@@ -9,67 +9,62 @@
 // and that Erlang FFI dispatch is preserved.
 
 TestCase subclass: ErlangObjectInheritanceTest
+  field: proxy
+  field: e
+
+  // proxy = ErlangModule for `lists`; e = the Erlang class object itself.
+  // `e` is stored in a field (not used bare as `Erlang <selector>`) so that
+  // dispatch goes through dynamic lookup instead of the compile-time static
+  // path that always creates an ErlangModule proxy.
+  setUp => (self withProxy: Erlang lists) withE: Erlang
 
   // === ErlangModule: Object-inherited methods ===
   testErlangModuleDisplayString =>
-    proxy := Erlang lists
-    self assert: (proxy displayString isKindOf: String)
+    self assert: (self.proxy displayString isKindOf: String)
 
   testErlangModuleInspect =>
-    proxy := Erlang lists
-    self assert: (proxy inspect isKindOf: String)
+    self assert: (self.proxy inspect isKindOf: String)
 
   testErlangModuleIsNilReturnsFalse =>
-    proxy := Erlang lists
-    self deny: proxy isNil
+    self deny: self.proxy isNil
 
   testErlangModuleRespondsToDisplayString =>
-    proxy := Erlang lists
-    self assert: (proxy respondsTo: #displayString)
+    self assert: (self.proxy respondsTo: #displayString)
 
   testErlangModuleRespondsToIsNil =>
-    proxy := Erlang lists
-    self assert: (proxy respondsTo: #isNil)
+    self assert: (self.proxy respondsTo: #isNil)
 
   testErlangModuleHash =>
-    proxy := Erlang lists
-    self assert: (proxy hash isKindOf: Integer)
+    self assert: (self.proxy hash isKindOf: Integer)
 
   // === ErlangModule: FFI dispatch still works ===
   testErlangModuleKeywordDispatch =>
-    proxy := Erlang lists
-    self assert: (proxy reverse: #(3, 2, 1)) equals: #(1, 2, 3)
+    self assert: (self.proxy reverse: #(3, 2, 1)) equals: #(1, 2, 3)
 
   testErlangModuleUnaryDispatch =>
-    proxy := Erlang erlang
-    self assert: proxy node notNil
+    self assert: (Erlang erlang) node notNil
 
   // === Erlang: Object-inherited methods ===
   // Note: Must use dynamic dispatch (via variable or perform:) because
   // compile-time `Erlang <selector>` always creates an ErlangModule proxy.
+  // self.e holds the Erlang class object and provides the needed indirection.
   testErlangDisplayString =>
-    e := Erlang
-    self assert: (e displayString isKindOf: String)
+    self assert: (self.e displayString isKindOf: String)
 
   testErlangInspect =>
-    e := Erlang
-    self assert: (e inspect isKindOf: String)
+    self assert: (self.e inspect isKindOf: String)
 
   testErlangIsNilReturnsFalse =>
-    e := Erlang
-    self deny: e isNil
+    self deny: self.e isNil
 
   testErlangRespondsToDisplayString =>
-    e := Erlang
-    self assert: (e respondsTo: #displayString)
+    self assert: (self.e respondsTo: #displayString)
 
   testErlangRespondsToIsNil =>
-    e := Erlang
-    self assert: (e respondsTo: #isNil)
+    self assert: (self.e respondsTo: #isNil)
 
   testErlangHash =>
-    e := Erlang
-    self assert: (e hash isKindOf: Integer)
+    self assert: (self.e hash isKindOf: Integer)
 
   // === Erlang: module lookup still works ===
   testErlangModuleLookup =>
