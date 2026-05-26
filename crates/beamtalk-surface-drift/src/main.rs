@@ -191,6 +191,17 @@ impl ParityDoc {
                 if let CellState::Bound(ref name) = bindings.lsp {
                     self.lsp_caps.insert(name.clone());
                 }
+                // ADR 0082 Phase 3 (BT-2289): an `executeCommand:` LSP cell may
+                // list more than one command name (e.g. the `flush` row enumerates
+                // `beamtalk.flush` / `beamtalk.flush.class` / `beamtalk.flush.file`
+                // / `beamtalk.flush.kind`). Harvest every backtick-delimited code
+                // span that starts with `executeCommand:` so the matching against
+                // the code-side `BEAMTALK_LSP_COMMANDS` array is exhaustive.
+                for code in extract_all_code(&cells[4]) {
+                    if code.trim_start().starts_with("executeCommand:") {
+                        self.lsp_caps.insert(code);
+                    }
+                }
                 self.ops.insert(op, bindings);
             }
             Section::CliOnly => {
@@ -718,6 +729,78 @@ fn extract_lsp_caps(text: &str, out: &mut BTreeSet<String>) {
             out.insert("textDocument/didSave".into());
         }
     }
+    // ADR 0082 Phase 3 (BT-2289): `execute_command_provider` is enabled in
+    // the capabilities literal, but the individual command identifiers live
+    // outside it in the `BEAMTALK_LSP_COMMANDS` array. Surface the array's
+    // contents as `executeCommand: <command>` entries so the doc's per-row
+    // bindings (e.g. `executeCommand: beamtalk.flush`) verify against real
+    // commands the server claims.
+    if block.contains("execute_command_provider:") {
+        for cmd in extract_beamtalk_lsp_commands(text) {
+            out.insert(format!("executeCommand: {cmd}"));
+        }
+    }
+}
+
+/// Parse the `BEAMTALK_LSP_COMMANDS` array literal from the LSP server source
+/// and return the list of command identifiers it exposes. Each identifier is
+/// matched against a `CMD_*` `const` definition (`pub(crate) const CMD_X:
+/// &str = "..."` in the same file). Robust to layout variations because we
+/// resolve each token through its `const` declaration rather than parsing
+/// inside the array literal.
+fn extract_beamtalk_lsp_commands(text: &str) -> Vec<String> {
+    // Anchor on the full `= &[` to skip past the `&[&str]` type annotation so
+    // the array body extraction lands inside the literal, not inside the type.
+    let Some(array_start) = text.find("BEAMTALK_LSP_COMMANDS: &[&str] = &[") else {
+        return Vec::new();
+    };
+    let rest = &text[array_start..];
+    let Some(eq_arrow) = rest.find("= &[") else {
+        return Vec::new();
+    };
+    let after_open = &rest[eq_arrow + "= &[".len()..];
+    let Some(close) = after_open.find(']') else {
+        return Vec::new();
+    };
+    let array_body = &after_open[..close];
+
+    // Map of `CMD_FOO` -> the string literal it expands to.
+    let mut cmd_consts = std::collections::HashMap::new();
+    for (line_idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("pub(crate) const CMD_") {
+            if let Some(eq_idx) = rest.find('=') {
+                let name_part = rest[..eq_idx].trim();
+                // Strip the `: &str` type annotation, leaving the bare ident.
+                let ident = name_part.split(':').next().unwrap_or("").trim();
+                if ident.is_empty() {
+                    continue;
+                }
+                let after_eq = &rest[eq_idx + 1..];
+                if let Some(first_quote) = after_eq.find('"') {
+                    let from_quote = &after_eq[first_quote + 1..];
+                    if let Some(end_quote) = from_quote.find('"') {
+                        cmd_consts
+                            .insert(format!("CMD_{ident}"), from_quote[..end_quote].to_string());
+                        // Silence unused-variable warning in release builds.
+                        let _ = line_idx;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    for tok in array_body.split(',') {
+        let tok = tok.trim();
+        if tok.is_empty() {
+            continue;
+        }
+        if let Some(value) = cmd_consts.get(tok) {
+            out.push(value.clone());
+        }
+    }
+    out
 }
 
 fn parse_capability_field(line: &str) -> Option<String> {
@@ -1043,5 +1126,119 @@ describe_ops() ->
         assert!(doc.mcp_tools.contains("evaluate"));
         assert!(doc.repl_meta.contains(":exit"));
         assert!(doc.lsp_caps.contains("textDocument/hover"));
+    }
+
+    // ADR 0082 Phase 3 (BT-2289): LSP `executeCommand` registration
+    // discovery + multi-binding cell harvesting.
+
+    #[test]
+    fn extract_beamtalk_lsp_commands_resolves_consts_from_array() {
+        // Mock LSP server source containing both the CMD_* consts and the
+        // BEAMTALK_LSP_COMMANDS array. The extractor should resolve each
+        // identifier through its const and return the literal string value.
+        let src = r#"
+pub(crate) const CMD_FLUSH: &str = "beamtalk.flush";
+pub(crate) const CMD_FLUSH_CLASS: &str = "beamtalk.flush.class";
+pub(crate) const CMD_FLUSH_FILE: &str = "beamtalk.flush.file";
+pub(crate) const CMD_FLUSH_KIND: &str = "beamtalk.flush.kind";
+pub(crate) const CMD_SAVE_CLASS: &str = "beamtalk.saveClass";
+
+pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
+    CMD_FLUSH,
+    CMD_FLUSH_CLASS,
+    CMD_FLUSH_FILE,
+    CMD_FLUSH_KIND,
+    CMD_SAVE_CLASS,
+];
+"#;
+        let mut commands = extract_beamtalk_lsp_commands(src);
+        commands.sort();
+        assert_eq!(
+            commands,
+            vec![
+                "beamtalk.flush".to_string(),
+                "beamtalk.flush.class".to_string(),
+                "beamtalk.flush.file".to_string(),
+                "beamtalk.flush.kind".to_string(),
+                "beamtalk.saveClass".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_beamtalk_lsp_commands_returns_empty_when_array_absent() {
+        // No `BEAMTALK_LSP_COMMANDS` array → no commands.
+        let src = "pub(crate) const CMD_FLUSH: &str = \"beamtalk.flush\";";
+        assert!(extract_beamtalk_lsp_commands(src).is_empty());
+    }
+
+    #[test]
+    fn extract_beamtalk_lsp_commands_skips_unknown_const_tokens() {
+        // A token in the array that has no matching const is silently
+        // dropped — defensive against partial edits during refactors.
+        let src = r#"
+pub(crate) const CMD_FLUSH: &str = "beamtalk.flush";
+
+pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
+    CMD_FLUSH,
+    CMD_GHOST,
+];
+"#;
+        let commands = extract_beamtalk_lsp_commands(src);
+        assert_eq!(commands, vec!["beamtalk.flush".to_string()]);
+    }
+
+    #[test]
+    fn extract_lsp_caps_includes_execute_commands_when_provider_enabled() {
+        let src = r#"
+pub(crate) const CMD_FLUSH: &str = "beamtalk.flush";
+pub(crate) const CMD_FLUSH_CLASS: &str = "beamtalk.flush.class";
+
+pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
+    CMD_FLUSH,
+    CMD_FLUSH_CLASS,
+];
+
+fn _stub() -> () {
+    let _caps = ServerCapabilities {
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+        execute_command_provider: Some(ExecuteCommandOptions {
+            commands: BEAMTALK_LSP_COMMANDS.iter().map(|s| (*s).to_string()).collect(),
+        }),
+    };
+}
+"#;
+        let mut caps = BTreeSet::new();
+        extract_lsp_caps(src, &mut caps);
+        assert!(caps.contains("textDocument/hover"));
+        assert!(caps.contains("executeCommand: beamtalk.flush"));
+        assert!(caps.contains("executeCommand: beamtalk.flush.class"));
+    }
+
+    #[test]
+    fn extract_lsp_caps_omits_execute_commands_when_provider_disabled() {
+        // Provider not enabled → executeCommand entries should not appear
+        // in the inventory, even if a BEAMTALK_LSP_COMMANDS array is
+        // accidentally left behind.
+        let src = r#"
+pub(crate) const CMD_FLUSH: &str = "beamtalk.flush";
+
+pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[CMD_FLUSH];
+
+fn _stub() -> () {
+    let _caps = ServerCapabilities {
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
+    };
+}
+"#;
+        let mut caps = BTreeSet::new();
+        extract_lsp_caps(src, &mut caps);
+        assert!(caps.contains("textDocument/hover"));
+        for cap in &caps {
+            assert!(
+                !cap.starts_with("executeCommand:"),
+                "unexpected executeCommand entry: {cap}"
+            );
+        }
     }
 }

@@ -727,6 +727,15 @@ filter_shadowed_by_survivor(Shadowed, SurvivorKeys) ->
 -spec complete_flush([binary()], [#prepared{}], [map()], [non_neg_integer()]) ->
     {ok, map()}.
 complete_flush(Files, Renamed, Failed, Seqs) ->
+    %% ADR 0082 Phase 3 (BT-2289): broadcast flush completion so LSP clients
+    %% can emit `workspace/applyEdit` for each touched file. Fire BEFORE
+    %% `mark_flushed/1` so editor refresh fires reliably in the mixed-success
+    %% case where renames succeeded but the ChangeLog server is unreachable —
+    %% the files are already on disk at this point and the editor needs to
+    %% realign regardless of marker outcome. Fire-and-forget: the broadcaster
+    %% swallows missing-server errors so flush never fails on a downstream
+    %% subscriber issue.
+    beamtalk_flush_events:on_files_flushed(Files),
     %% Catch any failure mode from the ChangeLog server — explicit {error, _}
     %% returns *or* gen_server crashes (the call exits with noproc/timeout
     %% when the server is unreachable). Files have already been written so

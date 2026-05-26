@@ -202,6 +202,21 @@ websocket_info({class_loaded, ClassName}, State = #ws_state{authenticated = true
         })
     ),
     {[{text, Push}], State};
+%% ADR 0082 Phase 3 (BT-2289): Flush-completion push — broadcast after a
+%% `Workspace flush` writes one or more `.bt` source files. LSP clients use
+%% this to emit `workspace/applyEdit` so open editor buffers refresh against
+%% the new on-disk state. `Files` is the list of absolute paths that were
+%% renamed during the flush.
+websocket_info({flush_completed, Files}, State = #ws_state{authenticated = true}) ->
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"workspace">>,
+            <<"event">> => <<"flush_completed">>,
+            <<"data">> => #{<<"files">> => normalise_files_for_push(Files)}
+        })
+    ),
+    {[{text, Push}], State};
 %% BT-1433: Log event push from beamtalk_ws_log_handler
 websocket_info(
     {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
@@ -254,6 +269,8 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
     beamtalk_class_events:unsubscribe(),
     %% Unsubscribe from bindings-changed push messages
     beamtalk_bindings_events:unsubscribe(),
+    %% Unsubscribe from flush-completion push messages (ADR 0082 Phase 3, BT-2289)
+    beamtalk_flush_events:unsubscribe(),
     %% Unsubscribe from log streaming (BT-1433)
     beamtalk_ws_log_handler:unsubscribe(),
     %% Keep session alive for resume — session idle monitor handles cleanup.
@@ -381,6 +398,9 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                     beamtalk_repl_actors:subscribe(),
                     beamtalk_class_events:subscribe(),
                     beamtalk_bindings_events:subscribe(),
+                    %% ADR 0082 Phase 3 (BT-2289): receive `{flush_completed, Files}`
+                    %% so LSP clients can emit `workspace/applyEdit` per touched file.
+                    beamtalk_flush_events:subscribe(),
                     InitialActors = actor_snapshot_frames(),
                     AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
                     SessionMsg = iolist_to_binary(
@@ -436,6 +456,9 @@ create_session(SessionId, State) ->
             beamtalk_repl_actors:subscribe(),
             beamtalk_class_events:subscribe(),
             beamtalk_bindings_events:subscribe(),
+            %% ADR 0082 Phase 3 (BT-2289): flush-completion subscription so
+            %% LSP clients can emit `workspace/applyEdit` on flush.
+            beamtalk_flush_events:subscribe(),
             InitialActors = actor_snapshot_frames(),
             AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
             SessionMsg = iolist_to_binary(
@@ -657,6 +680,61 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
         {ok, T} -> Base#{<<"spawned_at">> => T};
         error -> Base
     end.
+
+-doc """
+ADR 0082 Phase 3 (BT-2289): Normalise the file list shipped on a
+`flush_completed` WS push frame. The runtime stores `ChangeEntry.sourceFile`
+as a binary (`<<"src/foo.bt">>` or absolute), and `beamtalk_workspace_flush`
+forwards that shape unchanged. The push consumer (LSP) expects each element
+to be a JSON string; binaries and lists are accepted, anything else is
+dropped with a warning so a single malformed entry doesn't break the frame.
+""".
+-spec normalise_files_for_push([term()]) -> [binary()].
+normalise_files_for_push(Files) when is_list(Files) ->
+    lists:filtermap(
+        fun
+            (F) when is_binary(F) ->
+                {true, F};
+            (F) when is_list(F) ->
+                %% `unicode:characters_to_binary/1` returns a binary on
+                %% success but `{error, _, _}` / `{incomplete, _, _}` tuples
+                %% on bad data — it does NOT throw. Filter failure tuples
+                %% out so a malformed entry never reaches the JSON encoder.
+                %% `try` also catches the `badarg` case (improper list,
+                %% bitstring, etc.) so a single bad entry can't crash the
+                %% whole push frame.
+                try unicode:characters_to_binary(F) of
+                    Bin when is_binary(Bin) ->
+                        {true, Bin};
+                    {error, _Encoded, _Rest} ->
+                        ?LOG_WARNING(
+                            "flush_completed push: dropping invalid unicode path entry",
+                            #{entry => F, domain => [beamtalk, runtime]}
+                        ),
+                        false;
+                    {incomplete, _Encoded, _Rest} ->
+                        ?LOG_WARNING(
+                            "flush_completed push: dropping incomplete unicode path entry",
+                            #{entry => F, domain => [beamtalk, runtime]}
+                        ),
+                        false
+                catch
+                    _:_ ->
+                        ?LOG_WARNING(
+                            "flush_completed push: dropping non-path file entry",
+                            #{entry => F, domain => [beamtalk, runtime]}
+                        ),
+                        false
+                end;
+            (Other) ->
+                ?LOG_WARNING(
+                    "flush_completed push: dropping non-path file entry",
+                    #{entry => Other, domain => [beamtalk, runtime]}
+                ),
+                false
+        end,
+        Files
+    ).
 
 -doc "Encode actor stop info for push message JSON.".
 encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
