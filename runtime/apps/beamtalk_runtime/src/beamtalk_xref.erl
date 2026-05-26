@@ -333,7 +333,7 @@ insert_method_xref_rows(Class, MethodXref, Gen) ->
 insert_one_method(Class, Entry, Gen) ->
     ClassSide = maps:get(class_side, Entry, false),
     Selector = maps:get(selector, Entry),
-    Line = maps:get(line, Entry, 0),
+    Line = maps:get(line, Entry),
     SourceStatus = maps:get(source_status, Entry, indexed),
     Provenance = maps:get(provenance, Entry, class_body),
 
@@ -386,7 +386,7 @@ class's generation counter. Idempotent.
 
 `senders` and `references` are keyed by selector / referenced class, so
 the class-owner predicate lives inside the value map. ETS match_spec
-maps support partial-key pattern matching (`#{owner := '$1'}`), so we
+maps support partial-key pattern matching (`#{owner => '$1'}`), so we
 use `select_delete` with a guard on the owner field rather than the
 non-existent literal-map `match_delete` form.
 """.
