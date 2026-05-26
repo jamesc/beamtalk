@@ -213,6 +213,15 @@ For a fresh class load (no prior gen), step (1) reads "no current gen",
 sets `new_gen = 1`, inserts, then atomically publishes `current_gen = 1`.
 Same shape; the old-rows set is empty.
 
+**Scope of atomicity is per-class, not global.** A multi-class walk
+(e.g. `unimplementedSelectors` over `allClasses`) reads each class's
+`current_gen` independently, so a reload completing mid-walk can show
+the walk a pre-reload view of class A and a post-reload view of class B.
+This matches today's source-scan behaviour (each class is scanned
+independently) and matches what an IDE user would expect — there is no
+cross-class transaction. Callers that want a global snapshot must
+take it externally (none do today).
+
 #### Authoritativeness + miss policy
 
 Because the per-query re-parse is removed from migrated queries, an index
@@ -248,14 +257,24 @@ started its gen_server. On `beamtalk_xref` `init/1`:
 Backfill makes the index complete before the first navigation query,
 without ordering constraints between bootstrap and xref startup.
 
+Stdlib **primitive classes** (`Integer`, `Float`, `Symbol`, etc.) are
+hand-coded in Erlang in `beamtalk_stdlib.erl` and have no Beamtalk
+source. Their methods are registered as bare funs and back-fill as
+`source_status = unindexed_runtime_fun` rows — known-present-but-
+unindexable, distinct from absent, matching the runtime-fun policy
+below. The bridge primitive `methods includes:` checks still work
+because the rows exist; only the per-method send/reference walk
+returns empty.
+
 #### Synthetic / compiler-inserted methods
 
 Compiler-generated methods — auto-accessors (`field/1` getters,
-`withField:/2` setters; `value_type_codegen.rs`), context accessors
-(BT-1461), and similar — have **no user source text** but are **fully
-known to the compiler**. They ride the same xref write path: the
-compiler emits their sent/defined selectors alongside hand-written
-methods. No source channel required.
+`withField:/2` setters; `value_type_codegen.rs`), and any future
+compiler-emitted method shape that does not originate in user
+`.bt` source — have **no user source text** but are **fully known to
+the compiler**. They ride the same xref write path: the compiler emits
+their sent/defined selectors alongside hand-written methods. No source
+channel required.
 
 Two consequences:
 
@@ -305,8 +324,11 @@ compiler-synthesised methods above, which the write path indexes fully.
 ### Wire-format extension
 
 `beamtalk_compiler:compile/2` already returns
-`{ok, #{core_erlang, module_name, classes, warnings}}`. Extended with one
-new key:
+`{ok, #{core_erlang, module_name, classes, warnings}}`. The companion
+REPL path `beamtalk_compiler:compile_expression/3` returns
+`{ok, class_definition, ClassInfo}` for inline class definitions
+(BT-571), which is the workspace-classes-without-files entry point.
+Both paths are extended with one new key:
 
 ```erlang
 {ok, #{
@@ -341,9 +363,12 @@ new key:
 }}
 ```
 
-`method_xref` is **always present** on a successful compile — empty list
-when the source has no methods (e.g. protocol-only files). Consumers
-unaware of the field ignore it (backward-compatible map extension).
+`method_xref` is **always present** on a successful compile that defines
+classes — empty list when the source has no methods (e.g. protocol-only
+files). Consumers unaware of the field ignore it (backward-compatible
+map extension). Expression-only compiles (the non-`class_definition`
+branch of `compile_expression/3`) carry no `method_xref` — there are
+no method definitions to index.
 
 The Rust side reuses the existing `senders_query`/`references_to_query`/
 `all_sends_query` AST walkers — they already produce `SendHit` /
@@ -363,18 +388,21 @@ same machinery and a parallel set of bag tables.
 
 ### Implementation phasing (high-level)
 
+This ADR is the predicate; implementation lands in phases below.
+
 | Phase | Slice | Closes |
 |---|---|---|
-| 1 | ADR (this document) | design contract |
-| 2 | `beamtalk_xref` gen_server skeleton + three empty tables + supervisor wiring | infrastructure |
-| 3 | Compiler emits `method_xref` payload; runtime consumes on class load; backfill on `init/1` | write path |
-| 4 | Migrate `sendersOf:` end-to-end with miss-policy fallback; benchmark before/after | first query |
-| 5 | Reload / unload / `put_method/4` / extension register-unregister / ClassBuilder hooks | full lifecycle |
-| 6 | Migrate remaining five queries in scope | read-path migration |
-| 7 | Synthetic accessor emission + tagging; parity exception encoded in tests | completeness |
+| 1 | `beamtalk_xref` gen_server skeleton + three empty tables + supervisor wiring | infrastructure |
+| 2 | Compiler emits `method_xref` payload; runtime consumes on class load; backfill on `init/1` | write path |
+| 3 | Migrate `sendersOf:` end-to-end with miss-policy fallback; benchmark before/after | first query (wire-check) |
+| 4 | Reload / unload / `put_method/4` / extension register-unregister / ClassBuilder hooks | full lifecycle |
+| 5 | Migrate remaining five queries in scope | read-path migration |
+| 6 | Synthetic accessor emission + tagging; parity exception encoded in tests | completeness |
 
-Phases 2–4 are the minimum-viable index. Phases 5–7 close the
-acceptance criteria.
+Phases 1–3 are the minimum-viable index — Phase 3 acts as the "napkin"
+wire-check that the whole compiler→port→ETS→stdlib path round-trips
+correctly before broader migration. Phases 4–6 close the acceptance
+criteria.
 
 ## Prior Art
 
@@ -417,18 +445,33 @@ the read side; this ADR is the write-side counterpart.
 
 ## User Impact
 
-- **Smalltalk-style users** get the latencies they expect from a System
-  Browser: sub-millisecond `sendersOf:`, `implementorsOf:`,
-  `referencesTo:`. Equivalent to opening a Pharo Senders pane.
-- **LSP / IDE consumers** (ADR 0017 LiveView IDE, `beamtalk-lsp`) can
-  now back hover-driven incoming/outgoing call panels and on-save lint
-  surfaces without re-parsing thousands of methods. The latency budget
-  for those features comes down from seconds to milliseconds.
 - **Newcomers** see no API change. Same selectors, same return shapes.
+  The `synthetic` parity exception (auto-accessors appearing in
+  `implementorsOf:` results) is the only externally-visible difference,
+  and is more complete rather than weirder.
+- **Smalltalk developers** get the latencies they expect from a System
+  Browser: sub-millisecond `sendersOf:`, `implementorsOf:`,
+  `referencesTo:`. Equivalent to opening a Pharo Senders pane. The
+  "Find Senders" / "Find Implementors" interaction loop becomes viable
+  for live editing rather than just batch inspection.
+- **Beamtalk-on-BEAM developers** writing tooling against navigation
+  queries (LSP integrations, ADR 0017 LiveView IDE, the
+  `beamtalk-lsp` epic) can back hover-driven incoming/outgoing call
+  panels and on-save lint surfaces without re-parsing thousands of
+  methods. Adjustment for tool authors: they must tolerate the
+  `synthetic` and `unindexed_runtime_fun` markers on returned rows and
+  decide whether to filter them. The miss-policy warning is the
+  affordance that surfaces accidental gaps during tool development.
 - **Erlang/BEAM operators** see one new supervised worker
-  (`beamtalk_xref`) in the supervision tree, with `domain => [beamtalk,
-  runtime]` log lines for backfill, reload purge, and miss-policy
-  warnings.
+  (`beamtalk_xref`) in `beamtalk_runtime_sup`, with `domain =>
+  [beamtalk, runtime]` log lines for backfill, reload purge, and
+  miss-policy warnings. The new tables (`beamtalk_xref_methods`,
+  `_senders`, `_references`, `xref_class_gen`) are observable via
+  standard `ets:info/1` / `ets:tab2list/1` for debugging. A
+  `beamtalk_xref` crash drops the tables; the supervisor restart
+  triggers a fresh backfill, and in-flight navigation queries hit the
+  miss-policy fallback during the rebuild window (correct results,
+  warning logged).
 
 ### Discoverability
 
