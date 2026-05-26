@@ -56,6 +56,10 @@ const REPL_COMMANDS: &[&str] = &[
     ":t",
     ":show-codegen",
     ":sc",
+    // BT-2287 / ADR 0082 Phase 3: ChangeLog meta-commands.
+    ":flush",
+    ":changes",
+    ":dirty",
 ];
 
 /// REPL helper providing tab completion and syntax highlighting.
@@ -182,6 +186,9 @@ const CLASS_EXPR_COMMANDS: &[&str] = &[
     ":show-codegen ",
     ":sc ",
     ":unload ",
+    // BT-2287 / ADR 0082 Phase 3: `:flush <Class>` argument is a Beamtalk
+    // expression (typically a class name or selector literal).
+    ":flush ",
 ];
 
 /// If `line` starts with a REPL class/expression command, return the byte offset
@@ -516,6 +523,25 @@ mod tests {
     fn test_repl_command_completion_unknown_prefix_is_empty() {
         let candidates = command_completions(":unknown");
         assert!(candidates.is_empty());
+    }
+
+    /// BT-2287 / ADR 0082 Phase 3: the `ChangeLog` meta-commands must be
+    /// discoverable via tab completion.
+    #[test]
+    fn test_repl_command_completion_changelog_commands_present() {
+        let candidates = command_completions(":");
+        assert!(candidates.contains(&":flush".to_string()));
+        assert!(candidates.contains(&":changes".to_string()));
+        assert!(candidates.contains(&":dirty".to_string()));
+    }
+
+    /// `:flush ` (with argument) must route the argument through the
+    /// receiver-aware backend completer so `:flush Cou<TAB>` can complete a
+    /// class name. Mirrors `:test ` / `:unload ` behaviour.
+    #[test]
+    fn test_flush_with_arg_uses_class_expr_completion_path() {
+        assert!(parse_class_expr_command_prefix(":flush Counter").is_some());
+        assert!(parse_class_expr_command_prefix(":flush ").is_some());
     }
 
     #[test]
