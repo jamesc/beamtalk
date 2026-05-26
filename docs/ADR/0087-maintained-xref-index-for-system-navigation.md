@@ -14,11 +14,13 @@ Accepted (2026-05-26)
 | 1 | [BT-2297](https://linear.app/beamtalk/issue/BT-2297) | Runtime: `beamtalk_xref` gen_server + supervisor wiring | M | – |
 | 2 | [BT-2298](https://linear.app/beamtalk/issue/BT-2298) | Codegen + runtime: bake `method_xref` into `register_class/0`; sync-forward in `start/2` | M | BT-2297 |
 | 3 | [BT-2299](https://linear.app/beamtalk/issue/BT-2299) | Stdlib: migrate `sendersOf:` to xref + miss-policy fallback + benchmark (napkin wire-check) | M | BT-2298 |
-| 4 | [BT-2300](https://linear.app/beamtalk/issue/BT-2300) | Runtime: hot-reload purge + new-gen install with atomicity | M | BT-2299 |
-| 4 | [BT-2301](https://linear.app/beamtalk/issue/BT-2301) | Runtime: `put_method/4`, extension, and ClassBuilder lifecycle hooks | M | BT-2298 |
-| 5 | [BT-2302](https://linear.app/beamtalk/issue/BT-2302) | Stdlib: migrate `referencesTo:` + `implementorsOf:` + `selectorsMatching:` to xref | M | BT-2299 |
-| 5 | [BT-2303](https://linear.app/beamtalk/issue/BT-2303) | Stdlib: migrate `unimplementedSelectors` + `unusedSelectors` to xref | M | BT-2299 |
+| 4a | [BT-2300](https://linear.app/beamtalk/issue/BT-2300) | Runtime: hot-reload purge + new-gen install with atomicity | M | BT-2299 |
+| 4b | [BT-2301](https://linear.app/beamtalk/issue/BT-2301) | Runtime: `put_method/4`, extension, and ClassBuilder lifecycle hooks | M | BT-2298 |
+| 5a | [BT-2302](https://linear.app/beamtalk/issue/BT-2302) | Stdlib: migrate `referencesTo:` + `implementorsOf:` + `selectorsMatching:` to xref | M | BT-2299 |
+| 5b | [BT-2303](https://linear.app/beamtalk/issue/BT-2303) | Stdlib: migrate `unimplementedSelectors` + `unusedSelectors` to xref | M | BT-2299 |
 | 6 | [BT-2304](https://linear.app/beamtalk/issue/BT-2304) | Codegen: synthetic-method xref emission + parity tests + ADR Accepted→Implemented | M | BT-2298 |
+
+Phases 4 and 5 each split into two sibling issues (4a/4b, 5a/5b) — they touch overlapping files and serialize across waves, but conceptually live in the same phase of the migration.
 
 **Wave plan:**
 

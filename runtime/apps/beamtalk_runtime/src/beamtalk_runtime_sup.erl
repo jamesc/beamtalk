@@ -33,6 +33,17 @@ init([]) ->
     },
 
     ChildSpecs = [
+        %% Cross-reference index for SystemNavigation queries (ADR 0087).
+        %% MUST be the first non-pg child so its tables exist before any
+        %% `register_class/0` runs in beamtalk_bootstrap / beamtalk_stdlib.
+        #{
+            id => beamtalk_xref,
+            start => {beamtalk_xref, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_xref]
+        },
         %% Bootstrap the class hierarchy first
         #{
             id => beamtalk_bootstrap,
