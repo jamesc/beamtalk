@@ -1465,3 +1465,67 @@ handle_protocol_definition_no_register_class_test() ->
     %% Cleanup
     code:purge(ModuleName),
     code:delete(ModuleName).
+
+%%% normalize_method_source/2 tests (ADR 0082 Phase 1, BT-2283)
+%%%
+%%% `compile:source:' accepts either a full method definition (left intact) or a
+%%% bare body (canonical `selector => ' header prepended). The header detection
+%%% must not be fooled by a bare body that merely starts with the selector name.
+
+-doc "A full unary definition is left untouched (already has a header).".
+normalize_method_source_full_unary_test() ->
+    ?assertEqual(
+        <<"increment => self.value := self.value + 1">>,
+        beamtalk_repl_eval:normalize_method_source(
+            <<"increment">>, <<"increment => self.value := self.value + 1">>
+        )
+    ).
+
+-doc "A bare unary body gets the canonical `selector => ' header prepended.".
+normalize_method_source_bare_unary_test() ->
+    ?assertEqual(
+        <<"increment => self.value + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"self.value + 1">>)
+    ).
+
+-doc """
+Regression (CodeRabbit): a bare body that begins with the selector token but is
+not a header (`increment + 1') must still be prefixed, not mistaken for a
+definition. A raw prefix check would wrongly leave it unheaded.
+""".
+normalize_method_source_bare_body_starting_with_selector_test() ->
+    ?assertEqual(
+        <<"increment => increment + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"increment + 1">>)
+    ).
+
+-doc "A longer identifier sharing the selector prefix is not a header.".
+normalize_method_source_identifier_prefix_not_header_test() ->
+    ?assertEqual(
+        <<"increment => incremented value">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"incremented value">>)
+    ).
+
+-doc "A full keyword definition (`at: k put: v => body') is left untouched.".
+normalize_method_source_full_keyword_test() ->
+    Source = <<"at: k put: v => self.store at: k put: v">>,
+    ?assertEqual(
+        Source,
+        beamtalk_repl_eval:normalize_method_source(<<"at:put:">>, Source)
+    ).
+
+-doc "A full binary definition (`+ other => body') is left untouched.".
+normalize_method_source_full_binary_test() ->
+    Source = <<"+ other => self.value + other">>,
+    ?assertEqual(
+        Source,
+        beamtalk_repl_eval:normalize_method_source(<<"+">>, Source)
+    ).
+
+-doc "Leading whitespace before a full definition is tolerated.".
+normalize_method_source_leading_whitespace_test() ->
+    Source = <<"   increment => self.value + 1">>,
+    ?assertEqual(
+        Source,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Source)
+    ).

@@ -34,7 +34,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_references_to_in_source/2,
     find_field_readers_in_source/2,
     find_field_writers_in_source/2,
-    find_ffi_sites_in_source/4
+    find_ffi_sites_in_source/4,
+    resolve_method_span/4
 ]).
 
 -doc """
@@ -269,3 +270,31 @@ Erlang function?" navigation.
     {ok, [pos_integer()]} | {error, [map()]}.
 find_ffi_sites_in_source(Source, Module, Function, Arity) ->
     beamtalk_compiler_server:find_ffi_sites_in_source(Source, Module, Function, Arity).
+
+-doc """
+Resolve the byte span of a method definition in `Source' (ADR 0082 Phase 1).
+
+Given the current on-disk source of a `.bt' file and a target
+`(ClassName, Selector, Side)' (`Side' is `instance' or `class'), returns
+`{ok, #{start := S, end := E}, PrevSource}' with the exact byte span of that
+method's definition and the bytes currently occupying it. Splicing `PrevSource'
+back into the span is a no-op, which is the load-bearing property the
+`Workspace flush' splice relies on.
+
+Resolution failures (`class_not_found' / `selector_not_found' / `ambiguous')
+and transport failures (`port_error' / `noproc' / `timeout') both return
+`{error, Reason, Message}'. The live-patch install hook uses a clean `{ok, ...}'
+to record a *flushable* ChangeEntry with the resolved span. On error it still
+appends a ChangeEntry (the patch is already installed in memory) — for
+`selector_not_found' (a brand-new method not yet on disk) the entry stays
+flushable with no prior span; any other error downgrades the entry to
+`flushable: false' with a `not_flushable_reason'. The error never blocks or
+undoes the in-memory install.
+
+Backs the `>>' / `compile:source:' install hook.
+""".
+-spec resolve_method_span(binary(), atom() | binary(), atom() | binary(), instance | class) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+resolve_method_span(Source, ClassName, Selector, Side) ->
+    beamtalk_compiler_server:resolve_method_span(Source, ClassName, Selector, Side).
