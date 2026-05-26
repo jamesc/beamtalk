@@ -765,19 +765,20 @@ create_bindings_table_is_idempotent_test() ->
 %%====================================================================
 
 dependencies_returns_empty_when_no_package_test() ->
-    %% beamtalk_workspace_meta:get_package_name/0 catches noproc and
-    %% returns undefined when the gen_server is not started, so this
-    %% test is safe to run without the workspace application.
-    %% The undefined -> #{} branch in dependencies/0 returns an empty map.
+    %% Snapshot whereis/1 BEFORE calling dependencies/0 so the assertion is
+    %% based on the same state that get_package_name/0 observed internally.
+    %% (Copilot BT-2295: capturing after the call is a TOCTOU race — the
+    %% gen_server could stop between the two calls.)
+    WasMissing = whereis(beamtalk_workspace_meta) =:= undefined,
     Result = beamtalk_workspace_interface_primitives:dependencies(),
     ?assert(is_map(Result)),
-    %% In a unit-test environment without the workspace app, the gen_server
-    %% is not running, so the result must be the empty map (no package).
-    case whereis(beamtalk_workspace_meta) of
-        undefined ->
+    case WasMissing of
+        true ->
+            %% workspace_meta was absent → get_package_name/0 returned
+            %% undefined → dependencies/0 must return the empty map.
             ?assertEqual(#{}, Result);
-        _ ->
-            %% workspace_meta is running (e.g. in integration test suite);
-            %% only assert the type — the content depends on loaded packages.
+        false ->
+            %% workspace_meta was running (e.g. in integration suite);
+            %% only assert the type — content depends on loaded packages.
             ok
     end.
