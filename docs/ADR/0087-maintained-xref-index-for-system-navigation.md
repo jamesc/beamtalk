@@ -257,14 +257,21 @@ started its gen_server. On `beamtalk_xref` `init/1`:
 Backfill makes the index complete before the first navigation query,
 without ordering constraints between bootstrap and xref startup.
 
-Stdlib **primitive classes** (`Integer`, `Float`, `Symbol`, etc.) are
-hand-coded in Erlang in `beamtalk_stdlib.erl` and have no Beamtalk
-source. Their methods are registered as bare funs and back-fill as
-`source_status = unindexed_runtime_fun` rows — known-present-but-
-unindexable, distinct from absent, matching the runtime-fun policy
-below. The bridge primitive `methods includes:` checks still work
-because the rows exist; only the per-method send/reference walk
-returns empty.
+Stdlib classes — including primitives like `Integer`, `Float`, `Symbol`,
+`String` — have full `.bt` source (the method bodies are
+`@primitive "..."` declarations, but the surrounding class headers,
+selectors, type annotations and AST are real Beamtalk that the compiler
+walks like any other). They ride the compile-result `method_xref`
+payload during their normal load via `beamtalk_stdlib`. The backfill
+on `init/1` exists purely to handle the *timing gap* — if those classes
+load before `beamtalk_xref` itself is up, their xref payloads would be
+emitted into the void. The backfill replays from the class registry's
+stored `method_source` / `class_method_source` maps and re-parses to
+recover the same rows the load-time payload would have produced.
+`@primitive` method bodies parse to empty send lists (the body sends
+nothing — it delegates to Erlang) but the type-annotation references
+on the signature (`+ other :: Number -> Integer`) are preserved
+normally.
 
 #### Synthetic / compiler-inserted methods
 
