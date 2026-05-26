@@ -42,12 +42,12 @@ Each compile pays for steps 2 and 3 — building text from structure, then rebui
 
 - **ETF transport**: `crates/beamtalk-etf/` (459 LOC) already encodes Erlang terms from Rust. The Port channel established by ADR 0022 already speaks ETF for request/response framing.
 - **In-memory compile path**: ADR 0022 already established that the Erlang side calls `compile:forms/2` in-process — there is no `erlc` subprocess to eliminate. The only wasted step is `core_scan` + `core_parse` reconstructing forms from text the Rust side just rendered.
-- **Document API discipline**: BT-875 forced all codegen onto the `Document` combinator API. The combinators (`docvec!`, `join`, `nest`, `line`) are the right abstraction — they just currently produce text leaves. The migration target is for the same combinators to produce `cerl` AST leaves.
+- **Document API discipline**: BT-875 forced all codegen onto the `Document` combinator API — the *discipline* (build structured data, never strings; per-fragment unit testability) is what we keep. The Document *API surface* itself is text-rendering-shaped (its `nest`/`group`/`break` combinators are pretty-printer primitives with no analogue on a typed AST), so it does not survive the migration; codegen functions instead return typed `cerl::Expr` values directly.
 
 ### Constraints
 
 - **Core Erlang remains the target IR** (ADR 0003). This decision is about *how* Core Erlang reaches `compile:forms/2`, not *whether* Core Erlang is the right IR.
-- **Document API contract preserved** (ADR 0018, BT-875). The combinator surface stays; only the leaf types change. No regression to ad-hoc string construction.
+- **ADR 0018 discipline preserved** (BT-875). The principle of building structured data (never strings) carries forward; codegen functions construct typed `cerl::Expr` values directly. The `Document` API surface itself is text-rendering-shaped and does not carry over — it survives only as a transitional adapter (`cerl_to_doc`) during Phase 3 and is deleted in Phase 4. No regression to ad-hoc string construction.
 - **Port boundary preserved** (ADR 0022). No NIF embedding. The Rust ↔ BEAM seam stays at the OS process boundary.
 - **Atom-table safety** (ADR 0022 implementation). The current `binary_to_term/1` calls on Port responses use `[safe]` to prevent atom-exhaustion attacks from a buggy or corrupted Rust payload. The new `{cerl, Etf}` decode must use `[safe]` too. This means every atom appearing in a cerl-ETF payload must already exist as an Erlang literal — feasible because the structural atoms (cerl record tags like `c_module`, `c_fun`, `c_var`, ...) are a fixed finite set, and Beamtalk-generated module/function/atom names are mangled into a stable namespace that's already pre-allocated for the text path. Phase 0's ETF byte-equivalence tests must include a `binary_to_term(_, [safe])` round-trip assertion to catch any payload that introduces unknown atoms.
 - **Codegen test discipline preserved**: ~245 inline `#[test]` codegen unit tests in `crates/beamtalk-core/src/codegen/core_erlang/tests/` (assert on `Document.to_pretty_string()` output) and the proptest parseability suite in `core_erlang_validity_tests.rs` must continue to pass during transition. End-to-end stdlib/BUnit/REPL test suites verify behaviour parity at the BEAM level.
@@ -145,7 +145,7 @@ The Rust-side change is the larger one (return types of every codegen function o
 
 ### Discoverability
 
-No user-facing change. Contributors writing new codegen use the same `docvec!`/`join`/`nest` API as today. The `cerl::*` leaf types are new vocabulary but map 1:1 to OTP's existing `cerl` module (well-documented, stable across recent OTP versions).
+No user-facing change. Contributors writing new codegen (post Phase 2) return `cerl::Expr` values directly — composed using cerl constructors (`let_expr(...)`, `case_expr(...)`, `apply(...)`) rather than the pretty-printer combinators (`docvec!`, `join`, `nest`) the text path uses today. The `cerl::*` types are new vocabulary but map 1:1 to OTP's existing `cerl` module (well-documented, stable across recent OTP versions). During Phase 3, the `cerl_to_doc` adapter lets migrated functions still embed into unmigrated parents; that adapter is deleted in Phase 4 along with the rest of the `Document` API.
 
 ## Steelman Analysis
 
@@ -355,7 +355,7 @@ When `≤50` text-leaf `Document` call sites remain (same threshold ADR 0018 use
 ### Affected Components
 
 - New: `crates/beamtalk-core/src/codegen/core_erlang/cerl.rs` (Rust cerl mirror + ETF encoders)
-- Modified: `crates/beamtalk-core/src/codegen/core_erlang/document.rs` (generic over leaf type)
+- Modified: `crates/beamtalk-core/src/codegen/core_erlang/document.rs` — stays text-rendering-shaped (not generalised over a leaf type); gains the `cerl_to_doc` adapter for the transition period; deleted entirely in Phase 4
 - Modified: every file under `crates/beamtalk-core/src/codegen/core_erlang/` (per-file leaf migration, over time — ~55 source files)
 - Modified: `runtime/apps/beamtalk_compiler/src/beamtalk_compiler_server.erl` — add cerl receive path to `compile_core_erlang/1`, eventually remove text path
 - Modified: `runtime/apps/beamtalk_compiler/src/beamtalk_build_worker.erl` — parallel migration of its `compile_core_erlang/1` (stdlib build path; same logic, separate implementation). Note: the build-worker path passes `debug_info` to `compile:forms/2` while the server path does not, so its `debug_info` chunks will *include* the cerl annotations we add. Phase 0 napkin must verify both paths (with and without `debug_info`) work end-to-end so the build-worker doesn't surprise us later.
@@ -382,7 +382,7 @@ When `≤50` text-leaf `Document` call sites remain (same threshold ADR 0018 use
 
 ## Migration Path
 
-This is an internal refactor — no user-facing migration needed. Beamtalk source code (`.bt` files) is unaffected. Generated `.beam` artifacts are byte-for-byte identical.
+This is an internal refactor — no user-facing migration needed. Beamtalk source code (`.bt` files) is unaffected. Generated `.beam` artifacts are *behaviourally* identical (verified by the full behavioural test suite with both wire formats during transition); their bytes may differ in annotation chunks and chunk ordering, per the Consequences section. The `just codegen-diff` harness surfaces unexpected divergence as a diagnostic, not as a parity invariant.
 
 For compiler contributors:
 - New codegen functions: return `cerl::Expr` (or the appropriate cerl node type) from the start, once Phase 2 lands.
