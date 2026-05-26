@@ -32,6 +32,16 @@ TestCase subclass: WorkspaceInterfaceTest
   testIncludesSelectorNewClassAt =>
     self assert: (WorkspaceInterface includesSelector: #newClass:at:)
 
+  // ADR 0082 Phase 2 (BT-2286): flush + flush: selectors. Live splice + atomic
+  // rename + external-edit detection are covered in the
+  // beamtalk_workspace_flush_tests EUnit suite. BUnit only verifies the
+  // selectors are present on the facade.
+  testIncludesSelectorFlush =>
+    self assert: (WorkspaceInterface includesSelector: #flush)
+
+  testIncludesSelectorFlushColon =>
+    self assert: (WorkspaceInterface includesSelector: #flush:)
+
   testIncludesSelectorTest =>
     self assert: (WorkspaceInterface includesSelector: #test)
 

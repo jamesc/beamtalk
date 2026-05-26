@@ -65,6 +65,8 @@ into REPL session state. Workspace readiness is detected via
 -export([sync/0]).
 %% New-class creation (ADR 0082 Phase 1, BT-2285)
 -export([newClass/2]).
+%% Workspace flush (ADR 0082 Phase 2, BT-2286)
+-export([flush/0, flush/1]).
 %% Shared with beamtalk_repl_loader:new_class/2 to surface created classes to the
 %% REPL identically to a file load.
 -export([loaded_class_objects/1]).
@@ -109,6 +111,10 @@ dispatch(sync, [], _Self) ->
     sync();
 dispatch('newClass:at:', [Source, Path], _Self) ->
     newClass(Source, Path);
+dispatch(flush, [], _Self) ->
+    flush();
+dispatch('flush:', [Filter], _Self) ->
+    flush(Filter);
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -203,6 +209,36 @@ new_class_arg_type_error(ArgName, Value) ->
             <<"newClass:at: expects a String ">>, ArgName, <<", got ">>, TypeName
         ])
     ).
+
+-doc """
+Flush every pending durable+flushable ChangeEntry to disk (ADR 0082 Phase 2).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) flush`. Returns a
+`FlushResult`-tagged map summarising what was written, what was skipped, and
+what conflicted. Hard runtime errors (e.g. the changelog server is missing) are
+raised as structured `#beamtalk_error{}` so they surface at the call site.
+""".
+-spec flush() -> map().
+flush() ->
+    case beamtalk_workspace_flush:flush() of
+        {ok, Summary} -> Summary;
+        {error, Err} -> beamtalk_error:raise(Err)
+    end.
+
+-doc """
+Flush only the ChangeEntries that match `Filter` (ADR 0082 Phase 2).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) flush: filter`.
+`Filter` may be a Class, a Symbol (e.g. `#'new-class'`), or a Dictionary
+`#{ #file => "..." }` (Symbol-keyed). Anything else surfaces a structured
+`#beamtalk_error{}`.
+""".
+-spec flush(term()) -> map().
+flush(Filter) ->
+    case beamtalk_workspace_flush:flush(Filter) of
+        {ok, Summary} -> Summary;
+        {error, Err} -> beamtalk_error:raise(Err)
+    end.
 
 -doc """
 Return the full workspace namespace snapshot.
