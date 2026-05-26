@@ -525,7 +525,7 @@ mod tests {
         assert!(candidates.is_empty());
     }
 
-    /// BT-2287 / ADR 0082 Phase 3: the ChangeLog meta-commands must be
+    /// BT-2287 / ADR 0082 Phase 3: the `ChangeLog` meta-commands must be
     /// discoverable via tab completion.
     #[test]
     fn test_repl_command_completion_changelog_commands_present() {
