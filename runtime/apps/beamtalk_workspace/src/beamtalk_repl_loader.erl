@@ -55,7 +55,8 @@ Extracted from beamtalk_repl_eval (BT-863).
     span_error_entry/3,
     %% ADR 0082 Phase 1 (BT-2285): pure validation helpers for new_class/2.
     declared_class_name/1,
-    validate_new_class/3
+    validate_new_class/3,
+    validate_target_path/1
 ]).
 -endif.
 
@@ -806,19 +807,8 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
 %% there is no tree to create the file in).
 -spec validate_target_path(string()) -> {ok, string()} | {error, #beamtalk_error{}}.
 validate_target_path(TargetPath) ->
-    case filelib:is_file(TargetPath) of
-        true ->
-            {error,
-                new_class_error(
-                    target_exists,
-                    iolist_to_binary([
-                        <<"newClass:at: target already exists on disk: ">>,
-                        list_to_binary(TargetPath),
-                        <<" — use compile:source: against the existing class, or choose a new path">>
-                    ]),
-                    TargetPath
-                )};
-        false ->
+    case file:read_file_info(TargetPath) of
+        {error, enoent} ->
             case classify_source_file(list_to_binary(TargetPath)) of
                 {flushable, AbsPath} ->
                     {ok, AbsPath};
@@ -833,7 +823,21 @@ validate_target_path(TargetPath) ->
                             ]),
                             TargetPath
                         )}
-            end
+            end;
+        _Other ->
+            %% Any existing filesystem entry (regular file, directory, symlink)
+            %% blocks new-class; also treat unreadable paths (eaccess, etc.) as
+            %% existing rather than silently overwriting.
+            {error,
+                new_class_error(
+                    target_exists,
+                    iolist_to_binary([
+                        <<"newClass:at: target already exists on disk: ">>,
+                        list_to_binary(TargetPath),
+                        <<" — use compile:source: against the existing class, or choose a new path">>
+                    ]),
+                    TargetPath
+                )}
     end.
 
 -doc """
@@ -898,13 +902,15 @@ validate_new_class(DeclaredName, TargetPath, Loaded) ->
                     iolist_to_binary([
                         <<"newClass:at: declared class ">>,
                         DeclaredName,
-                        <<" does not match the basename of ">>,
+                        <<" does not match basename '">>,
+                        Expected,
+                        <<"' of ">>,
                         list_to_binary(TargetPath),
-                        <<" (expected ">>,
+                        <<" — either rename the class to match the basename, or use a path with basename ">>,
                         DeclaredName,
                         <<".bt or ">>,
-                        list_to_binary(to_snake_case(binary_to_list(DeclaredName))),
-                        <<".bt) — one class per file (ADR 0040)">>
+                        list_to_binary(DeclaredSnake),
+                        <<".bt. One class per file (ADR 0040)">>
                     ]),
                     TargetPath
                 )};
@@ -952,6 +958,10 @@ emit_new_class_entry(ClassNameBin, Source, SourceFile) ->
             class => ClassNameBin,
             kind => 'new-class',
             source => Source,
+            %% Explicit per ADR 0082 contract: new-class entries carry no prior
+            %% disk body and no byte span (the file does not yet exist).
+            prev_source => undefined,
+            span => undefined,
             intent => durable,
             flushable => true,
             source_file => SourceFile,

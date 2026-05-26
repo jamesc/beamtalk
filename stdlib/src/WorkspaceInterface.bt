@@ -133,7 +133,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Create a brand-new class from a source String at a target path (ADR 0082).
   ///
   /// Compiles and installs the class in memory, then records a durable
-  /// `kind: "new-class"` ChangeLog entry. Phase 1 does NOT write the file to
+  /// `kind: #'new-class'` ChangeLog entry. Phase 1 does NOT write the file to
   /// disk — that happens later on `Workspace flush`, which replays the entry to
   /// write the initial file. Returns the loaded class object(s), like `load:`.
   ///

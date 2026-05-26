@@ -596,3 +596,20 @@ validate_new_class_name_mismatch_takes_precedence_over_loaded_test() ->
         <<"Greeter">>, "src/other.bt", true
     ),
     ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind).
+
+%% Any existing filesystem entry (regular file *or* directory) at the target
+%% path must be reported as target_exists; otherwise newClass:at: would log a
+%% durable ChangeEntry that later fails to flush with eisdir.
+validate_target_path_existing_directory_is_target_exists_test() ->
+    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Dir =
+        Tmp ++ "/bt_new_class_dir_test_" ++
+            integer_to_list(erlang:unique_integer([positive])),
+    ok = file:make_dir(Dir),
+    try
+        {error, Err} = beamtalk_repl_loader:validate_target_path(Dir),
+        ?assertEqual(target_exists, Err#beamtalk_error.kind),
+        ?assertEqual('newClass:at:', Err#beamtalk_error.selector)
+    after
+        file:del_dir(Dir)
+    end.
