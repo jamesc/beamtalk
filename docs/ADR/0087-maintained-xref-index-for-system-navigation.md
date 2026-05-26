@@ -167,14 +167,24 @@ Every mutation that changes what a method sends or defines is driven by
 operation: **(re)parse the affected method's source → recompute its xref
 rows → atomically update the index.**
 
+The xref payload **co-locates with the class registration**: codegen
+emits the per-method xref list as a field of the `ClassInfo` map that
+`register_class/0` already passes to `beamtalk_object_class:start/2`
+(the same map carrying `method_source` / `class_method_source` per
+BT-2195/BT-2246). The class-registration path forwards that payload
+synchronously to `beamtalk_xref` during class creation. No separate
+wire-format payload; no separate consumer; the data lives with the
+module that owns it and survives node restarts as part of the BEAM
+module's `register_class/0` body.
+
 Entries:
 
 | Trigger | Source provider | Re-parse needed? |
 |---|---|---|
-| Class load | compile-result `method_xref` payload | No — compiler already walked the AST |
-| Class reload (`Behaviour reload` → `beamtalk_hot_reload`) | compile-result payload of new build | No — same |
-| Class unload / destroy | n/a (purge only) | n/a |
-| Method-level edit (`put_method/4` with source, ADR 0082) | `method_source` field | Yes — re-parse the one method |
+| Class load | `ClassInfo.method_xref` baked into `register_class/0` | No — compiler already walked the AST |
+| Class reload (`Behaviour reload` → `beamtalk_hot_reload`) | new module's `register_class/0` payload | No — same |
+| Class unload / destroy | n/a (registry-coordinated purge of the class's rows) | n/a |
+| Method-level edit (`put_method/4` with source, ADR 0082) | `method_source` field of the patch | Yes — re-parse the one method |
 | Extension register (`register/5`, BT-2196) | `beamtalk_extension_sources` | Yes — re-parse the one method |
 | Extension unregister | n/a (purge only) | n/a |
 | ClassBuilder install (with `methodSource:`, BT-2195/BT-2246) | builder state map | Yes — re-parse the one method |
@@ -240,38 +250,74 @@ Queries never return a silently-incomplete result.
 The fallback path is the existing `findSendersIn:selector:` /
 `findReferencesToIn:class:` / etc. FFI calls, which remain available
 exactly because they are also the only way to handle the documented
-sourceless runtime-fun case (see below) and the bootstrap window.
+sourceless runtime-fun case (see below).
 
-#### Bootstrap / backfill
+#### Interaction with ADR 0082 (method-level edit and save)
 
-stdlib classes load during boot, potentially before `beamtalk_xref` has
-started its gen_server. On `beamtalk_xref` `init/1`:
+ADR 0082 (live workspace `>>` patches, ChangeLog, `Workspace flush`,
+external-edit detection, LSP write coordination) introduces no
+image-mutation paths beyond the ones already in the write-path table.
+It adds orchestration around them. The sync analysis:
 
-1. Read the class registry's currently-loaded classes.
-2. For each class, ask the class gen_server for its `method_source` /
-   `class_method_source` maps.
-3. For each method with source, re-parse via the existing Rust FFI to
-   produce sends/references rows.
-4. Insert under `gen = 1`.
+| ADR 0082 surface | Mutates image? | xref sync |
+|---|---|---|
+| Live `>>` patch | Yes — lowers to `put_method/4` | covered by `put_method/4` entry; the affected method is re-xrefed from new source |
+| `Workspace flush` (memory → disk) | No — image already mutated by the prior `>>`; flush writes disk only | no xref action; the image is already in the new state |
+| External-edit detection prompt (user defers reload) | No — image unchanged until reload | xref correctly reflects pre-edit image; matches governing invariant ("image is authoritative") |
+| External-edit detection prompt (user accepts reload) | Yes — `Behaviour reload` | covered by reload entry; per-class purge + new-gen install |
+| ChangeLog replay / undo | Yes — replays through `put_method/4` forward | xref reacts to the forward write; no ChangeLog awareness required |
+| LSP textDocument/edit applied | Yes — lowers to `put_method/4` | same as `>>` |
 
-Backfill makes the index complete before the first navigation query,
-without ordering constraints between bootstrap and xref startup.
+The only failure mode is contract break — a new image-mutating path
+that bypasses every documented entry. The miss-policy fallback
+surfaces that defect as a logged warning rather than letting it
+silently lie.
+
+**Line-number stability across flush.** `Workspace flush` splices a
+patched method body back into its `.bt` file via the trivia-preserving
+printer (ADR 0082). That changes *file-relative* line numbers but not
+*method-relative* ones. The xref stores method-relative line numbers
+(same semantics as today's source-scan FFI returns). Flush therefore
+does not invalidate xref rows; consumers (LSP, browser, REPL) translate
+method-relative → file-relative using the method's current file
+position, as they already do.
+
+#### Bootstrap ordering (no backfill required)
+
+`beamtalk_xref` is the **first non-pg child** of `beamtalk_runtime_sup`,
+ordered ahead of `beamtalk_bootstrap` and `beamtalk_stdlib`. By the
+time any class's `on_load` → `register_class/0` runs, the xref tables
+exist and are accepting writes. Each class registers its xref payload
+synchronously alongside its class-state, so the index grows atomically
+with the class registry itself. No separate backfill protocol is
+needed.
+
+The supervisor's child order becomes the load-bearing invariant:
+
+```
+1. beamtalk_xref            (this ADR)
+2. beamtalk_bootstrap       (process group + Erlang stub classes)
+3. beamtalk_stdlib          (compiled .bt class modules)
+4. beamtalk_object_instances
+5. ...
+```
+
+Erlang stub classes registered from `beamtalk_bootstrap` (`Behaviour`,
+`Class`, `Metaclass`, `ClassBuilder` — the metaclass-tower scaffolding
+that pre-dates the .bt-compiled stdlib) emit `method_xref => []` and
+their methods land as `source_status = unindexed_runtime_fun` rows —
+the genuine narrow sourceless category.
 
 Stdlib classes — including primitives like `Integer`, `Float`, `Symbol`,
-`String` — have full `.bt` source (the method bodies are
+`String` — have full `.bt` source. The method bodies are
 `@primitive "..."` declarations, but the surrounding class headers,
 selectors, type annotations and AST are real Beamtalk that the compiler
-walks like any other). They ride the compile-result `method_xref`
-payload during their normal load via `beamtalk_stdlib`. The backfill
-on `init/1` exists purely to handle the *timing gap* — if those classes
-load before `beamtalk_xref` itself is up, their xref payloads would be
-emitted into the void. The backfill replays from the class registry's
-stored `method_source` / `class_method_source` maps and re-parses to
-recover the same rows the load-time payload would have produced.
-`@primitive` method bodies parse to empty send lists (the body sends
-nothing — it delegates to Erlang) but the type-annotation references
-on the signature (`+ other :: Number -> Integer`) are preserved
-normally.
+walks like any other. They ride the `method_xref` payload baked into
+`register_class/0` like any other compiled-from-source class.
+`@primitive` method bodies parse to empty send lists (they delegate to
+Erlang) but the type-annotation references on the signature
+(`+ other :: Number -> Integer`) are preserved normally and visible to
+`referencesTo:`.
 
 #### Synthetic / compiler-inserted methods
 
@@ -328,60 +374,63 @@ This residue is shrinkable (see BT-2228 follow-ups) but not zero.
 This is the *runtime-fun* sourceless case — distinct from
 compiler-synthesised methods above, which the write path indexes fully.
 
-### Wire-format extension
+### Codegen extension (no separate wire-format payload)
 
-`beamtalk_compiler:compile/2` already returns
-`{ok, #{core_erlang, module_name, classes, warnings}}`. The companion
-REPL path `beamtalk_compiler:compile_expression/3` returns
-`{ok, class_definition, ClassInfo}` for inline class definitions
-(BT-571), which is the workspace-classes-without-files entry point.
-Both paths are extended with one new key:
+The xref data is emitted **directly into the Core Erlang
+`register_class/0` body** alongside the `method_source` /
+`class_method_source` maps already there. Same `Document` / `docvec!`
+codegen pattern as `method_source` (see
+`crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs`).
+The `ClassInfo` map passed to `beamtalk_object_class:start/2` gains one
+field:
 
 ```erlang
-{ok, #{
-  core_erlang := binary(),
-  module_name := binary(),
-  classes := [#{name := binary(), superclass := binary()}],
-  warnings := [binary()],
-  method_xref := [
-    #{
-      class          := binary(),        %% the class the method lives on
-      class_side     := boolean(),
-      selector       := binary(),
-      line           := pos_integer(),
-      sends          := [#{
-                          selector := binary(),
-                          line     := pos_integer(),
-                          recv     := <<"self">>
-                                    | <<"super">>
-                                    | <<"erlang_ffi">>
-                                    | <<"other">>
-                        }],
-      references     := [#{
-                          class := binary(),
-                          line  := pos_integer()
-                        }],
-      source_status  := <<"indexed">>
-                      | <<"synthetic">>,
-      synthetic_origin := pos_integer() | null  %% line of generating declaration
-                                                %% when source_status = synthetic
-    }
-  ]
-}}
+ClassInfo = #{
+    name => 'Counter',
+    superclass => 'Object',
+    module => bt@example@counter,
+    fields => [...],
+    is_abstract => false,
+    class_methods => #{...},
+    instance_methods => #{...},
+    method_source => #{...},           %% BT-2195
+    class_method_source => #{...},     %% BT-2195
+    method_xref => [                   %% this ADR
+      #{
+        class_side       => false,
+        selector         => 'increment',
+        line             => 14,
+        sends            => [#{
+                              selector  => '+',
+                              line      => 17,
+                              recv_kind => self_recv
+                           }],
+        references       => [#{
+                              class => 'Integer',
+                              line  => 16
+                           }],
+        source_status    => indexed,
+        synthetic_origin => undefined  %% pos_integer() when source_status = synthetic
+      },
+      ...
+    ]
+}
 ```
 
-`method_xref` is **always present** on a successful compile that defines
-classes — empty list when the source has no methods (e.g. protocol-only
-files). Consumers unaware of the field ignore it (backward-compatible
-map extension). Expression-only compiles (the non-`class_definition`
-branch of `compile_expression/3`) carry no `method_xref` — there are
-no method definitions to index.
+`beamtalk_object_class:start/2` forwards the `method_xref` value
+synchronously to `beamtalk_xref` during class creation, before
+returning. The class is not considered "loaded" until xref has the
+rows.
 
 The Rust side reuses the existing `senders_query`/`references_to_query`/
 `all_sends_query` AST walkers — they already produce `SendHit` /
 reference / send-with-receiver records. They run once per method during
-compilation, on the AST the compiler already has, then the results are
-serialised into the response. No new walker is introduced.
+compilation, on the AST the compiler already has. The results are
+emitted as Core Erlang literal terms inside the `register_class/0`
+function body via `docvec!` (CLAUDE.md mandates Document/docvec! for
+all Core Erlang fragments). No new walker, no new wire-format field,
+no new REPL load path — REPL `:load` and stdlib `on_load` both reach
+the same `register_class/0` and inherit the index update for free.
 
 ### Migration scope (this ADR)
 
@@ -399,17 +448,20 @@ This ADR is the predicate; implementation lands in phases below.
 
 | Phase | Slice | Closes |
 |---|---|---|
-| 1 | `beamtalk_xref` gen_server skeleton + three empty tables + supervisor wiring | infrastructure |
-| 2 | Compiler emits `method_xref` payload; runtime consumes on class load; backfill on `init/1` | write path |
+| 1 | `beamtalk_xref` gen_server skeleton + tables + supervisor wired as the first non-pg child | infrastructure |
+| 2 | Codegen emits `method_xref` into `register_class/0`; `beamtalk_object_class:start/2` forwards to xref synchronously | write path |
 | 3 | Migrate `sendersOf:` end-to-end with miss-policy fallback; benchmark before/after | first query (wire-check) |
-| 4 | Reload / unload / `put_method/4` / extension register-unregister / ClassBuilder hooks | full lifecycle |
+| 4 | Reload purge + new-gen install via `beamtalk_hot_reload`; `put_method/4` re-xref; extension and ClassBuilder hooks | full lifecycle |
 | 5 | Migrate remaining five queries in scope | read-path migration |
 | 6 | Synthetic accessor emission + tagging; parity exception encoded in tests | completeness |
 
-Phases 1–3 are the minimum-viable index — Phase 3 acts as the "napkin"
-wire-check that the whole compiler→port→ETS→stdlib path round-trips
-correctly before broader migration. Phases 4–6 close the acceptance
-criteria.
+Phases 1–3 are the minimum-viable index — Phase 3 acts as the napkin
+wire-check that the whole compiler→`register_class/0`→ETS→stdlib path
+round-trips correctly before broader migration. Phases 4–6 close the
+acceptance criteria. There is no separate backfill phase: the
+co-located write path covers stdlib boot via supervisor ordering, REPL
+load via the same `register_class/0`, and dynamic class creation via
+the same hook.
 
 ## Prior Art
 
@@ -470,15 +522,19 @@ the read side; this ADR is the write-side counterpart.
   decide whether to filter them. The miss-policy warning is the
   affordance that surfaces accidental gaps during tool development.
 - **Erlang/BEAM operators** see one new supervised worker
-  (`beamtalk_xref`) in `beamtalk_runtime_sup`, with `domain =>
-  [beamtalk, runtime]` log lines for backfill, reload purge, and
+  (`beamtalk_xref`) as the first non-pg child of `beamtalk_runtime_sup`,
+  with `domain => [beamtalk, runtime]` log lines for reload purge and
   miss-policy warnings. The new tables (`beamtalk_xref_methods`,
   `_senders`, `_references`, `xref_class_gen`) are observable via
   standard `ets:info/1` / `ets:tab2list/1` for debugging. A
   `beamtalk_xref` crash drops the tables; the supervisor restart
-  triggers a fresh backfill, and in-flight navigation queries hit the
-  miss-policy fallback during the rebuild window (correct results,
-  warning logged).
+  brings up empty tables, and in-flight navigation queries hit the
+  miss-policy fallback (correct results, warning logged) until each
+  class's `register_class/0` is re-driven — which happens naturally
+  on the next class load, hot-reload, or operator-triggered
+  `Behaviour reload` of affected classes. (A future enhancement could
+  trigger a full re-register via the class registry; not required for
+  correctness.)
 
 ### Discoverability
 
@@ -604,40 +660,48 @@ persistence adds a sync surface (disk vs ETS) without a correctness gain.
 Phases listed under **Migration scope** above; details tracked in
 BT-2228 acceptance criteria. Key entry points:
 
-- `crates/beamtalk-core/` — extend the compile result with
-  per-method `sent` / `references` metadata. Reuse
-  `queries/senders_query.rs`, `queries/references_to_query.rs`,
-  `queries/all_sends_query.rs` as the source of truth for the walk.
-  Synthetic-method emission piggybacks on
-  `codegen/core_erlang/value_type_codegen.rs` and the BT-1461 context
-  accessor path.
-- `crates/beamtalk-compiler-port/src/main.rs` — carry the `method_xref`
-  key in `compile_ok_response/4`.
-- `runtime/apps/beamtalk_runtime/src/beamtalk_xref.erl` (new) — gen_server
-  with three protected/named ETS tables, a fourth small `xref_class_gen`
-  metadata table, and the per-class-generation atomicity protocol.
+- `crates/beamtalk-core/src/codegen/core_erlang/gen_server/methods.rs` —
+  compute per-method xref (reusing `queries/senders_query.rs`,
+  `queries/references_to_query.rs`, `queries/all_sends_query.rs` as the
+  source of truth for the walk) and emit it as a `method_xref` map
+  field in the `ClassInfo` literal built by `register_class/0`, using
+  the same `build_selector_map`-style `Document`/`docvec!` pattern as
+  `method_source`. Synthetic-method emission piggybacks on
+  `codegen/core_erlang/value_type_codegen.rs`.
+- `runtime/apps/beamtalk_runtime/src/beamtalk_xref.erl` (new) —
+  gen_server with three protected/named ETS tables, a fourth small
+  `xref_class_gen` metadata table, and the per-class-generation
+  atomicity protocol.
 - `runtime/apps/beamtalk_runtime/src/beamtalk_runtime_sup.erl` — add
-  `beamtalk_xref` as a permanent worker between `beamtalk_stdlib` and
-  `beamtalk_object_instances` (so it's up before the first navigation
-  query but after class bootstrap).
-- `runtime/apps/beamtalk_runtime/src/beamtalk_class_registry.erl` —
-  notify `beamtalk_xref` on class load / unload; provide the backfill
-  enumeration during xref `init/1`.
-- `runtime/apps/beamtalk_runtime/src/beamtalk_hot_reload.erl` — invoke
-  the per-class purge+reinsert path.
+  `beamtalk_xref` as the **first non-pg child**, ahead of
+  `beamtalk_bootstrap` and `beamtalk_stdlib`, so the index is up before
+  any `register_class/0` runs.
 - `runtime/apps/beamtalk_runtime/src/beamtalk_object_class.erl` —
-  `put_method/4` re-xrefs the affected method from `Source`.
+  `start/2` forwards the `method_xref` field of `ClassInfo` to
+  `beamtalk_xref` synchronously during class creation; `put_method/4`
+  re-xrefs the affected method from `Source`.
+- `runtime/apps/beamtalk_runtime/src/beamtalk_hot_reload.erl` —
+  coordinates the per-class purge with the new module's
+  `register_class/0` call (generation bump in xref).
+- `runtime/apps/beamtalk_runtime/src/beamtalk_class_registry.erl` —
+  unload hook purges xref rows for the destroyed class.
 - `runtime/apps/beamtalk_runtime/src/beamtalk_extensions.erl` —
-  `register/5` re-xrefs the new method; `unregister` purges; `register/4`
-  inserts a `source_status = unindexed_runtime_fun` row.
+  `register/5` re-xrefs the new method; `unregister` purges;
+  `register/4` inserts a `source_status = unindexed_runtime_fun` row.
 - `runtime/apps/beamtalk_runtime/src/beamtalk_class_builder.erl` —
-  feeds `methodSource:` per-method source into the index during install.
+  feeds `methodSource:` per-method source into the xref during install
+  (riding through `beamtalk_object_class:start/2`'s `ClassInfo`).
 - `stdlib/src/SystemNavigation.bt` — repoint migrated queries at
   `(Erlang beamtalk_xref) sendersOf:` etc., keeping the on-miss
   fallback to the existing source-scan helpers.
 
 The fallback path (`findSendersIn:` etc.) is retained — it is the
 miss-policy backstop and the read path for sourceless runtime-fun cases.
+
+No backfill module is needed: the xref is the first non-pg supervisor
+child, so every class's `register_class/0` runs after xref is alive
+and registers its data inline. The compile-port wire format
+(`beamtalk_compiler:compile/2` response) is unchanged.
 
 ## Migration Path
 
