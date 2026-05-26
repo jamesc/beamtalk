@@ -649,9 +649,12 @@ load_metadata_from_disk(State) ->
                         end,
 
                     %% ADR 0082 Phase 4 (BT-2290): restore workspace-scoped
-                    %% settings (autoflush etc.). Unknown setting keys are
-                    %% preserved so a newer build's settings survive a
-                    %% downgrade-then-upgrade cycle.
+                    %% settings (autoflush etc.). `restore_settings/1` drops
+                    %% setting keys whose name does not resolve to an
+                    %% existing atom in this build, so unknown keys from a
+                    %% newer build are silently discarded on
+                    %% downgrade-then-upgrade. Known atom-keyed settings
+                    %% round-trip cleanly.
                     Settings = restore_settings(maps:get(<<"settings">>, Map, #{})),
 
                     State#state{
@@ -837,9 +840,12 @@ persist_settings(Settings) ->
         Settings
     ).
 
-%% Whitelist of types we are willing to round-trip through JSON. Today only
-%% booleans (autoflush). Other types are silently dropped from persistence
-%% rather than risk a JSON-encode crash bringing down the gen_server.
+%% Whitelist of JSON-safe primitive types we are willing to round-trip:
+%% booleans (autoflush — the only setting today), plus integers and binaries
+%% to leave headroom for future settings without forcing another whitelist
+%% edit. Other types (lists/maps/atoms/floats) are silently dropped from
+%% persistence rather than risk a JSON-encode crash bringing down the
+%% gen_server.
 -spec persistable_setting_value(term()) -> {ok, term()} | skip.
 persistable_setting_value(V) when is_boolean(V) -> {ok, V};
 persistable_setting_value(V) when is_integer(V) -> {ok, V};

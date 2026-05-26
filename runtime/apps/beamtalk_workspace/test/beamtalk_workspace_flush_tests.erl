@@ -694,8 +694,8 @@ filter_shadowed_drops_unrenamed_survivors() ->
 %% matching entries were written to disk and the others remain pending.
 
 flush_kinds_by_entry_kind(#{proj_dir := ProjDir}) ->
-    %% Two method-patch entries (`instance` kind) + one new-class entry.
-    %% `flushKinds: #{#instance}` must write only the method patches.
+    %% One method-patch entry (`instance` kind) + one new-class entry.
+    %% `flushKinds: #{#instance}` must write only the method patch.
     InstanceFile = filename:join([ProjDir, "src", "counter.bt"]),
     NewClassFile = filename:join([ProjDir, "src", "greeter.bt"]),
     Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
