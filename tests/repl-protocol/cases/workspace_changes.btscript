@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for `Workspace changes` and the ChangeLog collection protocol
+// (ADR 0082 Phase 1, BT-2284). These require E2E because the live FFI path
+// (`Workspace changes` -> beamtalk_workspace_changelog:changeLog/0) only
+// resolves in the running workspace; BUnit covers the exact-value collection
+// protocol against directly-constructed objects.
+//
+// IMPORTANT: REPL-protocol cases share one long-lived workspace session, and
+// earlier cases perform live `>>` method patches that the install hook logs to
+// the ChangeLog. So the ChangeLog is NOT empty here and entry counts are not
+// deterministic. These assertions therefore verify the live FFI dispatch and
+// the *shape/contract* of the results (types, consistency) rather than exact
+// counts — the exact-value semantics live in stdlib/test/changelog_test.bt.
+
+// Workspace responds to #changes
+Workspace respondsTo: #changes
+// => true
+
+// Workspace changes returns a ChangeLog object (FFI dispatch resolves)
+(Workspace changes) isKindOf: ChangeLog
+// => true
+
+// notEmpty returns a Boolean
+(Workspace changes notEmpty) isKindOf: Boolean
+// => true
+
+// isEmpty returns a Boolean
+(Workspace changes isEmpty) isKindOf: Boolean
+// => true
+
+// isEmpty is the inverse of notEmpty (internal consistency)
+(Workspace changes isEmpty) =:= (Workspace changes notEmpty not)
+// => true
+
+// size returns an Integer
+(Workspace changes size) isKindOf: Integer
+// => true
+
+// size is consistent with isEmpty
+(Workspace changes size =:= 0) =:= (Workspace changes isEmpty)
+// => true
+
+// dirtyMethods returns a Dictionary
+(Workspace changes dirtyMethods) isKindOf: Dictionary
+// => true
+
+// allEntries returns a List
+(Workspace changes allEntries) isKindOf: List
+// => true
+
+// select: returns a List (and can be filtered without error)
+(Workspace changes select: [:e | e isOrphan]) isKindOf: List
+// => true
+
+// do: iterates without error (returns ok)
+Workspace changes do: [:e | e className]
+// => ok

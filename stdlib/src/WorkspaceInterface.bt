@@ -100,6 +100,25 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   sync -> Dictionary => (Erlang beamtalk_workspace_interface_primitives) sync
 
+  /// Return the workspace ChangeLog — the navigable view of pending in-memory
+  /// changes (ADR 0082).
+  ///
+  /// All pending-state queries live on the returned ChangeLog object, following
+  /// Pharo's `Smalltalk changes` idiom: "is anything dirty?" is
+  /// `Workspace changes notEmpty`; "what's dirty?" is
+  /// `Workspace changes dirtyMethods`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes notEmpty       // => false
+  /// Workspace changes dirtyMethods   // => #{}
+  /// ```
+  changes -> ChangeLog =>
+    // FFI returns a `ChangeLog`-tagged map (beamtalk_workspace_changelog:changeLog/0);
+    // suppress the untyped-FFI Dynamic warning since the shape is known.
+    @expect type
+    (Erlang beamtalk_workspace_changelog) changeLog
+
   /// Compile and load a .bt file, registering the class.
   /// Returns a List of loaded class objects (empty if none resolved).
   /// Returns a structured error if path is not a String or the file cannot be loaded.

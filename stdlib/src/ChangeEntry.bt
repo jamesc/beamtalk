@@ -1,0 +1,126 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ChangeEntry — One recorded in-memory method mutation (ADR 0082 Phase 1).
+///
+/// A ChangeEntry is an immutable snapshot of a single entry in the workspace
+/// ChangeLog: the class and selector that were patched, the kind of patch,
+/// whether the caller intended it as durable, whether it is flushable to disk,
+/// who made it, and the derived restart-state flags (orphan / prior-epoch /
+/// active). Entries are produced by `Workspace changes` and surfaced to
+/// `ChangeLog do:` / `ChangeLog select:` blocks; they are not constructed
+/// directly by user code.
+///
+/// The underlying record lives in `beamtalk_workspace_changelog.erl`; this
+/// value object wraps the tagged map that the FFI returns.
+///
+/// ## Examples
+/// ```beamtalk
+/// Workspace changes do: [:e | Transcript show: e authorKind]
+/// Workspace changes select: [:e | e isOrphan]
+/// ```
+sealed typed Value subclass: ChangeEntry
+  field: seq :: Integer = 0
+  field: className :: Symbol = #unknown
+  field: selector :: Symbol | Nil = nil
+  field: kind :: Symbol = #unknown
+  field: intent :: Symbol = #unknown
+  field: flushable :: Boolean = false
+  field: authorKind :: Symbol = #unknown
+  field: sourceFile :: String | Nil = nil
+  field: orphan :: Boolean = false
+  field: priorEpoch :: Boolean = false
+  field: active :: Boolean = false
+
+  /// The monotonic sequence number assigned when the entry was logged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Workspace changes select: [:e | true]) first seq   // => _
+  /// ```
+  seq -> Integer => self.seq
+
+  /// The name (Symbol) of the class that was patched.
+  ///
+  /// Named `className` rather than `class` because every object already
+  /// responds to `class` (returning the metaclass).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Workspace changes select: [:e | true]) first className   // => _
+  /// ```
+  className -> Symbol => self.className
+
+  /// The patched selector (Symbol), or nil for new-class entries.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Workspace changes select: [:e | true]) first selector   // => _
+  /// ```
+  selector -> Symbol | Nil => self.selector
+
+  /// The kind of patch: #instance, #class, #new-class, or #unknown.
+  kind -> Symbol => self.kind
+
+  /// The recorded intent: #durable or #ephemeral.
+  intent -> Symbol => self.intent
+
+  /// Whether the patch is flushable to disk (the class has an in-project
+  /// source file).
+  isFlushable -> Boolean => self.flushable
+
+  /// Whether the entry was logged with durable intent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes select: [:e | e isDurable]   // => _
+  /// ```
+  isDurable -> Boolean => self.intent =:= #durable
+
+  /// Whether the entry was logged with ephemeral (exploratory) intent.
+  isEphemeral -> Boolean => self.intent =:= #ephemeral
+
+  /// Who made the change: #human or #agent (audit metadata, not a filter).
+  authorKind -> Symbol => self.authorKind
+
+  /// Whether the change came from an agent (MCP tool).
+  isAgent -> Boolean => self.authorKind =:= #agent
+
+  /// Whether the change came from a human (REPL / browser).
+  isHuman -> Boolean => self.authorKind =:= #human
+
+  /// The recorded source file path (String), or nil for stdlib / dynamic
+  /// classes that have no on-disk source.
+  sourceFile -> String | Nil => self.sourceFile
+
+  /// Whether the entry is orphaned — its prev_source no longer matches disk
+  /// after a workspace restart, so the patch can no longer be reconciled.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes select: [:e | e isOrphan]   // => _
+  /// ```
+  isOrphan -> Boolean => self.orphan
+
+  /// Whether the entry belongs to a prior workspace epoch (logged before the
+  /// most recent restart — its memory state was lost).
+  isPriorEpoch -> Boolean => self.priorEpoch
+
+  /// Whether the entry is part of the active dirty view: current epoch and not
+  /// orphaned. Active entries are the live, re-appliable changes.
+  isActive -> Boolean => self.active
+
+  /// Whether this entry created a new class (kind `#'new-class'`, no selector).
+  isNewClass -> Boolean => self.kind =:= #'new-class'
+
+  /// Developer-readable representation, e.g. "Counter>>increment" or
+  /// "Counter (new-class)".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Workspace changes select: [:e | true]) first printString   // => _
+  /// ```
+  printString -> String =>
+    self.selector isNil ifTrue: [
+      self.className asString ++ " (new-class)"
+    ] ifFalse: [self.className asString ++ ">>" ++ self.selector asString]

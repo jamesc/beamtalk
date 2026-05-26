@@ -93,6 +93,19 @@ release nodes do not start a workspace, so this code is a no-op there.
     clear/0
 ]).
 
+%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284). These build the data the
+%% `ChangeLog.bt` / `ChangeEntry.bt` value objects wrap: each entry becomes a
+%% `$beamtalk_class`-tagged map and `dirtyMethods/0` returns the per-class set
+%% of dirty selectors. The FFI dispatches on the Beamtalk selector verbatim, so
+%% these entry points are named in camelCase (`changeLog`, `dirtyMethods`) to
+%% match the selectors used in `ChangeLog.bt` / `WorkspaceInterface.bt`. Called
+%% via `(Erlang beamtalk_workspace_changelog) ...` from the compiled stdlib.
+-export([
+    changeLog/0,
+    dirtyMethods/0,
+    change_entries/0
+]).
+
 %% Accessors on the opaque entry type (used by callers and tests).
 -export([
     entry_seq/1,
@@ -277,6 +290,110 @@ later `revert:`/audit flow may still want them; rotation prunes them). Used by
 -spec clear() -> ok.
 clear() ->
     gen_server:call(?MODULE, clear).
+
+%%% ----------------------------------------------------------------------------
+%%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284)
+%%% ----------------------------------------------------------------------------
+%%% These functions translate the opaque `#entry{}` records into the
+%%% `$beamtalk_class`-tagged maps that the `ChangeLog.bt` / `ChangeEntry.bt`
+%%% value objects wrap. `change_entries/0` returns *every* entry (the
+%%% `ChangeLog` object holds the full set so `select:` can still reach
+%%% prior-epoch / orphan entries); the active/dirty filtering lives on the
+%%% Beamtalk side using the per-entry `active` flag. `dirtyMethods/0` is
+%%% computed here because it groups *active* entries by class into Beamtalk
+%%% `Set` values.
+
+-doc """
+Return the workspace ChangeLog as a `ChangeLog` value-object map.
+
+The map is tagged `'$beamtalk_class' => 'ChangeLog'` and carries the full set
+of entries (as `ChangeEntry` maps) under `entries`, so the `ChangeLog.bt`
+object can apply the active-vs-full filtering in Beamtalk. This is what
+`Workspace changes` returns. Called via
+`(Erlang beamtalk_workspace_changelog) changeLog`.
+""".
+-spec changeLog() -> map().
+changeLog() ->
+    #{
+        '$beamtalk_class' => 'ChangeLog',
+        entries => change_entries()
+    }.
+
+-doc """
+Return every ChangeLog entry as a `ChangeEntry` value-object map, oldest first.
+
+Each map is tagged `'$beamtalk_class' => 'ChangeEntry'` so the runtime
+dispatches the instance methods defined in `ChangeEntry.bt`. The full set is
+returned (including prior-epoch and orphan entries) so `ChangeLog select:` can
+still reach them; the default collection views filter on the per-entry `active`
+flag in Beamtalk. Internal helper for `changeLog/0` (and exported for tests); it
+is not itself an FFI entry point — `ChangeLog.bt` only ever calls `changeLog`.
+""".
+-spec change_entries() -> [map()].
+change_entries() ->
+    [entry_to_value(E) || E <- entries()].
+
+-doc """
+Return the dirty methods derived from the *active* entries as a Beamtalk
+Dictionary `#{ClassSymbol => Set(selectorSymbol)}`.
+
+Only active entries (current epoch, not orphaned) contribute, matching the ADR's
+"dirty state" semantics. New-class entries (no selector) are recorded under the
+class with the placeholder selector `#new-class`, mirroring the ADR REPL example
+`DoubleCounterTest -> #new-class`. Called via
+`(Erlang beamtalk_workspace_changelog) dirtyMethods`.
+""".
+-spec dirtyMethods() -> #{atom() => map()}.
+dirtyMethods() ->
+    Active = active_entries(),
+    Grouped = lists:foldl(
+        fun(E, Acc) ->
+            ClassSym = binary_to_atom(E#entry.class, utf8),
+            Sel = dirty_selector(E),
+            Existing = maps:get(ClassSym, Acc, []),
+            Acc#{ClassSym => [Sel | Existing]}
+        end,
+        #{},
+        Active
+    ),
+    maps:map(fun(_Class, Selectors) -> beamtalk_set:from_list(Selectors) end, Grouped).
+
+%% The selector recorded for the dirty-methods view. Method patches use their
+%% own selector; new-class entries (selector = undefined) use the `#new-class`
+%% placeholder so the per-class entry is still visible.
+-spec dirty_selector(#entry{}) -> atom().
+dirty_selector(#entry{selector = undefined}) -> 'new-class';
+dirty_selector(#entry{selector = Sel}) -> binary_to_atom(Sel, utf8).
+
+%% Build a `ChangeEntry` value-object map from an `#entry{}` record. Field keys
+%% match the `field:` declarations in `ChangeEntry.bt`; `self.field` reads them.
+%% Atoms (selector, kind, intent, authorKind) are surfaced as Beamtalk Symbols;
+%% the derived `active` flag is `true` iff the entry is current-epoch and not an
+%% orphan (the default dirty view).
+-spec entry_to_value(#entry{}) -> map().
+entry_to_value(#entry{} = E) ->
+    #{
+        '$beamtalk_class' => 'ChangeEntry',
+        seq => E#entry.seq,
+        className => binary_to_atom(E#entry.class, utf8),
+        selector => selector_symbol(E#entry.selector),
+        kind => E#entry.kind,
+        intent => E#entry.intent,
+        flushable => E#entry.flushable,
+        authorKind => E#entry.author_kind,
+        sourceFile => source_file_value(E#entry.source_file),
+        orphan => E#entry.orphan,
+        priorEpoch => E#entry.prior_epoch,
+        active => (not E#entry.prior_epoch) andalso (not E#entry.orphan)
+    }.
+
+-spec selector_symbol(binary() | undefined) -> atom() | nil.
+selector_symbol(undefined) -> nil;
+selector_symbol(Sel) -> binary_to_atom(Sel, utf8).
+
+-spec source_file_value(binary() | undefined) -> binary() | nil.
+source_file_value(undefined) -> nil;
+source_file_value(File) -> File.
 
 %%% ----------------------------------------------------------------------------
 %%% Entry accessors
