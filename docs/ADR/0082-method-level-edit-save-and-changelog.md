@@ -1,7 +1,7 @@
 # ADR 0082: Method-Level Edit and Save in the Live Workspace
 
 ## Status
-Proposed (2026-05-17)
+Accepted (2026-05-17) — **Shipped 2026-05-26** (all phases 0–5 merged to main, BT-2281 through BT-2292).
 
 ## Context
 
@@ -524,7 +524,19 @@ For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending change
 
 ## References
 
-- Related issues: BT-XXX (this ADR; issues to be created via `/plan-adr`)
+- Implementation epic: **BT-2280** (parent), phases tracked under:
+  - BT-2281 — Phase 0: byte-span resolver + corpus round-trip validation spike
+  - BT-2282 — Phase 1: ChangeLog gen_server + two-part on-disk persistence
+  - BT-2283 — Phase 1: `Behaviour compile:source:` / `tryCompile:source:` + install-hook ChangeEntry
+  - BT-2284 — Phase 1: `Workspace changes` + `ChangeLog.bt` collection protocol
+  - BT-2285 — Phase 1: `Workspace newClass:at:` — new-class creation + validation
+  - BT-2286 — Phase 2: `Workspace flush` — splice, atomicity, external-edit detection
+  - BT-2287 — Phase 3: REPL meta-commands `:flush` / `:changes` / `:dirty`
+  - BT-2288 — Phase 3: MCP tools `save_method` / `save_class` / `try_method` / `flush` / `list_changes` / `dirty_methods`
+  - BT-2289 — Phase 3: LSP `executeCommand` (`beamtalk.flush*`, `beamtalk.saveClass`) + `workspace/applyEdit` on flush
+  - BT-2290 — Phase 4: `ChangeLog revert:` / `clear` / `flushKinds:` + `autoflush`
+  - BT-2291 — Phase 5: e2e full flush / external-edit conflict round-trip btscript
+  - BT-2292 — Phase 5: docs + surface-parity audit
 - Related ADRs:
   - ADR 0004 — Persistent Workspace Management (memory-only hot reload contract)
   - ADR 0017 — Browser Connectivity to Running Workspaces (Phase 3 LiveView IDE that motivates this)
