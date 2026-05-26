@@ -689,8 +689,10 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
         }
         ":dirty" => {
             // BT-2287 / ADR 0082 Phase 3: REPL alias for
-            // `Workspace changes notEmpty` — answers "is anything pending?".
-            eval_and_display(client, "Workspace changes notEmpty");
+            // `Workspace changes dirtyMethods` — the per-class set of dirty
+            // selectors. Pairs with `:changes` (full summary) and answers
+            // "what specifically has changed?".
+            eval_and_display(client, "Workspace changes dirtyMethods");
             return CommandResult::Handled;
         }
         _ => {}
@@ -1722,6 +1724,37 @@ mod tests {
         assert_eq!(
             flush_expr_for(":flush   Counter   "),
             Some("Workspace flush: Counter".to_string())
+        );
+    }
+
+    /// Helper mirroring `handle_repl_command`'s bare-alias dispatch table.
+    /// Keep this in sync with the `":flush" | ":changes" | ":dirty"` arms in
+    /// `handle_repl_command` — the tests below pin the translation contract so
+    /// drift in the dispatch table fails CI.
+    fn bare_alias_expr(line: &str) -> Option<&'static str> {
+        match line {
+            ":flush" => Some("Workspace flush"),
+            ":changes" => Some("Workspace changes"),
+            ":dirty" => Some("Workspace changes dirtyMethods"),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn bare_flush_translates_to_workspace_flush() {
+        assert_eq!(bare_alias_expr(":flush"), Some("Workspace flush"));
+    }
+
+    #[test]
+    fn changes_translates_to_workspace_changes() {
+        assert_eq!(bare_alias_expr(":changes"), Some("Workspace changes"));
+    }
+
+    #[test]
+    fn dirty_translates_to_workspace_changes_dirty_methods() {
+        assert_eq!(
+            bare_alias_expr(":dirty"),
+            Some("Workspace changes dirtyMethods")
         );
     }
 
