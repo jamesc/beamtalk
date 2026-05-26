@@ -350,6 +350,31 @@ impl RequestBuilder {
         req
     }
 
+    /// Build a `nav-query` request — structured navigation query that
+    /// returns `beamtalk_xref` site records to the LSP / MCP (BT-2239).
+    ///
+    /// `kind` is one of `"senders"`, `"implementors"`, `"references"`.
+    /// For `senders` / `implementors`, pass a Beamtalk selector as the
+    /// second arg; for `references`, pass a Beamtalk class name.
+    #[must_use]
+    pub fn nav_query(kind: &str, arg: &str) -> serde_json::Value {
+        let mut req = serde_json::json!({
+            "op": "nav-query",
+            "id": next_msg_id(),
+            "kind": kind,
+        });
+        match kind {
+            "senders" | "implementors" => {
+                req["selector"] = serde_json::Value::String(arg.to_owned());
+            }
+            _ => {
+                // Default "references" branch — class name argument.
+                req["class"] = serde_json::Value::String(arg.to_owned());
+            }
+        }
+        req
+    }
+
     // --- Tracing operations (ADR 0069) ---
 
     /// Build an `enable-tracing` request.
