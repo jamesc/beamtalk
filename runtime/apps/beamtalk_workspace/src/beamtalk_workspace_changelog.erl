@@ -326,8 +326,8 @@ Each map is tagged `'$beamtalk_class' => 'ChangeEntry'` so the runtime
 dispatches the instance methods defined in `ChangeEntry.bt`. The full set is
 returned (including prior-epoch and orphan entries) so `ChangeLog select:` can
 still reach them; the default collection views filter on the per-entry `active`
-flag in Beamtalk. Internal helper for `changeLog/0` (and exported for tests); it
-is not itself an FFI entry point — `ChangeLog.bt` only ever calls `changeLog`.
+flag in Beamtalk. Internal helper for `changeLog/0`; not used by the stdlib API
+(`ChangeLog.bt` only ever calls `changeLog`) — exported for tests/helpers.
 """.
 -spec change_entries() -> [map()].
 change_entries() ->
@@ -339,8 +339,8 @@ Dictionary `#{ClassSymbol => Set(selectorSymbol)}`.
 
 Only active entries (current epoch, not orphaned) contribute, matching the ADR's
 "dirty state" semantics. New-class entries (no selector) are recorded under the
-class with the placeholder selector `#new-class`, mirroring the ADR REPL example
-`DoubleCounterTest -> #new-class`. Called via
+class with the placeholder selector `#'new-class'`, mirroring the ADR REPL example
+`DoubleCounterTest -> #'new-class'`. Called via
 `(Erlang beamtalk_workspace_changelog) dirtyMethods`.
 """.
 -spec dirtyMethods() -> #{atom() => map()}.

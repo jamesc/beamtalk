@@ -59,7 +59,7 @@ sealed typed Value subclass: ChangeEntry
   /// ```
   selector -> Symbol | Nil => self.selector
 
-  /// The kind of patch: #instance, #class, #new-class, or #unknown.
+  /// The kind of patch: #instance, #class, #'new-class', or #unknown.
   kind -> Symbol => self.kind
 
   /// The recorded intent: #durable or #ephemeral.

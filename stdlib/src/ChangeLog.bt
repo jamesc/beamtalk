@@ -97,7 +97,7 @@ sealed typed Value subclass: ChangeLog
   ///
   /// Derived from the active entries only. Each class maps to a Set of patched
   /// selector Symbols; new-class entries appear under their class with the
-  /// placeholder selector `#new-class`.
+  /// placeholder selector `#'new-class'`.
   ///
   /// ## Examples
   /// ```beamtalk
