@@ -11,10 +11,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+use crate::runtime::{FlushEvent, RuntimeClient, RuntimeError};
 
 use beamtalk_core::language_service::{
     CompletionKind, DocumentSymbolKind, LanguageService, Position as BtPosition,
@@ -31,20 +33,43 @@ use tower_lsp::lsp_types::{
     CompletionOptions, CompletionParams, CompletionResponse, DiagnosticSeverity,
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
     DidSaveTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, Documentation, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, MarkupContent, MarkupKind, OneOf,
-    ParameterInformation, ParameterLabel, Range, ReferenceParams, ServerCapabilities,
-    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
-    SymbolInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions,
-    WorkspaceEdit, WorkspaceSymbolParams,
+    DocumentSymbolParams, DocumentSymbolResponse, Documentation, ExecuteCommandOptions,
+    ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    MarkupContent, MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position,
+    Range, ReferenceParams, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind,
+    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
+    TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
 
 const DIAGNOSTIC_DEBOUNCE_DURATION: Duration = Duration::from_millis(150);
 const PRELOAD_MAX_FILES: usize = 5000;
+
+/// ADR 0082 Phase 3 (BT-2289): LSP `workspace/executeCommand` identifiers
+/// surfaced to clients. Each command compiles to a Beamtalk expression
+/// submitted via the workspace's existing `evaluate` REPL op — no new
+/// workspace-side dispatch is added (per ADR 0082 "Rationale: why no new REPL
+/// ops"). Keep the names stable; editors bind to them by string match.
+pub(crate) const CMD_FLUSH: &str = "beamtalk.flush";
+pub(crate) const CMD_FLUSH_CLASS: &str = "beamtalk.flush.class";
+pub(crate) const CMD_FLUSH_FILE: &str = "beamtalk.flush.file";
+pub(crate) const CMD_FLUSH_KIND: &str = "beamtalk.flush.kind";
+pub(crate) const CMD_SAVE_CLASS: &str = "beamtalk.saveClass";
+
+/// All commands surfaced via `executeCommand`. Wired into
+/// `ServerCapabilities::execute_command_provider` and used by the LSP→runtime
+/// dispatch in [`Backend::execute_command`].
+pub(crate) const BEAMTALK_LSP_COMMANDS: &[&str] = &[
+    CMD_FLUSH,
+    CMD_FLUSH_CLASS,
+    CMD_FLUSH_FILE,
+    CMD_FLUSH_KIND,
+    CMD_SAVE_CLASS,
+];
 
 #[derive(Clone)]
 struct PreloadConfig {
@@ -79,7 +104,7 @@ pub struct Backend {
     /// The underlying language service, protected by a mutex for concurrent access.
     service: Mutex<SimpleLanguageService>,
     /// Last known LSP document version by file path.
-    versions: Mutex<HashMap<Utf8PathBuf, i32>>,
+    versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>>,
     /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
     /// Deferred preload config captured at initialize and consumed after handshake.
@@ -90,6 +115,16 @@ pub struct Backend {
     workspace_roots: Mutex<Vec<PathBuf>>,
     /// Cached OTP lib directory (e.g., `/usr/lib/erlang/lib`); resolved once at startup.
     otp_lib_dir: Mutex<Option<PathBuf>>,
+    /// ADR 0082 Phase 3 (BT-2289): lazy-attached WebSocket client to the
+    /// running workspace, used for `workspace/executeCommand` dispatch and
+    /// `flush_completed` push subscription. Lives behind a `tokio` mutex so
+    /// async `executeCommand` handlers can attach on demand without blocking
+    /// the LSP service thread.
+    runtime: tokio::sync::Mutex<Option<RuntimeClient>>,
+    /// ADR 0082 Phase 3 (BT-2289): handle to the flush-event listener task
+    /// that consumes `FlushEvent`s from the runtime client and emits
+    /// `workspace/applyEdit` per touched file.
+    flush_listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Backend {
@@ -98,12 +133,14 @@ impl Backend {
         Self {
             client,
             service: Mutex::new(SimpleLanguageService::new()),
-            versions: Mutex::new(HashMap::new()),
+            versions: Arc::new(Mutex::new(HashMap::new())),
             diagnostic_generation: Mutex::new(HashMap::new()),
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
             workspace_roots: Mutex::new(Vec::new()),
             otp_lib_dir: Mutex::new(None),
+            runtime: tokio::sync::Mutex::new(None),
+            flush_listener: tokio::sync::Mutex::new(None),
         }
     }
 
@@ -508,6 +545,113 @@ impl Backend {
     }
 
     /// Publishes diagnostics for a file after every change.
+    /// ADR 0082 Phase 3 (BT-2289): Attach to a running workspace lazily.
+    ///
+    /// Returns a cloneable [`RuntimeClient`] handle on success. The handle
+    /// is cached on `Backend::runtime`; subsequent calls reuse it. A
+    /// background task is spawned the first time to consume `FlushEvent`s
+    /// from the runtime and emit `workspace/applyEdit` per flushed file.
+    ///
+    /// Discovery uses the first workspace root captured at `initialize` —
+    /// this matches the LSP convention "the editor told us which project to
+    /// attach to" and avoids guessing across multi-root workspaces. If the
+    /// workspace is not running this returns `RuntimeError::WorkspaceNotFound`
+    /// and the LSP layer surfaces a friendly message to the editor.
+    ///
+    /// Concurrency: two parallel `executeCommand` calls may both pass the
+    /// initial cache check before either finishes connecting. Both will run
+    /// `RuntimeClient::connect` in parallel; whichever finishes first wins
+    /// (stored in the cache + its listener spawned). The loser's client is
+    /// dropped (its background tasks abort on drop via `JoinHandle::abort`
+    /// when the `RuntimeInner` is freed) — no leaked tasks, but the loser's
+    /// WebSocket session counts against the workspace until OS cleanup.
+    /// This is acceptable for the LSP's low call rate; if it ever matters,
+    /// switch to `tokio::sync::OnceCell`-style single-flight.
+    async fn ensure_runtime_attached(&self) -> std::result::Result<RuntimeClient, RuntimeError> {
+        {
+            let guard = self.runtime.lock().await;
+            if let Some(client) = guard.as_ref() {
+                return Ok(client.clone());
+            }
+        }
+
+        let project_root = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots
+                .first()
+                .cloned()
+                .ok_or_else(|| RuntimeError::WorkspaceNotFound {
+                    project_path: "<no workspace root>".to_string(),
+                    reason: "LSP initialize did not provide a workspace folder".to_string(),
+                })?
+        };
+
+        // Unbounded so a slow `applyEdit` task can't backpressure the runtime
+        // listener — flushes are infrequent and small relative to typical
+        // LSP traffic.
+        let (flush_tx, flush_rx) = tokio::sync::mpsc::unbounded_channel::<FlushEvent>();
+        let client = RuntimeClient::connect(&project_root, flush_tx).await?;
+
+        // Re-check the cache under the lock before installing. If a parallel
+        // call beat us to it, drop our freshly-connected client (its
+        // listener/writer tasks will be aborted on drop since the only
+        // strong refs are inside the soon-to-be-dropped `RuntimeInner`) and
+        // return the winner's client. This narrows the race window from
+        // "always leak on parallel attach" to "rare, OS-cleaned" — see the
+        // doc comment above for the trade-off rationale.
+        let runtime_guard_first = self.runtime.lock().await;
+        if let Some(existing) = runtime_guard_first.as_ref() {
+            let existing = existing.clone();
+            drop(runtime_guard_first);
+            // Explicit close on the loser so the workspace doesn't see a
+            // dangling authenticated WS session until the OS reclaims it.
+            client.close().await;
+            return Ok(existing);
+        }
+        drop(runtime_guard_first);
+
+        // Spawn the listener that consumes FlushEvents and emits
+        // workspace/applyEdit per touched file. The listener queries the
+        // *live* `versions` map on each event so files opened after attach
+        // get refreshed too; we still gather the roots once because
+        // workspace roots are fixed at `initialize` and never change.
+        let listener_client = self.client.clone();
+        let listener_roots = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots.clone()
+        };
+        let open_paths_handle = OpenPathsHandle {
+            versions: Arc::clone(&self.versions),
+        };
+        let listener_handle = tokio::spawn(flush_event_listener(
+            listener_client,
+            listener_roots,
+            open_paths_handle,
+            flush_rx,
+        ));
+
+        {
+            let mut runtime_guard = self.runtime.lock().await;
+            *runtime_guard = Some(client.clone());
+        }
+        {
+            let mut listener_guard = self.flush_listener.lock().await;
+            // Cancel any prior listener (shouldn't happen, but be defensive).
+            if let Some(prev) = listener_guard.take() {
+                prev.abort();
+            }
+            *listener_guard = Some(listener_handle);
+        }
+
+        Ok(client)
+    }
+
     async fn publish_diagnostics(&self, uri: &Url) {
         // Stdlib virtual documents have no user-facing diagnostics.
         if uri.scheme() == "beamtalk-stdlib" {
@@ -580,6 +724,19 @@ impl LanguageServer for Backend {
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                // ADR 0082 Phase 3 (BT-2289): workspace/executeCommand for
+                // `beamtalk.flush` and `beamtalk.saveClass` — the LSP-surface
+                // wrappers that dispatch to `Workspace flush` /
+                // `Workspace newClass:at:` on the attached runtime. Keep the
+                // command identifiers stable; the surface-parity drift checker
+                // hashes them.
+                execute_command_provider: Some(ExecuteCommandOptions {
+                    commands: BEAMTALK_LSP_COMMANDS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect(),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                }),
                 ..Default::default()
             },
             ..Default::default()
@@ -1177,6 +1334,392 @@ impl LanguageServer for Backend {
 
         Ok(Some(lsp_actions))
     }
+
+    /// ADR 0082 Phase 3 (BT-2289): dispatch `workspace/executeCommand`.
+    ///
+    /// Each LSP command compiles to a Beamtalk expression submitted via the
+    /// existing `evaluate` REPL op on the attached workspace. Per ADR 0082
+    /// the language is the API — there are no new workspace-side ops. This
+    /// handler:
+    ///
+    /// 1. Looks up the command and builds the Beamtalk expression (see
+    ///    [`build_command_expression`]).
+    /// 2. Attaches to a running workspace lazily if not already attached (see
+    ///    [`Backend::ensure_runtime_attached`]).
+    /// 3. Submits the expression and returns the result value to the editor.
+    ///
+    /// A missing workspace (`beamtalk run .` not active) surfaces a friendly
+    /// `MessageType::WARNING` log to the client and an `internal_error`
+    /// JSON-RPC response so the editor's progress UI ends cleanly. Structured
+    /// runtime errors (`#beamtalk_error{}`) come back through `ReplResponse`
+    /// and are forwarded as the command result so editors can surface the
+    /// detail to the user.
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> Result<Option<serde_json::Value>> {
+        let expr = match build_command_expression(&params.command, &params.arguments) {
+            Ok(expr) => expr,
+            Err(msg) => {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!("executeCommand {}: {msg}", params.command),
+                    )
+                    .await;
+                return Err(tower_lsp::jsonrpc::Error::invalid_params(msg));
+            }
+        };
+
+        let runtime = match self.ensure_runtime_attached().await {
+            Ok(client) => client,
+            Err(e) => {
+                let detail = format!(
+                    "Beamtalk LSP could not reach a running workspace for executeCommand `{}`. \
+                     Start `beamtalk run .` (or `beamtalk repl`) against this project and retry. \
+                     ({e})",
+                    params.command
+                );
+                self.client.log_message(MessageType::WARNING, &detail).await;
+                let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                err.message = detail.into();
+                return Err(err);
+            }
+        };
+
+        match runtime.evaluate(&expr).await {
+            Ok(response) => {
+                if response.is_error() {
+                    let msg = response
+                        .error_message()
+                        .unwrap_or("workspace evaluator returned an error");
+                    self.client
+                        .log_message(
+                            MessageType::WARNING,
+                            format!("executeCommand {}: {msg}", params.command),
+                        )
+                        .await;
+                    let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                    err.message = format!("Beamtalk evaluator error: {msg}").into();
+                    return Err(err);
+                }
+                let pretty = response.value_string();
+                let value = response.value.unwrap_or(serde_json::Value::Null);
+                if !pretty.is_empty() {
+                    self.client
+                        .log_message(
+                            MessageType::INFO,
+                            format!("executeCommand {}: {pretty}", params.command),
+                        )
+                        .await;
+                }
+                Ok(Some(value))
+            }
+            Err(e) => {
+                let detail = format!("executeCommand {}: runtime error: {e}", params.command);
+                self.client.log_message(MessageType::WARNING, &detail).await;
+                let mut err = tower_lsp::jsonrpc::Error::internal_error();
+                err.message = detail.into();
+                Err(err)
+            }
+        }
+    }
+}
+
+/// Shared handle to the LSP `Backend::versions` map, used by the flush
+/// listener task to ask "is this file currently open?" on each `FlushEvent`
+/// without copying the whole map up-front. Wrapping rather than passing
+/// `Arc<Mutex<HashMap<...>>>` directly keeps the listener's API narrow:
+/// it can only check membership, not mutate.
+#[derive(Clone)]
+pub(crate) struct OpenPathsHandle {
+    versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>>,
+}
+
+impl OpenPathsHandle {
+    /// Returns true if `path` is currently registered as open in the LSP
+    /// document table. Locks the underlying mutex briefly; the lock is
+    /// released before the caller awaits, so no deadlock risk against the
+    /// LSP's `std::sync::Mutex`.
+    fn contains(&self, path: &Utf8PathBuf) -> bool {
+        let guard = self.versions.lock().expect("versions lock poisoned");
+        guard.contains_key(path)
+    }
+}
+
+/// ADR 0082 Phase 3 (BT-2289): consume `FlushEvent`s from the runtime
+/// listener and emit `workspace/applyEdit` per flushed file.
+///
+/// For each file in the event, the listener:
+/// 1. Resolves the runtime-reported path against the LSP workspace roots to
+///    canonicalise into an absolute filesystem path.
+/// 2. Checks the *live* open-paths handle to see whether the path is
+///    currently open in the editor. Files that aren't open are skipped —
+///    `VSCode` reads them fresh on next `did_open`. The check happens per
+///    event so files opened after the listener started are still picked up.
+/// 3. Reads the new on-disk content and issues `apply_edit` with a single
+///    `TextEdit` covering the whole document, so the open buffer realigns
+///    with the post-flush bytes. `VSCode`'s conflict UX handles unsaved local
+///    edits per the LSP spec.
+async fn flush_event_listener(
+    client: Client,
+    workspace_roots: Vec<PathBuf>,
+    open_paths: OpenPathsHandle,
+    mut flush_rx: tokio::sync::mpsc::UnboundedReceiver<FlushEvent>,
+) {
+    while let Some(event) = flush_rx.recv().await {
+        for raw_path in event.files {
+            let canonical = resolve_flushed_path(&raw_path, &workspace_roots);
+            let Some(abs_path) = canonical else {
+                tracing::debug!(
+                    raw_path,
+                    "flush_event_listener: could not resolve runtime path against workspace roots"
+                );
+                continue;
+            };
+            let Ok(utf8_path) = Utf8PathBuf::try_from(abs_path.clone()) else {
+                tracing::debug!(raw_path, "flush_event_listener: resolved path is not UTF-8");
+                continue;
+            };
+            if !open_paths.contains(&utf8_path) {
+                tracing::debug!(
+                    %utf8_path,
+                    "flush_event_listener: skipping closed file"
+                );
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&abs_path) else {
+                tracing::warn!(
+                    %utf8_path,
+                    "flush_event_listener: failed to read flushed file from disk"
+                );
+                continue;
+            };
+            let Ok(uri) = Url::from_file_path(&abs_path) else {
+                tracing::debug!(
+                    %utf8_path,
+                    "flush_event_listener: could not build file:// URI"
+                );
+                continue;
+            };
+            let edit = WorkspaceEdit {
+                changes: Some({
+                    let mut changes = HashMap::new();
+                    changes.insert(
+                        uri.clone(),
+                        vec![TextEdit {
+                            range: Range {
+                                start: Position {
+                                    line: 0,
+                                    character: 0,
+                                },
+                                // u32::MAX/u32::MAX is the LSP convention for "end
+                                // of file" — any line longer than this is unrealistic
+                                // for source code and clients clamp to actual EOF.
+                                end: Position {
+                                    line: u32::MAX,
+                                    character: u32::MAX,
+                                },
+                            },
+                            new_text: content,
+                        }],
+                    );
+                    changes
+                }),
+                ..Default::default()
+            };
+            match client.apply_edit(edit).await {
+                Ok(resp) if resp.applied => {
+                    tracing::debug!(%uri, "flush_event_listener: applied edit");
+                }
+                Ok(resp) => {
+                    tracing::info!(
+                        %uri,
+                        failure_reason = ?resp.failure_reason,
+                        "flush_event_listener: client declined applyEdit"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(%uri, error = %e, "flush_event_listener: applyEdit failed");
+                }
+            }
+        }
+    }
+}
+
+/// Resolve a path reported by the runtime against the LSP workspace roots.
+///
+/// The runtime stores `ChangeEntry.sourceFile` as whatever was passed at
+/// `compile:source:` hook time — typically a workspace-relative path
+/// (`"src/counter.bt"`) when the workspace was started in the project root.
+/// We try, in order:
+///
+/// 1. Absolute → use as-is if it exists.
+/// 2. For each workspace root, join + canonicalise.
+///
+/// Returns the canonicalised absolute path on success, or `None` if we can't
+/// find a real file matching `raw`. Canonicalisation matters because the LSP
+/// stores open documents under canonical paths (`uri_to_path` runs
+/// `canonicalize`); a non-canonical lookup would always miss.
+pub(crate) fn resolve_flushed_path(raw: &str, roots: &[PathBuf]) -> Option<PathBuf> {
+    let candidate = PathBuf::from(raw);
+    if candidate.is_absolute() {
+        return candidate.canonicalize().ok();
+    }
+    for root in roots {
+        let joined = root.join(&candidate);
+        if let Ok(canon) = joined.canonicalize() {
+            return Some(canon);
+        }
+    }
+    None
+}
+
+/// ADR 0082 Phase 3 (BT-2289): map a `workspace/executeCommand` invocation
+/// to the Beamtalk expression that compiles to the same effect on the live
+/// workspace. Mirrors `beamtalk-mcp`'s expression builders one-for-one so
+/// surface parity is preserved (REPL `:flush` ≡ MCP `flush` ≡ LSP
+/// `beamtalk.flush`).
+///
+/// Returns the expression string on success or a human-readable parameter
+/// error on failure (which the LSP layer surfaces as `invalid_params`).
+pub(crate) fn build_command_expression(
+    command: &str,
+    arguments: &[serde_json::Value],
+) -> std::result::Result<String, String> {
+    match command {
+        CMD_FLUSH => {
+            // No arguments — `Workspace flush` on the whole pending set.
+            if !arguments.is_empty() {
+                return Err(format!(
+                    "{CMD_FLUSH}: expected no arguments, got {}",
+                    arguments.len()
+                ));
+            }
+            Ok("Workspace flush".to_string())
+        }
+        CMD_FLUSH_CLASS => {
+            let class = expect_string_arg(arguments, 0, "class")?;
+            validate_class_name(&class)?;
+            // `Workspace flush: ClassName` — the class is named literally in
+            // the expression (no escaping); validation above prevents any
+            // shape that could parse differently.
+            Ok(format!("Workspace flush: {class}"))
+        }
+        CMD_FLUSH_FILE => {
+            let file = expect_string_arg(arguments, 0, "file")?;
+            // `Workspace flush: #{ #file => "path" }` — Symbol-keyed
+            // dictionary; the path is passed as a String value.
+            Ok(format!(
+                "Workspace flush: #{{ #file => \"{}\" }}",
+                escape_beamtalk_string(&file)
+            ))
+        }
+        CMD_FLUSH_KIND => {
+            let kind = expect_string_arg(arguments, 0, "kind")?;
+            // Allow either bare `new-class` or `#'new-class'`. Emit the
+            // quoted-symbol form so hyphenated kinds parse cleanly.
+            let bare = kind.strip_prefix('#').unwrap_or(&kind);
+            let bare = bare.trim_matches('\'');
+            if bare.is_empty()
+                || !bare
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            {
+                return Err(format!(
+                    "{CMD_FLUSH_KIND}: 'kind' must be an identifier (letters, digits, '-' or '_'); got '{kind}'"
+                ));
+            }
+            Ok(format!("Workspace flush: #'{bare}'"))
+        }
+        CMD_SAVE_CLASS => {
+            let source = expect_string_arg(arguments, 0, "source")?;
+            let path = expect_string_arg(arguments, 1, "path")?;
+            if source.is_empty() {
+                return Err(format!("{CMD_SAVE_CLASS}: 'source' must not be empty"));
+            }
+            if path.is_empty() {
+                return Err(format!("{CMD_SAVE_CLASS}: 'path' must not be empty"));
+            }
+            // Mirrors `beamtalk-mcp::save_class_expr`: pass body + path as
+            // String values; the workspace primitive takes them as values
+            // rather than re-parsed Beamtalk source.
+            Ok(format!(
+                "Workspace newClass: \"{}\" at: \"{}\"",
+                escape_beamtalk_string(&source),
+                escape_beamtalk_string(&path)
+            ))
+        }
+        _ => Err(format!("unknown LSP command: {command}")),
+    }
+}
+
+/// Extract the i-th argument from an `executeCommand` invocation as a string.
+/// LSP clients pack arguments as a `Vec<Value>`; we accept either a bare
+/// JSON string or an object whose `name` field is the value the parameter
+/// expects, to be friendly to both raw JSON-RPC callers and editors that wrap
+/// arguments in objects.
+fn expect_string_arg(
+    arguments: &[serde_json::Value],
+    index: usize,
+    name: &str,
+) -> std::result::Result<String, String> {
+    let value = arguments
+        .get(index)
+        .ok_or_else(|| format!("missing argument {index} ({name})"))?;
+    match value {
+        serde_json::Value::String(s) => Ok(s.clone()),
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::String(s)) = map.get(name) {
+                Ok(s.clone())
+            } else {
+                Err(format!(
+                    "argument {index} must be a string or an object with a '{name}' string field"
+                ))
+            }
+        }
+        _ => Err(format!(
+            "argument {index} ({name}) must be a string, got {value}"
+        )),
+    }
+}
+
+/// Validate that a class name argument is a Beamtalk identifier
+/// (`PascalCase`, ASCII-only, underscores OK). Prevents an injection-shaped
+/// argument like `"X. delete Workspace; X"` from being concatenated into the
+/// flush expression. Tight on purpose — Beamtalk class names are a closed
+/// alphabet.
+fn validate_class_name(name: &str) -> std::result::Result<(), String> {
+    if name.is_empty() {
+        return Err("class name must not be empty".to_string());
+    }
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_uppercase() => {}
+        _ => {
+            return Err(format!(
+                "class name '{name}' must start with an uppercase letter"
+            ));
+        }
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_') {
+            return Err(format!(
+                "class name '{name}' contains invalid character '{c}' (allowed: letters, digits, underscore)"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Escape an arbitrary Rust string for embedding inside a Beamtalk double-
+/// quoted string literal. Mirrors `beamtalk-mcp::escape_beamtalk_string`:
+/// Beamtalk strings use `\` and `"` like Rust plus `{` triggers
+/// interpolation (ADR 0023), so `\{` is required for a literal `{`.
+fn escape_beamtalk_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('{', "\\{")
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -2544,5 +3087,263 @@ mod tests {
         let json = r#"{"beam_mtime_secs":100}"#;
         let result = extract_specs_line_from_cache(json);
         assert!(result.is_none());
+    }
+
+    // ----------------------------------------------------------------------
+    // ADR 0082 Phase 3 (BT-2289): executeCommand expression builder + helpers
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn build_flush_with_no_arguments_returns_workspace_flush() {
+        let expr = build_command_expression(CMD_FLUSH, &[]).expect("ok");
+        assert_eq!(expr, "Workspace flush");
+    }
+
+    #[test]
+    fn build_flush_rejects_extra_arguments() {
+        let err =
+            build_command_expression(CMD_FLUSH, &[serde_json::json!("extra")]).expect_err("err");
+        assert!(err.contains("expected no arguments"));
+    }
+
+    #[test]
+    fn build_flush_class_with_valid_name_returns_class_filter() {
+        let expr =
+            build_command_expression(CMD_FLUSH_CLASS, &[serde_json::json!("Counter")]).expect("ok");
+        assert_eq!(expr, "Workspace flush: Counter");
+    }
+
+    #[test]
+    fn build_flush_class_rejects_lowercase_first_letter() {
+        let err = build_command_expression(CMD_FLUSH_CLASS, &[serde_json::json!("counter")])
+            .expect_err("err");
+        assert!(err.contains("must start with an uppercase letter"));
+    }
+
+    #[test]
+    fn build_flush_class_rejects_special_chars() {
+        let err =
+            build_command_expression(CMD_FLUSH_CLASS, &[serde_json::json!("Counter; rm -rf /")])
+                .expect_err("err");
+        assert!(err.contains("invalid character"));
+    }
+
+    #[test]
+    fn build_flush_class_rejects_empty() {
+        let err =
+            build_command_expression(CMD_FLUSH_CLASS, &[serde_json::json!("")]).expect_err("err");
+        assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn build_flush_file_emits_symbol_keyed_dictionary() {
+        let expr = build_command_expression(CMD_FLUSH_FILE, &[serde_json::json!("src/counter.bt")])
+            .expect("ok");
+        assert_eq!(expr, "Workspace flush: #{ #file => \"src/counter.bt\" }");
+    }
+
+    #[test]
+    fn build_flush_file_escapes_quotes_and_braces() {
+        // A pathological path with `"`, `\`, and `{` to confirm the
+        // Beamtalk string escape rules match `beamtalk-mcp`.
+        let expr = build_command_expression(CMD_FLUSH_FILE, &[serde_json::json!("a\\b\"c{d")])
+            .expect("ok");
+        assert_eq!(expr, "Workspace flush: #{ #file => \"a\\\\b\\\"c\\{d\" }");
+    }
+
+    #[test]
+    fn build_flush_kind_accepts_bare_kind() {
+        let expr = build_command_expression(CMD_FLUSH_KIND, &[serde_json::json!("new-class")])
+            .expect("ok");
+        assert_eq!(expr, "Workspace flush: #'new-class'");
+    }
+
+    #[test]
+    fn build_flush_kind_accepts_quoted_symbol() {
+        let expr = build_command_expression(CMD_FLUSH_KIND, &[serde_json::json!("#'new-class'")])
+            .expect("ok");
+        assert_eq!(expr, "Workspace flush: #'new-class'");
+    }
+
+    #[test]
+    fn build_flush_kind_rejects_invalid_chars() {
+        let err = build_command_expression(CMD_FLUSH_KIND, &[serde_json::json!("new class")])
+            .expect_err("err");
+        assert!(err.contains("must be an identifier"));
+    }
+
+    #[test]
+    fn build_save_class_emits_workspace_newclass_expression() {
+        let source = "Object subclass: Greeter\n  instanceMethods\n  greet => 'hi'";
+        let path = "src/greeter.bt";
+        let expr = build_command_expression(
+            CMD_SAVE_CLASS,
+            &[serde_json::json!(source), serde_json::json!(path)],
+        )
+        .expect("ok");
+        // Roundtrip the source through the Beamtalk escaper.
+        let expected_source = escape_beamtalk_string(source);
+        let expected_path = escape_beamtalk_string(path);
+        assert_eq!(
+            expr,
+            format!("Workspace newClass: \"{expected_source}\" at: \"{expected_path}\"")
+        );
+    }
+
+    #[test]
+    fn build_save_class_rejects_empty_source() {
+        let err = build_command_expression(
+            CMD_SAVE_CLASS,
+            &[serde_json::json!(""), serde_json::json!("src/x.bt")],
+        )
+        .expect_err("err");
+        assert!(err.contains("source"));
+    }
+
+    #[test]
+    fn build_save_class_rejects_empty_path() {
+        let err = build_command_expression(
+            CMD_SAVE_CLASS,
+            &[
+                serde_json::json!("Object subclass: X"),
+                serde_json::json!(""),
+            ],
+        )
+        .expect_err("err");
+        assert!(err.contains("path"));
+    }
+
+    #[test]
+    fn build_save_class_accepts_object_wrapped_arguments() {
+        // LSP clients sometimes pack arguments as `{"source": "...", "path":
+        // "..."}` instead of a positional `[source, path]`. The handler
+        // accepts either shape.
+        let expr = build_command_expression(
+            CMD_SAVE_CLASS,
+            &[
+                serde_json::json!({"source": "Object subclass: X"}),
+                serde_json::json!({"path": "src/x.bt"}),
+            ],
+        )
+        .expect("ok");
+        assert!(expr.starts_with("Workspace newClass: \"Object subclass: X\""));
+        assert!(expr.ends_with("at: \"src/x.bt\""));
+    }
+
+    #[test]
+    fn build_unknown_command_returns_error() {
+        let err = build_command_expression("not.a.real.command", &[]).expect_err("err");
+        assert!(err.contains("unknown LSP command"));
+    }
+
+    #[test]
+    fn escape_beamtalk_string_handles_quotes_backslashes_and_braces() {
+        assert_eq!(escape_beamtalk_string("hello"), "hello");
+        assert_eq!(escape_beamtalk_string("\"q\""), "\\\"q\\\"");
+        assert_eq!(escape_beamtalk_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_beamtalk_string("{x}"), "\\{x}");
+        assert_eq!(escape_beamtalk_string("\\\"{"), "\\\\\\\"\\{");
+    }
+
+    #[test]
+    fn validate_class_name_accepts_pascal_case() {
+        assert!(validate_class_name("Counter").is_ok());
+        assert!(validate_class_name("FooBarBaz").is_ok());
+        assert!(validate_class_name("X123").is_ok());
+        assert!(validate_class_name("X_y").is_ok());
+    }
+
+    #[test]
+    fn validate_class_name_rejects_bad_shapes() {
+        assert!(validate_class_name("").is_err());
+        assert!(validate_class_name("lowercase").is_err());
+        assert!(validate_class_name("With Space").is_err());
+        assert!(validate_class_name("Bad!").is_err());
+        assert!(validate_class_name("123Foo").is_err());
+    }
+
+    #[test]
+    fn beamtalk_lsp_commands_list_matches_constants() {
+        // Surface-parity drift check fodder: the constants drive the
+        // capability list. Verify there are no accidental omissions.
+        let listed: HashSet<&str> = BEAMTALK_LSP_COMMANDS.iter().copied().collect();
+        assert!(listed.contains(CMD_FLUSH));
+        assert!(listed.contains(CMD_FLUSH_CLASS));
+        assert!(listed.contains(CMD_FLUSH_FILE));
+        assert!(listed.contains(CMD_FLUSH_KIND));
+        assert!(listed.contains(CMD_SAVE_CLASS));
+        assert_eq!(listed.len(), 5);
+    }
+
+    #[test]
+    fn resolve_flushed_path_canonicalises_absolute_paths_against_existing_file() {
+        let temp = unique_temp_dir("beamtalk_lsp_resolve_abs");
+        fs::create_dir_all(&temp).expect("create temp");
+        let bt = temp.join("counter.bt");
+        fs::write(&bt, "src").expect("write");
+        let raw = bt.to_str().unwrap();
+        let resolved = resolve_flushed_path(raw, &[]).expect("resolved");
+        // canonicalize may resolve symlinks; just verify equality with the
+        // canonical form of the same input.
+        let canon = bt.canonicalize().expect("canonicalize");
+        assert_eq!(resolved, canon);
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_flushed_path_joins_against_first_matching_workspace_root() {
+        let temp = unique_temp_dir("beamtalk_lsp_resolve_root");
+        let root = temp.join("project");
+        fs::create_dir_all(root.join("src")).expect("dirs");
+        let target = root.join("src/counter.bt");
+        fs::write(&target, "src").expect("write");
+
+        let resolved =
+            resolve_flushed_path("src/counter.bt", std::slice::from_ref(&root)).expect("resolved");
+        assert_eq!(resolved, target.canonicalize().expect("canonicalize"));
+        let _ = fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn resolve_flushed_path_returns_none_when_nothing_matches() {
+        // A nonexistent relative path with no roots — nothing to find.
+        assert!(resolve_flushed_path("does/not/exist.bt", &[]).is_none());
+    }
+
+    #[test]
+    fn open_paths_handle_observes_late_inserts() {
+        // ADR 0082 Phase 3 (BT-2289): the listener must see files opened
+        // *after* the runtime client attached. Verify the handle reads the
+        // live map, not a captured snapshot, by inserting after handle
+        // creation and confirming `contains` flips from false to true.
+        let versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>> = Arc::new(Mutex::new(HashMap::new()));
+        let handle = OpenPathsHandle {
+            versions: Arc::clone(&versions),
+        };
+        let path = Utf8PathBuf::from("/tmp/counter.bt");
+        assert!(!handle.contains(&path));
+        versions
+            .lock()
+            .expect("versions lock")
+            .insert(path.clone(), 1);
+        assert!(handle.contains(&path));
+    }
+
+    #[test]
+    fn open_paths_handle_observes_late_removes() {
+        // Symmetric to the late-inserts case: closing a file in the editor
+        // should immediately flip `contains` back to false.
+        let versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>> = Arc::new(Mutex::new(HashMap::new()));
+        let handle = OpenPathsHandle {
+            versions: Arc::clone(&versions),
+        };
+        let path = Utf8PathBuf::from("/tmp/counter.bt");
+        versions
+            .lock()
+            .expect("versions lock")
+            .insert(path.clone(), 1);
+        assert!(handle.contains(&path));
+        versions.lock().expect("versions lock").remove(&path);
+        assert!(!handle.contains(&path));
     }
 }

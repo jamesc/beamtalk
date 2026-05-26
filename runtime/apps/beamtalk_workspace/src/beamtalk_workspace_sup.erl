@@ -26,6 +26,7 @@ beamtalk_workspace_sup
   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
+  ├─ beamtalk_flush_events        % Flush-completion pub/sub (ADR 0082 Phase 3, BT-2289)
   ├─ beamtalk_repl_server         % TCP server (session-per-connection)
   ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
   ├─ beamtalk_actor_sup           % Supervises user actors
@@ -171,6 +172,19 @@ init(Config) ->
                     shutdown => 5000,
                     type => worker,
                     modules => [beamtalk_bindings_events]
+                },
+
+                %% Flush-completion event pub/sub (ADR 0082 Phase 3, BT-2289).
+                %% Broadcasts after `Workspace flush` writes one or more .bt
+                %% source files so LSP clients can emit `workspace/applyEdit`
+                %% and refresh open editor buffers against the new on-disk state.
+                #{
+                    id => beamtalk_flush_events,
+                    start => {beamtalk_flush_events, start_link, [registered]},
+                    restart => permanent,
+                    shutdown => 5000,
+                    type => worker,
+                    modules => [beamtalk_flush_events]
                 },
 
                 %% Bootstrap worker — sets singleton class variables (ADR 0019 Phase 2)

@@ -740,6 +740,11 @@ complete_flush(Files, Renamed, Failed, Seqs) ->
         end,
     case MarkResult of
         ok ->
+            %% ADR 0082 Phase 3 (BT-2289): broadcast flush completion so LSP
+            %% clients can emit `workspace/applyEdit` for each touched file.
+            %% Fire-and-forget — the broadcaster swallows missing-server errors
+            %% so flush never fails on a downstream subscriber issue.
+            beamtalk_flush_events:on_files_flushed(Files),
             {ok, success_summary(Files, Renamed, Failed)};
         {error, Reason} ->
             ?LOG_ERROR(
