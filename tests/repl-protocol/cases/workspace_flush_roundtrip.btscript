@@ -1,0 +1,429 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0082 Phase 5 (BT-2291): End-to-end regression gate for the full
+// method-edit / save / flush / external-edit / conflict round trip.
+//
+// This test is the permanent gate: it walks the canonical path users follow
+// through the live workspace and asserts each observable transition in the
+// Beamtalk surface (Workspace facade, ChangeLog object, FlushResult summary).
+//
+// The shared e2e workspace has no active project context (no beamtalk.toml at
+// the harness CWD), so live patches from `compile:source:` / `>>` log as
+// `flushable: false` (the install hook classifies their sourceFile as
+// "dependency"). The Beamtalk-native dirty/flush surface is still fully
+// exercised:
+//
+//   - the in-memory patch step uses `compile:source:` exactly as the docs
+//     describe — same primitive, same dispatch, same install hook.
+//   - the disk-write + conflict step uses the FFI to inject a real, fully-
+//     formed *flushable* ChangeEntry against a temp source file we wrote
+//     ourselves. That entry traverses the *same* gen_server, the *same*
+//     `flushable_pending` selection, the *same* byte-span splice, the
+//     *same* prev_source verification, and the *same* FlushResult builder
+//     as a production patch — only the entry's *origin* (FFI vs install
+//     hook) differs. The install-hook → entry shape mapping is unit-tested
+//     in `beamtalk_repl_loader_tests` (BT-2283).
+//
+// What this gate would catch (each is a real regression risk):
+//   - `Workspace changes notEmpty` returning true after a clean restart
+//   - `Workspace flush` writing files to disk but leaving entries pending
+//   - byte-span splice corrupting file content around the patched method
+//   - external-edit detection missing a mid-flight content change
+//   - a `#external_edit` conflict pruning the pending entry from the log
+//   - `Workspace changes clear` failing to truncate the active view
+//   - the FlushResult shape drifting from the documented contract
+
+// ===========================================================================
+// CLEAN START — wipe any state accumulated by earlier cases.
+// ===========================================================================
+
+// Prior cases (compile_source_patch, workspace_changes, etc.) log non-
+// flushable entries against the shared session ChangeLog. Reset to a known
+// clean baseline so the round-trip below is deterministic.
+Workspace changes clear
+// => _
+
+// The active view is now empty.
+Workspace changes isEmpty
+// => true
+
+Workspace changes notEmpty
+// => false
+
+Workspace changes size
+// => 0
+
+// And dirtyMethods agrees.
+Workspace changes dirtyMethods isEmpty
+// => true
+
+// ===========================================================================
+// STEP 1 — IN-MEMORY METHOD PATCH VIA compile:source: (DURABLE)
+// ===========================================================================
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// Patch Counter>>increment durably (the underlying primitive `>>` desugars to).
+// The install hook logs this with `intent: durable` and (in the projectless
+// e2e session) `flushable: false` — the dirty/dirtyMethods plumbing does not
+// care about flushability, so the active view picks it up.
+Counter compile: #increment source: "increment => self.value := self.value + 5"
+// => Counter
+
+// After the patch the active set has exactly one entry.
+Workspace changes notEmpty
+// => true
+
+Workspace changes size
+// => 1
+
+// dirtyMethods groups by class. We assert the per-class shape via
+// `includesKey:` / `includes:` directly (avoiding equality against a
+// dictionary whose entry encoding may drift with workspace wiring).
+dirtyMap := Workspace changes dirtyMethods
+// => _
+
+dirtyMap isKindOf: Dictionary
+// => true
+
+dirtyMap includesKey: #Counter
+// => true
+
+(dirtyMap at: #Counter) includes: #increment
+// => true
+
+// The logged ChangeEntry reflects the same patch.
+patchEntry := (Workspace changes select: [:e | e className =:= #Counter]) first
+// => _
+
+patchEntry className
+// => Counter
+
+patchEntry selector
+// => increment
+
+patchEntry isDurable
+// => true
+
+patchEntry isActive
+// => true
+
+// In-memory dispatch sees the patched body (the install hot-swap actually
+// installed the new method, not just logged it).
+c1 := Counter spawn
+// => _
+
+c1 increment
+// => 5
+
+// ===========================================================================
+// STEP 2 — RESET FOR THE FLUSH ROUND TRIP
+// ===========================================================================
+
+// The compile:source: entry above is non-flushable (no project context). Clear
+// it so the flushable entry we inject next is the *only* candidate `Workspace
+// flush` considers — that makes the FlushResult.flushed count deterministic.
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 3 — SET UP A REAL SOURCE FILE FOR THE FLUSH PATH
+// ===========================================================================
+
+// File operations use File tempDirectory (per CLAUDE.md cross-platform rule).
+_tmpDir := File tempDirectory
+// => _
+
+// Unique-per-process directory so concurrent test runs do not collide.
+_flushDir := _tmpDir ++ "/bt_e2e_flush_" ++ (Erlang erlang) unique_integer asString
+// => _
+
+(Erlang file) make_dir: _flushDir
+// => _
+
+_flushPath := _flushDir ++ "/RoundTripCounter.bt"
+// => _
+
+// Newline character as a single-byte string, used to assemble file content
+// without multi-line string literals (the test parser reads expressions a
+// line at a time).
+_nl := (Character value: 10) asString
+// => _
+
+// The on-disk class body. The recorded byte span (computed below) covers
+// exactly `tick => self.value := self.value + 1\n`; the splice will replace
+// that span with the patched body verbatim.
+_origBody := "Actor subclass: RoundTripCounter" ++ _nl ++ "  state: value = 0" ++ _nl ++ _nl ++ "  tick => self.value := self.value + 1" ++ _nl ++ _nl ++ "  getValue => self.value" ++ _nl
+// => _
+
+File writeAll: _flushPath contents: _origBody
+// => Result ok: nil
+
+// Sanity: the file is back on disk.
+File exists: _flushPath
+// => true
+
+// ===========================================================================
+// STEP 4 — INJECT A FLUSHABLE METHOD-PATCH ENTRY VIA THE CHANGELOG FFI
+// ===========================================================================
+
+// `prevSource` MUST byte-match the recorded span. External-edit detection
+// compares the two at flush time, and a mismatch surfaces as #external_edit.
+// The span starts at the leading two-space indent and ends just past the
+// trailing newline so the splice is trivia-preserving across the line.
+_prevSource := "  tick => self.value := self.value + 1" ++ _nl
+// => _
+
+// Locate the span dynamically — both robust to the fixture changing and
+// resilient to OS line-ending differences (binary:match returns the actual
+// byte offsets in the on-disk content).
+_match := (Erlang binary) match: _origBody with: _prevSource
+// => _
+
+_spanStart := _match at: 1
+// => _
+
+_spanLen := _match at: 2
+// => _
+
+_spanEnd := _spanStart + _spanLen
+// => _
+
+// The new method body. Same shape (selector + arrow + body), different
+// arithmetic — what the splice will write into the span on disk.
+_newSource := "  tick => self.value := self.value + 100" ++ _nl
+// => _
+
+// Build the input map mirroring what `add_flushability/4` produces in the
+// install hook (beamtalk_repl_loader: ~1159). Symbol keys map to atoms
+// across the FFI, so `#'author_kind'` becomes `author_kind`.
+_patchInput := #{ #class => "RoundTripCounter", #selector => "tick", #kind => #instance, #source => _newSource, #intent => #durable, #author => "e2e-roundtrip", #'author_kind' => #human, #flushable => true, #'source_file' => _flushPath, #span => #{ #start => _spanStart, #'end' => _spanEnd }, #'prev_source' => _prevSource }
+// => _
+
+(Erlang beamtalk_workspace_changelog) append: _patchInput
+// => _
+
+// The entry is visible to the active view, flagged flushable.
+Workspace changes notEmpty
+// => true
+
+_flushableEntry := (Workspace changes select: [:e | e className =:= #RoundTripCounter]) first
+// => _
+
+_flushableEntry isFlushable
+// => true
+
+_flushableEntry isDurable
+// => true
+
+// ===========================================================================
+// STEP 5 — Workspace flush WRITES THE PATCH VIA BYTE-SPAN SPLICE
+// ===========================================================================
+
+_flushResult := Workspace flush
+// => _
+
+// The summary reports exactly one method written, no conflicts, no skips.
+// FlushResult is a tagged map; access fields via maps:get/2 over the FFI.
+Erlang maps get: #flushed with: _flushResult
+// => 1
+
+(Erlang maps get: #conflicts with: _flushResult) isEmpty
+// => true
+
+(Erlang maps get: #files with: _flushResult) size
+// => 1
+
+// The on-disk file now carries the patched body. Outside the span it is
+// byte-identical to the original (the splice is trivia-preserving). We
+// assert this two ways: (1) the new body substring is present, and (2)
+// the old body substring is gone.
+_afterFlush := (File readAll: _flushPath) unwrap
+// => _
+
+_afterFlush includesSubstring: "self.value + 100"
+// => true
+
+_afterFlush includesSubstring: "self.value + 1" ++ _nl
+// => false
+
+// The framing (class declaration, the other method) survives untouched —
+// the splice did not reformat the file.
+_afterFlush includesSubstring: "Actor subclass: RoundTripCounter"
+// => true
+
+_afterFlush includesSubstring: "getValue => self.value"
+// => true
+
+// The entry dropped out of the active view (it is marked flushed; the
+// underlying log still has it for audit).
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 6 — EXTERNAL EDIT + SECOND PATCH SURFACES AS #external_edit CONFLICT
+// ===========================================================================
+
+// External writer (git pull / VSCode / `bt fmt`) rewrites the file outside the
+// workspace. We model it with a direct write — the workspace did not see it
+// happen and the *original* prev_source no longer byte-matches the new
+// on-disk content of the entry's span.
+_externalBody := "Actor subclass: RoundTripCounter" ++ _nl ++ "  state: value = 0" ++ _nl ++ _nl ++ "  tick => self.value := self.value + 999" ++ _nl ++ _nl ++ "  getValue => self.value" ++ _nl
+// => _
+
+File writeAll: _flushPath contents: _externalBody
+// => Result ok: nil
+
+// Re-locate the span — same shape ("tick => ... + 999") but at a possibly
+// different offset; the byte-length differs by two digits.
+_extPrev := "  tick => self.value := self.value + 999" ++ _nl
+// => _
+
+_match2 := (Erlang binary) match: _externalBody with: _extPrev
+// => _
+
+_extStart := _match2 at: 1
+// => _
+
+_extEnd := _extStart + (_match2 at: 2)
+// => _
+
+// Now inject a second patch entry that records the *original* prev_source
+// (what an install hook would have captured before the external edit) at
+// the externally-edited file's new offsets. The recorded prev_source no
+// longer byte-matches what is on disk — this is exactly the situation
+// `apply_splices/2` flags as `external_edit`.
+_conflictInput := #{ #class => "RoundTripCounter", #selector => "tick", #kind => #instance, #source => "  tick => self.value := self.value + 7" ++ _nl, #intent => #durable, #author => "e2e-roundtrip", #'author_kind' => #human, #flushable => true, #'source_file' => _flushPath, #span => #{ #start => _extStart, #'end' => _extEnd }, #'prev_source' => _prevSource }
+// => _
+
+(Erlang beamtalk_workspace_changelog) append: _conflictInput
+// => _
+
+// The entry is pending in the active view.
+Workspace changes notEmpty
+// => true
+
+_conflictFlush := Workspace flush
+// => _
+
+// flush() returns a FlushResult — never raises on a normal conflict (ADR 0082
+// §"Conflict detection"); the conflict is reported in the `conflicts` field.
+_conflicts := Erlang maps get: #conflicts with: _conflictFlush
+// => _
+
+_conflicts isEmpty
+// => false
+
+// The first listed conflict is the external_edit on our file.
+_conflictDesc := _conflicts first
+// => _
+
+Erlang maps get: #reason with: _conflictDesc
+// => external_edit
+
+// Nothing was written: the Phase A failure aborted the whole flush.
+Erlang maps get: #flushed with: _conflictFlush
+// => 0
+
+// The entry remains in the active view for retry / discard.
+Workspace changes notEmpty
+// => true
+
+// And the on-disk content is the external-edit body, untouched by the
+// aborted flush.
+_postConflict := (File readAll: _flushPath) unwrap
+// => _
+
+_postConflict includesSubstring: "self.value + 999"
+// => true
+
+_postConflict includesSubstring: "self.value + 7"
+// => false
+
+// ===========================================================================
+// STEP 7 — Workspace changes clear DISCARDS THE PENDING CONFLICT
+// ===========================================================================
+
+Workspace changes clear
+// => _
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 8 — NEW-CLASS FLUSH WRITES A FRESH FILE
+// ===========================================================================
+
+// `Workspace newClass:at:` requires project_path so we cannot drive it
+// natively here; instead we inject the same `kind: #'new-class'` entry the
+// FFI primitive produces and let flush write the file. This exercises the
+// new-class branch of prepare_file/2 end to end against real disk I/O.
+_newClassPath := _flushDir ++ "/FreshlyMade.bt"
+// => _
+
+// The new file body. Built with `_nl` to avoid multi-line string literals;
+// the doubled-quote inside the string is the standard Beamtalk escape.
+_newClassSource := "Object subclass: FreshlyMade" ++ _nl ++ "  hello => ""hi from e2e""" ++ _nl
+// => _
+
+_newClassInput := #{ #class => "FreshlyMade", #kind => #'new-class', #source => _newClassSource, #intent => #durable, #author => "e2e-roundtrip", #'author_kind' => #human, #flushable => true, #'source_file' => _newClassPath }
+// => _
+
+(Erlang beamtalk_workspace_changelog) append: _newClassInput
+// => _
+
+_newClassFlush := Workspace flush
+// => _
+
+Erlang maps get: #flushed with: _newClassFlush
+// => 1
+
+Erlang maps get: #newClasses with: _newClassFlush
+// => 1
+
+(Erlang maps get: #conflicts with: _newClassFlush) isEmpty
+// => true
+
+// The file is now on disk with the recorded source.
+File exists: _newClassPath
+// => true
+
+(File readAll: _newClassPath) unwrap =:= _newClassSource
+// => true
+
+Workspace changes isEmpty
+// => true
+
+// ===========================================================================
+// STEP 9 — flushKinds: SURFACE (DOES NOT RAISE WITH A WELL-FORMED SET)
+// ===========================================================================
+
+// With nothing pending, flushKinds: against a known kind returns a FlushResult
+// with flushed=0. The point is to confirm the dispatch + kind validation works
+// from the Beamtalk surface (the underlying semantics live in
+// beamtalk_workspace_flush_tests).
+_emptyKindsFlush := Workspace changes flushKinds: #( #instance )
+// => _
+
+Erlang maps get: #flushed with: _emptyKindsFlush
+// => 0
+
+// ===========================================================================
+// CLEANUP — delete the temp files / directory we created.
+// ===========================================================================
+
+(Erlang file) delete: _flushPath
+// => _
+
+(Erlang file) delete: _newClassPath
+// => _
+
+(Erlang file) del_dir: _flushDir
+// => _
+
+Workspace changes clear
+// => _
