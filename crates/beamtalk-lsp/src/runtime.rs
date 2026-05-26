@@ -85,10 +85,11 @@ pub struct FlushEvent {
 /// WebSocket client to a running Beamtalk workspace.
 ///
 /// Single-connection, single-process. Cloneable handle so async tasks can
-/// share it (the inner socket is mutex-protected). Drop will not close the
-/// connection — call [`RuntimeClient::close`] explicitly to do that, or just
-/// drop and let the OS close the TCP socket when the last reference goes
-/// away.
+/// share it (the inner socket is mutex-protected). When the last clone is
+/// dropped the inner reader/writer tasks are aborted (via [`Drop`] for
+/// `RuntimeInner`) so the WebSocket is reliably torn down — no need to call
+/// [`RuntimeClient::close`] explicitly. `close` is still available for
+/// callers that want to tear down eagerly.
 #[derive(Clone)]
 pub struct RuntimeClient {
     inner: Arc<RuntimeInner>,
@@ -113,6 +114,25 @@ struct EvalRequest {
     request: serde_json::Value,
     id: String,
     reply_to: oneshot::Sender<Result<ReplResponse, RuntimeError>>,
+}
+
+impl Drop for RuntimeInner {
+    fn drop(&mut self) {
+        // Abort the writer/listener tasks so the WebSocket is reliably torn
+        // down when the last `RuntimeClient` handle is dropped. By the time
+        // `Drop` runs the inner `Arc` has reached refcount zero, so
+        // `try_lock` cannot contend with any other holder of these mutexes.
+        if let Ok(mut g) = self.writer.try_lock() {
+            if let Some(h) = g.take() {
+                h.abort();
+            }
+        }
+        if let Ok(mut g) = self.listener.try_lock() {
+            if let Some(h) = g.take() {
+                h.abort();
+            }
+        }
+    }
 }
 
 impl RuntimeClient {

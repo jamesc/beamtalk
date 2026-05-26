@@ -1399,9 +1399,17 @@ impl LanguageServer for Backend {
                             format!("executeCommand {}: {msg}", params.command),
                         )
                         .await;
-                    let mut err = tower_lsp::jsonrpc::Error::internal_error();
-                    err.message = format!("Beamtalk evaluator error: {msg}").into();
-                    return Err(err);
+                    // Forward structured Beamtalk evaluator errors as the
+                    // command result so editors can surface the rich payload
+                    // (matches the docstring above). Reserve JSON-RPC errors
+                    // for transport/parameter failures.
+                    let value = response.value.clone().unwrap_or_else(|| {
+                        serde_json::json!({
+                            "error": msg,
+                            "status": response.status,
+                        })
+                    });
+                    return Ok(Some(value));
                 }
                 let pretty = response.value_string();
                 let value = response.value.unwrap_or(serde_json::Value::Null);
@@ -1488,7 +1496,7 @@ async fn flush_event_listener(
                 );
                 continue;
             }
-            let Ok(content) = fs::read_to_string(&abs_path) else {
+            let Ok(content) = tokio::fs::read_to_string(&abs_path).await else {
                 tracing::warn!(
                     %utf8_path,
                     "flush_event_listener: failed to read flushed file from disk"
