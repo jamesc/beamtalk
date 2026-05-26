@@ -152,6 +152,48 @@ sealed typed Object subclass: WorkspaceInterface
   newClass: source :: String at: path :: String -> List(Behaviour) =>
     (Erlang beamtalk_workspace_interface_primitives) newClass: source at: path
 
+  /// Flush every pending durable change to disk (ADR 0082 Phase 2).
+  ///
+  /// Writes each pending ChangeLog entry's patched body back to its source
+  /// file via byte-span splice (trivia-preserving — no AST reprint), atomically
+  /// (`<file>.tmp` + atomic rename), with external-edit conflict detection.
+  ///
+  /// Returns a `FlushResult` summary recording what was written, what was
+  /// skipped, and what conflicted:
+  ///   - `flushed` (Integer) — number of durable entries written
+  ///   - `files` (List of String) — files written, in rename order
+  ///   - `newClasses` (Integer) — subset of `flushed` for new-class entries
+  ///   - `conflicts` (List) — per-file conflict descriptors (external-edit,
+  ///     target-exists, span-out-of-range, ...). A non-empty list means the
+  ///     listed entries remain pending and require manual reconciliation.
+  ///
+  /// Quiet on success; loud only on conflicts and structured errors.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace flush          // => _ (flush summary)
+  /// ```
+  flush -> Object => (Erlang beamtalk_workspace_interface_primitives) flush
+
+  /// Flush the pending ChangeLog entries matching `filter` (ADR 0082 Phase 2).
+  ///
+  /// `filter` is one of:
+  ///   - a Class — flush only entries targeting that class
+  ///   - a Symbol (e.g. `#'new-class'`) — flush only entries of that kind
+  ///   - a Dictionary `#{#file => "path"}` — flush only entries against that
+  ///     source file
+  ///
+  /// Returns the same `FlushResult` shape as `flush`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace flush: Counter             // => _
+  /// Workspace flush: #'new-class'        // => _
+  /// Workspace flush: #{ #file => "src/counter.bt" }  // => _
+  /// ```
+  flush: filter :: Object -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) flush: filter
+
   /// Run all loaded test classes and return a TestResult.
   ///
   /// ## Examples

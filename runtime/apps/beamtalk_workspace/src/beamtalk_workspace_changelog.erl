@@ -88,6 +88,8 @@ release nodes do not start a workspace, so this code is a no-op there.
     append/1,
     entries/0,
     active_entries/0,
+    flushable_pending/0,
+    mark_flushed/1,
     size/0,
     epoch/0,
     clear/0
@@ -114,9 +116,16 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_kind/1,
     entry_intent/1,
     entry_flushable/1,
+    entry_flushed/1,
     entry_author_kind/1,
     entry_is_orphan/1,
-    entry_is_prior_epoch/1
+    entry_is_prior_epoch/1,
+    entry_source_file/1,
+    entry_span/1,
+    entry_source_ref/1,
+    entry_prev_source_ref/1,
+    read_source_body/1,
+    read_prev_source_body/1
 ]).
 
 %% gen_server callbacks
@@ -168,6 +177,11 @@ release nodes do not start a workspace, so this code is a no-op there.
     not_flushable_reason :: binary() | undefined,
     author :: binary(),
     author_kind :: author_kind(),
+    %% True once a `Workspace flush` has written this entry's patch to disk
+    %% (ADR 0082 Phase 2). Persisted so the entry stays excluded from the
+    %% active view across workspace restarts: history is preserved in the
+    %% log for audit, but the entry is no longer considered "dirty".
+    flushed = false :: boolean(),
     %% Derived, in-memory only — not persisted (recomputed on restart).
     prior_epoch = false :: boolean(),
     orphan = false :: boolean()
@@ -256,12 +270,56 @@ entries() ->
 
 -doc """
 Return only *active* entries — those from the current epoch that are not
-orphaned. This is the dirty-state view; `Workspace changes` (a later phase) is
-backed by this. Prior-epoch and orphan entries are excluded.
+orphaned and have not been flushed to disk. This is the dirty-state view that
+`Workspace changes` is backed by; entries already written to disk by
+`Workspace flush` (ADR 0082 Phase 2) drop out of this view but stay in the log
+for audit.
 """.
 -spec active_entries() -> [entry()].
 active_entries() ->
-    [E || E <- entries(), not E#entry.prior_epoch, not E#entry.orphan].
+    [
+        E
+     || E <- entries(),
+        not E#entry.prior_epoch,
+        not E#entry.orphan,
+        not E#entry.flushed
+    ].
+
+-doc """
+Return the entries that are candidates for `Workspace flush` (ADR 0082 Phase 2):
+durable intent, flushable, not yet flushed, and active (current epoch, not
+orphaned). Ordered by sequence number ascending so the caller can apply them
+in append order.
+""".
+-spec flushable_pending() -> [entry()].
+flushable_pending() ->
+    [
+        E
+     || E <- active_entries(),
+        E#entry.intent =:= durable,
+        E#entry.flushable
+    ].
+
+-doc """
+Mark the entries with the given sequence numbers as flushed.
+
+Called by `Workspace flush` after successfully writing their patches to disk.
+The entries stay in the on-disk log (audit history is preserved) but drop out
+of the active view. The on-disk metadata segment is rewritten so the flushed
+flag survives workspace restart.
+
+Returns `ok` on success and `{error, Reason}` if rewriting the on-disk log
+segment fails (disk full, permissions, etc.); callers should log and continue
+rather than retry, since the in-memory entries' flushed flag is only flipped
+after a successful rewrite. Idempotent: passing the empty list or seqs not in
+the log is a successful no-op (defensive callers can pass the full pending set
+without checking emptiness first).
+""".
+-spec mark_flushed([non_neg_integer()]) -> ok | {error, term()}.
+mark_flushed([]) ->
+    ok;
+mark_flushed(Seqs) when is_list(Seqs) ->
+    gen_server:call(?MODULE, {mark_flushed, Seqs}).
 
 -doc """
 Total number of entries in the log (all epochs).
@@ -384,7 +442,11 @@ entry_to_value(#entry{} = E) ->
         sourceFile => source_file_value(E#entry.source_file),
         orphan => E#entry.orphan,
         priorEpoch => E#entry.prior_epoch,
-        active => (not E#entry.prior_epoch) andalso (not E#entry.orphan)
+        flushed => E#entry.flushed,
+        active =>
+            (not E#entry.prior_epoch) andalso
+            (not E#entry.orphan) andalso
+            (not E#entry.flushed)
     }.
 
 -spec selector_symbol(binary() | undefined) -> atom() | nil.
@@ -428,6 +490,57 @@ entry_is_orphan(#entry{orphan = V}) -> V.
 -spec entry_is_prior_epoch(entry()) -> boolean().
 entry_is_prior_epoch(#entry{prior_epoch = V}) -> V.
 
+-spec entry_flushed(entry()) -> boolean().
+entry_flushed(#entry{flushed = V}) -> V.
+
+-spec entry_source_file(entry()) -> binary() | undefined.
+entry_source_file(#entry{source_file = V}) -> V.
+
+-spec entry_span(entry()) -> span() | undefined.
+entry_span(#entry{span = V}) -> V.
+
+-spec entry_source_ref(entry()) -> binary().
+entry_source_ref(#entry{source_ref = V}) -> V.
+
+-spec entry_prev_source_ref(entry()) -> binary() | undefined.
+entry_prev_source_ref(#entry{prev_source_ref = V}) -> V.
+
+-doc """
+Read the patched method body (or full new-class source) recorded for `Entry`
+from `<workspace>/changes/sources/<source_ref>.bt`.
+
+Returns `{ok, Body}` or `{error, Reason}`. Used by `Workspace flush` (ADR 0082
+Phase 2) to splice the patched body back into the on-disk file. In run mode (no
+workspace_id, no `changes/` dir) returns `{error, no_workspace}`.
+""".
+-spec read_source_body(entry()) -> {ok, binary()} | {error, term()}.
+read_source_body(#entry{source_ref = Ref}) ->
+    read_source_file(Ref).
+
+-doc """
+Read the recorded prior on-disk body for `Entry` from
+`<workspace>/changes/sources/<prev_source_ref>.bt`.
+
+Returns `{ok, Body}` or `{error, Reason}`. New-class entries (no
+`prev_source_ref`) return `{error, no_prev_source}`. Used by `Workspace flush`
+to detect external edits before splicing.
+""".
+-spec read_prev_source_body(entry()) -> {ok, binary()} | {error, term()}.
+read_prev_source_body(#entry{prev_source_ref = undefined}) ->
+    {error, no_prev_source};
+read_prev_source_body(#entry{prev_source_ref = Ref}) ->
+    read_source_file(Ref).
+
+-spec read_source_file(binary()) -> {ok, binary()} | {error, term()}.
+read_source_file(Ref) ->
+    case gen_server:call(?MODULE, get_sources_dir) of
+        {ok, SourcesDir} ->
+            Path = filename:join(SourcesDir, binary_to_list(Ref)),
+            file:read_file(Path);
+        undefined ->
+            {error, no_workspace}
+    end.
+
 %%% ----------------------------------------------------------------------------
 %%% gen_server callbacks
 %%% ----------------------------------------------------------------------------
@@ -461,6 +574,16 @@ handle_call({append, Input}, _From, State) ->
     end;
 handle_call(epoch, _From, State) ->
     {reply, State#state.epoch, State};
+handle_call({mark_flushed, Seqs}, _From, State) ->
+    Reply = do_mark_flushed(Seqs, State),
+    {reply, Reply, State};
+handle_call(get_sources_dir, _From, State) ->
+    case State#state.changes_dir of
+        undefined ->
+            {reply, undefined, State};
+        Dir ->
+            {reply, {ok, filename:join(Dir, "sources")}, State}
+    end;
 handle_call(clear, _From, State) ->
     ets:delete_all_objects(?ETS_TABLE),
     truncate_log(State),
@@ -520,6 +643,35 @@ do_append(Input, State) ->
             {ok, Seq, State2};
         {error, Reason} ->
             {error, append_error(Reason)}
+    end.
+
+%% Mark each given seq's entry as flushed. Updates ETS in-place and rewrites the
+%% on-disk log so the flag survives restart. Unknown seqs are silently skipped
+%% (idempotent: callers can pass the full pending set without checking each
+%% entry first). The whole-log rewrite is atomic via temp+rename so a crash
+%% mid-update never truncates the log; a crash *before* the rewrite leaves the
+%% in-memory ETS still showing entries as flushed while disk does not. To avoid
+%% diverging the live view from disk, we only flip the ETS flag *after* the
+%% log rewrite returns ok.
+-spec do_mark_flushed([non_neg_integer()], #state{}) -> ok | {error, term()}.
+do_mark_flushed(Seqs, State) ->
+    SeqSet = sets:from_list(Seqs, [{version, 2}]),
+    All = entries(),
+    Updated = lists:map(
+        fun(E) ->
+            case sets:is_element(E#entry.seq, SeqSet) of
+                true -> E#entry{flushed = true};
+                false -> E
+            end
+        end,
+        All
+    ),
+    case rewrite_log(Updated, State) of
+        ok ->
+            lists:foreach(fun(E) -> ets:insert(?ETS_TABLE, {E#entry.seq, E}) end, Updated),
+            ok;
+        {error, _} = Err ->
+            Err
     end.
 
 %% Crash-safe persistence ordering: write the body files first (atomically via
@@ -927,7 +1079,8 @@ entry_to_json(#entry{} = E) ->
         <<"flushable">> => E#entry.flushable,
         <<"not_flushable_reason">> => null_or(E#entry.not_flushable_reason),
         <<"author">> => E#entry.author,
-        <<"author_kind">> => atom_to_binary(E#entry.author_kind, utf8)
+        <<"author_kind">> => atom_to_binary(E#entry.author_kind, utf8),
+        <<"flushed">> => E#entry.flushed
     },
     iolist_to_binary(json:encode(Map)).
 
@@ -950,7 +1103,12 @@ entry_from_json(Line) ->
         flushable = maps:get(<<"flushable">>, Map),
         not_flushable_reason = from_null(maps:get(<<"not_flushable_reason">>, Map, null)),
         author = maps:get(<<"author">>, Map),
-        author_kind = decode_author_kind(maps:get(<<"author_kind">>, Map))
+        author_kind = decode_author_kind(maps:get(<<"author_kind">>, Map)),
+        %% `flushed` was added in Phase 2; entries written by an earlier build
+        %% will not have this field — default to false so they re-appear as
+        %% pending on first restart (the correct conservative outcome — they
+        %% never made it to disk).
+        flushed = maps:get(<<"flushed">>, Map, false)
     }.
 
 %% Enum decoders use an explicit allowlist with a safe `unknown` fallback rather
