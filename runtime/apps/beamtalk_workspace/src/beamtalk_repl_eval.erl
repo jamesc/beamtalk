@@ -26,6 +26,9 @@ module loading to beamtalk_repl_loader (BT-863).
 %% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
 -export([reload_class_file/1, reload_class_file/2]).
 
+%% ADR 0082 Phase 1 (BT-2285) — new-class creation backing `Workspace newClass:at:'.
+-export([new_class/2]).
+
 %% ADR 0082 Phase 1 (BT-2283) — stateless live method patch backing
 %% `Behaviour compile:source:' / `tryCompile:source:'. Called via erlang:apply
 %% from beamtalk_behaviour_intrinsics so beamtalk_runtime keeps no compile-time
@@ -269,6 +272,16 @@ reload_class_file(Path) ->
 -spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
     beamtalk_repl_loader:reload_class_file(Path, ExpectedClassName).
+
+-doc """
+Create a brand-new class from a source String at a target path (ADR 0082 Phase 1,
+BT-2285). Delegates to `beamtalk_repl_loader:new_class/2`; see there for the
+validation contract. Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
+""".
+-spec new_class(binary() | string(), binary() | string()) ->
+    {ok, [tuple()]} | {error, term()}.
+new_class(Source, TargetPath) ->
+    beamtalk_repl_loader:new_class(Source, TargetPath).
 
 -doc """
 Install a live method patch from a `(ClassName, Selector, Source, Intent)' tuple

@@ -63,6 +63,11 @@ into REPL session state. Workspace readiness is detected via
 -export([dependencies/0]).
 %% Project sync (BT-1723)
 -export([sync/0]).
+%% New-class creation (ADR 0082 Phase 1, BT-2285)
+-export([newClass/2]).
+%% Shared with beamtalk_repl_loader:new_class/2 to surface created classes to the
+%% REPL identically to a file load.
+-export([loaded_class_objects/1]).
 
 %% ETS table name for user workspace bindings
 -define(WI_BINDINGS_TABLE, beamtalk_wi_user_bindings).
@@ -102,6 +107,8 @@ dispatch(supervisors, [], _Self) ->
     supervisors();
 dispatch(sync, [], _Self) ->
     sync();
+dispatch('newClass:at:', [Source, Path], _Self) ->
+    newClass(Source, Path);
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -150,6 +157,52 @@ load(Path) ->
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
     end.
+
+-doc """
+Create a brand-new class from a source String at a target path (ADR 0082 Phase 1).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) newClass: source at: path`.
+Compiles and installs the class in memory and logs a durable `kind: "new-class"`
+ChangeEntry (no disk write — that happens later in `Workspace flush`, Phase 2).
+Raises a loud, specific `#beamtalk_error{}` (no silent fallback) when the target
+already exists, lies outside the project tree, the declared class name does not
+match the path basename, or a class of that name is already loaded. On success
+returns the loaded class object(s), matching `load:`.
+""".
+-spec newClass(term(), term()) -> term().
+newClass(Source, Path) ->
+    case validate_new_class_args(Source, Path) of
+        {ok, SourceBin, PathBin} ->
+            case beamtalk_repl_eval:new_class(SourceBin, PathBin) of
+                {ok, ClassObjects} -> ClassObjects;
+                {error, Err} -> beamtalk_error:raise(Err)
+            end;
+        {error, Err} ->
+            beamtalk_error:raise(Err)
+    end.
+
+%% Both arguments must be Strings. A non-String surfaces a typed error at the
+%% `newClass:at:` boundary rather than a deep crash inside the loader.
+-spec validate_new_class_args(term(), term()) ->
+    {ok, binary(), binary()} | {error, #beamtalk_error{}}.
+validate_new_class_args(Source, Path) when is_binary(Source), is_binary(Path) ->
+    {ok, Source, Path};
+validate_new_class_args(Source, _Path) when not is_binary(Source) ->
+    {error, new_class_arg_type_error(<<"source">>, Source)};
+validate_new_class_args(_Source, Path) ->
+    {error, new_class_arg_type_error(<<"path">>, Path)}.
+
+-spec new_class_arg_type_error(binary(), term()) -> #beamtalk_error{}.
+new_class_arg_type_error(ArgName, Value) ->
+    TypeName = value_type_name(Value),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
+    beamtalk_error:with_message(
+        Err1,
+        iolist_to_binary([
+            <<"newClass:at: expects a String ">>, ArgName, <<", got ">>, TypeName
+        ])
+    ).
 
 -doc """
 Return the full workspace namespace snapshot.
