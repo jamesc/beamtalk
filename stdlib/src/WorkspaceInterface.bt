@@ -163,8 +163,8 @@ sealed typed Object subclass: WorkspaceInterface
   ///   - `flushed` (Integer) — number of durable entries written
   ///   - `files` (List of String) — files written, in rename order
   ///   - `newClasses` (Integer) — subset of `flushed` for new-class entries
-  ///   - `conflicts` (List) — per-file conflict descriptors (external-edit,
-  ///     target-exists, span-out-of-range, ...). A non-empty list means the
+  ///   - `conflicts` (List) — per-file conflict descriptors (`#external_edit`,
+  ///     `#target_exists`, `#span_out_of_range`, ...). A non-empty list means the
   ///     listed entries remain pending and require manual reconciliation.
   ///
   /// Quiet on success; loud only on conflicts and structured errors.
