@@ -112,6 +112,8 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Accepted (in progress) | 2026-05-24 |
 | [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
 | [0086](0086-string-subclass-of-binary.md) | Make String a Subclass of Binary | Implemented | 2026-03-21 |
+| [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Accepted | 2026-05-26 |
+| [0088](0088-direct-cerl-emission.md) | Direct Core Erlang AST Emission via ETF | Proposed | 2026-05-26 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
