@@ -25083,11 +25083,14 @@
         "WorkspaceInterfaceTest",
         "async",
         "concurrent",
+        "constructor",
+        "create",
         "extends",
         "gen_server",
         "genserver",
         "inherit",
         "inheritance",
+        "instantiate",
         "object",
         "process",
         "subclassing",
@@ -25098,6 +25101,7 @@
         "testIncludesSelectorClasses",
         "testIncludesSelectorGlobals",
         "testIncludesSelectorLoadColon",
+        "testIncludesSelectorNewClassAt",
         "testIncludesSelectorTest",
         "testIncludesSelectorTestClasses",
         "testIncludesSelectorTestColon",
@@ -25105,7 +25109,7 @@
         "testInheritsFromObject",
         "workspace_interface_test"
       ],
-      "source": "// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, globals, load:, test, test:, actors,\n//         actorAt:, actorsOf:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceInterfaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (WorkspaceInterface includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (WorkspaceInterface includesSelector: #testClasses)\n\n  testIncludesSelectorGlobals =>\n    self assert: (WorkspaceInterface includesSelector: #globals)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (WorkspaceInterface includesSelector: #load:)\n\n  testIncludesSelectorTest =>\n    self assert: (WorkspaceInterface includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (WorkspaceInterface includesSelector: #test:)\n\n  testIncludesSelectorActors =>\n    self assert: (WorkspaceInterface includesSelector: #actors)\n\n  testIncludesSelectorActorAt =>\n    self assert: (WorkspaceInterface includesSelector: #actorAt:)\n\n  testIncludesSelectorActorsOf =>\n    self assert: (WorkspaceInterface includesSelector: #actorsOf:)\n\n  testIncludesSelectorBindAs =>\n    self assert: (WorkspaceInterface includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (WorkspaceInterface includesSelector: #unbind:)\n\n  testInheritsFromObject =>\n    self assert: (WorkspaceInterface inheritsFrom: Object)",
+      "source": "// BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)\n//\n// Tests use class-level introspection (includesSelector:, inheritsFrom:) since\n// the Workspace singleton is not available in the BUnit test context\n// (workspace_mode: false). Live functionality tests are in E2E:\n// tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt\n//\n// Covers: classes, testClasses, globals, load:, test, test:, actors,\n//         actorAt:, actorsOf:, bind:as:, unbind:\n\nTestCase subclass: WorkspaceInterfaceTest\n\n  testIncludesSelectorClasses =>\n    self assert: (WorkspaceInterface includesSelector: #classes)\n\n  testIncludesSelectorTestClasses =>\n    self assert: (WorkspaceInterface includesSelector: #testClasses)\n\n  testIncludesSelectorGlobals =>\n    self assert: (WorkspaceInterface includesSelector: #globals)\n\n  testIncludesSelectorLoadColon =>\n    self assert: (WorkspaceInterface includesSelector: #load:)\n\n  // ADR 0082 Phase 1 (BT-2285): new-class creation facade method. The live\n  // happy path + the four validation errors require a workspace + project tree\n  // and are covered in tests/repl-protocol/cases/workspace_new_class.btscript\n  // and the loader's EUnit tests; BUnit only verifies the selector exists.\n  testIncludesSelectorNewClassAt =>\n    self assert: (WorkspaceInterface includesSelector: #newClass:at:)\n\n  testIncludesSelectorTest =>\n    self assert: (WorkspaceInterface includesSelector: #test)\n\n  testIncludesSelectorTestColon =>\n    self assert: (WorkspaceInterface includesSelector: #test:)\n\n  testIncludesSelectorActors =>\n    self assert: (WorkspaceInterface includesSelector: #actors)\n\n  testIncludesSelectorActorAt =>\n    self assert: (WorkspaceInterface includesSelector: #actorAt:)\n\n  testIncludesSelectorActorsOf =>\n    self assert: (WorkspaceInterface includesSelector: #actorsOf:)\n\n  testIncludesSelectorBindAs =>\n    self assert: (WorkspaceInterface includesSelector: #bind:as:)\n\n  testIncludesSelectorUnbind =>\n    self assert: (WorkspaceInterface includesSelector: #unbind:)\n\n  testInheritsFromObject =>\n    self assert: (WorkspaceInterface inheritsFrom: Object)",
       "explanation": "BUnit tests for WorkspaceInterface facade API (BT-849 / ADR 0040 Phase 6)  Tests use class-level introspection (includesSelector:, inheritsFrom:) since the Workspace singleton is not available in the BUnit test context (workspace_mode: false). Live functionality tests are in E2E: tests/repl-protocol/cases/workspace_load.bt, workspace_native_api.bt  Covers: classes, testClasses, globals, load:, test, test:, actors,         actorAt:, actorsOf:, bind:as:, unbind:"
     },
     {

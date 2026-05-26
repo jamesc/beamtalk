@@ -130,6 +130,28 @@ sealed typed Object subclass: WorkspaceInterface
   load: path :: String -> List(Behaviour) =>
     (Erlang beamtalk_workspace_interface_primitives) load: path
 
+  /// Create a brand-new class from a source String at a target path (ADR 0082).
+  ///
+  /// Compiles and installs the class in memory, then records a durable
+  /// `kind: "new-class"` ChangeLog entry. Phase 1 does NOT write the file to
+  /// disk — that happens later on `Workspace flush`, which replays the entry to
+  /// write the initial file. Returns the loaded class object(s), like `load:`.
+  ///
+  /// Raises a loud, specific error (no silent fallback) when:
+  ///   - `path` already exists on disk;
+  ///   - `path` lies outside the project source tree;
+  ///   - the declared class name does not match the basename of `path`
+  ///     (one class per file, ADR 0040);
+  ///   - a class of that name is already loaded (use `compile:source:` instead).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace newClass: "Object subclass: Greeter" at: "src/greeter.bt"
+  /// // => [Greeter]
+  /// ```
+  newClass: source :: String at: path :: String -> List(Behaviour) =>
+    (Erlang beamtalk_workspace_interface_primitives) newClass: source at: path
+
   /// Run all loaded test classes and return a TestResult.
   ///
   /// ## Examples
