@@ -124,7 +124,7 @@ impl ProtocolClient {
 
     /// Exchange the WebSocket auth handshake with the server.
     ///
-    /// Performs the three-message sequence required before the connection is
+    /// Performs the four-message sequence required before the connection is
     /// ready for use:
     ///
     /// 1. Receive `auth-required` from the server.
@@ -143,7 +143,7 @@ impl ProtocolClient {
         }
 
         // Build auth message with optional resume field
-        let mut auth_msg = serde_json::json!({"type": "auth", "cookie": self.cookie});
+        let mut auth_msg = serde_json::json!({"type": "auth", "cookie": self.cookie.as_str()});
         if let Some(res) = resume {
             auth_msg["resume"] = serde_json::Value::String(res.to_string());
         }
