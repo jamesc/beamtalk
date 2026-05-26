@@ -768,5 +768,16 @@ dependencies_returns_empty_when_no_package_test() ->
     %% beamtalk_workspace_meta:get_package_name/0 catches noproc and
     %% returns undefined when the gen_server is not started, so this
     %% test is safe to run without the workspace application.
+    %% The undefined -> #{} branch in dependencies/0 returns an empty map.
     Result = beamtalk_workspace_interface_primitives:dependencies(),
-    ?assert(is_map(Result)).
+    ?assert(is_map(Result)),
+    %% In a unit-test environment without the workspace app, the gen_server
+    %% is not running, so the result must be the empty map (no package).
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ?assertEqual(#{}, Result);
+        _ ->
+            %% workspace_meta is running (e.g. in integration test suite);
+            %% only assert the type — the content depends on loaded packages.
+            ok
+    end.
