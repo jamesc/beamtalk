@@ -118,34 +118,39 @@ impl ProtocolClient {
             print_transcript: true,
         };
 
+        client.perform_auth_handshake(resume)?;
+        Ok(client)
+    }
+
+    /// Exchange the WebSocket auth handshake with the server.
+    ///
+    /// Performs the four-message sequence required before the connection is
+    /// ready for use:
+    ///
+    /// 1. Receive `auth-required` from the server.
+    /// 2. Send `auth` with the cookie and an optional session-resume token.
+    /// 3. Receive `auth_ok` (or `auth_error` on bad credentials).
+    /// 4. Receive `session-started`; populate `self.session_id`.
+    ///
+    /// Mirrors the pattern established in the MCP client
+    /// (`beamtalk-mcp/src/client.rs: perform_auth_handshake`).
+    fn perform_auth_handshake(&mut self, resume: Option<&str>) -> Result<()> {
         // Read auth-required message (pre-auth, no session yet)
-        let auth_required = client.read_response()?;
+        let auth_required = self.read_response()?;
         match auth_required.get("op").and_then(|v| v.as_str()) {
             Some("auth-required") => {}
             _ => return Err(miette!("Unexpected pre-auth message: {auth_required}")),
         }
 
         // Build auth message with optional resume field
-        let mut auth_map = serde_json::Map::new();
-        auth_map.insert(
-            "type".to_string(),
-            serde_json::Value::String("auth".to_string()),
-        );
-        auth_map.insert(
-            "cookie".to_string(),
-            serde_json::Value::String(cookie.to_string()),
-        );
+        let mut auth_msg = serde_json::json!({"type": "auth", "cookie": self.cookie.as_str()});
         if let Some(res) = resume {
-            auth_map.insert(
-                "resume".to_string(),
-                serde_json::Value::String(res.to_string()),
-            );
+            auth_msg["resume"] = serde_json::Value::String(res.to_string());
         }
-        let auth_msg = serde_json::Value::Object(auth_map);
-        client.send_only(&auth_msg)?;
+        self.send_only(&auth_msg)?;
 
         // Read auth response
-        let auth_response = client.read_response()?;
+        let auth_response = self.read_response()?;
         match auth_response.get("type").and_then(|t| t.as_str()) {
             Some("auth_ok") => {}
             Some("auth_error") => {
@@ -161,17 +166,17 @@ impl ProtocolClient {
         }
 
         // Read session-started message (sent after auth_ok)
-        let session_msg = client.read_response()?;
+        let session_msg = self.read_response()?;
         match session_msg.get("op").and_then(|v| v.as_str()) {
             Some("session-started") => {}
             _ => return Err(miette!("Unexpected session message: {session_msg}")),
         }
-        client.session_id = session_msg
+        self.session_id = session_msg
             .get("session")
             .and_then(|s| s.as_str())
             .map(String::from);
 
-        Ok(client)
+        Ok(())
     }
 
     /// Attempt to reconnect the underlying WebSocket and resume the session
