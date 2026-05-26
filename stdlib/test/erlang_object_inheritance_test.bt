@@ -22,11 +22,9 @@ TestCase subclass: ErlangObjectInheritanceTest
   testErlangModuleDisplayString =>
     self assert: (self.proxy displayString isKindOf: String)
 
-  testErlangModuleInspect =>
-    self assert: (self.proxy inspect isKindOf: String)
+  testErlangModuleInspect => self assert: (self.proxy inspect isKindOf: String)
 
-  testErlangModuleIsNilReturnsFalse =>
-    self deny: self.proxy isNil
+  testErlangModuleIsNilReturnsFalse => self deny: self.proxy isNil
 
   testErlangModuleRespondsToDisplayString =>
     self assert: (self.proxy respondsTo: #displayString)
@@ -34,15 +32,13 @@ TestCase subclass: ErlangObjectInheritanceTest
   testErlangModuleRespondsToIsNil =>
     self assert: (self.proxy respondsTo: #isNil)
 
-  testErlangModuleHash =>
-    self assert: (self.proxy hash isKindOf: Integer)
+  testErlangModuleHash => self assert: (self.proxy hash isKindOf: Integer)
 
   // === ErlangModule: FFI dispatch still works ===
   testErlangModuleKeywordDispatch =>
     self assert: (self.proxy reverse: #(3, 2, 1)) equals: #(1, 2, 3)
 
-  testErlangModuleUnaryDispatch =>
-    self assert: (Erlang erlang) node notNil
+  testErlangModuleUnaryDispatch => self assert: (Erlang erlang) node notNil
 
   // === Erlang: Object-inherited methods ===
   // Note: Must use dynamic dispatch (via variable or perform:) because
@@ -51,20 +47,16 @@ TestCase subclass: ErlangObjectInheritanceTest
   testErlangDisplayString =>
     self assert: (self.e displayString isKindOf: String)
 
-  testErlangInspect =>
-    self assert: (self.e inspect isKindOf: String)
+  testErlangInspect => self assert: (self.e inspect isKindOf: String)
 
-  testErlangIsNilReturnsFalse =>
-    self deny: self.e isNil
+  testErlangIsNilReturnsFalse => self deny: self.e isNil
 
   testErlangRespondsToDisplayString =>
     self assert: (self.e respondsTo: #displayString)
 
-  testErlangRespondsToIsNil =>
-    self assert: (self.e respondsTo: #isNil)
+  testErlangRespondsToIsNil => self assert: (self.e respondsTo: #isNil)
 
-  testErlangHash =>
-    self assert: (self.e hash isKindOf: Integer)
+  testErlangHash => self assert: (self.e hash isKindOf: Integer)
 
   // === Erlang: module lookup still works ===
   testErlangModuleLookup =>
