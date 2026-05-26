@@ -47,7 +47,10 @@ compiler_test_() ->
         {"multiple compiles on same server", fun multiple_compiles/0},
         {"compile file with workspace_mode=false", fun compile_file_workspace_mode/0},
         {"compile_expression with class definition", fun compile_expression_class_def/0},
-        {"compiler app module callbacks", fun compiler_app_callbacks/0}
+        {"compiler app module callbacks", fun compiler_app_callbacks/0},
+        {"resolve_method_span instance method", fun resolve_method_span_instance/0},
+        {"resolve_method_span class method", fun resolve_method_span_class/0},
+        {"resolve_method_span selector not found", fun resolve_method_span_not_found/0}
     ]}.
 
 %%% Tests
@@ -200,3 +203,36 @@ compile_expression_class_def() ->
 compiler_app_callbacks() ->
     %% stop/1 returns ok
     ?assertEqual(ok, beamtalk_compiler_app:stop(undefined)).
+
+%% --- resolve_method_span (ADR 0082 Phase 1, BT-2283) ---
+
+%% Shared fixture: a small class with an instance and a class-side method.
+span_fixture() ->
+    <<
+        "Object subclass: SpanCounter\n"
+        "\n"
+        "  increment => self.value := self.value + 1\n"
+        "\n"
+        "  class new => self basicNew\n"
+    >>.
+
+resolve_method_span_instance() ->
+    Source = span_fixture(),
+    {ok, #{start := Start, 'end' := End}, PrevSource} =
+        beamtalk_compiler:resolve_method_span(Source, <<"SpanCounter">>, <<"increment">>, instance),
+    %% Splicing PrevSource back over the span is a no-op — the load-bearing
+    %% property of the byte-span splice strategy.
+    ?assertEqual(PrevSource, binary:part(Source, Start, End - Start)),
+    ?assert(binary:match(PrevSource, <<"increment =>">>) =/= nomatch).
+
+resolve_method_span_class() ->
+    Source = span_fixture(),
+    {ok, _Span, PrevSource} =
+        beamtalk_compiler:resolve_method_span(Source, <<"SpanCounter">>, <<"new">>, class),
+    ?assert(binary:match(PrevSource, <<"class new =>">>) =/= nomatch).
+
+resolve_method_span_not_found() ->
+    Source = span_fixture(),
+    Result =
+        beamtalk_compiler:resolve_method_span(Source, <<"SpanCounter">>, <<"nope">>, instance),
+    ?assertMatch({error, selector_not_found, _}, Result).

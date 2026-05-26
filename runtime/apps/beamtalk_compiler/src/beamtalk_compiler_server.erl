@@ -36,7 +36,8 @@ to avoid temp files on disk (BT-48).
     find_references_to_in_source/2,
     find_field_readers_in_source/2,
     find_field_writers_in_source/2,
-    find_ffi_sites_in_source/4
+    find_ffi_sites_in_source/4,
+    resolve_method_span/4
 ]).
 
 %% gen_server callbacks
@@ -307,6 +308,31 @@ find_ffi_sites_in_source(Source, Module, Function, Arity) ->
     end.
 
 -doc """
+Resolve the byte span of a method definition in `Source' (ADR 0082 Phase 1).
+
+Backs the live-patch install hook — given the current on-disk source of a
+`.bt' file and a target `(ClassName, Selector, Side)', returns
+`{ok, #{start := S, end := E}, PrevSource}' with the exact byte span of that
+method's definition and the bytes currently occupying it. Resolution failures
+return `{error, Reason, Message}'; transport failures return
+`{error, port_error | noproc | timeout, Message}'.
+""".
+-spec resolve_method_span(binary(), atom() | binary(), atom() | binary(), instance | class) ->
+    {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
+    | {error, atom(), binary()}.
+resolve_method_span(Source, ClassName, Selector, Side) ->
+    try
+        gen_server:call(
+            ?MODULE, {resolve_method_span, Source, ClassName, Selector, Side}, 30000
+        )
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Register a class with its metadata in the compiler server cache.
 
 ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -423,6 +449,11 @@ handle_call({find_field_writers_in_source, Source, Field}, _From, State) ->
 handle_call({find_ffi_sites_in_source, Source, Module, Function, Arity}, _From, State) ->
     Result = beamtalk_compiler_port:find_ffi_sites_in_source(
         State#state.port, Source, Module, Function, Arity
+    ),
+    {reply, Result, State};
+handle_call({resolve_method_span, Source, ClassName, Selector, Side}, _From, State) ->
+    Result = beamtalk_compiler_port:resolve_method_span(
+        State#state.port, Source, ClassName, Selector, Side
     ),
     {reply, Result, State};
 handle_call(version, _From, State) ->

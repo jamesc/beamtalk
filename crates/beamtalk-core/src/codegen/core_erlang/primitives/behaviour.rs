@@ -115,6 +115,23 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
                 ")"
             ])
         }
+        // ADR 0082 Phase 1 (BT-2283): live method patch primitives. Both take a
+        // selector Symbol and a body String *as values* and share one
+        // compile-and-install path; only the intent differs (`durable` vs
+        // `ephemeral`), which the intrinsic encodes when it logs the ChangeEntry.
+        "classCompileSource" | "classTryCompileSource" => {
+            let sel = params.first()?;
+            let source = params.get(1)?;
+            Some(docvec![
+                "call 'beamtalk_behaviour_intrinsics':'",
+                selector.to_owned(),
+                "'(Self, ",
+                sel.clone(),
+                ", ",
+                source.clone(),
+                ")"
+            ])
+        }
         "metaclassNew" => Some(Document::Str(
             "call 'beamtalk_behaviour_intrinsics':'metaclassNew'()",
         )),
@@ -315,6 +332,36 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'beamtalk_behaviour_intrinsics':'classReload'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_class_compile_source() {
+        let result = doc_to_string(generate_tower_bif(
+            "classCompileSource",
+            &["Selector".to_string(), "Source".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_behaviour_intrinsics':'classCompileSource'(Self, Selector, Source)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_class_try_compile_source() {
+        let result = doc_to_string(generate_tower_bif(
+            "classTryCompileSource",
+            &["Selector".to_string(), "Source".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_behaviour_intrinsics':'classTryCompileSource'(Self, Selector, Source)"
+                    .to_string()
+            )
         );
     }
 

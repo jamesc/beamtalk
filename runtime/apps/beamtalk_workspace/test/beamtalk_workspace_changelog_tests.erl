@@ -35,9 +35,22 @@ changelog_test_() ->
         fun append_new_class_has_no_prev_or_span/1,
         fun json_round_trip/1,
         fun active_excludes_nothing_in_fresh_session/1,
+        fun change_entries_builds_tagged_maps/1,
+        fun change_log_wraps_all_entries/1,
+        fun change_entries_marks_active_flag/1,
+        fun dirty_methods_groups_active_by_class/1,
+        fun dirty_methods_uses_new_class_placeholder/1,
         fun append_returns_error_on_unwritable_dir/1,
         fun clear_empties_log/1
     ]}.
+
+%% FFI surface with no gen_server started: must degrade to empty, not crash.
+ffi_no_server_test_() ->
+    [
+        fun change_entries_empty_when_table_absent/0,
+        fun change_log_empty_when_table_absent/0,
+        fun dirty_methods_empty_when_table_absent/0
+    ].
 
 %% These run with no gen_server started so they exercise the table-absent guards.
 no_server_test_() ->
@@ -167,6 +180,108 @@ active_excludes_nothing_in_fresh_session(_Ctx) ->
         ?_assertEqual(2, length(beamtalk_workspace_changelog:active_entries())),
         ?_assertEqual(2, length(beamtalk_workspace_changelog:entries()))
     ].
+
+%%====================================================================
+%% Beamtalk FFI surface (ADR 0082 Phase 1, BT-2284)
+%%====================================================================
+
+change_entries_builds_tagged_maps(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
+    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [
+        ?_assertEqual('ChangeEntry', maps:get('$beamtalk_class', Entry)),
+        ?_assertEqual('Counter', maps:get(className, Entry)),
+        ?_assertEqual(inc, maps:get(selector, Entry)),
+        ?_assertEqual(instance, maps:get(kind, Entry)),
+        ?_assertEqual(durable, maps:get(intent, Entry)),
+        ?_assertEqual(true, maps:get(flushable, Entry)),
+        ?_assertEqual(human, maps:get(authorKind, Entry)),
+        ?_assertEqual(<<"/proj/src/counter.bt">>, maps:get(sourceFile, Entry)),
+        ?_assertEqual(false, maps:get(orphan, Entry)),
+        ?_assertEqual(false, maps:get(priorEpoch, Entry)),
+        ?_assertEqual(true, maps:get(active, Entry))
+    ].
+
+change_log_wraps_all_entries(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
+    Log = beamtalk_workspace_changelog:changeLog(),
+    Entries = maps:get(entries, Log),
+    [
+        ?_assertEqual('ChangeLog', maps:get('$beamtalk_class', Log)),
+        ?_assertEqual(2, length(Entries)),
+        %% Oldest-first ordering preserved.
+        ?_assertEqual(inc, maps:get(selector, hd(Entries)))
+    ].
+
+%% new-class entries surface a nil selector (not undefined) so Beamtalk reads it
+%% as the nil object.
+change_entries_marks_active_flag(_Ctx) ->
+    NewClassInput = #{
+        class => <<"NewThing">>,
+        kind => 'new-class',
+        source => <<"class NewThing\nend">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => agent,
+        source_file => <<"/proj/src/new_thing.bt">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [
+        ?_assertEqual(nil, maps:get(selector, Entry)),
+        ?_assertEqual('new-class', maps:get(kind, Entry)),
+        ?_assertEqual(agent, maps:get(authorKind, Entry)),
+        ?_assertEqual(true, maps:get(active, Entry))
+    ].
+
+dirty_methods_groups_active_by_class(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Widget">>, <<"render">>)),
+    Dirty = beamtalk_workspace_changelog:dirtyMethods(),
+    CounterSet = maps:get('Counter', Dirty),
+    WidgetSet = maps:get('Widget', Dirty),
+    [
+        ?_assertEqual(2, map_size(Dirty)),
+        %% Each value is a Beamtalk Set (tagged map with ordset elements).
+        ?_assertEqual('Set', maps:get('$beamtalk_class', CounterSet)),
+        ?_assertEqual([dec, inc], maps:get(elements, CounterSet)),
+        ?_assertEqual([render], maps:get(elements, WidgetSet))
+    ].
+
+dirty_methods_uses_new_class_placeholder(_Ctx) ->
+    NewClassInput = #{
+        class => <<"DoubleCounter">>,
+        kind => 'new-class',
+        source => <<"class DoubleCounter\nend">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => agent,
+        source_file => <<"/proj/src/double_counter.bt">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    Dirty = beamtalk_workspace_changelog:dirtyMethods(),
+    Set = maps:get('DoubleCounter', Dirty),
+    [
+        ?_assertEqual(['new-class'], maps:get(elements, Set))
+    ].
+
+change_entries_empty_when_table_absent() ->
+    ok = ensure_no_changelog_table(),
+    ?assertEqual([], beamtalk_workspace_changelog:change_entries()).
+
+change_log_empty_when_table_absent() ->
+    ok = ensure_no_changelog_table(),
+    Log = beamtalk_workspace_changelog:changeLog(),
+    ?assertEqual('ChangeLog', maps:get('$beamtalk_class', Log)),
+    ?assertEqual([], maps:get(entries, Log)).
+
+dirty_methods_empty_when_table_absent() ->
+    ok = ensure_no_changelog_table(),
+    ?assertEqual(#{}, beamtalk_workspace_changelog:dirtyMethods()).
 
 %%====================================================================
 %% error path

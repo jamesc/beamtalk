@@ -16,6 +16,8 @@
             #{name => 'Binary', module => 'bt@stdlib@binary', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Block', module => 'bt@stdlib@block', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Boolean', module => 'bt@stdlib@boolean', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
+            #{name => 'ChangeEntry', module => 'bt@stdlib@change_entry', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
+            #{name => 'ChangeLog', module => 'bt@stdlib@change_log', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'Character', module => 'bt@stdlib@character', parent => 'Integer', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Class', module => 'bt@stdlib@class', parent => 'Behaviour', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ClassBuilder', module => 'bt@stdlib@class_builder', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},

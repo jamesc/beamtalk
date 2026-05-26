@@ -1,0 +1,128 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ChangeLog — Navigable view of the workspace's pending in-memory changes
+/// (ADR 0082 Phase 1).
+///
+/// Returned by `Workspace changes`, following Pharo's `Smalltalk changes`
+/// idiom. The ChangeLog is the append-only record of every live method
+/// mutation and the workspace's dirty-state tracker — "what has the running
+/// workspace changed relative to disk?".
+///
+/// A ChangeLog snapshot holds *every* logged entry, but its default collection
+/// views (`size`, `isEmpty`, `notEmpty`, `do:`, `dirtyMethods`) reflect only
+/// the **active** entries: changes from the current epoch that have not been
+/// orphaned. Prior-epoch and orphan entries (whose memory state was lost on
+/// workspace restart, so they are no longer re-appliable) are excluded from
+/// those views — but `select:` ranges over the full set, so it can still reach
+/// them (e.g. `Workspace changes select: [:e | e isOrphan]`).
+///
+/// Backed by `beamtalk_workspace_changelog.erl` via FFI.
+///
+/// ## Examples
+/// ```beamtalk
+/// Workspace changes notEmpty                        // => false
+/// Workspace changes dirtyMethods                    // => #{}
+/// Workspace changes do: [:e | Transcript show: e printString]
+/// Workspace changes select: [:e | e isOrphan]       // => _
+/// ```
+sealed typed Value subclass: ChangeLog
+  field: entries :: List(ChangeEntry) = #()
+
+  /// Return the active entries: current epoch and not orphaned.
+  ///
+  /// This is the live, re-appliable dirty set that the default collection
+  /// views operate on. `select:` (which can reach orphans) uses the full set
+  /// instead.
+  activeEntries -> List(ChangeEntry) => self.entries select: [:e | e isActive]
+
+  /// Return all entries, including prior-epoch and orphan entries.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes allEntries   // => _
+  /// ```
+  allEntries -> List(ChangeEntry) => self.entries
+
+  /// The number of active (live, re-appliable) changes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes size   // => 0
+  /// ```
+  size -> Integer => self activeEntries size
+
+  /// Whether there are no active changes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes isEmpty   // => true
+  /// ```
+  isEmpty -> Boolean => self size =:= 0
+
+  /// Whether there is at least one active change.
+  ///
+  /// "Is anything dirty?" is `Workspace changes notEmpty`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes notEmpty   // => false
+  /// ```
+  notEmpty -> Boolean => self isEmpty not
+
+  /// Iterate over each active entry, evaluating `block` with it.
+  ///
+  /// Prior-epoch and orphan entries are skipped — use `select:` to reach them.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes do: [:e | Transcript show: e authorKind]
+  /// ```
+  do: block :: Block(ChangeEntry, Object) -> Nil => self activeEntries do: block
+
+  /// Select entries for which `block` returns true, over the *full* entry set.
+  ///
+  /// Unlike the other collection views, `select:` ranges over every entry —
+  /// including prior-epoch and orphan entries — so it can still reach them.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes select: [:e | e isOrphan]    // orphans only
+  /// Workspace changes select: [:e | e isAgent]     // agent changes only
+  /// ```
+  select: block :: Block(ChangeEntry, Boolean) -> List(ChangeEntry) =>
+    self.entries select: block
+
+  /// Return the dirty methods grouped by class: `#{Class -> #{selectors}}`.
+  ///
+  /// Derived from the active entries only. Each class maps to a Set of patched
+  /// selector Symbols; new-class entries appear under their class with the
+  /// placeholder selector `#'new-class'`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes dirtyMethods   // => #{}  (nothing patched)
+  /// // After `Counter >> increment => ...`:
+  /// // Workspace changes dirtyMethods   // => #{#Counter => #{#increment}}
+  /// ```
+  dirtyMethods -> Dictionary =>
+    // FFI returns a Dictionary `#{ClassSymbol => Set(selectorSymbol)}`
+    // (beamtalk_workspace_changelog:dirtyMethods/0); suppress the untyped-FFI
+    // Dynamic warning since the shape is known.
+    @expect type
+    (Erlang beamtalk_workspace_changelog) dirtyMethods
+
+  /// Developer-readable representation, e.g. "a ChangeLog with 2 entries".
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes printString   // => "a ChangeLog with 0 entries"
+  /// ```
+  printString -> String =>
+    n := self size
+    n =:= 1 ifTrue: [
+      "a ChangeLog with 1 entry"
+    ] ifFalse: ["a ChangeLog with " ++ n asString ++ " entries"]
+
+  /// Override inspect to use printString rather than the field-based format.
+  inspect -> String => self printString

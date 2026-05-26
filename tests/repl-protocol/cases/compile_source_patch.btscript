@@ -1,0 +1,83 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E test for the live method-edit primitives compile:source: / tryCompile:source:
+// (ADR 0082 Phase 1, BT-2283).
+//
+// These are the value-API live-patch primitives. The `>>` patcher form and
+// `compile:source:` are distinct front doors that converge at the runtime
+// install chokepoint (`>>` is not parser sugar for this primitive). Unlike `>>`,
+// the method body here is passed as a String *value* (the path MCP `save_method`
+// / `try_method` and the browser "Save" action take), so this test drives them
+// the way a tool would. Verifies the patched method installs in memory and
+// dispatches on new instances, for both the durable (`compile:source:`) and
+// ephemeral (`tryCompile:source:`) variants.
+//
+// Requires E2E because the install path (compile + hot-swap + ChangeLog emit)
+// runs only in a live workspace; BUnit executes compiled code with no workspace.
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// ===========================================================================
+// DURABLE PATCH VIA compile:source:
+// ===========================================================================
+
+// Replace increment to add 5 instead of 1, passing the body as a String value.
+Counter compile: #increment source: "increment => self.value := self.value + 5"
+// => Counter
+
+c := Counter spawn
+// => #Actor<Counter,_>
+
+c increment
+// => 5
+
+c getValue
+// => 5
+
+// ===========================================================================
+// ADD A NEW METHOD VIA compile:source:
+// ===========================================================================
+
+// A method that did not exist in the original file installs the same way.
+Counter compile: #triple source: "triple => self.value * 3"
+// => Counter
+
+c2 := Counter spawn
+// => #Actor<Counter,_>
+
+c2 increment
+// => 5
+
+c2 triple
+// => 15
+
+// ===========================================================================
+// BARE-BODY FORM (no header) FOR A UNARY SELECTOR
+// ===========================================================================
+
+// A bare body (no `selector =>` header) is accepted for a unary selector: the
+// canonical header is prepended before recompile.
+Counter compile: #increment source: "self.value := self.value + 10"
+// => Counter
+
+c4 := Counter spawn
+// => #Actor<Counter,_>
+
+c4 increment
+// => 10
+
+// ===========================================================================
+// EPHEMERAL PATCH VIA tryCompile:source:
+// ===========================================================================
+
+// tryCompile:source: installs in memory exactly like compile:source: — the
+// difference (ephemeral ChangeLog intent) is not observable from dispatch.
+Counter tryCompile: #spike source: "spike => 42"
+// => Counter
+
+c3 := Counter spawn
+// => #Actor<Counter,_>
+
+c3 spike
+// => 42
