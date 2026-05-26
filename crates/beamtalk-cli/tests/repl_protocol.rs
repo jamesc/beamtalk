@@ -1309,6 +1309,19 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
         } else if case.expression.starts_with(":complete ") {
             let code = case.expression.strip_prefix(":complete ").unwrap();
             client.get_completions(code)
+        } else if case.expression == ":flush" {
+            // BT-2287 / ADR 0082 Phase 3: `:flush` → `Workspace flush`.
+            client.eval("Workspace flush")
+        } else if case.expression.starts_with(":flush ") {
+            // BT-2287 / ADR 0082 Phase 3: `:flush <sel>` → `Workspace flush: <sel>`.
+            let selector = case.expression.strip_prefix(":flush ").unwrap().trim();
+            client.eval(&format!("Workspace flush: {selector}"))
+        } else if case.expression == ":changes" {
+            // BT-2287 / ADR 0082 Phase 3: `:changes` → `Workspace changes`.
+            client.eval("Workspace changes")
+        } else if case.expression == ":dirty" {
+            // BT-2287 / ADR 0082 Phase 3: `:dirty` → `Workspace changes notEmpty`.
+            client.eval("Workspace changes notEmpty")
         } else {
             client.eval(&case.expression)
         };

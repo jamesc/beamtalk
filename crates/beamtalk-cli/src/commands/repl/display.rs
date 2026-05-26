@@ -73,6 +73,13 @@ pub(crate) fn print_help() {
     println!("  :show-codegen <expr>  Show generated Core Erlang for an expression");
     println!("  :sc <expr>      Short alias for :show-codegen");
     println!("  :interrupt, :int  Cancel a running evaluation (sends out-of-band interrupt)");
+    println!("  :changes        Show the ChangeLog (→ Workspace changes)");
+    println!(
+        "  :dirty          True if there are unflushed changes (→ Workspace changes notEmpty)"
+    );
+    println!("  :flush          Flush pending changes to disk (→ Workspace flush)");
+    println!("  :flush <sel>    Flush a subset (→ Workspace flush: <sel>); <sel> is a Class,");
+    println!("                  a Symbol like #'new-class', or #{{ #file => \"path\" }}");
     println!();
     println!("Expression examples:");
     println!("  x := 42              # Variable assignment");

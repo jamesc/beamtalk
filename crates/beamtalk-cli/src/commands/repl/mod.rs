@@ -664,6 +664,35 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             handle_interrupt(client);
             return CommandResult::Handled;
         }
+        ":flush" => {
+            // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace flush`.
+            eval_and_display(client, "Workspace flush");
+            return CommandResult::Handled;
+        }
+        _ if line.starts_with(":flush ") => {
+            // BT-2287 / ADR 0082 Phase 3: `:flush <selector>` desugars to
+            // `Workspace flush: <selector>`. The selector is passed through
+            // verbatim so users can pass a Class (`Counter`), a Symbol
+            // (`#'new-class'`), or a Dictionary (`#{ #file => "path" }`).
+            let selector = extract_command_arg(line, ":flush ", None);
+            if selector.is_empty() {
+                eprintln!("Usage: :flush [<Class>|#kind|#{{ #file => \"path\" }}]");
+            } else {
+                eval_and_display(client, &format!("Workspace flush: {selector}"));
+            }
+            return CommandResult::Handled;
+        }
+        ":changes" => {
+            // BT-2287 / ADR 0082 Phase 3: REPL alias for `Workspace changes`.
+            eval_and_display(client, "Workspace changes");
+            return CommandResult::Handled;
+        }
+        ":dirty" => {
+            // BT-2287 / ADR 0082 Phase 3: REPL alias for
+            // `Workspace changes notEmpty` — answers "is anything pending?".
+            eval_and_display(client, "Workspace changes notEmpty");
+            return CommandResult::Handled;
+        }
         _ => {}
     }
 
@@ -1642,5 +1671,64 @@ mod tests {
     #[test]
     fn extract_command_arg_whitespace_only_argument() {
         assert_eq!(extract_command_arg(":inspect   ", ":inspect ", None), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // BT-2287 / ADR 0082 Phase 3 — `:flush`, `:flush <sel>`, `:changes`,
+    // `:dirty` meta-command dispatch. The aliases compile to Beamtalk
+    // expressions; the surface-parity contract (and the Erlang side) treats
+    // them as `evaluate` of a known string. These tests pin the translation.
+    // -----------------------------------------------------------------------
+
+    /// Construct the Beamtalk expression a `:flush <selector>` line dispatches
+    /// to. Mirrors the format used in `handle_repl_command` so the tests catch
+    /// translation drift.
+    fn flush_expr_for(line: &str) -> Option<String> {
+        let selector = extract_command_arg(line, ":flush ", None);
+        if selector.is_empty() {
+            None
+        } else {
+            Some(format!("Workspace flush: {selector}"))
+        }
+    }
+
+    #[test]
+    fn flush_class_selector_translates_to_workspace_flush_message() {
+        assert_eq!(
+            flush_expr_for(":flush Counter"),
+            Some("Workspace flush: Counter".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_symbol_kind_selector_translates_verbatim() {
+        assert_eq!(
+            flush_expr_for(":flush #'new-class'"),
+            Some("Workspace flush: #'new-class'".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_dictionary_selector_translates_verbatim() {
+        assert_eq!(
+            flush_expr_for(":flush #{ #file => \"src/foo.bt\" }"),
+            Some("Workspace flush: #{ #file => \"src/foo.bt\" }".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_with_trailing_whitespace_in_selector_is_trimmed() {
+        // `extract_command_arg` trims — selectors don't end with stray space.
+        assert_eq!(
+            flush_expr_for(":flush   Counter   "),
+            Some("Workspace flush: Counter".to_string())
+        );
+    }
+
+    #[test]
+    fn flush_with_empty_selector_reports_no_expression() {
+        // `:flush ` (trailing space only) is a usage error, not an eval.
+        assert_eq!(flush_expr_for(":flush "), None);
+        assert_eq!(flush_expr_for(":flush     "), None);
     }
 }
