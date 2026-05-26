@@ -230,7 +230,8 @@ Flush only the ChangeEntries that match `Filter` (ADR 0082 Phase 2).
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) flush: filter`.
 `Filter` may be a Class, a Symbol (e.g. `#'new-class'`), or a Dictionary
-`#{file => "..."}`. Anything else surfaces a structured `#beamtalk_error{}`.
+`#{ #file => "..." }` (Symbol-keyed). Anything else surfaces a structured
+`#beamtalk_error{}`.
 """.
 -spec flush(term()) -> map().
 flush(Filter) ->

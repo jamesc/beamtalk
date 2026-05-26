@@ -20,8 +20,8 @@ epoch, not orphaned), and not already flushed. `flush/1` adds a filter:
 
   - a class name (atom or binary, e.g. `Counter`) selects entries for that class
   - a selector Symbol (e.g. `#'new-class'`) selects entries of that kind
-  - a Beamtalk Dictionary `#{file => "..."}` selects entries with that
-    `sourceFile`
+  - a Beamtalk Dictionary `#{ #file => "..." }` (Symbol-keyed) selects entries
+    with that `sourceFile`
 
 Multiple ChangeEntries against the *same* `(class, selector)` are shadowed: only
 the most recent (highest `seq`) is applied to disk. The shadowed entries are
@@ -52,7 +52,11 @@ Two-phase per flush operation (ADR 0082, *Multi-file atomicity*):
   - **Phase A**: for every target file, read disk, validate span + prev_source,
     compute the new body, write the `<file>.tmp`. If *any* file fails Phase A,
     abort: clean up every `<file>.tmp` written so far, leave the live log
-    untouched, and surface a structured error. **No rename happened.**
+    untouched, and return `{ok, Summary}` with the per-file failures reported
+    in the `conflicts` field of the summary (so the REPL can render them
+    without an exception). Hard runtime errors (e.g. I/O write failure on
+    `<file>.tmp`) still come back as `{error, #beamtalk_error{}}`. **No rename
+    happened.**
   - **Phase B**: rename each `<file>.tmp` → `<file>` in sequence. POSIX
     guarantees the rename is atomic but the OS may still surface I/O errors;
     a Phase B failure leaves a mixed state where successfully-renamed files
@@ -111,7 +115,10 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
 %% Exported for tests.
 -export([
     splice/3,
-    group_by_file/1
+    group_by_file/1,
+    complete_flush/4,
+    filter_shadowed_by_survivor/2,
+    renamed_target_keys/1
 ]).
 
 -type filter() :: any | {class, binary()} | {selector, atom()} | {file, binary()}.
@@ -142,7 +149,8 @@ Flush only the ChangeEntries that match `Filter`.
     `" class"`) — filter by the class's display name
   - a class name atom (`'Counter'`) or binary (`<<"Counter">>`) — filter by name
   - a selector atom, including `'new-class'` — filter by entry kind/selector
-  - a Beamtalk Dictionary `#{file => "..."}` — filter by `sourceFile`
+  - a Beamtalk Dictionary `#{ #file => "..." }` (Symbol-keyed) — filter by
+    `sourceFile`
 
 Anything else surfaces a structured error.
 """.
@@ -196,13 +204,13 @@ normalise_filter(_Other) ->
     {error,
         filter_error(<<
             "flush: expects a Class, a Symbol (e.g. #'new-class'), or a Dictionary "
-            "#{file => \"...\"}"
+            "#{ #file => \"...\" } (Symbol-keyed)"
         >>)}.
 
 %% Heuristic: class names start uppercase (PascalCase), selectors lowercase.
 %% Matches Beamtalk's naming convention; selectors that happen to start
 %% uppercase would be rare and the caller can always pass an explicit
-%% `#{file => ...}` instead.
+%% `#{ #file => ... }` (Symbol-keyed) dictionary instead.
 -spec is_class_name_atom(atom()) -> boolean().
 is_class_name_atom(Atom) ->
     case atom_to_binary(Atom, utf8) of
@@ -423,14 +431,13 @@ is_new_class_entry(E) ->
 
 prepare_new_class(File, Entries, Entry) ->
     AbsPath = binary_to_list(File),
-    case filelib:is_regular(AbsPath) of
-        true ->
-            {conflict,
-                conflict_map(File, <<"target_exists">>, Entries, <<
-                    "newClass:at: target already exists on disk — choose a different path "
-                    "or clear the pending entry"
-                >>)};
-        false ->
+    %% Use file:read_file_info/1 (not filelib:is_regular/1) so any existing
+    %% filesystem entry — directory, symlink, unreadable path — is caught
+    %% up front as target_exists. Otherwise a directory at the target would
+    %% slip past Phase A and fail later with an opaque rename_failed conflict.
+    %% Mirrors the BT-2285 fix in beamtalk_repl_loader:validate_target_path/1.
+    case file:read_file_info(AbsPath) of
+        {error, enoent} ->
             case beamtalk_workspace_changelog:read_source_body(Entry) of
                 {ok, Body} ->
                     case write_tmp(AbsPath, Body) of
@@ -446,7 +453,18 @@ prepare_new_class(File, Entries, Entry) ->
                     end;
                 {error, Reason} ->
                     {error, source_body_error(File, Reason)}
-            end
+            end;
+        _Other ->
+            %% Any existing filesystem entry (regular file, directory, symlink)
+            %% blocks new-class; also treat unreadable paths (eacces, etc.) as
+            %% existing rather than silently overwriting. `_Other` is either
+            %% `{ok, FileInfo}` or `{error, Reason}` where Reason is something
+            %% other than enoent (e.g. eacces, eloop).
+            {conflict,
+                conflict_map(File, <<"target_exists">>, Entries, <<
+                    "newClass:at: target already exists on disk — choose a different path "
+                    "or clear the pending entry"
+                >>)}
     end.
 
 %%% ----------------------------------------------------------------------------
@@ -647,22 +665,17 @@ phase_b(Prepared, Shadowed) ->
 
 phase_b_loop([], Shadowed, Renamed, Failed) ->
     Files = lists:reverse([P#prepared.file || P <- Renamed]),
-    EntriesToMark = lists:flatten([P#prepared.entries || P <- Renamed]) ++ Shadowed,
+    RenamedEntries = lists:flatten([P#prepared.entries || P <- Renamed]),
+    %% Only mark shadowed entries whose survivor (same class+selector) was
+    %% actually renamed in this Phase B. When Phase B aborts mid-loop, a
+    %% shadowed entry whose survivor never made it to disk must stay pending
+    %% — otherwise we silently lose the change from the active view while it
+    %% is not on disk. See Copilot review on PR #2325.
+    SurvivorKeys = renamed_target_keys(RenamedEntries),
+    AppliedShadowed = filter_shadowed_by_survivor(Shadowed, SurvivorKeys),
+    EntriesToMark = RenamedEntries ++ AppliedShadowed,
     Seqs = [beamtalk_workspace_changelog:entry_seq(E) || E <- EntriesToMark],
-    case beamtalk_workspace_changelog:mark_flushed(Seqs) of
-        ok ->
-            {ok, success_summary(Files, lists:reverse(Renamed), Failed)};
-        {error, Reason} ->
-            ?LOG_ERROR(
-                "Workspace flush: mark_flushed failed after successful rename",
-                #{
-                    reason => Reason,
-                    files => Files,
-                    domain => [beamtalk, runtime]
-                }
-            ),
-            {ok, success_summary(Files, lists:reverse(Renamed), Failed)}
-    end;
+    complete_flush(Files, lists:reverse(Renamed), Failed, Seqs);
 phase_b_loop([P | Rest], Shadowed, Renamed, Failed) ->
     case file:rename(P#prepared.tmp, binary_to_list(P#prepared.file)) of
         ok ->
@@ -687,6 +700,72 @@ phase_b_loop([P | Rest], Shadowed, Renamed, Failed) ->
             %% behind for the next flush to trip over.
             cleanup_tmps([P | Rest]),
             phase_b_loop([], Shadowed, Renamed, [FailedHere | Failed])
+    end.
+
+%% Build a set of {Class, Selector} target keys from the entries whose file
+%% was renamed in Phase B. Used to gate which shadowed entries can be marked
+%% flushed — a shadowed entry whose survivor never reached disk must stay
+%% pending.
+-spec renamed_target_keys([term()]) -> sets:set().
+renamed_target_keys(Entries) ->
+    lists:foldl(
+        fun(E, Acc) -> sets:add_element(target_key(E), Acc) end,
+        sets:new([{version, 2}]),
+        Entries
+    ).
+
+-spec filter_shadowed_by_survivor([term()], sets:set()) -> [term()].
+filter_shadowed_by_survivor(Shadowed, SurvivorKeys) ->
+    [E || E <- Shadowed, sets:is_element(target_key(E), SurvivorKeys)].
+
+%% Centralise the post-rename completion path: mark flushed seqs in the
+%% ChangeLog, build the summary, and surface a marker failure as an
+%% additional conflict in the summary so the caller can react. Files have
+%% already been renamed at this point — we never return a hard `{error, _}`
+%% here because on-disk state has moved forward and the caller still needs
+%% to see which files were written.
+-spec complete_flush([binary()], [#prepared{}], [map()], [non_neg_integer()]) ->
+    {ok, map()}.
+complete_flush(Files, Renamed, Failed, Seqs) ->
+    %% Catch any failure mode from the ChangeLog server — explicit {error, _}
+    %% returns *or* gen_server crashes (the call exits with noproc/timeout
+    %% when the server is unreachable). Files have already been written so
+    %% returning a hard error tuple would lose the success report; we surface
+    %% the failure as a conflict-shaped entry on the summary instead.
+    MarkResult =
+        try
+            beamtalk_workspace_changelog:mark_flushed(Seqs)
+        catch
+            exit:ExitReason -> {error, {changelog_unreachable, ExitReason}}
+        end,
+    case MarkResult of
+        ok ->
+            {ok, success_summary(Files, Renamed, Failed)};
+        {error, Reason} ->
+            ?LOG_ERROR(
+                "Workspace flush: mark_flushed failed after successful rename",
+                #{
+                    reason => Reason,
+                    files => Files,
+                    seqs => Seqs,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            MarkerFailure = #{
+                file => <<"<changelog>">>,
+                reason => <<"flush_marker_failed">>,
+                seqs => Seqs,
+                detail => iolist_to_binary([
+                    <<
+                        "Files were written to disk but the ChangeLog could not "
+                        "mark the entries as flushed — they still appear in "
+                        "`Workspace changes` and will conflict on re-flush. "
+                        "Detail: "
+                    >>,
+                    io_lib:format("~p", [Reason])
+                ])
+            },
+            {ok, success_summary(Files, Renamed, [MarkerFailure | Failed])}
     end.
 
 %%% ----------------------------------------------------------------------------

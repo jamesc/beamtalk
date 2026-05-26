@@ -48,8 +48,16 @@ unit_test_() ->
         fun splice_is_pure_byte_replace/0,
         fun splice_at_start_of_file/0,
         fun splice_at_end_of_file/0,
-        fun group_by_file_preserves_seq_order/0
+        fun group_by_file_preserves_seq_order/0,
+        fun filter_shadowed_keeps_only_renamed_survivors/0,
+        fun filter_shadowed_drops_unrenamed_survivors/0
     ].
+
+new_class_directory_target_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun new_class_target_is_directory_is_conflict/1}.
+
+mark_flushed_failure_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun mark_flushed_failure_is_reported/1}.
 
 setup() ->
     {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
@@ -483,6 +491,194 @@ filter_by_new_class_selector(#{proj_dir := ProjDir}) ->
         ?_assertEqual({ok, Original1}, file:read_file(File1)),
         ?_assertEqual({ok, NewSource}, file:read_file(File2))
     ].
+
+%%====================================================================
+%% Tests — substantive Copilot fixes (PR #2325, BT-2286)
+%%====================================================================
+
+%% Fix #2: target path that already exists *as a directory* must surface as
+%% a `target_exists` conflict during Phase A, not as a `rename_failed` later
+%% on. Mirrors the BT-2285 fix in beamtalk_repl_loader:validate_target_path/1.
+new_class_target_is_directory_is_conflict(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "greeter.bt"]),
+    %% Create a directory *at the target path*. filelib:is_regular/1 would
+    %% return false (so the old code would proceed and later fail rename);
+    %% file:read_file_info/1 returns {ok, FileInfo} so we catch it up front.
+    ok = filelib:ensure_path(File),
+    ?assertEqual(true, filelib:is_dir(File)),
+    NewSource = <<"Object subclass: Greeter\n  hi => 'hello'\nend\n">>,
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        new_class_input(<<"Greeter">>, NewSource, list_to_binary(File))
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(Conflicts)),
+        ?_assertEqual(<<"target_exists">>, maps:get(reason, hd(Conflicts))),
+        ?_assert(lists:member(Seq, maps:get(seqs, hd(Conflicts)))),
+        %% Directory remains as-is — no .tmp left behind either.
+        ?_assertEqual(true, filelib:is_dir(File)),
+        ?_assertEqual(false, filelib:is_regular(File ++ ".tmp"))
+    ].
+
+%% Fix #3: when mark_flushed/1 returns {error, _} after successful renames,
+%% the success summary must surface that failure (as a conflict-like entry)
+%% rather than silently swallowing it. Otherwise disk has moved on but the
+%% ChangeLog still shows the entries as pending — next flush hits
+%% external_edit on its own writes.
+mark_flushed_failure_is_reported(#{proj_dir := ProjDir, pid := Pid}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(File, Original),
+    {Start, End, OldBody} = locate(Original, <<"value => 0\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>,
+            <<"value">>,
+            <<"value => 42\n">>,
+            OldBody,
+            list_to_binary(File),
+            Start,
+            End
+        )
+    ),
+    %% Simulate a marker failure by routing through the exported
+    %% complete_flush/4 helper with seqs that the (live) ChangeLog server
+    %% cannot mark — pass a manually-crafted scenario by killing the
+    %% ChangeLog gen_server before calling mark_flushed.
+    stop(Pid),
+    %% Without a live ChangeLog server, mark_flushed/1 errors via the
+    %% gen_server:call mechanism. complete_flush/4 must wrap that into the
+    %% summary as a flush_marker_failed conflict.
+    Files = [list_to_binary(File)],
+    Renamed = [],
+    Failed = [],
+    Seqs = [1],
+    %% Trap exits so the failed gen_server:call does not nuke this test
+    %% process — complete_flush/4 should catch the exit and turn it into
+    %% the marker conflict.
+    process_flag(trap_exit, true),
+    Result =
+        try
+            beamtalk_workspace_flush:complete_flush(Files, Renamed, Failed, Seqs)
+        catch
+            exit:_ -> caller_did_not_handle
+        end,
+    [
+        ?_assertMatch({ok, _}, Result),
+        ?_assert(
+            case Result of
+                {ok, S} ->
+                    Conflicts = maps:get(conflicts, S),
+                    lists:any(
+                        fun(C) ->
+                            maps:get(reason, C, undefined) =:= <<"flush_marker_failed">>
+                        end,
+                        Conflicts
+                    );
+                _ ->
+                    false
+            end
+        )
+    ].
+
+%% Fix #1: when Phase B aborts mid-loop, shadowed entries whose survivor
+%% never reached disk must be excluded from the mark-flushed set. The pure
+%% helpers `renamed_target_keys/1` and `filter_shadowed_by_survivor/2` are
+%% the seam — exercise them directly with synthetic entries.
+filter_shadowed_keeps_only_renamed_survivors() ->
+    %% Set up via the real changelog so the entries have the right shape.
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        %% Two entries for (Counter, value): the survivor (newer) and a shadow.
+        %% One unrelated entry for (Widget, render) that never gets renamed.
+        File1 = <<"/proj/src/counter.bt">>,
+        File2 = <<"/proj/src/widget.bt">>,
+        {ok, _} = beamtalk_workspace_changelog:append(
+            method_input(
+                <<"Counter">>, <<"value">>, <<"new1">>, <<"old1">>, File1, 0, 4
+            )
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(
+            method_input(
+                <<"Counter">>, <<"value">>, <<"new2">>, <<"old2">>, File1, 0, 4
+            )
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(
+            method_input(
+                <<"Widget">>, <<"render">>, <<"new3">>, <<"old3">>, File2, 0, 4
+            )
+        ),
+        AllPending = beamtalk_workspace_changelog:flushable_pending(),
+        %% Survivor for (Counter, value) is the newest one. Build "renamed
+        %% survivor" set as if File1 was renamed but File2 was not.
+        CounterEntries = [
+            E
+         || E <- AllPending,
+            beamtalk_workspace_changelog:entry_class(E) =:= <<"Counter">>
+        ],
+        RenamedSurvivor =
+            hd(
+                lists:sort(
+                    fun(A, B) ->
+                        beamtalk_workspace_changelog:entry_seq(A) >
+                            beamtalk_workspace_changelog:entry_seq(B)
+                    end,
+                    CounterEntries
+                )
+            ),
+        Shadowed = [
+            E
+         || E <- CounterEntries,
+            beamtalk_workspace_changelog:entry_seq(E) =/=
+                beamtalk_workspace_changelog:entry_seq(RenamedSurvivor)
+        ],
+        ?assertEqual(1, length(Shadowed)),
+        Keys = beamtalk_workspace_flush:renamed_target_keys([RenamedSurvivor]),
+        Kept = beamtalk_workspace_flush:filter_shadowed_by_survivor(Shadowed, Keys),
+        ?assertEqual(1, length(Kept))
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
+
+filter_shadowed_drops_unrenamed_survivors() ->
+    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    try
+        File2 = <<"/proj/src/widget.bt">>,
+        {ok, _} = beamtalk_workspace_changelog:append(
+            method_input(
+                <<"Widget">>, <<"render">>, <<"new1">>, <<"old1">>, File2, 0, 4
+            )
+        ),
+        {ok, _} = beamtalk_workspace_changelog:append(
+            method_input(
+                <<"Widget">>, <<"render">>, <<"new2">>, <<"old2">>, File2, 0, 4
+            )
+        ),
+        AllPending = beamtalk_workspace_changelog:flushable_pending(),
+        Sorted = lists:sort(
+            fun(A, B) ->
+                beamtalk_workspace_changelog:entry_seq(A) >
+                    beamtalk_workspace_changelog:entry_seq(B)
+            end,
+            AllPending
+        ),
+        [_Survivor | Shadowed] = Sorted,
+        ?assertEqual(1, length(Shadowed)),
+        %% No survivor was renamed: the empty set must exclude the shadow.
+        EmptyKeys = beamtalk_workspace_flush:renamed_target_keys([]),
+        Kept = beamtalk_workspace_flush:filter_shadowed_by_survivor(Shadowed, EmptyKeys),
+        ?assertEqual([], Kept)
+    after
+        stop(Pid),
+        restore_home(OldHome),
+        del_tree(TmpHome)
+    end.
 
 %%====================================================================
 %% Pure helpers
