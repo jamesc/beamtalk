@@ -13,7 +13,7 @@ Every `SystemNavigation` query that needs AST information — `sendersOf:`,
 **re-parses every method's source on every call**, and does so by crossing
 the runtime→compiler process boundary on each method:
 
-```
+```text
 SystemNavigation.bt
   └── (Erlang beamtalk_interface) findSendersIn:selector:        [BT]
         └── beamtalk_interface                                    [Erlang]
@@ -93,9 +93,11 @@ and process-boundary hops eliminated.
 
 ### Index data model
 
-Three ETS tables, owned by a supervised gen_server `beamtalk_xref`,
-created `protected, named_table, {read_concurrency, true}` so writes
-serialise through the gen_server but reads bypass it.
+Three ETS bag tables (methods, senders, references) plus a small
+fourth `xref_class_gen` metadata table for the per-class generation
+counter (see "Atomicity"), all owned by a supervised gen_server
+`beamtalk_xref` and created `protected, named_table, {read_concurrency,
+true}` so writes serialise through the gen_server but reads bypass it.
 
 ```erlang
 %% Per-method registration. Keyed by {class, class_side, selector} so
@@ -103,17 +105,17 @@ serialise through the gen_server but reads bypass it.
 beamtalk_xref_methods :: bag of
     { Key :: {Class :: atom(), ClassSide :: boolean(), Selector :: atom()},
       MethodInfo :: #{
-        owner          := atom(),        %% normalised class atom
-                                         %%   (instance tag, or 'Foo class' for metaclass)
-        line           := pos_integer(), %% method definition line in source
-        source_status  := indexed
-                        | unindexed_runtime_fun  %% register/4, put_method/3, computed fun
-                        | synthetic,             %% compiler-generated accessor
-        provenance     := class_body
-                        | extension
-                        | class_builder
-                        | put_method,
-        gen            := pos_integer()  %% per-class generation, see "Atomicity"
+        owner          := atom(),
+            %% normalised class atom (instance tag, or 'Foo class' for metaclass)
+        line           := pos_integer(),
+            %% method definition line in source
+        source_status  := indexed | unindexed_runtime_fun | synthetic,
+            %% indexed                = normal compiled-from-source method
+            %% unindexed_runtime_fun  = register/4, put_method/3, computed fun
+            %% synthetic              = compiler-generated accessor
+        provenance     := class_body | extension | class_builder | put_method,
+        gen            := pos_integer()
+            %% per-class generation, see "Atomicity"
       }
     }.
 
@@ -469,9 +471,10 @@ the same hook.
 
 `CompiledMethod >> messages` is a cheap in-image read of the method's
 literal frame — the selectors the method sends are stored alongside the
-bytecode at compile time, not recomputed. `SystemNavigation >>
-#allImplementorsOf:` walks `SystemDictionary` (a flat in-image hash) once.
-`#allSendersOf:` is backed by the literal-frame walk.
+bytecode at compile time, not recomputed.
+`SystemNavigation >> #allImplementorsOf:` walks `SystemDictionary`
+(a flat in-image hash) once. `#allSendersOf:` is backed by the
+literal-frame walk.
 
 We adopt the *idea* (precompute and store the per-method send set) but
 not the storage location. Smalltalk stores it on the CompiledMethod;
