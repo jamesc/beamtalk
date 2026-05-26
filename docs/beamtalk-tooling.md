@@ -432,9 +432,11 @@ _   // FlushResult; quiet on success
 
 If `flush` detects an external edit on a target file the offending entries stay
 pending and surface under the result's `#conflicts` field. Recover with
-`Workspace changes clear` (discard memory edits), `Workspace changes revert: anEntry`
-(undo one patch by re-installing its prior body), or reconcile the file by hand
-and retry `:flush`.
+`Workspace changes revert: anEntry` (undo one patch by re-installing its prior
+body), `Workspace changes clear` (drop the pending ChangeLog entries — note
+already-installed patches remain live until workspace restart; use `revert:` if
+you also want to roll back the in-memory method body), or reconcile the file by
+hand and retry `:flush`.
 
 For write-through editor semantics: `Workspace autoflush: true` flips a
 per-workspace setting so every successful durable patch flushes immediately.
@@ -791,7 +793,7 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `search_examples` | Search the bundled example corpus |
 | `search_classes` | Search class names and documentation |
 | `save_method` | Durable live patch (ADR 0082): wraps `aClass compile: #sel source: body`; logs a durable ChangeEntry |
-| `try_method` | Ephemeral spike (ADR 0082): wraps `aClass tryCompile: #sel source: body`; logs an ephemeral ChangeEntry that auto-prunes on flush/restart |
+| `try_method` | Ephemeral spike (ADR 0082): wraps `aClass tryCompile: #sel source: body`; logs an ephemeral ChangeEntry (not flushable — pruned on workspace restart or via `Workspace changes clear`) |
 | `save_class` | Create a new class file (ADR 0082): wraps `Workspace newClass: source at: path`; logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
 | `flush` | Write pending durable changes to disk (ADR 0082): wraps `Workspace flush` (optional `class` / `file` / `kind` argument selects a subset) |
 | `list_changes` | Wraps `Workspace changes` — serialised view of the pending ChangeLog |

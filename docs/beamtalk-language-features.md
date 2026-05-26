@@ -2607,7 +2607,10 @@ When flush detects an external edit, the offending entries stay in the log and
 the user picks the recovery path:
 
 ```beamtalk
-Workspace changes clear                           // discard the in-memory edits
+Workspace changes clear                           // drop the pending ChangeLog entries
+                                                  //   (already-installed patches stay in memory
+                                                  //    until workspace restart — use `revert:` to
+                                                  //    actually re-install the prior method body)
 Workspace changes revert: anEntry                 // undo one patch (re-install prior body)
 // or open the file, reconcile by hand, then:
 Workspace flush                                   // retry once disk matches expectations
