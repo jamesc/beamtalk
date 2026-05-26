@@ -1,0 +1,196 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the ChangeLog / ChangeEntry collection protocol
+// (ADR 0082 Phase 1, BT-2284).
+//
+// The live `Workspace changes` path requires the workspace singleton + the
+// changelog gen_server, which are not available in the BUnit context
+// (workspace_mode: false). These tests therefore construct ChangeLog /
+// ChangeEntry value objects directly (via `new:`) to cover the collection
+// protocol and the active-vs-full (orphan / prior-epoch) filtering. The live
+// end-to-end path (`Workspace changes` returning a populated ChangeLog) is
+// covered by the gen_server's EUnit tests and the WorkspaceInterface facade
+// selector checks below.
+
+TestCase subclass: ChangeLogTest
+
+  // --- Fixtures: build ChangeEntry value objects directly ---
+
+  // An active, durable, human method patch (Counter>>increment).
+  activeEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 1,
+        #className => #Counter,
+        #selector => #increment,
+        #kind => #instance,
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #human,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true
+      }
+
+  // A second active entry (Counter>>decrement, agent-authored).
+  activeAgentEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 2,
+        #className => #Counter,
+        #selector => #decrement,
+        #kind => #instance,
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #agent,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true
+      }
+
+  // An orphan entry from a prior epoch (excluded from the default view).
+  orphanEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 0,
+        #className => #Widget,
+        #selector => #render,
+        #kind => #instance,
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #human,
+        #orphan => true,
+        #priorEpoch => true,
+        #active => false
+      }
+
+  // A new-class entry (no selector).
+  newClassEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 3,
+        #className => #DoubleCounter,
+        #selector => nil,
+        #kind => #'new-class',
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #agent,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true
+      }
+
+  // A ChangeLog holding two active entries plus one orphan.
+  mixedLog =>
+    ChangeLog new: #{
+      #entries => #(self orphanEntry, self activeEntry, self activeAgentEntry)
+    }
+
+  emptyLog => ChangeLog new
+
+  // --- Empty ChangeLog ---
+  testEmptyLogSizeIsZero => self assert: self emptyLog size equals: 0
+
+  testEmptyLogIsEmpty => self assert: self emptyLog isEmpty
+
+  testEmptyLogNotEmptyIsFalse => self deny: self emptyLog notEmpty
+
+  testEmptyLogDirtyMethodsThroughActiveEntries =>
+    // dirtyMethods delegates to FFI in the live path; here we verify the
+    // empty-log collection views directly.
+    self assert: self emptyLog activeEntries equals: #()
+
+  // --- size / isEmpty / notEmpty reflect the ACTIVE subset ---
+  testMixedLogSizeCountsOnlyActive =>
+    // 2 active + 1 orphan => size is 2 (active only).
+    self assert: self mixedLog size equals: 2
+
+  testMixedLogNotEmpty => self assert: self mixedLog notEmpty
+
+  testMixedLogIsEmptyIsFalse => self deny: self mixedLog isEmpty
+
+  testActiveEntriesExcludeOrphan =>
+    self assert: self mixedLog activeEntries size equals: 2
+
+  testAllEntriesIncludeOrphan =>
+    self assert: self mixedLog allEntries size equals: 3
+
+  // --- do: iterates only ACTIVE entries ---
+  testDoVisitsOnlyActiveEntries =>
+    visited := #()
+    self mixedLog do: [:e | visited := visited add: e className]
+    self assert: visited size equals: 2
+
+  testDoSkipsOrphanClass =>
+    visited := #()
+    self mixedLog do: [:e | visited := visited add: e className]
+    self deny: (visited includes: #Widget)
+
+  // --- select: ranges over the FULL set, so it can reach orphans ---
+  testSelectCanReachOrphans =>
+    orphans := self mixedLog select: [:e | e isOrphan]
+    self assert: orphans size equals: 1
+
+  testSelectOrphanIsExpectedClass =>
+    orphans := self mixedLog select: [:e | e isOrphan]
+    self assert: orphans first className equals: #Widget
+
+  testSelectActiveSubset =>
+    actives := self mixedLog select: [:e | e isActive]
+    self assert: actives size equals: 2
+
+  testSelectByAuthorKind =>
+    agentChanges := self mixedLog select: [:e | e isAgent]
+    self assert: agentChanges size equals: 1
+
+  testSelectEmptyWhenNoMatch =>
+    none := self mixedLog select: [:e | e className =:= #Nonexistent]
+    self assert: none isEmpty
+
+  // --- ChangeEntry predicates ---
+  testEntryClassName => self assert: self activeEntry className equals: #Counter
+
+  testEntrySelector => self assert: self activeEntry selector equals: #increment
+
+  testEntryIsDurable => self assert: self activeEntry isDurable
+
+  testEntryIsNotEphemeral => self deny: self activeEntry isEphemeral
+
+  testEntryIsFlushable => self assert: self activeEntry isFlushable
+
+  testEntryIsHuman => self assert: self activeEntry isHuman
+
+  testEntryIsAgent => self assert: self activeAgentEntry isAgent
+
+  testEntryIsActive => self assert: self activeEntry isActive
+
+  testOrphanEntryIsOrphan => self assert: self orphanEntry isOrphan
+
+  testOrphanEntryIsPriorEpoch => self assert: self orphanEntry isPriorEpoch
+
+  testOrphanEntryIsNotActive => self deny: self orphanEntry isActive
+
+  testNewClassEntryIsNewClass => self assert: self newClassEntry isNewClass
+
+  testNewClassEntrySelectorIsNil =>
+    self assert: self newClassEntry selector isNil
+
+  testMethodEntryIsNotNewClass => self deny: self activeEntry isNewClass
+
+  // --- printString ---
+  testEntryPrintStringForMethodPatch =>
+    self assert: self activeEntry printString equals: "Counter>>increment"
+
+  testEntryPrintStringForNewClass =>
+    self assert: self newClassEntry printString equals: "DoubleCounter (new-class)"
+
+  testEmptyLogPrintString =>
+    self assert: self emptyLog printString equals: "a ChangeLog with 0 entries"
+
+  testMixedLogPrintStringCountsActive =>
+    self assert: self mixedLog printString equals: "a ChangeLog with 2 entries"
+
+  // --- WorkspaceInterface facade: `changes` selector exists ---
+  testWorkspaceIncludesSelectorChanges =>
+    self assert: (WorkspaceInterface includesSelector: #changes)
