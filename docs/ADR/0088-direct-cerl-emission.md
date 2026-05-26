@@ -152,33 +152,37 @@ No user-facing change. Contributors writing new codegen use the same `docvec!`/`
 ### Option A: Direct cerl Emission via ETF (Recommended)
 
 - 🧑‍💻 **Newcomer contributor**: "When I'm adding a new codegen function, the Rust type system tells me if I've assembled a malformed Core Erlang construct. I don't have to wait for `core_parse` to reject my string and decode an Erlang parse error to find the bug."
-- 🎩 **Smalltalk purist**: "Compilation should be a function over structured data, not a text-templating operation. Smalltalk compilers manipulate ASTs internally — this aligns us with that tradition."
+- 🎩 **Smalltalk purist**: "BT-875's cleanup commits — every `Document::String(format!(...))` violation, every escape-bug PR — only happen because the current `Document` API has a *typed leaf that accepts arbitrary text*. The discipline is convention; the type system permits it. `cerl::Expr` removes the escape hatch — there is no leaf that accepts a raw string, so the bug class becomes unrepresentable. That's the strongest argument: not 'cerl is fancier' but 'BT-875 keeps recurring because the type system doesn't actually prevent it.'"
 - ⚙️ **BEAM veteran**: "`compile:forms/2` with `from_core` is *the* way to drive the Core Erlang compiler from another language on BEAM. It's what LFE does. We're already doing the in-memory `compile:forms` call (ADR 0022); we just have a needless `core_scan`/`core_parse` round-trip in front of it."
-- 🏭 **Operator**: "Fewer codegen failure modes reach production. Mis-escaped atoms or malformed expressions become Rust type errors at build time instead of `core_parse` errors at runtime. Compile latency drops a few percent — small but real."
-- 🎨 **Language designer**: "Annotations on cerl nodes survive to BEAM bytecode. This is the foundation for proper source-mapped diagnostics, dialyzer integration, and debugger support — none of which work cleanly when our generated text loses position information at the text/AST boundary."
+- 🏭 **Operator**: "Fewer codegen failure modes reach production. Mis-escaped atoms or malformed expressions become Rust type errors at build time instead of `core_parse` errors at runtime. Compile latency improvement is bonus — the real operator win is that the BT-875 class of bug becomes impossible to ship."
+- 🎨 **Language designer**: "Annotations on cerl nodes survive to BEAM bytecode. This is the foundation for proper source-mapped diagnostics, dialyzer integration, and debugger support — none of which work cleanly when our generated text loses position information at the text/AST boundary. *Caveat*: this benefit requires Beamtalk's AST to carry source positions through to codegen call sites, which today it does only partially. The ADR enables the downstream end; the upstream end is separate work that must happen for the benefit to materialise."
 
 ### Option B: Keep Text Emission (Status Quo)
 
-- 🧑‍💻 **Newcomer contributor**: "I can `cat module.core` and read what was generated. With cerl-as-terms I'd need a pretty-printer I don't have memorized. The text path is debuggable in a way structured terms aren't."
-- 🎩 **Smalltalk purist**: "Don't fix what isn't broken. The current ~245 codegen unit tests plus stdlib/BUnit/REPL end-to-end suites prove the text path produces correct BEAM. Ship features."
-- ⚙️ **BEAM veteran**: "The `core_scan`/`core_parse` calls are stable OTP — they're not going away, they're not slow enough to matter. The compile-time cost is dominated by Beamtalk's own analysis, not the Erlang side."
-- 🏭 **Operator**: "Any refactor of 58K LOC of codegen is a regression risk. The current pipeline is six months stable. Stability beats theoretical optimization."
+- 🧑‍💻 **Newcomer contributor**: "I can `cat module.core` and read what was generated. The text path is debuggable in a way structured terms aren't — diffing two Document outputs is a string diff; diffing two cerl ETF blobs is opaque without specialised tooling."
+- 🎩 **Smalltalk purist**: "Don't fix what isn't broken. The ~245 codegen unit tests plus stdlib/BUnit/REPL end-to-end suites prove the text path produces correct BEAM. Ship features."
+- ⚙️ **BEAM veteran**: "The `core_scan`/`core_parse` calls are stable OTP, they're not going away, and they're not slow enough to matter — the per-compile cost is dominated by Beamtalk's own analysis, not the Erlang side. The performance argument for cerl-direct is approximately zero in practice."
+- 🏭 **Operator**: "Any refactor of 58K LOC of codegen is a regression risk. The pipeline is six months stable. Stability beats theoretical optimization, and the migration's '50 sites remaining' Phase 4 trigger is the same forcing function pattern ADR 0018 used — and ADR 0018's migration has lingered. Long transitions get half-done."
 - 🎨 **Language designer**: "Text is a versioned, debuggable, interoperable wire format. cerl record layouts change between OTP versions (rare, but it has happened). Coupling our codegen to a private OTP record shape is a long-term maintenance bet."
+- 🛠️ **Sharpest argument — Compiler architect**: "ADR 0018 *already* gave us typed codegen. The `Document` type already prevents string-concatenation bugs at the combinator level. BT-875 was about *reverts to string concatenation*, not about Document failing as an abstraction. Why is `cerl::Expr` worth a 58K LOC migration when `Document` is already typed? The proposed answer — that `Document::String(format!(...))` is a typed escape hatch — is real, but it's also fixable with a much cheaper change: forbid `Document::String` constructors at module boundaries, or replace `Document::String` with a `Atom`/`VarName`/`StringLit` sum type. The 'cerl-direct' migration is a hammer for a problem that has a screwdriver-shaped solution."
 
 ### Option C: NIF-based cerl Construction (Embed ERTS into Rust)
 
-- 🧑‍💻 **Newcomer contributor**: "No serialization at all — the Rust compiler constructs BEAM terms directly in the VM's heap. Lowest possible latency."
-- 🎩 **Smalltalk purist**: "Compiler and runtime sharing the same memory space is more 'Smalltalk' than any Port boundary."
-- ⚙️ **BEAM veteran**: "Eliminates the ETF encode/decode entirely. If we're serious about low latency, this is the path."
-- 🏭 **Operator**: "Strongly negative. A NIF crash in `compile:forms/2` kills the entire BEAM node, taking all running actors with it. ADR 0022 deferred NIF specifically for this reason; the same argument applies."
-- 🎨 **Language designer**: "Couples codegen to ERTS internals. Distribution complexity (NIF .so per platform). Already rejected in ADR 0022."
+- 🧑‍💻 **Newcomer contributor**: "One fewer concept to learn. There's no ETF spec, no wire-format versioning, no encoder/decoder pair to keep in sync — the Rust function returns a value and the BEAM consumes it. Mental model maps directly to a function call across an FFI boundary, which is more familiar than 'serialize, ship, deserialize'."
+- 🎩 **Smalltalk purist**: "The deeper Smalltalk principle isn't 'compiler in the image' — it's that the compiler is *reachable* and *modifiable* from the live environment. A NIF-embedded compiler is dlopened into the running BEAM; you can inspect its dispatch table, hot-reload it without restarting the runtime, instrument its entry points from BEAM tooling. That's strictly more accessible than a Port subprocess whose internals are opaque to `observer` and `recon`."
+- ⚙️ **BEAM veteran**: "ADR 0022's NIF rejection was based on `compile:forms/2` being a long-running call that would block schedulers. That argument doesn't apply here — the NIF would only do the cerl Rust → cerl BEAM term conversion (a microsecond-scale pure data transform), then call `compile:forms/2` from the same BEAM process via the standard Erlang API. The actual compile remains on a normal Erlang scheduler, supervised normally."
+- 🏭 **Operator**: "The 'a NIF crash kills the BEAM' framing is overbroad in 2026. Rustler with panic boundaries plus dirty NIFs for long operations is a different safety story than raw `enif_*` C code. The real failure mode for a *conversion-only* NIF is malformed input, which can be caught and returned as `{error, Reason}` without escaping the NIF — the same way the existing ETF decode path catches malformed terms today."
+- 🎨 **Language designer**: "The strongest case for a NIF here isn't latency — it's *fidelity*. ETF is a *copy*: the Rust-side cerl tree is encoded, transmitted, decoded, and reconstructed as a fresh BEAM term tree. A NIF can construct the BEAM term directly in the destination heap, sharing literals (atom tables, common subtree literals like `nil`) by reference. For a large codegen output (thousands of nodes), that's a measurable memory and latency win that no amount of ETF encoder optimisation can match."
+- 🪓 **Sharpest argument — Hybrid Port + NIF-for-conversion**: "The ADR addresses this in Alternative 7 but defers it. The deferral is reasonable *if* Phase 0's napkin shows ETF encode/decode is a small share of per-compile cost — but for large modules with thousands of cerl nodes, heap-resident term construction with literal sharing could be a meaningful win that ETF can't match by design. If the napkin data turns out the other way (encode/decode dominates), the right move is not 'ship ETF anyway' but 'pivot to the hybrid'. The ADR's commitment to ETF first should be explicitly contingent on the napkin's timing data, not implicit."
 
 ### Tension Points
 
 - **Debuggability of the wire vs. wire efficiency**: Text dumps are easier for humans; cerl terms are easier for machines. Mitigation: `core_pp:format/1` lets us reconstruct text on demand for debugging, so we keep human-readability as an opt-in tool, not the always-on wire format.
 - **Coupling to OTP `cerl` record shapes**: Cerl records are documented in OTP but technically internal. Mitigation: the shapes have been stable since OTP 18 (2014); the migration's per-file structure means we could re-target a different Erlang AST shape if OTP ever broke us, with the same combinator surface.
-- **Refactor cost vs. compile-speed win**: 58K LOC of codegen migration is a large refactor for a single-digit-percent compile speedup. Mitigation: the compile-speed win is not the primary motivation — annotation fidelity, type-checked codegen, and removing the string-escaping risk surface (BT-875 was a real bug) are the larger long-term wins. The refactor is organic, not a dedicated project, following the ADR 0018 model.
+- **Refactor cost vs. payoff**: 58K LOC of codegen migration is a large refactor. The compile-speed win is small; the type-checked-codegen win partially overlaps with what ADR 0018 already delivered (see compiler-architect steelman above). The genuinely *new* benefit is: (a) string-leaf escape-hatch elimination (closes the BT-875 recurrence vector), plus (b) annotation infrastructure for downstream tooling. Whether (a) + (b) justifies the migration is the decision's core risk. Mitigation: the per-file migration model means the cost is amortised across normal feature work, and Phase 0's napkin produces a real cost estimate before any large commitment.
 - **Tooling for inspecting generated cerl**: Today a contributor can read `.core` files. With cerl-terms-only, contributors need a `--emit-core` flag to dump `core_pp:format/1` output. Acceptable cost; small new tool.
+- **Annotation fidelity depends on upstream work**: A primary advertised benefit (source positions surviving to BEAM) only materialises if Beamtalk's AST tracks source positions consistently to codegen call sites — which today it does only partially. This ADR enables the downstream half of that pipeline; the upstream half is unrelated work that must happen for the benefit to be real. The proposal should not be sold on annotation fidelity alone, because the cerl wire is necessary but not sufficient.
+- **Long-transition risk**: The per-PR organic-migration model has a track record (ADR 0018) of stretching out for a year+ with a long tail of un-migrated call sites. The Phase 4 trigger (≤50 sites) is a soft forcing function; if it doesn't fire within a defined window, the codebase carries the maintenance cost of two parallel paths indefinitely. Mitigation: add a hard checkpoint at 12 months — if migration is <60% by then, escalate to a dedicated sprint rather than continuing organic.
 
 ## Alternatives Considered
 
@@ -201,14 +205,16 @@ Construct Erlang surface-syntax AST in Rust, encode via ETF, call `compile:forms
 - We'd be re-encoding decisions the compiler has already made: our codegen already produces post-desugar shapes (explicit case expressions for pattern matching, explicit gen_server dispatch trees). Targeting cerl matches the level we're already at.
 - ADR 0003 already chose Core Erlang over Erlang source for codegen simplicity. The same argument applies to the AST: cerl is simpler and matches our intent.
 
-### 3. NIF-based Cerl Construction (Embed ERTS into Rust)
+### 3. Full NIF-based Compiler (Embed Rust Compiler into BEAM)
 
-Use Rustler or hand-rolled NIFs to construct `cerl` terms in the BEAM VM's heap directly, eliminating ETF encoding/decoding.
+Use Rustler or hand-rolled NIFs to host the *entire Rust compiler* in the BEAM VM, constructing `cerl` terms in the BEAM heap directly and calling `compile:forms/2` from inside the NIF or from the calling Erlang process.
 
 **Rejected because:**
-- ADR 0022 deferred NIF specifically because a NIF crash kills the BEAM node (taking running actors with it). The same risk profile applies: `compile:forms/2` is a 10–500 ms operation exercising complex code paths, exactly the wrong workload for an in-process NIF.
-- The ETF encode/decode overhead is small relative to compile time (~1–2 ms on modules taking 10–500 ms to compile).
+- ADR 0022 deferred this specifically because a NIF crash kills the BEAM node (taking running actors with it). The same risk profile applies: the full Beamtalk compile pipeline is a 10–500 ms operation exercising complex code paths, exactly the wrong workload for an in-process NIF — and dirty NIFs only partially mitigate it (they avoid scheduler blocking but not crash propagation).
+- The ETF encode/decode overhead is small relative to compile time on currently-sized modules.
 - The Port boundary preserved by this ADR is the only thing keeping compiler bugs from being workspace-killers.
+
+A *narrower* NIF variant — Port for the compiler, NIF only for cerl-term conversion — is a distinct alternative (see Alternative 7 below) with a meaningfully different risk profile.
 
 ### 4. Direct BEAM Bytecode Emission (Skip cerl Too)
 
@@ -237,6 +243,16 @@ Keep the text path as the default; add a `--cerl-wire` flag that opts into the c
 - A permanent dual path is the worst of both worlds — two codegen targets to maintain, two test surfaces, two failure modes.
 - The ADR 0018 migration model already provides the right transition mechanism: the `Document` type carries the migration state internally; per-file migration moves leaves from text to cerl while the combinator surface is stable. No user-visible flag is needed.
 - Acceptable as a *transition* state (the migration period necessarily has both paths coexisting), but not as a *permanent* configuration.
+
+### 7. Hybrid Port + NIF-for-cerl-Conversion
+
+Keep the OTP Port boundary for the compiler itself (preserving ADR 0022's crash-isolation guarantee for the long-running `compile:forms/2` call), but replace the *ETF encode/decode step alone* with a NIF that constructs BEAM-heap cerl terms directly from the Rust cerl representation. The NIF does pure data conversion (no compilation work, no scheduler blocking, no side effects); the compiler itself stays on its supervised Port.
+
+**Rejected (for now) because:**
+- The genuine win it captures — heap-resident term construction with literal sharing — is *measurable* (potentially significant for large modules) but is **second-order** relative to the type-safety and annotation-fidelity wins this ADR primarily targets. We can adopt cerl-direct via ETF first, measure the actual encode/decode cost on representative workloads, and revisit the NIF path *only if* that cost turns out to be a bottleneck.
+- Introducing a NIF — even a conversion-only one — adds a `.so` per platform to the distribution surface, a new failure mode in the build pipeline, and a new operational concern (NIF-version vs OTP-version compatibility). That's real complexity for a benefit we haven't yet measured.
+- The conversion NIF interacts with the Port in a non-obvious way: a Port message would still arrive on the Erlang side as a binary, get decoded via the NIF, then be passed to `compile:forms/2`. The Port's atomic-message guarantee no longer cleanly applies — the message bytes are merely a vehicle for the NIF call. This blurs the architectural boundary ADR 0022 established for the Port.
+- **Honest acknowledgement**: the steelman for this alternative (raised in Option C's "sharpest argument") is the strongest case for revisiting NIFs in this ADR. We're deferring it, not refuting it. If Phase 0's napkin shows ETF encode/decode dominating the per-compile cost for large modules, this alternative should be reopened as a follow-up ADR.
 
 ## Consequences
 
@@ -275,9 +291,9 @@ The minimum proof that the wire contract works. Goal: compile a hand-constructed
 - Add an ETF encoder for those nodes; verify byte-equivalence against `term_to_binary(cerl:c_module(...))` on the Erlang side via a unit test.
 - Add a Port message variant `{cerl, Etf}` in `beamtalk_compiler_server` and `beamtalk_build_worker` that `binary_to_term`s then calls `compile:forms(CoreModule, [from_core, binary, return_errors])`.
 - Smoke test: Rust code sends an empty-module cerl term across the existing Port, BEAM compiles + loads it, `beamtalk_test_module:module_info(module) =:= bt_napkin`.
-- Measure: time the round-trip vs. the equivalent text path; record the delta as the baseline for the Performance consequence claim.
+- Measure: time the round-trip vs. the equivalent text path on (i) the empty module and (ii) a hand-constructed large cerl tree (~thousands of nodes, representative of a real Beamtalk module). Record breakdown: ETF encode time, ETF decode time, `compile:forms` time, total.
 
-This phase is the wire-check. If it works, we know the rest of the migration is mechanical filling-out of node types; if it doesn't, we discover the obstacle before touching any codegen.
+This phase is the wire-check AND the contingency check. If it works and ETF cost is a small share of total, Phase 1 proceeds as planned. If it works but ETF cost dominates for large modules, pivot to Alternative 7 (Port + NIF-for-conversion) before committing to the full ETF-direct migration. The commitment to ETF over NIF in this ADR is *contingent on the napkin's timing data*.
 
 ### Phase 1: Cerl Rust Mirror — Full Node Set + ETF Encoders (S)
 
