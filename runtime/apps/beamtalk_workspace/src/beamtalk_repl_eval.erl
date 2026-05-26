@@ -30,7 +30,7 @@ module loading to beamtalk_repl_loader (BT-863).
 %% `Behaviour compile:source:' / `tryCompile:source:'. Called via erlang:apply
 %% from beamtalk_behaviour_intrinsics so beamtalk_runtime keeps no compile-time
 %% dependency on beamtalk_workspace.
--export([compile_method/4]).
+-export([compile_method/4, compile_method/6]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
@@ -44,7 +44,8 @@ module loading to beamtalk_repl_loader (BT-863).
     handle_class_definition/7,
     handle_method_definition/4,
     handle_protocol_definition/3,
-    wrap_load_err/3
+    wrap_load_err/3,
+    normalize_method_source/2
 ]).
 -endif.
 
@@ -273,29 +274,57 @@ reload_class_file(Path, ExpectedClassName) ->
 Install a live method patch from a `(ClassName, Selector, Source, Intent)' tuple
 without REPL session state (ADR 0082 Phase 1, BT-2283).
 
-Backs `Behaviour compile:source:' (`Intent = durable') and
-`tryCompile:source:' (`Intent = ephemeral'). `Source' is the method body String
-exactly as the caller supplied it — either a full `selector => body' definition
-or a bare body; both are accepted because the synthesized `>>' expression
-(`ClassName >> Source') is recompiled to recover the canonical MethodInfo.
-
-The patch compiles and installs in memory, and the install chokepoint
-(`beamtalk_repl_loader:load_recompiled_method/7') emits a ChangeLog entry tagged
-with `Intent'. Returns `{ok, ClassName}' on success or `{error, Reason}' on
-compile/install failure (memory unchanged, no ChangeLog entry — the
-all-or-nothing contract).
+Equivalent to `compile_method/6' with the author defaulting to `<<"repl">>' /
+`human' — used by callers (e.g. tests) that do not carry audit metadata.
 """.
 -spec compile_method(binary(), atom() | binary(), binary(), durable | ephemeral) ->
     {ok, binary()} | {error, term()}.
 compile_method(ClassNameBin, Selector, Source, Intent) ->
+    compile_method(ClassNameBin, Selector, Source, Intent, <<"repl">>, human).
+
+-doc """
+Install a live method patch, threading the caller's audit metadata
+(ADR 0082 Phase 1, BT-2283).
+
+Backs `Behaviour compile:source:' (`Intent = durable') and
+`tryCompile:source:' (`Intent = ephemeral'). `Source' is the method definition
+String exactly as the caller supplied it. The accepted forms are:
+
+  - A **full method definition** that names its own parameters, for any selector
+    arity: unary (`increment => body'), keyword (`at: k put: v => body'), or
+    binary (`+ other => body'). This is the form tools should always send.
+  - A **bare body** with no header — only meaningful for a **unary** selector,
+    where the canonical `selector => ' header is prepended. A bare body cannot
+    supply parameter names for a keyword/binary selector, so for those a full
+    definition is required (a bare body would fail to compile).
+
+Either way the synthesized `>>' expression (`ClassName >> definition') is
+recompiled to recover the canonical MethodInfo.
+
+`Author' / `AuthorKind' identify the caller for the ChangeLog audit trail:
+agent-driven patches (MCP `save_method' / `try_method') pass `AuthorKind = agent';
+the human REPL path passes `human'. They are stamped onto the MethodInfo so the
+install chokepoint records them verbatim instead of defaulting to `human'.
+
+The patch compiles and installs in memory, and the install chokepoint
+(`beamtalk_repl_loader:load_recompiled_method/7') attempts (best-effort) to emit
+a ChangeLog entry tagged with `Intent' and the author metadata. Returns
+`{ok, ClassName}' on success or `{error, Reason}' on compile/install failure
+(memory unchanged — the all-or-nothing contract for the install).
+""".
+-spec compile_method(
+    binary(), atom() | binary(), binary(), durable | ephemeral, binary(), human | agent
+) ->
+    {ok, binary()} | {error, term()}.
+compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
     SelectorBin = to_binary(Selector),
     SourceStr = unicode:characters_to_list(normalize_method_source(SelectorBin, Source)),
     Expression =
         unicode:characters_to_list(<<ClassNameBin/binary, " >> ">>) ++ SourceStr,
     %% Compile the synthesized standalone definition to recover the canonical
     %% MethodInfo (selector, is_class_method, method_source) the install path
-    %% expects, then tag it with the caller's intent so the ChangeLog entry is
-    %% durable / ephemeral as appropriate.
+    %% expects, then tag it with the caller's intent and audit metadata so the
+    %% ChangeLog entry is durable / ephemeral and attributed correctly.
     State = beamtalk_repl_state:new(undefined, 0),
     Counter = beamtalk_repl_state:get_eval_counter(State),
     % elp:fixme W0023 intentional atom creation
@@ -304,7 +333,8 @@ compile_method(ClassNameBin, Selector, Source, Intent) ->
         {ok, method_definition, MethodInfo0, Warnings} ->
             MethodInfo = MethodInfo0#{
                 intent => Intent,
-                author_kind => human,
+                author => Author,
+                author_kind => AuthorKind,
                 expression => list_to_binary(Expression)
             },
             case
@@ -323,18 +353,70 @@ compile_method(ClassNameBin, Selector, Source, Intent) ->
             {error, Reason}
     end.
 
-%% A `compile:source:' body may be a full `selector => body' definition or a bare
-%% body. When the selector prefix is missing, prepend it so the synthesized `>>'
-%% expression parses as a method definition. Heuristic: if the trimmed source
-%% does not already start with the selector token, prefix `selector => '.
+%% A `compile:source:' body may be a full method definition or a bare body. When
+%% it is a bare body, prepend the canonical `selector => ' header so the
+%% synthesized `>>' expression parses as a method definition. We only treat the
+%% source as already-headed when it begins with the selector token *and* that
+%% token is followed by a header form — an argument list / argument name and/or
+%% whitespace up to the `=>' arrow. A bare expression such as `incremented + 1'
+%% for selector `increment' shares no such header and is correctly prefixed.
 -spec normalize_method_source(binary(), binary()) -> binary().
 normalize_method_source(SelectorBin, Source) ->
     Trimmed = string:trim(Source, leading),
     Head = first_token(SelectorBin),
-    case binary:longest_common_prefix([Trimmed, Head]) =:= byte_size(Head) of
+    case has_method_header(Trimmed, Head) of
         true -> Source;
         false -> <<SelectorBin/binary, " => ", Source/binary>>
     end.
+
+%% True iff `Trimmed' starts with the selector token `Head' followed by a valid
+%% method header: the token, then anything (args / arg names / whitespace), then
+%% the `=>' arrow, before any other top-level statement boundary. We require both
+%% the leading token *and* an arrow so a bare body that merely happens to begin
+%% with the selector name (e.g. `increment + 1') is not mistaken for a header.
+-spec has_method_header(binary(), binary()) -> boolean().
+has_method_header(Trimmed, Head) ->
+    HeadSize = byte_size(Head),
+    case Trimmed of
+        <<Head:HeadSize/binary, Rest/binary>> ->
+            %% The char right after the token must be a header delimiter, not a
+            %% continuation of a longer identifier (so `increments' is not read
+            %% as the `increment' header) — `:' for keyword selectors, or
+            %% whitespace, or an operator/`=>' for unary/binary selectors.
+            header_after_token(Rest);
+        _ ->
+            false
+    end.
+
+-spec header_after_token(binary()) -> boolean().
+header_after_token(<<>>) ->
+    false;
+%% Identifier continuation: not a header boundary (e.g. `increments').
+header_after_token(<<C, _/binary>>) when
+    (C >= $a andalso C =< $z);
+    (C >= $A andalso C =< $Z);
+    (C >= $0 andalso C =< $9);
+    C =:= $_
+->
+    false;
+header_after_token(Rest) ->
+    %% A keyword/unary/binary header reaches the `=>' arrow before the next
+    %% top-level statement separator (`.' or newline).
+    binary_has_arrow_before_break(Rest).
+
+%% True iff `Bin' contains a `=>' arrow before the first top-level statement
+%% break (newline or `.'), i.e. the leading token really opens a method header.
+-spec binary_has_arrow_before_break(binary()) -> boolean().
+binary_has_arrow_before_break(<<"=>", _/binary>>) ->
+    true;
+binary_has_arrow_before_break(<<$\n, _/binary>>) ->
+    false;
+binary_has_arrow_before_break(<<$., _/binary>>) ->
+    false;
+binary_has_arrow_before_break(<<_, Rest/binary>>) ->
+    binary_has_arrow_before_break(Rest);
+binary_has_arrow_before_break(<<>>) ->
+    false.
 
 %% First whitespace/`:'-delimited token of a (possibly keyword) selector binary,
 %% e.g. `at:put:' -> `at', `increment' -> `increment', `+' -> `+'.

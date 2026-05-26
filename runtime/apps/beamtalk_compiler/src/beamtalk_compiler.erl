@@ -283,9 +283,13 @@ back into the span is a no-op, which is the load-bearing property the
 
 Resolution failures (`class_not_found' / `selector_not_found' / `ambiguous')
 and transport failures (`port_error' / `noproc' / `timeout') both return
-`{error, Reason, Message}'. The live-patch install hook uses this to record a
-flushable ChangeEntry; on any error it downgrades to a memory-only patch with
-no ChangeEntry.
+`{error, Reason, Message}'. The live-patch install hook uses a clean `{ok, ...}'
+to record a *flushable* ChangeEntry with the resolved span. On error it still
+appends a ChangeEntry (the patch is already installed in memory) — for
+`selector_not_found' (a brand-new method not yet on disk) the entry stays
+flushable with no prior span; any other error downgrades the entry to
+`flushable: false' with a `not_flushable_reason'. The error never blocks or
+undoes the in-memory install.
 
 Backs the `>>' / `compile:source:' install hook.
 """.

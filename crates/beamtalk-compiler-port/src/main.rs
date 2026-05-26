@@ -1564,10 +1564,25 @@ fn handle_resolve_method_span(request: &Map) -> Term {
         Ok(span) => {
             let start = span.start();
             let end = span.end();
-            let prev_source = source
-                .get(start as usize..end as usize)
-                .unwrap_or_default()
-                .to_string();
+            // The resolved span must address real bytes of `source`. If slicing
+            // fails (out-of-bounds / non-char-boundary), surface a structured
+            // error rather than recording an empty `prev_source` under
+            // `status => ok` — a bogus span/source would corrupt later flush and
+            // drift checks.
+            let Some(prev_source) = source.get(start as usize..end as usize) else {
+                return Term::from(Map::from([
+                    (atom("status"), atom("error")),
+                    (atom("reason"), atom("invalid_span")),
+                    (
+                        atom("message"),
+                        binary(&format!(
+                            "Resolved method span {start}..{end} is out of bounds \
+                             for source of length {}",
+                            source.len()
+                        )),
+                    ),
+                ]));
+            };
             let span_map = Term::from(Map::from([
                 (
                     atom("start"),
@@ -1581,7 +1596,7 @@ fn handle_resolve_method_span(request: &Map) -> Term {
             Term::from(Map::from([
                 (atom("status"), atom("ok")),
                 (atom("span"), span_map),
-                (atom("prev_source"), binary(&prev_source)),
+                (atom("prev_source"), binary(prev_source)),
             ]))
         }
         Err(err) => method_span_error_response(&err),

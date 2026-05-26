@@ -377,20 +377,26 @@ abstract Object subclass: Behaviour
   // --- Live method editing (ADR 0082 Phase 1) ---
 
   /// Compile a method from a source body String and install it in this class,
-  /// recording a **durable** ChangeLog entry (ADR 0082).
+  /// attempting to record a **durable** ChangeLog entry (ADR 0082).
   ///
-  /// This is the underlying primitive that the `>>` patcher form desugars to
-  /// (`Counter >> increment => body` ≡ `Counter compile: #increment source:
-  /// "increment => body"`). The body is passed as a **String value**, not
-  /// concatenated into a `>>` expression — tools (MCP `save_method`, the browser
-  /// "Save" action, the REPL editor) call this directly with the body value so a
-  /// quote char or multi-line body never has to be escaped back into source.
+  /// This is the primitive that backs the durable live-patch path. The `>>`
+  /// patcher form and `compile:source:` are distinct front doors that converge
+  /// at the runtime install chokepoint (`>>` is not parser sugar for this
+  /// primitive); both produce the same in-memory patch and ChangeLog entry there
+  /// (`Counter >> increment => body` and `Counter compile: #increment source:
+  /// "increment => body"` are equivalent in effect). The body is passed as a
+  /// **String value**, not concatenated into a `>>` expression — tools (MCP
+  /// `save_method`, the browser "Save" action, the REPL editor) call this
+  /// directly with the body value so a quote char or multi-line body never has
+  /// to be escaped back into source.
   ///
   /// The patch installs in memory immediately. If this class is backed by an
-  /// in-project `.bt` source file, the ChangeLog entry is `flushable` and a later
-  /// `Workspace flush` can splice the body back to disk; for stdlib / dynamic /
-  /// dependency classes the entry is logged `flushable: false` and flush skips
-  /// it (the patch is still live in memory). Returns the receiver class.
+  /// in-project `.bt` source file, the ChangeLog entry is intended `flushable`
+  /// and a later `Workspace flush` can splice the body back to disk; for stdlib /
+  /// dynamic / dependency classes the entry is intended `flushable: false` and
+  /// flush skips it (the patch is still live in memory). ChangeLog append is
+  /// best-effort and does not block or undo the successful in-memory install —
+  /// the install still succeeds even if logging fails. Returns the receiver class.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -401,7 +407,8 @@ abstract Object subclass: Behaviour
     @primitive "classCompileSource"
 
   /// Compile and install a method like `compile:source:`, but record an
-  /// **ephemeral** ChangeLog entry (ADR 0082).
+  /// **ephemeral** ChangeLog intent (ADR 0082), via a best-effort ChangeLog
+  /// append that never blocks the in-memory install.
   ///
   /// Intended for exploration: spike a candidate fix, run it, and either discard
   /// it (ephemeral entries auto-prune on flush and on workspace restart) or

@@ -741,11 +741,14 @@ classReload(Self) ->
 Compile a method body String and install it in this class as a **durable** live
 patch (ADR 0082 Phase 1).
 
-Backs `@primitive "classCompileSource"' (`Behaviour>>compile:source:'). The
-underlying primitive the `>>' patcher form desugars to and the target of MCP
-`save_method' / the browser "Save" action. `Selector' is a Symbol (atom),
-`Source' the method body String (binary) passed as a value. Installs in memory
-and records a durable ChangeLog entry; returns the receiver class.
+Backs `@primitive "classCompileSource"' (`Behaviour>>compile:source:') and the
+target of MCP `save_method' / the browser "Save" action. The `>>' patcher form
+and `compile:source:' are distinct front doors that converge at the runtime
+install chokepoint (`beamtalk_repl_loader:load_recompiled_method/7'): `>>' is not
+parser sugar for this primitive, but both produce the same in-memory patch and
+ChangeLog entry there. `Selector' is a Symbol (atom), `Source' the method body
+String (binary) passed as a value. Installs in memory and attempts (best-effort)
+to record a durable ChangeLog entry; returns the receiver class.
 """.
 -spec classCompileSource(#beamtalk_object{}, atom(), binary()) -> #beamtalk_object{}.
 classCompileSource(Self, Selector, Source) ->
@@ -765,7 +768,7 @@ classTryCompileSource(Self, Selector, Source) ->
     do_compile_source(Self, Selector, Source, ephemeral).
 
 %% Shared compile-and-install path for compile:source: / tryCompile:source:.
-%% Routes to beamtalk_repl_eval:compile_method/4 via erlang:apply to keep
+%% Routes to beamtalk_repl_eval:compile_method/6 via erlang:apply to keep
 %% beamtalk_runtime free of a compile-time dependency on beamtalk_workspace
 %% (the same indirection classReload/1 uses).
 -spec do_compile_source(#beamtalk_object{}, atom(), binary(), durable | ephemeral) ->
@@ -774,10 +777,11 @@ do_compile_source(Self, Selector, Source, Intent) ->
     ClassPid = erlang:element(4, Self),
     ClassName = gen_server:call(ClassPid, class_name),
     ClassNameBin = atom_to_binary(ClassName, utf8),
-    SourceBin = ensure_source_binary(Selector, Source, ClassName),
+    SourceBin = ensure_source_binary(Selector, Source, Intent, ClassName),
+    {Author, AuthorKind} = current_author_context(),
     try
         erlang:apply(beamtalk_repl_eval, compile_method, [
-            ClassNameBin, Selector, SourceBin, Intent
+            ClassNameBin, Selector, SourceBin, Intent, Author, AuthorKind
         ])
     of
         {ok, _ClassNameBin} ->
@@ -803,16 +807,49 @@ do_compile_source(Self, Selector, Source, Intent) ->
     end.
 
 %% Validate the `Source' argument is a String (binary). Raises a typed error for
-%% a non-binary so callers get a clear message instead of a deep crash.
--spec ensure_source_binary(atom(), term(), atom()) -> binary().
-ensure_source_binary(_Selector, Source, _ClassName) when is_binary(Source) ->
+%% a non-binary so callers get a clear message instead of a deep crash. The
+%% message names the actual selector invoked (derived from `Intent') so callers
+%% of `tryCompile:source:' do not see a misleading `compile:source:' message.
+-spec ensure_source_binary(atom(), term(), durable | ephemeral, atom()) -> binary().
+ensure_source_binary(_Selector, Source, _Intent, _ClassName) when is_binary(Source) ->
     Source;
-ensure_source_binary(_Selector, Source, ClassName) ->
+ensure_source_binary(_Selector, Source, Intent, ClassName) ->
     Error0 = beamtalk_error:new(type_error, ClassName),
+    SelectorName = intent_selector(Intent),
     Msg = iolist_to_binary(
-        io_lib:format("compile:source: expects a String body, got: ~p", [Source])
+        io_lib:format("~s expects a String body, got: ~p", [SelectorName, Source])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
+
+%% Surface selector for the public message: `compile:source:' is durable,
+%% `tryCompile:source:' is ephemeral.
+-spec intent_selector(durable | ephemeral) -> binary().
+intent_selector(ephemeral) -> <<"tryCompile:source:">>;
+intent_selector(durable) -> <<"compile:source:">>.
+
+%% Resolve the audit author for the current patch. ADR 0082 distinguishes
+%% `human' (REPL / interactive) from `agent' (MCP `save_method' / `try_method').
+%% The submission boundary stamps the kind into the process dictionary before
+%% dispatching; absent that stamp (e.g. a direct REPL `compile:source:' call) we
+%% default to `human'/`repl'. Returns `{Author, AuthorKind}'.
+-spec current_author_context() -> {binary(), human | agent}.
+current_author_context() ->
+    case erlang:get('$beamtalk_author_kind') of
+        agent ->
+            Author =
+                case erlang:get('$beamtalk_author') of
+                    A when is_binary(A) -> A;
+                    _ -> <<"agent">>
+                end,
+            {Author, agent};
+        _ ->
+            Author =
+                case erlang:get('$beamtalk_author') of
+                    A when is_binary(A) -> A;
+                    _ -> <<"repl">>
+                end,
+            {Author, human}
+    end.
 
 %%% ============================================================================
 %%% Protocol Query Primitives (ADR 0068 Phase 2c)

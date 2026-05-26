@@ -767,7 +767,7 @@ method_source_binary(MethodInfo) ->
 add_flushability(Base, ClassNameBin, SelectorBin, Side) ->
     case class_source_file(ClassNameBin) of
         nil ->
-            Base#{flushable => false, not_flushable_reason => <<"stdlib">>};
+            Base#{flushable => false, not_flushable_reason => no_source_reason(ClassNameBin)};
         SourceFile when is_binary(SourceFile) ->
             case classify_source_file(SourceFile) of
                 {flushable, AbsPath} ->
@@ -777,6 +777,41 @@ add_flushability(Base, ClassNameBin, SelectorBin, Side) ->
                 {not_flushable, Reason} ->
                     Base#{flushable => false, not_flushable_reason => Reason}
             end
+    end.
+
+%% Reason for a class with no backing `.bt' sourceFile (`class_source_file/1'
+%% returned nil). Distinguishes a stdlib class — whose module is compiled to a
+%% `.beam' on disk (`code:which/1' returns a path) — from a dynamically-created
+%% / live-only class whose module exists only in memory (`code:which/1' returns
+%% a non-path atom such as `non_existing', `cover_compiled', or `preloaded').
+%% Matches the ChangeLog schema's documented "stdlib" / "dynamic" reasons so flush
+%% summaries can tell the two apart.
+-spec no_source_reason(binary()) -> binary().
+no_source_reason(ClassNameBin) ->
+    case class_module(ClassNameBin) of
+        {ok, Module} ->
+            case code:which(Module) of
+                Path when is_list(Path) -> <<"stdlib">>;
+                _NonPath -> <<"dynamic">>
+            end;
+        error ->
+            <<"dynamic">>
+    end.
+
+%% Resolve a class name binary to its loaded BEAM module name, if the class is
+%% registered. Returns `error' when the class is unknown / not loaded.
+-spec class_module(binary()) -> {ok, atom()} | error.
+class_module(ClassNameBin) ->
+    case beamtalk_repl_server:safe_to_existing_atom(ClassNameBin) of
+        {ok, ClassName} ->
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                Pid when is_pid(Pid) ->
+                    {ok, beamtalk_object_class:module_name(Pid)};
+                _ ->
+                    error
+            end;
+        {error, _} ->
+            error
     end.
 
 %% Resolve the disk span/prev_source for a flushable class; downgrade on failure.
