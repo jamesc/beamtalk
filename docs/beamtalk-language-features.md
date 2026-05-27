@@ -27,6 +27,8 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Named Actor Registration (ADR 0079)](#named-actor-registration-adr-0079)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
+  - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
+  - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
   - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
