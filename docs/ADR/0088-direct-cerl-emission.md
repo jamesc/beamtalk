@@ -1,7 +1,14 @@
 # ADR 0088: Direct Core Erlang AST Emission via ETF
 
 ## Status
-Proposed (2026-05-26)
+Proposed (2026-05-26) — **Phase 0a + 0b only**. Phases 1–4 are explicitly contingent on two decision gates:
+
+- **Phase 0a (Codegen Shrinkage Audit)** — 3 representative codegen functions rewritten cerl-direct, projected LOC delta across the codebase. If the projection is ≥15% shrinkage, the migration pays back its own LOC cost and is justified on simplification grounds alone. If ≤5%, the typed-Document-leaves alternative (see *Why not just constrain `Document` leaves?* below) likely wins for the BT-875 vector, and the remaining justification rests on annotation-consumer roadmap.
+- **Phase 0b (Napkin)** — ETF encode/decode timing on representative-sized modules. If ETF cost dominates, pivot to Alternative 7 (Port + NIF-for-conversion) before Phase 1.
+
+BT-aware stack traces are now a committed downstream consumer (see *Downstream Consumers*), so the annotation-fidelity leg of the justification is no longer hypothetical. The full source-level debugger remains aspirational.
+
+Approval of this ADR authorises Phases 0a + 0b and the data-gathering they enable; it does not pre-authorise the 58K LOC codegen migration.
 
 ## Context
 
@@ -49,7 +56,7 @@ Each compile pays for steps 2 and 3 — building text from structure, then rebui
 - **Core Erlang remains the target IR** (ADR 0003). This decision is about *how* Core Erlang reaches `compile:forms/2`, not *whether* Core Erlang is the right IR.
 - **ADR 0018 discipline preserved** (BT-875). The principle of building structured data (never strings) carries forward; codegen functions construct typed `cerl::Expr` values directly. The `Document` API surface itself is text-rendering-shaped and does not carry over — it survives only as a transitional adapter (`cerl_to_doc`) during Phase 3 and is deleted in Phase 4. No regression to ad-hoc string construction.
 - **Port boundary preserved** (ADR 0022). No NIF embedding. The Rust ↔ BEAM seam stays at the OS process boundary.
-- **Atom-table safety** (ADR 0022 implementation). The current `binary_to_term/1` calls on Port responses use `[safe]` to prevent atom-exhaustion attacks from a buggy or corrupted Rust payload. The new `{cerl, Etf}` decode must use `[safe]` too. This means every atom appearing in a cerl-ETF payload must already exist as an Erlang literal — feasible because the structural atoms (cerl record tags like `c_module`, `c_fun`, `c_var`, ...) are a fixed finite set, and Beamtalk-generated module/function/atom names are mangled into a stable namespace that's already pre-allocated for the text path. Phase 0's ETF byte-equivalence tests must include a `binary_to_term(_, [safe])` round-trip assertion to catch any payload that introduces unknown atoms.
+- **Atom-table safety** (ADR 0022 implementation). The current `binary_to_term/1` calls on Port responses use `[safe]` to prevent atom-exhaustion attacks from a buggy or corrupted Rust payload. The new `{cerl, Etf}` decode must use `[safe]` too. This means every atom appearing in a cerl-ETF payload must already exist as an Erlang literal — feasible because the structural atoms (cerl record tags like `c_module`, `c_fun`, `c_var`, ...) are a fixed finite set, and Beamtalk-generated module/function/atom names are mangled into a stable namespace that's already pre-allocated for the text path. Phase 0b's ETF byte-equivalence tests must include a `binary_to_term(_, [safe])` round-trip assertion to catch any payload that introduces unknown atoms.
 - **Codegen test discipline preserved**: ~245 inline `#[test]` codegen unit tests in `crates/beamtalk-core/src/codegen/core_erlang/tests/` (assert on `Document.to_pretty_string()` output) and the proptest parseability suite in `core_erlang_validity_tests.rs` must continue to pass during transition. End-to-end stdlib/BUnit/REPL test suites verify behaviour parity at the BEAM level.
 
 ## Decision
@@ -64,6 +71,24 @@ Concretely:
 4. The Port message format gains a `cerl` response variant alongside the existing `core_erlang` text variant. The Erlang side decodes ETF, calls `compile:forms(Forms, [from_core, binary, return_errors])`, and `code:load_binary/3` as today.
 5. Migrate codegen functions opportunistically (per ADR 0018's organic-migration model) — each function's return type changes from `Document` to the corresponding cerl node type. The full behavioural test suite (`just test-stdlib`, `just test-bunit`, `just test-repl-protocol`) verifies *behaviour* parity at every step; the `just codegen-diff` BEAM-diff harness runs as a diagnostic, but byte-for-byte BEAM parity is not enforced (see Consequences).
 6. After all codegen has migrated, remove the text path: delete the `Document` type and its API, delete the `cerl_to_doc` transitional adapter, and delete the `core_scan`/`core_parse` calls in `beamtalk_compiler_server` and `beamtalk_build_worker`.
+
+### Why not just constrain `Document` leaves?
+
+The Option B "compiler architect" steelman raises the sharpest counter to this ADR: ADR 0018 already gave us typed codegen, and the BT-875 recurrence vector is the *one* typed-leaf escape hatch — `Document::String(...)` accepts arbitrary text. That escape hatch is closable in ~1–2K LOC by replacing `Document::String` with a sum of typed leaves (`Atom`, `VarName`, `StringLit`, `IntLit`, ...) and forbidding raw-string construction at module boundaries. If BT-875 elimination is the *primary* motivation, that change is roughly 30× cheaper than the 58K LOC migration this ADR proposes, and it preserves the Document combinator surface and all 245 unit tests unchanged.
+
+We do not refute that argument — we **scope around** it. The typed-leaf refactor closes BT-875 but captures *none* of the other benefits this ADR targets: it does not remove the `core_scan`/`core_parse` round-trip, does not enable cerl-node annotation propagation to BEAM bytecode, does not give us the same idiomatic interface LFE uses, and does not eliminate the text/AST boundary at which source positions are lost today. BT-aware stack traces (see *Downstream Consumers* below) are now a committed near-term feature whose enabling infrastructure requires the cerl wire — they cannot be delivered by the typed-leaf refactor alone. So the contingency in the Status section narrows: the typed-leaf alternative wins only if **both** (a) the Phase 0a audit shows cerl-direct does not materially shrink codegen, **and** (b) Phase 0b's napkin timing data shows ETF is dominant cost (pushing toward Alternative 7 anyway). With at least one downstream consumer (stack traces) committed, the annotation-fidelity leg of the justification is no longer hypothetical.
+
+### Downstream Consumers
+
+The annotation-fidelity benefit only counts as a real argument for this ADR if scheduled work consumes those annotations. Today:
+
+| Consumer | Status | What it needs from the cerl wire |
+|---|---|---|
+| **BT-aware stack traces** | Scheduled near-term | Cerl nodes carrying `{file, line}` annotations (Phase 1 covers this), `debug_info` chunks in the compiled BEAM (already true on `beamtalk_build_worker`; the compiler-server path would need it added), and Beamtalk's AST reliably propagating positions to every codegen call site (separate upstream work, partially complete today). Estimated weeks of work *after* Phase 1 lands. Payoff hits every runtime error a user sees. |
+| **Source-level debugger** | Aspirational | Cerl annotations as above, plus breakpoint resolution (`.bt` line → BEAM instruction), variable-name remapping (cerl `c_var` ↔ Beamtalk identifier), step semantics that respect Beamtalk block/closure boundaries, and DAP/`int`/`dbg` integration. Multi-month effort; OTP's debugger ecosystem is thin. The cerl wire is necessary but a long way from sufficient. |
+| **Dialyzer integration** | Not scheduled | Cerl annotations + Beamtalk-typed specs surfaced through the codegen. Listed as a possibility, not a roadmap item. |
+
+The presence of **at least one scheduled consumer** (stack traces) is what flips the annotation-fidelity argument from hypothetical to material. Both Phase 0a (audit) and Phase 0b (napkin) decisions should weigh stack-trace delivery as a real downstream constraint, not a "nice if it works out" benefit. If the stack-traces roadmap item is descoped, this section should be revisited — the ADR's justification would meaningfully weaken.
 
 ### What this looks like
 
@@ -173,13 +198,13 @@ No user-facing change. Contributors writing new codegen (post Phase 2) return `c
 - ⚙️ **BEAM veteran**: "ADR 0022's NIF rejection was based on `compile:forms/2` being a long-running call that would block schedulers. That argument doesn't apply here — the NIF would only do the cerl Rust → cerl BEAM term conversion (a microsecond-scale pure data transform), then call `compile:forms/2` from the same BEAM process via the standard Erlang API. The actual compile remains on a normal Erlang scheduler, supervised normally."
 - 🏭 **Operator**: "The 'a NIF crash kills the BEAM' framing is overbroad in 2026. Rustler with panic boundaries plus dirty NIFs for long operations is a different safety story than raw `enif_*` C code. The real failure mode for a *conversion-only* NIF is malformed input, which can be caught and returned as `{error, Reason}` without escaping the NIF — the same way the existing ETF decode path catches malformed terms today."
 - 🎨 **Language designer**: "The strongest case for a NIF here isn't latency — it's *fidelity*. ETF is a *copy*: the Rust-side cerl tree is encoded, transmitted, decoded, and reconstructed as a fresh BEAM term tree. A NIF can construct the BEAM term directly in the destination heap, sharing literals (atom tables, common subtree literals like `nil`) by reference. For a large codegen output (thousands of nodes), that's a measurable memory and latency win that no amount of ETF encoder optimisation can match."
-- 🪓 **Sharpest argument — Hybrid Port + NIF-for-conversion**: "The ADR addresses this in Alternative 7 but defers it. The deferral is reasonable *if* Phase 0's napkin shows ETF encode/decode is a small share of per-compile cost — but for large modules with thousands of cerl nodes, heap-resident term construction with literal sharing could be a meaningful win that ETF can't match by design. If the napkin data turns out the other way (encode/decode dominates), the right move is not 'ship ETF anyway' but 'pivot to the hybrid'. The ADR's commitment to ETF first should be explicitly contingent on the napkin's timing data, not implicit."
+- 🪓 **Sharpest argument — Hybrid Port + NIF-for-conversion**: "The ADR addresses this in Alternative 7 but defers it. The deferral is reasonable *if* Phase 0b's napkin shows ETF encode/decode is a small share of per-compile cost — but for large modules with thousands of cerl nodes, heap-resident term construction with literal sharing could be a meaningful win that ETF can't match by design. If the napkin data turns out the other way (encode/decode dominates), the right move is not 'ship ETF anyway' but 'pivot to the hybrid'. The ADR's commitment to ETF first should be explicitly contingent on the napkin's timing data, not implicit."
 
 ### Tension Points
 
 - **Debuggability of the wire vs. wire efficiency**: Text dumps are easier for humans; cerl terms are easier for machines. Mitigation: `core_pp:format/1` lets us reconstruct text on demand for debugging, so we keep human-readability as an opt-in tool, not the always-on wire format.
 - **Coupling to OTP `cerl` record shapes**: Cerl records are documented in OTP but technically internal. Mitigation: the shapes have been stable since OTP 18 (2014); the migration's per-file structure means we could re-target a different Erlang AST shape if OTP ever broke us, with the same combinator surface.
-- **Refactor cost vs. payoff**: 58K LOC of codegen migration is a large refactor. The compile-speed win is small; the type-checked-codegen win partially overlaps with what ADR 0018 already delivered (see compiler-architect steelman above). The genuinely *new* benefit is: (a) string-leaf escape-hatch elimination (closes the BT-875 recurrence vector), plus (b) annotation infrastructure for downstream tooling. Whether (a) + (b) justifies the migration is the decision's core risk. Mitigation: the per-file migration model means the cost is amortised across normal feature work, and Phase 0's napkin produces a real cost estimate before any large commitment.
+- **Refactor cost vs. payoff**: 58K LOC of codegen migration is a large refactor. The compile-speed win is small; the type-checked-codegen win partially overlaps with what ADR 0018 already delivered (see compiler-architect steelman above). The genuinely *new* benefit is: (a) string-leaf escape-hatch elimination (closes the BT-875 recurrence vector), plus (b) annotation infrastructure for downstream tooling. Whether (a) + (b) justifies the migration is the decision's core risk. Mitigation: the per-file migration model means the cost is amortised across normal feature work, and Phase 0b's napkin produces a real cost estimate before any large commitment.
 - **Tooling for inspecting generated cerl**: Today a contributor can read `.core` files. With cerl-terms-only, contributors need a `--emit-core` flag to dump `core_pp:format/1` output. Acceptable cost; small new tool.
 - **Annotation fidelity depends on upstream work**: A primary advertised benefit (source positions surviving to BEAM) only materialises if Beamtalk's AST tracks source positions consistently to codegen call sites — which today it does only partially. This ADR enables the downstream half of that pipeline; the upstream half is unrelated work that must happen for the benefit to be real. The proposal should not be sold on annotation fidelity alone, because the cerl wire is necessary but not sufficient.
 - **Long-transition risk**: The per-PR organic-migration model has a track record (ADR 0018) of stretching out for a year+ with a long tail of un-migrated call sites. The Phase 4 trigger (≤50 sites) is a soft forcing function; if it doesn't fire within a defined window, the codebase carries the maintenance cost of two parallel paths indefinitely. Mitigation: add a hard checkpoint at 12 months — if migration is <60% by then, escalate to a dedicated sprint rather than continuing organic.
@@ -252,13 +277,13 @@ Keep the OTP Port boundary for the compiler itself (preserving ADR 0022's crash-
 - The genuine win it captures — heap-resident term construction with literal sharing — is *measurable* (potentially significant for large modules) but is **second-order** relative to the type-safety and annotation-fidelity wins this ADR primarily targets. We can adopt cerl-direct via ETF first, measure the actual encode/decode cost on representative workloads, and revisit the NIF path *only if* that cost turns out to be a bottleneck.
 - Introducing a NIF — even a conversion-only one — adds a `.so` per platform to the distribution surface, a new failure mode in the build pipeline, and a new operational concern (NIF-version vs OTP-version compatibility). That's real complexity for a benefit we haven't yet measured.
 - The conversion NIF interacts with the Port in a non-obvious way: a Port message would still arrive on the Erlang side as a binary, get decoded via the NIF, then be passed to `compile:forms/2`. The Port's atomic-message guarantee no longer cleanly applies — the message bytes are merely a vehicle for the NIF call. This blurs the architectural boundary ADR 0022 established for the Port.
-- **Honest acknowledgement**: the steelman for this alternative (raised in Option C's "sharpest argument") is the strongest case for revisiting NIFs in this ADR. We're deferring it, not refuting it. If Phase 0's napkin shows ETF encode/decode dominating the per-compile cost for large modules, this alternative should be reopened as a follow-up ADR.
+- **Honest acknowledgement**: the steelman for this alternative (raised in Option C's "sharpest argument") is the strongest case for revisiting NIFs in this ADR. We're deferring it, not refuting it. If Phase 0b's napkin shows ETF encode/decode dominating the per-compile cost for large modules, this alternative should be reopened as a follow-up ADR.
 
 ## Consequences
 
 ### Positive
 
-- **Removes serialization round-trip.** `core_scan`/`core_parse` calls disappear from the per-compile hot path. Compile-time improvement is expected but not yet measured — Beamtalk's own analysis dominates per-compile latency, so the wire-format win is likely modest. Phase 0's BEAM-diff harness will produce timing data for the actual delta before commitments are made.
+- **Removes serialization round-trip.** `core_scan`/`core_parse` calls disappear from the per-compile hot path. Compile-time improvement is expected but not yet measured — Beamtalk's own analysis dominates per-compile latency, so the wire-format win is likely modest. Phase 0b's BEAM-diff harness will produce timing data for the actual delta before commitments are made.
 - **Type-checked codegen.** Mis-shaped Core Erlang becomes a Rust type error at build time, not a `core_parse` error at runtime. Whole classes of codegen bugs (BT-875 string escapes) become impossible by construction.
 - **Annotation fidelity.** Source positions on cerl nodes survive to BEAM bytecode unchanged. Future source-mapped diagnostics, dialyzer integration, and debugger support all benefit. Today's text path loses positions at the `core_scan` boundary unless we re-emit `-file` directives manually.
 - **Preserves ADR 0018's discipline.** BT-875 invariant carries forward (no `format!()` for codegen fragments; structured-data-only). Per-fragment unit testability is preserved — assertions move from `assert_eq!(doc.to_pretty_string(), "...")` to structural matches on `cerl::Expr` values.
@@ -283,7 +308,21 @@ Keep the OTP Port boundary for the compiler itself (preserving ADR 0022's crash-
 
 ## Implementation
 
-### Phase 0: Napkin — Empty Module End-to-End (S)
+### Phase 0a: Codegen Shrinkage Audit (Decision Gate — XS)
+
+Before any wire-format work, measure how much of today's ~38.5K LOC of codegen (excluding tests; ~58K total) is **Document pretty-printer ceremony** vs. **irreducible language-lowering complexity**. The hypothesis behind ADR 0088 is that a meaningful fraction of current codegen exists to thread parens, commas, atom-escaping, and indentation through a text-rendering pipeline — work that disappears entirely under typed cerl construction.
+
+- Pick 3 representative codegen functions covering different shapes:
+  - A leaf utility (e.g., something in `selector_mangler.rs` or `erlang_types.rs`)
+  - A medium-complexity expression builder (e.g., a case from `expressions.rs` or `intrinsics.rs`)
+  - A high-complexity construct (e.g., a control-flow lowering from `control_flow/mod.rs` — the 4,237-LOC hot spot)
+- Write the equivalent cerl-direct version of each (using a small handwritten cerl Rust mirror sufficient for these three functions — does not need to be the full Phase 1 mirror).
+- Compare LOC, branching complexity, and number of helper calls. Project the result across the ~55 codegen files weighted by current size.
+- Deliverable: a one-page memo with three before/after side-by-sides, a projected total-codegen LOC delta (rough — order of magnitude is enough), and a recommendation.
+
+**Why this gates Phase 0b**: if the audit shows cerl-direct shrinks codegen materially (say, ≥15%), the migration's net cost story changes from "58K LOC of churn" to "the migration is itself a simplification that pays back in LOC". If the audit shows ≤5% shrinkage, the typed-Document-leaves alternative (see *Why not just constrain `Document` leaves?* above) becomes the right call for the BT-875 vector, and the cerl migration's remaining justification rests entirely on annotation-consumer roadmap (see *Downstream Consumers* below). Either outcome is decision-useful; the napkin's timing data is necessary but not sufficient on its own.
+
+### Phase 0b: Napkin — Empty Module End-to-End (S)
 
 The minimum proof that the wire contract works. Goal: compile a hand-constructed cerl `c_module` for `module 'bt_napkin' [] [] attributes [] end` from Rust → ETF → BEAM → loaded module that responds to `module_info/0`. No codegen migration yet.
 
@@ -293,7 +332,7 @@ The minimum proof that the wire contract works. Goal: compile a hand-constructed
 - Smoke test: Rust code sends an empty-module cerl term across the existing Port, BEAM compiles + loads it, `beamtalk_test_module:module_info(module) =:= bt_napkin`.
 - Measure: time the round-trip vs. the equivalent text path on (i) the empty module and (ii) a hand-constructed large cerl tree (~thousands of nodes, representative of a real Beamtalk module). Record breakdown: ETF encode time, ETF decode time, `compile:forms` time, total.
 
-This phase is the wire-check AND the contingency check. If it works and ETF cost is a small share of total, Phase 1 proceeds as planned. If it works but ETF cost dominates for large modules, pivot to Alternative 7 (Port + NIF-for-conversion) before committing to the full ETF-direct migration. The commitment to ETF over NIF in this ADR is *contingent on the napkin's timing data*.
+This phase is the wire-check AND the timing-contingency check. If it works and ETF cost is a small share of total, Phase 1 proceeds as planned. If it works but ETF cost dominates for large modules, pivot to Alternative 7 (Port + NIF-for-conversion) before committing to the full ETF-direct migration. The commitment to ETF over NIF in this ADR is *contingent on the napkin's timing data*.
 
 ### Phase 1: Cerl Rust Mirror — Full Node Set + ETF Encoders (S)
 
@@ -358,7 +397,7 @@ When `≤50` text-leaf `Document` call sites remain (same threshold ADR 0018 use
 - Modified: `crates/beamtalk-core/src/codegen/core_erlang/document.rs` — stays text-rendering-shaped (not generalised over a leaf type); gains the `cerl_to_doc` adapter for the transition period; deleted entirely in Phase 4
 - Modified: every file under `crates/beamtalk-core/src/codegen/core_erlang/` (per-file leaf migration, over time — ~55 source files)
 - Modified: `runtime/apps/beamtalk_compiler/src/beamtalk_compiler_server.erl` — add cerl receive path to `compile_core_erlang/1`, eventually remove text path
-- Modified: `runtime/apps/beamtalk_compiler/src/beamtalk_build_worker.erl` — parallel migration of its `compile_core_erlang/1` (stdlib build path; same logic, separate implementation). Note: the build-worker path passes `debug_info` to `compile:forms/2` while the server path does not, so its `debug_info` chunks will *include* the cerl annotations we add. Phase 0 napkin must verify both paths (with and without `debug_info`) work end-to-end so the build-worker doesn't surprise us later.
+- Modified: `runtime/apps/beamtalk_compiler/src/beamtalk_build_worker.erl` — parallel migration of its `compile_core_erlang/1` (stdlib build path; same logic, separate implementation). Note: the build-worker path passes `debug_info` to `compile:forms/2` while the server path does not, so its `debug_info` chunks will *include* the cerl annotations we add. Phase 0b napkin must verify both paths (with and without `debug_info`) work end-to-end so the build-worker doesn't surprise us later.
 - Modified: `runtime/apps/beamtalk_compiler/src/beamtalk_compiler_port.erl` — wire message variant
 - Modified: `crates/beamtalk-core/src/codegen/core_erlang_validity_tests.rs` — extend proptest suite to the cerl path
 - New: `just codegen-diff` task (BEAM-diff harness for the transition period)
@@ -374,7 +413,7 @@ When `≤50` text-leaf `Document` call sites remain (same threshold ADR 0018 use
 ### Verification
 
 - **Codegen unit tests** in `crates/beamtalk-core/src/codegen/core_erlang/tests/` (~245 inline `#[test]` blocks asserting on `Document.to_pretty_string()`) continue to pass on the text-leaf code paths during the transition. New equivalents for migrated code paths assert on cerl-AST shape via direct field matching (no string rendering required).
-- **BEAM-diff harness** added as part of Phase 0: a small `just codegen-diff` task that compiles a fixed fixture set (`stdlib/test/*.bt`, REPL workspace snippets) via both wire formats and `cmp -l`s the resulting `.beam` files. Runs in CI during the transition period; deleted when Phase 4 removes the text path.
+- **BEAM-diff harness** added as part of Phase 0b: a small `just codegen-diff` task that compiles a fixed fixture set (`stdlib/test/*.bt`, REPL workspace snippets) via both wire formats and `cmp -l`s the resulting `.beam` files. Runs in CI during the transition period; deleted when Phase 4 removes the text path.
 - **Property-based parseability tests** (`core_erlang_validity_tests.rs`) extended to the cerl path: round-trip cerl-Rust → ETF → `binary_to_term` → `cerl_lint`.
 - **End-to-end suites** — `just test-stdlib`, `just test-bunit`, `just test-repl-protocol` — pass with both wire formats during transition.
 - **ETF byte-equivalence**: new unit tests for the cerl Rust mirror compare against `term_to_binary(cerl:c_*/n(...))` invoked on the Erlang side, ensuring each Rust node encodes to the same ETF bytes as the corresponding OTP-constructed term.
@@ -401,3 +440,54 @@ For compiler contributors:
 - OTP `core_pp` (for opt-in debug dumps): https://www.erlang.org/doc/man/core_pp.html
 - Core Erlang specification: https://www.it.uu.se/research/group/hipe/cerl/
 - LFE compiler driver (precedent for direct cerl emission): https://github.com/lfe/lfe/blob/develop/src/lfe_comp.erl
+
+## Appendix A: Smoke-Test Audit Data
+
+A two-file informal audit was performed during ADR review to sanity-check the Phase 0a hypothesis that cerl-direct shrinks codegen materially. **This is not a substitute for Phase 0a** — it's a lower-bound signal on whether running the real audit is worthwhile. Phase 0a must still rewrite three representative functions (including one from `control_flow/mod.rs`) and project across all ~55 files before any Phase 1 commitment.
+
+### Files sampled
+
+| File | Total LOC | Non-test LOC | Why chosen |
+|---|---|---|---|
+| `util.rs` | 449 | ~250 | Leaf utility — escape helpers, attribute fragment builders |
+| `operators.rs` | 201 | ~150 | Small medium-complexity — binary ops, power, concat with runtime type dispatch |
+
+### `util.rs` findings
+
+Lines that **evaporate entirely** under cerl-direct (not just simplify):
+
+| Construct | LOC affected | Why it disappears |
+|---|---|---|
+| `escape_core_erlang_string` + its 4 unit tests | ~25 | ETF encodes strings as length+bytes; no `\"` escaping needed |
+| `escape_atom_chars` + its 3 unit tests | ~35 | ETF encodes atoms via `ATOM_EXT`; no `\'` escaping |
+| Text plumbing in `beamtalk_class_attribute` | ~12 of 18 | Becomes a structured `c_module.attrs.push(c_tuple([c_atom(name), c_atom(super)]))` |
+| Text plumbing in `file_attr` and `source_path_attr` | ~20 of 26 | Same — structured attribute constructors |
+| `capture_expression` (renders to string for interpolation) | ~5 | Exists only because some callers want text; mostly deletable |
+
+**Estimated shrinkage: ~95 LOC of 449 ≈ 21%** (or ~38% of non-test code).
+
+### `operators.rs` findings
+
+- `generate_binary_op`: ~4 LOC saved. Text-flat shape; modest win.
+- `generate_power_op`: roughly a wash. Could grow slightly when spelling out nested `cerl::Call` constructors.
+- `generate_concat_op` runtime-dispatch branch: ~22 LOC of manually-threaded `let X = Y in let Z = … in case … of <'true'> when 'true' -> … end` text, with `Document::String(var.clone())` appearing **four times** because the var name has to be re-interpolated at every textual reference. Under cerl-direct that's a `cerl::Let` / `cerl::Let` / `cerl::Case` tree where the var is one value referenced four times — no `String::clone`s, no comma threading. ~5–8 LOC saved, qualitative win larger than LOC delta.
+- The CLAUDE.md-enforcement comment on lines 87–89 (explaining why `Document::Str` is "safe" here) evaporates — the type system would just enforce it. This comment genre exists throughout the codegen; small but real cleanup.
+
+**Estimated shrinkage: ~12 LOC of 201 ≈ 6%.**
+
+### Combined and caveats
+
+**Combined: ~107 LOC of 650 ≈ 16%** — right at the ADR's 15% threshold.
+
+Sample biases to be aware of when reading this number:
+
+- **Biased upward**: `util.rs` is unusually heavy on escape/text-fragment helpers because that's its specific purpose. Most codegen files won't shrink this much.
+- **Biased downward**: the sample omits `control_flow/mod.rs` (4,237 LOC), where multi-statement let-chains and nested case expressions are the dominant shape. That file is expected to show the biggest per-function wins from eliminating manual `let X = Y in let Z = …` plumbing — potentially a 5× amplification of the `generate_concat_op` pattern.
+- **Second-order effects uncounted**: every call site of `escape_atom_chars`, `escape_core_erlang_string`, and the attribute helpers has surrounding plumbing that also simplifies. Dozens of those exist.
+- **Test count drops alongside code**: ~7 unit tests in `util.rs` exist *only* to test escaping logic that won't exist post-migration.
+
+### What the smoke test does and does not say
+
+**Says**: A meaningful fraction (≈15–20%) of codegen LOC is text-rendering ceremony, not language-lowering logic. The hypothesis underlying Phase 0a is plausible and the real audit is worth running.
+
+**Does not say**: That the migration is justified. The smoke-test sample is small and skewed toward a leaf-utility file. A real Phase 0a must include `control_flow/mod.rs` (or similar high-complexity file) before any Phase 1 decision — that's where the strongest evidence either way will come from.
