@@ -124,7 +124,17 @@ validate_params(Params) ->
 with_selector(Params, Kind) ->
     case maps:get(<<"selector">>, Params, undefined) of
         Sel when is_binary(Sel), byte_size(Sel) > 0 ->
-            {ok, {Kind, binary_to_atom(Sel, utf8)}};
+            %% binary_to_existing_atom: untrusted client input must not be
+            %% able to grow the VM atom table. xref lookups can only
+            %% succeed for selectors already known to the runtime, so a
+            %% missing-atom error returns an empty result set, not a
+            %% validation failure.
+            try
+                {ok, {Kind, binary_to_existing_atom(Sel, utf8)}}
+            catch
+                error:badarg ->
+                    {ok, {Kind, '__nav_query_unknown__'}}
+            end;
         _ ->
             {error, <<"`selector` (non-empty string) is required for senders/implementors">>}
     end.
@@ -133,7 +143,13 @@ with_selector(Params, Kind) ->
 with_class(Params) ->
     case maps:get(<<"class">>, Params, undefined) of
         Cls when is_binary(Cls), byte_size(Cls) > 0 ->
-            {ok, {references, binary_to_atom(Cls, utf8)}};
+            %% binary_to_existing_atom: see comment in with_selector/2.
+            try
+                {ok, {references, binary_to_existing_atom(Cls, utf8)}}
+            catch
+                error:badarg ->
+                    {ok, {references, '__nav_query_unknown__'}}
+            end;
         _ ->
             {error, <<"`class` (non-empty string) is required for references">>}
     end.

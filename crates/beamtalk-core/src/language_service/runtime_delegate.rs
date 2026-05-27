@@ -310,19 +310,21 @@ mod tests {
 
     #[test]
     fn nav_site_to_location_uses_absolute_path_as_is() {
-        // Choose a path that exists everywhere on Linux. Doesn't need to be
-        // a real `.bt` file — the resolver just checks existence.
-        let s = site("Counter", 7, Some("/etc/hostname"));
+        // Use a real temp file so the test is portable (Windows CI matrix
+        // doesn't have /etc/hostname; CLAUDE.md also forbids hardcoded /tmp).
+        let tmp = tempfile::NamedTempFile::new().expect("create temp file");
+        let path_str = tmp.path().to_str().expect("utf8 temp path").to_string();
+        let s = site("Counter", 7, Some(&path_str));
         let loc = nav_site_to_location(&s, &[]).expect("path exists");
-        assert_eq!(loc.file.as_str(), "/etc/hostname");
+        assert_eq!(loc.file.as_str(), path_str);
         assert_eq!(loc.line, 7);
     }
 
     #[test]
     fn nav_site_to_location_anchors_relative_path_to_workspace_root() {
+        let tmp = tempfile::tempdir().expect("create temp dir");
         let s = site("Counter", 7, Some("relative/foo.bt"));
-        let root = PathBuf::from("/tmp");
-        let loc = nav_site_to_location(&s, &[root]).expect("anchored");
+        let loc = nav_site_to_location(&s, &[tmp.path().to_path_buf()]).expect("anchored");
         assert!(loc.file.as_str().ends_with("relative/foo.bt"));
         assert_eq!(loc.line, 7);
     }
