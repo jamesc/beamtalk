@@ -780,6 +780,34 @@ mod tests {
     }
 
     #[test]
+    fn nav_query_senders_routes_to_selector_field() {
+        let req = RequestBuilder::nav_query("senders", "increment");
+        assert_eq!(req["op"], "nav-query");
+        assert_eq!(req["kind"], "senders");
+        assert_eq!(req["selector"], "increment");
+        assert!(req.get("class").is_none());
+        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
+    }
+
+    #[test]
+    fn nav_query_implementors_routes_to_selector_field() {
+        let req = RequestBuilder::nav_query("implementors", "asString");
+        assert_eq!(req["op"], "nav-query");
+        assert_eq!(req["kind"], "implementors");
+        assert_eq!(req["selector"], "asString");
+        assert!(req.get("class").is_none());
+    }
+
+    #[test]
+    fn nav_query_references_routes_to_class_field() {
+        let req = RequestBuilder::nav_query("references", "Counter");
+        assert_eq!(req["op"], "nav-query");
+        assert_eq!(req["kind"], "references");
+        assert_eq!(req["class"], "Counter");
+        assert!(req.get("selector").is_none());
+    }
+
+    #[test]
     fn enable_tracing_request_has_correct_op() {
         let req = RequestBuilder::enable_tracing();
         assert_eq!(req["op"], "enable-tracing");

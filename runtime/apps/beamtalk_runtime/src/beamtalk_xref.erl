@@ -250,9 +250,27 @@ method_info(Class, ClassSide, Selector) when
         undefined ->
             undefined;
         _ ->
+            %% `?METHODS_TABLE` is a bag — after a class re-register without an
+            %% intervening `purge_class/1` (allowed by the write contract),
+            %% multiple rows can share `{Class, ClassSide, Selector}`. Pick the
+            %% row carrying the highest `gen` so live patches and reloads always
+            %% win over stale generations.
             case ets:lookup(?METHODS_TABLE, {Class, ClassSide, Selector}) of
-                [{_Key, Info} | _] -> Info;
-                [] -> undefined
+                [] ->
+                    undefined;
+                [{_Key, Info}] ->
+                    Info;
+                [{_Key, First} | Rest] ->
+                    lists:foldl(
+                        fun({_K, Cur}, Best) ->
+                            case maps:get(gen, Cur, 0) >= maps:get(gen, Best, 0) of
+                                true -> Cur;
+                                false -> Best
+                            end
+                        end,
+                        First,
+                        Rest
+                    )
             end
     end.
 
