@@ -440,3 +440,54 @@ For compiler contributors:
 - OTP `core_pp` (for opt-in debug dumps): https://www.erlang.org/doc/man/core_pp.html
 - Core Erlang specification: https://www.it.uu.se/research/group/hipe/cerl/
 - LFE compiler driver (precedent for direct cerl emission): https://github.com/lfe/lfe/blob/develop/src/lfe_comp.erl
+
+## Appendix A: Smoke-Test Audit Data
+
+A two-file informal audit was performed during ADR review to sanity-check the Phase 0a hypothesis that cerl-direct shrinks codegen materially. **This is not a substitute for Phase 0a** — it's a lower-bound signal on whether running the real audit is worthwhile. Phase 0a must still rewrite three representative functions (including one from `control_flow/mod.rs`) and project across all ~55 files before any Phase 1 commitment.
+
+### Files sampled
+
+| File | Total LOC | Non-test LOC | Why chosen |
+|---|---|---|---|
+| `util.rs` | 449 | ~250 | Leaf utility — escape helpers, attribute fragment builders |
+| `operators.rs` | 201 | ~150 | Small medium-complexity — binary ops, power, concat with runtime type dispatch |
+
+### `util.rs` findings
+
+Lines that **evaporate entirely** under cerl-direct (not just simplify):
+
+| Construct | LOC affected | Why it disappears |
+|---|---|---|
+| `escape_core_erlang_string` + its 4 unit tests | ~25 | ETF encodes strings as length+bytes; no `\"` escaping needed |
+| `escape_atom_chars` + its 3 unit tests | ~35 | ETF encodes atoms via `ATOM_EXT`; no `\'` escaping |
+| Text plumbing in `beamtalk_class_attribute` | ~12 of 18 | Becomes a structured `c_module.attrs.push(c_tuple([c_atom(name), c_atom(super)]))` |
+| Text plumbing in `file_attr` and `source_path_attr` | ~20 of 26 | Same — structured attribute constructors |
+| `capture_expression` (renders to string for interpolation) | ~5 | Exists only because some callers want text; mostly deletable |
+
+**Estimated shrinkage: ~95 LOC of 449 ≈ 21%** (or ~38% of non-test code).
+
+### `operators.rs` findings
+
+- `generate_binary_op`: ~4 LOC saved. Text-flat shape; modest win.
+- `generate_power_op`: roughly a wash. Could grow slightly when spelling out nested `cerl::Call` constructors.
+- `generate_concat_op` runtime-dispatch branch: ~22 LOC of manually-threaded `let X = Y in let Z = … in case … of <'true'> when 'true' -> … end` text, with `Document::String(var.clone())` appearing **four times** because the var name has to be re-interpolated at every textual reference. Under cerl-direct that's a `cerl::Let` / `cerl::Let` / `cerl::Case` tree where the var is one value referenced four times — no `String::clone`s, no comma threading. ~5–8 LOC saved, qualitative win larger than LOC delta.
+- The CLAUDE.md-enforcement comment on lines 87–89 (explaining why `Document::Str` is "safe" here) evaporates — the type system would just enforce it. This comment genre exists throughout the codegen; small but real cleanup.
+
+**Estimated shrinkage: ~12 LOC of 201 ≈ 6%.**
+
+### Combined and caveats
+
+**Combined: ~107 LOC of 650 ≈ 16%** — right at the ADR's 15% threshold.
+
+Sample biases to be aware of when reading this number:
+
+- **Biased upward**: `util.rs` is unusually heavy on escape/text-fragment helpers because that's its specific purpose. Most codegen files won't shrink this much.
+- **Biased downward**: the sample omits `control_flow/mod.rs` (4,237 LOC), where multi-statement let-chains and nested case expressions are the dominant shape. That file is expected to show the biggest per-function wins from eliminating manual `let X = Y in let Z = …` plumbing — potentially a 5× amplification of the `generate_concat_op` pattern.
+- **Second-order effects uncounted**: every call site of `escape_atom_chars`, `escape_core_erlang_string`, and the attribute helpers has surrounding plumbing that also simplifies. Dozens of those exist.
+- **Test count drops alongside code**: ~7 unit tests in `util.rs` exist *only* to test escaping logic that won't exist post-migration.
+
+### What the smoke test does and does not say
+
+**Says**: A meaningful fraction (≈15–20%) of codegen LOC is text-rendering ceremony, not language-lowering logic. The hypothesis underlying Phase 0a is plausible and the real audit is worth running.
+
+**Does not say**: That the migration is justified. The smoke-test sample is small and skewed toward a leaf-utility file. A real Phase 0a must include `control_flow/mod.rs` (or similar high-complexity file) before any Phase 1 decision — that's where the strongest evidence either way will come from.
