@@ -35,13 +35,13 @@ use tower_lsp::lsp_types::{
     DidSaveTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
     DocumentSymbolParams, DocumentSymbolResponse, Documentation, ExecuteCommandOptions,
     ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    MarkupContent, MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position,
-    Range, ReferenceParams, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind,
-    TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
-    TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
-    WorkspaceSymbolParams,
+    HoverParams, HoverProviderCapability, ImplementationProviderCapability, InitializeParams,
+    InitializeResult, InitializedParams, MarkupContent, MarkupKind, MessageType, OneOf,
+    ParameterInformation, ParameterLabel, Position, Range, ReferenceParams, ServerCapabilities,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
+    SymbolInformation, SymbolKind, TextDocumentSyncCapability, TextDocumentSyncKind,
+    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
@@ -916,6 +916,13 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                // BT-2241: `textDocument/implementation` — selector under
+                // the cursor → `SystemNavigation implementorsOf:` via the
+                // BT-2239 runtime-delegate seam (cold-file fallback walks
+                // the AST). Wired alongside `references_provider` because
+                // both go through the same `Backend::delegate_nav_query`
+                // helper and the same `nav-query` REPL op.
+                implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
@@ -1375,6 +1382,101 @@ impl LanguageServer for Backend {
             Ok(None)
         } else {
             Ok(Some(locations))
+        }
+    }
+
+    /// BT-2241: Finds every class that implements the selector under the
+    /// cursor (`textDocument/implementation`).
+    ///
+    /// When `delegateToRuntime` is on and a runtime is attached, classifies
+    /// the cursor with [`SimpleLanguageService::implementors_query_at`] and
+    /// forwards an `ImplementorsOf` [`NavQuery`] through
+    /// [`Backend::delegate_nav_query`]; the runtime answers via
+    /// `beamtalk_xref` (one site per implementing class, instance- and
+    /// class-side both reported) and includes ADR-0066 extension methods
+    /// the AST walker can't see.
+    ///
+    /// Otherwise (flag off, no workspace, runtime error), falls back to the
+    /// in-process AST walker via [`SimpleLanguageService::find_implementors`].
+    ///
+    /// Returns `None` (LSP "no result") when the cursor isn't on a selector
+    /// or when no class defines it — empty `Vec` and `None` are wire-
+    /// equivalent for goto requests, but `None` lets the editor distinguish
+    /// "nothing under cursor" from "selector with zero implementors" if it
+    /// wants to.
+    async fn goto_implementation(
+        &self,
+        params: tower_lsp::lsp_types::request::GotoImplementationParams,
+    ) -> Result<Option<tower_lsp::lsp_types::request::GotoImplementationResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let Some(path) = self.resolve_path_for_uri(uri) else {
+            return Ok(None);
+        };
+
+        // Compute everything that depends on `svc` up front so the lock is
+        // released before any async runtime call (delegate_nav_query awaits
+        // a runtime round-trip when the flag is on). Mirrors the `references`
+        // handler structure (BT-2239 reference impl).
+        let (pos, runtime_query) = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position_params.position, &source);
+            let runtime_query = if self.delegate_to_runtime() {
+                svc.implementors_query_at(&path, pos)
+            } else {
+                None
+            };
+            (pos, runtime_query)
+        };
+
+        let backend_self = self;
+        let path_for_ast = path.clone();
+        let ast_fallback = || -> Vec<tower_lsp::lsp_types::Location> {
+            let svc = backend_self.service.lock().expect("service lock poisoned");
+            // Resolve the selector locally so the AST fallback works when
+            // the runtime flag is off (in which case `runtime_query` above
+            // is `None` and the same `implementors_query_at` classification
+            // is needed here). Reusing the classifier keeps cold-file and
+            // runtime-attached modes in lockstep.
+            let Some(query) = svc.implementors_query_at(&path_for_ast, pos) else {
+                return Vec::new();
+            };
+            let Some(selector) = query.selector() else {
+                return Vec::new();
+            };
+            let impls = svc.find_implementors(selector);
+            impls
+                .into_iter()
+                .filter_map(|loc| {
+                    let source = svc.file_source(&loc.file)?;
+                    let range = span_to_range(loc.span, &source);
+                    Some(tower_lsp::lsp_types::Location {
+                        uri: path_to_uri(&loc.file)?,
+                        range,
+                    })
+                })
+                .collect()
+        };
+
+        let locations = if let Some(query) = runtime_query {
+            self.delegate_nav_query(query, runtime_site_to_lsp_location, ast_fallback)
+                .await
+        } else {
+            // Cursor isn't on a selector — `implementorsOf:` has no answer
+            // for non-selector tokens. Skip the runtime hop and run the
+            // fallback (which also returns empty for the same reason).
+            ast_fallback()
+        };
+
+        if locations.is_empty() {
+            Ok(None)
+        } else {
+            // `GotoImplementationResponse` is an alias for `GotoDefinitionResponse`
+            // in lsp-types; using the underlying type avoids the
+            // `request::` path everywhere we construct the response.
+            Ok(Some(GotoDefinitionResponse::Array(locations)))
         }
     }
 
@@ -3658,5 +3760,143 @@ mod tests {
         assert!(handle.contains(&path));
         versions.lock().expect("versions lock").remove(&path);
         assert!(!handle.contains(&path));
+    }
+
+    /// BT-2241: `initialize` must advertise `implementation_provider` so
+    /// clients enable goto-implementation. Pins the capability registration
+    /// so a future refactor of the capabilities literal can't silently
+    /// drop the binding (the surface-parity drift checker would catch
+    /// the drop via `extract_lsp_caps`, but a dedicated unit test gives a
+    /// faster signal at the change site).
+    #[tokio::test]
+    async fn initialize_advertises_implementation_provider() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let result = backend
+            .initialize(InitializeParams::default())
+            .await
+            .expect("initialize ok");
+        assert!(
+            matches!(
+                result.capabilities.implementation_provider,
+                Some(ImplementationProviderCapability::Simple(true))
+            ),
+            "expected implementation_provider = Simple(true), got {:?}",
+            result.capabilities.implementation_provider
+        );
+    }
+
+    /// BT-2241: AST-fallback path of `goto_implementation`. The runtime
+    /// flag defaults to off in tests (no `initialize` with
+    /// `delegateToRuntime`), so this exercises the cold-file walker via
+    /// `SimpleLanguageService::find_implementors`. Two classes in the same
+    /// in-memory file define `bar`; both method-header locations must come
+    /// back when the cursor is on a call site for `bar`.
+    #[tokio::test]
+    async fn goto_implementation_returns_all_implementors_via_ast_fallback() {
+        use tower_lsp::lsp_types::{
+            PartialResultParams, TextDocumentIdentifier, TextDocumentPositionParams,
+            WorkDoneProgressParams,
+        };
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        // Seed an in-memory file with two implementors of `bar` plus a call
+        // site for `bar`. Use a `file://` URI so `resolve_path_for_uri`
+        // returns the path key the service stores.
+        let path = Utf8PathBuf::from("/tmp/bt-2241-goto-impl-test.bt");
+        let source = "Object subclass: Foo\n  \
+                      bar => 1\n\
+                      Object subclass: Baz\n  \
+                      bar => 2\n\
+                      Object subclass: User\n  \
+                      go => self bar\n";
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(path.clone(), source.to_string());
+        }
+
+        // Cursor on the `bar` call site (line 5, column 12 in the User
+        // method body). Line/column are 0-based for LSP.
+        let uri = Url::from_file_path(path.as_std_path()).expect("file URI");
+        let params = tower_lsp::lsp_types::request::GotoImplementationParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: tower_lsp::lsp_types::Position::new(5, 12),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let response = backend
+            .goto_implementation(params)
+            .await
+            .expect("goto_implementation ok");
+
+        let locations = match response {
+            Some(GotoDefinitionResponse::Array(v)) => v,
+            other => panic!("expected Array response, got {other:?}"),
+        };
+        assert_eq!(
+            locations.len(),
+            2,
+            "expected one location per implementor (Foo + Baz), got {locations:?}"
+        );
+        // Both locations should be in the same file (the only one indexed).
+        for loc in &locations {
+            assert!(
+                loc.uri.as_str().ends_with("bt-2241-goto-impl-test.bt"),
+                "unexpected URI in result: {}",
+                loc.uri
+            );
+        }
+    }
+
+    /// BT-2241: cursor on a non-selector token (e.g. a `state:` declaration
+    /// name) yields `None`. The runtime-attached mode would skip the hop
+    /// (the classifier returns `None`), and the AST fallback would do the
+    /// same — `goto_implementation` is selector-scoped by design.
+    #[tokio::test]
+    async fn goto_implementation_returns_none_for_non_selector_cursor() {
+        use tower_lsp::lsp_types::{
+            PartialResultParams, TextDocumentIdentifier, TextDocumentPositionParams,
+            WorkDoneProgressParams,
+        };
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let path = Utf8PathBuf::from("/tmp/bt-2241-goto-impl-none.bt");
+        // A class body with a state declaration; cursor will land on the
+        // state-variable name, which is neither a selector nor a class.
+        let source = "Object subclass: Foo\n  \
+                      state: counter = 0\n  \
+                      bar => 1\n";
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(path.clone(), source.to_string());
+        }
+
+        let uri = Url::from_file_path(path.as_std_path()).expect("file URI");
+        let params = tower_lsp::lsp_types::request::GotoImplementationParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                // Line 1 ("  state: counter = 0"), column 11 lands on the
+                // `counter` identifier.
+                position: tower_lsp::lsp_types::Position::new(1, 11),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let response = backend
+            .goto_implementation(params)
+            .await
+            .expect("goto_implementation ok");
+        assert!(
+            response.is_none(),
+            "expected None for non-selector cursor, got {response:?}"
+        );
     }
 }

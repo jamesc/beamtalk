@@ -301,6 +301,67 @@ impl SimpleLanguageService {
         None
     }
 
+    /// BT-2241: Classify the cursor for a `textDocument/implementation`
+    /// request and return the equivalent [`NavQuery::ImplementorsOf`], or
+    /// `None` when the cursor is not on a selector.
+    ///
+    /// Public so `beamtalk-lsp` builds the runtime-delegate request with
+    /// the *same* classification logic the AST walker uses — keeping the
+    /// runtime and cold-file modes in lockstep is a foundational invariant
+    /// of the epic (BT-2215).
+    ///
+    /// Unlike [`Self::references_query_at`], goto-implementation only
+    /// resolves selectors (not class names) — "implementations of a class"
+    /// would mean its subclasses, which `SystemNavigation` exposes via a
+    /// different selector (`subclassesOf:`) and is out of scope for this
+    /// LSP capability.
+    ///
+    /// Returns:
+    /// * `Some(NavQuery::ImplementorsOf(selector))` when the cursor is on
+    ///   a selector token (call site or method header).
+    /// * `None` for any other shape (class names, locals, parameters, ...).
+    #[must_use]
+    pub fn implementors_query_at(
+        &self,
+        file: &Utf8PathBuf,
+        position: Position,
+    ) -> Option<NavQuery> {
+        let file_data = self.files.get(file)?;
+        let offset = position.to_byte_offset(&file_data.source)?;
+
+        if let Some(selector_lookup) =
+            Self::find_selector_at_offset(&file_data.module, offset.get())
+        {
+            return Some(NavQuery::ImplementorsOf(selector_lookup.selector_name));
+        }
+        if let Some(selector_name) =
+            Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
+        {
+            return Some(NavQuery::ImplementorsOf(selector_name));
+        }
+        None
+    }
+
+    /// BT-2241: Find every class that defines `selector_name` across all
+    /// indexed files. Mirrors `SystemNavigation default implementorsOf:`
+    /// semantics — local definitions only, both instance- and class-side.
+    ///
+    /// This is the cold-file AST fallback for `textDocument/implementation`.
+    /// The LSP wraps it in [`Backend::delegate_nav_query`] so the runtime
+    /// path is preferred when attached (and sees live patches, stdlib
+    /// classes, ADR-0066 extension methods the walker can't index).
+    ///
+    /// Returns method-definition locations whose `span` is the full
+    /// `MethodDefinition::span` — LSP callers that want only the header
+    /// line collapse it to `span.start()`.
+    #[must_use]
+    pub fn find_implementors(&self, selector_name: &str) -> Vec<Location> {
+        crate::queries::implementors_provider::find_implementors(
+            selector_name,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
+        )
+    }
+
     /// If the offset falls inside the header of a method *definition*
     /// (the selector area of `bar => ...`, `+ other => ...`, or
     /// `at: i put: v => ...`), returns the method's selector name.
