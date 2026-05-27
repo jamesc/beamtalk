@@ -10,10 +10,42 @@
 //! - Name conversions (class names, module names)
 //! - Class identity (DDD Value Object bundling module + class names)
 
+use std::fmt::Write as _;
+
 use super::document::{Document, join};
 use super::{CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Expression, ExpressionStatement};
 use crate::docvec;
+
+/// Builds a versioned Core Erlang variable name.
+///
+/// Returns `prefix` when `version == 0`, otherwise `prefix{version}`
+/// (e.g. `"State"`, `"State1"`, `"StateAcc2"`, `"ClassVars1"`, `"Self3"`).
+///
+/// Uses [`std::fmt::Write`] on a pre-allocated buffer rather than `format!()`
+/// to comply with CLAUDE.md: "NEVER use `format!()` to produce Core Erlang
+/// fragments."  See also: `variable_context::VariableContext::fresh_var` which
+/// uses the same `write!` pattern (introduced in BT-875).
+///
+/// # Examples
+///
+/// ```ignore
+/// assert_eq!(versioned_var("State", 0), "State");
+/// assert_eq!(versioned_var("State", 1), "State1");
+/// assert_eq!(versioned_var("StateAcc", 2), "StateAcc2");
+/// ```
+pub(super) fn versioned_var(prefix: &str, version: usize) -> String {
+    if version == 0 {
+        prefix.to_string()
+    } else {
+        // Pre-allocate: prefix length + up to 4 digits (handles version ≤ 9999).
+        let mut s = String::with_capacity(prefix.len() + 4);
+        s.push_str(prefix);
+        // Write the counter directly instead of using format!.
+        let _ = write!(s, "{version}");
+        s
+    }
+}
 
 /// Escapes a string for use inside a Core Erlang double-quoted string literal.
 ///
@@ -445,5 +477,29 @@ mod tests {
             escape_core_erlang_string("C:\\Users\\foo\\bar.bt"),
             "C:\\\\Users\\\\foo\\\\bar.bt"
         );
+    }
+
+    #[test]
+    fn test_versioned_var_version_zero_returns_prefix() {
+        assert_eq!(versioned_var("State", 0), "State");
+        assert_eq!(versioned_var("StateAcc", 0), "StateAcc");
+        assert_eq!(versioned_var("ClassVars", 0), "ClassVars");
+        assert_eq!(versioned_var("Self", 0), "Self");
+    }
+
+    #[test]
+    fn test_versioned_var_appends_version_number() {
+        assert_eq!(versioned_var("State", 1), "State1");
+        assert_eq!(versioned_var("State", 2), "State2");
+        assert_eq!(versioned_var("StateAcc", 1), "StateAcc1");
+        assert_eq!(versioned_var("ClassVars", 3), "ClassVars3");
+        assert_eq!(versioned_var("Self", 5), "Self5");
+    }
+
+    #[test]
+    fn test_versioned_var_large_version() {
+        // Verify capacity pre-allocation does not truncate for larger versions.
+        assert_eq!(versioned_var("State", 100), "State100");
+        assert_eq!(versioned_var("State", 9999), "State9999");
     }
 }
