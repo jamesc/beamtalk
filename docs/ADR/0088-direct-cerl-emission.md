@@ -1,7 +1,7 @@
 # ADR 0088: Direct Core Erlang AST Emission via ETF
 
 ## Status
-Proposed (2026-05-26)
+Proposed (2026-05-26) — **Phase 0 only**. Phases 1–4 are explicitly contingent on (a) the Phase 0 napkin's timing data showing that ETF encode/decode is not the dominant per-compile cost (otherwise pivot to Alternative 7), **and** (b) a separate decision against the cheaper "typed Document leaves" alternative for the BT-875 recurrence vector (see *Why not just constrain `Document` leaves?* below). Approval of this ADR authorises Phase 0 and the data-gathering it enables; it does not pre-authorise the 58K LOC codegen migration.
 
 ## Context
 
@@ -64,6 +64,12 @@ Concretely:
 4. The Port message format gains a `cerl` response variant alongside the existing `core_erlang` text variant. The Erlang side decodes ETF, calls `compile:forms(Forms, [from_core, binary, return_errors])`, and `code:load_binary/3` as today.
 5. Migrate codegen functions opportunistically (per ADR 0018's organic-migration model) — each function's return type changes from `Document` to the corresponding cerl node type. The full behavioural test suite (`just test-stdlib`, `just test-bunit`, `just test-repl-protocol`) verifies *behaviour* parity at every step; the `just codegen-diff` BEAM-diff harness runs as a diagnostic, but byte-for-byte BEAM parity is not enforced (see Consequences).
 6. After all codegen has migrated, remove the text path: delete the `Document` type and its API, delete the `cerl_to_doc` transitional adapter, and delete the `core_scan`/`core_parse` calls in `beamtalk_compiler_server` and `beamtalk_build_worker`.
+
+### Why not just constrain `Document` leaves?
+
+The Option B "compiler architect" steelman raises the sharpest counter to this ADR: ADR 0018 already gave us typed codegen, and the BT-875 recurrence vector is the *one* typed-leaf escape hatch — `Document::String(...)` accepts arbitrary text. That escape hatch is closable in ~1–2K LOC by replacing `Document::String` with a sum of typed leaves (`Atom`, `VarName`, `StringLit`, `IntLit`, ...) and forbidding raw-string construction at module boundaries. If BT-875 elimination is the *primary* motivation, that change is roughly 30× cheaper than the 58K LOC migration this ADR proposes, and it preserves the Document combinator surface and all 245 unit tests unchanged.
+
+We do not refute that argument — we **scope around** it. The typed-leaf refactor closes BT-875 but captures *none* of the other benefits this ADR targets: it does not remove the `core_scan`/`core_parse` round-trip, does not enable cerl-node annotation propagation to BEAM bytecode, does not give us the same idiomatic interface LFE uses, and does not eliminate the text/AST boundary at which source positions are lost today. If the napkin's timing data shows ETF wire-cost is in the noise *and* the downstream consumers of annotation fidelity (source-mapped diagnostics, dialyzer integration, debugger) are not scheduled work, then the typed-leaf refactor is genuinely the right call and this ADR should be withdrawn in favour of it. The contingency in the Status section is real: Phase 0 produces the data to decide between these two paths, and the decision is not pre-made.
 
 ### What this looks like
 
