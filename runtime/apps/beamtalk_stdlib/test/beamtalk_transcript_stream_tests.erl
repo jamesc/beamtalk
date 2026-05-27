@@ -473,7 +473,8 @@ async_show_notifies_subscriber_test() ->
     {ok, Pid} = beamtalk_transcript_stream:start_link(),
     %% Subscribe via direct cast so self() is the subscriber
     gen_server:cast(Pid, {subscribe, self()}),
-    _ = gen_server:call(Pid, recent),  %% sync barrier — ensure subscribe processed
+    %% sync barrier — ensure subscribe processed
+    _ = gen_server:call(Pid, recent),
     Future = beamtalk_future:new(),
     FuturePid = beamtalk_future:pid(Future),
     gen_server:cast(Pid, {'show:', [<<"async_msg">>], FuturePid}),
