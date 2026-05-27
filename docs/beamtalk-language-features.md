@@ -27,6 +27,8 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Named Actor Registration (ADR 0079)](#named-actor-registration-adr-0079)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
+  - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
+  - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
   - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
@@ -2526,6 +2528,89 @@ Registry reset          // => 0
 > Purely-programmatic `ClassBuilder` classes have no recorded source; supply their
 > class methods up front via `classMethods:` / `addClassMethod:body:` instead.
 
+### Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)
+
+The `>>` patcher form is convenient at the REPL, but tools (MCP, LSP, browser
+editors) that hold the method body as a String value need a keyword form that
+avoids escaping quotes and multi-line bodies back into source. Two `Behaviour`
+class-side methods provide this:
+
+| Method | Intent | Used by |
+|--------|--------|---------|
+| `aClass compile: #sel source: "body"` | durable | MCP `save_method`, browser "Save", REPL editor |
+| `aClass tryCompile: #sel source: "body"` | ephemeral (auto-prunes) | MCP `try_method`, agent spikes |
+
+`>>` and `compile:source:` are equivalent in effect — both install the new
+method in memory and append a durable ChangeEntry to the workspace ChangeLog.
+`tryCompile:source:` installs in memory like `compile:source:` but tags the
+entry as ephemeral — successful spikes are promoted by re-calling
+`compile:source:` with the same body.
+
+```beamtalk
+// Durable patch — equivalent to `Counter >> increment => ...`
+Counter compile: #increment source: "increment => self.value := self.value + 1"
+// => Counter
+
+// Ephemeral spike — try a candidate fix without committing
+Counter tryCompile: #doubled source: "doubled => self.value * 2"
+// => Counter
+```
+
+Both methods return the receiver class. Every successful in-memory patch emits
+a ChangeEntry unconditionally — including patches against stdlib or dependency
+classes (which are not flushable). The audit trail is exhaustive on purpose.
+
+### ChangeLog — Tracking In-Memory Changes (ADR 0082)
+
+Every successful live patch — whether via `>>`, `compile:source:`, or
+`tryCompile:source:` — appends a `ChangeEntry` to the workspace **ChangeLog**.
+`Workspace changes` returns the ChangeLog object, following Pharo's
+`Smalltalk changes` idiom.
+
+```beamtalk
+Workspace changes notEmpty       // => false  (nothing patched yet)
+Workspace changes dirtyMethods   // => #{}
+```
+
+The ChangeLog's default collection views (`size`, `isEmpty`, `notEmpty`, `do:`,
+`dirtyMethods`) reflect only **active** entries: current epoch, not orphaned.
+`select:` ranges over the **full** set so it can reach prior-epoch and orphan
+entries.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `size` | `Integer` | Active (live, re-appliable) entries |
+| `isEmpty` / `notEmpty` | `Boolean` | "Is anything dirty?" is `Workspace changes notEmpty` |
+| `do: block` | `Nil` | Iterate active entries |
+| `select: block` | `List(ChangeEntry)` | Filter **all** entries (reaches orphans and prior-epoch too) |
+| `dirtyMethods` | `Dictionary` | `#{ClassName => Set(selectors)}` for the active set |
+| `activeEntries` | `List(ChangeEntry)` | Current-epoch entries that have not been orphaned |
+| `allEntries` | `List(ChangeEntry)` | Every logged entry, including prior-epoch and orphan entries |
+
+Each `ChangeEntry` exposes:
+
+| Accessor | Type | Description |
+|----------|------|-------------|
+| `className` | `Symbol` | The patched class name |
+| `selector` | `Symbol \| Nil` | The patched selector, or `nil` for new-class entries |
+| `kind` | `Symbol` | `#instance`, `#class`, `#'new-class'`, or `#unknown` |
+| `intent` | `Symbol` | `#durable` or `#ephemeral` |
+| `authorKind` | `Symbol` | `#human` or `#agent` |
+| `sourceFile` | `String \| Nil` | Source file path, or `nil` for stdlib/dynamic classes |
+| `seq` | `Integer` | Monotonic sequence number |
+| `isDurable` / `isEphemeral` | `Boolean` | Intent predicates |
+| `isFlushable` | `Boolean` | Whether the patch can be written to disk |
+| `isOrphan` | `Boolean` | `prev_source` no longer matches disk after restart |
+| `isActive` | `Boolean` | Current epoch and not orphaned |
+| `isNewClass` | `Boolean` | `kind` is `#'new-class'` |
+| `isAgent` / `isHuman` | `Boolean` | Author predicates |
+
+```beamtalk
+Workspace changes do: [:e | Transcript show: e printString]
+Workspace changes select: [:e | e isOrphan]
+Workspace changes select: [:e | e isAgent]
+```
+
 ---
 
 ## Extension Methods (Open Classes)
@@ -2648,6 +2733,7 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 | `actorsOf: AClass` | `List` | All live actors of the given class |
 | `bind: value as: #Name` | `Nil` | Register a value in the workspace namespace |
 | `unbind: #Name` | `Nil` | Remove a registered name from the namespace |
+| `changes` | `ChangeLog` | Pending in-memory changes (ADR 0082) — see [ChangeLog](#changelog--tracking-in-memory-changes-adr-0082) |
 
 ```beamtalk
 (Workspace load: "examples/counter.bt")
