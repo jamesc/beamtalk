@@ -226,6 +226,78 @@ fn pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
+/// Escape a Rust string so it can be embedded as a Beamtalk String literal.
+///
+/// Beamtalk strings use `\` and `"` like Rust, plus `{` triggers interpolation
+/// (ADR 0023), so `\{` is required to embed a literal `{`. Used by ADR 0082
+/// Phase 3 MCP tools (`save_method`, `try_method`, `save_class`, `flush`)
+/// to forward user-supplied bodies and paths through the `evaluate` op without
+/// the body needing to be valid Beamtalk source on its own.
+fn escape_beamtalk_string(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('{', "\\{")
+}
+
+/// Build the Beamtalk expression for the `save_method` MCP tool — durable
+/// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
+fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
+    format!(
+        "{} compile: #{} source: \"{}\"",
+        class,
+        selector,
+        escape_beamtalk_string(body),
+    )
+}
+
+/// Build the Beamtalk expression for the `try_method` MCP tool — ephemeral
+/// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
+fn try_method_expr(class: &str, selector: &str, body: &str) -> String {
+    format!(
+        "{} tryCompile: #{} source: \"{}\"",
+        class,
+        selector,
+        escape_beamtalk_string(body),
+    )
+}
+
+/// Build the Beamtalk expression for the `save_class` MCP tool — new-class
+/// creation path (ADR 0082 Phase 3).
+fn save_class_expr(source: &str, path: &str) -> String {
+    format!(
+        "Workspace newClass: \"{}\" at: \"{}\"",
+        escape_beamtalk_string(source),
+        escape_beamtalk_string(path),
+    )
+}
+
+/// Scope filter for the `flush` MCP tool (ADR 0082 Phase 3). Mutually
+/// exclusive; the tool wrapper enforces this before constructing the
+/// expression.
+#[derive(Clone, Copy)]
+enum FlushFilter<'a> {
+    None,
+    Class(&'a str),
+    File(&'a str),
+    Kind(&'a str),
+}
+
+/// Build the Beamtalk expression for the `flush` MCP tool.
+///
+/// Surface map: `Workspace flush` / `Workspace flush: ClassName` /
+/// `Workspace flush: #{ #file => "path" }` / `Workspace flush: #'kind'`.
+fn flush_expr(filter: FlushFilter<'_>) -> String {
+    match filter {
+        FlushFilter::None => "Workspace flush".to_string(),
+        FlushFilter::Class(class) => format!("Workspace flush: {class}"),
+        FlushFilter::File(file) => format!(
+            "Workspace flush: #{{ #file => \"{}\" }}",
+            escape_beamtalk_string(file)
+        ),
+        FlushFilter::Kind(kind) => format!("Workspace flush: #'{kind}'"),
+    }
+}
+
 /// Check a REPL response for errors and return early with a formatted error result.
 ///
 /// The `$fallback` string is used when the response has no error message.
@@ -535,6 +607,82 @@ pub struct DiagnosticSummaryParams {
     pub path: Option<String>,
 }
 
+/// Parameters for the `save_method` MCP tool (ADR 0082 Phase 3, BT-2288).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SaveMethodParams {
+    /// Name of the Beamtalk class whose method should be patched.
+    #[schemars(
+        description = "Name of the Beamtalk class to install the method on (e.g. \"Counter\")."
+    )]
+    pub class: String,
+    /// Method selector — accepted with or without a leading `#`.
+    #[schemars(
+        description = "Method selector to install (e.g. \"increment\", \"at:put:\", \"+\"). Accepted with or without a leading '#'."
+    )]
+    pub selector: String,
+    /// Method source body as a String value (the right-hand side of `=>`).
+    #[schemars(
+        description = "The method body source as a String value (the right-hand side of '=>'). Passed verbatim to Behaviour>>compile:source: — no escaping required by the caller."
+    )]
+    pub body: String,
+}
+
+/// Parameters for the `try_method` MCP tool (ADR 0082 Phase 3, BT-2288).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct TryMethodParams {
+    /// Name of the Beamtalk class whose method should be ephemerally patched.
+    #[schemars(
+        description = "Name of the Beamtalk class to install the ephemeral method on (e.g. \"Counter\")."
+    )]
+    pub class: String,
+    /// Method selector — accepted with or without a leading `#`.
+    #[schemars(
+        description = "Method selector to install (e.g. \"increment\", \"at:put:\", \"+\"). Accepted with or without a leading '#'."
+    )]
+    pub selector: String,
+    /// Method source body as a String value (the right-hand side of `=>`).
+    #[schemars(
+        description = "The method body source as a String value (the right-hand side of '=>'). Passed verbatim to Behaviour>>tryCompile:source: — no escaping required by the caller."
+    )]
+    pub body: String,
+}
+
+/// Parameters for the `save_class` MCP tool (ADR 0082 Phase 3, BT-2288).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SaveClassParams {
+    /// Full Beamtalk class source (e.g. `Object subclass: Greeter ...`).
+    #[schemars(
+        description = "Full Beamtalk class source — the entire 'Object subclass: ...' declaration including any methods. Passed verbatim to Workspace>>newClass:at:."
+    )]
+    pub source: String,
+    /// Target path for the new class file, relative to the project root
+    /// (e.g. `"src/greeter.bt"`).
+    #[schemars(
+        description = "Target path for the new class file, typically relative to the project root (e.g. \"src/greeter.bt\" or \"test/greeter_test.bt\"). Must lie inside the project source tree and the basename must match the declared class name."
+    )]
+    pub path: String,
+}
+
+/// Parameters for the `flush` MCP tool (ADR 0082 Phase 3, BT-2288).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct FlushParams {
+    /// Optional class name to scope the flush to that class's pending entries.
+    #[schemars(
+        description = "Optional class name to scope the flush (compiles to 'Workspace flush: ClassName'). Mutually exclusive with 'file' and 'kind'. Omit all three to flush every pending durable change."
+    )]
+    pub class: Option<String>,
+    /// Optional file path to scope the flush to entries against that file.
+    #[schemars(
+        description = "Optional source file path to scope the flush (compiles to 'Workspace flush: #{ #file => \"path\" }'). Mutually exclusive with 'class' and 'kind'."
+    )]
+    pub file: Option<String>,
+    /// Optional change-kind symbol (e.g. `"new-class"`) to scope the flush.
+    #[schemars(
+        description = "Optional change-kind symbol to scope the flush, e.g. \"new-class\" (compiles to 'Workspace flush: #'new-class'). Mutually exclusive with 'class' and 'file'."
+    )]
+    pub kind: Option<String>,
+}
+
 // --- MCP Tool implementations ---
 
 #[tool_router]
@@ -775,11 +923,7 @@ impl BeamtalkMcp {
         // Use native Beamtalk API: Workspace load: "path"
         let expr = format!(
             "Workspace load: \"{}\"",
-            params
-                .path
-                .replace('\\', "\\\\")
-                .replace('"', "\\\"")
-                .replace('{', "\\{")
+            escape_beamtalk_string(&params.path)
         );
         let response = self
             .client
@@ -1712,6 +1856,327 @@ impl BeamtalkMcp {
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
+
+    // --- ADR 0082 Phase 3 (BT-2288): ChangeLog + flush MCP tools ---
+    //
+    // Each tool below is a typed front-end for an `evaluate` of a Beamtalk
+    // expression. Per ADR 0082 there are no new workspace-side REPL ops; the
+    // language is the API, MCP is convenience. The Beamtalk expression each
+    // tool compiles to is documented next to the implementation and aligned
+    // with the surface-parity map.
+
+    /// Durably install a method on a Beamtalk class (ADR 0082 Phase 3).
+    ///
+    /// Compiles to `aClass compile: #selector source: body`. The patch installs
+    /// in memory and appends a durable `ChangeLog` entry that can be written to
+    /// disk by a subsequent `flush`.
+    #[tool(
+        description = "Durably install a method on a Beamtalk class. The method patch installs in memory and appends a durable ChangeLog entry that 'flush' will later write to disk (when the class is backed by an in-project .bt file). The 'body' argument is the source on the right-hand side of '=>' and is passed as a String value — no escaping or quoting required from the caller. Use 'try_method' for ephemeral spikes you may discard. (ADR 0082 Phase 3, BT-2288.)"
+    )]
+    async fn save_method(
+        &self,
+        Parameters(params): Parameters<SaveMethodParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("save_method");
+        validate_class_name(&params.class)?;
+        let selector = params
+            .selector
+            .strip_prefix('#')
+            .unwrap_or(&params.selector);
+        validate_selector(selector)?;
+        tracing::debug!(
+            tool = "save_method",
+            class = %params.class,
+            selector = %selector,
+            body_len = params.body.len(),
+            "tool invoked"
+        );
+
+        // `aClass compile: #selector source: "body"`. The body is passed as a
+        // String value through eval; the runtime primitive (classCompileSource)
+        // takes the body as a value, so we never re-parse it as Beamtalk source.
+        let expr = save_method_expr(&params.class, selector, &params.body);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to save method");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                format!("Method {}>>#{} saved", params.class, selector)
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Ephemerally install a method on a Beamtalk class (ADR 0082 Phase 3).
+    ///
+    /// Compiles to `aClass tryCompile: #selector source: body`. Installs in
+    /// memory and logs an ephemeral `ChangeLog` entry that does not flush and
+    /// auto-prunes on workspace restart. Promote a successful spike by calling
+    /// `save_method` with the same source.
+    #[tool(
+        description = "Ephemerally install a method on a Beamtalk class for exploration. Installs in memory and logs an ephemeral ChangeLog entry that 'flush' skips and auto-prunes on workspace restart. Use this for spike fixes you may discard; promote a successful spike by calling 'save_method' with the same body to upgrade the intent to durable. The 'body' argument is the source on the right-hand side of '=>' and is passed as a String value — no escaping or quoting required from the caller. (ADR 0082 Phase 3, BT-2288.)"
+    )]
+    async fn try_method(
+        &self,
+        Parameters(params): Parameters<TryMethodParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("try_method");
+        validate_class_name(&params.class)?;
+        let selector = params
+            .selector
+            .strip_prefix('#')
+            .unwrap_or(&params.selector);
+        validate_selector(selector)?;
+        tracing::debug!(
+            tool = "try_method",
+            class = %params.class,
+            selector = %selector,
+            body_len = params.body.len(),
+            "tool invoked"
+        );
+
+        // `aClass tryCompile: #selector source: "body"`.
+        let expr = try_method_expr(&params.class, selector, &params.body);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to try method");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                format!(
+                    "Method {}>>#{} installed (ephemeral)",
+                    params.class, selector
+                )
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Create a new Beamtalk class at a path (ADR 0082 Phase 3).
+    ///
+    /// Compiles to `Workspace newClass: source at: path`. Installs the class in
+    /// memory and logs a durable `kind: #'new-class'` `ChangeLog` entry. The
+    /// file is written to disk by a later `flush`.
+    #[tool(
+        description = "Create a new Beamtalk class. Compiles 'source' and installs the class in memory, then appends a durable 'kind: new-class' ChangeLog entry; a subsequent 'flush' writes the file to disk at 'path'. The path is typically relative to the project root (e.g. \"src/greeter.bt\") and must lie inside the project source tree; the basename must match the declared class name. Raises a structured error if the target already exists, lies outside the project tree, the class name does not match the basename, or a class with that name is already loaded — use 'save_method' against the existing class in that last case. (ADR 0082 Phase 3, BT-2288.)"
+    )]
+    async fn save_class(
+        &self,
+        Parameters(params): Parameters<SaveClassParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("save_class");
+        if params.path.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "save_class: 'path' must not be empty.",
+                None,
+            ));
+        }
+        if params.source.is_empty() {
+            return Err(rmcp::ErrorData::invalid_params(
+                "save_class: 'source' must not be empty.",
+                None,
+            ));
+        }
+        tracing::debug!(
+            tool = "save_class",
+            path = %params.path,
+            source_len = params.source.len(),
+            "tool invoked"
+        );
+
+        let expr = save_class_expr(&params.source, &params.path);
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to save class");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                format!("New class queued for {}", params.path)
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Flush pending `ChangeLog` entries to disk (ADR 0082 Phase 3).
+    ///
+    /// Compiles to `Workspace flush` or `Workspace flush: <selector>`. The
+    /// optional `class`, `file`, and `kind` filters are mutually exclusive; at
+    /// most one may be supplied.
+    #[tool(
+        description = "Write pending durable ChangeLog entries to disk via byte-span splice + atomic rename, with external-edit conflict detection. With no arguments, flushes every pending durable change ('Workspace flush'). At most one of 'class', 'file', or 'kind' may be supplied: 'class' scopes to one class ('Workspace flush: ClassName'), 'file' scopes to one source file ('Workspace flush: #{ #file => \"path\" }'), and 'kind' scopes to a ChangeEntry kind such as \"new-class\" ('Workspace flush: #'new-class'). Returns a FlushResult summary listing files written and any conflicts. (ADR 0082 Phase 3, BT-2288.)"
+    )]
+    async fn flush(
+        &self,
+        Parameters(params): Parameters<FlushParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("flush");
+        // Mutual exclusivity: at most one filter.
+        let provided = [
+            params.class.as_deref(),
+            params.file.as_deref(),
+            params.kind.as_deref(),
+        ]
+        .into_iter()
+        .filter(|v| v.is_some_and(|s| !s.is_empty()))
+        .count();
+        if provided > 1 {
+            return Err(rmcp::ErrorData::invalid_params(
+                "flush: 'class', 'file', and 'kind' are mutually exclusive — pass at most one.",
+                None,
+            ));
+        }
+        tracing::debug!(
+            tool = "flush",
+            class = ?params.class,
+            file = ?params.file,
+            kind = ?params.kind,
+            "tool invoked"
+        );
+
+        let expr = match (
+            params.class.as_deref().filter(|s| !s.is_empty()),
+            params.file.as_deref().filter(|s| !s.is_empty()),
+            params.kind.as_deref().filter(|s| !s.is_empty()),
+        ) {
+            (Some(class), None, None) => {
+                validate_class_name(class)?;
+                flush_expr(FlushFilter::Class(class))
+            }
+            (None, Some(file), None) => flush_expr(FlushFilter::File(file)),
+            (None, None, Some(kind)) => {
+                // Allow either bare `new-class` or `#'new-class'`. We always
+                // emit a quoted-symbol literal so hyphenated kinds parse.
+                let bare = kind.strip_prefix('#').unwrap_or(kind);
+                let bare = bare.trim_matches('\'');
+                if bare.is_empty()
+                    || !bare
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
+                    return Err(rmcp::ErrorData::invalid_params(
+                        format!(
+                            "flush: 'kind' must be an identifier (letters, digits, '-' or '_'); got '{kind}'."
+                        ),
+                        None,
+                    ));
+                }
+                flush_expr(FlushFilter::Kind(bare))
+            }
+            _ => flush_expr(FlushFilter::None),
+        };
+
+        let response = self
+            .client
+            .evaluate_with_options(&expr, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Flush failed");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "Flushed".to_string()
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// List pending `ChangeLog` entries (ADR 0082 Phase 3).
+    ///
+    /// Compiles to `Workspace changes` — returns the `ChangeLog` object's
+    /// display form. Pair with `dirty_methods` for the per-class breakdown.
+    #[tool(
+        description = "Return the workspace ChangeLog — the navigable view of pending in-memory changes against the on-disk source files. Compiles to 'Workspace changes'. Pair with 'dirty_methods' for the per-class breakdown of dirty selectors, or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)"
+    )]
+    async fn list_changes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("list_changes");
+        tracing::debug!(tool = "list_changes", "tool invoked");
+
+        let response = self
+            .client
+            .evaluate_with_options("Workspace changes", false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to list changes");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "No changes".to_string()
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Per-class dirty selectors (ADR 0082 Phase 3).
+    ///
+    /// Compiles to `Workspace changes dirtyMethods` — the per-class set of
+    /// dirty selectors, the structured "what specifically has changed?" view.
+    #[tool(
+        description = "Return the per-class set of dirty selectors in the workspace — the structured 'what specifically has changed?' view. Compiles to 'Workspace changes dirtyMethods'. Pair with 'list_changes' for the full summary or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)"
+    )]
+    async fn dirty_methods(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("dirty_methods");
+        tracing::debug!(tool = "dirty_methods", "tool invoked");
+
+        let response = self
+            .client
+            .evaluate_with_options("Workspace changes dirtyMethods", false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        check_response!(response, "Failed to list dirty methods");
+
+        let text = {
+            let v = response.value_string();
+            if v.is_empty() {
+                "No dirty methods".to_string()
+            } else {
+                v
+            }
+        };
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
 }
 
 // --- Lint helpers ---
@@ -2148,6 +2613,10 @@ impl ServerHandler for BeamtalkMcp {
                  'show_codegen' to inspect generated Core Erlang (use class+selector for loaded classes), 'info' for symbol details, \
                  'list_packages' to see loaded packages with metadata, \
                  'package_classes' to list classes in a package, \
+                 'save_method' / 'try_method' to durably or ephemerally patch a class method (ADR 0082), \
+                 'save_class' to create a new class file pending flush, \
+                 'list_changes' / 'dirty_methods' to inspect pending workspace changes, \
+                 'flush' to write durable ChangeLog entries to disk, \
                  'describe' for capability discovery, 'clear' to reset bindings, \
                  'unload' to remove a class, and 'interrupt' to cancel evaluations.",
             )
@@ -2931,5 +3400,124 @@ mod tests {
         assert!(result["type_coverage"]["typed"].is_number());
         assert!(result["type_coverage"]["total"].is_number());
         assert!(result["type_coverage"]["dynamic_percent"].is_number());
+    }
+
+    // --- ADR 0082 Phase 3 (BT-2288): MCP ChangeLog / flush tool wiring ---
+    //
+    // The tools below pin the Beamtalk expression each MCP tool dispatches to,
+    // matching the REPL meta-command tests in
+    // crates/beamtalk-cli/src/commands/repl/mod.rs. Surface drift in the
+    // expression mapping fails CI through these tests.
+
+    #[test]
+    fn escape_beamtalk_string_handles_backslash_quote_and_brace() {
+        // Brace escaping prevents Beamtalk's '{x}' interpolation (ADR 0023).
+        assert_eq!(escape_beamtalk_string("hello"), "hello");
+        assert_eq!(escape_beamtalk_string("a\"b"), "a\\\"b");
+        assert_eq!(escape_beamtalk_string("a\\b"), "a\\\\b");
+        assert_eq!(escape_beamtalk_string("a{b}"), "a\\{b}");
+        // Order matters: backslash escape must run first so a literal '\{'
+        // arriving from the caller does not become '\\\\{' (which would expand
+        // to a literal backslash followed by an interpolation).
+        assert_eq!(escape_beamtalk_string("\\{x}"), "\\\\\\{x}");
+    }
+
+    #[test]
+    fn save_method_expr_compiles_durable_patch() {
+        // `save_method` → `aClass compile: #selector source: body`.
+        assert_eq!(
+            save_method_expr("Counter", "increment", "self.value := self.value + 1"),
+            "Counter compile: #increment source: \"self.value := self.value + 1\"",
+        );
+    }
+
+    #[test]
+    fn save_method_expr_escapes_body_quotes_and_braces() {
+        // Interpolation braces in the body must be neutralised — the body is
+        // a String value, not interpolated source.
+        assert_eq!(
+            save_method_expr("Greeter", "greet", "\"Hello, {name}\""),
+            "Greeter compile: #greet source: \"\\\"Hello, \\{name}\\\"\"",
+        );
+    }
+
+    #[test]
+    fn save_method_expr_preserves_keyword_selectors() {
+        assert_eq!(
+            save_method_expr("Dict", "at:put:", "..."),
+            "Dict compile: #at:put: source: \"...\"",
+        );
+    }
+
+    #[test]
+    fn try_method_expr_compiles_ephemeral_patch() {
+        // `try_method` → `aClass tryCompile: #selector source: body`.
+        assert_eq!(
+            try_method_expr("Counter", "doubled", "^ self value * 2"),
+            "Counter tryCompile: #doubled source: \"^ self value * 2\"",
+        );
+    }
+
+    #[test]
+    fn save_class_expr_compiles_new_class_creation() {
+        // `save_class` → `Workspace newClass: source at: path`.
+        assert_eq!(
+            save_class_expr("Object subclass: Greeter", "src/greeter.bt"),
+            "Workspace newClass: \"Object subclass: Greeter\" at: \"src/greeter.bt\"",
+        );
+    }
+
+    #[test]
+    fn save_class_expr_escapes_source_quotes_and_braces() {
+        // A class source containing string-interpolation literals must come
+        // through as a String value, not as embedded Beamtalk source.
+        // Newlines pass through verbatim — Beamtalk strings are multi-line.
+        let source = "Object subclass: Greeter\n  greet => \"hi {name}\"";
+        let got = save_class_expr(source, "src/greeter.bt");
+        assert_eq!(
+            got,
+            "Workspace newClass: \"Object subclass: Greeter\n  greet => \\\"hi \\{name}\\\"\" at: \"src/greeter.bt\"",
+        );
+    }
+
+    #[test]
+    fn flush_expr_no_filter() {
+        assert_eq!(flush_expr(FlushFilter::None), "Workspace flush");
+    }
+
+    #[test]
+    fn flush_expr_class_filter() {
+        assert_eq!(
+            flush_expr(FlushFilter::Class("Counter")),
+            "Workspace flush: Counter",
+        );
+    }
+
+    #[test]
+    fn flush_expr_file_filter_uses_file_dict() {
+        // The Beamtalk-side flush: selector accepts a Dictionary
+        // `#{ #file => "..." }` (see Workspace.bt flush: docs).
+        assert_eq!(
+            flush_expr(FlushFilter::File("src/foo.bt")),
+            "Workspace flush: #{ #file => \"src/foo.bt\" }",
+        );
+    }
+
+    #[test]
+    fn flush_expr_file_filter_escapes_path() {
+        assert_eq!(
+            flush_expr(FlushFilter::File("src/\"weird\".bt")),
+            "Workspace flush: #{ #file => \"src/\\\"weird\\\".bt\" }",
+        );
+    }
+
+    #[test]
+    fn flush_expr_kind_filter_uses_quoted_symbol() {
+        // Hyphenated kinds (e.g. `new-class`) require a quoted-symbol literal
+        // — Beamtalk symbol literals without quotes only accept identifiers.
+        assert_eq!(
+            flush_expr(FlushFilter::Kind("new-class")),
+            "Workspace flush: #'new-class'",
+        );
     }
 }

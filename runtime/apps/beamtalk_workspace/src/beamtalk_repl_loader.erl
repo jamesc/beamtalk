@@ -28,7 +28,8 @@ Extracted from beamtalk_repl_eval (BT-863).
     is_stdlib_path/1,
     to_snake_case/1,
     verify_class_present/3,
-    compute_package_module_name/1
+    compute_package_module_name/1,
+    new_class/2
 ]).
 
 %% Exported for testing (only in test builds)
@@ -51,11 +52,16 @@ Extracted from beamtalk_repl_eval (BT-863).
     method_source_binary/1,
     patch_side/1,
     classify_source_file/1,
-    span_error_entry/3
+    span_error_entry/3,
+    %% ADR 0082 Phase 1 (BT-2285): pure validation helpers for new_class/2.
+    declared_class_name/1,
+    validate_new_class/3,
+    validate_target_path/1
 ]).
 -endif.
 
 -include_lib("kernel/include/logger.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% Public API
 
@@ -656,6 +662,15 @@ load_recompiled_method(
             %% method is already live in memory. emit_change_entry/1 logs and
             %% swallows its own errors.
             emit_change_entry(MethodInfo),
+            %% (4) ADR 0082 Phase 4: when the workspace is in `autoflush: true'
+            %% mode, every successful durable in-memory patch is immediately
+            %% flushed to disk. Best-effort and synchronous; a flush failure does
+            %% NOT roll back the BEAM module install (prior binary may already be
+            %% unloaded and live actors may hold references to the new closures)
+            %% — the entry simply stays pending in the log for manual flush
+            %% reconciliation. Ephemeral patches are not autoflushed because
+            %% only durable+flushable entries are written by `flush/0'.
+            maybe_autoflush(maps:get(intent, MethodInfo, durable)),
             Result = <<ClassNameBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, AllWarnings, State};
         {error, LoadReason} ->
@@ -667,6 +682,417 @@ load_recompiled_method(
                     {error, {load_error, LoadReason}, <<>>, AllWarnings, State}
             end
     end.
+
+%%% ----------------------------------------------------------------------------
+%%% New-class creation (ADR 0082 Phase 1, BT-2285)
+%%% ----------------------------------------------------------------------------
+
+-doc """
+Create a brand-new class from a source String at `TargetPath` (ADR 0082 Phase 1).
+
+Compiles and installs the class in memory, then logs a `kind: "new-class"`
+ChangeEntry (`intent: durable`, `flushable: true`, `prev_source = nil`,
+`span = nil`, full source). Phase 1 does NOT write `TargetPath` to disk — the
+file is written later by `Workspace flush` (Phase 2), which replays the
+new-class entry. The entry records `sourceFile = TargetPath` so the flush knows
+where to write.
+
+Validation is loud and specific — every failure is an `#beamtalk_error{}` with
+no silent fallback (ADR 0082, *`Workspace newClass:` validation*). The op raises
+when, in order:
+
+  (a) `TargetPath` already exists on disk;
+  (b) `TargetPath` lies outside the project source tree;
+  (c) the declared class name does not match the basename of `TargetPath`
+      (one-class-per-file convention, ADR 0040);
+  (d) a class with that name is already loaded in memory.
+
+On success returns `{ok, [ClassObject]}` (the loaded class object(s), matching
+`load:`); on any validation/compile/install failure returns
+`{error, #beamtalk_error{}}` so the FFI boundary can raise it.
+""".
+-spec new_class(binary() | string(), binary() | string()) ->
+    {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+new_class(Source, TargetPath) when is_binary(Source) ->
+    new_class(binary_to_list(Source), TargetPath);
+new_class(Source, TargetPath) when is_binary(TargetPath) ->
+    new_class(Source, binary_to_list(TargetPath));
+new_class(Source, TargetPath) when is_list(Source), is_list(TargetPath) ->
+    %% (a) TargetPath must not already exist on disk; (b) must be in-project.
+    %% These checks run before compiling so a bad path fails fast and cheaply.
+    case validate_target_path(TargetPath) of
+        {ok, AbsPath} ->
+            new_class_compile(Source, TargetPath, AbsPath);
+        {error, _} = PathErr ->
+            PathErr
+    end;
+new_class(_Source, _TargetPath) ->
+    {error, new_class_type_error(<<"newClass:at: expects String source and path arguments">>)}.
+
+%% Compile (without installing) to discover the declared class name, validate
+%% (c) name == basename and (d) not already loaded, then install + log.
+-spec new_class_compile(string(), string(), string()) ->
+    {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+new_class_compile(Source, TargetPath, AbsPath) ->
+    ModuleNameOverride = compute_package_module_name(TargetPath),
+    StdlibMode = is_stdlib_path(TargetPath),
+    %% `compile_file/4`'s success-typing return here is a class binary or an
+    %% error (the protocol-definition variant declared in its spec is produced by
+    %% a different compiler entry, not this one — dialyzer confirms it can never
+    %% arrive). A protocol-only source therefore surfaces as a compile error or
+    %% as a class-less result that `declared_class_name([])` rejects loudly.
+    case beamtalk_repl_compiler:compile_file(Source, TargetPath, StdlibMode, ModuleNameOverride) of
+        {ok, Binary, ClassNames, ModuleName} ->
+            new_class_validate_and_install(
+                Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName
+            );
+        {error, Reason} ->
+            {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
+    end.
+
+%% With a successful compile, finish validation against the declared class name,
+%% then install the already-compiled binary and emit the new-class ChangeEntry.
+-spec new_class_validate_and_install(
+    string(), string(), string(), binary(), [map()], atom()
+) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName) ->
+    case declared_class_name(ClassNames) of
+        {error, _} = NameErr ->
+            NameErr;
+        {ok, DeclaredName} ->
+            case validate_new_class(DeclaredName, TargetPath, class_loaded(DeclaredName)) of
+                ok ->
+                    new_class_install(
+                        Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName
+                    );
+                {error, _} = ValErr ->
+                    ValErr
+            end
+    end.
+
+%% Install the compiled binary in memory (mirrors load_compiled_module/6's
+%% activation path, but stateless) and emit the durable new-class ChangeEntry.
+%% A ChangeLog failure does not undo the install — the class is already live.
+-spec new_class_install(
+    string(), string(), string(), binary(), [map()], atom(), binary()
+) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
+new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName) ->
+    case code:load_binary(ModuleName, AbsPath, Binary) of
+        {module, ModuleName} ->
+            activate_module(ModuleName, ClassNames, AbsPath),
+            %% Record class source so subsequent `>>` / compile:source: patches
+            %% against the new class resolve their span (mirrors the file-load path).
+            lists:foreach(
+                fun(#{name := Name}) ->
+                    beamtalk_workspace_meta:set_class_source(
+                        normalize_class_source_key(Name), Source
+                    )
+                end,
+                ClassNames
+            ),
+            emit_new_class_entry(DeclaredName, list_to_binary(Source), list_to_binary(AbsPath)),
+            %% ADR 0082 Phase 4: autoflush also covers new-class entries (they
+            %% are durable + flushable by construction). See the analogous
+            %% comment in load_recompiled_method/7 for the failure semantics.
+            maybe_autoflush(durable),
+            {ok, loaded_class_objects(ClassNames)};
+        {error, LoadReason} ->
+            ClassAtoms = class_name_atoms(ClassNames),
+            case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
+                [{_ClassName, StructuredError} | _] ->
+                    {error, StructuredError};
+                [] ->
+                    {error,
+                        new_class_error(
+                            new_class_load_failed,
+                            iolist_to_binary(
+                                io_lib:format("Could not load new class: ~p", [LoadReason])
+                            ),
+                            TargetPath
+                        )}
+            end
+    end.
+
+%% Validate (a) the path does not already exist and (b) it is inside the project
+%% source tree. Returns the absolute path on success. `classify_source_file/1`
+%% already encodes the in-project containment rule (and treats a workspace with
+%% no project context as "outside", which is the correct conservative answer —
+%% there is no tree to create the file in).
+-spec validate_target_path(string()) -> {ok, string()} | {error, #beamtalk_error{}}.
+validate_target_path(TargetPath) ->
+    case file:read_file_info(TargetPath) of
+        {error, enoent} ->
+            case classify_source_file(list_to_binary(TargetPath)) of
+                {flushable, AbsPath} ->
+                    {ok, AbsPath};
+                {not_flushable, _Reason} ->
+                    {error,
+                        new_class_error(
+                            target_outside_project,
+                            iolist_to_binary([
+                                <<"newClass:at: target is outside the project source tree: ">>,
+                                list_to_binary(TargetPath),
+                                <<" — new classes must be created inside the current project">>
+                            ]),
+                            TargetPath
+                        )}
+            end;
+        _Other ->
+            %% Any existing filesystem entry (regular file, directory, symlink)
+            %% blocks new-class; also treat unreadable paths (eaccess, etc.) as
+            %% existing rather than silently overwriting.
+            {error,
+                new_class_error(
+                    target_exists,
+                    iolist_to_binary([
+                        <<"newClass:at: target already exists on disk: ">>,
+                        list_to_binary(TargetPath),
+                        <<" — use compile:source: against the existing class, or choose a new path">>
+                    ]),
+                    TargetPath
+                )}
+    end.
+
+-doc """
+Extract the single declared class name from a compile result's class list.
+
+Enforces the one-class-per-file convention (ADR 0040): `newClass:at:` accepts
+exactly one class. An empty list (no class declared) or more than one class is a
+loud error. Pure — exported for tests.
+""".
+-spec declared_class_name([map()]) -> {ok, binary()} | {error, #beamtalk_error{}}.
+declared_class_name([#{name := Name}]) ->
+    {ok, normalize_class_source_key(Name)};
+declared_class_name([]) ->
+    {error,
+        new_class_error(
+            no_class_declared,
+            <<"newClass:at: source does not declare a class">>,
+            undefined
+        )};
+declared_class_name(ClassNames) when length(ClassNames) > 1 ->
+    Names = [normalize_class_source_key(N) || #{name := N} <- ClassNames],
+    {error,
+        new_class_error(
+            multiple_classes_declared,
+            iolist_to_binary([
+                <<"newClass:at: source declares multiple classes (">>,
+                lists:join(<<", ">>, Names),
+                <<") — one class per file (ADR 0040)">>
+            ]),
+            undefined
+        )}.
+
+-doc """
+Validate the declared class name against the target path (ADR 0082 Phase 1).
+
+Checks (c) the declared name matches the basename of `TargetPath` (one class per
+file, ADR 0040) and (d) no class of that name is already loaded (`Loaded` is the
+caller-supplied result of `class_loaded/1`, threaded in so this helper stays
+pure and unit-testable). Returns `ok` or `{error, #beamtalk_error{}}`.
+
+The basename match is *snake_case-normalised* so both established file-naming
+conventions are accepted for a class `Greeter`: `Greeter.bt` (PascalCase, the
+stdlib convention) and `greeter.bt` (snake_case, the examples/fixtures
+convention). Both resolve to the same module name in the compiler, so both are
+"matching" here. The class name must still be the same word as the file stem —
+`Welcomer` at `greeter.bt` is rejected.
+""".
+-spec validate_new_class(binary(), string(), boolean()) -> ok | {error, #beamtalk_error{}}.
+validate_new_class(DeclaredName, TargetPath, Loaded) ->
+    BaseName = filename:basename(TargetPath, ".bt"),
+    Expected = list_to_binary(BaseName),
+    %% Accept either an exact match (Greeter.bt) or a snake_case match
+    %% (greeter.bt) — both map to the same module name as the class.
+    DeclaredSnake = to_snake_case(binary_to_list(DeclaredName)),
+    BaseSnake = to_snake_case(BaseName),
+    Matches = (DeclaredName =:= Expected) orelse (DeclaredSnake =:= BaseSnake),
+    case Matches of
+        false ->
+            {error,
+                new_class_error(
+                    class_name_mismatch,
+                    iolist_to_binary([
+                        <<"newClass:at: declared class ">>,
+                        DeclaredName,
+                        <<" does not match basename '">>,
+                        Expected,
+                        <<"' of ">>,
+                        list_to_binary(TargetPath),
+                        <<" — either rename the class to match the basename, or use a path with basename ">>,
+                        DeclaredName,
+                        <<".bt or ">>,
+                        list_to_binary(DeclaredSnake),
+                        <<".bt. One class per file (ADR 0040)">>
+                    ]),
+                    TargetPath
+                )};
+        true when Loaded ->
+            {error,
+                new_class_error(
+                    class_already_loaded,
+                    iolist_to_binary([
+                        <<"newClass:at: class ">>,
+                        DeclaredName,
+                        <<" is already loaded — use compile:source: against it, or remove it first">>
+                    ]),
+                    TargetPath
+                )};
+        true ->
+            ok
+    end.
+
+%% True iff a class of this name is currently registered in the runtime.
+-spec class_loaded(binary()) -> boolean().
+class_loaded(ClassNameBin) ->
+    case beamtalk_repl_server:safe_to_existing_atom(ClassNameBin) of
+        {ok, ClassName} ->
+            is_pid(beamtalk_class_registry:whereis_class(ClassName));
+        {error, _} ->
+            %% Name has never been interned as an atom, so it cannot be a loaded
+            %% class — safe to treat as not loaded.
+            false
+    end.
+
+%% Resolve loaded class info maps to Beamtalk class objects (same shape `load:`
+%% returns). Reuses the workspace primitives' helper so the FFI surfaces the
+%% created class to the REPL identically to a file load.
+-spec loaded_class_objects([map()]) -> [#beamtalk_object{}].
+loaded_class_objects(ClassNames) ->
+    beamtalk_workspace_interface_primitives:loaded_class_objects(ClassNames).
+
+%% Trigger `Workspace flush' when `autoflush: true' is set on the workspace
+%% (ADR 0082 Phase 4, BT-2290). Best-effort and synchronous:
+%%
+%%   - Ephemeral patches are never autoflushed (they are not flushable by
+%%     definition — only `durable AND flushable' entries are written).
+%%   - The flush call itself is wrapped in try/catch so a flush failure (e.g.
+%%     external-edit conflict surfaces a conflict-summary, not an exception,
+%%     but the ChangeLog server being unreachable would exit the gen_server
+%%     call) cannot bubble up and undo the BEAM module install — the patch is
+%%     already live in memory.
+%%   - The flush is best-effort. A conflict / I/O failure leaves the entry
+%%     pending in the log; the user can re-flush manually after reconciling.
+%%
+%% A successful flush returns a `FlushResult' summary; we log a warning when
+%% the summary reports conflicts so an autoflush failure is observable in the
+%% workspace log even though the install path returns successfully.
+-spec maybe_autoflush(durable | ephemeral) -> ok.
+maybe_autoflush(ephemeral) ->
+    ok;
+maybe_autoflush(durable) ->
+    case beamtalk_workspace_meta:get_setting(autoflush, false) of
+        true -> do_autoflush();
+        _ -> ok
+    end.
+
+-spec do_autoflush() -> ok.
+do_autoflush() ->
+    try beamtalk_workspace_flush:flush() of
+        {ok, #{conflicts := Conflicts} = Summary} when Conflicts =/= [] ->
+            ?LOG_WARNING(
+                "Autoflush reported conflicts — pending entries remain in the log",
+                #{conflicts => Conflicts, summary => Summary, domain => [beamtalk, runtime]}
+            ),
+            ok;
+        {ok, _Summary} ->
+            ok;
+        {error, Reason} ->
+            ?LOG_WARNING(
+                "Autoflush returned a structured error (entries remain pending)",
+                #{reason => Reason, domain => [beamtalk, runtime]}
+            ),
+            ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Autoflush crashed (entries remain pending; patch still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+%% Emit the durable `new-class` ChangeEntry for a freshly created class. Best
+%% effort: a ChangeLog write must never fail or undo the in-memory install (the
+%% class is already live), mirroring emit_change_entry/1's contract.
+-spec emit_new_class_entry(binary(), binary(), binary()) -> ok.
+emit_new_class_entry(ClassNameBin, Source, SourceFile) ->
+    try
+        Entry = #{
+            class => ClassNameBin,
+            kind => 'new-class',
+            source => Source,
+            %% Explicit per ADR 0082 contract: new-class entries carry no prior
+            %% disk body and no byte span (the file does not yet exist).
+            prev_source => undefined,
+            span => undefined,
+            intent => durable,
+            flushable => true,
+            source_file => SourceFile,
+            author => new_class_author(),
+            author_kind => new_class_author_kind()
+        },
+        _ = beamtalk_workspace_changelog:append(Entry),
+        ok
+    catch
+        Class:Reason:Stack ->
+            ?LOG_WARNING(
+                "Failed to emit ChangeLog entry for new class (class still installed)",
+                #{
+                    error_class => Class,
+                    reason => Reason,
+                    stack => Stack,
+                    class_name => ClassNameBin,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            ok
+    end.
+
+%% Audit author for a new-class entry. MCP `save_class` stamps `agent` into the
+%% process dictionary at the submission boundary (same mechanism `compile:source:`
+%% uses); a direct REPL call defaults to `human`/`repl`.
+-spec new_class_author() -> binary().
+new_class_author() ->
+    case erlang:get('$beamtalk_author') of
+        A when is_binary(A) -> A;
+        _ -> new_class_default_author()
+    end.
+
+-spec new_class_default_author() -> binary().
+new_class_default_author() ->
+    case erlang:get('$beamtalk_author_kind') of
+        agent -> <<"agent">>;
+        _ -> <<"repl">>
+    end.
+
+-spec new_class_author_kind() -> human | agent.
+new_class_author_kind() ->
+    case erlang:get('$beamtalk_author_kind') of
+        agent -> agent;
+        _ -> human
+    end.
+
+-spec new_class_error(atom(), binary(), string() | undefined) -> #beamtalk_error{}.
+new_class_error(Kind, Message, TargetPath) ->
+    Err0 = beamtalk_error:new(Kind, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
+    Err2 = beamtalk_error:with_message(Err1, Message),
+    case TargetPath of
+        undefined -> Err2;
+        _ -> beamtalk_error:with_details(Err2, #{target => list_to_binary(TargetPath)})
+    end.
+
+-spec new_class_type_error(binary()) -> #beamtalk_error{}.
+new_class_type_error(Message) ->
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
+    beamtalk_error:with_message(Err1, Message).
 
 %% Emit a ChangeLog entry for a live in-memory method patch (ADR 0082 Phase 1).
 %%

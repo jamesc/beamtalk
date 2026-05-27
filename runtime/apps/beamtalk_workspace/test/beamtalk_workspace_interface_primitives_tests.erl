@@ -10,12 +10,14 @@ Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
 - actors selector
 - actorAt: selector
 - classes selector
-- load: selector
+- load: selector (including value_type_name/1 coverage — BT-2295)
 - globals selector
-- bind:as: selector
+- bind:as: selector (including to_atom_name/1 error paths — BT-2295)
 - unbind: selector
 - get_user_bindings/0 external API
 - get_session_bindings/0 external API
+- create_bindings_table/0 and ensure_bindings_table/0 idempotency (BT-2295)
+- dependencies/0 no-package branch (BT-2295)
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -607,4 +609,252 @@ sync_returns_map_with_expected_keys_test() ->
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
         rm_rf(TmpDir)
+    end.
+
+%%====================================================================
+%% value_type_name/1 coverage via load/1 — BT-2295
+%%
+%% load/1 raises a type_error for non-binary, non-list arguments. The
+%% error message is built from value_type_name/1, so each of these tests
+%% exercises a distinct clause of that helper.
+%%====================================================================
+
+%% Float input → "Float" in error message
+load_type_error_for_float_test() ->
+    try
+        beamtalk_workspace_interface_primitives:load(3.14),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Float">>))
+    end.
+
+%% Boolean input → "Boolean" in error message
+load_type_error_for_boolean_test() ->
+    try
+        beamtalk_workspace_interface_primitives:load(true),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Boolean">>))
+    end.
+
+%% nil input → "nil" in error message
+load_type_error_for_nil_test() ->
+    try
+        beamtalk_workspace_interface_primitives:load(nil),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"nil">>))
+    end.
+
+%% Atom (non-boolean, non-nil) → "Symbol" in error message
+load_type_error_for_atom_test() ->
+    try
+        beamtalk_workspace_interface_primitives:load(myatom),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Symbol">>))
+    end.
+
+%% Map input → "Dictionary" in error message
+load_type_error_for_map_test() ->
+    try
+        beamtalk_workspace_interface_primitives:load(#{key => val}),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Dictionary">>))
+    end.
+
+%% beamtalk_object input → "Object" in error message
+load_type_error_for_object_test() ->
+    try
+        beamtalk_workspace_interface_primitives:load(#beamtalk_object{}),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Object">>))
+    end.
+
+%%====================================================================
+%% to_atom_name/1 error-path coverage via bind/2 — BT-2295
+%%
+%% bind/2 calls to_atom_name/1 on the name argument. Non-atom names
+%% produce a type_error with a message built from value_type_name/1.
+%% These tests exercise the non-atom clauses of to_atom_name/1 and
+%% the corresponding value_type_name/1 branches.
+%%====================================================================
+
+%% Float name → type_error with "Float" in message
+bind_type_error_for_float_name_test() ->
+    try
+        beamtalk_workspace_interface_primitives:bind(42, 1.5),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Float">>))
+    end.
+
+%% beamtalk_object name → type_error with "Object" in message
+%% (nil is an Erlang atom, so it passes to_atom_name/1; use a
+%%  #beamtalk_object{} record to reach the "Object" branch instead)
+bind_type_error_for_object_name_test() ->
+    try
+        beamtalk_workspace_interface_primitives:bind(42, #beamtalk_object{}),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Object">>))
+    end.
+
+%% List name → type_error with "List" in message
+bind_type_error_for_list_name_test() ->
+    try
+        beamtalk_workspace_interface_primitives:bind(42, [a, b]),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"List">>))
+    end.
+
+%% Map name → type_error with "Dictionary" in message
+bind_type_error_for_map_name_test() ->
+    try
+        beamtalk_workspace_interface_primitives:bind(42, #{key => val}),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Dictionary">>))
+    end.
+
+%%====================================================================
+%% create_bindings_table/0 and ensure_bindings_table/0 — BT-2295
+%%
+%% Both functions are idempotent: calling them twice in sequence must
+%% succeed and return ok without crashing or duplicating the ETS table.
+%%====================================================================
+
+create_bindings_table_is_idempotent_test() ->
+    %% First call creates the table; second call must not crash.
+    ok = beamtalk_workspace_interface_primitives:create_bindings_table(),
+    ok = beamtalk_workspace_interface_primitives:create_bindings_table().
+
+%% ensure_bindings_table/0 is not exported; it is exercised indirectly via
+%% bind/2 which calls it before every insert. The idempotency of both
+%% create and ensure is implicitly tested by create_bindings_table_is_idempotent_test
+%% and the many bind/unbind tests that call bind/2 repeatedly.
+
+%%====================================================================
+%% dependencies/0 — BT-2295
+%%
+%% When beamtalk_workspace_meta is not running, get_package_name/0
+%% returns undefined and dependencies/0 must return an empty map.
+%%====================================================================
+
+dependencies_returns_empty_when_no_package_test() ->
+    %% Snapshot whereis/1 BEFORE calling dependencies/0 so the assertion is
+    %% based on the same state that get_package_name/0 observed internally.
+    %% (Copilot BT-2295: capturing after the call is a TOCTOU race — the
+    %% gen_server could stop between the two calls.)
+    WasMissing = whereis(beamtalk_workspace_meta) =:= undefined,
+    Result = beamtalk_workspace_interface_primitives:dependencies(),
+    ?assert(is_map(Result)),
+    case WasMissing of
+        true ->
+            %% workspace_meta was absent → get_package_name/0 returned
+            %% undefined → dependencies/0 must return the empty map.
+            ?assertEqual(#{}, Result);
+        false ->
+            %% workspace_meta was running (e.g. in integration suite);
+            %% only assert the type — content depends on loaded packages.
+            ok
+    end.
+
+%%====================================================================
+%% ADR 0082 Phase 4 (BT-2290): ChangeLog operations and autoflush
+%%====================================================================
+%% These tests exercise the FFI-shaped surface directly without booting a
+%% workspace. The underlying flush/changelog gen_servers are tested in their
+%% own suites; here we focus on argument-shape validation and error paths
+%% which do not require a live workspace.
+
+revert_rejects_non_changeentry_test() ->
+    %% Passing something that is not a ChangeEntry must raise a typed error
+    %% at the FFI boundary, not a deep crash.
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogRevert(42)
+    ).
+
+revert_rejects_new_class_entry_test() ->
+    %% A ChangeEntry shaped as a new-class entry (selector = nil) must be
+    %% rejected with a structured error rather than attempting a revert.
+    NewClassEntry = #{
+        '$beamtalk_class' => 'ChangeEntry',
+        className => 'NewThing',
+        selector => nil,
+        kind => 'new-class'
+    },
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogRevert(NewClassEntry)
+    ).
+
+flush_kinds_rejects_non_set_non_list_test() ->
+    %% A non-Set/non-List argument surfaces a typed error.
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogFlushKinds(42)
+    ).
+
+flush_kinds_accepts_beamtalk_set_test() ->
+    %% A Beamtalk Set tagged map flows through. An empty Set then surfaces
+    %% the structured "use Workspace flush" error from the lower layer.
+    EmptySet = #{'$beamtalk_class' => 'Set', elements => []},
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:changeLogFlushKinds(EmptySet)
+    ).
+
+set_autoflush_rejects_non_boolean_test() ->
+    %% Any non-Boolean value raises a typed error.
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:setAutoflush(<<"yes">>)
+    ),
+    ?assertException(
+        error,
+        _,
+        beamtalk_workspace_interface_primitives:setAutoflush(1)
+    ).
+
+autoflush_default_is_false_test() ->
+    %% With no workspace running, autoflush/0 must fall back to the default
+    %% (false) instead of crashing — mirrors get_setting/2's graceful-on-noproc
+    %% behaviour.
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ?assertEqual(false, beamtalk_workspace_interface_primitives:autoflush());
+        _ ->
+            %% Server running (parallel integration suite); only assert that
+            %% it returns a Boolean.
+            ?assert(is_boolean(beamtalk_workspace_interface_primitives:autoflush()))
     end.

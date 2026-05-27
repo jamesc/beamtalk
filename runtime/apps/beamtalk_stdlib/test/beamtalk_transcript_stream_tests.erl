@@ -434,3 +434,177 @@ sync_show_then_clear_test() ->
     Result = gen_server:call(Pid, recent),
     ?assertEqual([], Result),
     gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% Async FuturePid path tests — handle_cast/2 actor-protocol clauses (BT-2306)
+%%%
+%%% These cover the {Selector, Args, FuturePid} 3-tuple form that compiled
+%%% Beamtalk actors use when sending async messages to TranscriptStream.
+%%% Pattern: create a future, cast the message, await the resolved value.
+%%% ============================================================================
+
+%% --- async show: resolves future with self-ref ---
+
+async_show_resolves_future_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {'show:', [<<"async_hello">>], FuturePid}),
+    SelfRef = beamtalk_future:await(Future, 1000),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    %% Text must also appear in the buffer
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"async_hello">>], Result),
+    gen_server:stop(Pid).
+
+async_show_converts_integer_async_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {'show:', [99], FuturePid}),
+    _ = beamtalk_future:await(Future, 1000),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"99">>], Result),
+    gen_server:stop(Pid).
+
+%% --- async show: notifies subscribers ---
+
+async_show_notifies_subscriber_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% Subscribe via direct cast so self() is the subscriber
+    gen_server:cast(Pid, {subscribe, self()}),
+    %% sync barrier — ensure subscribe processed
+    _ = gen_server:call(Pid, recent),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {'show:', [<<"async_msg">>], FuturePid}),
+    _ = beamtalk_future:await(Future, 1000),
+    receive
+        {transcript_output, <<"async_msg">>} -> ok
+    after 500 ->
+        ?assert(false)
+    end,
+    flush_transcript(),
+    gen_server:stop(Pid).
+
+%% --- async cr resolves future with self-ref ---
+
+async_cr_resolves_future_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {cr, [], FuturePid}),
+    SelfRef = beamtalk_future:await(Future, 1000),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"\n">>], Result),
+    gen_server:stop(Pid).
+
+%% --- async recent resolves future with buffer list ---
+
+async_recent_resolves_future_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    _ = gen_server:call(Pid, {'show:', [<<"a">>]}),
+    _ = gen_server:call(Pid, {'show:', [<<"b">>]}),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {recent, [], FuturePid}),
+    Result = beamtalk_future:await(Future, 1000),
+    ?assertEqual([<<"a">>, <<"b">>], Result),
+    gen_server:stop(Pid).
+
+%% --- async clear resolves future with self-ref and empties buffer ---
+
+async_clear_resolves_future_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    _ = gen_server:call(Pid, {'show:', [<<"data">>]}),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {clear, [], FuturePid}),
+    SelfRef = beamtalk_future:await(Future, 1000),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([], Result),
+    gen_server:stop(Pid).
+
+%% --- async subscribe resolves future with self-ref ---
+
+async_subscribe_resolves_future_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    gen_server:cast(Pid, {subscribe, [], FuturePid}),
+    SelfRef = beamtalk_future:await(Future, 1000),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    gen_server:stop(Pid).
+
+%% --- async unsubscribe resolves future with self-ref ---
+
+async_unsubscribe_resolves_future_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    SubFuture = beamtalk_future:new(),
+    SubFuturePid = beamtalk_future:pid(SubFuture),
+    gen_server:cast(Pid, {subscribe, [], SubFuturePid}),
+    _ = beamtalk_future:await(SubFuture, 1000),
+    UnsubFuture = beamtalk_future:new(),
+    UnsubFuturePid = beamtalk_future:pid(UnsubFuture),
+    gen_server:cast(Pid, {unsubscribe, [], UnsubFuturePid}),
+    SelfRef = beamtalk_future:await(UnsubFuture, 1000),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% Context-propagation strip — 4-tuple {Selector, Args, FuturePid, PropCtx}
+%%% (ADR 0069 Phase 2b) BT-2306
+%%% ============================================================================
+
+async_context_strip_delegates_test() ->
+    %% A 4-tuple with a PropCtx map should strip the context and fall through
+    %% to the matching 3-tuple clause. Use show: so we can verify buffering.
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    Future = beamtalk_future:new(),
+    FuturePid = beamtalk_future:pid(Future),
+    PropCtx = #{},
+    gen_server:cast(Pid, {'show:', [<<"ctx_stripped">>], FuturePid, PropCtx}),
+    SelfRef = beamtalk_future:await(Future, 1000),
+    ?assertMatch({beamtalk_object, 'TranscriptStream', beamtalk_transcript_stream, Pid}, SelfRef),
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([<<"ctx_stripped">>], Result),
+    gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% Catch-all paths — BT-2306
+%%% ============================================================================
+
+%% --- handle_cast(_Msg, State) — unknown cast is a silent no-op ---
+
+async_unknown_cast_noop_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    gen_server:cast(Pid, totally_unknown_garbage),
+    %% Sync barrier: if the server crashed, this call would fail/timeout
+    Result = gen_server:call(Pid, recent),
+    ?assertEqual([], Result),
+    gen_server:stop(Pid).
+
+%% --- handle_call(Request, ...) DNU catch-all — bare non-tuple request ---
+
+sync_dnu_bare_request_test() ->
+    {ok, Pid} = beamtalk_transcript_stream:start_link(),
+    %% A bare atom that matches no known handle_call clause triggers the DNU fallback
+    Reply = gen_server:call(Pid, definitely_not_a_known_selector),
+    ?assertMatch({error, _}, Reply),
+    gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% start_link/2 — named variant — BT-2306
+%%% ============================================================================
+
+start_link_named_variant_test() ->
+    Name = bt_ts_named_test_BT_2306,
+    {ok, Pid} = beamtalk_transcript_stream:start_link({local, Name}, 500),
+    ?assert(is_pid(Pid)),
+    ?assertEqual(Pid, whereis(Name)),
+    _ = gen_server:call(Name, {'show:', [<<"named_test">>]}),
+    Result = gen_server:call(Name, recent),
+    ?assertEqual([<<"named_test">>], Result),
+    gen_server:stop(Name).

@@ -11,6 +11,9 @@
 /// LSP server backend implementation.
 mod server;
 
+/// WebSocket client to a running workspace (ADR 0082 Phase 3, BT-2289).
+mod runtime;
+
 use clap::{ArgAction, Parser};
 use tower_lsp::{LspService, Server};
 use tracing_subscriber::{self, EnvFilter};

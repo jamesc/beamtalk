@@ -112,6 +112,66 @@ sealed typed Value subclass: ChangeLog
     @expect type
     (Erlang beamtalk_workspace_changelog) dirtyMethods
 
+  /// Re-install the prior body of `anEntry`'s method, undoing the patch
+  /// (ADR 0082 Phase 4).
+  ///
+  /// The re-install is itself a durable patch that emits a fresh ChangeEntry —
+  /// the original entry is preserved in the log so the audit history is intact.
+  /// `anEntry` is a ChangeEntry obtained from `do:` / `select:`. Raises a
+  /// structured error when the entry's method has no active prior body to
+  /// restore, when the entry is a `#'new-class'` creation (destructive — out of
+  /// scope for this phase), or when re-installing the prior body fails to
+  /// compile.
+  ///
+  /// Returns the patched class object (matching `compile:source:`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes do: [:e | e isAgent ifTrue: [Workspace changes revert: e]]
+  /// ```
+  revert: anEntry :: ChangeEntry -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) changeLogRevert: anEntry
+
+  /// Discard every pending ChangeLog entry without writing to disk
+  /// (ADR 0082 Phase 4).
+  ///
+  /// The on-disk metadata segment is truncated so the audit log is reset.
+  /// Memory still holds the latest patched method versions until the next
+  /// workspace restart, when disk wins (matching the ADR contract).
+  /// Idempotent: clearing an empty log is a successful no-op. Returns the
+  /// receiver so calls chain like the other ChangeLog operations.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes clear   // => _
+  /// ```
+  clear -> ChangeLog =>
+    (Erlang beamtalk_workspace_interface_primitives) changeLogClear
+    self
+
+  /// Flush only the ChangeEntries whose kind or author_kind is in `kinds`
+  /// (ADR 0082 Phase 4).
+  ///
+  /// `kinds` is a Set (or List) of Symbols. Allowed values:
+  ///   - entry kinds: `#instance`, `#class`, `#'new-class'`
+  ///   - author kinds: `#human`, `#agent`
+  ///
+  /// When both an entry-kind and an author-kind symbol are present, the entry
+  /// must satisfy both dimensions (e.g. `#{#agent, #'new-class'}` flushes only
+  /// agent-authored new-class entries). Unknown symbols and an empty set are
+  /// rejected with a structured error.
+  ///
+  /// Returns the same `FlushResult` summary as `Workspace flush`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes flushKinds: #{#agent}              // => _
+  /// Workspace changes flushKinds: #{#'new-class'}        // => _
+  /// Workspace changes flushKinds: #{#agent, #instance}   // => _
+  /// ```
+  flushKinds: kinds :: Object -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: kinds
+
   /// Developer-readable representation, e.g. "a ChangeLog with 2 entries".
   ///
   /// ## Examples

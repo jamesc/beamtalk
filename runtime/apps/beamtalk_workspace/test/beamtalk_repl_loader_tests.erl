@@ -5,6 +5,7 @@
 
 -moduledoc "Unit tests for beamtalk_repl_loader module".
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
 %% Helpers
@@ -530,3 +531,85 @@ span_error_entry_other_error_downgrades_test() ->
     Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, ambiguous),
     ?assertEqual(false, maps:get(flushable, Entry)),
     ?assertEqual(<<"span_unresolved:ambiguous">>, maps:get(not_flushable_reason, Entry)).
+
+%%====================================================================
+%% declared_class_name/1 (ADR 0082 Phase 1, BT-2285)
+%%====================================================================
+
+declared_class_name_single_class_test() ->
+    Classes = [#{name => "Greeter", superclass => "Object"}],
+    ?assertEqual({ok, <<"Greeter">>}, beamtalk_repl_loader:declared_class_name(Classes)).
+
+declared_class_name_no_class_is_error_test() ->
+    {error, Err} = beamtalk_repl_loader:declared_class_name([]),
+    ?assertEqual(no_class_declared, Err#beamtalk_error.kind),
+    ?assertEqual('newClass:at:', Err#beamtalk_error.selector).
+
+declared_class_name_multiple_classes_is_error_test() ->
+    %% One class per file (ADR 0040): a source with two classes is rejected, and
+    %% the message names both so the user knows what to split.
+    Classes = [
+        #{name => "Foo", superclass => "Object"},
+        #{name => "Bar", superclass => "Object"}
+    ],
+    {error, Err} = beamtalk_repl_loader:declared_class_name(Classes),
+    ?assertEqual(multiple_classes_declared, Err#beamtalk_error.kind),
+    Msg = Err#beamtalk_error.message,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Foo">>)),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Bar">>)).
+
+%%====================================================================
+%% validate_new_class/3 (ADR 0082 Phase 1, BT-2285)
+%%====================================================================
+
+validate_new_class_matching_name_not_loaded_ok_test() ->
+    %% Declared name == basename(path) and not already loaded → ok.
+    ?assertEqual(
+        ok,
+        beamtalk_repl_loader:validate_new_class(<<"Greeter">>, "src/greeter.bt", false)
+    ).
+
+validate_new_class_name_mismatch_is_error_test() ->
+    %% (c) declared class name must match the path basename.
+    {error, Err} = beamtalk_repl_loader:validate_new_class(
+        <<"Greeter">>, "src/welcomer.bt", false
+    ),
+    ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind),
+    ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
+    Msg = Err#beamtalk_error.message,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"Greeter">>)),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"welcomer">>)).
+
+validate_new_class_already_loaded_is_error_test() ->
+    %% (d) a class of that name is already loaded → error even when the basename
+    %% matches.
+    {error, Err} = beamtalk_repl_loader:validate_new_class(
+        <<"Greeter">>, "src/greeter.bt", true
+    ),
+    ?assertEqual(class_already_loaded, Err#beamtalk_error.kind),
+    ?assertEqual('newClass:at:', Err#beamtalk_error.selector).
+
+validate_new_class_name_mismatch_takes_precedence_over_loaded_test() ->
+    %% Name mismatch is checked before the loaded check, so a mismatched name
+    %% surfaces the mismatch error regardless of load state.
+    {error, Err} = beamtalk_repl_loader:validate_new_class(
+        <<"Greeter">>, "src/other.bt", true
+    ),
+    ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind).
+
+%% Any existing filesystem entry (regular file *or* directory) at the target
+%% path must be reported as target_exists; otherwise newClass:at: would log a
+%% durable ChangeEntry that later fails to flush with eisdir.
+validate_target_path_existing_directory_is_target_exists_test() ->
+    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Dir =
+        Tmp ++ "/bt_new_class_dir_test_" ++
+            integer_to_list(erlang:unique_integer([positive])),
+    ok = file:make_dir(Dir),
+    try
+        {error, Err} = beamtalk_repl_loader:validate_target_path(Dir),
+        ?assertEqual(target_exists, Err#beamtalk_error.kind),
+        ?assertEqual('newClass:at:', Err#beamtalk_error.selector)
+    after
+        file:del_dir(Dir)
+    end.

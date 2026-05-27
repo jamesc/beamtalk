@@ -63,6 +63,16 @@ into REPL session state. Workspace readiness is detected via
 -export([dependencies/0]).
 %% Project sync (BT-1723)
 -export([sync/0]).
+%% New-class creation (ADR 0082 Phase 1, BT-2285)
+-export([newClass/2]).
+%% Workspace flush (ADR 0082 Phase 2, BT-2286)
+-export([flush/0, flush/1]).
+%% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
+-export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1]).
+-export([autoflush/0, setAutoflush/1]).
+%% Shared with beamtalk_repl_loader:new_class/2 to surface created classes to the
+%% REPL identically to a file load.
+-export([loaded_class_objects/1]).
 
 %% ETS table name for user workspace bindings
 -define(WI_BINDINGS_TABLE, beamtalk_wi_user_bindings).
@@ -102,6 +112,16 @@ dispatch(supervisors, [], _Self) ->
     supervisors();
 dispatch(sync, [], _Self) ->
     sync();
+dispatch('newClass:at:', [Source, Path], _Self) ->
+    newClass(Source, Path);
+dispatch(flush, [], _Self) ->
+    flush();
+dispatch('flush:', [Filter], _Self) ->
+    flush(Filter);
+dispatch(autoflush, [], _Self) ->
+    autoflush();
+dispatch('autoflush:', [Value], _Self) ->
+    setAutoflush(Value);
 dispatch(Selector, _Args, _Self) ->
     Err0 = beamtalk_error:new(does_not_understand, 'WorkspaceInterface'),
     Err1 = beamtalk_error:with_selector(Err0, Selector),
@@ -150,6 +170,373 @@ load(Path) ->
         {error, Err} -> beamtalk_error:raise(Err);
         Result -> Result
     end.
+
+-doc """
+Create a brand-new class from a source String at a target path (ADR 0082 Phase 1).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) newClass: source at: path`.
+Compiles and installs the class in memory and logs a durable `kind: "new-class"`
+ChangeEntry (no disk write — that happens later in `Workspace flush`, Phase 2).
+Raises a loud, specific `#beamtalk_error{}` (no silent fallback) when the target
+already exists, lies outside the project tree, the declared class name does not
+match the path basename, or a class of that name is already loaded. On success
+returns the loaded class object(s), matching `load:`.
+""".
+-spec newClass(term(), term()) -> term().
+newClass(Source, Path) ->
+    case validate_new_class_args(Source, Path) of
+        {ok, SourceBin, PathBin} ->
+            case beamtalk_repl_eval:new_class(SourceBin, PathBin) of
+                {ok, ClassObjects} -> ClassObjects;
+                {error, Err} -> beamtalk_error:raise(Err)
+            end;
+        {error, Err} ->
+            beamtalk_error:raise(Err)
+    end.
+
+%% Both arguments must be Strings. A non-String surfaces a typed error at the
+%% `newClass:at:` boundary rather than a deep crash inside the loader.
+-spec validate_new_class_args(term(), term()) ->
+    {ok, binary(), binary()} | {error, #beamtalk_error{}}.
+validate_new_class_args(Source, Path) when is_binary(Source), is_binary(Path) ->
+    {ok, Source, Path};
+validate_new_class_args(Source, _Path) when not is_binary(Source) ->
+    {error, new_class_arg_type_error(<<"source">>, Source)};
+validate_new_class_args(_Source, Path) ->
+    {error, new_class_arg_type_error(<<"path">>, Path)}.
+
+-spec new_class_arg_type_error(binary(), term()) -> #beamtalk_error{}.
+new_class_arg_type_error(ArgName, Value) ->
+    TypeName = value_type_name(Value),
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'newClass:at:'),
+    beamtalk_error:with_message(
+        Err1,
+        iolist_to_binary([
+            <<"newClass:at: expects a String ">>, ArgName, <<", got ">>, TypeName
+        ])
+    ).
+
+-doc """
+Flush every pending durable+flushable ChangeEntry to disk (ADR 0082 Phase 2).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) flush`. Returns a
+`FlushResult`-tagged map summarising what was written, what was skipped, and
+what conflicted. Hard runtime errors (e.g. the changelog server is missing) are
+raised as structured `#beamtalk_error{}` so they surface at the call site.
+""".
+-spec flush() -> map().
+flush() ->
+    case beamtalk_workspace_flush:flush() of
+        {ok, Summary} -> Summary;
+        {error, Err} -> beamtalk_error:raise(Err)
+    end.
+
+-doc """
+Flush only the ChangeEntries that match `Filter` (ADR 0082 Phase 2).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) flush: filter`.
+`Filter` may be a Class, a Symbol (e.g. `#'new-class'`), or a Dictionary
+`#{ #file => "..." }` (Symbol-keyed). Anything else surfaces a structured
+`#beamtalk_error{}`.
+""".
+-spec flush(term()) -> map().
+flush(Filter) ->
+    case beamtalk_workspace_flush:flush(Filter) of
+        {ok, Summary} -> Summary;
+        {error, Err} -> beamtalk_error:raise(Err)
+    end.
+
+-doc """
+Revert a single ChangeEntry (ADR 0082 Phase 4, BT-2290).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogRevert: anEntry`
+from `ChangeLog>>revert:`. `Entry` is a `ChangeEntry` value-object map (or a
+plain map shaped the same way) carrying at least `className` (Symbol) and
+`selector` (Symbol). Looks up the most recent active entry for that
+`(class, selector)` target and re-installs its recorded `prev_source` via the
+durable `compile:source:` install path. The re-install itself emits a fresh
+`#instance`/`#class` ChangeEntry — per ADR 0082 the revert is "itself a patch,
+not log mutation" — so the original entry's audit history is preserved.
+
+Reverting a `#'new-class'` entry is rejected with a structured error: deleting
+the in-memory class (and undoing the file creation on flush) is destructive
+and is deferred to the future "Destructive Workspace Operations" ADR.
+""".
+-spec changeLogRevert(term()) -> term().
+changeLogRevert(Entry) ->
+    case extract_revert_target(Entry) of
+        {ok, ClassNameBin, SelectorAtom} ->
+            do_revert(ClassNameBin, SelectorAtom);
+        {error, Err} ->
+            beamtalk_error:raise(Err)
+    end.
+
+%% Pull the `(class, selector)` pair out of a ChangeEntry. The argument is
+%% normally the `$beamtalk_class => ChangeEntry`-tagged map produced by the FFI
+%% surface, so the keys are atoms (`className`, `selector`). We also accept the
+%% raw `#beamtalk_object{}` defensively so tests / future Beamtalk-side callers
+%% can synthesise the input from a different shape.
+-spec extract_revert_target(term()) ->
+    {ok, binary(), atom()} | {error, #beamtalk_error{}}.
+extract_revert_target(#{'$beamtalk_class' := 'ChangeEntry'} = M) ->
+    extract_revert_target_from_map(M);
+extract_revert_target(#{className := _} = M) ->
+    extract_revert_target_from_map(M);
+extract_revert_target(_Other) ->
+    {error, revert_type_error(<<"revert: expects a ChangeEntry, got an unrelated value">>)}.
+
+-spec extract_revert_target_from_map(map()) ->
+    {ok, binary(), atom()} | {error, #beamtalk_error{}}.
+extract_revert_target_from_map(M) ->
+    case {maps:get(className, M, undefined), maps:get(selector, M, undefined)} of
+        {ClassAtom, SelectorAtom} when
+            is_atom(ClassAtom),
+            is_atom(SelectorAtom),
+            SelectorAtom =/= nil,
+            SelectorAtom =/= undefined
+        ->
+            {ok, atom_to_binary(ClassAtom, utf8), SelectorAtom};
+        {_ClassAtom, nil} ->
+            {error,
+                revert_kind_error(
+                    <<
+                        "revert: this entry has no selector (it is a new-class creation). "
+                        "Reverting a new-class is destructive and is not supported in this "
+                        "phase — use `Workspace changes clear` to discard the pending entry "
+                        "instead"
+                    >>
+                )};
+        _ ->
+            {error,
+                revert_type_error(
+                    <<
+                        "revert: ChangeEntry is missing className/selector fields — pass an "
+                        "entry obtained from `Workspace changes do:` or `select:`"
+                    >>
+                )}
+    end.
+
+-spec do_revert(binary(), atom()) -> term().
+do_revert(ClassNameBin, SelectorAtom) ->
+    case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom) of
+        {ok, PrevBody, Entry} ->
+            case beamtalk_workspace_changelog:entry_kind(Entry) of
+                class ->
+                    beamtalk_error:raise(
+                        revert_kind_error(
+                            <<
+                                "revert: this entry is a class-side patch. "
+                                "Class-side reverts are not yet supported in Phase 4 — "
+                                "the underlying compile:source: path synthesises an "
+                                "instance-side expression. Track follow-up work for the "
+                                "class-side install entry, or use `Workspace changes "
+                                "clear` to discard the pending entry"
+                            >>
+                        )
+                    );
+                _ ->
+                    install_revert_patch(ClassNameBin, SelectorAtom, PrevBody)
+            end;
+        {error, no_entry} ->
+            beamtalk_error:raise(
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: no active ChangeEntry found for ">>,
+                        ClassNameBin,
+                        <<">>">>,
+                        atom_to_binary(SelectorAtom, utf8),
+                        <<" — nothing to revert">>
+                    ])
+                )
+            );
+        {error, no_prev_source} ->
+            beamtalk_error:raise(
+                revert_state_error(
+                    <<
+                        "revert: this entry has no recorded prior body (the on-disk "
+                        "sources/ file is missing). Cannot reconstruct the pre-patch "
+                        "method body"
+                    >>
+                )
+            )
+    end.
+
+-spec install_revert_patch(binary(), atom(), binary()) -> term().
+install_revert_patch(ClassNameBin, SelectorAtom, PrevBody) ->
+    %% Reverts are durable, human-authored patches that re-install the prior
+    %% source. The install chokepoint emits the new ChangeEntry; the original
+    %% entry is left in place for audit (ADR 0082, "Undo": revert is itself a
+    %% patch, not a log mutation).
+    case
+        beamtalk_repl_eval:compile_method(
+            ClassNameBin, SelectorAtom, PrevBody, durable, <<"repl/revert">>, human
+        )
+    of
+        {ok, _ClassName} ->
+            class_object_for(ClassNameBin);
+        {error, Reason} ->
+            beamtalk_error:raise(revert_install_error(ClassNameBin, SelectorAtom, Reason))
+    end.
+
+-spec class_object_for(binary()) -> term().
+class_object_for(ClassNameBin) ->
+    case safe_existing_atom(ClassNameBin) of
+        undefined ->
+            nil;
+        Atom ->
+            case beamtalk_runtime_api:whereis_class(Atom) of
+                undefined ->
+                    nil;
+                ClassPid ->
+                    Mod = beamtalk_runtime_api:module_name(ClassPid),
+                    Tag = beamtalk_runtime_api:class_object_tag(Atom),
+                    #beamtalk_object{class = Tag, class_mod = Mod, pid = ClassPid}
+            end
+    end.
+
+-spec safe_existing_atom(binary()) -> atom() | undefined.
+safe_existing_atom(Bin) ->
+    try binary_to_existing_atom(Bin, utf8) of
+        Atom -> Atom
+    catch
+        error:badarg -> undefined
+    end.
+
+-spec revert_type_error(binary()) -> #beamtalk_error{}.
+revert_type_error(Message) ->
+    Err0 = beamtalk_error:new(type_error, 'ChangeLog'),
+    Err1 = beamtalk_error:with_selector(Err0, 'revert:'),
+    beamtalk_error:with_message(Err1, Message).
+
+-spec revert_kind_error(binary()) -> #beamtalk_error{}.
+revert_kind_error(Message) ->
+    Err0 = beamtalk_error:new(unsupported_revert_kind, 'ChangeLog'),
+    Err1 = beamtalk_error:with_selector(Err0, 'revert:'),
+    beamtalk_error:with_message(Err1, Message).
+
+-spec revert_state_error(binary()) -> #beamtalk_error{}.
+revert_state_error(Message) ->
+    Err0 = beamtalk_error:new(revert_not_possible, 'ChangeLog'),
+    Err1 = beamtalk_error:with_selector(Err0, 'revert:'),
+    beamtalk_error:with_message(Err1, Message).
+
+-spec revert_install_error(binary(), atom(), term()) -> #beamtalk_error{}.
+revert_install_error(ClassNameBin, SelectorAtom, Reason) ->
+    Err0 = beamtalk_error:new(revert_install_failed, 'ChangeLog'),
+    Err1 = beamtalk_error:with_selector(Err0, 'revert:'),
+    Msg = iolist_to_binary([
+        <<"revert: could not re-install prior body for ">>,
+        ClassNameBin,
+        <<">>">>,
+        atom_to_binary(SelectorAtom, utf8)
+    ]),
+    Err2 = beamtalk_error:with_message(Err1, Msg),
+    beamtalk_error:with_details(Err2, #{reason => Reason}).
+
+-doc """
+Discard every pending ChangeLog entry without writing to disk
+(ADR 0082 Phase 4, BT-2290).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogClear`
+from `ChangeLog>>clear`. Drops every entry from the in-memory active view and
+truncates the on-disk metadata segment (audit history is therefore reset).
+Memory still holds the latest patched method versions until the next workspace
+restart, when disk wins — matching the ADR contract:
+
+  > `Workspace changes clear` discards the ChangeLog without writing. Memory
+  > still holds the latest patched versions until the next workspace restart,
+  > when disk wins.
+
+Returns `nil` (Beamtalk's unit value). Idempotent: clearing an empty log is a
+successful no-op.
+""".
+-spec changeLogClear() -> nil.
+changeLogClear() ->
+    ok = beamtalk_workspace_changelog:clear(),
+    nil.
+
+-doc """
+Flush only the ChangeEntries whose kind or author_kind is in `KindsSet`
+(ADR 0082 Phase 4, BT-2290).
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: aSet`
+from `ChangeLog>>flushKinds:`. `KindsSet` is a Beamtalk `Set` (tagged map)
+or a List of Symbols. Accepted symbols:
+
+  - entry kinds: `#instance`, `#class`, `#'new-class'`
+  - author kinds: `#human`, `#agent`
+
+Returns the same `FlushResult` summary as `Workspace flush`.
+""".
+-spec changeLogFlushKinds(term()) -> map().
+changeLogFlushKinds(KindsSet) ->
+    case kinds_to_list(KindsSet) of
+        {ok, Kinds} ->
+            case beamtalk_workspace_flush:flush_kinds(Kinds) of
+                {ok, Summary} -> Summary;
+                {error, Err} -> beamtalk_error:raise(Err)
+            end;
+        {error, Err} ->
+            beamtalk_error:raise(Err)
+    end.
+
+%% Accept a Beamtalk Set (tagged map) or a List of atoms. Anything else
+%% surfaces a type error rather than being silently coerced — a typo at the
+%% callsite (`#agent` written as `agent`, a non-symbol element) should fail
+%% loudly. An empty list flows through to `flush_kinds/1`, which rejects it
+%% with the "use Workspace flush to flush everything" message.
+-spec kinds_to_list(term()) -> {ok, [atom()]} | {error, #beamtalk_error{}}.
+kinds_to_list(#{'$beamtalk_class' := 'Set', elements := Elements}) when is_list(Elements) ->
+    {ok, Elements};
+kinds_to_list(List) when is_list(List) ->
+    {ok, List};
+kinds_to_list(_Other) ->
+    {error,
+        filter_error_for(
+            'flushKinds:',
+            <<"flushKinds: expects a Set or List of kind Symbols">>
+        )}.
+
+-spec filter_error_for(atom(), binary()) -> #beamtalk_error{}.
+filter_error_for(Selector, Message) ->
+    Err0 = beamtalk_error:new(type_error, 'ChangeLog'),
+    Err1 = beamtalk_error:with_selector(Err0, Selector),
+    beamtalk_error:with_message(Err1, Message).
+
+-doc """
+Read the `autoflush` workspace setting (ADR 0082 Phase 4, BT-2290).
+
+Default is `false`. When `true`, every successful durable in-memory patch
+triggers `Workspace flush` synchronously after the install. Called via
+`(Erlang beamtalk_workspace_interface_primitives) autoflush`.
+""".
+-spec autoflush() -> boolean().
+autoflush() ->
+    beamtalk_workspace_meta:get_setting(autoflush, false).
+
+-doc """
+Set the `autoflush` workspace setting (ADR 0082 Phase 4, BT-2290).
+
+`Value` must be a Boolean. Setting `true` enables auto-flush after every
+successful durable in-memory patch; `false` reverts to the explicit-flush
+default. Persists to `metadata.json` so the setting survives workspace
+restart. Called via
+`(Erlang beamtalk_workspace_interface_primitives) autoflush: aBoolean`.
+
+Returns the new value so the caller sees the effective state.
+""".
+-spec setAutoflush(term()) -> boolean().
+setAutoflush(Value) when is_boolean(Value) ->
+    ok = beamtalk_workspace_meta:set_setting(autoflush, Value),
+    Value;
+setAutoflush(Other) ->
+    Err0 = beamtalk_error:new(type_error, 'WorkspaceInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'autoflush:'),
+    Msg = iolist_to_binary(
+        io_lib:format("autoflush: expects a Boolean, got: ~p", [Other])
+    ),
+    beamtalk_error:raise(beamtalk_error:with_message(Err1, Msg)).
 
 -doc """
 Return the full workspace namespace snapshot.

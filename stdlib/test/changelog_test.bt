@@ -194,3 +194,20 @@ TestCase subclass: ChangeLogTest
   // --- WorkspaceInterface facade: `changes` selector exists ---
   testWorkspaceIncludesSelectorChanges =>
     self assert: (WorkspaceInterface includesSelector: #changes)
+
+  // --- ADR 0082 Phase 4 (BT-2290) ChangeLog operations exist ---
+  testChangeLogIncludesSelectorRevert =>
+    self assert: (ChangeLog includesSelector: #revert:)
+
+  testChangeLogIncludesSelectorClear =>
+    self assert: (ChangeLog includesSelector: #clear)
+
+  testChangeLogIncludesSelectorFlushKinds =>
+    self assert: (ChangeLog includesSelector: #flushKinds:)
+
+  // --- ADR 0082 Phase 4 (BT-2290) autoflush setting exists ---
+  testWorkspaceIncludesSelectorAutoflush =>
+    self assert: (WorkspaceInterface includesSelector: #autoflush)
+
+  testWorkspaceIncludesSelectorAutoflushSetter =>
+    self assert: (WorkspaceInterface includesSelector: #autoflush:)

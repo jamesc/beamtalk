@@ -13,6 +13,7 @@
 - Fix foreign cross-class extension methods (`TargetClass >> sel => …` where the target is defined in another file) being silently dropped by codegen — the compiler now emits `beamtalk_extensions:register/5` at module load for each foreign extension, so they dispatch correctly at runtime. Class-side extensions register under the metaclass tag. Pure-extension files (no host class) now emit `register_class/0` + `on_load` (BT-2250).
 - **`ClassBuilder classMethods:` arity validation** — a `classMethods:` block whose parameter count does not match its selector (e.g. `#{ #greet => [42] }`, forgetting the leading `:self`) is now rejected at compile time with a clear diagnostic naming the selector and expected shape, instead of silently lowering to a wrong-arity fun that crashed with an opaque `error:undef` only when the class method was first called. A computed (non-literal) `classMethods:` fun of the wrong arity is rejected at registration time with a structured `#beamtalk_error{}` (`arity_mismatch`), since its arity is unknown until runtime. Correctly-shaped blocks and funs (following the `fun(ClassSelf, ClassVars, …)` convention) are unaffected (BT-2276).
 - **`Behaviour compile:source:` / `tryCompile:source:`** — keyword method-patching primitives (ADR 0082 Phase 1). `aClass compile: #sel source: "body"` installs a method and logs a durable ChangeEntry; `tryCompile:source:` does the same with ephemeral intent. Both take the body as a String value (no escaping needed) and are equivalent in effect to `>>` — tools (MCP, LSP, browser editors) call these directly. Every successful in-memory patch (including `>>`) now emits a ChangeEntry to the workspace ChangeLog (BT-2283).
+- Fix `addClassMethod:body:` allowing `super` in blocks with non-literal selectors — the name resolver now mirrors codegen's literal-symbol gate, correctly rejecting `super` when the selector is not a compile-time known symbol (BT-2279).
 
 ### Standard Library
 
@@ -35,6 +36,8 @@
 - **`SystemNavigation fieldReadersOf:in:` / `fieldWritersOf:in:`** — field/class-var usage queries. `fieldReadersOf: #slot in: aClass` returns `#{#class, #selector, #line}` for every method that reads `#slot`, scanning `aClass` + subclasses on instance and class sides. `fieldWritersOf:in:` does the same for writes (BT-2208).
 - **`SystemNavigation classesInPackage:` / `subclassesOf:in:`** — package-scoped class queries. `classesInPackage: aPackage` returns class objects belonging to a package; `subclassesOf: aClass in: aPackage` filters `allSubclasses` by package (BT-2213).
 - **`ChangeLog` and `ChangeEntry`** — new stdlib classes exposing the workspace ChangeLog as a navigable Beamtalk object (ADR 0082 Phase 1). `Workspace changes` returns a `ChangeLog` with collection protocol: `size`, `isEmpty`, `notEmpty`, `do:`, `select:`, `dirtyMethods`, `activeEntries`, `allEntries`. Each `ChangeEntry` wraps one logged patch with predicates (`isOrphan`, `isActive`, `isDurable`, `isEphemeral`, `isAgent`, `isHuman`, `isFlushable`, `isNewClass`) and accessors (`className`, `selector`, `kind`, `intent`, `authorKind`, `sourceFile`, `seq`). Default views reflect only active entries (current epoch, not orphaned); `select:` ranges over the full set (BT-2284).
+- **`ClassBuilder >> register` returns canonical class object** — previously returned an unusable wrapper that failed all dispatch; now returns the same shape as `classNamed:` (dispatchable, `isClass: true`, `==` to the registry reference) (BT-2258).
+- **`ClassBuilder` metadata parity setters** — `methodSignatures:`, `classMethodSignatures:`, `methodDocs:`, `classMethodDocs:`, `methodReturnTypes:`, `classMethodReturnTypes:`, `classDoc:`, `meta:`, and `isConstructible:` bring programmatically built classes to `:help` parity with file-defined ones (BT-2268).
 
 ### Runtime
 
@@ -51,6 +54,11 @@
 - Fix `super` in a value/primitive context (a value-type method or a foreign extension on a value/primitive class) generating invalid Core Erlang. Value-context funs are `fun(Args, Self) -> Result` with no `State` binding, so the old codegen's `beamtalk_dispatch:super(Sel, Args, Self, State, Class)` referenced an unbound `State` and failed to compile. Such `super` sends now route to the new `beamtalk_dispatch:super_value/4`, which walks the same superclass chain without threading state and returns a plain value (BT-2252).
 - **Install-hook ChangeEntry emission** — the `>>` runtime install chokepoint (`beamtalk_repl_loader:load_recompiled_method`) now emits a ChangeEntry after every successful in-memory method patch. The entry captures flushability (true iff the class has an in-project source file), byte span + previous source (via the resolver) for flushable classes, and `intent`/`authorKind` metadata. Non-flushable patches (stdlib, dynamic, dependency classes) still log with `flushable: false`. Emission is best-effort and never blocks the install (BT-2283).
 - **Byte-span resolver bridge** — new `resolve_method_span` compiler-port command returns the exact byte span and previous source bytes for a method in a `.bt` file, enabling the install hook to capture flush-time splice coordinates (BT-2283).
+- **Class-side runtime method dispatch** — programmatic `ClassBuilder` classes can now install and dispatch class-method funs via an ETS retrieval store, mirroring the instance extension path. `classMethods:` blocks lower to anonymous class-method funs matching the compiled convention, with `self`/`super` resolution and class-variable state threading (BT-2266, BT-2267).
+- **Module-less `ClassBuilder` instantiation** — classes built purely programmatically via `ClassBuilder` can now be instantiated with `new` / `new:` before being flushed to a compiled module. The generic instance uses the same tagged-map shape as compiled value types for seamless post-flush behavior (BT-2275).
+- Harden module-less `ClassBuilder` instantiation — depth-guard logging on ancestor chain walks, deadlock-free self-dispatch for fun-backed instance methods inside the class gen_server, and robust ancestor exit handling (BT-2277).
+- Fix `selector_arity` for malformed selectors — interior-colon atoms (e.g. `'at:put'`) are now treated as unary instead of keyword, avoiding spurious `arity_mismatch` diagnostics (BT-2278).
+- **`beamtalk_workspace_changelog`** gen_server — workspace-local ChangeLog that records every live method patch as a crash-safe, session-aware change entry with two-part on-disk persistence (ADR 0082 Phase 1) (BT-2282).
 
 ### Tooling
 
@@ -86,6 +94,8 @@
 - Unmapped quoted `@primitive` in stdlib value-type codegen now fails the build with a clear error naming class + selector, instead of silently falling back to runtime dispatch (BT-2233).
 - Shared `beamtalk_error:raise_type_error/3` extracted from five stdlib modules — zero behavior change (BT-2229).
 - Unify Behaviour/Class/Metaclass primitive-lowering into a single `REGISTRY` table — tower classes share one function pointer so any tower selector resolves regardless of which class declares it, preventing the BT-2232 regression pattern where moving a method up the tower silently dropped its inline BIF (BT-2234).
+- Byte-span resolver validates that the parser can resolve exact method byte spans for flush-time splice replacement — 1347 methods across 161 files pass no-op round-trip (ADR 0082 Phase 0) (BT-2281).
+- Extract `kill_and_wait/1` and `delegate_error/1` helpers in `beamtalk_actor.erl` — zero behavior change (BT-2272).
 
 ## 0.4.0 — 2026-04-27
 
