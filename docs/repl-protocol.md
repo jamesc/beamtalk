@@ -559,6 +559,97 @@ Run all loaded TestCase subclasses and return aggregated results. Each test entr
 {"id": "msg-052", "results": {"class": "All", "total": 0, "passed": 0, "failed": 0, "duration": 0.0, "tests": []}, "status": ["done"]}
 ```
 
+### Navigation Operations
+
+#### `nav-query` — Structured Navigation Query (BT-2239)
+
+Run a `SystemNavigation`-style query directly against the maintained
+selector → sites cross-reference index (`beamtalk_xref`). Unlike `eval` of
+`SystemNavigation default sendersOf: …`, this op returns typed JSON rows
+instead of routing through the Beamtalk inspect-string formatter, so
+clients can decode directly into typed records without parsing display
+output.
+
+Used by `beamtalk-lsp` to delegate `textDocument/references`,
+`textDocument/implementation`, and similar queries to a running workspace
+when the editor's `delegateToRuntime` initialization option is on (epic
+BT-2215). The runtime sees live-patched method bodies (`Behaviour >>`,
+`compile:source:`) and stdlib classes that the LSP's in-process AST
+walker can't index, so the runtime-attached answer is always at least as
+fresh as the AST one.
+
+**Kinds:**
+
+| Kind            | Arg          | Returns                                                  |
+|-----------------|--------------|----------------------------------------------------------|
+| `senders`       | `selector`   | One site per call site sending the selector.             |
+| `implementors`  | `selector`   | One site per class that defines the selector.            |
+| `references`    | `class`      | One site per call site that mentions the class name.    |
+
+`selector` is a Beamtalk selector (e.g. `"increment"`, `"+"`, `"at:put:"`).
+`class` is a Beamtalk class name (e.g. `"Counter"`).
+
+**Request (senders):**
+```json
+{"op": "nav-query", "id": "msg-080", "kind": "senders", "selector": "increment"}
+```
+
+**Request (implementors):**
+```json
+{"op": "nav-query", "id": "msg-081", "kind": "implementors", "selector": "asString"}
+```
+
+**Request (references):**
+```json
+{"op": "nav-query", "id": "msg-082", "kind": "references", "class": "Counter"}
+```
+
+**Response:**
+```json
+{
+  "id": "msg-080",
+  "status": ["done"],
+  "value": {
+    "sites": [
+      {
+        "class": "Counter",
+        "class_side": false,
+        "method": "tick",
+        "line": 7,
+        "source_file": "/abs/path/examples/counter.bt"
+      },
+      {
+        "class": "Integer",
+        "class_side": true,
+        "method": "fromString:",
+        "line": 12,
+        "source_file": null
+      }
+    ]
+  }
+}
+```
+
+| Site field    | Type                      | Description                                                  |
+|---------------|---------------------------|--------------------------------------------------------------|
+| `class`       | string                    | Class that contains the site (or whose metaclass contains it when `class_side` is true). Bare name — no `class` suffix. |
+| `class_side`  | boolean                   | `true` when the site lives in a class-side method (metaclass), `false` for instance-side. |
+| `method`      | string                    | The enclosing method's selector (for senders / references), or the selector being implemented (for implementors). |
+| `line`        | integer (1-based)         | Line number within the source file. The runtime emits absolute file lines, not method-relative offsets. |
+| `source_file` | string \| null            | Absolute path of the `.bt` file backing the class, or `null` for stdlib / bootstrap / dynamically-built classes (no navigable backing file). |
+
+`sites` is an empty list when no matches are found — distinguishable from
+"the runtime knows the query" only by the absence of an `error`.
+
+**Error responses** follow the standard `status: ["done", "error"]` shape
+with a human-readable `error` field. Validation errors include missing
+`kind`, unknown `kind`, and missing `selector` / `class` for the chosen
+kind.
+
+> **BT-2239 (foundation):** the op is wired and answered today; LSP
+> consumers (`textDocument/references`, etc.) are flipped over per-method
+> in BT-2240..2244 once the runtime-attached mode is end-to-end tested.
+
 ### Server Operations
 
 #### `describe` — Capability Discovery

@@ -350,6 +350,62 @@ put_method_normalises_selector_and_side_test_() ->
     end}.
 
 %%====================================================================
+%% method_info reads — current generation wins on stale bag rows
+%%====================================================================
+
+method_info_picks_highest_generation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% `?METHODS_TABLE` is a bag; `register_class` does NOT purge
+                %% before inserting under the new gen, so re-registering a
+                %% class without an intervening `purge_class/1` accumulates
+                %% rows from older generations. `method_info/3` must pick the
+                %% row carrying the highest `gen` so live patches always win.
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+                Info1 = beamtalk_xref:method_info('Counter', false, 'increment'),
+                ?assertEqual(1, maps:get(gen, Info1)),
+                ?assertEqual(14, maps:get(line, Info1)),
+
+                %% Re-register with the same selector at a different line; the
+                %% old row at line 8 (gen 1) stays in the bag alongside the new
+                %% gen-2 row at line 42. `method_info/3` must return the gen-2
+                %% row, not whichever row ETS picks first.
+                Counter2 = lists:map(
+                    fun
+                        (#{selector := 'increment'} = E) ->
+                            E#{line => 42};
+                        (E) ->
+                            E
+                    end,
+                    counter_xref()
+                ),
+                ok = beamtalk_xref:register_class('Counter', Counter2),
+                Info2 = beamtalk_xref:method_info('Counter', false, 'increment'),
+                ?assertEqual(2, maps:get(gen, Info2)),
+                ?assertEqual(42, maps:get(line, Info2)),
+
+                %% Sanity: the bag really does still hold both generations
+                %% — the read picks the higher one rather than relying on a
+                %% prior purge.
+                Rows = ets:lookup(beamtalk_xref_methods, {'Counter', false, 'increment'}),
+                ?assertEqual(2, length(Rows)),
+
+                %% Unknown method → undefined.
+                ?assertEqual(
+                    undefined,
+                    beamtalk_xref:method_info('Counter', false, 'no_such_method')
+                ),
+                %% Unknown class → undefined.
+                ?assertEqual(
+                    undefined,
+                    beamtalk_xref:method_info('NoSuchClass', false, 'increment')
+                )
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Concurrent reader during write
 %%====================================================================
 

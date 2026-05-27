@@ -350,6 +350,31 @@ impl RequestBuilder {
         req
     }
 
+    /// Build a `nav-query` request — structured navigation query that
+    /// returns `beamtalk_xref` site records to the LSP / MCP (BT-2239).
+    ///
+    /// `kind` is one of `"senders"`, `"implementors"`, `"references"`.
+    /// For `senders` / `implementors`, pass a Beamtalk selector as the
+    /// second arg; for `references`, pass a Beamtalk class name.
+    #[must_use]
+    pub fn nav_query(kind: &str, arg: &str) -> serde_json::Value {
+        let mut req = serde_json::json!({
+            "op": "nav-query",
+            "id": next_msg_id(),
+            "kind": kind,
+        });
+        match kind {
+            "senders" | "implementors" => {
+                req["selector"] = serde_json::Value::String(arg.to_owned());
+            }
+            _ => {
+                // Default "references" branch — class name argument.
+                req["class"] = serde_json::Value::String(arg.to_owned());
+            }
+        }
+        req
+    }
+
     // --- Tracing operations (ADR 0069) ---
 
     /// Build an `enable-tracing` request.
@@ -752,6 +777,34 @@ mod tests {
         let req = RequestBuilder::list_classes(Some("Counter"));
         assert_eq!(req["op"], "list-classes");
         assert_eq!(req["filter"], "Counter");
+    }
+
+    #[test]
+    fn nav_query_senders_routes_to_selector_field() {
+        let req = RequestBuilder::nav_query("senders", "increment");
+        assert_eq!(req["op"], "nav-query");
+        assert_eq!(req["kind"], "senders");
+        assert_eq!(req["selector"], "increment");
+        assert!(req.get("class").is_none());
+        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
+    }
+
+    #[test]
+    fn nav_query_implementors_routes_to_selector_field() {
+        let req = RequestBuilder::nav_query("implementors", "asString");
+        assert_eq!(req["op"], "nav-query");
+        assert_eq!(req["kind"], "implementors");
+        assert_eq!(req["selector"], "asString");
+        assert!(req.get("class").is_none());
+    }
+
+    #[test]
+    fn nav_query_references_routes_to_class_field() {
+        let req = RequestBuilder::nav_query("references", "Counter");
+        assert_eq!(req["op"], "nav-query");
+        assert_eq!(req["kind"], "references");
+        assert_eq!(req["class"], "Counter");
+        assert!(req.get("selector").is_none());
     }
 
     #[test]

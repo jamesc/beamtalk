@@ -45,7 +45,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     senders_of/1,
     references_to/1,
     implementors_of/1,
-    defined_selectors/2
+    defined_selectors/2,
+    method_info/3
 ]).
 
 %% gen_server callbacks
@@ -231,6 +232,46 @@ defined_selectors(Class, ClassSide) when is_atom(Class), is_boolean(ClassSide) -
         _ ->
             Matches = ets:match(?METHODS_TABLE, {{Class, ClassSide, '$1'}, '_'}),
             lists:usort([Sel || [Sel] <- Matches])
+    end.
+
+-doc """
+Return the `method_info()` record for a method, or `undefined` if the
+class+selector+side triple is not registered.
+
+Used by the LSP `nav-query` op (BT-2239) to surface the method-header line
+number to `textDocument/implementation` consumers (BT-2241). Direct ETS
+lookup — does not go through the gen_server.
+""".
+-spec method_info(class_name(), class_side(), selector()) -> method_info() | undefined.
+method_info(Class, ClassSide, Selector) when
+    is_atom(Class), is_boolean(ClassSide), is_atom(Selector)
+->
+    case ets:whereis(?METHODS_TABLE) of
+        undefined ->
+            undefined;
+        _ ->
+            %% `?METHODS_TABLE` is a bag — after a class re-register without an
+            %% intervening `purge_class/1` (allowed by the write contract),
+            %% multiple rows can share `{Class, ClassSide, Selector}`. Pick the
+            %% row carrying the highest `gen` so live patches and reloads always
+            %% win over stale generations.
+            case ets:lookup(?METHODS_TABLE, {Class, ClassSide, Selector}) of
+                [] ->
+                    undefined;
+                [{_Key, Info}] ->
+                    Info;
+                [{_Key, First} | Rest] ->
+                    lists:foldl(
+                        fun({_K, Cur}, Best) ->
+                            case maps:get(gen, Cur, 0) >= maps:get(gen, Best, 0) of
+                                true -> Cur;
+                                false -> Best
+                            end
+                        end,
+                        First,
+                        Rest
+                    )
+            end
     end.
 
 %%====================================================================
