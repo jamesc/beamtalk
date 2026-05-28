@@ -33,9 +33,9 @@ the 5% "withdraw" gate**.
 
 **Recommendation:** This is the **qualified middle**. The audit does *not*
 support proceeding with Phase 1 on simplification grounds alone; the per-line
-savings exist but are modest and trend smaller as function complexity
-increases — exactly the opposite of what the ADR's most optimistic scenario
-predicts. Before committing to Phase 1, gather **Phase 0b** data (ETF
+savings exist but are modest and converge to ~11% regardless of function
+complexity — not the "bigger functions benefit more" curve the ADR's most
+optimistic scenario predicts. Before committing to Phase 1, gather **Phase 0b** data (ETF
 encode/decode cost) and explicitly compare against the **typed-Document-leaves**
 alternative on the same three functions. See §"What would shift the
 recommendation" below.
@@ -71,7 +71,7 @@ All rewrites + a minimal `cerl::*` mirror + the original functions (verbatim
 copies, isolated from `CoreErlangGenerator` so they need no compiler instance)
 live in `crates/beamtalk-core/src/codegen/core_erlang/cerl_audit.rs`. The file
 is `#[cfg(test)]`-gated so it ships no production code, and is to be deleted
-when the gate decision lands. The minimal `cerl::*` mirror has 10 node kinds
+when the gate decision lands. The minimal `cerl::*` mirror has 12 node kinds
 (Atom, Var, Int, Map, Tuple, List, Cons, Call, Let, LetOpen, Seq, Raw) — a
 small fraction of the 20–30 the real ADR-0088 Phase 1 would need.
 
@@ -88,7 +88,7 @@ matrix:
 
 All 9 tests pass:
 
-```
+```text
 test codegen::core_erlang::cerl_audit::tests::beamtalk_class_attribute_empty_matches ... ok
 test codegen::core_erlang::cerl_audit::tests::beamtalk_class_attribute_single_class_matches ... ok
 test codegen::core_erlang::cerl_audit::tests::beamtalk_class_attribute_multi_class_matches ... ok
@@ -417,10 +417,12 @@ here is too small to justify the migration on its own.
 3. Decide Phase 1 *only* after both Phase 0b and Phase 0c data are in.
 
 The audit specifically does **not** support the ADR's Phase 1 plan on the
-simplification dimension alone. Shrinkage is real but below the gate, and the
-high-complexity hot-spot (`control_flow/mod.rs`) shrinks the *least* — exactly
-inverse to where the migration cost is highest. The cheaper typed-leaves
-alternative is now a serious contender and must be measured before commitment.
+simplification dimension alone. Shrinkage is real but plateaus at ~11% by
+characters regardless of function complexity — it does not grow proportionally
+with the emission-heaviness of the file, so the largest files (where migration
+cost is highest) gain proportionally no more than small leaf utilities. The
+cheaper typed-leaves alternative is now a serious contender and must be
+measured before commitment.
 
 ## No regressions
 
@@ -435,7 +437,7 @@ alternative is now a serious contender and must be measured before commitment.
 ## Files added/modified
 
 * **New:** `crates/beamtalk-core/src/codegen/core_erlang/cerl_audit.rs`
-  (throwaway, ~600 LOC including doc comments + 9 tests)
+  (throwaway, ~760 LOC including doc comments + 9 tests)
 * **New:** `docs/ADR/0088-phase-0a-audit.md` (this memo)
 * **Modified:** `crates/beamtalk-core/src/codegen/core_erlang/mod.rs` — added
   `#[cfg(test)] mod cerl_audit;` declaration
