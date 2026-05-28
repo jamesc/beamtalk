@@ -285,6 +285,64 @@ sealed typed Object subclass: SystemNavigation
     ]) collect: [:c | c class]
     instanceImpls ++ classSideImpls
 
+  /// Return the message sends that occur in the body of `aMethod` — the
+  /// outgoing-call set of a single method, the dual of `sendersOf:`.
+  ///
+  /// Each result is a Dictionary with two keys:
+  /// - `#selector` — the selector being sent (a Symbol)
+  /// - `#line` — the 1-based line number within `aMethod source` where the
+  ///   send appears
+  ///
+  /// Order matches the AST walk: outer sends come before sends in their
+  /// receiver/argument subtrees (a stable pre-order). A method that sends the
+  /// same selector multiple times produces one entry per occurrence.
+  ///
+  /// Backs the `callHierarchy/outgoingCalls` LSP query (BT-2243). The runtime
+  /// path used by `Backend::delegate_nav_query` reads the method source via
+  /// `aMethod source` and asks the compiler for every send — the same
+  /// per-method AST walk that powers `unimplementedSelectors` (BT-2206),
+  /// inverted to one-method-many-sends instead of all-methods-one-selector.
+  ///
+  /// Erlang FFI receivers (`Erlang foo` / `(Erlang foo) bar:`) are excluded:
+  /// those are Erlang function calls routed through the `ErlangModule` DNU
+  /// bridge, not Beamtalk message sends, so reporting them as outgoing calls
+  /// would let an Erlang function name shadow a Beamtalk selector in the
+  /// caller's call hierarchy. Mirrors the same exclusion in `unusedSelectors`.
+  ///
+  /// `aMethod` must be a `CompiledMethod` (the value returned by
+  /// `aClass >> #selector`). Passing anything else raises a typed error.
+  /// A method whose `source` is `nil` (a primitive / intrinsic registered
+  /// without source text) returns `[]`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// method := Counter >> #increment
+  /// SystemNavigation default messagesSentBy: method
+  /// // => [#{#selector => #+, #line => 2}, ...]
+  /// ```
+  messagesSentBy: aMethod :: CompiledMethod -> List(Dictionary) =>
+    (aMethod isKindOf: CompiledMethod)
+      ifFalse: [
+        self error: "SystemNavigation messagesSentBy: requires a CompiledMethod argument (the value of `aClass >> #selector`)."
+      ]
+    src := aMethod source
+    src isNil ifTrue: [^List new]
+    sends := (Erlang beamtalk_interface) allSendsIn: src
+    sends
+      inject: List new
+      into: [:acc :s |
+        sentSel := s at: 1
+        line := s at: 2
+        recv := s at: 3
+        // Skip Erlang FFI sends — same exclusion as `unusedSelectors`. An
+        // `Erlang foo` chain is an Erlang call routed through the DNU bridge,
+        // not a Beamtalk message send, so its "selectors" (module + function
+        // names) must not appear in the outgoing-call list.
+        recv == #erlang_ffi ifTrue: [
+          acc
+        ] ifFalse: [acc add: #{#selector => sentSel, #line => line}]
+      ]
+
   /// Return a collection of call sites that send the given selector.
   ///
   /// Each result is a Dictionary with three keys:

@@ -357,6 +357,73 @@ impl CodeAction {
     }
 }
 
+/// A call-hierarchy target — the method-level symbol surfaced by
+/// `textDocument/prepareCallHierarchy` (BT-2243).
+///
+/// **DDD Context:** Language Service — Value Object
+///
+/// `prepareCallHierarchy` answers "what method does the cursor refer to?"
+/// before the editor follows up with `callHierarchy/incomingCalls` or
+/// `callHierarchy/outgoingCalls`. The LSP layer translates this target into
+/// an LSP `CallHierarchyItem`; we keep the translation in the LSP crate so
+/// `beamtalk-core` stays free of `lsp_types` symbols.
+///
+/// The cold-file classifier produces one target per cursor hit: the call
+/// site's selector, the enclosing method's class (when the cursor is on a
+/// method-definition header), or no target at all when the cursor sits on a
+/// local identifier the LSP can't resolve to a method.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallHierarchyTarget {
+    /// The selector of the method the cursor points at (e.g. `increment`,
+    /// `at:put:`, `+`). Used as the display name on the LSP item and as the
+    /// senders-of argument when the editor asks for incoming calls.
+    pub selector: EcoString,
+    /// The class that defines (or contains the call site referencing) the
+    /// method, when the cursor is on a method-definition header in a known
+    /// class. `None` when the cursor is on a call site whose receiver class
+    /// can't be statically resolved — incoming-call queries still work
+    /// because `sendersOf:` is class-agnostic.
+    pub class_name: Option<EcoString>,
+    /// `true` when the method is defined on the metaclass (a class-side
+    /// method), `false` for instance-side. Always `false` when `class_name`
+    /// is `None`.
+    pub class_side: bool,
+    /// The file the prepare hit landed in. Used to retain anchoring
+    /// information for the follow-up `outgoingCalls` walk, which needs to
+    /// re-locate the method's body in this file.
+    pub file: Utf8PathBuf,
+    /// The span covering the full method definition when the cursor was on a
+    /// method-definition header, or just the selector token when on a call
+    /// site. Maps to the LSP `range` on `CallHierarchyItem`.
+    pub range: Span,
+    /// The span of the selector token (sub-range of `range`). Maps to the
+    /// LSP `selection_range`. When the selector span is not available (unary
+    /// / binary method headers don't carry one), falls back to `range`.
+    pub selection_range: Span,
+}
+
+impl CallHierarchyTarget {
+    /// Creates a new call-hierarchy target.
+    #[must_use]
+    pub fn new(
+        selector: impl Into<EcoString>,
+        class_name: Option<EcoString>,
+        class_side: bool,
+        file: Utf8PathBuf,
+        range: Span,
+        selection_range: Span,
+    ) -> Self {
+        Self {
+            selector: selector.into(),
+            class_name,
+            class_side,
+            file,
+            range,
+            selection_range,
+        }
+    }
+}
+
 /// The kind of a document symbol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DocumentSymbolKind {

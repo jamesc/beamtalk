@@ -198,13 +198,20 @@ impl ParityDoc {
                 // span that starts with `executeCommand:` so the matching against
                 // the code-side `BEAMTALK_LSP_COMMANDS` array is exhaustive.
                 //
-                // BT-2241: a single LSP cell may also list multiple
-                // `textDocument/*` or `workspace/*` capabilities separated
-                // by ` / ` (e.g. the `nav-query` row enumerates both
-                // `textDocument/references` and `textDocument/implementation`,
-                // because both go through the same `Backend::delegate_nav_query`
-                // helper). Harvest every such code span so the reverse drift
-                // check (code-side capability → doc) sees the full set.
+                // BT-2241 / BT-2243: a single LSP cell may also list multiple
+                // `textDocument/*`, `workspace/*`, or `callHierarchy/*`
+                // capabilities separated by ` / ` (e.g. the `nav-query` row
+                // enumerates `textDocument/references`,
+                // `textDocument/implementation`,
+                // `textDocument/prepareCallHierarchy`,
+                // `callHierarchy/incomingCalls`, and
+                // `callHierarchy/outgoingCalls`, because they all go through
+                // the same `Backend::delegate_nav_query` helper). Harvest
+                // every such code span so the reverse drift check (code-side
+                // capability → doc) sees the full set; without it only the
+                // first code span would be picked up via `parse_cell`, and
+                // the later spans would silently drift out of sync with the
+                // capabilities advertised in `crates/beamtalk-lsp/src/server.rs`.
                 for code in extract_all_code(&cells[4]) {
                     let trimmed = code.trim_start();
                     if trimmed.starts_with("executeCommand:")
@@ -868,6 +875,19 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "document_formatting_provider" => vec!["textDocument/formatting".into()],
         "document_range_formatting_provider" => vec!["textDocument/rangeFormatting".into()],
         "code_action_provider" => vec!["textDocument/codeAction".into()],
+        // BT-2243: per the LSP spec, the three call-hierarchy RPCs are
+        // `textDocument/prepareCallHierarchy` (the prepare step lives
+        // under `textDocument/` because it takes a text-document
+        // position) plus `callHierarchy/{incomingCalls,outgoingCalls}`
+        // (the follow-ups live under `callHierarchy/` because they take
+        // a `CallHierarchyItem` rather than a position). All three are
+        // wired by the same `call_hierarchy_provider` capability — the
+        // LSP server has no per-RPC opt-in.
+        "call_hierarchy_provider" => vec![
+            "textDocument/prepareCallHierarchy".into(),
+            "callHierarchy/incomingCalls".into(),
+            "callHierarchy/outgoingCalls".into(),
+        ],
         // `publishDiagnostics` is server→client, never declared in the
         // capabilities literal — handled outside this map.
         _ => Vec::new(),
@@ -1249,6 +1269,63 @@ fn _stub() -> () {
         assert!(caps.contains("textDocument/hover"));
         assert!(caps.contains("executeCommand: beamtalk.flush"));
         assert!(caps.contains("executeCommand: beamtalk.flush.class"));
+    }
+
+    #[test]
+    fn extract_lsp_caps_emits_three_call_hierarchy_names_for_one_provider() {
+        // BT-2243: `call_hierarchy_provider` covers prepareCallHierarchy +
+        // incomingCalls + outgoingCalls. The drift checker must emit all
+        // three doc-side names so the parity row's enumerated set verifies.
+        let src = r"
+fn _stub() -> () {
+    let _caps = ServerCapabilities {
+        call_hierarchy_provider: Some(CallHierarchyServerCapability::Options(
+            CallHierarchyOptions::default(),
+        )),
+    };
+}
+";
+        let mut caps = BTreeSet::new();
+        extract_lsp_caps(src, &mut caps);
+        // Per the LSP spec, prepare lives under `textDocument/` because it
+        // takes a text-document position; the follow-up RPCs live under
+        // `callHierarchy/` because they take a `CallHierarchyItem`.
+        assert!(caps.contains("textDocument/prepareCallHierarchy"));
+        assert!(caps.contains("callHierarchy/incomingCalls"));
+        assert!(caps.contains("callHierarchy/outgoingCalls"));
+    }
+
+    #[test]
+    fn parity_doc_harvests_multiple_lsp_caps_from_one_cell() {
+        // BT-2243: an LSP cell may list several capabilities (e.g. nav-query
+        // wires textDocument/references and callHierarchy/*). `parse_cell`
+        // captures only the first; the loop in `ingest_row` harvests the
+        // rest. Verify the rest reach the inventory.
+        let raw = "## Foo Operations\n\
+                   | REPL op | CLI | Meta | MCP | LSP | Notes |\n\
+                   |---|---|---|---|---|---|\n\
+                   | `myop` | -- | -- | -- | `textDocument/references` / \
+                   `callHierarchy/incomingCalls` / `callHierarchy/outgoingCalls` | foo |\n";
+        // No /tmp hardcoding (CLAUDE.md): use the OS temp dir + a
+        // process-unique name so concurrent CI shards don't collide. This
+        // crate has no dep on beamtalk-core::test_helpers, so we roll our
+        // own minimal helper here.
+        let tmp = std::env::temp_dir().join(format!(
+            "beamtalk_drift_parity_lsp_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        ));
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let p = tmp.join("parity.md");
+        std::fs::write(&p, raw).expect("write temp parity doc");
+        let doc = ParityDoc::load(&p).expect("load");
+        assert!(doc.lsp_caps.contains("textDocument/references"));
+        assert!(doc.lsp_caps.contains("callHierarchy/incomingCalls"));
+        assert!(doc.lsp_caps.contains("callHierarchy/outgoingCalls"));
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
