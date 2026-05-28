@@ -435,6 +435,48 @@ impl SimpleLanguageService {
         None
     }
 
+    /// BT-2240: Find the **declaration sites** (method-definition headers)
+    /// for the given selector across every indexed file.
+    ///
+    /// Used by the LSP to overlay declarations onto runtime-attached
+    /// `textDocument/references` results when `includeDeclaration = true`.
+    /// The runtime path (`SystemNavigation sendersOf:`) returns call sites
+    /// only; merging this helper's output back in keeps the runtime path
+    /// at parity with the cold-file AST walker, which has always returned
+    /// both.
+    ///
+    /// Polymorphic selectors (defined by multiple classes) return one
+    /// `Location` per defining class.
+    #[must_use]
+    pub fn find_selector_declarations(&self, selector_name: &str) -> Vec<Location> {
+        crate::queries::references_provider::find_selector_declarations(
+            selector_name,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
+        )
+    }
+
+    /// BT-2240: Find the **class declaration sites** (the class-name token
+    /// at the definition) for the given class or protocol name across every
+    /// indexed file.
+    ///
+    /// Used by the LSP to overlay class declarations onto runtime-attached
+    /// `textDocument/references` results when `includeDeclaration = true`.
+    /// The runtime path (`SystemNavigation referencesTo:`) returns sites
+    /// that *use* the class (type annotations, class literals, …) but
+    /// never the declaration site itself; merging this helper's output
+    /// back in keeps the runtime path at parity with the cold-file walker.
+    ///
+    /// In normal projects each class is declared once. The result is a
+    /// `Vec` to cover legitimate cases where the same name is declared in
+    /// multiple files (test fixtures, overlapping workspace roots).
+    #[must_use]
+    pub fn find_class_declarations(&self, class_name: &str) -> Vec<Location> {
+        crate::queries::references_provider::find_class_declarations(
+            class_name,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
+        )
+    }
+
     /// BT-2241: Classify the cursor for a `textDocument/implementation`
     /// request and return the equivalent [`NavQuery::ImplementorsOf`], or
     /// `None` when the cursor is not on a selector.

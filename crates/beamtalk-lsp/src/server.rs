@@ -19,8 +19,9 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::{ClassChangedEvent, FlushEvent, RuntimeClient, RuntimeError};
 
 use beamtalk_core::language_service::{
-    CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService, NavQuery, NavSite,
-    Position as BtPosition, RuntimeLocation, SimpleLanguageService, nav_site_to_location,
+    CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService,
+    Location as BtLocation, NavQuery, NavSite, Position as BtPosition, RuntimeLocation,
+    SimpleLanguageService, nav_site_to_location,
 };
 use beamtalk_core::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
@@ -303,6 +304,55 @@ impl Backend {
             .iter()
             .filter_map(|site| to_lsp(site, &roots))
             .collect()
+    }
+
+    /// BT-2240: Resolve the **declaration sites** (LSP `Location`s) for a
+    /// [`NavQuery`].
+    ///
+    /// * [`NavQuery::SendersOf`] (selector) → runtime
+    ///   `SystemNavigation implementorsOf:` via [`Self::delegate_nav_query`]
+    ///   when the flag is on; falls back to the in-process
+    ///   [`SimpleLanguageService::find_selector_declarations`] walker
+    ///   otherwise. The runtime path picks up live-edited methods (ADR
+    ///   0082, `ChangeLog` patches) and extension methods (ADR 0066) that the
+    ///   AST walker can't see.
+    /// * [`NavQuery::ReferencesTo`] (class) → always the AST
+    ///   [`SimpleLanguageService::find_class_declarations`] walker.
+    ///   `beamtalk_xref` does not currently expose a "declaration site for
+    ///   class `Foo`" query — class declarations come from cold-file
+    ///   indexing, which is always available for indexed files.
+    /// * [`NavQuery::ImplementorsOf`] — not used by `textDocument/references`;
+    ///   callers should not pass it. Returns an empty vector if they do.
+    ///
+    /// Used by the `textDocument/references` handler to overlay declaration
+    /// sites onto runtime-attached results when `includeDeclaration = true`.
+    async fn declaration_sites_for_query(
+        &self,
+        query: &NavQuery,
+    ) -> Vec<tower_lsp::lsp_types::Location> {
+        match query {
+            NavQuery::SendersOf(selector) => {
+                let selector_name = selector.clone();
+                let ast_fallback = || -> Vec<tower_lsp::lsp_types::Location> {
+                    let svc = self.service.lock().expect("service lock poisoned");
+                    let locs = svc.find_selector_declarations(selector_name.as_str());
+                    bt_locations_to_lsp(&svc, locs)
+                };
+                let implementors_query = NavQuery::ImplementorsOf(selector.clone());
+                self.delegate_nav_query(
+                    implementors_query,
+                    runtime_site_to_lsp_location,
+                    ast_fallback,
+                )
+                .await
+            }
+            NavQuery::ReferencesTo(class_name) => {
+                let svc = self.service.lock().expect("service lock poisoned");
+                let locs = svc.find_class_declarations(class_name.as_str());
+                bt_locations_to_lsp(&svc, locs)
+            }
+            NavQuery::ImplementorsOf(_) => Vec::new(),
+        }
     }
 
     /// Read the `delegateToRuntime` flag (BT-2239).
@@ -1399,12 +1449,31 @@ impl LanguageServer for Backend {
 
     /// Finds all references to the symbol at the cursor.
     ///
-    /// BT-2239 worked example: when `delegateToRuntime` is on and a runtime
-    /// is attached, classify the cursor with
-    /// [`SimpleLanguageService::references_query_at`] and forward to the
-    /// runtime via [`Backend::delegate_nav_query`]. Local-identifier hits
-    /// (parameters, locals) — which the runtime can't see — fall back to
-    /// the AST walker unconditionally.
+    /// BT-2239 wired this through [`Backend::delegate_nav_query`] as the
+    /// first per-method consumer of the runtime-attached navigation seam.
+    /// BT-2240 closes the **declaration-merge gap** left there:
+    ///
+    /// * `senders_of/1` (the runtime backing for selectors) returns call
+    ///   sites only — it never returns the method-definition headers.
+    /// * `references_to/1` (the runtime backing for classes) returns use
+    ///   sites only — it never returns the class-declaration name span.
+    ///
+    /// The AST walker has always returned both definitions and call sites
+    /// merged into one list. So when the LSP `context.includeDeclaration`
+    /// flag is `true` (the LSP default) and the runtime path is active,
+    /// we overlay the AST-known declaration sites onto the runtime result.
+    /// When `includeDeclaration` is `false`, we strip declarations out of
+    /// the AST result so the cold-file path obeys the flag too.
+    ///
+    /// Behaviour matrix:
+    ///
+    /// | cursor on | `include_declaration` | result |
+    /// |-----------|-----------------------|--------|
+    /// | selector  | `true`  | runtime `senders` + AST/runtime declarations |
+    /// | selector  | `false` | runtime `senders` only |
+    /// | class     | `true`  | runtime `references` + AST class-decl sites |
+    /// | class     | `false` | runtime `references` only |
+    /// | local id  | any      | AST walker (locals have no declaration overlay — `include_declaration` is a no-op for them) |
     async fn references(
         &self,
         params: ReferenceParams,
@@ -1413,6 +1482,7 @@ impl LanguageServer for Backend {
         let Some(path) = self.resolve_path_for_uri(uri) else {
             return Ok(None);
         };
+        let include_declaration = params.context.include_declaration;
 
         // Compute everything that depends on `svc` up front so the lock is
         // released before any async runtime call (delegate_nav_query awaits
@@ -1433,10 +1503,27 @@ impl LanguageServer for Backend {
 
         let backend_self = self;
         let path_for_ast = path.clone();
+        // Cold-file fallback. Builds an LSP location list from the AST
+        // walker. The walker always returns definitions+calls; strip
+        // declarations out when `include_declaration` is false so the
+        // cold-file path mirrors the runtime-path behaviour.
         let ast_fallback = || -> Vec<tower_lsp::lsp_types::Location> {
             let svc = backend_self.service.lock().expect("service lock poisoned");
             let refs = svc.find_references(&path_for_ast, pos);
+            // When the caller wants senders/uses only, subtract the AST
+            // declaration set for this cursor from the merged AST results.
+            let decl_set: HashSet<(Utf8PathBuf, Span)> = if include_declaration {
+                HashSet::new()
+            } else {
+                ast_declarations_for_cursor(&svc, &path_for_ast, pos)
+                    .into_iter()
+                    .map(|loc| (loc.file, loc.span))
+                    .collect()
+            };
             refs.into_iter()
+                .filter(|loc| {
+                    include_declaration || !decl_set.contains(&(loc.file.clone(), loc.span))
+                })
                 .filter_map(|loc| {
                     let source = svc.file_source(&loc.file)?;
                     let range = span_to_range(loc.span, &source);
@@ -1448,14 +1535,24 @@ impl LanguageServer for Backend {
                 .collect()
         };
 
-        let locations = if let Some(query) = runtime_query {
-            self.delegate_nav_query(query, runtime_site_to_lsp_location, ast_fallback)
-                .await
-        } else {
-            // Cursor isn't on a selector or class name (local identifier,
-            // parameter, etc.) — the runtime can't answer this, so go
-            // straight to the AST path.
-            ast_fallback()
+        let locations = match runtime_query {
+            Some(query) => {
+                let mut sites = self
+                    .delegate_nav_query(query.clone(), runtime_site_to_lsp_location, ast_fallback)
+                    .await;
+                if include_declaration {
+                    let decl_locs = self.declaration_sites_for_query(&query).await;
+                    merge_locations(&mut sites, decl_locs);
+                }
+                sites
+            }
+            None => {
+                // Cursor isn't on a selector or class name (local
+                // identifier, parameter, etc.) — the runtime can't answer
+                // this, so go straight to the AST path. `ast_fallback`
+                // already honours `include_declaration`.
+                ast_fallback()
+            }
         };
 
         if locations.is_empty() {
@@ -3046,6 +3143,90 @@ fn outgoing_calls_for_body(
     calls
 }
 
+/// BT-2240: Compute the AST-known declaration sites that correspond to the
+/// symbol the cursor is sitting on, in the same classification order
+/// [`SimpleLanguageService::references_query_at`] uses.
+///
+/// * Cursor on a selector (call site or method header) →
+///   [`SimpleLanguageService::find_selector_declarations`].
+/// * Cursor on a class-name identifier known to the hierarchy →
+///   [`SimpleLanguageService::find_class_declarations`].
+/// * Cursor on a local identifier (parameter, local variable) → empty —
+///   locals are scope-bound declarations, but the cold-file
+///   `find_references` walker emits all matching identifier spans without
+///   distinguishing the binding site, so we have nothing to subtract.
+///
+/// Caller uses the returned `(file, span)` pairs as a "decl set" to filter
+/// out of the AST `find_references` result when the LSP
+/// `context.includeDeclaration` flag is `false`.
+fn ast_declarations_for_cursor(
+    svc: &SimpleLanguageService,
+    file: &Utf8PathBuf,
+    position: BtPosition,
+) -> Vec<BtLocation> {
+    let Some(query) = svc.references_query_at(file, position) else {
+        return Vec::new();
+    };
+    match query {
+        NavQuery::SendersOf(selector) | NavQuery::ImplementorsOf(selector) => {
+            svc.find_selector_declarations(selector.as_str())
+        }
+        NavQuery::ReferencesTo(class_name) => svc.find_class_declarations(class_name.as_str()),
+    }
+}
+
+/// BT-2240: Translate a list of `beamtalk-core` `Location` values to LSP
+/// `Location`s by re-reading each file's cached source for the column
+/// math.
+///
+/// Drops entries whose file source isn't cached (deleted file, unloaded
+/// dependency) or whose path can't be converted to a `file://` URI.
+fn bt_locations_to_lsp(
+    svc: &SimpleLanguageService,
+    locations: Vec<BtLocation>,
+) -> Vec<tower_lsp::lsp_types::Location> {
+    locations
+        .into_iter()
+        .filter_map(|loc| {
+            let source = svc.file_source(&loc.file)?;
+            let range = span_to_range(loc.span, &source);
+            Some(tower_lsp::lsp_types::Location {
+                uri: path_to_uri(&loc.file)?,
+                range,
+            })
+        })
+        .collect()
+}
+
+/// BT-2240: Append `extras` to `base`, skipping any LSP `Location` already
+/// present (matched by `(uri, range)`). Used to overlay declaration sites
+/// onto runtime-attached `textDocument/references` results without
+/// duplicating entries the runtime already returned.
+///
+/// `lsp_types::Range` does not implement `Hash`, so the key flattens it
+/// to a 4-tuple of `(start.line, start.character, end.line, end.character)`
+/// alongside the URI.
+fn merge_locations(
+    base: &mut Vec<tower_lsp::lsp_types::Location>,
+    extras: Vec<tower_lsp::lsp_types::Location>,
+) {
+    fn key(loc: &tower_lsp::lsp_types::Location) -> (Url, u32, u32, u32, u32) {
+        (
+            loc.uri.clone(),
+            loc.range.start.line,
+            loc.range.start.character,
+            loc.range.end.line,
+            loc.range.end.character,
+        )
+    }
+    let mut seen: HashSet<(Url, u32, u32, u32, u32)> = base.iter().map(key).collect();
+    for loc in extras {
+        if seen.insert(key(&loc)) {
+            base.push(loc);
+        }
+    }
+}
+
 /// BT-2239: Convert a runtime-supplied `NavSite` into an LSP `Location`.
 ///
 /// Steps:
@@ -4528,6 +4709,218 @@ mod tests {
         let uri = Url::parse("file:///workspace/counter.bt").expect("url");
         let calls = outgoing_calls_for_body("answer => 42", Position::new(0, 0), &uri);
         assert!(calls.is_empty(), "got {calls:?}");
+    }
+
+    // -----------------------------------------------------------------
+    // BT-2240: declaration-merge in `textDocument/references`.
+    //
+    // These tests exercise the cold-file (AST-fallback) path because the
+    // runtime path requires a live `beamtalk_workspace` WebSocket and a
+    // populated `beamtalk_xref` table — which the BT-2241 sister PR's
+    // `delegate_nav_query` test fixture also avoids. The acceptance criterion
+    // we cover here is the `includeDeclaration` round-trip semantics: with
+    // the flag on, the result must include method-definition headers; with
+    // the flag off, declarations must be filtered out and only call sites
+    // remain. The runtime path inherits the same merge logic by construction
+    // (`declaration_sites_for_query` always falls back to the AST helpers
+    // when `delegate_to_runtime` is off, which is the default in tests).
+    // -----------------------------------------------------------------
+
+    /// Helper: open a single file in a `Backend` test fixture by directly
+    /// updating the service and versions maps. Skips the full LSP lifecycle
+    /// (`publish_diagnostics`, etc.) so handler logic can be exercised in
+    /// isolation. Returns the URI that `textDocument/references` requests
+    /// should target.
+    fn open_test_file(backend: &Backend, path: &Utf8PathBuf, source: &str) -> Url {
+        {
+            let mut svc = backend.service.lock().expect("service lock");
+            svc.update_file(path.clone(), source.to_string());
+        }
+        {
+            let mut versions = backend.versions.lock().expect("versions lock");
+            versions.insert(path.clone(), 1);
+        }
+        Url::from_file_path(path.as_std_path()).expect("path → uri")
+    }
+
+    fn references_params(
+        uri: Url,
+        line: u32,
+        character: u32,
+        include_declaration: bool,
+    ) -> ReferenceParams {
+        ReferenceParams {
+            text_document_position: tower_lsp::lsp_types::TextDocumentPositionParams {
+                text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
+                position: tower_lsp::lsp_types::Position::new(line, character),
+            },
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+            context: tower_lsp::lsp_types::ReferenceContext {
+                include_declaration,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn references_with_declaration_merges_method_definition_and_call_sites() {
+        // Cold-file path: cursor on a selector at a call site. With
+        // `includeDeclaration = true` the result must include the method
+        // definition header **and** every call site (one of each here).
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-with-decl").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let source = "Object subclass: Foo\n  bar => 1\nx bar\n";
+        let uri = open_test_file(backend, &path, source);
+
+        // Cursor on the `bar` call at line 2 (0-based), col 2.
+        let result = backend
+            .references(references_params(uri.clone(), 2, 2, true))
+            .await
+            .expect("rpc ok")
+            .expect("some locations");
+
+        // Expect at least 2 sites: the method-definition header on line 1
+        // and the call on line 2.
+        assert!(
+            result.len() >= 2,
+            "expected def + call (>= 2 sites), got {result:?}"
+        );
+        let lines: HashSet<u32> = result.iter().map(|l| l.range.start.line).collect();
+        assert!(
+            lines.contains(&1),
+            "expected definition line 1, got {lines:?}"
+        );
+        assert!(
+            lines.contains(&2),
+            "expected call site line 2, got {lines:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn references_without_declaration_strips_method_definition() {
+        // Same setup as above, but `includeDeclaration = false`: the
+        // method-definition header must be filtered out and only the call
+        // site should remain.
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-no-decl").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let source = "Object subclass: Foo\n  bar => 1\nx bar\n";
+        let uri = open_test_file(backend, &path, source);
+
+        let result = backend
+            .references(references_params(uri.clone(), 2, 2, false))
+            .await
+            .expect("rpc ok")
+            .expect("some locations");
+
+        let lines: HashSet<u32> = result.iter().map(|l| l.range.start.line).collect();
+        assert!(
+            !lines.contains(&1),
+            "method-definition header (line 1) must be stripped when \
+             includeDeclaration = false, got lines {lines:?}"
+        );
+        assert!(
+            lines.contains(&2),
+            "call site line 2 must remain, got {lines:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn references_with_declaration_includes_polymorphic_definitions() {
+        // Two classes both define `ping`. From a call site, the merge
+        // path must surface both definition headers (declaration-merge for
+        // polymorphic selectors).
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path_foo =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-foo").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let path_bar =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-bar").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let path_call =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-call").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        open_test_file(backend, &path_foo, "Object subclass: Foo\n  ping => 1\n");
+        open_test_file(backend, &path_bar, "Object subclass: Bar\n  ping => 2\n");
+        let uri_call = open_test_file(backend, &path_call, "x ping\n");
+
+        let result = backend
+            .references(references_params(uri_call, 0, 2, true))
+            .await
+            .expect("rpc ok")
+            .expect("some locations");
+
+        // Expect: Foo definition + Bar definition + the call site.
+        let file_uris: HashSet<String> = result.iter().map(|l| l.uri.to_string()).collect();
+        let foo_uri = Url::from_file_path(path_foo.as_std_path())
+            .unwrap()
+            .to_string();
+        let bar_uri = Url::from_file_path(path_bar.as_std_path())
+            .unwrap()
+            .to_string();
+        assert!(
+            file_uris.contains(&foo_uri),
+            "expected Foo definition, got {file_uris:?}"
+        );
+        assert!(
+            file_uris.contains(&bar_uri),
+            "expected Bar definition, got {file_uris:?}"
+        );
+    }
+
+    #[test]
+    fn merge_locations_dedupes_overlapping_runtime_and_decl_sites() {
+        // The runtime path may legitimately return a site that the
+        // declaration-overlay path would also produce (e.g. a method that
+        // is its own only call site, or a future change that has
+        // `senders_of/1` include definition rows). Verify the merge
+        // helper does not duplicate them.
+        let uri = Url::parse("file:///foo.bt").unwrap();
+        let r = Range {
+            start: tower_lsp::lsp_types::Position::new(1, 2),
+            end: tower_lsp::lsp_types::Position::new(1, 5),
+        };
+        let mut base = vec![tower_lsp::lsp_types::Location {
+            uri: uri.clone(),
+            range: r,
+        }];
+        let extras = vec![tower_lsp::lsp_types::Location {
+            uri: uri.clone(),
+            range: r,
+        }];
+        merge_locations(&mut base, extras);
+        assert_eq!(base.len(), 1, "duplicate site must collapse, got {base:?}");
+    }
+
+    #[test]
+    fn merge_locations_appends_disjoint_decl_sites() {
+        let uri = Url::parse("file:///foo.bt").unwrap();
+        let r1 = Range {
+            start: tower_lsp::lsp_types::Position::new(1, 0),
+            end: tower_lsp::lsp_types::Position::new(1, 3),
+        };
+        let r2 = Range {
+            start: tower_lsp::lsp_types::Position::new(7, 0),
+            end: tower_lsp::lsp_types::Position::new(7, 3),
+        };
+        let mut base = vec![tower_lsp::lsp_types::Location {
+            uri: uri.clone(),
+            range: r1,
+        }];
+        let extras = vec![tower_lsp::lsp_types::Location {
+            uri: uri.clone(),
+            range: r2,
+        }];
+        merge_locations(&mut base, extras);
+        assert_eq!(base.len(), 2);
+        assert!(base.iter().any(|l| l.range == r1));
+        assert!(base.iter().any(|l| l.range == r2));
     }
 
     /// BT-2241: `initialize` must advertise `implementation_provider` so
