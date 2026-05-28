@@ -76,13 +76,18 @@ Today an author can ship any of these:
 docvec!["{'", Document::String(name), "', '", Document::String(super_), "'}"]
 docvec!["call '", Document::String(module), "':'", Document::String(fun), "'"]
 docvec!["let ", Document::String(var), " = ", body, " in ", ...]
+
+// Same vector through Document::Eco — live today in actor_codegen.rs et al.:
+docvec!["module '", Document::Eco(self.module_name.clone()), "' [", ...]
+docvec!["'", Document::Eco(method.selector.name()), "'/", ...]
 ```
 
 In each case the author has manually rendered atom-quote or
-variable-name punctuation around a `String` leaf. The leaf carries no
-semantic information; the punctuation has to be re-typed at every site;
-mistakes are typos rather than type errors. BT-875's eight cleanup
-commits all share this shape.
+variable-name punctuation around a typed-but-text-shaped leaf
+(`String` or `Eco`). The leaf carries no semantic information; the
+punctuation has to be re-typed at every site; mistakes are typos
+rather than type errors. BT-875's eight cleanup commits all share
+this shape.
 
 Replacing the open `String` leaf with a typed-leaf API —
 `atom(name)`, `var(name)`, `string_lit(s)`, `int_lit(i)`, `float_lit(f)`,
@@ -97,6 +102,35 @@ docvec!["let ", var(name), " = ", body, " in ", ...]
 
 `Document::String` is then **removed from the enum**, the BT-875 vector
 becomes unrepresentable, and the renderer is unchanged.
+
+### Out-of-tree consumers of `Document`
+
+The `Document` enum is also used by ~2 modules outside the
+`codegen/core_erlang/` tree:
+
+- `crates/beamtalk-core/src/repl/codegen.rs` (~19 `Document::String`
+  sites) — REPL-specific Core Erlang codegen. The leaf shapes match
+  the core_erlang set (variable names dominate, all `var()`
+  candidates). **In scope** for the migration; treated as part of
+  Phase B.
+- `crates/beamtalk-core/src/unparse/mod.rs` (~65 `Document::String`
+  sites) — the *Beamtalk source* unparser, not a Core Erlang
+  emitter. It produces Beamtalk syntax (where atoms don't need
+  Core Erlang quoting, and the BT-875 vector doesn't apply).
+  **Out of scope** for the BT-875-driven typed-leaf API — the
+  unparser's leaves carry different semantics.
+
+The Beamtalk-side unparser nonetheless depends on the
+`Documentable<'a> for String` impl. To avoid breaking it during
+Phase B, the unparser migrates to construct its `Document<'static>`
+leaves through a small parallel API (`unparse::leaf`) that wraps
+`Document::Str` for compile-time fragments and exposes a
+`pub(crate) Document::Owned(String)` constructor for runtime-derived
+text. The unparse-leaf API is intentionally separate from
+`document::leaf` because the escaping rules differ (no atom-quote
+ceremony, no Core Erlang string escaping). Implementation epic must
+schedule unparse migration before the `Documentable<'a> for String`
+impl is removed.
 
 ### `Document::Eco` — the sibling escape hatch
 
@@ -141,23 +175,36 @@ The seven decisions called out by [BT-2318](https://linear.app/beamtalk/issue/BT
 
 ### 1. Leaf variant set
 
-Six helpers, all returning `Document<'static>`:
+Seven helpers, all returning `Document<'static>`:
 
 | Helper | Renders as | Example call site today |
 |---|---|---|
-| `atom(name)` | `'name'` (quoted Core Erlang atom) | `Document::String(class.name())` inside atom-quotes |
+| `atom(name)` | `'name'` (quoted Core Erlang atom, escaped) | `Document::String(class.name())` inside atom-quotes |
 | `var(name)` | `VarName` (bare Core Erlang variable) | `Document::String(var_name.clone())` |
 | `string_lit(s)` | `"escaped string"` (escaped Core Erlang string literal) | `Document::String(escape_core_erlang_string(s))` |
 | `int_lit(i: i64)` | integer literal | `Document::String(n.to_string())` |
 | `float_lit(f: f64)` | float literal in Core Erlang form | rare; today via `Document::String(format!("{:?}", f))` |
 | `fname(name, arity)` | `'name'/arity` (function-name / arity pair for remote calls) | `docvec!["'", Document::String(fun), "'/", Document::String(arity.to_string())]` |
+| `binary_lit(s)` | Core Erlang binary syntax (`#{#<65>(8,...), ...}#`) for a UTF-8 string | `Document::String(Self::binary_string_literal(s))` (~11 production sites) |
 
 The set is grounded in the survey of ~2,300 `Document::String(...)` call
 sites across the codegen tree: dominantly variable names and atom names,
-with a long tail of literal numbers, strings, and function-arity pairs.
-Anything not covered by these six is a defect (a call site that *should*
-be one of these but is hiding in raw-string form); the migration audit
-catches it.
+with a long tail of literal numbers, strings, function-arity pairs, and
+binary literals. The `binary_lit` helper was added after the initial
+audit surfaced ~11 `Document::String(Self::binary_string_literal(...))`
+sites in `gen_server/methods.rs`, `expressions.rs`, and
+`gen_server/callbacks.rs` — the audit prototype's
+`Document::String`-only grep missed them because the
+`binary_string_literal` call hides the leaf shape.
+
+**Escaping contract.** `atom(name)` and `string_lit(s)` are responsible
+for their own escaping — `atom` calls `escape_atom_chars` internally
+(handling `'` → `\'` and `\` → `\\`), `string_lit` calls
+`escape_core_erlang_string`. Callers pass raw text. This contract is
+load-bearing: it removes the "did I remember to escape this?" decision
+from every call site and concentrates it in the helper. Unit tests for
+each helper must cover non-trivial inputs (e.g.
+`atom("it's").to_pretty_string() == "'it\\'s'"`).
 
 Text-valued helpers (`atom`, `var`, `string_lit`, `fname`) accept
 `impl Into<String>` to match the audit prototype's ergonomics. A
@@ -172,7 +219,7 @@ through the numeric helpers.
 A new submodule `document::leaf`, accessed as:
 
 ```rust
-use crate::codegen::core_erlang::document::leaf::{atom, var, string_lit, int_lit, float_lit, fname};
+use crate::codegen::core_erlang::document::leaf::{atom, var, string_lit, int_lit, float_lit, fname, binary_lit};
 ```
 
 Rejected alternatives:
@@ -242,11 +289,19 @@ has any unmigrated call sites to address.
 
 ### 5. BT-875 closure proof
 
-**Structural — the public-API variant ceases to exist.**
+**Structural after Phase B — the public-API variants cease to exist.**
 
-Once `Document::String` and `Document::Eco` are removed from the
-public `Document` enum, no codegen call site can construct an
-arbitrary-text leaf. The internal `Document::Owned(String)` variant is
+Today, the BT-875 vector is open through *both* `Document::String`
+and `Document::Eco`. The `Document::Eco(self.module_name.clone())`
+pattern embedded between `'...'` atom-quotes is currently live in
+multiple files (notably `actor_codegen.rs` and `dispatch_codegen.rs`)
+and is structurally identical to the `Document::String(format!("'{name}'"))`
+shape that BT-875 catalogs. The CLAUDE.md rule + review process
+catch new instances; the type system does not prevent them.
+
+Once Phase B lands and `Document::String` and `Document::Eco` are
+removed from the public `Document` enum, no codegen call site can
+construct an arbitrary-text leaf. The internal `Document::Owned(String)` variant is
 `pub(super)` — visible only to the `document` module and its `leaf`
 submodule, where it is wrapped in typed helpers.
 
@@ -260,10 +315,11 @@ becomes redundant (kept as documentation of intent).
 Two secondary defences:
 
 - **Lint during migration.** While the migration is in flight, an
-  in-tree clippy-lint-style check (or a `just lint-no-document-string`
-  grep) reports any *new* `Document::String(...)` site appearing in a
-  PR. This prevents the migration's own scope from drifting upward as
-  unrelated feature work adds new call sites.
+  in-tree grep check (`just lint-no-new-document-string`) reports any
+  *new* `Document::String(...)` or `Document::Eco(...)` site appearing
+  in a PR. This prevents the migration's own scope from drifting
+  upward as unrelated feature work adds new call sites. Both
+  variants are equally BT-875 vectors and both must be blocked.
 - **`format!()` ban remains.** The `CLAUDE.md` rule against `format!()`
   for Core Erlang fragments stays. It catches the *other* vector
   (string-concatenation bypass), which is independent of `Document::String`.
@@ -310,12 +366,15 @@ isn't viable, the cerl-as-wire question reopens as an independent ADR.
 
 | Metric | Estimate | Source |
 |---|---|---|
-| `Document::String(...)` call sites | **~2,300** | `grep -rEc "Document::String\(" crates/beamtalk-core/src/codegen/core_erlang/ \| awk -F: '{s+=$2} END {print s}'` |
-| `Document::Eco(...)` call sites | **~57** | same grep for `Document::Eco(` |
-| Total sites to migrate | **~2,360** | String + Eco combined |
-| Files touched | **~34** | same grep, file count |
+| `Document::String(...)` in `codegen/core_erlang/` | **~2,300** | `grep -rEc "Document::String\(" crates/beamtalk-core/src/codegen/core_erlang/` |
+| `Document::Eco(...)` in `codegen/core_erlang/` | **~60** | same grep for `Document::Eco(` |
+| `Document::String(...)` in `repl/codegen.rs` | **~19** | REPL Core Erlang codegen |
+| `Document::String(...)` in `unparse/mod.rs` | **~65** | Beamtalk source unparser — migrates to parallel `unparse::leaf` API (different escaping rules) |
+| Total sites in scope for `document::leaf` migration | **~2,380** | core_erlang String + Eco + REPL String |
+| Total sites in `unparse::leaf` migration | **~65** | scheduled before `Documentable<'a> for String` impl is removed |
+| Files touched | **~36** | core_erlang (~34) + repl/codegen.rs + unparse/mod.rs |
 | Aggregate char shrinkage | **−8.7%** | [Phase 0c memo](0088-phase-0c-typed-leaves.md), 3-function projection |
-| Helper-library LOC | **~50** | six functions + doc comments, audit baseline is 10 LOC for two |
+| Helper-library LOC | **~50** | seven functions + doc comments, audit baseline is 10 LOC for two |
 | Wire-format changes | **0** | typed-leaves does not touch the Port |
 | Erlang-side changes | **0** | typed-leaves does not touch `beamtalk_compiler_server` |
 
@@ -368,7 +427,7 @@ path (b) is the affordable compromise.
 
 ### Discoverability
 
-The `document::leaf` submodule and its six helpers are discoverable
+The `document::leaf` submodule and its seven helpers are discoverable
 via standard `rustdoc` / `cargo doc` browsing and via the `use`
 statement at the top of every migrated codegen file. New codegen
 contributors who reach for `Document::String` get a compile error
@@ -381,7 +440,7 @@ the deletion.
 
 ### Option A: Typed-Leaf Helpers + Flag-Day Removal (Recommended)
 
-- 🧑‍💻 **Newcomer contributor**: "When I add a new codegen function, I never see a `Document::String` in the codebase to copy. The six helpers in `document::leaf` are the alphabet. I can't accidentally write the BT-875 bug because the variant doesn't exist."
+- 🧑‍💻 **Newcomer contributor**: "When I add a new codegen function, I never see a `Document::String` in the codebase to copy. The seven helpers in `document::leaf` are the alphabet. I can't accidentally write the BT-875 bug because the variant doesn't exist."
 - 🎩 **Smalltalk purist**: "Smalltalk's compiler is in the image precisely so that 'codegen text' isn't a thing you have to escape. We can't match that on BEAM, but we can match the principle: *leaves carry intent, not arbitrary text*. The typed-leaf API is the smallest change that makes that principle structural rather than conventional."
 - ⚙️ **BEAM veteran**: "The wire is unchanged. The Erlang side is unchanged. The 245 codegen unit tests asserting on `to_pretty_string()` are unchanged. This is a refactor of one Rust enum and ~2,300 call sites; the rest of the pipeline doesn't know the migration happened."
 - 🏭 **Operator**: "BT-875 keeps recurring because the type system permits it. After this ADR ships, the BT-875 class of bug is unrepresentable. No runtime change, no compile-time change, no new failure modes. The operational risk is zero."
@@ -423,7 +482,7 @@ empirical data driving it.
   0018, ADR 0088) of leaving long tails, and (iii) the result of A is
   binary — BT-875 either has a recurrence vector or it doesn't, and
   A makes it not.
-- **Helper API completeness.** The six-helper set covers the call-site
+- **Helper API completeness.** The seven-helper set covers the call-site
   audit's dominant shapes. If a Core Erlang fragment exists that none
   of the six covers, we have to either extend the set or fall back to
   rendering by hand. The flag-day audit must surface every such site
@@ -481,7 +540,7 @@ the variants continue to exist as implementation details.
 
 ### 3. Full sum-type replacement, hard delete (the recommended option, articulated as the alternative for the reader who wants the full reasoning)
 
-Replace `Document::String` with the six-helper `document::leaf` API and
+Replace `Document::String` with the seven-helper `document::leaf` API and
 remove the variant in one PR.
 
 **Accepted as Decision.** See *Decision* §3 above for the full
@@ -543,7 +602,7 @@ the enum; the renderer adds new arms for each.
   surface. The Port still ships text. `core_scan`/`core_parse` still
   run. All ~245 codegen unit tests assert on `to_pretty_string()`
   output unchanged.
-- **Migration cost ~30× cheaper than ADR 0088.** Six helpers + ~2,300
+- **Migration cost ~30× cheaper than ADR 0088.** Seven helpers + ~2,300
   mechanical edits + one variant removal, versus 58K LOC of codegen
   restructure plus wire-format change plus Erlang-side migration.
 - **Annotation extensibility preserved.** §6 sketches a path for
@@ -558,7 +617,7 @@ the enum; the renderer adds new arms for each.
   `to_pretty_string()` byte-for-byte test surface, and the full
   behavioural test suite.
 - **Helper-set completeness is load-bearing.** If a call site exists
-  that none of the six helpers covers, the migration either (a)
+  that none of the seven helpers covers, the migration either (a)
   extends the helper set before the flag-day, or (b) falls back to
   a temporary `Document::Str(&'static str)` for the static parts of
   that fragment. The flag-day audit must surface any such site
@@ -578,12 +637,18 @@ the enum; the renderer adds new arms for each.
 
 ### Neutral
 
-- **Generated `.beam` artefacts byte-for-byte identical.** Verified by
-  the existing codegen-diff harness and the full behavioural suite
-  during the flag-day PR.
-- **`Document` enum shrinks by two variants.** `String` and `Eco` are
-  removed; the six helpers compose `Str` and `Vec` internally. The
-  renderer loses two match arms but is otherwise untouched.
+- **Generated `.beam` artefacts byte-for-byte identical.** Verified
+  by an ad-hoc `cmp -l` of compiled fixtures before/after, the
+  ~245 codegen unit tests asserting on `to_pretty_string()` output,
+  and the full behavioural suite during the flag-day PR.
+- **`Document` enum: `String` and `Eco` removed from public API.**
+  Renamed to `pub(super) Document::Owned(String)` as the internal
+  backing for the typed-leaf helpers (still inside the `document`
+  module; invisible outside it). `Eco` is removed entirely (the
+  helpers convert `EcoString` to `String` at the boundary; the
+  `EcoString` import cost in the renderer disappears). The renderer
+  loses one match arm (`Eco`) and renames one (`String` → `Owned`);
+  no other change.
 - **No new dependencies.** Helpers live in the existing
   `beamtalk-core` crate.
 
@@ -599,9 +664,10 @@ the level the ADR commits to.
   `mod document;` in the parent remains unchanged; all existing
   `use crate::codegen::core_erlang::document::*` paths still resolve).
 - Add `crates/beamtalk-core/src/codegen/core_erlang/document/leaf.rs`
-  with the six helpers: `atom`, `var`, `string_lit`, `int_lit`,
-  `float_lit`, `fname`. Each has doc comments naming the rendered
-  Core Erlang form and links to the call-site classes it replaces.
+  with the seven helpers: `atom`, `var`, `string_lit`, `int_lit`,
+  `float_lit`, `fname`, `binary_lit`. Each has doc comments naming the
+  rendered Core Erlang form and links to the call-site classes it
+  replaces.
   Internally, the helpers construct dynamic text via a
   `pub(super) Document::Owned(String)` variant (renamed from
   `Document::String` to signal its restricted scope) that is not
@@ -652,10 +718,10 @@ exercises the helpers:
 
 - Add `&str`-taking overloads if `.into()` overhead is visible in
   compile profiles.
-- Add helpers for newly-discovered leaf classes (e.g. `binary_lit`
-  for `<<...>>` binary literals if a future codegen needs it; not
-  currently in the six-helper set because the call-site audit
-  didn't surface it).
+- Add helpers for newly-discovered leaf classes if future codegen
+  needs them (e.g. `bitstring_lit` for raw binary segments). The
+  seven-helper set covers all currently-known shapes; future
+  additions are additive.
 - Refine error messages for accidental `String`-passing.
 
 ### Phase D: Annotation Extension (Deferred — sibling ADR)
@@ -668,7 +734,7 @@ sibling ADR. Not part of this epic.
 ### Affected Components
 
 - **New**: `crates/beamtalk-core/src/codegen/core_erlang/document/leaf.rs`
-  — six helpers plus unit tests.
+  — seven helpers plus unit tests.
 - **Modified**: `crates/beamtalk-core/src/codegen/core_erlang/document.rs`
   — remove `Document::String` and `Document::Eco` variants, remove
   `Documentable<'a> for String` and `Documentable<'a> for EcoString`
@@ -677,7 +743,15 @@ sibling ADR. Not part of this epic.
   text-leaf variant. Renderer unchanged (fewer match arms).
 - **Modified**: every file under
   `crates/beamtalk-core/src/codegen/core_erlang/` containing
-  `Document::String(...)` — ~30 files, ~2,300 sites, all mechanical.
+  `Document::String(...)` or `Document::Eco(...)` — ~34 files,
+  ~2,360 sites, all mechanical.
+- **Modified**: `crates/beamtalk-core/src/repl/codegen.rs` —
+  ~19 `Document::String(...)` sites (all variable names, all
+  `var()` candidates).
+- **Modified**: `crates/beamtalk-core/src/unparse/mod.rs` — migrate
+  ~65 `Document::String(...)` sites to a parallel `unparse::leaf`
+  API (separate from `document::leaf`; different escaping semantics).
+  Must precede the `Documentable<'a> for String` impl removal.
 - **Removed**: `crates/beamtalk-core/src/codegen/core_erlang/cerl_audit.rs`
   and `typed_leaves_audit.rs` (throwaway audit modules).
 - **Modified**: `CLAUDE.md` — note that typed-leaf API is the only
@@ -702,10 +776,13 @@ sibling ADR. Not part of this epic.
 - **Behavioural suite**: `just test-stdlib`,
   `just test-bunit`, `just test-repl-protocol` run on the
   post-migration code and must pass.
-- **Codegen-diff harness**: the `just codegen-diff` task introduced
-  in the ADR 0088 Phase 0 work compares generated `.beam` artefacts
-  between two commits. Used as a diagnostic during the Phase B PR
-  to surface unexpected byte differences.
+- **Codegen-diff check**: the byte-for-byte parity of `.beam`
+  artefacts is verified ad-hoc during Phase B by compiling a fixed
+  fixture set (`stdlib/test/*.bt`) before and after, then `cmp -l`-ing
+  the outputs. ADR 0088 contemplated a permanent `just codegen-diff`
+  task but it was never landed; this ADR does not require it as a
+  standing harness (the unit-test byte-for-byte `to_pretty_string()`
+  assertions plus the behavioural suite are sufficient).
 
 ## References
 
@@ -730,7 +807,7 @@ sibling ADR. Not part of this epic.
 - Audit prototype:
   `crates/beamtalk-core/src/codegen/core_erlang/typed_leaves_audit.rs`
   (10 LOC of helpers + 3 rewrites; the starting point for the
-  six-helper API)
+  seven-helper API)
 - Current Document API:
   `crates/beamtalk-core/src/codegen/core_erlang/document.rs`
 - CLAUDE.md codegen rule (enforced structurally by this ADR):
