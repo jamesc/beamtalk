@@ -461,7 +461,7 @@ pub struct PackPrefixInputs {
 }
 
 impl PackPrefixInputs {
-    fn fresh_temp(&self) -> String {
+    pub(super) fn fresh_temp(&self) -> String {
         self.fresh_temps
             .borrow_mut()
             .pop_front()
