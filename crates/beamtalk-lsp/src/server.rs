@@ -1400,10 +1400,10 @@ impl LanguageServer for Backend {
     /// in-process AST walker via [`SimpleLanguageService::find_implementors`].
     ///
     /// Returns `None` (LSP "no result") when the cursor isn't on a selector
-    /// or when no class defines it — empty `Vec` and `None` are wire-
-    /// equivalent for goto requests, but `None` lets the editor distinguish
-    /// "nothing under cursor" from "selector with zero implementors" if it
-    /// wants to.
+    /// or when no class defines it. LSP technically distinguishes `null`
+    /// from `[]` on the wire, but most editors treat both as "no jump
+    /// target"; collapsing both cases to `None` keeps the handler simple
+    /// and matches the existing `goto_definition` shape.
     async fn goto_implementation(
         &self,
         params: tower_lsp::lsp_types::request::GotoImplementationParams,
@@ -1451,7 +1451,16 @@ impl LanguageServer for Backend {
                 .into_iter()
                 .filter_map(|loc| {
                     let source = svc.file_source(&loc.file)?;
-                    let range = span_to_range(loc.span, &source);
+                    // Collapse to a zero-width range at the start of the
+                    // method-header line, matching `runtime_site_to_lsp_location`
+                    // so goto-impl selection looks identical in cold-file and
+                    // runtime-attached modes (BT-2241 review).
+                    let start = offset_to_position(loc.span.start() as usize, &source);
+                    let line_start = tower_lsp::lsp_types::Position::new(start.line, 0);
+                    let range = tower_lsp::lsp_types::Range {
+                        start: line_start,
+                        end: line_start,
+                    };
                     Some(tower_lsp::lsp_types::Location {
                         uri: path_to_uri(&loc.file)?,
                         range,
@@ -3805,7 +3814,10 @@ mod tests {
         // Seed an in-memory file with two implementors of `bar` plus a call
         // site for `bar`. Use a `file://` URI so `resolve_path_for_uri`
         // returns the path key the service stores.
-        let path = Utf8PathBuf::from("/tmp/bt-2241-goto-impl-test.bt");
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2241-goto-impl-test").with_extension("bt"),
+        )
+        .expect("temp path is UTF-8");
         let source = "Object subclass: Foo\n  \
                       bar => 1\n\
                       Object subclass: Baz\n  \
@@ -3843,12 +3855,19 @@ mod tests {
             2,
             "expected one location per implementor (Foo + Baz), got {locations:?}"
         );
-        // Both locations should be in the same file (the only one indexed).
+        // Both locations should be in the seeded file (the only one
+        // indexed) and both ranges should be zero-width at column 0
+        // (matching the runtime path's header-line anchor, BT-2241 review).
+        let expected_uri = Url::from_file_path(path.as_std_path()).expect("file URI");
         for loc in &locations {
-            assert!(
-                loc.uri.as_str().ends_with("bt-2241-goto-impl-test.bt"),
-                "unexpected URI in result: {}",
-                loc.uri
+            assert_eq!(loc.uri, expected_uri, "unexpected URI in result");
+            assert_eq!(
+                loc.range.start, loc.range.end,
+                "AST fallback should emit zero-width ranges to match runtime path"
+            );
+            assert_eq!(
+                loc.range.start.character, 0,
+                "AST fallback should anchor at column 0 of the header line"
             );
         }
     }
@@ -3867,7 +3886,10 @@ mod tests {
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
 
-        let path = Utf8PathBuf::from("/tmp/bt-2241-goto-impl-none.bt");
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2241-goto-impl-none").with_extension("bt"),
+        )
+        .expect("temp path is UTF-8");
         // A class body with a state declaration; cursor will land on the
         // state-variable name, which is neither a selector nor a class.
         let source = "Object subclass: Foo\n  \

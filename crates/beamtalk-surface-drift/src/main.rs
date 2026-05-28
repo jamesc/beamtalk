@@ -211,7 +211,10 @@ impl ParityDoc {
                         || trimmed.starts_with("textDocument/")
                         || trimmed.starts_with("workspace/")
                     {
-                        self.lsp_caps.insert(code);
+                        // Store the canonicalised value so set comparisons
+                        // against code-derived capabilities don't mismatch
+                        // on stray leading whitespace (BT-2241 review).
+                        self.lsp_caps.insert(trimmed.to_string());
                     }
                 }
                 self.ops.insert(op, bindings);
