@@ -22,6 +22,9 @@ miette.workspace = true
 stacker.workspace = true
 dirs.workspace = true
 serde = { workspace = true, optional = true }
+# why: ADR 0088 Phase 0b — cerl AST nodes ETF-encode through `eetf` so the
+# wire bytes match `term_to_binary(cerl:c_module(...))` on the Erlang side.
+eetf = "0.12"
 
 [dev-dependencies]
 insta.workspace = true
