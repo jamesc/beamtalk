@@ -349,28 +349,65 @@ register_class(ClassName, MetaMap) ->
 
 -doc """
 Compile Core Erlang source to BEAM bytecode in memory.
-Uses core_scan → core_parse → compile:forms (no temp files).
+
+Two input shapes are accepted:
+
+  * A binary — the legacy text wire (ADR 0022). Goes through
+    `core_scan:string/1' → `core_parse:parse/1' → `compile:forms/2'.
+  * `{cerl, Etf}' — the ADR 0088 Phase 0b napkin wire (BT-2315). The
+    `Etf' binary is decoded via `binary_to_term(_, [safe])' and fed
+    straight to `compile:forms/2' with `from_core'; the scan/parse pass is
+    skipped entirely. The `[safe]' decode is the atom-table-safety
+    guarantee from ADR 0022: the cerl record tags are a fixed finite set
+    and the Beamtalk-generated module/function atoms are already
+    pre-allocated in the text path, so no unknown atoms can reach the VM
+    from a Phase 0b payload.
+
+The `{cerl, Etf}' variant is a side-channel for Phase 0b napkin tests
+only — it is **not** reachable from production compile paths today.
 """.
--spec compile_core_erlang(binary()) -> {ok, atom(), binary()} | {error, term()}.
-compile_core_erlang(CoreErlangBin) ->
+-spec compile_core_erlang(binary() | {cerl, binary()}) ->
+    {ok, atom(), binary()} | {error, term()}.
+compile_core_erlang({cerl, Etf}) when is_binary(Etf) ->
+    %% ADR 0088 Phase 0b napkin wire (BT-2315).
+    %% [safe] prevents atom exhaustion: cerl record tags (c_module, c_literal,
+    %% c_var, c_fun, ...) are a fixed finite set already known to the VM via
+    %% the OTP `cerl' module, and Beamtalk-generated names are pre-allocated
+    %% by the existing text path. Any unknown atom in a Phase 0b payload
+    %% indicates a bug, not legitimate traffic, and `badarg' is the right
+    %% failure mode.
+    try binary_to_term(Etf, [safe]) of
+        CoreModule ->
+            compile_core_forms(CoreModule, [from_core, binary, return_errors])
+    catch
+        error:badarg ->
+            {error, {cerl_decode_error, unsafe_atoms_or_malformed_etf}}
+    end;
+compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
     CoreErlangStr = binary_to_list(CoreErlangBin),
     case core_scan:string(CoreErlangStr) of
         {ok, Tokens, _} ->
             case core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
-                    case compile:forms(CoreModule, [from_core, binary, return_errors]) of
-                        {ok, ModuleName, Binary} ->
-                            {ok, ModuleName, Binary};
-                        {ok, ModuleName, Binary, _Warnings} ->
-                            {ok, ModuleName, Binary};
-                        {error, Errors, _Warnings} ->
-                            {error, {core_compile_error, Errors}}
-                    end;
+                    compile_core_forms(
+                        CoreModule, [from_core, binary, return_errors]
+                    );
                 {error, ParseError} ->
                     {error, {core_parse_error, ParseError}}
             end;
         {error, ScanError, _Loc} ->
             {error, {core_scan_error, ScanError}}
+    end.
+
+%% Internal: shared `compile:forms/2' arm used by both wire shapes.
+compile_core_forms(CoreModule, Options) ->
+    case compile:forms(CoreModule, Options) of
+        {ok, ModuleName, Binary} ->
+            {ok, ModuleName, Binary};
+        {ok, ModuleName, Binary, _Warnings} ->
+            {ok, ModuleName, Binary};
+        {error, Errors, _Warnings} ->
+            {error, {core_compile_error, Errors}}
     end.
 
 %%% gen_server callbacks

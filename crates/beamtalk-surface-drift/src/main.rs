@@ -198,12 +198,18 @@ impl ParityDoc {
                 // span that starts with `executeCommand:` so the matching against
                 // the code-side `BEAMTALK_LSP_COMMANDS` array is exhaustive.
                 //
-                // BT-2243 extends the same harvester to the LSP capability spans
-                // themselves — an LSP cell may now list multiple
-                // `textDocument/*`, `workspace/*`, or `callHierarchy/*` names
-                // (the `nav-query` row, for example, after [BT-2241] and
-                // [BT-2243] both wire onto it). Without the extra harvest only
-                // the first code span would be picked up via `parse_cell`, and
+                // BT-2241 / BT-2243: a single LSP cell may also list multiple
+                // `textDocument/*`, `workspace/*`, or `callHierarchy/*`
+                // capabilities separated by ` / ` (e.g. the `nav-query` row
+                // enumerates `textDocument/references`,
+                // `textDocument/implementation`,
+                // `textDocument/prepareCallHierarchy`,
+                // `callHierarchy/incomingCalls`, and
+                // `callHierarchy/outgoingCalls`, because they all go through
+                // the same `Backend::delegate_nav_query` helper). Harvest
+                // every such code span so the reverse drift check (code-side
+                // capability → doc) sees the full set; without it only the
+                // first code span would be picked up via `parse_cell`, and
                 // the later spans would silently drift out of sync with the
                 // capabilities advertised in `crates/beamtalk-lsp/src/server.rs`.
                 for code in extract_all_code(&cells[4]) {
@@ -213,7 +219,10 @@ impl ParityDoc {
                         || trimmed.starts_with("workspace/")
                         || trimmed.starts_with("callHierarchy/")
                     {
-                        self.lsp_caps.insert(code);
+                        // Store the canonicalised value so set comparisons
+                        // against code-derived capabilities don't mismatch
+                        // on stray leading whitespace (BT-2241 review).
+                        self.lsp_caps.insert(trimmed.to_string());
                     }
                 }
                 self.ops.insert(op, bindings);
@@ -841,6 +850,7 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "signature_help_provider" => vec!["textDocument/signatureHelp".into()],
         "definition_provider" => vec!["textDocument/definition".into()],
         "references_provider" => vec!["textDocument/references".into()],
+        "implementation_provider" => vec!["textDocument/implementation".into()],
         "document_symbol_provider" => vec!["textDocument/documentSymbol".into()],
         "workspace_symbol_provider" => vec!["workspace/symbol".into()],
         "document_formatting_provider" => vec!["textDocument/formatting".into()],

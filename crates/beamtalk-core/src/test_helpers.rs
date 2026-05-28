@@ -141,6 +141,22 @@ pub mod test_support {
         )
     }
 
+    /// Builds a minimal Actor [`ClassDefinition`] with the given name, no state, and no methods.
+    ///
+    /// Equivalent to `Actor subclass: <name>` with no declarations — the standard fixture for
+    /// codegen tests that need an actor class but don't care about its shape.
+    #[must_use]
+    pub fn make_actor_class(name: &str) -> ClassDefinition {
+        let span = test_span();
+        ClassDefinition::new(
+            Identifier::new(name, span),
+            Identifier::new("Actor", span),
+            Vec::new(),
+            Vec::new(),
+            span,
+        )
+    }
+
     /// Builds a minimal [`MethodDefinition`] with a unary selector and empty body.
     #[must_use]
     pub fn make_method(selector: &str) -> MethodDefinition {
@@ -207,6 +223,22 @@ pub mod test_support {
             let class = make_class("Counter");
             assert_eq!(class.name.name.as_str(), "Counter");
             assert!(class.superclass.is_none());
+            assert!(class.methods.is_empty());
+            assert!(class.state.is_empty());
+        }
+
+        #[test]
+        fn make_actor_class_builds_minimal_actor_class() {
+            let class = make_actor_class("CounterActor");
+            assert_eq!(class.name.name.as_str(), "CounterActor");
+            assert_eq!(
+                class
+                    .superclass
+                    .as_ref()
+                    .map(|superclass| superclass.name.as_str()),
+                Some("Actor")
+            );
+            assert_eq!(class.class_kind, crate::ast::ClassKind::Actor);
             assert!(class.methods.is_empty());
             assert!(class.state.is_empty());
         }
