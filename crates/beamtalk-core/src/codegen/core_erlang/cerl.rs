@@ -163,10 +163,14 @@ impl VarName {
     fn to_term(&self) -> Term {
         match self {
             Self::Atom(name) => Term::from(Atom::from(name.as_str())),
-            Self::FunRef { name, arity } => Term::from(Tuple::from(vec![
-                Term::from(Atom::from(name.as_str())),
-                Term::from(FixInteger::from(i32::try_from(*arity).unwrap_or(0))),
-            ])),
+            Self::FunRef { name, arity } => {
+                let arity_i32 = i32::try_from(*arity)
+                    .expect("Core Erlang fun arity must fit in i32 (BEAM limit is 255)");
+                Term::from(Tuple::from(vec![
+                    Term::from(Atom::from(name.as_str())),
+                    Term::from(FixInteger::from(arity_i32)),
+                ]))
+            }
         }
     }
 }
@@ -376,10 +380,13 @@ impl CModule {
     /// literal `f0_ok`, `f1_ok`, ... .
     ///
     /// Used by `examples/cerl_napkin_timing.rs` to produce a "hand-constructed
-    /// cerl tree with ~thousands of nodes" fixture per the AC. The exact node
-    /// count is `2 + n * 6` (six nodes per function: export `c_var`, def
-    /// `c_var` + `c_fun` + body literal + body `c_literal` value wrapper +
-    /// module-name `c_literal`). For `n = 250` the tree has ~1500 nodes.
+    /// cerl tree with ~thousands of nodes" fixture per the AC. Each function
+    /// contributes ~5 nodes (export `CVar`, def `CVar` + `CFun` + body
+    /// `Expr::Literal` wrapping a `CLiteral` atom); plus the outer `CModule`
+    /// and its name `CLiteral`. `n = 250` is the timing-harness default and
+    /// produces a module on the order of ~1500 nodes (counting anno lists per
+    /// node), satisfying the AC's "thousands of nodes" target. See
+    /// `docs/ADR/0088-phase-0b-napkin.md` §Methodology for the exact convention.
     #[must_use]
     pub fn multi_function(name: impl Into<String>, n: usize) -> Self {
         let name = name.into();

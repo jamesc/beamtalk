@@ -32,8 +32,8 @@ Phase 0b is the wire-mechanism napkin. It answers two questions:
    `term_to_binary(cerl:c_module(...))` is asserted in both Rust and Erlang
    unit tests for the empty-module and minimum-module shapes.
 2. **ETF is a small share.** On a representative `~1500`-node module the
-   ETF encode+decode pair is **~3.9% of total per-compile time**. On the
-   smallest possible (module_info-only) module the share is **~1.7%**.
+   ETF encode+decode pair is **~3.4% of total per-compile time**. On the
+   smallest possible (module_info-only) module the share is **~2.4%**.
    `compile:forms/2` dominates both cases. The
    pivot-to-Alternative-7 gate **does not fire**.
 

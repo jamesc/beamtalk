@@ -30,10 +30,11 @@ Protocol:
     "beamtalk-specs-result-error" on failure
 """.
 
--export([main/0, compile_core_erlang/1]).
+-export([main/0]).
 
 -ifdef(TEST).
 -export([
+    compile_core_erlang/1,
     compile_core_file/2,
     compile_modules/2,
     handle_read_specs/1
