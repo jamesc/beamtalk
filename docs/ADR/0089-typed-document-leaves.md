@@ -148,8 +148,8 @@ Six helpers, all returning `Document<'static>`:
 | `atom(name)` | `'name'` (quoted Core Erlang atom) | `Document::String(class.name())` inside atom-quotes |
 | `var(name)` | `VarName` (bare Core Erlang variable) | `Document::String(var_name.clone())` |
 | `string_lit(s)` | `"escaped string"` (escaped Core Erlang string literal) | `Document::String(escape_core_erlang_string(s))` |
-| `int_lit(i)` | integer literal | `Document::String(n.to_string())` |
-| `float_lit(f)` | float literal in Core Erlang form | rare; today via `Document::String(format!("{:?}", f))` |
+| `int_lit(i: i64)` | integer literal | `Document::String(n.to_string())` |
+| `float_lit(f: f64)` | float literal in Core Erlang form | rare; today via `Document::String(format!("{:?}", f))` |
 | `fname(name, arity)` | `'name'/arity` (function-name / arity pair for remote calls) | `docvec!["'", Document::String(fun), "'/", Document::String(arity.to_string())]` |
 
 The set is grounded in the survey of ~2,300 `Document::String(...)` call
@@ -159,10 +159,13 @@ Anything not covered by these six is a defect (a call site that *should*
 be one of these but is hiding in raw-string form); the migration audit
 catches it.
 
-Helpers accept `impl Into<String>` to match the audit prototype's
-ergonomics. A `&str`-taking overload may be added during migration if
-the `.clone()` overhead is visible in compile-time profiles, but is not
-part of the baseline API.
+Text-valued helpers (`atom`, `var`, `string_lit`, `fname`) accept
+`impl Into<String>` to match the audit prototype's ergonomics. A
+`&str`-taking overload may be added during migration if the `.clone()`
+overhead is visible in compile-time profiles, but is not part of the
+baseline API. `int_lit` takes `i64` (or a wider integer type) and
+`float_lit` takes `f64`, so callers cannot pass arbitrary strings
+through the numeric helpers.
 
 ### 2. Where the API lives
 
@@ -566,12 +569,12 @@ the enum; the renderer adds new arms for each.
   §6 side-table approach. If that turns out to be infeasible, the
   cerl-as-wire question reopens (as a separate, smaller ADR per the
   [Phase 0c memo](0088-phase-0c-typed-leaves.md)).
-- **`int_lit`/`float_lit` are stringly-typed internally.** The helpers
-  format numbers via `to_string` (or equivalent) and wrap the result.
-  Type-safe at the call-site boundary (you can't pass a `&str` to
-  `int_lit`), but the rendered string isn't structurally validated.
-  Negligible risk — number formatting is well-bounded — but worth
-  noting for completeness.
+- **`int_lit`/`float_lit` format numbers to strings internally.** The
+  helpers accept numeric types (`i64`, `f64`) and format via
+  `to_string`. Type-safe at the call-site boundary; rendered output is
+  deterministic. Negligible risk — number formatting is well-bounded —
+  but the rendered string is not structurally validated against Core
+  Erlang number grammar.
 
 ### Neutral
 
