@@ -38,6 +38,8 @@
 - **`ChangeLog` and `ChangeEntry`** — new stdlib classes exposing the workspace ChangeLog as a navigable Beamtalk object (ADR 0082 Phase 1). `Workspace changes` returns a `ChangeLog` with collection protocol: `size`, `isEmpty`, `notEmpty`, `do:`, `select:`, `dirtyMethods`, `activeEntries`, `allEntries`. Each `ChangeEntry` wraps one logged patch with predicates (`isOrphan`, `isActive`, `isDurable`, `isEphemeral`, `isAgent`, `isHuman`, `isFlushable`, `isNewClass`) and accessors (`className`, `selector`, `kind`, `intent`, `authorKind`, `sourceFile`, `seq`). Default views reflect only active entries (current epoch, not orphaned); `select:` ranges over the full set (BT-2284).
 - **`ClassBuilder >> register` returns canonical class object** — previously returned an unusable wrapper that failed all dispatch; now returns the same shape as `classNamed:` (dispatchable, `isClass: true`, `==` to the registry reference) (BT-2258).
 - **`ClassBuilder` metadata parity setters** — `methodSignatures:`, `classMethodSignatures:`, `methodDocs:`, `classMethodDocs:`, `methodReturnTypes:`, `classMethodReturnTypes:`, `classDoc:`, `meta:`, and `isConstructible:` bring programmatically built classes to `:help` parity with file-defined ones (BT-2268).
+- **`Workspace newClass:at:`** — compiles and installs a brand-new class in memory from a source String and target path, logging a durable `new-class` ChangeEntry for later `Workspace flush`. Validates that the target does not already exist on disk, lies within the project source tree, matches the declared class name, and is not already loaded (BT-2285).
+- **`ChangeLog revert:` / `clear` / `flushKinds:` and `Workspace autoflush`** — `revert:` re-installs a ChangeEntry's previous method body via durable `compile:source:`, `clear` discards all pending entries without touching disk, and `flushKinds:` selectively flushes entries filtered by kind (`#instance`, `#class`, `#'new-class'`) and/or author kind (`#human`, `#agent`). `Workspace autoflush` / `autoflush:` is a persistent workspace setting that, when enabled, immediately flushes every successful durable in-memory patch to disk (BT-2290).
 
 ### Runtime
 
@@ -59,6 +61,8 @@
 - Harden module-less `ClassBuilder` instantiation — depth-guard logging on ancestor chain walks, deadlock-free self-dispatch for fun-backed instance methods inside the class gen_server, and robust ancestor exit handling (BT-2277).
 - Fix `selector_arity` for malformed selectors — interior-colon atoms (e.g. `'at:put'`) are now treated as unary instead of keyword, avoiding spurious `arity_mismatch` diagnostics (BT-2278).
 - **`beamtalk_workspace_changelog`** gen_server — workspace-local ChangeLog that records every live method patch as a crash-safe, session-aware change entry with two-part on-disk persistence (ADR 0082 Phase 1) (BT-2282).
+- **`Workspace flush` / `flush:`** — writes pending ChangeLog entries to disk via trivia-preserving byte-span splice (no AST reprint) with atomic rename, multi-file two-phase commit, and external-edit conflict detection. Method patches splice the new body into the exact byte span of the old one; new-class entries write the full source to the target path. Conflicts are reported per-file rather than raised as exceptions (BT-2286).
+- **`beamtalk_xref` gen_server** — maintained selector-to-sites cross-reference index for `SystemNavigation` queries (ADR 0087). Four ETS tables track method definitions, senders, references, and per-class generation counters. Reads hit ETS directly without serializing through the gen_server; writes serialize for atomic per-class publish (BT-2297).
 
 ### Tooling
 
@@ -70,6 +74,9 @@
 - Fix false-positive `Unresolved class` warnings in the LSP for classes defined in fetched dependencies — the LSP now preloads `.bt` files from `_build/deps/*/src/` (BT-2137).
 - Fix LSP `is_protocol_type` always returning `false` for registered protocols, causing false-positive type warnings on protocol-typed parameters (BT-2135).
 - **Redundant type annotation lint** — `name :: T := <expr>` is flagged when the inferred type of `<expr>` exactly matches `T`, since the annotation adds no information the type checker doesn't already have. Suppressible with `@expect type_annotation`. Skips unions and widening annotations where the annotation does real work (BT-2140).
+- **REPL `:flush` / `:changes` / `:dirty` meta-commands** — `:flush` desugars to `Workspace flush`, `:flush <arg>` to `Workspace flush: <arg>` (accepting a class name, symbol kind, or dictionary filter), `:changes` to `Workspace changes`, and `:dirty` to `Workspace changes dirtyMethods` (BT-2287).
+- **MCP `save_method` / `try_method` / `save_class` / `flush` / `list_changes` / `dirty_methods` tools** — six new MCP tools exposing the ADR 0082 ChangeLog and flush operations to IDE and agent clients. `save_method` and `try_method` install durable and ephemeral method patches respectively, `save_class` creates a new class via `Workspace newClass:at:`, `flush` writes pending changes to disk, and `list_changes` / `dirty_methods` query the ChangeLog (BT-2288).
+- **LSP `executeCommand` handlers and `workspace/applyEdit` on flush** — `beamtalk.flush`, `beamtalk.flush.class`, `beamtalk.flush.file`, `beamtalk.flush.kind`, and `beamtalk.saveClass` editor commands dispatch through the attached workspace. After flush the LSP emits `workspace/applyEdit` with a whole-document `TextEdit` for every flushed file currently open in the editor, so buffers refresh automatically (BT-2289).
 
 ### Internal
 
@@ -97,6 +104,7 @@
 - Unify Behaviour/Class/Metaclass primitive-lowering into a single `REGISTRY` table — tower classes share one function pointer so any tower selector resolves regardless of which class declares it, preventing the BT-2232 regression pattern where moving a method up the tower silently dropped its inline BIF (BT-2234).
 - Byte-span resolver validates that the parser can resolve exact method byte spans for flush-time splice replacement — 1347 methods across 161 files pass no-op round-trip (ADR 0082 Phase 0) (BT-2281).
 - Extract `kill_and_wait/1` and `delegate_error/1` helpers in `beamtalk_actor.erl` — zero behavior change (BT-2272).
+- Replace 7 `format!()` calls with `versioned_var` helper in Core Erlang variable-name generators — continues the BT-875 cleanup (BT-2305).
 
 ## 0.4.0 — 2026-04-27
 
