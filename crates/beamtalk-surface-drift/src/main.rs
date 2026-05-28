@@ -197,9 +197,24 @@ impl ParityDoc {
                 // / `beamtalk.flush.kind`). Harvest every backtick-delimited code
                 // span that starts with `executeCommand:` so the matching against
                 // the code-side `BEAMTALK_LSP_COMMANDS` array is exhaustive.
+                //
+                // BT-2241: a single LSP cell may also list multiple
+                // `textDocument/*` or `workspace/*` capabilities separated
+                // by ` / ` (e.g. the `nav-query` row enumerates both
+                // `textDocument/references` and `textDocument/implementation`,
+                // because both go through the same `Backend::delegate_nav_query`
+                // helper). Harvest every such code span so the reverse drift
+                // check (code-side capability → doc) sees the full set.
                 for code in extract_all_code(&cells[4]) {
-                    if code.trim_start().starts_with("executeCommand:") {
-                        self.lsp_caps.insert(code);
+                    let trimmed = code.trim_start();
+                    if trimmed.starts_with("executeCommand:")
+                        || trimmed.starts_with("textDocument/")
+                        || trimmed.starts_with("workspace/")
+                    {
+                        // Store the canonicalised value so set comparisons
+                        // against code-derived capabilities don't mismatch
+                        // on stray leading whitespace (BT-2241 review).
+                        self.lsp_caps.insert(trimmed.to_string());
                     }
                 }
                 self.ops.insert(op, bindings);
@@ -827,6 +842,7 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "signature_help_provider" => vec!["textDocument/signatureHelp".into()],
         "definition_provider" => vec!["textDocument/definition".into()],
         "references_provider" => vec!["textDocument/references".into()],
+        "implementation_provider" => vec!["textDocument/implementation".into()],
         "document_symbol_provider" => vec!["textDocument/documentSymbol".into()],
         "workspace_symbol_provider" => vec!["workspace/symbol".into()],
         "document_formatting_provider" => vec!["textDocument/formatting".into()],

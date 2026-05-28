@@ -12,6 +12,7 @@
 //! - [`diagnostic_provider`] - Collect errors and warnings
 //! - [`document_symbols_provider`] - Return document outline symbols
 //! - [`hover_provider`] - Show information on hover
+//! - [`implementors_provider`] - Find every class that defines a given selector (BT-2241)
 //! - [`references_provider`] - Find all references to a symbol across files
 //! - [`signature_help_provider`] - Show parameter info for keyword messages
 //!
@@ -36,6 +37,7 @@ mod erlang_modules;
 pub mod ffi_sites_query;
 pub mod field_accesses_query;
 pub mod hover_provider;
+pub mod implementors_provider;
 pub mod references_provider;
 pub mod references_to_query;
 pub mod senders_query;
