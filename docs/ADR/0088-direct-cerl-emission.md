@@ -283,7 +283,7 @@ Keep the OTP Port boundary for the compiler itself (preserving ADR 0022's crash-
 
 ### Positive
 
-- **Removes serialization round-trip.** `core_scan`/`core_parse` calls disappear from the per-compile hot path. Compile-time improvement is expected but not yet measured — Beamtalk's own analysis dominates per-compile latency, so the wire-format win is likely modest. Phase 0b's BEAM-diff harness will produce timing data for the actual delta before commitments are made.
+- **Removes serialization round-trip.** `core_scan`/`core_parse` calls disappear from the per-compile hot path. Compile-time improvement is expected but not yet measured — Beamtalk's own analysis dominates per-compile latency, so the wire-format win is likely modest. Phase 0b's explicit stopwatch instrumentation (ETF encode time, ETF decode time, `compile:forms` time, total round-trip) will produce timing data for the actual delta before commitments are made; the `just codegen-diff` BEAM-diff harness (byte-level `cmp -l`) is a separate divergence diagnostic, not a timing instrument.
 - **Type-checked codegen.** Mis-shaped Core Erlang becomes a Rust type error at build time, not a `core_parse` error at runtime. Whole classes of codegen bugs (BT-875 string escapes) become impossible by construction.
 - **Annotation fidelity.** Source positions on cerl nodes survive to BEAM bytecode unchanged. Future source-mapped diagnostics, dialyzer integration, and debugger support all benefit. Today's text path loses positions at the `core_scan` boundary unless we re-emit `-file` directives manually.
 - **Preserves ADR 0018's discipline.** BT-875 invariant carries forward (no `format!()` for codegen fragments; structured-data-only). Per-fragment unit testability is preserved — assertions move from `assert_eq!(doc.to_pretty_string(), "...")` to structural matches on `cerl::Expr` values.
@@ -442,7 +442,7 @@ For compiler contributors:
 
 - Related ADRs:
   - [ADR 0003](0003-core-erlang-vs-erlang-source.md) — Core Erlang as primary codegen target (unchanged; this ADR only changes the transport, not the target IR)
-  - [ADR 0018](0018-document-tree-codegen.md) — Document tree codegen API (preserved; only leaf types change)
+  - [ADR 0018](0018-document-tree-codegen.md) — Document tree codegen API (discipline preserved — build structured data, never strings; per-fragment unit testability — but the `Document` API surface itself is transitional and is retired in Phase 4 along with the text wire)
   - [ADR 0022](0022-embedded-compiler-via-otp-port.md) — Embedded compiler via OTP Port (extended; same Port channel carries the new wire format)
 - Related cleanup: BT-875 (Document API discipline — preserved by this ADR)
 - OTP `cerl` module: https://www.erlang.org/doc/man/cerl.html
