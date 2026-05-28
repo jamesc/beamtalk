@@ -2,10 +2,31 @@
 
 ## Status
 
-**Proposed (2026-05-28).** Drafted as the long-term fix for the BT-875
-recurrence vector, replacing the withdrawn Phases 1–4 of
+**Accepted (2026-05-28).** Long-term fix for the BT-875 recurrence
+vector, replacing the withdrawn Phases 1–4 of
 [ADR 0088](0088-direct-cerl-emission.md). Acceptance authorises the
 flag-day migration described in *Implementation* below.
+
+## Implementation Tracking
+
+**Epic:** [BT-2319](https://linear.app/beamtalk/issue/BT-2319) — Typed Document Leaves Refactor (ADR 0089)
+
+| Phase | Issue | Description | Status |
+|---|---|---|---|
+| 1 | [BT-2320](https://linear.app/beamtalk/issue/BT-2320) | Add `document::leaf` API + migration lint | Backlog |
+| 1 | [BT-2321](https://linear.app/beamtalk/issue/BT-2321) | Add `unparse::leaf` API + migrate `unparse/mod.rs` | Backlog |
+| 2 | [BT-2322](https://linear.app/beamtalk/issue/BT-2322) | Migrate leaf utilities + small codegen files | Backlog |
+| 2 | [BT-2323](https://linear.app/beamtalk/issue/BT-2323) | Migrate `repl/codegen.rs` | Backlog |
+| 2 | [BT-2324](https://linear.app/beamtalk/issue/BT-2324) | Migrate `expressions.rs` | Backlog |
+| 2 | [BT-2325](https://linear.app/beamtalk/issue/BT-2325) | Migrate `intrinsics.rs` | Backlog |
+| 2 | [BT-2326](https://linear.app/beamtalk/issue/BT-2326) | Migrate `value_type_codegen.rs` | Backlog |
+| 2 | [BT-2327](https://linear.app/beamtalk/issue/BT-2327) | Migrate `dispatch_codegen.rs` | Backlog |
+| 2 | [BT-2328](https://linear.app/beamtalk/issue/BT-2328) | Migrate `gen_server/` | Backlog |
+| 2 | [BT-2329](https://linear.app/beamtalk/issue/BT-2329) | Migrate `control_flow/` | Backlog |
+| 2 | [BT-2330](https://linear.app/beamtalk/issue/BT-2330) | Migrate `mod.rs` + remaining | Backlog |
+| 3 | [BT-2331](https://linear.app/beamtalk/issue/BT-2331) | Flag-day: remove `Document::String` and `Document::Eco` | Backlog |
+
+**Recommended start:** BT-2320 (Phase 1, no dependencies).
 
 ## Context
 
