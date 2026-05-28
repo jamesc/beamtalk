@@ -1385,7 +1385,7 @@ impl LanguageServer for Backend {
     /// | selector  | `false` | runtime `senders` only |
     /// | class     | `true`  | runtime `references` + AST class-decl sites |
     /// | class     | `false` | runtime `references` only |
-    /// | local id  | any      | AST walker (filtered by flag) |
+    /// | local id  | any      | AST walker (locals have no declaration overlay — `include_declaration` is a no-op for them) |
     async fn references(
         &self,
         params: ReferenceParams,
