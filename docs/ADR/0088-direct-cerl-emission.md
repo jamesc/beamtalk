@@ -1,7 +1,66 @@
 # ADR 0088: Direct Core Erlang AST Emission via ETF
 
 ## Status
-Proposed (2026-05-26) — **Phase 0a + 0b only**. Phases 1–4 are explicitly contingent on two decision gates:
+
+**Phases 1–4: Rejected (2026-05-28).** Phase 0c measured the
+typed-Document-leaves alternative against the cerl-direct rewrite on the
+same three functions used in Phase 0a — typed-leaves came in at −8.7%
+aggregate char shrinkage vs cerl's −9.5% (within 0.8% on the aggregate;
+typed-leaves wins on 2 of 3 function tiers). With typed-leaves capturing
+essentially the same shrinkage at ~30× the migration cost ratio, the
+58K-LOC cerl-direct migration does not pay back. The recommendation in
+[Phase 0c memo](0088-phase-0c-typed-leaves.md) is **withdraw ADR 0088
+in favour of the typed-leaves refactor** as the long-term fix for the
+BT-875 recurrence vector.
+
+**The wire-as-ETF question is Deferred, not rejected.** Phase 0b
+([memo](0088-phase-0b-napkin.md)) found ETF encode+decode is only
+~2.4–3.4% of per-compile cost — small enough that ETF is viable — and
+the cerl wire beat the text wire end-to-end by ~7.7–10% on the same
+fixtures because `core_scan` + `core_parse` cost ~4–4.5× more than
+`binary_to_term`. If compile time becomes a real bottleneck on
+larger projects, this win can be reclaimed by a much smaller
+*independent* ADR (wire-only, no codegen restructure) — by then the
+codegen will already be typed-leaves clean and only the wire question
+remains. **Do not re-open ADR 0088 itself**; the bundled scope (typed
+codegen + wire change + 58K LOC migration) is what's rejected.
+
+**Phase 0 audit history (all merged):**
+
+| Phase | Memo | PR | Finding |
+|---|---|---|---|
+| 0a — Codegen shrinkage audit | [`0088-phase-0a-audit.md`](0088-phase-0a-audit.md) | [#2348](https://github.com/jamesc/beamtalk/pull/2348) | ~9.5% projected shrinkage by char count — in-between the 5% / 15% gates; qualified |
+| 0b — Wire-mechanism napkin | [`0088-phase-0b-napkin.md`](0088-phase-0b-napkin.md) | [#2350](https://github.com/jamesc/beamtalk/pull/2350) | ETF cost = 2.4–3.4% of per-compile time; pivot-to-Alternative-7 gate does not fire |
+| 0c — Typed-leaves comparison | [`0088-phase-0c-typed-leaves.md`](0088-phase-0c-typed-leaves.md) | [#2352](https://github.com/jamesc/beamtalk/pull/2352) | Typed-leaves shrinkage within 0.8% of cerl on the aggregate; decisive against Phase 1 |
+
+**Decision criteria that fired and why:**
+
+- The ADR's Phase 0a "≥15% shrinkage proceeds unconditionally" gate did
+  not fire (~9.5% < 15%).
+- The ADR's Phase 0a "≤5% shrinkage withdraw" gate did not fire either
+  (~9.5% > 5%); Phase 0a's verdict was qualified.
+- Phase 0b's "pivot to Alternative 7" gate did not fire (ETF cost is
+  small).
+- Phase 0c's BT-2316 criterion *did* fire: "if typed-Document-leaves
+  comes in within ~3% of cerl's shrinkage, ADR 0088 should be
+  withdrawn in favour of the typed-leaves refactor." The measured
+  delta is 0.8%, well inside that threshold.
+
+**What is left intact for downstream work:**
+
+- The Phase 0a + 0b throwaway audit modules (`cerl_audit.rs`, `cerl.rs`,
+  the EUnit wire tests, the timing harnesses) live on as references
+  but are explicitly marked throwaway. They can be deleted once
+  typed-leaves is shipped.
+- BT-aware stack traces (one of the original Phase 1+ motivators) are
+  still a committed downstream consumer, but they do not require cerl
+  on the wire — annotations can be carried in the typed-leaves
+  approach via per-leaf metadata or a separate side-band channel.
+  Plan as part of the typed-leaves rollout ADR.
+
+---
+
+**Original Status (now superseded — Proposed, 2026-05-26):** Phase 0a + 0b only. Phases 1–4 are explicitly contingent on two decision gates:
 
 - **Phase 0a (Codegen Shrinkage Audit)** — 3 representative codegen functions rewritten cerl-direct, projected LOC delta across the codebase. If the projection is ≥15% shrinkage, the migration pays back its own LOC cost and is justified on simplification grounds alone. If ≤5%, the typed-Document-leaves alternative (see *Why not just constrain `Document` leaves?* below) likely wins for the BT-875 vector, and the remaining justification rests on annotation-consumer roadmap.
 - **Phase 0b (Napkin)** — ETF encode/decode timing on representative-sized modules. If ETF cost dominates, pivot to Alternative 7 (Port + NIF-for-conversion) before Phase 1.

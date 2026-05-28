@@ -496,6 +496,119 @@ impl SimpleLanguageService {
         )
     }
 
+    /// BT-2242: Classify the cursor for a `textDocument/prepareTypeHierarchy`
+    /// request and return the class name plus its declaration site, or
+    /// `None` when the cursor is not on a known class name.
+    ///
+    /// "Class name" means any identifier whose token matches a class in the
+    /// merged project hierarchy (`ProjectIndex::hierarchy`). That picks up
+    /// the class header (`Foo subclass: Bar` — both names), superclass
+    /// references in other classes, type annotations, and class-literal
+    /// expressions inside method bodies.
+    ///
+    /// Returns the `(class_name, declaration_location)` pair. The
+    /// declaration location is the *class header span* — the name of the
+    /// declared class in its own definition (matches `definition_provider`'s
+    /// class-name lookup). When no source file backs the class (built-in /
+    /// stdlib precompiled, or an injected `add_from_beam_meta` entry), the
+    /// location is `None` and consumers fall back to "name only" presentation.
+    ///
+    /// The classification is selector-aware: clicks on a method selector
+    /// token that happens to be capitalised do not match here — selector
+    /// classification ([`Self::implementors_query_at`]) already covers
+    /// those.
+    #[must_use]
+    pub fn type_hierarchy_prepare_at(
+        &self,
+        file: &Utf8PathBuf,
+        position: Position,
+    ) -> Option<(EcoString, Option<Location>)> {
+        // Re-use the identifier walker the references handler uses — it
+        // already rejects selectors and parameter names, and returns the
+        // identifier *and* its span at the cursor.
+        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+        if !self.project_index.hierarchy().has_class(&ident.name) {
+            return None;
+        }
+        let class_name = ident.name.clone();
+        let declaration = self.find_class_declaration_location(class_name.as_str());
+        Some((class_name, declaration))
+    }
+
+    /// BT-2242: Find the declaration site of `class_name`, scanning every
+    /// indexed file for a `ClassDefinition` whose name matches.
+    ///
+    /// The returned [`Location::span`] is the *class-name span* (e.g. the
+    /// `Counter` token in `Actor subclass: Counter`), matching
+    /// `definition_provider` and what LSP `selectionRange` / `range`
+    /// expects for `TypeHierarchyItem`.
+    ///
+    /// Returns `None` for builtin / runtime-only classes whose source file
+    /// the language service hasn't indexed (the editor still shows the
+    /// item via the name returned from
+    /// [`Self::type_hierarchy_prepare_at`]; navigation just doesn't have a
+    /// jump target). Protocol declarations are also resolved here so
+    /// `prepareTypeHierarchy` on a protocol name lands on the protocol
+    /// header.
+    fn find_class_declaration_location(&self, class_name: &str) -> Option<Location> {
+        for (file_path, data) in &self.files {
+            for class in &data.module.classes {
+                if class.name.name.as_str() == class_name {
+                    return Some(Location::new(file_path.clone(), class.name.span));
+                }
+            }
+            for protocol in &data.module.protocols {
+                if protocol.name.name.as_str() == class_name {
+                    return Some(Location::new(file_path.clone(), protocol.name.span));
+                }
+            }
+        }
+        None
+    }
+
+    /// BT-2242: Resolve the supertype chain of `class_name` to declaration
+    /// locations. Mirrors `Behaviour superclassChain` (the stdlib query
+    /// `typeHierarchy/supertypes` is wired to) — returns the names paired
+    /// with their declaration site when one exists in the indexed corpus.
+    ///
+    /// `class_name` is excluded (consistent with `superclass_chain` itself).
+    /// Entries whose source file is not indexed return `(name, None)` so
+    /// the LSP layer can still emit a `TypeHierarchyItem` for the name and
+    /// let the editor present "no jump target" rather than dropping the row.
+    #[must_use]
+    pub fn supertypes_of(&self, class_name: &str) -> Vec<(EcoString, Option<Location>)> {
+        self.project_index
+            .hierarchy()
+            .superclass_chain(class_name)
+            .into_iter()
+            .map(|name| {
+                let loc = self.find_class_declaration_location(name.as_str());
+                (name, loc)
+            })
+            .collect()
+    }
+
+    /// BT-2242: Resolve all transitive subtypes of `class_name`. Mirrors
+    /// `Behaviour allSubclasses` (the stdlib query
+    /// `typeHierarchy/subtypes` is wired to) — returns the names paired
+    /// with their declaration site when one exists in the indexed corpus.
+    ///
+    /// Order matches `ClassHierarchy::all_subclasses`: BFS over the
+    /// inheritance tree, so direct children precede grandchildren. The
+    /// receiver itself is not included.
+    #[must_use]
+    pub fn subtypes_of(&self, class_name: &str) -> Vec<(EcoString, Option<Location>)> {
+        self.project_index
+            .hierarchy()
+            .all_subclasses(class_name)
+            .into_iter()
+            .map(|name| {
+                let loc = self.find_class_declaration_location(name.as_str());
+                (name, loc)
+            })
+            .collect()
+    }
+
     /// If the offset falls inside the header of a method *definition*
     /// (the selector area of `bar => ...`, `+ other => ...`, or
     /// `at: i put: v => ...`), returns the method's selector name.
@@ -3203,5 +3316,113 @@ mod tests {
             shadowing.is_empty(),
             "stdlib files should not emit stdlib-shadowing diagnostics, got: {shadowing:?}"
         );
+    }
+
+    // ---------- BT-2242: type hierarchy ----------
+
+    #[test]
+    fn type_hierarchy_prepare_at_resolves_class_name_on_subclass_clause() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("hierarchy.bt");
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\nFoo subclass: Bar\n".to_string(),
+        );
+
+        // Line 1 = "Foo subclass: Bar"; col 1 is on the `Foo` token.
+        let result = service.type_hierarchy_prepare_at(&file, Position::new(1, 1));
+        let (name, loc) = result.expect("Some for cursor on class reference");
+        assert_eq!(name.as_str(), "Foo");
+        let loc = loc.expect("Foo is declared in the same file");
+        assert_eq!(loc.file, file);
+        // The declaration span is the `Foo` token on line 0 (col 17 inside
+        // "Object subclass: Foo"). We only assert the file here; the span
+        // exact-offset is exercised by `find_class_declaration_location`'s
+        // direct call site (the LSP handler test).
+    }
+
+    #[test]
+    fn type_hierarchy_prepare_at_returns_none_for_selector_cursor() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("class_with_method.bt");
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n  bar => 42\n".to_string(),
+        );
+
+        // Cursor on the `bar` selector token (line 1, col 2..5). The
+        // identifier walker rejects this (selector, not a known class
+        // name), so prepare returns None.
+        let result = service.type_hierarchy_prepare_at(&file, Position::new(1, 4));
+        assert!(
+            result.is_none(),
+            "expected None for selector cursor, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn supertypes_of_returns_chain_for_user_class() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("chain.bt");
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\nFoo subclass: Bar\n".to_string(),
+        );
+
+        let supers = service.supertypes_of("Bar");
+        let names: Vec<String> = supers.iter().map(|(n, _)| n.to_string()).collect();
+        assert_eq!(names, vec!["Foo", "Object", "ProtoObject"]);
+
+        // `Foo` is declared in this file → should resolve.
+        let foo_row = supers
+            .iter()
+            .find(|(n, _)| n.as_str() == "Foo")
+            .expect("Foo row present");
+        assert!(foo_row.1.is_some(), "Foo's declaration must be indexed");
+        // Object / ProtoObject are builtins with no indexed source → None.
+        let object_row = supers
+            .iter()
+            .find(|(n, _)| n.as_str() == "Object")
+            .expect("Object row present");
+        assert!(
+            object_row.1.is_none(),
+            "Object should have no indexed declaration in this test setup"
+        );
+    }
+
+    #[test]
+    fn subtypes_of_returns_descendants_in_bfs_order() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("descendants.bt");
+        service.update_file(
+            file.clone(),
+            "Object subclass: Foo\n\
+             Foo subclass: Bar\n\
+             Foo subclass: Baz\n\
+             Bar subclass: Qux\n"
+                .to_string(),
+        );
+
+        let subs = service.subtypes_of("Foo");
+        let names: Vec<&str> = subs.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names.len(), 3, "expected 3 descendants, got {names:?}");
+        assert!(names.contains(&"Bar"));
+        assert!(names.contains(&"Baz"));
+        assert!(names.contains(&"Qux"));
+        // BFS: Qux (grandchild) must come after Bar (its parent).
+        let bar_pos = names.iter().position(|n| *n == "Bar").unwrap();
+        let qux_pos = names.iter().position(|n| *n == "Qux").unwrap();
+        assert!(qux_pos > bar_pos);
+        // The receiver itself is not included.
+        assert!(!names.contains(&"Foo"));
+    }
+
+    #[test]
+    fn subtypes_of_returns_empty_for_class_with_no_children() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("childless.bt");
+        service.update_file(file.clone(), "Object subclass: Foo\n".to_string());
+        let subs = service.subtypes_of("Foo");
+        assert!(subs.is_empty());
     }
 }

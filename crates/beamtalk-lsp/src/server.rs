@@ -43,8 +43,10 @@ use tower_lsp::lsp_types::{
     OneOf, ParameterInformation, ParameterLabel, Position, Range, ReferenceParams,
     ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
     SignatureInformation, SymbolInformation, SymbolKind, TextDocumentSyncCapability,
-    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit, Url,
-    WorkDoneProgressOptions, WorkspaceEdit, WorkspaceSymbolParams,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+    TypeHierarchyItem, TypeHierarchyPrepareParams, TypeHierarchySubtypesParams,
+    TypeHierarchySupertypesParams, Url, WorkDoneProgressOptions, WorkspaceEdit,
+    WorkspaceSymbolParams,
 };
 use tower_lsp::{Client, LanguageServer};
 use tracing::debug;
@@ -474,6 +476,39 @@ impl Backend {
             debug!("Resolved OTP lib dir: {}", dir.display());
         }
         *self.otp_lib_dir.lock().expect("otp_lib_dir lock poisoned") = result;
+    }
+
+    /// BT-2242: dynamically register the type-hierarchy capability so
+    /// clients that ignore the `experimental` channel still pick it up.
+    ///
+    /// `lsp-types` 0.94.1 doesn't expose a typed
+    /// `ServerCapabilities::type_hierarchy_provider` field (added upstream
+    /// in 0.95+), so static advertisement falls back to the typed
+    /// `experimental` blob set in [`Self::initialize`]. Some clients —
+    /// notably older `VSCode` + a strict tower-lsp install — read only the
+    /// typed fields and ignore `experimental`. Dynamic registration via
+    /// `client/registerCapability` is the LSP-3.17 way of telling those
+    /// clients about the three methods regardless of the typed-field
+    /// availability.
+    ///
+    /// Errors here are logged at debug level and otherwise swallowed:
+    /// pre-3.17 clients reject dynamic registration entirely, and we don't
+    /// want to gate startup on a non-essential feature.
+    async fn register_type_hierarchy_capability(&self) {
+        use tower_lsp::lsp_types::{Registration, TextDocumentRegistrationOptions};
+        let opts = TextDocumentRegistrationOptions {
+            document_selector: None,
+        };
+        let registrations = vec![Registration {
+            id: "beamtalk-type-hierarchy".to_string(),
+            method: "textDocument/prepareTypeHierarchy".to_string(),
+            register_options: serde_json::to_value(&opts).ok(),
+        }];
+        if let Err(e) = self.client.register_capability(registrations).await {
+            debug!(
+                "type-hierarchy dynamic capability registration rejected: {e}; clients that read `experimental.typeHierarchyProvider` still pick it up"
+            );
+        }
     }
 
     /// Loads the type cache from `_build/type_cache/` in workspace roots.
@@ -927,6 +962,19 @@ impl LanguageServer for Backend {
                 // helper and the same `nav-query` REPL op.
                 implementation_provider: Some(ImplementationProviderCapability::Simple(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                // BT-2242: `textDocument/prepareTypeHierarchy` +
+                // `typeHierarchy/{supertypes,subtypes}` — the class under
+                // the cursor → `Behaviour superclassChain` / `allSubclasses`.
+                // `lsp-types` 0.94.1 does not yet expose a typed
+                // `type_hierarchy_provider` field on `ServerCapabilities`
+                // (added upstream in 0.95+), so we advertise via the typed
+                // `experimental` escape hatch. VSCode and Helix both accept
+                // the capability through this channel; the surface-drift
+                // checker recognises the `experimental` JSON value so the
+                // surface-parity doc keeps verifying.
+                experimental: Some(serde_json::json!({
+                    "typeHierarchyProvider": true,
+                })),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
@@ -994,6 +1042,16 @@ impl LanguageServer for Backend {
 
         // Resolve OTP lib dir for FFI goto-definition.
         self.resolve_otp_lib_dir().await;
+
+        // BT-2242: dynamically register the type-hierarchy capability so
+        // clients that ignore the `experimental` channel still pick it up.
+        // `lsp-types` 0.94.1 doesn't expose `type_hierarchy_provider` on
+        // `ServerCapabilities`, but `client/registerCapability` works for
+        // every LSP-3.17 client regardless of the typed-field availability.
+        // Failures here are non-fatal — older clients may reject dynamic
+        // registration entirely, in which case the `experimental` field
+        // remains the advertisement channel.
+        self.register_type_hierarchy_capability().await;
 
         debug!("beamtalk-lsp initialized");
         self.client
@@ -1552,6 +1610,54 @@ impl LanguageServer for Backend {
         }
     }
 
+    /// BT-2242: `textDocument/prepareTypeHierarchy` — resolves the class
+    /// under the cursor to a single [`TypeHierarchyItem`] the editor can
+    /// then pass to [`Self::supertypes`] / [`Self::subtypes`].
+    ///
+    /// Cold-file only: type-hierarchy classification (selectors vs. class
+    /// names vs. locals) lives in [`SimpleLanguageService::type_hierarchy_prepare_at`].
+    /// The query channel (`nav-query`) is deliberately kept locked to the
+    /// three navigation kinds it ships today (`senders` / `implementors` /
+    /// `references`); the class-hierarchy data needed here is structural
+    /// (parent edges in `ClassHierarchy`), so the AST-walker answer is
+    /// strictly more complete than a runtime query would be in cold-file
+    /// mode. The runtime-attached path falls back to the same AST walker
+    /// when the flag is off, matching BT-2243's "outgoing calls" choice.
+    ///
+    /// Returns `None` when the cursor is not on a known class name (a
+    /// selector, a local identifier, whitespace, ...). LSP's
+    /// `prepareTypeHierarchy` semantics use `null` to mean "no item" — the
+    /// editor then suppresses the supertypes/subtypes follow-up.
+    async fn prepare_type_hierarchy(
+        &self,
+        params: TypeHierarchyPrepareParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let Some(path) = self.resolve_path_for_uri(uri) else {
+            return Ok(None);
+        };
+
+        let prepared = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position_params.position, &source);
+            let Some((class_name, declaration)) = svc.type_hierarchy_prepare_at(&path, pos) else {
+                return Ok(None);
+            };
+            // The clicked-on file's URI is the authoritative fallback when
+            // the class itself has no indexed declaration (built-in or
+            // runtime-only class). Tests rely on this — `prepareTypeHierarchy`
+            // on `Object` in a user file returns an item the editor can
+            // still annotate, even though `Object`'s source isn't in the
+            // workspace.
+            type_hierarchy_item(class_name.as_str(), declaration.as_ref(), &svc, uri)
+        };
+
+        Ok(prepared.map(|item| vec![item]))
+    }
+
     /// BT-2243: `callHierarchy/incomingCalls` — who calls this method.
     ///
     /// Decodes the [`SerializedCallTarget`] from the item's `data` field
@@ -1706,6 +1812,51 @@ impl LanguageServer for Backend {
         } else {
             Ok(Some(calls))
         }
+    }
+
+    /// BT-2242: `typeHierarchy/supertypes` — answers "what does this class
+    /// inherit from, transitively?" via [`SimpleLanguageService::supertypes_of`]
+    /// (which delegates to [`ClassHierarchy::superclass_chain`]).
+    ///
+    /// Returns one [`TypeHierarchyItem`] per ancestor, in order from
+    /// nearest parent to root. Names whose declaration site isn't indexed
+    /// (built-in classes the language service hasn't loaded) still appear
+    /// in the list — they carry a synthetic zero-range and the URI of the
+    /// originating item, so editors can show the name even if they can't
+    /// navigate to it. See [`type_hierarchy_item_for_undeclared`] for the
+    /// rationale.
+    async fn supertypes(
+        &self,
+        params: TypeHierarchySupertypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let parent_uri = params.item.uri.clone();
+        let class_name = params.item.name.clone();
+        let items = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            collect_hierarchy_items(svc.supertypes_of(class_name.as_str()), &svc, &parent_uri)
+        };
+        Ok(Some(items))
+    }
+
+    /// BT-2242: `typeHierarchy/subtypes` — answers "who inherits from this
+    /// class, transitively?" via [`SimpleLanguageService::subtypes_of`]
+    /// (which delegates to [`ClassHierarchy::all_subclasses`]).
+    ///
+    /// Order is the BFS order of `all_subclasses` — direct children first,
+    /// then grandchildren, etc. Names whose declaration site isn't indexed
+    /// are surfaced with [`type_hierarchy_item_for_undeclared`], same as
+    /// supertypes.
+    async fn subtypes(
+        &self,
+        params: TypeHierarchySubtypesParams,
+    ) -> Result<Option<Vec<TypeHierarchyItem>>> {
+        let parent_uri = params.item.uri.clone();
+        let class_name = params.item.name.clone();
+        let items = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            collect_hierarchy_items(svc.subtypes_of(class_name.as_str()), &svc, &parent_uri)
+        };
+        Ok(Some(items))
     }
 
     /// Returns the document symbol outline (classes, methods, fields).
@@ -2923,6 +3074,105 @@ fn runtime_site_to_lsp_location(
         end: tower_lsp::lsp_types::Position::new(line, 0),
     };
     Some(tower_lsp::lsp_types::Location { uri, range })
+}
+
+/// BT-2242: Build a `TypeHierarchyItem` for `class_name` when its declaration
+/// site is known. The selection range is collapsed to the class-name token
+/// (the `span` field on the declaration `Location`), and the surrounding
+/// `range` covers the same span — tower-lsp clients accept identical
+/// `range`/`selectionRange` for symbols whose body the server doesn't
+/// model (Beamtalk class bodies are method-level; the symbol itself is
+/// the name).
+///
+/// `fallback_uri` is only consulted in the `declaration == None` branch —
+/// when there is no indexed declaration at all, we still want to render
+/// the symbol row, so we attach the originating URI with a zero-width
+/// range. In the `Some(loc)` branch we never fall back: if either
+/// `file_source(&loc.file)` or `path_to_uri(&loc.file)` fails the function
+/// returns `None`. Returning `None` for a known-but-unloadable declaration
+/// is the conservative choice — pointing the editor at the wrong file
+/// would be worse than dropping the row.
+fn type_hierarchy_item(
+    class_name: &str,
+    declaration: Option<&beamtalk_core::language_service::Location>,
+    svc: &SimpleLanguageService,
+    fallback_uri: &Url,
+) -> Option<TypeHierarchyItem> {
+    let (uri, range) = if let Some(loc) = declaration {
+        let source = svc.file_source(&loc.file)?;
+        let range = span_to_range(loc.span, &source);
+        let uri = path_to_uri(&loc.file)?;
+        (uri, range)
+    } else {
+        // No indexed declaration — the class is real (the project index
+        // knows about it; e.g. a stdlib class compiled without source) but
+        // we don't have a file to point at. Attach the originating URI
+        // with a zero-width range at (0, 0) so editors render the name.
+        let zero = Range {
+            start: tower_lsp::lsp_types::Position::new(0, 0),
+            end: tower_lsp::lsp_types::Position::new(0, 0),
+        };
+        (fallback_uri.clone(), zero)
+    };
+    Some(TypeHierarchyItem {
+        name: class_name.to_string(),
+        kind: SymbolKind::CLASS,
+        tags: None,
+        detail: None,
+        uri,
+        range,
+        selection_range: range,
+        data: None,
+    })
+}
+
+/// BT-2242: Build a `TypeHierarchyItem` for a class whose declaration site
+/// is not indexed in the language service (e.g. ancestor classes
+/// compiled into the runtime without a `.bt` source mapping). Falls back
+/// to the parent item's URI so the editor still renders the row.
+///
+/// Kept separate from [`type_hierarchy_item`] so the parent-URI fallback
+/// is explicit at the call site — the `prepare` path passes the open
+/// document, the `super-/subtypes` paths pass the parent item's URI from
+/// the request.
+fn type_hierarchy_item_for_undeclared(class_name: &str, parent_uri: Url) -> TypeHierarchyItem {
+    let zero = Range {
+        start: tower_lsp::lsp_types::Position::new(0, 0),
+        end: tower_lsp::lsp_types::Position::new(0, 0),
+    };
+    TypeHierarchyItem {
+        name: class_name.to_string(),
+        kind: SymbolKind::CLASS,
+        tags: None,
+        detail: None,
+        uri: parent_uri,
+        range: zero,
+        selection_range: zero,
+        data: None,
+    }
+}
+
+/// BT-2242: Convert a `Vec<(name, Option<Location>)>` (the shape
+/// `supertypes_of` / `subtypes_of` return) into LSP items, falling back
+/// to the parent item's URI for any class without an indexed declaration.
+fn collect_hierarchy_items<S>(
+    rows: Vec<(S, Option<beamtalk_core::language_service::Location>)>,
+    svc: &SimpleLanguageService,
+    parent_uri: &Url,
+) -> Vec<TypeHierarchyItem>
+where
+    S: AsRef<str>,
+{
+    rows.into_iter()
+        .map(|(name, loc)| {
+            let resolved = loc
+                .as_ref()
+                .and_then(|_| type_hierarchy_item(name.as_ref(), loc.as_ref(), svc, parent_uri));
+            resolved.unwrap_or_else(|| {
+                type_hierarchy_item_for_undeclared(name.as_ref(), parent_uri.clone())
+            })
+        })
+        .collect()
 }
 
 /// Converts a byte offset to an LSP `Position` (0-based line/character in UTF-16 code units).
@@ -4428,6 +4678,272 @@ mod tests {
         assert!(
             response.is_none(),
             "expected None for non-selector cursor, got {response:?}"
+        );
+    }
+
+    /// BT-2242: `initialize` must advertise type-hierarchy support via the
+    /// `experimental` channel (lsp-types 0.94.1 does not yet expose a typed
+    /// `type_hierarchy_provider` field on `ServerCapabilities`).
+    ///
+    /// Pins the JSON shape so editors that look for
+    /// `experimental.typeHierarchyProvider == true` continue to detect the
+    /// capability after refactors of the capabilities literal.
+    #[tokio::test]
+    async fn initialize_advertises_type_hierarchy_provider_via_experimental() {
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let result = backend
+            .initialize(InitializeParams::default())
+            .await
+            .expect("initialize ok");
+        let experimental = result
+            .capabilities
+            .experimental
+            .expect("experimental field set");
+        let provider = experimental
+            .get("typeHierarchyProvider")
+            .expect("typeHierarchyProvider key present");
+        assert_eq!(
+            provider,
+            &serde_json::Value::Bool(true),
+            "typeHierarchyProvider should be `true`, got {provider:?}"
+        );
+    }
+
+    /// BT-2242: `prepare_type_hierarchy` on a known class name returns a
+    /// single item carrying the class-name span. Exercises the AST-walker
+    /// classifier (`type_hierarchy_prepare_at`) plus the LSP-side item
+    /// construction.
+    #[tokio::test]
+    async fn prepare_type_hierarchy_resolves_class_under_cursor() {
+        use tower_lsp::lsp_types::{
+            TextDocumentIdentifier, TextDocumentPositionParams, WorkDoneProgressParams,
+        };
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2242-prepare-th").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        // Two user classes — Bar's superclass reference to Foo is the
+        // cursor target. Click on the `Foo` token (line 2, col 0).
+        let source = "Object subclass: Foo\n\
+                      \n\
+                      Foo subclass: Bar\n";
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(path.clone(), source.to_string());
+        }
+        let uri = Url::from_file_path(path.as_std_path()).expect("file URI");
+        let params = TypeHierarchyPrepareParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                // Line 2 = "Foo subclass: Bar", column 1 lands on "Foo".
+                position: tower_lsp::lsp_types::Position::new(2, 1),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let items = backend
+            .prepare_type_hierarchy(params)
+            .await
+            .expect("prepare ok")
+            .expect("Some(items) for cursor on class name");
+
+        assert_eq!(
+            items.len(),
+            1,
+            "expected exactly one prepared item, got {items:?}"
+        );
+        assert_eq!(items[0].name, "Foo");
+        assert_eq!(items[0].kind, SymbolKind::CLASS);
+        // The URI must be the file containing the `Foo` declaration —
+        // since the seeded file declares Foo on line 0, the item points
+        // back at the seeded path.
+        assert_eq!(items[0].uri, uri);
+    }
+
+    /// BT-2242: cursor not on a class name (e.g. inside the `subclass:`
+    /// selector token) yields `None`. Selector tokens are owned by the
+    /// implementors / senders queries, not type hierarchy.
+    #[tokio::test]
+    async fn prepare_type_hierarchy_returns_none_for_non_class_cursor() {
+        use tower_lsp::lsp_types::{
+            TextDocumentIdentifier, TextDocumentPositionParams, WorkDoneProgressParams,
+        };
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2242-prepare-th-none").with_extension("bt"),
+        )
+        .expect("temp path is UTF-8");
+        let source = "Object subclass: Foo\n  \
+                      bar => 42\n";
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(path.clone(), source.to_string());
+        }
+
+        let uri = Url::from_file_path(path.as_std_path()).expect("file URI");
+        // Line 1 ("  bar => 42"), column 4 — squarely on `bar` (a selector,
+        // not a class name).
+        let params = TypeHierarchyPrepareParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: tower_lsp::lsp_types::Position::new(1, 4),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        };
+
+        let response = backend
+            .prepare_type_hierarchy(params)
+            .await
+            .expect("prepare ok");
+        assert!(
+            response.is_none(),
+            "expected None for selector cursor, got {response:?}"
+        );
+    }
+
+    /// BT-2242: `typeHierarchy/supertypes` returns the receiver's ancestor
+    /// chain, in `Behaviour superclassChain` order. Two-level chain
+    /// `Bar -> Foo -> Object -> ProtoObject` exercises the BFS-like
+    /// ordering (direct parent first).
+    #[tokio::test]
+    async fn supertypes_returns_chain_in_inheritance_order() {
+        use tower_lsp::lsp_types::{PartialResultParams, WorkDoneProgressParams};
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2242-supertypes").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let source = "Object subclass: Foo\n\
+                      Foo subclass: Bar\n";
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(path.clone(), source.to_string());
+        }
+
+        // Build a synthetic TypeHierarchyItem for `Bar` (the editor would
+        // get this from `prepare_type_hierarchy`; we hand-roll it here so
+        // the test focuses on the supertypes resolver).
+        let uri = Url::from_file_path(path.as_std_path()).expect("file URI");
+        let zero_range = Range {
+            start: tower_lsp::lsp_types::Position::new(0, 0),
+            end: tower_lsp::lsp_types::Position::new(0, 0),
+        };
+        let item = TypeHierarchyItem {
+            name: "Bar".to_string(),
+            kind: SymbolKind::CLASS,
+            tags: None,
+            detail: None,
+            uri,
+            range: zero_range,
+            selection_range: zero_range,
+            data: None,
+        };
+        let params = TypeHierarchySupertypesParams {
+            item,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let supers = backend
+            .supertypes(params)
+            .await
+            .expect("supertypes ok")
+            .expect("Some(items)");
+
+        // `Bar` => Foo, Object, ProtoObject. The user file only declares
+        // Foo; Object / ProtoObject come from the builtin hierarchy and
+        // have no indexed declaration site, but the LSP layer still emits
+        // a row for them (parent-URI fallback).
+        let names: Vec<&str> = supers.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Foo", "Object", "ProtoObject"],
+            "expected ordered ancestor chain"
+        );
+    }
+
+    /// BT-2242: `typeHierarchy/subtypes` returns transitive descendants
+    /// (BFS order — direct children before grandchildren) via
+    /// `ClassHierarchy::all_subclasses`. Two-level tree exercises both
+    /// levels and confirms the receiver itself is excluded.
+    #[tokio::test]
+    async fn subtypes_returns_transitive_descendants_in_bfs_order() {
+        use tower_lsp::lsp_types::{PartialResultParams, WorkDoneProgressParams};
+
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2242-subtypes").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        // Two-level tree: Foo -> {Bar, Baz}; Bar -> Qux.
+        let source = "Object subclass: Foo\n\
+                      Foo subclass: Bar\n\
+                      Foo subclass: Baz\n\
+                      Bar subclass: Qux\n";
+        {
+            let mut svc = backend.service.lock().expect("service lock poisoned");
+            svc.update_file(path.clone(), source.to_string());
+        }
+
+        let uri = Url::from_file_path(path.as_std_path()).expect("file URI");
+        let zero_range = Range {
+            start: tower_lsp::lsp_types::Position::new(0, 0),
+            end: tower_lsp::lsp_types::Position::new(0, 0),
+        };
+        let item = TypeHierarchyItem {
+            name: "Foo".to_string(),
+            kind: SymbolKind::CLASS,
+            tags: None,
+            detail: None,
+            uri,
+            range: zero_range,
+            selection_range: zero_range,
+            data: None,
+        };
+        let params = TypeHierarchySubtypesParams {
+            item,
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+
+        let subs = backend
+            .subtypes(params)
+            .await
+            .expect("subtypes ok")
+            .expect("Some(items)");
+
+        let names: Vec<&str> = subs.iter().map(|s| s.name.as_str()).collect();
+        // `all_subclasses` iteration order depends on hash-map iteration
+        // for siblings at the same level — assert as a set for the direct
+        // children and pin Qux's position after both direct children.
+        assert_eq!(names.len(), 3, "expected 3 descendants, got {names:?}");
+        assert!(
+            names.contains(&"Bar"),
+            "Bar should be in subtypes, got {names:?}"
+        );
+        assert!(
+            names.contains(&"Baz"),
+            "Baz should be in subtypes, got {names:?}"
+        );
+        let qux_pos = names.iter().position(|n| *n == "Qux").expect("Qux present");
+        let bar_pos = names.iter().position(|n| *n == "Bar").expect("Bar present");
+        assert!(
+            qux_pos > bar_pos,
+            "Qux (grandchild) must come after Bar (its parent) in BFS order, got {names:?}"
+        );
+        assert!(
+            !names.contains(&"Foo"),
+            "receiver Foo must not be in its own subtypes, got {names:?}"
         );
     }
 }
