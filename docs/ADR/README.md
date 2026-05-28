@@ -113,8 +113,8 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
 | [0086](0086-string-subclass-of-binary.md) | Make String a Subclass of Binary | Implemented | 2026-03-21 |
 | [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Accepted | 2026-05-26 |
-| [0088](0088-direct-cerl-emission.md) | Direct Core Erlang AST Emission via ETF | Proposed (Phases 1–4 Rejected) | 2026-05-26 |
-| [0089](0089-typed-document-leaves.md) | Typed Document Leaves for Core Erlang Codegen | Proposed | 2026-05-28 |
+| [0088](0088-direct-cerl-emission.md) | Direct Core Erlang AST Emission via ETF | Phases 1–4 Rejected; Wire Deferred | 2026-05-26 |
+| [0089](0089-typed-document-leaves.md) | Typed Document Leaves for Core Erlang Codegen | Accepted | 2026-05-28 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

@@ -248,7 +248,7 @@ Rejected alternatives:
 - **Free functions alongside `Document::Str` in `document`**: pollutes
   the top-level module surface. `document` already exports the
   combinator surface (`docvec!`, `join`, `nest`, `group`, `break_`);
-  adding six leaf helpers next to them obscures the layering
+  adding seven leaf helpers next to them obscures the layering
   (combinators vs leaves).
 - **New `Document::Atom`, `Document::Var`, ... enum variants**:
   requires renderer changes (each new variant needs a render arm), and
@@ -505,7 +505,7 @@ empirical data driving it.
   A makes it not.
 - **Helper API completeness.** The seven-helper set covers the call-site
   audit's dominant shapes. If a Core Erlang fragment exists that none
-  of the six covers, we have to either extend the set or fall back to
+  of the seven covers, we have to either extend the set or fall back to
   rendering by hand. The flag-day audit must surface every such site
   *before* the deletion PR lands; if any are found, the helper set
   grows before the deletion. This is the load-bearing risk in
