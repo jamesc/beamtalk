@@ -2709,10 +2709,14 @@ fn runtime_site_to_lsp_location(
 /// model (Beamtalk class bodies are method-level; the symbol itself is
 /// the name).
 ///
-/// `fallback_uri` is the URI we attach when the declaration carries a path
-/// the converter can't turn into a `file://` URL (very rare — file paths
-/// the language service has indexed are already absolute). Returns `None`
-/// only if both the declaration's path resolution and the fallback fail.
+/// `fallback_uri` is only consulted in the `declaration == None` branch —
+/// when there is no indexed declaration at all, we still want to render
+/// the symbol row, so we attach the originating URI with a zero-width
+/// range. In the `Some(loc)` branch we never fall back: if either
+/// `file_source(&loc.file)` or `path_to_uri(&loc.file)` fails the function
+/// returns `None`. Returning `None` for a known-but-unloadable declaration
+/// is the conservative choice — pointing the editor at the wrong file
+/// would be worse than dropping the row.
 fn type_hierarchy_item(
     class_name: &str,
     declaration: Option<&beamtalk_core::language_service::Location>,

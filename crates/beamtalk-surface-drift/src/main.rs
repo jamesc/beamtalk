@@ -767,7 +767,10 @@ fn extract_lsp_caps(text: &str, out: &mut BTreeSet<String>) {
     // Detect the well-known `"typeHierarchyProvider": true` shape inside
     // the `experimental:` literal and surface the three textDocument /
     // typeHierarchy capabilities the LSP backend implements on top of it.
-    if block.contains("experimental:") && block.contains("\"typeHierarchyProvider\"") {
+    if block.contains("experimental:")
+        && (block.contains("\"typeHierarchyProvider\": true")
+            || block.contains("\"typeHierarchyProvider\":true"))
+    {
         out.insert("textDocument/prepareTypeHierarchy".into());
         out.insert("typeHierarchy/supertypes".into());
         out.insert("typeHierarchy/subtypes".into());

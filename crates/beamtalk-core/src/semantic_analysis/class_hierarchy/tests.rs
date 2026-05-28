@@ -148,10 +148,11 @@ fn direct_subclasses_of_object_includes_actor_and_value() {
 #[test]
 fn direct_subclasses_of_leaf_class_is_empty() {
     let h = ClassHierarchy::with_builtins();
-    // `Character` is a leaf in the builtin hierarchy (`Integer` extends
-    // it but nothing extends `Character`). Pick it for the leaf check —
-    // `Integer` itself has `Character` as a direct subclass and would
-    // not be a valid leaf example.
+    // `Character` is a leaf in the builtin hierarchy: it extends
+    // `Integer` (Character inherits from Integer), but nothing extends
+    // `Character`. Pick it for the leaf check — `Integer` itself has
+    // `Character` as a direct subclass and would not be a valid leaf
+    // example.
     let subs = h.direct_subclasses("Character");
     assert!(
         subs.is_empty(),

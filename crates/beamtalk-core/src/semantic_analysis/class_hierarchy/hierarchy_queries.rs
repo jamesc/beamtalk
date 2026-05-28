@@ -54,11 +54,12 @@ impl ClassHierarchy {
     /// Example: `direct_subclasses("Actor")` → `["Counter", "Logger", ...]`
     /// (every class declared as `Actor subclass: ...`).
     ///
-    /// **BT-2242:** powers `typeHierarchy/subtypes` in the cold-file path —
-    /// the runtime path uses `Behaviour allSubclasses` (a transitive query)
-    /// through the same `nav-query` channel; this helper plus
-    /// [`Self::all_subclasses`] keeps the two modes byte-for-byte
-    /// equivalent on the indexed corpus.
+    /// **BT-2242:** powers `typeHierarchy/subtypes`. Answers come from the
+    /// in-process `ClassHierarchy` index; the LSP
+    /// `typeHierarchy/{supertypes,subtypes}` handlers call this directly with
+    /// no runtime-attached path. See BT-2242 PR notes for the scope-keeping
+    /// decision (a runtime-attached `nav-query` mode was considered and
+    /// deferred to keep this PR focused on the cold-file path).
     #[must_use]
     pub fn direct_subclasses(&self, class_name: &str) -> Vec<EcoString> {
         self.classes
@@ -84,8 +85,11 @@ impl ClassHierarchy {
     /// Cycles are guarded by a `visited` set (a malformed hierarchy with
     /// `A -> B -> A` would otherwise loop forever).
     ///
-    /// **BT-2242:** powers `typeHierarchy/subtypes` — see
-    /// [`Self::direct_subclasses`] for the parity story.
+    /// **BT-2242:** powers `typeHierarchy/subtypes`. Answers come from the
+    /// in-process `ClassHierarchy` index; the LSP
+    /// `typeHierarchy/{supertypes,subtypes}` handlers call this directly with
+    /// no runtime-attached path. See [`Self::direct_subclasses`] and the
+    /// BT-2242 PR notes for the scope-keeping decision.
     #[must_use]
     pub fn all_subclasses(&self, class_name: &str) -> Vec<EcoString> {
         let mut result = Vec::new();
