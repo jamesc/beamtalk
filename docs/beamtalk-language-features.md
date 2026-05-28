@@ -27,6 +27,8 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
 - [Named Actor Registration (ADR 0079)](#named-actor-registration-adr-0079)
 - [Pattern Matching](#pattern-matching)
 - [Live Patching](#live-patching)
+  - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
+  - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
   - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
@@ -2526,6 +2528,199 @@ Registry reset          // => 0
 > Purely-programmatic `ClassBuilder` classes have no recorded source; supply their
 > class methods up front via `classMethods:` / `addClassMethod:body:` instead.
 
+### Saving live edits back to disk — `compile:source:`, ChangeLog, and `flush` (ADR 0082)
+
+Live patches go into memory; they reach the `.bt` source file only when you
+**flush**. Between the patch and the flush, every in-memory mutation is recorded
+in the workspace **ChangeLog** — the pending-changes view, dirty-state tracker,
+and undo store rolled into one ([ADR 0082](ADR/0082-method-level-edit-save-and-changelog.md)).
+
+The model has three layers: in-memory class state (hot-reloaded BEAM), the
+ChangeLog (per-workspace append-only log; persists across workspace restart),
+and the `.bt` files on disk. Every successful live patch updates memory **and**
+appends a ChangeEntry. `Workspace flush` walks pending entries and splices each
+patched body back into its source file via byte-span replacement — no AST
+re-print, no whole-file reformat — atomically (`<file>.tmp` + rename) with
+external-edit conflict detection.
+
+#### The patcher primitives
+
+| Method | Intent | Logs? | Used by |
+|--------|--------|-------|---------|
+| `aClass >> sel => body` (parser sugar) | durable | yes | humans at the REPL |
+| `aClass compile: #sel source: "body"` | durable | yes | MCP `save_method`, browser "Save", REPL editor |
+| `aClass tryCompile: #sel source: "body"` | ephemeral (auto-prunes) | yes | MCP `try_method`, agent spikes |
+| `Workspace newClass: source at: path` | durable, `kind: #'new-class'` | yes | MCP `save_class`, browser "New File" |
+
+`>>` and `compile:source:` are equivalent in effect — both install the new
+method and append a durable ChangeEntry. The keyword form takes the body as a
+**String value** so tools (MCP, LSP, browser editors) don't have to escape
+quotes or multi-line bodies back into source. `tryCompile:source:` installs in
+memory like `compile:source:` but tags the entry as ephemeral — successful
+spikes are promoted by re-calling `compile:source:` with the same body. Every
+successful in-memory mutation logs unconditionally, including spikes and
+patches against stdlib / dependency classes (which are not flushable). The
+audit trail is exhaustive on purpose.
+
+#### Canonical patch → changes → flush round trip
+
+```beamtalk
+> Counter >> increment => self.value := self.value + 1
+=> Counter                          // memory patched
+> Workspace changes notEmpty
+=> true
+> Workspace changes dirtyMethods
+=> #{#Counter => #{#increment}}     // per-class set of dirty selectors
+> Workspace flush
+=> _                                // FlushResult; quiet on success
+> Workspace changes isEmpty
+=> true                             // flushed entries drop out of the active view
+```
+
+`Workspace changes` returns a [`ChangeLog`](#changelog) object (see below).
+`Workspace flush` returns a `FlushResult` summary with `#flushed`, `#files`,
+`#newClasses`, and `#conflicts`. A non-empty `#conflicts` list means the listed
+entries remain pending and require manual reconciliation.
+
+#### Targeted flush
+
+```beamtalk
+Workspace flush                                   // every durable + flushable entry
+Workspace flush: Counter                          // entries targeting one class
+Workspace flush: #'new-class'                     // entries of one kind
+Workspace flush: #{ #file => "src/counter.bt" }   // entries against one file
+Workspace changes flushKinds: #{#agent}           // only agent-authored entries
+Workspace changes flushKinds: #{#agent, #'new-class'}  // both filters AND together
+```
+
+#### External-edit conflict — patch, edit on disk, flush
+
+```beamtalk
+> Counter >> increment => self.value := self.value + 2   // memory patched
+=> Counter
+// ... another editor (or `git pull`) modifies examples/counter.bt on disk ...
+> Workspace flush
+=> _   // FlushResult with #conflicts: [#{#file => "examples/counter.bt",
+       //                                  #reason => #external_edit, ...}]
+       // The patch stays pending; memory is still ahead of disk.
+```
+
+When flush detects an external edit, the offending entries stay in the log and
+the user picks the recovery path:
+
+```beamtalk
+Workspace changes clear                           // drop the pending ChangeLog entries
+                                                  //   (already-installed patches stay in memory
+                                                  //    until workspace restart — use `revert:` to
+                                                  //    actually re-install the prior method body)
+Workspace changes revert: anEntry                 // undo one patch (re-install prior body)
+// or open the file, reconcile by hand, then:
+Workspace flush                                   // retry once disk matches expectations
+```
+
+#### Ephemeral spike → promote → flush
+
+```beamtalk
+> Counter tryCompile: #doubled source: "doubled => self.value * 2"
+=> Counter                          // memory patched, ChangeEntry logged as ephemeral
+> (Counter spawn) doubled
+=> 0                                // works — agent decides to keep it
+> Counter compile: #doubled source: "doubled => self.value * 2"
+=> Counter                          // promoted: durable ChangeEntry layered on top
+> Workspace flush
+=> _                                // disk gains the new method
+```
+
+The earlier ephemeral entry remains in the log for audit and is auto-pruned on
+the next workspace restart.
+
+#### Creating a brand-new class file
+
+```beamtalk
+> Workspace newClass: "Object subclass: Greeter\n  greet => 'hello'" at: "src/greeter.bt"
+=> [Greeter]                        // compiled and installed in memory
+> Workspace flush
+=> _                                // writes src/greeter.bt
+```
+
+`newClass:at:` raises a loud, specific error (no silent fallback) if `path`
+already exists, lies outside the project tree, the declared class name does
+not match the path basename (ADR 0040 one-class-per-file convention), or a
+class of that name is already loaded.
+
+#### `autoflush`
+
+For users who want write-through editor semantics, flip a single workspace
+setting:
+
+```beamtalk
+Workspace autoflush       // => false  (default)
+Workspace autoflush: true // => true   (every successful durable patch flushes immediately)
+```
+
+Autoflush persists across workspace restarts. It is **best-effort**, not
+transactional — a flush failure under autoflush (external-edit conflict, write
+error) leaves memory ahead of disk and the entry pending in the log. The BEAM
+module install is not rolled back because live actors may hold references to
+the new closures. The error surfaces with a "memory ahead of disk" warning.
+
+Ephemeral patches via `tryCompile:source:` are never autoflushed.
+
+#### Flushability — what `flush` writes
+
+A class is **flushable** iff its `sourceFile` is non-nil **and** lies inside the
+current project's source tree. `Workspace flush` writes only entries where
+`intent = durable AND flushable = true`. Other entries are reported under
+`#conflicts` (for external-edit / target-exists errors) or simply skipped:
+
+- **Stdlib classes** (`Integer`, `String`, ...) — `sourceFile = nil`. Patches
+  install in memory and log with `flushable: false`; flush skips them. Smalltalk
+  muscle memory (`Integer compile: #double source: "..."`) is supported as live,
+  audited, non-flushable drift.
+- **Dependency classes** — `sourceFile` outside the project tree. Same shape.
+  Flush never writes into the dependency cache (reproducible-build guarantee).
+- **Dynamic classes** ([ADR 0038](ADR/0038-subclass-classbuilder-protocol.md)
+  `ClassBuilder`) — `sourceFile = nil`. Same shape.
+
+#### ChangeLog
+
+`Workspace changes` returns a `ChangeLog` object (analogous to Pharo's
+`Smalltalk changes`). All pending-state queries live on this object, not on the
+`Workspace` facade itself.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `size` | `Integer` | Active (live, re-appliable) entries |
+| `isEmpty` / `notEmpty` | `Boolean` | "Is anything dirty?" is `Workspace changes notEmpty` |
+| `do: block` | `Nil` | Iterate active entries |
+| `select: block` | `List` | Filter **all** entries (reaches orphans and prior-epoch entries too) |
+| `dirtyMethods` | `Dictionary` | `#{Class => Set(selectors)}` for the active set |
+| `revert: anEntry` | class | Re-install `prev_source` for that entry (itself a durable patch) |
+| `clear` | `ChangeLog` | Discard every pending entry without writing to disk (memory keeps the patches until restart) |
+| `flushKinds: kinds` | `FlushResult` | Flush only entries matching a Set of `#instance` / `#class` / `#'new-class'` / `#human` / `#agent` symbols (both dimensions AND together) |
+| `allEntries` | `List(ChangeEntry)` | Every logged entry, including prior-epoch and orphan entries |
+| `activeEntries` | `List(ChangeEntry)` | Current-epoch entries that have not been orphaned (the default view) |
+
+Each `ChangeEntry` carries the patch's body, prior body, byte span, class,
+selector, intent (`durable` / `ephemeral`), flushable flag, `authorKind`
+(`#human` / `#agent`), and source-file reference. Bodies are stored as plain
+`.bt` files under `<workspace>/changes/sources/`; metadata lives in
+`<workspace>/changes/changes.jsonl`. `cat`, `less`, `diff`, and `bt fmt` all
+work on the source files directly.
+
+The ChangeLog persists across workspace restart. On restart, the workspace
+assigns a fresh `epoch` and excludes prior-epoch entries from the active view
+(their memory state is gone). The underlying audit log keeps them; reach them
+via `Workspace changes select: [:e | e isOrphan]`.
+
+#### REPL and tooling shortcuts
+
+Every operation above is reachable via the REPL meta-commands, MCP tools, LSP
+`executeCommand` handlers, and browser actions. These are all thin front-ends
+over the Beamtalk language — see [REPL shortcuts](#repl-shortcuts--commands-are-thin-wrappers)
+below and the [Tooling guide](beamtalk-tooling.md#changelog-and-flush-adr-0082)
+for the surface tables.
+
 ---
 
 ## Extension Methods (Open Classes)
@@ -2638,6 +2833,7 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `load: "path"` | `nil` or Error | Compile and load a `.bt` file or directory |
+| `newClass: source at: path` | `List(Behaviour)` | Create a brand-new class from source at `path`; logs a `kind: #'new-class'` ChangeEntry (ADR 0082) |
 | `classes` | `List` | All loaded user classes (those with a recorded source file) |
 | `testClasses` | `List` | Loaded classes that inherit from `TestCase` |
 | `globals` | `Dictionary` | Project namespace: singletons + loaded user classes |
@@ -2648,6 +2844,11 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 | `actorsOf: AClass` | `List` | All live actors of the given class |
 | `bind: value as: #Name` | `Nil` | Register a value in the workspace namespace |
 | `unbind: #Name` | `Nil` | Remove a registered name from the namespace |
+| `changes` | `ChangeLog` | Pending in-memory changes (ADR 0082) — see [Saving live edits back to disk](#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082) |
+| `flush` | `FlushResult` | Write every durable + flushable ChangeEntry back to its source file (ADR 0082) |
+| `flush: filter` | `FlushResult` | Flush a subset (Class / Symbol kind / `#{#file => path}`) |
+| `autoflush` | `Boolean` | Workspace setting (default `false`); persists across restarts |
+| `autoflush: enabled` | `Boolean` | Toggle write-through: every durable patch immediately flushes (best-effort) |
 
 ```beamtalk
 (Workspace load: "examples/counter.bt")
@@ -2792,6 +2993,12 @@ The REPL `:` commands are convenience aliases that desugar to the native message
 | `:test CounterTest` | `Workspace test: CounterTest` |
 | `:help Counter` | `Beamtalk help: Counter` |
 | `:help Counter increment` | `Beamtalk help: Counter selector: #increment` |
+| `:changes` | `Workspace changes` |
+| `:dirty` | `Workspace changes dirtyMethods` |
+| `:flush` | `Workspace flush` |
+| `:flush Counter` | `Workspace flush: Counter` |
+| `:flush #'new-class'` | `Workspace flush: #'new-class'` |
+| `:flush #{ #file => "path" }` | `Workspace flush: #{ #file => "path" }` |
 
 The native forms work from compiled code, scripts, and actor methods — not just
 the REPL.

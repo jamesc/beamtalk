@@ -1549,11 +1549,7 @@ impl CoreErlangGenerator {
             self.state_threading.current_var()
         } else if self.in_loop_body {
             // Normal loop body: use StateAcc* nomenclature
-            if self.state_threading.version() == 0 {
-                "StateAcc".to_string()
-            } else {
-                format!("StateAcc{}", self.state_threading.version())
-            }
+            util::versioned_var("StateAcc", self.state_threading.version())
         } else {
             // Normal context - use State nomenclature
             self.state_threading.current_var()
@@ -1637,12 +1633,7 @@ impl CoreErlangGenerator {
 
     /// BT-412: Returns the current class variable state variable name.
     fn current_class_var(&self) -> String {
-        let version = self.class_var_version();
-        if version == 0 {
-            "ClassVars".to_string()
-        } else {
-            format!("ClassVars{version}")
-        }
+        util::versioned_var("ClassVars", self.class_var_version())
     }
 
     /// BT-412: Increments class var version and returns the new variable name.
@@ -1650,7 +1641,7 @@ impl CoreErlangGenerator {
         let new_version = self.class_var_version() + 1;
         self.set_class_var_version(new_version);
         self.set_class_var_mutated(true);
-        format!("ClassVars{new_version}")
+        util::versioned_var("ClassVars", new_version)
     }
 
     /// BT-833: Returns the current Self variable name for value type Self-threading.
@@ -1658,19 +1649,14 @@ impl CoreErlangGenerator {
     /// Version 0 → `"Self"` (the original method parameter).
     /// Version N → `"Self{N}"` (after N field assignments have threaded a new snapshot).
     pub(super) fn current_self_var(&self) -> String {
-        let version = self.self_version();
-        if version == 0 {
-            "Self".to_string()
-        } else {
-            format!("Self{version}")
-        }
+        util::versioned_var("Self", self.self_version())
     }
 
     /// BT-833: Increments the Self version and returns the new variable name.
     pub(super) fn next_self_var(&mut self) -> String {
         let new_version = self.self_version() + 1;
         self.set_self_version(new_version);
-        format!("Self{new_version}")
+        util::versioned_var("Self", new_version)
     }
 
     /// BT-855: Records a structured diagnostic warning for the current module.

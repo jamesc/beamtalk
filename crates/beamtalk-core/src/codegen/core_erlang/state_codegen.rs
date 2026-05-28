@@ -63,11 +63,7 @@ impl StateThreading {
     /// - Version 2 → `"State2"`
     /// - etc.
     pub(super) fn current_var(&self) -> String {
-        if self.version == 0 {
-            "State".to_string()
-        } else {
-            format!("State{}", self.version)
-        }
+        super::util::versioned_var("State", self.version)
     }
 
     /// Increments the state version and returns the new state variable name.
@@ -92,8 +88,7 @@ impl StateThreading {
     /// version counter.  Used when the caller needs to know the name before
     /// calling `expression_doc` (which may itself advance state).
     pub(super) fn peek_next_var(&self) -> String {
-        let next = self.version + 1;
-        format!("State{next}")
+        super::util::versioned_var("State", self.version + 1)
     }
 
     /// Resets the state version to 0.

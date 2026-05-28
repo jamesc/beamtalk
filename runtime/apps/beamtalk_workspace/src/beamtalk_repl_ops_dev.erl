@@ -1740,7 +1740,9 @@ describe_ops() ->
     BaseOps = base_ops(),
     %% Merge ops from other modules (dynamic discovery, BT-1622)
     PerfOps = beamtalk_repl_ops_perf:describe_ops(),
-    maps:merge(BaseOps, PerfOps).
+    %% BT-2239: structured navigation queries.
+    NavOps = beamtalk_repl_ops_nav:describe_ops(),
+    maps:merge(maps:merge(BaseOps, PerfOps), NavOps).
 
 -doc "Core ops defined in this module and beamtalk_repl_server.".
 -spec base_ops() -> map().

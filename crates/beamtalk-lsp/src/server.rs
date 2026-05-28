@@ -16,11 +16,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::runtime::{FlushEvent, RuntimeClient, RuntimeError};
+use crate::runtime::{ClassChangedEvent, FlushEvent, RuntimeClient, RuntimeError};
 
 use beamtalk_core::language_service::{
-    CompletionKind, DocumentSymbolKind, LanguageService, Position as BtPosition,
-    SimpleLanguageService,
+    CompletionKind, DocumentSymbolKind, LanguageService, NavQuery, NavSite, Position as BtPosition,
+    RuntimeLocation, SimpleLanguageService, nav_site_to_location,
 };
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
@@ -125,6 +125,62 @@ pub struct Backend {
     /// that consumes `FlushEvent`s from the runtime client and emits
     /// `workspace/applyEdit` per touched file.
     flush_listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// BT-2239: handle to the class-changed-event listener task that
+    /// consumes `ClassChangedEvent`s and invalidates [`Self::nav_cache`].
+    class_changed_listener: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// BT-2239: feature flag — when true and a runtime is attached, the
+    /// LSP delegates navigation queries (find-references / implementation
+    /// / call-hierarchy / type-hierarchy) to the workspace via
+    /// `nav-query`. When false (the default), all nav queries use the
+    /// in-process AST walker. Read once from the `initialize` params'
+    /// `initializationOptions.delegateToRuntime` field and never mutated
+    /// after that — atomic for cheap concurrent reads from nav handlers.
+    delegate_to_runtime: std::sync::atomic::AtomicBool,
+    /// BT-2239: per-query cache of runtime-attached nav results, keyed by
+    /// query string. Invalidated wholesale on every `ClassChangedEvent`
+    /// (coarse but correct for the foundation issue — per-method children
+    /// can refine to per-class buckets if needed).
+    ///
+    /// Shared `Arc` so the class-changed listener task can hold a clone
+    /// without keeping the `Backend` itself alive (the listener is aborted
+    /// on `Drop` via `class_changed_listener`'s `JoinHandle`).
+    nav_cache: Arc<std::sync::Mutex<NavCache>>,
+}
+
+/// Coarse cache for runtime-attached navigation results (BT-2239).
+///
+/// The foundation issue uses a single generation counter — every
+/// `ClassChangedEvent` increments it, and cache entries are tagged with
+/// the generation they were computed under. A reader treats any entry
+/// whose generation predates the current one as stale.
+///
+/// Per-method children (BT-2240..2244) can keep the same shape and add
+/// payloads keyed by `(NavQuery, generation)` if they want memoisation;
+/// the foundation issue ships the invariant (any class change ⇒ caches
+/// are stale) without committing to a memoisation policy.
+#[derive(Debug, Default)]
+pub(crate) struct NavCache {
+    /// Monotonic generation. Starts at 0; bumped on every class change.
+    generation: u64,
+}
+
+impl NavCache {
+    /// Read the current generation. Cache consumers stash this with each
+    /// cached entry and compare on read.
+    ///
+    /// Foundation issue exposes the API but does not consume it directly;
+    /// per-method children (BT-2240..2244) call this when they cache
+    /// runtime results. Allowed-dead so the foundation PR doesn't have
+    /// to ship a consumer.
+    #[allow(dead_code, reason = "per-method children consume this API")]
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Bump the generation — invalidates every cached entry.
+    pub(crate) fn invalidate(&mut self) {
+        self.generation = self.generation.saturating_add(1);
+    }
 }
 
 impl Backend {
@@ -141,7 +197,119 @@ impl Backend {
             otp_lib_dir: Mutex::new(None),
             runtime: tokio::sync::Mutex::new(None),
             flush_listener: tokio::sync::Mutex::new(None),
+            class_changed_listener: tokio::sync::Mutex::new(None),
+            delegate_to_runtime: std::sync::atomic::AtomicBool::new(false),
+            nav_cache: Arc::new(std::sync::Mutex::new(NavCache::default())),
         }
+    }
+
+    /// Read the current nav-cache generation (BT-2239). Foundation
+    /// consumers store this with each cached entry and compare on read.
+    #[allow(dead_code, reason = "per-method children consume this API")]
+    pub(crate) fn nav_cache_generation(&self) -> u64 {
+        self.nav_cache
+            .lock()
+            .expect("nav_cache lock poisoned")
+            .generation()
+    }
+
+    /// BT-2239: two-mode dispatch seam for navigation queries.
+    ///
+    /// When the `delegateToRuntime` flag is on **and** a runtime is
+    /// reachable (the workspace is running), forwards `query` to the
+    /// attached runtime via [`RuntimeClient::nav_query`] and converts the
+    /// resulting [`NavSite`]s to LSP `Location`s through the per-call
+    /// `to_lsp` mapper. Otherwise — flag off, no running workspace,
+    /// runtime error, or empty runtime result — falls back to
+    /// `ast_fallback`.
+    ///
+    /// Per-method children (BT-2240..2244) implement one nav query each
+    /// by calling this helper with:
+    ///
+    /// * `query` — a [`NavQuery`] built from the cursor symbol
+    /// * `to_lsp` — turns a `NavSite` into the LSP type the caller needs
+    ///   (`Location` for references / implementation, `CallHierarchyItem`
+    ///   for call hierarchy, etc.)
+    /// * `ast_fallback` — a sync closure that runs the in-process AST
+    ///   walker (current behaviour)
+    ///
+    /// The helper keeps two contracts the issue's acceptance criteria
+    /// require:
+    /// 1. **No behaviour change when the flag is off.** The runtime path
+    ///    is never taken, no eval is submitted, no cache is consulted.
+    ///    Per-method children rely on this for byte-for-byte parity with
+    ///    today.
+    /// 2. **Strict cold-file fallback.** A runtime path that returns an
+    ///    error (workspace disconnected, malformed reply) falls through
+    ///    to `ast_fallback` rather than surfacing the error to the
+    ///    editor. The runtime-attached mode is a *better* answer, not a
+    ///    *different* one.
+    pub(crate) async fn delegate_nav_query<T, F, A>(
+        &self,
+        query: NavQuery,
+        to_lsp: F,
+        ast_fallback: A,
+    ) -> Vec<T>
+    where
+        F: Fn(&NavSite, &[PathBuf]) -> Option<T> + Send + Sync,
+        A: FnOnce() -> Vec<T>,
+    {
+        if !self.delegate_to_runtime() {
+            return ast_fallback();
+        }
+        let runtime = match self.ensure_runtime_attached().await {
+            Ok(client) => client,
+            Err(e) => {
+                tracing::debug!(
+                    %e,
+                    kind = query.kind(),
+                    "delegate_nav_query: runtime unreachable, falling back to AST"
+                );
+                return ast_fallback();
+            }
+        };
+        let sites = match runtime.nav_query(&query).await {
+            Ok(sites) => sites,
+            Err(e) => {
+                tracing::warn!(
+                    %e,
+                    kind = query.kind(),
+                    "delegate_nav_query: runtime error, falling back to AST"
+                );
+                return ast_fallback();
+            }
+        };
+        if sites.is_empty() {
+            // The runtime knows the query but has no matches. Trust the
+            // runtime — it sees live patches and stdlib classes the AST
+            // walker can't index — and return an empty result. (Falling
+            // back to AST here would mask legitimate "no matches" with
+            // stale results.)
+            return Vec::new();
+        }
+        let roots = {
+            let guard = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            guard.clone()
+        };
+        sites
+            .iter()
+            .filter_map(|site| to_lsp(site, &roots))
+            .collect()
+    }
+
+    /// Read the `delegateToRuntime` flag (BT-2239).
+    pub(crate) fn delegate_to_runtime(&self) -> bool {
+        self.delegate_to_runtime
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Set the `delegateToRuntime` flag from `initialize` params.
+    pub(crate) fn set_delegate_to_runtime(&self, value: bool) {
+        self.delegate_to_runtime
+            .store(value, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
@@ -593,7 +761,13 @@ impl Backend {
         // listener — flushes are infrequent and small relative to typical
         // LSP traffic.
         let (flush_tx, flush_rx) = tokio::sync::mpsc::unbounded_channel::<FlushEvent>();
-        let client = RuntimeClient::connect(&project_root, flush_tx).await?;
+        // BT-2239: class-loaded / method-installed push frames so the LSP
+        // can invalidate runtime-attached nav caches. Today the listener
+        // just logs and drops — the per-method children (BT-2240..2244)
+        // attach the real cache to it.
+        let (class_changed_tx, class_changed_rx) =
+            tokio::sync::mpsc::unbounded_channel::<ClassChangedEvent>();
+        let client = RuntimeClient::connect(&project_root, flush_tx, class_changed_tx).await?;
 
         // Re-check the cache under the lock before installing. If a parallel
         // call beat us to it, drop our freshly-connected client (its
@@ -636,6 +810,16 @@ impl Backend {
             flush_rx,
         ));
 
+        // BT-2239: cache-invalidation listener for class-loaded /
+        // method-installed push events. The listener holds a clone of the
+        // shared `Arc<Mutex<NavCache>>` so it can bump the generation
+        // counter as events arrive — `Backend::nav_cache_generation` reads
+        // through the same lock.
+        let class_changed_handle = tokio::spawn(class_changed_listener(
+            Arc::clone(&self.nav_cache),
+            class_changed_rx,
+        ));
+
         {
             let mut runtime_guard = self.runtime.lock().await;
             *runtime_guard = Some(client.clone());
@@ -647,6 +831,13 @@ impl Backend {
                 prev.abort();
             }
             *listener_guard = Some(listener_handle);
+        }
+        {
+            let mut guard = self.class_changed_listener.lock().await;
+            if let Some(prev) = guard.take() {
+                prev.abort();
+            }
+            *guard = Some(class_changed_handle);
         }
 
         Ok(client)
@@ -682,6 +873,12 @@ impl LanguageServer for Backend {
         let roots = workspace_roots(&params);
         let configured_stdlib = configured_stdlib_source_dir(&params);
         let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
+        // BT-2239: read the `delegateToRuntime` flag from
+        // `initializationOptions`. Default is `false` (foundation issue
+        // keeps current behaviour; per-method children opt the flag on as
+        // they're rolled out).
+        let delegate = configured_delegate_to_runtime(&params);
+        self.set_delegate_to_runtime(delegate);
         {
             let mut stored_roots = self
                 .workspace_roots
@@ -1114,6 +1311,13 @@ impl LanguageServer for Backend {
     }
 
     /// Finds all references to the symbol at the cursor.
+    ///
+    /// BT-2239 worked example: when `delegateToRuntime` is on and a runtime
+    /// is attached, classify the cursor with
+    /// [`SimpleLanguageService::references_query_at`] and forward to the
+    /// runtime via [`Backend::delegate_nav_query`]. Local-identifier hits
+    /// (parameters, locals) — which the runtime can't see — fall back to
+    /// the AST walker unconditionally.
     async fn references(
         &self,
         params: ReferenceParams,
@@ -1123,24 +1327,49 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let svc = self.service.lock().expect("service lock poisoned");
-        let Some(source) = svc.file_source(&path) else {
-            return Ok(None);
+        // Compute everything that depends on `svc` up front so the lock is
+        // released before any async runtime call (delegate_nav_query awaits
+        // a runtime round-trip when the flag is on).
+        let (pos, runtime_query) = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position.position, &source);
+            let runtime_query = if self.delegate_to_runtime() {
+                svc.references_query_at(&path, pos)
+            } else {
+                None
+            };
+            (pos, runtime_query)
         };
-        let pos = to_bt_position(params.text_document_position.position, &source);
-        let refs = svc.find_references(&path, pos);
 
-        let locations: Vec<tower_lsp::lsp_types::Location> = refs
-            .into_iter()
-            .filter_map(|loc| {
-                let source = svc.file_source(&loc.file)?;
-                let range = span_to_range(loc.span, &source);
-                Some(tower_lsp::lsp_types::Location {
-                    uri: path_to_uri(&loc.file)?,
-                    range,
+        let backend_self = self;
+        let path_for_ast = path.clone();
+        let ast_fallback = || -> Vec<tower_lsp::lsp_types::Location> {
+            let svc = backend_self.service.lock().expect("service lock poisoned");
+            let refs = svc.find_references(&path_for_ast, pos);
+            refs.into_iter()
+                .filter_map(|loc| {
+                    let source = svc.file_source(&loc.file)?;
+                    let range = span_to_range(loc.span, &source);
+                    Some(tower_lsp::lsp_types::Location {
+                        uri: path_to_uri(&loc.file)?,
+                        range,
+                    })
                 })
-            })
-            .collect();
+                .collect()
+        };
+
+        let locations = if let Some(query) = runtime_query {
+            self.delegate_nav_query(query, runtime_site_to_lsp_location, ast_fallback)
+                .await
+        } else {
+            // Cursor isn't on a selector or class name (local identifier,
+            // parameter, etc.) — the runtime can't answer this, so go
+            // straight to the AST path.
+            ast_fallback()
+        };
 
         if locations.is_empty() {
             Ok(None)
@@ -1455,6 +1684,36 @@ impl OpenPathsHandle {
     }
 }
 
+/// BT-2239: consume `ClassChangedEvent`s from the runtime listener and
+/// bump the shared nav-cache generation.
+///
+/// The foundation issue uses a coarse single-counter invalidation:
+/// any class load / reload / method install bumps the generation, and
+/// readers compare entries against the current counter. The per-method
+/// children (BT-2240..2244) can keep the same shape if they add their
+/// own per-class buckets — the listener stays the same.
+///
+/// Holds an `Arc` to `Backend::nav_cache` rather than a back-reference to
+/// the `Backend` so the task does not keep the backend alive on its own.
+/// When `ensure_runtime_attached` stores the `JoinHandle`, the task ends
+/// when the handle is aborted (during a subsequent attach or backend
+/// drop) or when the `class_changed_rx` channel closes (`RuntimeClient`
+/// disconnect).
+async fn class_changed_listener(
+    nav_cache: Arc<Mutex<NavCache>>,
+    mut class_changed_rx: tokio::sync::mpsc::UnboundedReceiver<ClassChangedEvent>,
+) {
+    while let Some(event) = class_changed_rx.recv().await {
+        tracing::debug!(
+            class_name = %event.class_name,
+            "class_changed_listener: invalidating nav cache"
+        );
+        let mut guard = nav_cache.lock().expect("nav_cache lock poisoned");
+        guard.invalidate();
+    }
+    tracing::debug!("class_changed_listener: channel closed, exiting");
+}
+
 /// ADR 0082 Phase 3 (BT-2289): consume `FlushEvent`s from the runtime
 /// listener and emit `workspace/applyEdit` per flushed file.
 ///
@@ -1766,6 +2025,22 @@ fn configured_stdlib_source_dir(params: &InitializeParams) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string)
+}
+
+/// BT-2239: Read the `delegateToRuntime` flag from `initializationOptions`.
+///
+/// Defaults to `false`: foundation issue keeps all navigation on the
+/// AST walker so behaviour is byte-for-byte identical to today. The
+/// per-method children (BT-2240..2244) flip individual queries over and
+/// rely on the editor / user enabling this flag once the runtime path is
+/// stable.
+fn configured_delegate_to_runtime(params: &InitializeParams) -> bool {
+    params
+        .initialization_options
+        .as_ref()
+        .and_then(|value| value.get("delegateToRuntime"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// Returns the stdlib source directory auto-discovered from the LSP binary's sysroot.
@@ -2133,6 +2408,36 @@ fn span_to_range(span: Span, source: &str) -> Range {
     let start = offset_to_position(span.start() as usize, source);
     let end = offset_to_position(span.end() as usize, source);
     Range { start, end }
+}
+
+/// BT-2239: Convert a runtime-supplied `NavSite` into an LSP `Location`.
+///
+/// Steps:
+/// 1. Use [`nav_site_to_location`] (in `beamtalk-core`) to resolve the
+///    runtime's `source_file` path against workspace roots.
+/// 2. Translate the 1-based runtime line to a zero-width LSP `Range`
+///    anchored at the start of the line. (The runtime tracks line, not
+///    column, so a finer `Range` would require re-reading the file —
+///    deferred to per-method consumers if they need it.)
+/// 3. Build the `file://` URI from the resolved path.
+///
+/// Returns `None` when:
+/// * The site has no backing `.bt` file (`source_file` is null — stdlib,
+///   dynamic, bootstrap class), or
+/// * The runtime reported line 0 (defensive — the runtime shouldn't).
+/// * The resolved path is not file-URI-able.
+fn runtime_site_to_lsp_location(
+    site: &NavSite,
+    workspace_roots: &[PathBuf],
+) -> Option<tower_lsp::lsp_types::Location> {
+    let resolved: RuntimeLocation = nav_site_to_location(site, workspace_roots)?;
+    let uri = path_to_uri(&resolved.file)?;
+    let line = resolved.line.checked_sub(1)?;
+    let range = Range {
+        start: tower_lsp::lsp_types::Position::new(line, 0),
+        end: tower_lsp::lsp_types::Position::new(line, 0),
+    };
+    Some(tower_lsp::lsp_types::Location { uri, range })
 }
 
 /// Converts a byte offset to an LSP `Position` (0-based line/character in UTF-16 code units).

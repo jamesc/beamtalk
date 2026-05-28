@@ -62,6 +62,7 @@ config := #{#host => "localhost", #port => 8080}
 - **Local variable type annotations** — `name :: Type := expr`.
 - **Auto-chained `initialize`** across the actor hierarchy ([ADR 0078](docs/ADR/0078-actor-initialize-inheritance.md)).
 - **REPL `:sync`** supersedes `:load`/`:reload` for project-wide reloads; `:interrupt` cancels a running eval out-of-band; parallel `:test`.
+- **Live-edit save model** — `Counter >> sel => body` and `Counter compile: #sel source: body` patch memory and append to a workspace `ChangeLog`; `Workspace flush` (REPL `:flush`, MCP `flush`, LSP `beamtalk.flush*`) splices the patched body back into the `.bt` file via byte-span replacement, atomically, with external-edit conflict detection. `:dirty` / `:changes` show pending state; `Workspace autoflush: true` opts into write-through ([ADR 0082](docs/ADR/0082-method-level-edit-save-and-changelog.md)).
 - **Class crash recovery** via ETS `heir` so live actors keep dispatching after a class process restart.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.

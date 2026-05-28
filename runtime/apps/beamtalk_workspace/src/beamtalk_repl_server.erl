@@ -443,6 +443,9 @@ handle_op(Op, Params, Msg, SessionPid) when
     Op =:= <<"export-traces">>
 ->
     beamtalk_repl_ops_perf:handle(Op, Params, Msg, SessionPid);
+%% BT-2239: structured navigation queries for runtime-attached LSP / MCP clients.
+handle_op(<<"nav-query">>, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops_nav:handle(<<"nav-query">>, Params, Msg, SessionPid);
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(

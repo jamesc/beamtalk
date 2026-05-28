@@ -404,6 +404,44 @@ Running 1 test class...
 2 passed, 0 failed
 ```
 
+#### ChangeLog and flush (ADR 0082)
+
+The live-edit save model: live patches install in memory and append to the
+workspace **ChangeLog**; the on-disk `.bt` files are only updated when you
+`flush`. See [Language Features — Saving live edits back to disk](beamtalk-language-features.md#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082)
+for the full model.
+
+| Command | Native equivalent | Description |
+|---------|-------------------|-------------|
+| `:changes` | `Workspace changes` | Show the ChangeLog (returns a `ChangeLog` object) |
+| `:dirty` | `Workspace changes dirtyMethods` | Per-class set of dirty selectors |
+| `:flush` | `Workspace flush` | Write every durable + flushable entry back to its source file |
+| `:flush Counter` | `Workspace flush: Counter` | Flush entries targeting one class |
+| `:flush #'new-class'` | `Workspace flush: #'new-class'` | Flush only entries of one kind |
+| `:flush #{ #file => "path" }` | `Workspace flush: #{ #file => "path" }` | Flush entries against one file |
+
+```beamtalk
+> Counter >> increment => self.value := self.value + 1   // memory patched, logged
+> :dirty
+#{#Counter => #{#increment}}
+> :flush
+_   // FlushResult; quiet on success
+> :dirty
+#{}
+```
+
+If `flush` detects an external edit on a target file the offending entries stay
+pending and surface under the result's `#conflicts` field. Recover with
+`Workspace changes revert: anEntry` (undo one patch by re-installing its prior
+body), `Workspace changes clear` (drop the pending ChangeLog entries — note
+already-installed patches remain live until workspace restart; use `revert:` if
+you also want to roll back the in-memory method body), or reconcile the file by
+hand and retry `:flush`.
+
+For write-through editor semantics: `Workspace autoflush: true` flips a
+per-workspace setting so every successful durable patch flushes immediately.
+The setting persists across restarts.
+
 #### Session Control
 
 | Command | Description |
@@ -754,6 +792,12 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `test` | Run tests (all, by class, or by file) |
 | `search_examples` | Search the bundled example corpus |
 | `search_classes` | Search class names and documentation |
+| `save_method` | Durable live patch (ADR 0082): wraps `aClass compile: #sel source: body`; logs a durable ChangeEntry |
+| `try_method` | Ephemeral spike (ADR 0082): wraps `aClass tryCompile: #sel source: body`; logs an ephemeral ChangeEntry (not flushable — pruned on workspace restart or via `Workspace changes clear`) |
+| `save_class` | Create a new class file (ADR 0082): wraps `Workspace newClass: source at: path`; logs a `kind: #'new-class'` ChangeEntry (flush writes the file to disk) |
+| `flush` | Write pending durable changes to disk (ADR 0082): wraps `Workspace flush` (optional `class` / `file` / `kind` argument selects a subset) |
+| `list_changes` | Wraps `Workspace changes` — serialised view of the pending ChangeLog |
+| `dirty_methods` | Wraps `Workspace changes dirtyMethods` — per-class set of dirty selectors |
 | `enable-tracing` | Enable detailed trace event capture for actor dispatch |
 | `disable-tracing` | Disable trace event capture (aggregate stats remain) |
 | `get-traces` | Retrieve trace events with optional filters (actor, selector, class, outcome, duration) |
@@ -761,7 +805,7 @@ Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding ag
 | `actor-stats` | Get aggregate per-actor, per-method statistics (call counts, durations, error rates) |
 | `diagnostic_summary` | Aggregated diagnostic counts by category/severity plus type-coverage stats (offline) |
 
-All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL. The tracing tools correspond to the `Tracing` stdlib class (see [Language Features — Actor Observability](beamtalk-language-features.md#actor-observability-and-tracing-adr-0069)).
+All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the REPL. The tracing tools correspond to the `Tracing` stdlib class (see [Language Features — Actor Observability](beamtalk-language-features.md#actor-observability-and-tracing-adr-0069)). The live-edit save tools (`save_method`, `try_method`, `save_class`, `flush`, `list_changes`, `dirty_methods`) correspond to the ChangeLog model (see [Language Features — Saving live edits back to disk](beamtalk-language-features.md#saving-live-edits-back-to-disk--compilesource-changelog-and-flush-adr-0082)); the same operations are exposed to editors via the LSP `executeCommand` handlers `beamtalk.flush`, `beamtalk.flush.class`, `beamtalk.flush.file`, `beamtalk.flush.kind`, and `beamtalk.saveClass`, which emit `workspace/applyEdit` on each flushed file so open buffers refresh automatically.
 
 ## VS Code Extension
 

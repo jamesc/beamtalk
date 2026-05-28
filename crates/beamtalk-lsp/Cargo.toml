@@ -19,7 +19,7 @@ name = "beamtalk-lsp"
 path = "src/main.rs"
 
 [dependencies]
-beamtalk-core = { workspace = true }
+beamtalk-core = { workspace = true, features = ["serde"] }
 beamtalk-repl-protocol = { workspace = true }
 beamtalk-workspace = { workspace = true }
 tower-lsp = { workspace = true }

@@ -29,6 +29,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, info, warn};
 
+use beamtalk_core::language_service::{NavQuery, NavQueryResponse, NavSite};
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
 
 /// How long to wait for individual WebSocket reads / writes during the auth
@@ -80,6 +81,21 @@ pub struct FlushEvent {
     /// `ChangeEntry.sourceFile` carried; the LSP layer canonicalises against
     /// its workspace roots before lookup.
     pub files: Vec<String>,
+}
+
+/// A class-load or class-reload event surfaced to the LSP server so it
+/// can invalidate caches that depend on the class's method dictionary or
+/// senders (BT-2239).
+///
+/// Today the workspace emits `class_loaded` for every register / re-register
+/// — including the per-method `Behaviour >>` install path (ADR 0082 Phase 1),
+/// since those routes both go through `beamtalk_class_builder`. The LSP
+/// treats this as a coarse "any nav cache for this class is stale" signal;
+/// it does not yet distinguish method-level patches from full reloads.
+#[derive(Debug, Clone)]
+pub struct ClassChangedEvent {
+    /// Beamtalk class name (as reported on the wire, no `class` suffix).
+    pub class_name: String,
 }
 
 /// WebSocket client to a running Beamtalk workspace.
@@ -149,9 +165,17 @@ impl RuntimeClient {
     /// `flush_tx` receives `{flush_completed, files: [...]}` push frames
     /// translated to [`FlushEvent`]. The channel is unbounded so a slow
     /// `applyEdit` task can't backpressure the listener.
+    ///
+    /// `class_changed_tx` receives `{classes, loaded}` push frames
+    /// translated to [`ClassChangedEvent`] (BT-2239) — used by the LSP to
+    /// invalidate runtime-attached nav caches. Pass an unbounded sender so
+    /// the listener never blocks. Listeners that don't care can drop the
+    /// receiver — the send will fail silently, which is fine for a
+    /// best-effort signal.
     pub async fn connect(
         project_path: &Path,
         flush_tx: mpsc::UnboundedSender<FlushEvent>,
+        class_changed_tx: mpsc::UnboundedSender<ClassChangedEvent>,
     ) -> Result<Self, RuntimeError> {
         let workspace_id =
             beamtalk_workspace::generate_workspace_id(project_path).map_err(|e| {
@@ -181,7 +205,7 @@ impl RuntimeClient {
                 reason: "no cookie file under ~/.beamtalk/workspaces/<id>/".to_string(),
             })?;
 
-        Self::connect_to(port, &cookie, flush_tx).await
+        Self::connect_to(port, &cookie, flush_tx, class_changed_tx).await
     }
 
     /// Connect directly to a workspace on `port` with `cookie`. Used by
@@ -190,6 +214,7 @@ impl RuntimeClient {
         port: u16,
         cookie: &str,
         flush_tx: mpsc::UnboundedSender<FlushEvent>,
+        class_changed_tx: mpsc::UnboundedSender<ClassChangedEvent>,
     ) -> Result<Self, RuntimeError> {
         let url = format!("ws://127.0.0.1:{port}/ws");
         let connect_fut = connect_async(&url);
@@ -221,7 +246,7 @@ impl RuntimeClient {
         let (req_tx, req_rx) = mpsc::channel::<EvalRequest>(64);
 
         let writer = tokio::spawn(writer_task(sink, req_rx, Arc::clone(&pending)));
-        let listener = tokio::spawn(listener_task(stream, pending, flush_tx));
+        let listener = tokio::spawn(listener_task(stream, pending, flush_tx, class_changed_tx));
 
         Ok(Self {
             inner: Arc::new(RuntimeInner {
@@ -269,6 +294,78 @@ impl RuntimeClient {
             .map_err(|_| {
                 RuntimeError::Protocol("eval reply channel dropped before response".to_string())
             })?
+    }
+
+    /// Submit a structured `nav-query` request and decode the typed reply
+    /// (BT-2239).
+    ///
+    /// Unlike [`Self::evaluate`], this op bypasses the Beamtalk inspect-string
+    /// formatter — the runtime serialises `beamtalk_xref` site records as
+    /// plain JSON arrays/objects, so the reply decodes directly into typed
+    /// [`NavSite`] records.
+    ///
+    /// Returns:
+    /// * `Ok(Vec<NavSite>)` on a successful reply (possibly empty when no
+    ///   matches were found — distinguished from an absent runtime by the
+    ///   surrounding `Backend::delegate_nav_query` seam).
+    /// * `Err(RuntimeError::Protocol)` for transport-level failures or a
+    ///   structured `#beamtalk_error{}` reply (the latter is rare — the op
+    ///   validates inputs up front and `beamtalk_xref` lookups don't fail).
+    pub async fn nav_query(&self, query: &NavQuery) -> Result<Vec<NavSite>, RuntimeError> {
+        let arg = query
+            .selector()
+            .or_else(|| query.class_name())
+            .ok_or_else(|| {
+                RuntimeError::Protocol("nav-query: missing selector/class argument".to_string())
+            })?;
+        let request = RequestBuilder::nav_query(query.kind(), arg);
+        let id = request
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RuntimeError::Protocol("nav-query request missing id".to_string()))?
+            .to_string();
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let req = EvalRequest {
+            request,
+            id: id.clone(),
+            reply_to: reply_tx,
+        };
+        self.inner
+            .sender
+            .send(req)
+            .await
+            .map_err(|_| RuntimeError::Protocol("runtime client shut down".to_string()))?;
+
+        let response = tokio::time::timeout(IO_TIMEOUT, reply_rx)
+            .await
+            .map_err(|_| {
+                RuntimeError::Protocol(format!(
+                    "nav-query timed out after {}s waiting for reply (id={id})",
+                    IO_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|_| {
+                RuntimeError::Protocol(
+                    "nav-query reply channel dropped before response".to_string(),
+                )
+            })??;
+
+        if response.is_error() {
+            let msg = response
+                .error
+                .or(response.message)
+                .unwrap_or_else(|| "unknown error".to_string());
+            return Err(RuntimeError::Protocol(format!("nav-query error: {msg}")));
+        }
+
+        let value = response.value.ok_or_else(|| {
+            RuntimeError::Protocol("nav-query: reply missing `value`".to_string())
+        })?;
+        let payload: NavQueryResponse = serde_json::from_value(value).map_err(|e| {
+            RuntimeError::Protocol(format!("nav-query: malformed reply payload: {e}"))
+        })?;
+        Ok(payload.sites)
     }
 
     /// Close the underlying connection and abort the listener/writer tasks.
@@ -329,6 +426,7 @@ async fn listener_task(
     mut stream: futures_util::stream::SplitStream<WsStream>,
     pending: Arc<Mutex<PendingMap>>,
     flush_tx: mpsc::UnboundedSender<FlushEvent>,
+    class_changed_tx: mpsc::UnboundedSender<ClassChangedEvent>,
 ) {
     while let Some(msg) = stream.next().await {
         match msg {
@@ -342,7 +440,7 @@ async fn listener_task(
                 };
                 // Push frame? Dispatch and continue.
                 if value.get("type").and_then(|v| v.as_str()) == Some("push") {
-                    handle_push_frame(&value, &flush_tx);
+                    handle_push_frame(&value, &flush_tx, &class_changed_tx);
                     continue;
                 }
                 // Otherwise it's a reply to a pending request — look up by id.
@@ -387,29 +485,53 @@ async fn listener_task(
     }
 }
 
-fn handle_push_frame(value: &serde_json::Value, flush_tx: &mpsc::UnboundedSender<FlushEvent>) {
+fn handle_push_frame(
+    value: &serde_json::Value,
+    flush_tx: &mpsc::UnboundedSender<FlushEvent>,
+    class_changed_tx: &mpsc::UnboundedSender<ClassChangedEvent>,
+) {
     let channel = value.get("channel").and_then(|v| v.as_str());
     let event = value.get("event").and_then(|v| v.as_str());
-    // Other push channels (classes, actors, bindings, transcript, logs) are
-    // not consumed by the LSP today — fall through and drop silently.
-    if let (Some("workspace"), Some("flush_completed")) = (channel, event) {
-        let files = value
-            .get("data")
-            .and_then(|d| d.get("files"))
-            .and_then(|f| f.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        if files.is_empty() {
-            debug!("runtime: flush_completed with empty files list");
-            return;
+    // Other push channels (actors, bindings, transcript, logs) are not
+    // consumed by the LSP today — fall through and drop silently.
+    match (channel, event) {
+        (Some("workspace"), Some("flush_completed")) => {
+            let files = value
+                .get("data")
+                .and_then(|d| d.get("files"))
+                .and_then(|f| f.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if files.is_empty() {
+                debug!("runtime: flush_completed with empty files list");
+                return;
+            }
+            if let Err(e) = flush_tx.send(FlushEvent { files }) {
+                warn!(error = %e, "runtime: flush_tx receiver dropped");
+            }
         }
-        if let Err(e) = flush_tx.send(FlushEvent { files }) {
-            warn!(error = %e, "runtime: flush_tx receiver dropped");
+        // BT-2239: a class load / reload / method-install (all routed through
+        // `beamtalk_class_builder`) invalidates any runtime-attached nav
+        // cache keyed on that class's method dictionary or senders.
+        (Some("classes"), Some("loaded")) => {
+            let class_name = value
+                .get("data")
+                .and_then(|d| d.get("class"))
+                .and_then(|c| c.as_str())
+                .map(String::from);
+            let Some(class_name) = class_name else {
+                debug!("runtime: classes/loaded push with no class name");
+                return;
+            };
+            if let Err(e) = class_changed_tx.send(ClassChangedEvent { class_name }) {
+                warn!(error = %e, "runtime: class_changed_tx receiver dropped");
+            }
         }
+        _ => {}
     }
 }
 
@@ -489,6 +611,7 @@ mod tests {
     #[tokio::test]
     async fn push_frame_with_files_is_forwarded() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -499,6 +622,7 @@ mod tests {
                 }
             }),
             &tx,
+            &class_tx,
         );
         let evt = rx.recv().await.expect("flush event");
         assert_eq!(evt.files, vec!["src/counter.bt", "src/foo.bt"]);
@@ -507,6 +631,7 @@ mod tests {
     #[tokio::test]
     async fn push_frame_with_empty_files_is_dropped() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -515,6 +640,7 @@ mod tests {
                 "data": { "files": [] }
             }),
             &tx,
+            &class_tx,
         );
         // Empty files: nothing should arrive.
         assert!(rx.try_recv().is_err());
@@ -523,6 +649,7 @@ mod tests {
     #[tokio::test]
     async fn push_frame_unknown_channel_is_ignored() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, mut class_rx) = unbounded_channel::<ClassChangedEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -531,13 +658,53 @@ mod tests {
                 "data": { "class": "Counter", "pid": "<0.1.0>" }
             }),
             &tx,
+            &class_tx,
         );
         assert!(rx.try_recv().is_err());
+        assert!(class_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn class_loaded_push_forwards_to_class_changed_channel() {
+        let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, mut class_rx) = unbounded_channel::<ClassChangedEvent>();
+        handle_push_frame(
+            &json!({
+                "type": "push",
+                "channel": "classes",
+                "event": "loaded",
+                "data": { "class": "Counter" }
+            }),
+            &tx,
+            &class_tx,
+        );
+        let evt = class_rx.recv().await.expect("class changed");
+        assert_eq!(evt.class_name, "Counter");
+        // Flush channel must not be touched.
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn class_loaded_push_without_class_name_is_dropped() {
+        let (tx, _rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, mut class_rx) = unbounded_channel::<ClassChangedEvent>();
+        handle_push_frame(
+            &json!({
+                "type": "push",
+                "channel": "classes",
+                "event": "loaded",
+                "data": {}
+            }),
+            &tx,
+            &class_tx,
+        );
+        assert!(class_rx.try_recv().is_err());
     }
 
     #[tokio::test]
     async fn push_frame_missing_data_is_ignored() {
         let (tx, mut rx) = unbounded_channel::<FlushEvent>();
+        let (class_tx, _class_rx) = unbounded_channel::<ClassChangedEvent>();
         handle_push_frame(
             &json!({
                 "type": "push",
@@ -545,6 +712,7 @@ mod tests {
                 "event": "flush_completed"
             }),
             &tx,
+            &class_tx,
         );
         assert!(rx.try_recv().is_err());
     }

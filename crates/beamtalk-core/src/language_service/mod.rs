@@ -50,10 +50,14 @@
 //! ```
 
 mod project_index;
+pub mod runtime_delegate;
 mod value_objects;
 
 // Re-export value objects at the module level
 pub use project_index::ProjectIndex;
+pub use runtime_delegate::{
+    NavQuery, NavQueryResponse, NavSite, RuntimeLocation, line_to_position, nav_site_to_location,
+};
 pub use value_objects::{
     ByteOffset, CodeAction, Completion, CompletionKind, Diagnostic, DocumentSymbol,
     DocumentSymbolKind, HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
@@ -256,6 +260,45 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
         self.files.get(file).map(|data| data.source.clone())
+    }
+
+    /// BT-2239: Classify the cursor for a Find-References request and
+    /// return the equivalent [`NavQuery`], or `None` when the cursor is
+    /// on a local identifier that can't be expressed as a runtime
+    /// navigation query.
+    ///
+    /// Public so `beamtalk-lsp` can build runtime-delegate requests with
+    /// the *same* classification logic the AST walker uses — keeping the
+    /// two modes in lockstep is a foundational invariant of the epic
+    /// (BT-2215).
+    ///
+    /// Returns:
+    /// * `Some(NavQuery::SendersOf(selector))` when the cursor is on a
+    ///   selector token (call site or method header).
+    /// * `Some(NavQuery::ReferencesTo(class_name))` when the cursor is on
+    ///   a class-name identifier known to the project hierarchy.
+    /// * `None` for local-identifier references (parameters, locals) and
+    ///   any other shape the runtime can't resolve.
+    #[must_use]
+    pub fn references_query_at(&self, file: &Utf8PathBuf, position: Position) -> Option<NavQuery> {
+        let file_data = self.files.get(file)?;
+        let offset = position.to_byte_offset(&file_data.source)?;
+
+        if let Some(selector_lookup) =
+            Self::find_selector_at_offset(&file_data.module, offset.get())
+        {
+            return Some(NavQuery::SendersOf(selector_lookup.selector_name));
+        }
+        if let Some(selector_name) =
+            Self::find_method_header_selector_at_offset(&file_data.module, offset.get())
+        {
+            return Some(NavQuery::SendersOf(selector_name));
+        }
+        let (ident, _span) = self.find_identifier_at_position(file, position)?;
+        if self.project_index.hierarchy().has_class(&ident.name) {
+            return Some(NavQuery::ReferencesTo(ident.name));
+        }
+        None
     }
 
     /// If the offset falls inside the header of a method *definition*
