@@ -358,16 +358,22 @@ impl SimpleLanguageService {
         None
     }
 
-    /// BT-2243: find every call site / definition of `selector_name` across
-    /// every indexed file, sharing the same walker as `find_references`.
+    /// BT-2243: find every *call site* of `selector_name` across every
+    /// indexed file — sends only, no method-definition headers.
     ///
     /// Used by the LSP `callHierarchy/incomingCalls` cold-file fallback
     /// when no runtime is attached or the `delegateToRuntime` flag is off.
     /// The runtime-attached path goes through `nav-query` `senders` and
     /// the `beamtalk_xref` index instead.
+    ///
+    /// Unlike [`LanguageService::find_references`] (which intentionally
+    /// also surfaces method-definition headers for the
+    /// `textDocument/references` UI), this walker excludes definitions so
+    /// the editor doesn't list the method's own header as an incoming
+    /// call to itself.
     #[must_use]
-    pub fn find_selector_references_across_files(&self, selector_name: &str) -> Vec<Location> {
-        crate::queries::references_provider::find_selector_references(
+    pub fn find_selector_send_sites_across_files(&self, selector_name: &str) -> Vec<Location> {
+        crate::queries::references_provider::find_selector_send_sites(
             selector_name,
             self.files.iter().map(|(path, data)| (path, &data.module)),
         )
@@ -1596,28 +1602,38 @@ mod tests {
         assert!(target.is_none());
     }
 
-    /// Cross-file reference walk exposes the same shape as `find_references`
-    /// for the cold-file incoming-calls fallback.
+    /// BT-2243: cold-file incoming-calls fallback walks every file and
+    /// returns *only* sender sites — method-definition headers must be
+    /// excluded (otherwise the editor would list the method itself as
+    /// "calling itself"). Compare with `find_references`, which also
+    /// emits the definition for the `textDocument/references` UI.
     #[test]
-    fn find_selector_references_across_files_walks_every_file() {
+    fn find_selector_send_sites_across_files_excludes_definitions() {
         let mut service = SimpleLanguageService::new();
         let file_a = Utf8PathBuf::from("a.bt");
         let file_b = Utf8PathBuf::from("b.bt");
+        // File A defines `increment` but does not send it.
         service.update_file(
             file_a.clone(),
             "Object subclass: A\n  increment => 1\n".to_string(),
         );
+        // File B sends `increment` from another method.
         service.update_file(
             file_b.clone(),
             "Object subclass: B\n  use => a increment\n".to_string(),
         );
 
-        let refs = service.find_selector_references_across_files("increment");
-        // The walker collects both the definition site in A and the call
-        // site in B — same set as the LSP `references` handler would
-        // surface.
-        assert!(refs.iter().any(|loc| loc.file == file_a));
-        assert!(refs.iter().any(|loc| loc.file == file_b));
+        let sites = service.find_selector_send_sites_across_files("increment");
+        // The sender lives in B, and only in B — the definition header in
+        // A must not appear, even though A is the implementor.
+        assert!(
+            sites.iter().any(|loc| loc.file == file_b),
+            "expected call site in B, got {sites:?}"
+        );
+        assert!(
+            !sites.iter().any(|loc| loc.file == file_a),
+            "definition in A leaked into senders: {sites:?}"
+        );
     }
 
     #[test]

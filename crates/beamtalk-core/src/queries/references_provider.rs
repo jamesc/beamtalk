@@ -439,6 +439,54 @@ fn collect_pattern_class_refs(
     }
 }
 
+/// Find call sites of a selector across files — sends only, no
+/// method-definition headers.
+///
+/// BT-2243: backs the LSP `callHierarchy/incomingCalls` cold-file fallback.
+/// Incoming calls are by definition *places that call the method*, so a
+/// method's own definition header must be excluded — otherwise the editor
+/// would list the method itself (and every other implementor) as an
+/// "incoming call".
+///
+/// Collects locations where the selector appears as:
+/// - A `MessageSend` with matching selector
+/// - A cascade message with matching selector
+///
+/// Method-definition headers are deliberately omitted; use
+/// [`find_selector_references`] when you also want the definitions
+/// (e.g. for `textDocument/references`).
+pub fn find_selector_send_sites<'a>(
+    selector_name: &str,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Vec<Location> {
+    let mut results = Vec::new();
+
+    for (file_path, module) in files {
+        // Top-level expressions
+        for stmt in &module.expressions {
+            collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
+        }
+
+        // Class method bodies (instance + class side)
+        for class in &module.classes {
+            for method in class.methods.iter().chain(class.class_methods.iter()) {
+                for stmt in &method.body {
+                    collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
+                }
+            }
+        }
+
+        // Standalone method bodies
+        for smd in &module.method_definitions {
+            for stmt in &smd.method.body {
+                collect_selector_refs(&stmt.expression, selector_name, file_path, &mut results);
+            }
+        }
+    }
+
+    results
+}
+
 /// Find all references to a method selector across files.
 ///
 /// Collects all locations where the selector appears as:

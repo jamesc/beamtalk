@@ -846,13 +846,16 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "document_formatting_provider" => vec!["textDocument/formatting".into()],
         "document_range_formatting_provider" => vec!["textDocument/rangeFormatting".into()],
         "code_action_provider" => vec!["textDocument/codeAction".into()],
-        // BT-2243: `callHierarchy/{prepareCallHierarchy,incomingCalls,
-        // outgoingCalls}` are all wired by the same `call_hierarchy_provider`
-        // capability — the LSP server has no per-RPC opt-in. Emit all three
-        // doc-side names so the parity row that lists them as a slash-
-        // separated set verifies cleanly.
+        // BT-2243: per the LSP spec, the three call-hierarchy RPCs are
+        // `textDocument/prepareCallHierarchy` (the prepare step lives
+        // under `textDocument/` because it takes a text-document
+        // position) plus `callHierarchy/{incomingCalls,outgoingCalls}`
+        // (the follow-ups live under `callHierarchy/` because they take
+        // a `CallHierarchyItem` rather than a position). All three are
+        // wired by the same `call_hierarchy_provider` capability — the
+        // LSP server has no per-RPC opt-in.
         "call_hierarchy_provider" => vec![
-            "callHierarchy/prepareCallHierarchy".into(),
+            "textDocument/prepareCallHierarchy".into(),
             "callHierarchy/incomingCalls".into(),
             "callHierarchy/outgoingCalls".into(),
         ],
@@ -1255,7 +1258,10 @@ fn _stub() -> () {
 ";
         let mut caps = BTreeSet::new();
         extract_lsp_caps(src, &mut caps);
-        assert!(caps.contains("callHierarchy/prepareCallHierarchy"));
+        // Per the LSP spec, prepare lives under `textDocument/` because it
+        // takes a text-document position; the follow-up RPCs live under
+        // `callHierarchy/` because they take a `CallHierarchyItem`.
+        assert!(caps.contains("textDocument/prepareCallHierarchy"));
         assert!(caps.contains("callHierarchy/incomingCalls"));
         assert!(caps.contains("callHierarchy/outgoingCalls"));
     }
