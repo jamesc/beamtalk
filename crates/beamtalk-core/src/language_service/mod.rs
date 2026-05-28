@@ -59,8 +59,9 @@ pub use runtime_delegate::{
     NavQuery, NavQueryResponse, NavSite, RuntimeLocation, line_to_position, nav_site_to_location,
 };
 pub use value_objects::{
-    ByteOffset, CodeAction, Completion, CompletionKind, Diagnostic, DocumentSymbol,
-    DocumentSymbolKind, HoverInfo, Location, ParameterInfo, Position, SignatureHelp, SignatureInfo,
+    ByteOffset, CallHierarchyTarget, CodeAction, Completion, CompletionKind, Diagnostic,
+    DocumentSymbol, DocumentSymbolKind, HoverInfo, Location, ParameterInfo, Position,
+    SignatureHelp, SignatureInfo,
 };
 
 // Property-based tests for language service operations (ADR 0011 Phase 2)
@@ -260,6 +261,133 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn file_source(&self, file: &Utf8PathBuf) -> Option<String> {
         self.files.get(file).map(|data| data.source.clone())
+    }
+
+    /// BT-2243: Classify the cursor for a
+    /// `textDocument/prepareCallHierarchy` request and return a
+    /// [`CallHierarchyTarget`], or `None` when the cursor is not on a
+    /// recognisable method symbol.
+    ///
+    /// The classifier is intentionally cold-file: it walks only the open
+    /// document's AST. The LSP layer turns the target into a
+    /// `CallHierarchyItem`; the `incomingCalls` / `outgoingCalls` follow-ups
+    /// use that item to dispatch — incoming via the existing `nav-query`
+    /// `SendersOf` path, outgoing via a body walk anchored on this hit.
+    ///
+    /// Returns:
+    /// * `Some(CallHierarchyTarget)` when the cursor is on a selector token
+    ///   (call site or method-definition header). When the hit lands on a
+    ///   method-definition header we additionally fill in the enclosing
+    ///   class name and class-side flag so outgoing-calls can locate the
+    ///   method body deterministically.
+    /// * `None` when the cursor is on a local identifier, whitespace, or
+    ///   any non-selector shape — the editor will fall back to no call
+    ///   hierarchy.
+    #[must_use]
+    pub fn call_hierarchy_prepare_at(
+        &self,
+        file: &Utf8PathBuf,
+        position: Position,
+    ) -> Option<CallHierarchyTarget> {
+        let file_data = self.files.get(file)?;
+        let offset = position.to_byte_offset(&file_data.source)?;
+        let offset_val = offset.get();
+
+        // 1. Method-definition header hit — most informative because we can
+        //    fill in the enclosing class and class-side flag.
+        for class in &file_data.module.classes {
+            for method in &class.methods {
+                if Self::offset_in_method_header_selector(method, offset_val) {
+                    let selection = Self::method_header_selection_span(method);
+                    return Some(CallHierarchyTarget::new(
+                        method.selector.name(),
+                        Some(class.name.name.clone()),
+                        false,
+                        file.clone(),
+                        method.span,
+                        selection,
+                    ));
+                }
+            }
+            for method in &class.class_methods {
+                if Self::offset_in_method_header_selector(method, offset_val) {
+                    let selection = Self::method_header_selection_span(method);
+                    return Some(CallHierarchyTarget::new(
+                        method.selector.name(),
+                        Some(class.name.name.clone()),
+                        true,
+                        file.clone(),
+                        method.span,
+                        selection,
+                    ));
+                }
+            }
+        }
+        for smd in &file_data.module.method_definitions {
+            if Self::offset_in_method_header_selector(&smd.method, offset_val) {
+                let selection = Self::method_header_selection_span(&smd.method);
+                return Some(CallHierarchyTarget::new(
+                    smd.method.selector.name(),
+                    Some(smd.class_name.name.clone()),
+                    smd.is_class_method,
+                    file.clone(),
+                    smd.method.span,
+                    selection,
+                ));
+            }
+        }
+
+        // 2. Call-site selector hit — no enclosing class on the *send*
+        //    (the receiver class is dynamic), but the selector alone is
+        //    enough to drive `sendersOf:` for incoming calls. Outgoing
+        //    calls from a call-site target are not meaningful (we have no
+        //    method body to walk), so the LSP layer returns `[]` in that
+        //    case rather than picking the wrong method.
+        if let Some(selector_lookup) = Self::find_selector_at_offset(&file_data.module, offset_val)
+        {
+            return Some(CallHierarchyTarget::new(
+                selector_lookup.selector_name,
+                None,
+                false,
+                file.clone(),
+                selector_lookup.selector_span,
+                selector_lookup.selector_span,
+            ));
+        }
+
+        None
+    }
+
+    /// BT-2243: find every call site / definition of `selector_name` across
+    /// every indexed file, sharing the same walker as `find_references`.
+    ///
+    /// Used by the LSP `callHierarchy/incomingCalls` cold-file fallback
+    /// when no runtime is attached or the `delegateToRuntime` flag is off.
+    /// The runtime-attached path goes through `nav-query` `senders` and
+    /// the `beamtalk_xref` index instead.
+    #[must_use]
+    pub fn find_selector_references_across_files(&self, selector_name: &str) -> Vec<Location> {
+        crate::queries::references_provider::find_selector_references(
+            selector_name,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
+        )
+    }
+
+    /// The selector-token span of a method-definition header, used as the
+    /// `selection_range` on `CallHierarchyItem`. For keyword selectors this
+    /// is the span covering all keyword parts; for unary / binary selectors
+    /// we fall back to `method.span` since `MessageSelector` carries no
+    /// per-token span (see [`Self::offset_in_method_header_selector`] for
+    /// the same trade-off).
+    fn method_header_selection_span(method: &MethodDefinition) -> Span {
+        match &method.selector {
+            MessageSelector::Keyword(parts) if !parts.is_empty() => {
+                let first = parts.first().expect("non-empty checked above").span;
+                let last = parts.last().expect("non-empty checked above").span;
+                first.merge(last)
+            }
+            _ => method.span,
+        }
     }
 
     /// BT-2239: Classify the cursor for a Find-References request and
@@ -1396,6 +1524,100 @@ mod tests {
         let loc = def.unwrap();
         assert_eq!(loc.file, file);
         assert_eq!(loc.span.start(), 0);
+    }
+
+    // --- BT-2243: call hierarchy prepare classifier ---
+
+    /// Cursor on a method-definition header (instance side) populates
+    /// selector + class + `class_side=false`.
+    #[test]
+    fn call_hierarchy_prepare_at_method_header_instance() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("counter.bt");
+        // Line 2, column 2: `increment` selector token in a method header.
+        let source = "Object subclass: Counter\n  increment => 1\n";
+        service.update_file(file.clone(), source.to_string());
+
+        let target = service
+            .call_hierarchy_prepare_at(&file, Position::new(1, 2))
+            .expect("prepare hit on method header");
+        assert_eq!(target.selector, "increment");
+        assert_eq!(target.class_name.as_deref(), Some("Counter"));
+        assert!(!target.class_side);
+        assert_eq!(target.file, file);
+    }
+
+    /// Cursor on a class-method header populates `class_side=true`.
+    #[test]
+    fn call_hierarchy_prepare_at_method_header_class_side() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("counter.bt");
+        let source = "Object subclass: Counter\n  class make => self new\n";
+        service.update_file(file.clone(), source.to_string());
+
+        // Column 8: inside the `make` selector on the class-method header.
+        let target = service
+            .call_hierarchy_prepare_at(&file, Position::new(1, 8))
+            .expect("prepare hit on class-method header");
+        assert_eq!(target.selector, "make");
+        assert_eq!(target.class_name.as_deref(), Some("Counter"));
+        assert!(target.class_side);
+    }
+
+    /// Cursor on a call-site selector populates selector but leaves
+    /// `class_name` empty — the receiver class is dynamic.
+    #[test]
+    fn call_hierarchy_prepare_at_call_site_has_no_class_context() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("counter.bt");
+        let source = "Object subclass: Counter\n  greet => self name asString\n";
+        service.update_file(file.clone(), source.to_string());
+
+        // Column 23: inside `asString` at the call site
+        // (2-space indent + `greet => self name ` = 21 chars; column 23
+        // lands on the third letter of `asString`).
+        let target = service
+            .call_hierarchy_prepare_at(&file, Position::new(1, 23))
+            .expect("prepare hit on call site");
+        assert_eq!(target.selector, "asString");
+        assert!(target.class_name.is_none());
+    }
+
+    /// Cursor on whitespace / non-selector returns None.
+    #[test]
+    fn call_hierarchy_prepare_at_returns_none_on_local_identifier() {
+        let mut service = SimpleLanguageService::new();
+        let file = Utf8PathBuf::from("counter.bt");
+        let source = "x := 42\n".to_string();
+        service.update_file(file.clone(), source);
+
+        // Column 0 is the bare local variable `x` — not a selector.
+        let target = service.call_hierarchy_prepare_at(&file, Position::new(0, 0));
+        assert!(target.is_none());
+    }
+
+    /// Cross-file reference walk exposes the same shape as `find_references`
+    /// for the cold-file incoming-calls fallback.
+    #[test]
+    fn find_selector_references_across_files_walks_every_file() {
+        let mut service = SimpleLanguageService::new();
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+        service.update_file(
+            file_a.clone(),
+            "Object subclass: A\n  increment => 1\n".to_string(),
+        );
+        service.update_file(
+            file_b.clone(),
+            "Object subclass: B\n  use => a increment\n".to_string(),
+        );
+
+        let refs = service.find_selector_references_across_files("increment");
+        // The walker collects both the definition site in A and the call
+        // site in B — same set as the LSP `references` handler would
+        // surface.
+        assert!(refs.iter().any(|loc| loc.file == file_a));
+        assert!(refs.iter().any(|loc| loc.file == file_b));
     }
 
     #[test]

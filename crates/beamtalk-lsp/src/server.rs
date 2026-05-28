@@ -19,26 +19,29 @@ use serde::{Deserialize, Serialize};
 use crate::runtime::{ClassChangedEvent, FlushEvent, RuntimeClient, RuntimeError};
 
 use beamtalk_core::language_service::{
-    CompletionKind, DocumentSymbolKind, LanguageService, NavQuery, NavSite, Position as BtPosition,
-    RuntimeLocation, SimpleLanguageService, nav_site_to_location,
+    CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService, NavQuery, NavSite,
+    Position as BtPosition, RuntimeLocation, SimpleLanguageService, nav_site_to_location,
 };
+use beamtalk_core::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
 use beamtalk_core::unparse::format_source;
 use camino::Utf8PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
-    CodeAction, CodeActionKind, CodeActionOrCommand, CodeActionParams,
-    CodeActionProviderCapability, CodeActionResponse, CompletionItem, CompletionItemKind,
-    CompletionOptions, CompletionParams, CompletionResponse, DiagnosticSeverity,
-    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentFormattingParams, DocumentRangeFormattingParams,
-    DocumentSymbolParams, DocumentSymbolResponse, Documentation, ExecuteCommandOptions,
-    ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
-    MarkupContent, MarkupKind, MessageType, OneOf, ParameterInformation, ParameterLabel, Position,
-    Range, ReferenceParams, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind,
+    CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
+    CallHierarchyOptions, CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams,
+    CallHierarchyPrepareParams, CallHierarchyServerCapability, CodeAction, CodeActionKind,
+    CodeActionOrCommand, CodeActionParams, CodeActionProviderCapability, CodeActionResponse,
+    CompletionItem, CompletionItemKind, CompletionOptions, CompletionParams, CompletionResponse,
+    DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, DocumentFormattingParams,
+    DocumentRangeFormattingParams, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
+    ExecuteCommandOptions, ExecuteCommandParams, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    InitializedParams, MarkupContent, MarkupKind, MessageType, OneOf, ParameterInformation,
+    ParameterLabel, Position, Range, ReferenceParams, ServerCapabilities, SignatureHelp,
+    SignatureHelpOptions, SignatureHelpParams, SignatureInformation, SymbolInformation, SymbolKind,
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncOptions,
     TextDocumentSyncSaveOptions, TextEdit, Url, WorkDoneProgressOptions, WorkspaceEdit,
     WorkspaceSymbolParams,
@@ -934,6 +937,21 @@ impl LanguageServer for Backend {
                         .collect(),
                     work_done_progress_options: WorkDoneProgressOptions::default(),
                 }),
+                // BT-2243: `callHierarchy/{prepareCallHierarchy,incomingCalls,
+                // outgoingCalls}`. Incoming calls are answered via the
+                // existing `nav-query` `senders` kind through
+                // `Backend::delegate_nav_query`; outgoing calls walk the
+                // method body's AST in-process (the cold-file path is the
+                // only correct answer because the body lives in the open
+                // file). The advertised capability is wired regardless of
+                // the `delegateToRuntime` flag — runtime delegation flips
+                // only the incoming-calls fallback path between the AST
+                // walker and the runtime's `senders_of` xref index.
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Options(
+                    CallHierarchyOptions {
+                        work_done_progress_options: WorkDoneProgressOptions::default(),
+                    },
+                )),
                 ..Default::default()
             },
             ..Default::default()
@@ -1375,6 +1393,198 @@ impl LanguageServer for Backend {
             Ok(None)
         } else {
             Ok(Some(locations))
+        }
+    }
+
+    /// BT-2243: `textDocument/prepareCallHierarchy` — resolve the cursor to
+    /// a method-level `CallHierarchyItem` the editor can pass back to
+    /// `callHierarchy/{incomingCalls,outgoingCalls}`.
+    ///
+    /// Cold-file classification only — `SimpleLanguageService::call_hierarchy_prepare_at`
+    /// walks the open document's AST. When the hit lands on a method-
+    /// definition header we record the enclosing class and class-side flag
+    /// in `data` (via [`SerializedCallTarget`]) so outgoing calls can
+    /// reliably locate the body to walk; call-site hits omit those fields
+    /// because the receiver class is dynamic.
+    ///
+    /// Returns `None` (`null` to the editor) when the cursor is on a local
+    /// identifier, whitespace, or any non-selector shape — VS Code falls
+    /// back to no call hierarchy in that case.
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let Some(path) = self.resolve_path_for_uri(&uri) else {
+            return Ok(None);
+        };
+
+        let item = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let pos = to_bt_position(params.text_document_position_params.position, &source);
+            let Some(target) = svc.call_hierarchy_prepare_at(&path, pos) else {
+                return Ok(None);
+            };
+            target_to_lsp_item(&target, &uri, &source)
+        };
+
+        match item {
+            Some(item) => Ok(Some(vec![item])),
+            None => Ok(None),
+        }
+    }
+
+    /// BT-2243: `callHierarchy/incomingCalls` — who calls this method.
+    ///
+    /// Decodes the [`SerializedCallTarget`] from the item's `data` field
+    /// to recover the selector, then dispatches through the existing
+    /// `nav-query` `SendersOf` channel via [`Backend::delegate_nav_query`].
+    /// The runtime path uses `beamtalk_xref:senders_of/1` (live, sees
+    /// extension methods + `ChangeLog` patches); the AST fallback uses
+    /// the in-process `references_provider::find_selector_references`
+    /// walker — the same path used by `textDocument/references`.
+    ///
+    /// Each sender site becomes one `CallHierarchyIncomingCall`. Sites with
+    /// no backing source file (stdlib without `source_file` metadata,
+    /// dynamic / bootstrap classes) are dropped — the editor cannot
+    /// navigate to them anyway.
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let Some(serialized) = SerializedCallTarget::from_item(&params.item) else {
+            return Ok(None);
+        };
+        let selector = serialized.selector.clone();
+
+        let backend_self = self;
+        let display_name = serialized.selector.clone();
+        let ast_fallback = move || -> Vec<CallHierarchyIncomingCall> {
+            let svc = backend_self.service.lock().expect("service lock poisoned");
+            let refs = svc.find_selector_references_across_files(&selector);
+            refs.into_iter()
+                .filter_map(|loc| {
+                    let source = svc.file_source(&loc.file)?;
+                    let range = span_to_range(loc.span, &source);
+                    let uri = path_to_uri(&loc.file)?;
+                    let from = CallHierarchyItem {
+                        name: display_name.clone(),
+                        kind: SymbolKind::METHOD,
+                        tags: None,
+                        detail: None,
+                        uri,
+                        range,
+                        selection_range: range,
+                        data: None,
+                    };
+                    Some(CallHierarchyIncomingCall {
+                        from,
+                        from_ranges: vec![range],
+                    })
+                })
+                .collect()
+        };
+
+        let query = NavQuery::SendersOf(serialized.selector.clone().into());
+        let to_lsp =
+            move |site: &NavSite, roots: &[PathBuf]| -> Option<CallHierarchyIncomingCall> {
+                let resolved = nav_site_to_location(site, roots)?;
+                let uri = path_to_uri(&resolved.file)?;
+                let line = resolved.line.checked_sub(1)?;
+                let range = Range {
+                    start: Position::new(line, 0),
+                    end: Position::new(line, 0),
+                };
+                // Name the item after the *containing* method (the caller),
+                // because the editor renders this as "X calls our method".
+                let from = CallHierarchyItem {
+                    name: site.method.to_string(),
+                    kind: SymbolKind::METHOD,
+                    tags: None,
+                    detail: Some(format_class_detail(&site.class, site.class_side)),
+                    uri,
+                    range,
+                    selection_range: range,
+                    data: None,
+                };
+                Some(CallHierarchyIncomingCall {
+                    from,
+                    from_ranges: vec![range],
+                })
+            };
+
+        let calls = self.delegate_nav_query(query, to_lsp, ast_fallback).await;
+        if calls.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(calls))
+        }
+    }
+
+    /// BT-2243: `callHierarchy/outgoingCalls` — what does this method call.
+    ///
+    /// Walks the method body's AST in-process via
+    /// [`find_all_sends_in_source`]: the body source slice comes from the
+    /// item's recorded file + range (the file the editor opened, the range
+    /// covering the method definition). One [`CallHierarchyOutgoingCall`]
+    /// per send is emitted, with the selector as the item's name and the
+    /// 1-based line (translated to LSP 0-based) as the call range.
+    ///
+    /// Erlang FFI sends (`Erlang foo` / `(Erlang foo) bar:`) are skipped —
+    /// these are Erlang function invocations through the `ErlangModule`
+    /// DNU bridge, not Beamtalk message sends, so showing them as
+    /// outgoing calls would shadow Beamtalk selectors with Erlang
+    /// module/function names. Mirrors the same exclusion in the stdlib
+    /// `unusedSelectors` query (BT-2212).
+    ///
+    /// Returns `None` when:
+    /// * The item is a call-site target (no enclosing method body to walk)
+    /// * The file isn't open / has no cached source
+    /// * The body slice contains no sends
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let Some(serialized) = SerializedCallTarget::from_item(&params.item) else {
+            return Ok(None);
+        };
+        // A call-site hit (no class context) has no body to walk.
+        if serialized.class_name.is_none() {
+            return Ok(None);
+        }
+        let Ok(path) = Utf8PathBuf::try_from(PathBuf::from(serialized.file.as_str())) else {
+            return Ok(None);
+        };
+
+        let calls = {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(source) = svc.file_source(&path) else {
+                return Ok(None);
+            };
+            let Some(body_slice) =
+                source.get(serialized.range_start as usize..serialized.range_end as usize)
+            else {
+                return Ok(None);
+            };
+            // Re-derive the LSP line offset for the body slice so per-hit
+            // ranges land at the right absolute line in the file. Method
+            // definitions start at column 0 in practice (the unparser
+            // emits them that way), so a column anchor is not needed —
+            // the LSP item's range carries the precise span.
+            let body_start_pos = offset_to_position(serialized.range_start as usize, &source);
+            let Some(uri) = path_to_uri(&path) else {
+                return Ok(None);
+            };
+            outgoing_calls_for_body(body_slice, body_start_pos, &uri)
+        };
+
+        if calls.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(calls))
         }
     }
 
@@ -2408,6 +2618,161 @@ fn span_to_range(span: Span, source: &str) -> Range {
     let start = offset_to_position(span.start() as usize, source);
     let end = offset_to_position(span.end() as usize, source);
     Range { start, end }
+}
+
+/// BT-2243: serializable shape of a [`CallHierarchyTarget`] stored on the
+/// `data` field of a [`CallHierarchyItem`] so the incoming/outgoing
+/// follow-up requests can re-construct enough context to dispatch.
+///
+/// The LSP spec is explicit that `data` is the channel for preserving
+/// prepare-side state across the three-call flow (prepare → incoming /
+/// outgoing): `data` is opaque to the editor, round-tripped verbatim.
+/// We encode everything we need to dispatch incoming (selector) and
+/// outgoing (selector + file + body range to walk) calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SerializedCallTarget {
+    /// Selector of the method this item refers to. Drives the senders-of
+    /// dispatch for incoming calls and serves as the displayable name.
+    selector: String,
+    /// Enclosing class name when the prepare hit was on a method-definition
+    /// header, `None` for a call-site hit. Outgoing-calls dispatch refuses
+    /// to walk a body when this is `None` (no method context to anchor on).
+    #[serde(default)]
+    class_name: Option<String>,
+    /// Whether the method is class-side. Mirrored to the runtime-attached
+    /// senders query; the AST walker is class-agnostic.
+    #[serde(default)]
+    class_side: bool,
+    /// File path the prepare hit landed in — used by outgoing-calls to
+    /// re-locate the method body in the open document set.
+    file: String,
+    /// Start byte offset of the method-definition span in `file`. Combined
+    /// with `range_end` to extract the body slice for the outgoing AST
+    /// walk.
+    range_start: u32,
+    /// End byte offset of the method-definition span in `file`.
+    range_end: u32,
+}
+
+impl SerializedCallTarget {
+    /// Build from a [`CallHierarchyTarget`] produced by the prepare
+    /// classifier.
+    fn from_target(target: &CallHierarchyTarget) -> Self {
+        Self {
+            selector: target.selector.to_string(),
+            class_name: target
+                .class_name
+                .as_ref()
+                .map(std::string::ToString::to_string),
+            class_side: target.class_side,
+            file: target.file.as_str().to_string(),
+            range_start: target.range.start(),
+            range_end: target.range.end(),
+        }
+    }
+
+    /// Decode from a [`CallHierarchyItem`]'s `data` field, returning `None`
+    /// when the field is absent or malformed. The LSP spec does not
+    /// guarantee `data` survives every editor round-trip (some clients
+    /// scrub it), so callers should treat `None` as "the editor didn't
+    /// preserve our context — answer with no calls" rather than as an
+    /// error condition.
+    fn from_item(item: &CallHierarchyItem) -> Option<Self> {
+        let data = item.data.as_ref()?;
+        serde_json::from_value(data.clone()).ok()
+    }
+}
+
+/// Build a [`CallHierarchyItem`] from a prepare-side target, embedding
+/// the [`SerializedCallTarget`] payload on `data` so the follow-up
+/// incoming/outgoing requests can dispatch without re-classifying.
+///
+/// `kind` is always [`SymbolKind::METHOD`] — call hierarchy items are
+/// methods by definition. `detail` includes the class name (with a
+/// `class` suffix for class-side methods) when known, mirroring the
+/// document-symbol convention.
+fn target_to_lsp_item(
+    target: &CallHierarchyTarget,
+    uri: &Url,
+    source: &str,
+) -> Option<CallHierarchyItem> {
+    let range = span_to_range(target.range, source);
+    let selection_range = span_to_range(target.selection_range, source);
+    let detail = target
+        .class_name
+        .as_ref()
+        .map(|cn| format_class_detail(cn.as_str(), target.class_side));
+    let data = serde_json::to_value(SerializedCallTarget::from_target(target)).ok()?;
+    Some(CallHierarchyItem {
+        name: target.selector.to_string(),
+        kind: SymbolKind::METHOD,
+        tags: None,
+        detail,
+        uri: uri.clone(),
+        range,
+        selection_range,
+        data: Some(data),
+    })
+}
+
+/// Format a class-name detail string for the `detail` field on a
+/// `CallHierarchyItem`. Mirrors the workspace-symbol convention of
+/// rendering class-side methods with a `class` suffix so the editor
+/// shows `Counter` vs `Counter class` in the hover.
+fn format_class_detail(class: &str, class_side: bool) -> String {
+    if class_side {
+        format!("{class} class")
+    } else {
+        class.to_string()
+    }
+}
+
+/// BT-2243: walk a method body slice for outgoing calls.
+///
+/// Reads sends via [`find_all_sends_in_source`] (the same query that backs
+/// the stdlib `SystemNavigation messagesSentBy:`), drops Erlang FFI sends,
+/// and emits one [`CallHierarchyOutgoingCall`] per remaining send. Lines
+/// are 1-based relative to `body_slice`; the LSP layer adds
+/// `body_start_pos.line` (zero-based) so per-call ranges land at the right
+/// absolute line in the file. Column is approximated to 0 because the
+/// underlying query records only line granularity for selector tokens — a
+/// precise column would require re-lexing the slice for each hit.
+fn outgoing_calls_for_body(
+    body_slice: &str,
+    body_start_pos: tower_lsp::lsp_types::Position,
+    uri: &Url,
+) -> Vec<CallHierarchyOutgoingCall> {
+    let hits = find_all_sends_in_source(body_slice);
+    let mut calls = Vec::new();
+    for hit in hits {
+        if hit.receiver == ReceiverKind::ErlangFfi {
+            continue;
+        }
+        // 1-based line within the body slice, offset by the body's
+        // starting line within the file. `find_all_sends_in_source`
+        // returns at least 1 for any real hit (the `.max(1)` in its
+        // implementation), so subtracting 1 is safe.
+        let abs_line = body_start_pos.line + hit.line.saturating_sub(1);
+        let range = Range {
+            start: Position::new(abs_line, 0),
+            end: Position::new(abs_line, 0),
+        };
+        let to = CallHierarchyItem {
+            name: hit.selector.clone(),
+            kind: SymbolKind::METHOD,
+            tags: None,
+            detail: None,
+            uri: uri.clone(),
+            range,
+            selection_range: range,
+            data: None,
+        };
+        calls.push(CallHierarchyOutgoingCall {
+            to,
+            from_ranges: vec![range],
+        });
+    }
+    calls
 }
 
 /// BT-2239: Convert a runtime-supplied `NavSite` into an LSP `Location`.
@@ -3658,5 +4023,123 @@ mod tests {
         assert!(handle.contains(&path));
         versions.lock().expect("versions lock").remove(&path);
         assert!(!handle.contains(&path));
+    }
+
+    // --- BT-2243: callHierarchy helpers ---
+
+    /// `target_to_lsp_item` round-trips through `SerializedCallTarget::from_item`
+    /// so the prepare → outgoing flow preserves enough context to walk the
+    /// method body in the open document.
+    #[test]
+    fn call_target_round_trips_through_item_data() {
+        use beamtalk_core::source_analysis::Span;
+        let path = Utf8PathBuf::from("/tmp/counter.bt");
+        let target = CallHierarchyTarget::new(
+            "increment",
+            Some("Counter".into()),
+            false,
+            path.clone(),
+            Span::new(10, 50),
+            Span::new(10, 19),
+        );
+        let uri = Url::parse("file:///tmp/counter.bt").expect("parse url");
+        // The slice covers up to byte 50 — make the synthetic source at
+        // least that long so `span_to_range` doesn't clamp inside our
+        // expected range.
+        let source = " ".repeat(60);
+        let item = target_to_lsp_item(&target, &uri, &source).expect("item built");
+        assert_eq!(item.name, "increment");
+        assert_eq!(item.kind, SymbolKind::METHOD);
+        assert_eq!(item.detail.as_deref(), Some("Counter"));
+        let decoded = SerializedCallTarget::from_item(&item).expect("decoded");
+        assert_eq!(decoded.selector, "increment");
+        assert_eq!(decoded.class_name.as_deref(), Some("Counter"));
+        assert!(!decoded.class_side);
+        assert_eq!(decoded.range_start, 10);
+        assert_eq!(decoded.range_end, 50);
+        assert_eq!(decoded.file, "/tmp/counter.bt");
+    }
+
+    /// Class-side targets surface a `Counter class` detail string so the
+    /// editor distinguishes instance from class methods in the hover.
+    #[test]
+    fn call_target_class_side_detail_uses_class_suffix() {
+        use beamtalk_core::source_analysis::Span;
+        let target = CallHierarchyTarget::new(
+            "make",
+            Some("Counter".into()),
+            true,
+            Utf8PathBuf::from("/tmp/c.bt"),
+            Span::new(0, 10),
+            Span::new(0, 4),
+        );
+        let uri = Url::parse("file:///tmp/c.bt").expect("parse url");
+        let source = "x".repeat(20);
+        let item = target_to_lsp_item(&target, &uri, &source).expect("item");
+        assert_eq!(item.detail.as_deref(), Some("Counter class"));
+        let decoded = SerializedCallTarget::from_item(&item).expect("decoded");
+        assert!(decoded.class_side);
+    }
+
+    /// `from_item` returns None on a call-site item that has no recorded
+    /// data — defensive against editors that scrub the `data` field on
+    /// round-trip.
+    #[test]
+    fn serialized_call_target_returns_none_when_data_missing() {
+        let item = CallHierarchyItem {
+            name: "foo".into(),
+            kind: SymbolKind::METHOD,
+            tags: None,
+            detail: None,
+            uri: Url::parse("file:///tmp/x.bt").expect("url"),
+            range: Range {
+                start: Position::new(0, 0),
+                end: Position::new(0, 3),
+            },
+            selection_range: Range {
+                start: Position::new(0, 0),
+                end: Position::new(0, 3),
+            },
+            data: None,
+        };
+        assert!(SerializedCallTarget::from_item(&item).is_none());
+    }
+
+    /// `outgoing_calls_for_body` walks the slice and emits one
+    /// `CallHierarchyOutgoingCall` per non-FFI send. Lines are offset by
+    /// the body's starting line so absolute file lines come out right.
+    #[test]
+    fn outgoing_calls_for_body_emits_one_per_send_offset_by_body_start() {
+        let uri = Url::parse("file:///tmp/counter.bt").expect("url");
+        // A simple method body with two sends on the same line, plus one
+        // FFI call which must be filtered out.
+        let body = "report =>\n  self show: \"hi\"\n  Erlang lists reverse: x";
+        // Body starts on line 5 of the synthetic file (0-based).
+        let body_start = Position::new(5, 0);
+        let calls = outgoing_calls_for_body(body, body_start, &uri);
+        // `find_all_sends_in_source` finds `show:` and (likely) one of
+        // the Erlang sends; the FFI one must not appear. Verify at least
+        // the show: send is present and at the right absolute line, and
+        // no Erlang/reverse send leaks through.
+        assert!(
+            calls.iter().any(|c| c.to.name == "show:"),
+            "expected show: in {calls:?}"
+        );
+        assert!(
+            calls.iter().all(|c| c.to.name != "reverse:"),
+            "Erlang reverse: leaked: {calls:?}"
+        );
+        // `show:` is on body-relative line 2 → absolute file line 6.
+        let show = calls.iter().find(|c| c.to.name == "show:").unwrap();
+        assert_eq!(show.to.range.start.line, 6);
+    }
+
+    /// An empty body produces no outgoing calls (defensive — the editor
+    /// should get `None` from the handler in this case).
+    #[test]
+    fn outgoing_calls_for_body_empty_returns_no_calls() {
+        let uri = Url::parse("file:///tmp/counter.bt").expect("url");
+        let calls = outgoing_calls_for_body("answer => 42", Position::new(0, 0), &uri);
+        assert!(calls.is_empty(), "got {calls:?}");
     }
 }
