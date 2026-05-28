@@ -88,6 +88,8 @@
 
 mod actor_codegen;
 mod block_analysis;
+#[cfg(test)]
+mod cerl_audit;
 mod class_builder_source;
 mod control_flow;
 mod dispatch_codegen;
