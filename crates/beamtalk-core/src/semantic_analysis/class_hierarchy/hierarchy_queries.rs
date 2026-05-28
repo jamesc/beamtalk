@@ -44,6 +44,77 @@ impl ClassHierarchy {
         chain
     }
 
+    /// Returns the names of all classes whose immediate superclass is
+    /// `class_name`.
+    ///
+    /// Counterpart to `Behaviour subclasses` in the stdlib (BT-2189). The
+    /// order is unspecified (it follows hash iteration order); callers that
+    /// need a stable presentation sort the result.
+    ///
+    /// Example: `direct_subclasses("Actor")` → `["Counter", "Logger", ...]`
+    /// (every class declared as `Actor subclass: ...`).
+    ///
+    /// **BT-2242:** powers `typeHierarchy/subtypes`. Answers come from the
+    /// in-process `ClassHierarchy` index; the LSP
+    /// `typeHierarchy/{supertypes,subtypes}` handlers call this directly with
+    /// no runtime-attached path. See BT-2242 PR notes for the scope-keeping
+    /// decision (a runtime-attached `nav-query` mode was considered and
+    /// deferred to keep this PR focused on the cold-file path).
+    #[must_use]
+    pub fn direct_subclasses(&self, class_name: &str) -> Vec<EcoString> {
+        self.classes
+            .iter()
+            .filter_map(|(name, info)| {
+                info.superclass
+                    .as_ref()
+                    .filter(|s| s.as_str() == class_name)
+                    .map(|_| name.clone())
+            })
+            .collect()
+    }
+
+    /// Returns every class transitively descended from `class_name` (children,
+    /// grandchildren, ...), in breadth-first order. The receiver itself is
+    /// not included.
+    ///
+    /// Counterpart to `Behaviour allSubclasses` in the stdlib (BT-2189). The
+    /// breadth-first order is stable across runs *within a level* only by
+    /// `direct_subclasses`'s hash iteration order; consumers that need a
+    /// fully-stable presentation sort the result.
+    ///
+    /// Cycles are guarded by a `visited` set (a malformed hierarchy with
+    /// `A -> B -> A` would otherwise loop forever).
+    ///
+    /// **BT-2242:** powers `typeHierarchy/subtypes`. Answers come from the
+    /// in-process `ClassHierarchy` index; the LSP
+    /// `typeHierarchy/{supertypes,subtypes}` handlers call this directly with
+    /// no runtime-attached path. See [`Self::direct_subclasses`] and the
+    /// BT-2242 PR notes for the scope-keeping decision.
+    #[must_use]
+    pub fn all_subclasses(&self, class_name: &str) -> Vec<EcoString> {
+        let mut result = Vec::new();
+        let mut visited = HashSet::new();
+        visited.insert(class_name.to_string());
+        let mut queue: std::collections::VecDeque<EcoString> =
+            self.direct_subclasses(class_name).into_iter().collect();
+
+        while let Some(name) = queue.pop_front() {
+            if !visited.insert(name.to_string()) {
+                continue;
+            }
+            // Enqueue this class's own children before pushing it onto the
+            // result — that's what gives the BFS its level-by-level shape.
+            for child in self.direct_subclasses(name.as_str()) {
+                if !visited.contains(child.as_str()) {
+                    queue.push_back(child);
+                }
+            }
+            result.push(name);
+        }
+
+        result
+    }
+
     /// Returns true if the named class is abstract (cannot be instantiated).
     #[must_use]
     pub fn is_abstract(&self, name: &str) -> bool {
