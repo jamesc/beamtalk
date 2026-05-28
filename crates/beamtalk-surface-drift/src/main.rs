@@ -210,10 +210,16 @@ impl ParityDoc {
                     if trimmed.starts_with("executeCommand:")
                         || trimmed.starts_with("textDocument/")
                         || trimmed.starts_with("workspace/")
+                        || trimmed.starts_with("callHierarchy/")
+                        || trimmed.starts_with("typeHierarchy/")
                     {
                         // Store the canonicalised value so set comparisons
                         // against code-derived capabilities don't mismatch
                         // on stray leading whitespace (BT-2241 review).
+                        // BT-2242 added `typeHierarchy/*` and the prior
+                        // BT-2243 work added `callHierarchy/*` — both follow
+                        // the same enumerate-per-row convention as
+                        // `textDocument/*`.
                         self.lsp_caps.insert(trimmed.to_string());
                     }
                 }
@@ -754,6 +760,17 @@ fn extract_lsp_caps(text: &str, out: &mut BTreeSet<String>) {
         for cmd in extract_beamtalk_lsp_commands(text) {
             out.insert(format!("executeCommand: {cmd}"));
         }
+    }
+    // BT-2242: type-hierarchy support is advertised via the typed
+    // `experimental` JSON value because lsp-types 0.94.1 does not yet
+    // expose a `type_hierarchy_provider` field on `ServerCapabilities`.
+    // Detect the well-known `"typeHierarchyProvider": true` shape inside
+    // the `experimental:` literal and surface the three textDocument /
+    // typeHierarchy capabilities the LSP backend implements on top of it.
+    if block.contains("experimental:") && block.contains("\"typeHierarchyProvider\"") {
+        out.insert("textDocument/prepareTypeHierarchy".into());
+        out.insert("typeHierarchy/supertypes".into());
+        out.insert("typeHierarchy/subtypes".into());
     }
 }
 

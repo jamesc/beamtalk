@@ -128,6 +128,88 @@ fn superclass_chain_for_unknown_class() {
     let chain = h.superclass_chain("DoesNotExist");
     assert!(chain.is_empty());
 }
+
+// --- Subclass query tests (BT-2242) ---
+#[test]
+fn direct_subclasses_of_object_includes_actor_and_value() {
+    let h = ClassHierarchy::with_builtins();
+    let mut subs = h.direct_subclasses("Object");
+    subs.sort();
+    assert!(
+        subs.iter().any(|s| s.as_str() == "Actor"),
+        "Object's direct subclasses should include Actor, got {subs:?}"
+    );
+    assert!(
+        subs.iter().any(|s| s.as_str() == "Value"),
+        "Object's direct subclasses should include Value, got {subs:?}"
+    );
+}
+
+#[test]
+fn direct_subclasses_of_leaf_class_is_empty() {
+    let h = ClassHierarchy::with_builtins();
+    // `Character` is a leaf in the builtin hierarchy (`Integer` extends
+    // it but nothing extends `Character`). Pick it for the leaf check —
+    // `Integer` itself has `Character` as a direct subclass and would
+    // not be a valid leaf example.
+    let subs = h.direct_subclasses("Character");
+    assert!(
+        subs.is_empty(),
+        "Character should have no builtin subclasses, got {subs:?}"
+    );
+}
+
+#[test]
+fn direct_subclasses_of_unknown_class_is_empty() {
+    let h = ClassHierarchy::with_builtins();
+    let subs = h.direct_subclasses("DoesNotExist");
+    assert!(subs.is_empty());
+}
+
+#[test]
+fn all_subclasses_transitively_includes_grandchildren() {
+    let h = ClassHierarchy::with_builtins();
+    // ProtoObject -> Object -> {Actor, Value, ...}; transitive subclasses
+    // of ProtoObject include Object, Actor, Number, Integer, ...
+    let subs = h.all_subclasses("ProtoObject");
+    assert!(
+        subs.iter().any(|s| s.as_str() == "Object"),
+        "expected Object in transitive subclasses of ProtoObject, got {subs:?}"
+    );
+    assert!(
+        subs.iter().any(|s| s.as_str() == "Integer"),
+        "expected Integer in transitive subclasses of ProtoObject, got {subs:?}"
+    );
+    // The receiver itself must not appear.
+    assert!(
+        !subs.iter().any(|s| s.as_str() == "ProtoObject"),
+        "all_subclasses must not include the receiver, got {subs:?}"
+    );
+}
+
+#[test]
+fn all_subclasses_of_leaf_is_empty() {
+    let h = ClassHierarchy::with_builtins();
+    let subs = h.all_subclasses("Character");
+    assert!(subs.is_empty(), "Character has no builtin subclasses");
+}
+
+#[test]
+fn all_subclasses_breadth_first_orders_direct_before_indirect() {
+    let h = ClassHierarchy::with_builtins();
+    let subs = h.all_subclasses("ProtoObject");
+    let object_pos = subs.iter().position(|s| s.as_str() == "Object");
+    let integer_pos = subs.iter().position(|s| s.as_str() == "Integer");
+    assert!(
+        object_pos.is_some() && integer_pos.is_some(),
+        "expected both Object and Integer in subclasses, got {subs:?}"
+    );
+    assert!(
+        object_pos < integer_pos,
+        "Object (direct child) should precede Integer (grandchild via Number->Value->Object), got order {subs:?}"
+    );
+}
+
 // --- all_methods tests ---
 #[test]
 fn all_methods_includes_inherited() {
