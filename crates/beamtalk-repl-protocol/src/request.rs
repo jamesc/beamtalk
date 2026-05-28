@@ -387,10 +387,11 @@ impl RequestBuilder {
     ///
     /// `scope` filters the result set:
     /// * `Some("user")` — only classes with a backing `.bt` file (mirrors
-    ///   `list-classes` `user` filter and the LSP workspace-symbol default).
+    ///   `list-classes` `user` filter and matches the narrower
+    ///   `textDocument/documentSymbol` usage).
     /// * `Some("all")` / `None` — every loaded class, including stdlib /
-    ///   dynamic / REPL-loaded classes (workspace/symbol consumers that
-    ///   want the live-class-with-no-source surfacing pick this).
+    ///   dynamic / REPL-loaded classes (the `workspace/symbol` behavior,
+    ///   including live classes with no source file).
     #[must_use]
     pub fn nav_symbols(scope: Option<&str>) -> serde_json::Value {
         let mut req = serde_json::json!({

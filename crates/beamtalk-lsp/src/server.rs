@@ -111,6 +111,13 @@ pub struct Backend {
     service: Mutex<SimpleLanguageService>,
     /// Last known LSP document version by file path.
     versions: Arc<Mutex<HashMap<Utf8PathBuf, i32>>>,
+    /// Paths of documents that have received `didChange` notifications since
+    /// their last `didSave` / `didOpen`. The editor's in-memory copy is the
+    /// source of truth for these — the on-disk bytes are stale and so is the
+    /// runtime's class registry (which only sees compiled / flushed source).
+    /// Used by [`Backend::document_symbol`] to bypass the runtime path when
+    /// answering the outline for an unsaved buffer (BT-2244 review fix).
+    dirty_files: Mutex<HashSet<Utf8PathBuf>>,
     /// Monotonic generation counter used to debounce `didChange` diagnostics per URI.
     diagnostic_generation: Mutex<HashMap<Url, u64>>,
     /// Deferred preload config captured at initialize and consumed after handshake.
@@ -196,6 +203,7 @@ impl Backend {
             client,
             service: Mutex::new(SimpleLanguageService::new()),
             versions: Arc::new(Mutex::new(HashMap::new())),
+            dirty_files: Mutex::new(HashSet::new()),
             diagnostic_generation: Mutex::new(HashMap::new()),
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
@@ -438,6 +446,32 @@ impl Backend {
     pub(crate) fn set_delegate_to_runtime(&self, value: bool) {
         self.delegate_to_runtime
             .store(value, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Returns true if `path` has unsaved edits in the editor — i.e. a
+    /// `didChange` arrived since the last `didOpen` / `didSave`. The
+    /// runtime's view of this file (on-disk bytes / last compiled module)
+    /// is stale for as long as this flag is set, so any query that needs
+    /// per-file source ordering (notably `document_symbol`) must use the
+    /// LSP-side AST for dirty files. (BT-2244 review fix.)
+    pub(crate) fn is_dirty(&self, path: &Utf8PathBuf) -> bool {
+        let guard = self.dirty_files.lock().expect("dirty_files lock poisoned");
+        guard.contains(path)
+    }
+
+    /// Mark `path` as having unsaved edits. Called from `did_change`.
+    fn mark_dirty(&self, path: Utf8PathBuf) {
+        let mut guard = self.dirty_files.lock().expect("dirty_files lock poisoned");
+        guard.insert(path);
+    }
+
+    /// Clear the dirty bit for `path`. Called from `did_save` and
+    /// `did_close` — `did_save` because the on-disk bytes now match the
+    /// editor buffer, `did_close` because the editor no longer owns a
+    /// modified copy.
+    fn clear_dirty(&self, path: &Utf8PathBuf) {
+        let mut guard = self.dirty_files.lock().expect("dirty_files lock poisoned");
+        guard.remove(path);
     }
 
     fn file_version_for_uri(&self, uri: &Url) -> Option<i32> {
@@ -1219,15 +1253,15 @@ impl LanguageServer for Backend {
         {
             {
                 let mut svc = self.service.lock().expect("service lock poisoned");
-                svc.update_file(path, change.text);
+                svc.update_file(path.clone(), change.text);
             }
             {
                 let mut versions = self.versions.lock().expect("versions lock poisoned");
-                versions.insert(
-                    uri_to_path(&uri).expect("path already checked"),
-                    params.text_document.version,
-                );
+                versions.insert(path.clone(), params.text_document.version);
             }
+            // Buffer now diverges from the on-disk bytes (and the
+            // runtime's compiled module) until the next `didSave`.
+            self.mark_dirty(path);
 
             let generation = {
                 let mut generations = self
@@ -1268,6 +1302,7 @@ impl LanguageServer for Backend {
                 let mut versions = self.versions.lock().expect("versions lock poisoned");
                 versions.remove(&path);
             }
+            self.clear_dirty(&path);
             {
                 let mut generations = self
                     .diagnostic_generation
@@ -1285,6 +1320,13 @@ impl LanguageServer for Backend {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri;
         debug!(uri = %uri, "did_save");
+        // Editor buffer now matches the on-disk bytes again. The runtime
+        // will still be stale until the workspace recompiles the module
+        // (a separate flush cycle), but the AST path is no longer
+        // *strictly* required for outline correctness.
+        if let Some(path) = self.resolve_path_for_uri(&uri) {
+            self.clear_dirty(&path);
+        }
         self.publish_diagnostics(&uri).await;
     }
 
@@ -2039,6 +2081,24 @@ impl LanguageServer for Backend {
     /// resolves to the requested URI's path. Otherwise we fall back to
     /// the in-process AST walker, byte-for-byte identical to the
     /// pre-BT-2244 behaviour.
+    ///
+    /// **Bypasses the runtime path for buffers the runtime can't answer
+    /// correctly** (BT-2244 review fix). The runtime path needs a stable
+    /// `source_file` correspondence and the latest source bytes — neither
+    /// holds for:
+    /// * `untitled:` URIs — no `source_file` exists in the class registry
+    ///   (the buffer has never been saved), so a `scope = "user"` query
+    ///   filters every class out and returns an empty outline.
+    /// * `beamtalk-stdlib:` URIs — virtual stdlib documents. `scope =
+    ///   "user"` filters out stdlib classes by construction, so the outline
+    ///   would be empty here too.
+    /// * Dirty (unsaved) `file://` documents — `did_change` updates the
+    ///   in-memory AST cache but never re-pushes source to the runtime, so
+    ///   the runtime's reply reflects stale (last-saved / last-compiled)
+    ///   bytes. The AST path uses the latest in-memory copy.
+    ///
+    /// For any of those, we drop straight into the AST fallback rather
+    /// than asking the runtime.
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -2049,8 +2109,9 @@ impl LanguageServer for Backend {
         };
 
         // AST fallback — preserves the pre-BT-2244 behaviour byte-for-byte.
-        // Used when the flag is off, the runtime is unreachable, or the
-        // runtime returns an error.
+        // Used when the flag is off, the runtime is unreachable, the
+        // runtime returns an error, or the request is for a buffer the
+        // runtime can't answer correctly (see the doc comment above).
         let ast_fallback = || -> Vec<tower_lsp::lsp_types::DocumentSymbol> {
             let svc = self.service.lock().expect("service lock poisoned");
             let Some(src) = svc.file_source(&path) else {
@@ -2062,6 +2123,20 @@ impl LanguageServer for Backend {
                 .map(|s| to_lsp_symbol(s, &src))
                 .collect()
         };
+
+        // Runtime path needs (a) a `file://` URI so `source_file`
+        // correspondence is meaningful, and (b) a clean buffer so the
+        // runtime's view of the source matches the editor's. If either
+        // fails, take the AST path directly.
+        let runtime_path_ok = uri.scheme() == "file" && !self.is_dirty(&path);
+        if !runtime_path_ok {
+            let lsp_symbols = ast_fallback();
+            return if lsp_symbols.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(DocumentSymbolResponse::Nested(lsp_symbols)))
+            };
+        }
 
         let target_path = path.clone();
         let to_lsp = move |classes: Vec<NavSymbolClass>,
@@ -5974,6 +6049,59 @@ mod tests {
             s.is_none(),
             "source-less class without a root URI must drop the row"
         );
+    }
+
+    #[tokio::test]
+    async fn document_symbol_uses_ast_for_untitled_uri() {
+        // BT-2244 review fix: `document_symbol` must bypass the runtime
+        // (`delegate_nav_symbols`) path whenever the URI is not a clean
+        // `file://` document.  An `untitled:` buffer has no `source_file`
+        // in the live class registry, so a `scope = "user"` runtime
+        // query would filter every class out and return an empty
+        // outline. The handler should take the AST fallback directly
+        // and return the buffer's parsed symbols, even when
+        // `delegateToRuntime` is on.
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        // Mimic what `did_open` does for an `untitled:` URI: the path
+        // key is `__untitled__/<name>`.
+        let path = Utf8PathBuf::from("__untitled__/scratch.bt");
+        let source = "Object subclass: Counter\n  increment => 1\n  value => 2";
+        {
+            let mut svc = backend.service.lock().expect("service lock");
+            svc.update_file(path.clone(), source.to_string());
+        }
+        {
+            let mut versions = backend.versions.lock().expect("versions lock");
+            versions.insert(path.clone(), 1);
+        }
+        // Flip the flag on so the bypass guard is the *only* reason the
+        // runtime path isn't taken. (Without the bypass, a delegate
+        // path with no attached runtime would still fall back to AST,
+        // so the assertion below couldn't distinguish — but the flag
+        // being on makes the guard observable as the early-return.)
+        backend.set_delegate_to_runtime(true);
+
+        let untitled_uri = Url::parse("untitled:scratch.bt").expect("untitled uri parses");
+        let params = DocumentSymbolParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri: untitled_uri },
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response = backend.document_symbol(params).await.expect("rpc ok");
+        let DocumentSymbolResponse::Nested(symbols) = response.expect("Some(symbols)") else {
+            panic!("expected nested response");
+        };
+        assert_eq!(
+            symbols.len(),
+            1,
+            "untitled buffer should yield the AST outline"
+        );
+        assert_eq!(symbols[0].name, "Counter (class)");
+        let children = symbols[0].children.as_ref().expect("methods present");
+        let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"increment"), "got {names:?}");
+        assert!(names.contains(&"value"), "got {names:?}");
     }
 
     #[tokio::test]
