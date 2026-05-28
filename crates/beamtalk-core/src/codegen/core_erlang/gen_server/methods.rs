@@ -3324,11 +3324,12 @@ impl CoreErlangGenerator {
 mod tests {
     use super::{MetaTypeRepr, extract_package_from_module_name};
     use crate::ast::{
-        ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, Literal,
-        MessageSelector, MethodDefinition, Module, TypeParamDecl,
+        ClassKind, Expression, ExpressionStatement, Identifier, Literal, MessageSelector,
+        MethodDefinition, Module, TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
+    use crate::test_helpers::test_support::make_actor_class;
 
     fn s() -> Span {
         Span::new(0, 0)
@@ -3343,16 +3344,6 @@ mod tests {
             MessageSelector::Unary(selector.into()),
             vec![],
             vec![bare(Expression::Literal(Literal::Integer(42), s()))],
-            s(),
-        )
-    }
-
-    fn empty_actor_class(name: &str) -> ClassDefinition {
-        ClassDefinition::new(
-            Identifier::new(name, s()),
-            Identifier::new("Actor", s()),
-            vec![],
-            vec![],
             s(),
         )
     }
@@ -3381,7 +3372,7 @@ mod tests {
     fn test_generate_register_class_includes_class_name() {
         let mut generator = CoreErlangGenerator::new("test");
         let module = Module {
-            classes: vec![empty_actor_class("Counter")],
+            classes: vec![make_actor_class("Counter")],
             method_definitions: Vec::new(),
             protocols: Vec::new(),
             expressions: Vec::new(),
@@ -3416,7 +3407,7 @@ mod tests {
     #[test]
     fn test_generate_class_method_dispatches_empty_class() {
         let mut generator = CoreErlangGenerator::new("test");
-        let class = empty_actor_class("Counter");
+        let class = make_actor_class("Counter");
         let doc = generator
             .generate_class_method_dispatches(&class, 2)
             .unwrap();
@@ -3430,7 +3421,7 @@ mod tests {
     #[test]
     fn test_generate_class_method_functions_empty_class() {
         let mut generator = CoreErlangGenerator::new("test");
-        let class = empty_actor_class("Counter");
+        let class = make_actor_class("Counter");
         let doc = generator.generate_class_method_functions(&class).unwrap();
         assert_eq!(
             doc.to_pretty_string(),
@@ -3593,7 +3584,7 @@ mod tests {
     #[test]
     fn test_meta_type_params_in_meta_map() {
         // Build a generic class and verify type_params appears in meta map
-        let mut class = empty_actor_class("Container");
+        let mut class = make_actor_class("Container");
         class.type_params = vec![
             TypeParamDecl::unbounded(Identifier::new("T", s())),
             TypeParamDecl::unbounded(Identifier::new("E", s())),
@@ -3623,7 +3614,7 @@ mod tests {
 
     #[test]
     fn test_meta_type_params_empty_for_non_generic() {
-        let class = empty_actor_class("Counter");
+        let class = make_actor_class("Counter");
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
@@ -3649,7 +3640,7 @@ mod tests {
 
     #[test]
     fn test_meta_map_includes_package_name() {
-        let class = empty_actor_class("Counter");
+        let class = make_actor_class("Counter");
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
@@ -3675,7 +3666,7 @@ mod tests {
 
     #[test]
     fn test_meta_map_package_none_without_package() {
-        let class = empty_actor_class("Counter");
+        let class = make_actor_class("Counter");
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
@@ -3701,7 +3692,7 @@ mod tests {
 
     #[test]
     fn test_meta_map_includes_kind_actor() {
-        let class = empty_actor_class("Counter");
+        let class = make_actor_class("Counter");
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
@@ -3727,7 +3718,7 @@ mod tests {
 
     #[test]
     fn test_meta_map_includes_kind_value() {
-        let mut class = empty_actor_class("Point");
+        let mut class = make_actor_class("Point");
         class.class_kind = ClassKind::Value;
         let module = Module {
             classes: vec![class],
@@ -3772,7 +3763,7 @@ mod tests {
 
     #[test]
     fn test_meta_map_visibility_public_by_default() {
-        let class = empty_actor_class("Counter");
+        let class = make_actor_class("Counter");
         let module = Module {
             classes: vec![class],
             method_definitions: Vec::new(),
@@ -3798,7 +3789,7 @@ mod tests {
 
     #[test]
     fn test_meta_map_visibility_internal() {
-        let mut class = empty_actor_class("Helper");
+        let mut class = make_actor_class("Helper");
         class.is_internal = true;
         let module = Module {
             classes: vec![class],
