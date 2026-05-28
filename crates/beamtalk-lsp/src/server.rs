@@ -481,7 +481,7 @@ impl Backend {
     /// `ServerCapabilities::type_hierarchy_provider` field (added upstream
     /// in 0.95+), so static advertisement falls back to the typed
     /// `experimental` blob set in [`Self::initialize`]. Some clients —
-    /// notably older VSCode + a strict tower-lsp install — read only the
+    /// notably older `VSCode` + a strict tower-lsp install — read only the
     /// typed fields and ignore `experimental`. Dynamic registration via
     /// `client/registerCapability` is the LSP-3.17 way of telling those
     /// clients about the three methods regardless of the typed-field
