@@ -3898,7 +3898,9 @@ mod tests {
         // definition header **and** every call site (one of each here).
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
-        let path = Utf8PathBuf::from("/tmp/bt-2240-with-decl.bt");
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-with-decl").with_extension("bt"))
+                .expect("temp path is UTF-8");
         let source = "Object subclass: Foo\n  bar => 1\nx bar\n";
         let uri = open_test_file(backend, &path, source);
 
@@ -3933,7 +3935,9 @@ mod tests {
         // site should remain.
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
-        let path = Utf8PathBuf::from("/tmp/bt-2240-no-decl.bt");
+        let path =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-no-decl").with_extension("bt"))
+                .expect("temp path is UTF-8");
         let source = "Object subclass: Foo\n  bar => 1\nx bar\n";
         let uri = open_test_file(backend, &path, source);
 
@@ -3962,9 +3966,15 @@ mod tests {
         // polymorphic selectors).
         let (service, _socket) = tower_lsp::LspService::new(Backend::new);
         let backend: &Backend = service.inner();
-        let path_foo = Utf8PathBuf::from("/tmp/bt-2240-foo.bt");
-        let path_bar = Utf8PathBuf::from("/tmp/bt-2240-bar.bt");
-        let path_call = Utf8PathBuf::from("/tmp/bt-2240-call.bt");
+        let path_foo =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-foo").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let path_bar =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-bar").with_extension("bt"))
+                .expect("temp path is UTF-8");
+        let path_call =
+            Utf8PathBuf::from_path_buf(unique_temp_dir("bt-2240-call").with_extension("bt"))
+                .expect("temp path is UTF-8");
         open_test_file(backend, &path_foo, "Object subclass: Foo\n  ping => 1\n");
         open_test_file(backend, &path_bar, "Object subclass: Bar\n  ping => 2\n");
         let uri_call = open_test_file(backend, &path_call, "x ping\n");
