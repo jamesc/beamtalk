@@ -91,12 +91,26 @@ punctuation a property of the helper, not of the call site:
 
 ```rust
 docvec!["{", atom(name), ", ", atom(super_), "}"]
-call_remote(atom(module), atom(fun), args)
-let_in(var(name), body, ...)
+docvec!["call ", atom(module), ":", atom(fun), "(", join(args, ", "), ")"]
+docvec!["let ", var(name), " = ", body, " in ", ...]
 ```
 
 `Document::String` is then **removed from the enum**, the BT-875 vector
 becomes unrepresentable, and the renderer is unchanged.
+
+### `Document::Eco` — the sibling escape hatch
+
+`Document::Eco(ecow::EcoString)` carries the same BT-875 risk as
+`Document::String`. There are ~57 production `Document::Eco(...)` call
+sites in the codegen tree, used primarily for module names and selector
+names passed from the AST as `EcoString` values. The migration must
+cover both variants.
+
+`Document::Str(&'static str)` is *not* at risk. Its ~467 uses are
+compile-time string literals (fixed Core Erlang fragments like `"\n"`,
+`", "`, `"'dispatch'/3"`). An author cannot inject dynamic content
+through a `&'static str` — the Rust type system prevents it. `Str`
+remains as the only text-leaf variant after the migration.
 
 ### Constraints
 
@@ -119,8 +133,9 @@ becomes unrepresentable, and the renderer is unchanged.
 
 ## Decision
 
-**Replace `Document::String` with a typed-leaf API in a single
-flag-day migration, then remove `Document::String` from the enum.**
+**Replace `Document::String` and `Document::Eco` with a typed-leaf API
+in a single flag-day migration, then remove both variants from the
+enum.**
 
 The seven decisions called out by [BT-2318](https://linear.app/beamtalk/issue/BT-2318):
 
@@ -137,7 +152,7 @@ Six helpers, all returning `Document<'static>`:
 | `float_lit(f)` | float literal in Core Erlang form | rare; today via `Document::String(format!("{:?}", f))` |
 | `fname(name, arity)` | `'name'/arity` (function-name / arity pair for remote calls) | `docvec!["'", Document::String(fun), "'/", Document::String(arity.to_string())]` |
 
-The set is grounded in the survey of ~2,260 `Document::String(...)` call
+The set is grounded in the survey of ~2,300 `Document::String(...)` call
 sites across the codegen tree: dominantly variable names and atom names,
 with a long tail of literal numbers, strings, and function-arity pairs.
 Anything not covered by these six is a defect (a call site that *should*
@@ -170,13 +185,16 @@ Rejected alternatives:
   the existing combinator surface. The audit's design — helpers that
   return `Document<'static>` — keeps `Document` itself unchanged.
 
-### 3. `Document::String` deletion strategy
+### 3. `Document::String` and `Document::Eco` deletion strategy
 
-**Hard delete, flag-day migration.**
+**Remove from public API, flag-day migration.**
 
-A single PR adds the `document::leaf` helpers, migrates all ~2,260 call
-sites mechanically, removes `Document::String` from the enum, and lands
-together. No deprecation window, no soft seal, no parallel paths.
+A single PR adds the `document::leaf` helpers, migrates all ~2,360 call
+sites mechanically, and removes `Document::String` and `Document::Eco`
+from the public enum. A `pub(super)` variant `Document::Owned(String)`
+survives inside the `document` module as the internal backing for the
+typed-leaf helpers — but it is invisible to codegen call sites. No
+deprecation window, no parallel paths.
 
 This is the most aggressive of the three options the issue called out
 and is chosen for two reasons:
@@ -221,12 +239,20 @@ has any unmigrated call sites to address.
 
 ### 5. BT-875 closure proof
 
-**Structural — the variant ceases to exist.**
+**Structural — the public-API variant ceases to exist.**
 
-Once `Document::String` is removed from the `Document` enum, no Rust
-code can construct it. The BT-875 recurrence vector is unrepresentable;
-the CLAUDE.md prohibition becomes redundant (kept as documentation of
-intent, not as the load-bearing enforcement).
+Once `Document::String` and `Document::Eco` are removed from the
+public `Document` enum, no codegen call site can construct an
+arbitrary-text leaf. The internal `Document::Owned(String)` variant is
+`pub(super)` — visible only to the `document` module and its `leaf`
+submodule, where it is wrapped in typed helpers.
+
+`Document::Str(&'static str)` remains public, but it accepts only
+compile-time string constants. An author cannot pass a runtime-computed
+`&str` to `Document::Str` without unsafe lifetime extension, which
+Rust's borrow checker prevents. The BT-875 recurrence vector is
+unrepresentable through normal code; the CLAUDE.md prohibition
+becomes redundant (kept as documentation of intent).
 
 Two secondary defences:
 
@@ -281,8 +307,10 @@ isn't viable, the cerl-as-wire question reopens as an independent ADR.
 
 | Metric | Estimate | Source |
 |---|---|---|
-| `Document::String(...)` call sites | **~2,260** | `grep -rEc "Document::String\(" crates/beamtalk-core/src/codegen/core_erlang/ \| awk -F: '{s+=$2} END {print s}'` |
-| Files touched | **~30** | same grep, file count |
+| `Document::String(...)` call sites | **~2,300** | `grep -rEc "Document::String\(" crates/beamtalk-core/src/codegen/core_erlang/ \| awk -F: '{s+=$2} END {print s}'` |
+| `Document::Eco(...)` call sites | **~57** | same grep for `Document::Eco(` |
+| Total sites to migrate | **~2,360** | String + Eco combined |
+| Files touched | **~34** | same grep, file count |
 | Aggregate char shrinkage | **−8.7%** | [Phase 0c memo](0088-phase-0c-typed-leaves.md), 3-function projection |
 | Helper-library LOC | **~50** | six functions + doc comments, audit baseline is 10 LOC for two |
 | Wire-format changes | **0** | typed-leaves does not touch the Port |
@@ -352,7 +380,7 @@ the deletion.
 
 - 🧑‍💻 **Newcomer contributor**: "When I add a new codegen function, I never see a `Document::String` in the codebase to copy. The six helpers in `document::leaf` are the alphabet. I can't accidentally write the BT-875 bug because the variant doesn't exist."
 - 🎩 **Smalltalk purist**: "Smalltalk's compiler is in the image precisely so that 'codegen text' isn't a thing you have to escape. We can't match that on BEAM, but we can match the principle: *leaves carry intent, not arbitrary text*. The typed-leaf API is the smallest change that makes that principle structural rather than conventional."
-- ⚙️ **BEAM veteran**: "The wire is unchanged. The Erlang side is unchanged. The 245 codegen unit tests asserting on `to_pretty_string()` are unchanged. This is a refactor of one Rust enum and ~2,260 call sites; the rest of the pipeline doesn't know the migration happened."
+- ⚙️ **BEAM veteran**: "The wire is unchanged. The Erlang side is unchanged. The 245 codegen unit tests asserting on `to_pretty_string()` are unchanged. This is a refactor of one Rust enum and ~2,300 call sites; the rest of the pipeline doesn't know the migration happened."
 - 🏭 **Operator**: "BT-875 keeps recurring because the type system permits it. After this ADR ships, the BT-875 class of bug is unrepresentable. No runtime change, no compile-time change, no new failure modes. The operational risk is zero."
 - 🎨 **Language designer**: "The compounding cost of ADR 0018's combinator-only discipline + ad-hoc string leaves is the typo-rate at every leaf. Typed leaves move ~80% of that cost into the type system; the remaining ~20% (`format!()`-style raw-string bypass) is already covered by the CLAUDE.md rule. The combination closes the recurrence vector at the cost of ~50 LOC of new helpers."
 
@@ -363,11 +391,11 @@ the deletion.
 - ⚙️ **BEAM veteran**: "Erlang's habit is to deprecate, not delete. `Document::String` becomes `pub(super)`, the helpers are the public face; nothing breaks if some test or one-off tool needs the raw variant."
 - 🏭 **Operator**: "Lower-risk PR. A soft seal can ship in pieces: leaves first, then seal, then optional removal. Each step is independently revertible. A flag-day PR is one big revert."
 - 🎨 **Language designer**: "The 'soft seal' is honest about the API boundary — the public surface is the helpers; the variant is an implementation detail. Hard-removing the variant conflates 'what's exported' with 'what exists'."
-- 🛠️ **Sharpest argument — Operator (reprise)**: "A flag-day PR that touches ~2,260 sites is at the edge of reviewable. Soft-seal-then-deprecate has a track record (ADR 0018's migration model) of working without coordinated cutovers. Why pay the flag-day cost for a result that's strictly worse than the deprecation path on review effort?"
+- 🛠️ **Sharpest argument — Operator (reprise)**: "A flag-day PR that touches ~2,300 sites is at the edge of reviewable. Soft-seal-then-deprecate has a track record (ADR 0018's migration model) of working without coordinated cutovers. Why pay the flag-day cost for a result that's strictly worse than the deprecation path on review effort?"
 
 ### Option C: Status Quo — CLAUDE.md Rule + Manual Review
 
-- 🧑‍💻 **Newcomer contributor**: "BT-875 was *already cleaned up*; the current `format!()` count is zero. Whatever review process caught the last round will catch the next round. Refactoring 2,260 sites to prevent a bug class that has zero open instances feels like over-engineering."
+- 🧑‍💻 **Newcomer contributor**: "BT-875 was *already cleaned up*; the current `format!()` count is zero. Whatever review process caught the last round will catch the next round. Refactoring 2,300 sites to prevent a bug class that has zero open instances feels like over-engineering."
 - 🎩 **Smalltalk purist**: "Smalltalk values *flexibility* — the ability to express any code shape. Restricting the leaf variants pre-commits us to a leaf taxonomy we may revisit. If the helpers are useful, add them; don't remove the underlying flexibility."
 - ⚙️ **BEAM veteran**: "BEAM-language pretty-printers (Gleam's included) all leave leaf-typing as application concern. We're not behind the state of the art."
 - 🏭 **Operator**: "Zero refactor cost. Zero migration risk. The CLAUDE.md rule has held since the BT-875 cleanup. Process beats migration."
@@ -427,11 +455,11 @@ to catch new `format!()` / string-concatenation regressions.
   the rule. Typed leaves transfer that cost from runtime author
   vigilance to one-time API design.
 
-### 2. `Document::String` as `pub(super)` — soft seal, no removal
+### 2. `Document::String` and `Document::Eco` as `pub(super)` — soft seal, no removal
 
-Move `Document::String` behind a module-private visibility so only the
-`document::leaf` helpers can construct it; the variant continues to
-exist as an implementation detail.
+Move `Document::String` and `Document::Eco` behind a module-private
+visibility so only the `document::leaf` helpers can construct them;
+the variants continue to exist as implementation details.
 
 **Rejected because:**
 
@@ -512,7 +540,7 @@ the enum; the renderer adds new arms for each.
   surface. The Port still ships text. `core_scan`/`core_parse` still
   run. All ~245 codegen unit tests assert on `to_pretty_string()`
   output unchanged.
-- **Migration cost ~30× cheaper than ADR 0088.** Six helpers + ~2,260
+- **Migration cost ~30× cheaper than ADR 0088.** Six helpers + ~2,300
   mechanical edits + one variant removal, versus 58K LOC of codegen
   restructure plus wire-format change plus Erlang-side migration.
 - **Annotation extensibility preserved.** §6 sketches a path for
@@ -520,7 +548,7 @@ the enum; the renderer adds new arms for each.
 
 ### Negative
 
-- **One large coordinated PR.** ~2,260 sites across ~30 files in a
+- **One large coordinated PR.** ~2,300 sites across ~30 files in a
   single PR is at the edge of reviewable. Mitigated by the
   mechanical nature of the edit (reviewers check variant
   classification, not codegen correctness), the existing
@@ -550,9 +578,9 @@ the enum; the renderer adds new arms for each.
 - **Generated `.beam` artefacts byte-for-byte identical.** Verified by
   the existing codegen-diff harness and the full behavioural suite
   during the flag-day PR.
-- **`Document` enum gains no variants.** The six helpers compose
-  existing variants (`Vec`, `String`, `Str`); the renderer is
-  untouched.
+- **`Document` enum shrinks by two variants.** `String` and `Eco` are
+  removed; the six helpers compose `Str` and `Vec` internally. The
+  renderer loses two match arms but is otherwise untouched.
 - **No new dependencies.** Helpers live in the existing
   `beamtalk-core` crate.
 
@@ -564,10 +592,19 @@ the level the ADR commits to.
 
 ### Phase A: Helper Library + Lint (S)
 
+- Restructure `document.rs` → `document/mod.rs` (a mechanical move —
+  `mod document;` in the parent remains unchanged; all existing
+  `use crate::codegen::core_erlang::document::*` paths still resolve).
 - Add `crates/beamtalk-core/src/codegen/core_erlang/document/leaf.rs`
   with the six helpers: `atom`, `var`, `string_lit`, `int_lit`,
   `float_lit`, `fname`. Each has doc comments naming the rendered
   Core Erlang form and links to the call-site classes it replaces.
+  Internally, the helpers construct dynamic text via a
+  `pub(super) Document::Owned(String)` variant (renamed from
+  `Document::String` to signal its restricted scope) that is not
+  exported from the `document` module. External codegen code cannot
+  construct `Owned` directly — the typed-leaf helpers are the only
+  public path.
 - Add unit tests for each helper covering the rendered byte form
   (e.g. `atom("foo").to_pretty_string() == "'foo'"`,
   `string_lit("a\"b").to_pretty_string() == "\"a\\\"b\""`).
@@ -580,18 +617,19 @@ the level the ADR commits to.
 
 A single PR that:
 
-1. Greps every `Document::String(...)` site across the codegen
-   tree, classifies it (atom / var / string_lit / int_lit / float_lit
-   / fname), and rewrites it to the corresponding helper call. The
-   classification is mostly mechanical (surrounding atom-quotes
-   ⇒ `atom`, capitalised identifier ⇒ `var`, `.to_string()` on a
-   number ⇒ `int_lit`/`float_lit`); ambiguous sites get a
-   per-site reviewer note in the PR.
-2. Removes `Document::String` from the `Document` enum in
-   `document.rs`. Removes the `Documentable<'a> for String` impl
-   (callers now construct via helpers or via `Document::String`'s
-   replacement). The `Documentable<'a> for usize` /
-   `for isize` impls migrate to call `int_lit` internally.
+1. Greps every `Document::String(...)` and `Document::Eco(...)` site
+   across the codegen tree, classifies it (atom / var / string_lit /
+   int_lit / float_lit / fname), and rewrites it to the corresponding
+   helper call. The classification is mostly mechanical (surrounding
+   atom-quotes ⇒ `atom`, capitalised identifier ⇒ `var`,
+   `.to_string()` on a number ⇒ `int_lit`/`float_lit`); ambiguous
+   sites get a per-site reviewer note in the PR.
+2. Removes `Document::String` and `Document::Eco` from the `Document`
+   enum in `document.rs`. Removes the `Documentable<'a> for String`
+   and `Documentable<'a> for EcoString` impls. The
+   `Documentable<'a> for usize` / `for isize` impls migrate to call
+   `int_lit` internally. `Document::Str(&'static str)` stays — it
+   can only carry compile-time constants and is not a BT-875 vector.
 3. Removes the `cerl_audit.rs` and `typed_leaves_audit.rs` modules
    ([Phase 0c memo](0088-phase-0c-typed-leaves.md) flagged them as
    throwaway).
@@ -629,12 +667,14 @@ sibling ADR. Not part of this epic.
 - **New**: `crates/beamtalk-core/src/codegen/core_erlang/document/leaf.rs`
   — six helpers plus unit tests.
 - **Modified**: `crates/beamtalk-core/src/codegen/core_erlang/document.rs`
-  — remove `Document::String` variant, remove
-  `Documentable<'a> for String` impl, update `Documentable for usize/isize`
-  to delegate to `int_lit`. Renderer unchanged.
+  — remove `Document::String` and `Document::Eco` variants, remove
+  `Documentable<'a> for String` and `Documentable<'a> for EcoString`
+  impls, update `Documentable for usize/isize` to delegate to
+  `int_lit`. `Document::Str(&'static str)` remains as the only
+  text-leaf variant. Renderer unchanged (fewer match arms).
 - **Modified**: every file under
   `crates/beamtalk-core/src/codegen/core_erlang/` containing
-  `Document::String(...)` — ~30 files, ~2,260 sites, all mechanical.
+  `Document::String(...)` — ~30 files, ~2,300 sites, all mechanical.
 - **Removed**: `crates/beamtalk-core/src/codegen/core_erlang/cerl_audit.rs`
   and `typed_leaves_audit.rs` (throwaway audit modules).
 - **Modified**: `CLAUDE.md` — note that typed-leaf API is the only
