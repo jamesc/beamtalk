@@ -20,8 +20,8 @@ use crate::runtime::{ClassChangedEvent, FlushEvent, RuntimeClient, RuntimeError}
 
 use beamtalk_core::language_service::{
     CallHierarchyTarget, CompletionKind, DocumentSymbolKind, LanguageService,
-    Location as BtLocation, NavQuery, NavSite, Position as BtPosition, RuntimeLocation,
-    SimpleLanguageService, nav_site_to_location,
+    Location as BtLocation, NavQuery, NavSite, NavSymbolClass, Position as BtPosition,
+    RuntimeLocation, SimpleLanguageService, nav_site_to_location,
 };
 use beamtalk_core::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
@@ -304,6 +304,79 @@ impl Backend {
             .iter()
             .filter_map(|site| to_lsp(site, &roots))
             .collect()
+    }
+
+    /// BT-2244: two-mode dispatch seam for the **bulk symbol outline**
+    /// (`textDocument/documentSymbol`, `workspace/symbol`).
+    ///
+    /// Sibling of [`Self::delegate_nav_query`]. Both follow the same
+    /// flag/runtime contract — runtime path wins when the flag is on **and**
+    /// a runtime is reachable; otherwise falls back to `ast_fallback`.
+    /// The difference is the payload shape: `nav-symbols` returns a list of
+    /// classes-with-methods instead of a flat list of sites, so the helper
+    /// hands the typed `Vec<NavSymbolClass>` to the caller's `to_lsp`
+    /// mapper rather than a per-row converter.
+    ///
+    /// * `scope` — `Some("user")` for source-backed only (LSP
+    ///   `documentSymbol`), `Some("all")` / `None` for every loaded class
+    ///   (LSP `workspace/symbol`)
+    /// * `to_lsp` — converts the typed payload to the LSP result shape; sees
+    ///   the workspace roots so it can resolve `source_file` paths the same
+    ///   way [`runtime_site_to_lsp_location`] does for nav queries
+    /// * `ast_fallback` — sync closure that runs today's AST/glob path; the
+    ///   sole code path when the flag is off, the runtime is unreachable,
+    ///   or the runtime returns an error
+    ///
+    /// Contracts match [`Self::delegate_nav_query`]:
+    /// 1. **No behaviour change when the flag is off.**
+    /// 2. **Strict cold-file fallback on runtime error** — a transport or
+    ///    decoding failure falls through to AST, never surfaces to the
+    ///    editor.
+    /// 3. **Trust an empty runtime answer.** When the runtime returns zero
+    ///    classes (a *valid* "no symbols" answer — e.g. a project with no
+    ///    user classes loaded yet) the helper does **not** fall back; an
+    ///    empty list is what the editor wants.
+    pub(crate) async fn delegate_nav_symbols<T, F, A>(
+        &self,
+        scope: Option<&'static str>,
+        to_lsp: F,
+        ast_fallback: A,
+    ) -> Vec<T>
+    where
+        F: FnOnce(Vec<NavSymbolClass>, &[PathBuf]) -> Vec<T>,
+        A: FnOnce() -> Vec<T>,
+    {
+        if !self.delegate_to_runtime() {
+            return ast_fallback();
+        }
+        let runtime = match self.ensure_runtime_attached().await {
+            Ok(client) => client,
+            Err(e) => {
+                tracing::debug!(
+                    %e,
+                    "delegate_nav_symbols: runtime unreachable, falling back to AST"
+                );
+                return ast_fallback();
+            }
+        };
+        let classes = match runtime.nav_symbols(scope).await {
+            Ok(classes) => classes,
+            Err(e) => {
+                tracing::warn!(
+                    %e,
+                    "delegate_nav_symbols: runtime error, falling back to AST"
+                );
+                return ast_fallback();
+            }
+        };
+        let roots = {
+            let guard = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            guard.clone()
+        };
+        to_lsp(classes, &roots)
     }
 
     /// BT-2240: Resolve the **declaration sites** (LSP `Location`s) for a
@@ -1957,6 +2030,15 @@ impl LanguageServer for Backend {
     }
 
     /// Returns the document symbol outline (classes, methods, fields).
+    ///
+    /// BT-2244 wired this through [`Backend::delegate_nav_symbols`] as the
+    /// per-file dispatcher: when `delegateToRuntime` is on and a workspace
+    /// is attached, the runtime answers via `nav-symbols` (the live class
+    /// registry — picks up REPL-loaded and live-edited classes the AST
+    /// walker can't see) and we filter to classes whose `source_file`
+    /// resolves to the requested URI's path. Otherwise we fall back to
+    /// the in-process AST walker, byte-for-byte identical to the
+    /// pre-BT-2244 behaviour.
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -1966,16 +2048,37 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
-        let svc = self.service.lock().expect("service lock poisoned");
-        let source = svc.file_source(&path);
-        let symbols = svc.document_symbols(&path);
-
-        let Some(src) = source.as_deref() else {
-            return Ok(None);
+        // AST fallback — preserves the pre-BT-2244 behaviour byte-for-byte.
+        // Used when the flag is off, the runtime is unreachable, or the
+        // runtime returns an error.
+        let ast_fallback = || -> Vec<tower_lsp::lsp_types::DocumentSymbol> {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let Some(src) = svc.file_source(&path) else {
+                return Vec::new();
+            };
+            let symbols = svc.document_symbols(&path);
+            symbols
+                .into_iter()
+                .map(|s| to_lsp_symbol(s, &src))
+                .collect()
         };
 
-        let lsp_symbols: Vec<tower_lsp::lsp_types::DocumentSymbol> =
-            symbols.into_iter().map(|s| to_lsp_symbol(s, src)).collect();
+        let target_path = path.clone();
+        let to_lsp = move |classes: Vec<NavSymbolClass>,
+                           roots: &[PathBuf]|
+              -> Vec<tower_lsp::lsp_types::DocumentSymbol> {
+            classes
+                .into_iter()
+                .filter_map(|c| runtime_class_to_document_symbol(c, &target_path, roots))
+                .collect()
+        };
+
+        // `scope = "user"` — `document_symbol` is per-file, so only
+        // source-backed classes are reachable here. Reduces the wire
+        // payload and avoids touching stdlib's huge class set.
+        let lsp_symbols = self
+            .delegate_nav_symbols(Some("user"), to_lsp, ast_fallback)
+            .await;
 
         if lsp_symbols.is_empty() {
             Ok(None)
@@ -1986,71 +2089,138 @@ impl LanguageServer for Backend {
 
     /// Returns workspace-wide class symbols matching the query (BT-2081).
     ///
-    /// Iterates over every indexed user file and emits one `SymbolInformation`
-    /// per top-level class whose name contains the query string (case-insensitive,
-    /// substring match). Stdlib files are excluded so the result mirrors the
-    /// MCP `list_classes` "user" scope.
+    /// BT-2244 wired this through [`Backend::delegate_nav_symbols`]:
+    /// * when `delegateToRuntime` is on and a workspace is attached, the
+    ///   runtime answers via `nav-symbols` against the live class
+    ///   registry — the headline win is that REPL-loaded classes with
+    ///   no source file appear here (impossible with the AST/glob path
+    ///   which only sees indexed `.bt` files on disk). Classes without
+    ///   a `source_file` are attached to the first workspace root with
+    ///   a zero-width range at (0, 0); the symbol detail carries
+    ///   `(no source file)` so editors render them visibly distinct.
+    /// * Otherwise — flag off, runtime unreachable, runtime error — the
+    ///   fallback iterates every indexed user file and emits one
+    ///   `SymbolInformation` per top-level class whose name contains the
+    ///   query string (case-insensitive, substring match). Stdlib files
+    ///   are excluded so the result mirrors the MCP `list_classes`
+    ///   "user" scope.
     ///
-    /// An empty query returns every user class; this matches MCP behaviour.
+    /// An empty query returns every user class; this matches MCP
+    /// behaviour and the editor's "Ctrl-T with empty filter" UX.
     async fn symbol(
         &self,
         params: WorkspaceSymbolParams,
     ) -> Result<Option<Vec<SymbolInformation>>> {
         let query_lower = params.query.to_ascii_lowercase();
-        let svc = self.service.lock().expect("service lock poisoned");
-        let mut out: Vec<SymbolInformation> = Vec::new();
-        // Snapshot indexed file paths first; `document_symbols` does not
-        // require a separate borrow of the project index.
-        let files: Vec<Utf8PathBuf> = svc
-            .project_index()
-            .indexed_files()
-            .into_iter()
-            .filter(|f| !svc.project_index().is_stdlib_file(f))
-            .cloned()
-            .collect();
-        for file in files {
-            let Some(source) = svc.file_source(&file) else {
-                continue;
-            };
-            let symbols = svc.document_symbols(&file);
-            let Some(uri) = path_to_uri(&file) else {
-                continue;
-            };
-            for sym in symbols {
-                if !matches!(sym.kind, DocumentSymbolKind::Class) {
+
+        // AST fallback path — kept verbatim from the pre-BT-2244
+        // implementation so cold-file mode is byte-for-byte identical.
+        let query_for_fallback = query_lower.clone();
+        let ast_fallback = || -> Vec<SymbolInformation> {
+            let svc = self.service.lock().expect("service lock poisoned");
+            let mut out: Vec<SymbolInformation> = Vec::new();
+            let files: Vec<Utf8PathBuf> = svc
+                .project_index()
+                .indexed_files()
+                .into_iter()
+                .filter(|f| !svc.project_index().is_stdlib_file(f))
+                .cloned()
+                .collect();
+            for file in files {
+                let Some(source) = svc.file_source(&file) else {
                     continue;
-                }
-                // The document-symbol provider tags class entries with a
-                // trailing " (class)" disambiguator (so editors can render
-                // `Counter (class)` in document outlines). Strip it here so
-                // workspace/symbol surfaces a bare class name — that
-                // matches the MCP `list_classes` semantics and is the
-                // string editors typically expect for symbol queries.
-                let name = sym
-                    .name
-                    .as_str()
-                    .strip_suffix(" (class)")
-                    .unwrap_or(sym.name.as_str())
-                    .to_string();
-                if !query_lower.is_empty() && !name.to_ascii_lowercase().contains(&query_lower) {
-                    continue;
-                }
-                let range = span_to_range(sym.span, &source);
-                #[expect(deprecated, reason = "LSP SymbolInformation requires deprecated field")]
-                let info = SymbolInformation {
-                    name,
-                    kind: SymbolKind::CLASS,
-                    tags: None,
-                    deprecated: None,
-                    location: tower_lsp::lsp_types::Location {
-                        uri: uri.clone(),
-                        range,
-                    },
-                    container_name: None,
                 };
-                out.push(info);
+                let symbols = svc.document_symbols(&file);
+                let Some(uri) = path_to_uri(&file) else {
+                    continue;
+                };
+                for sym in symbols {
+                    if !matches!(sym.kind, DocumentSymbolKind::Class) {
+                        continue;
+                    }
+                    let name = sym
+                        .name
+                        .as_str()
+                        .strip_suffix(" (class)")
+                        .unwrap_or(sym.name.as_str())
+                        .to_string();
+                    if !query_for_fallback.is_empty()
+                        && !name.to_ascii_lowercase().contains(&query_for_fallback)
+                    {
+                        continue;
+                    }
+                    let range = span_to_range(sym.span, &source);
+                    #[expect(
+                        deprecated,
+                        reason = "LSP SymbolInformation requires deprecated field"
+                    )]
+                    let info = SymbolInformation {
+                        name,
+                        kind: SymbolKind::CLASS,
+                        tags: None,
+                        deprecated: None,
+                        location: tower_lsp::lsp_types::Location {
+                            uri: uri.clone(),
+                            range,
+                        },
+                        container_name: None,
+                    };
+                    out.push(info);
+                }
             }
-        }
+            out
+        };
+
+        // Workspace-root URI fallback used when the runtime reports a
+        // class with no `source_file`. Editors that get this row see
+        // the symbol but a zero-width range; clicking opens the project
+        // root (or stays put if the editor declines the navigation).
+        let workspace_root_uri = {
+            let roots = self
+                .workspace_roots
+                .lock()
+                .expect("workspace_roots lock poisoned");
+            roots.first().and_then(|p| Url::from_file_path(p).ok())
+        };
+        // Stdlib paths to exclude from the runtime path — mirrors the
+        // AST fallback at line ~2126 which skips `is_stdlib_file`. The
+        // runtime's `scope=all` returns every loaded class including
+        // stdlib (`Integer`, `String`, ...); without this filter the
+        // editor's Ctrl-T picker would balloon with stdlib classes that
+        // were not in the cold-file result.
+        let stdlib_paths: HashSet<Utf8PathBuf> = {
+            let guard = self
+                .stdlib_paths
+                .lock()
+                .expect("stdlib_paths lock poisoned");
+            guard.clone()
+        };
+
+        let to_lsp =
+            move |classes: Vec<NavSymbolClass>, roots: &[PathBuf]| -> Vec<SymbolInformation> {
+                classes
+                    .iter()
+                    .filter(|c| !class_source_is_stdlib(c, roots, &stdlib_paths))
+                    .filter_map(|c| {
+                        runtime_class_to_workspace_symbol(
+                            c,
+                            &query_lower,
+                            roots,
+                            workspace_root_uri.as_ref(),
+                        )
+                    })
+                    .collect()
+            };
+
+        // `scope = "all"` — workspace/symbol's headline win is showing
+        // source-less classes (REPL-loaded, dynamically built). Letting
+        // the runtime return its full class list and filtering on the
+        // LSP side keeps the query string locally-applied for
+        // case-insensitivity parity with the AST path.
+        let out = self
+            .delegate_nav_symbols(Some("all"), to_lsp, ast_fallback)
+            .await;
+
         if out.is_empty() {
             Ok(None)
         } else {
@@ -3257,6 +3427,228 @@ fn runtime_site_to_lsp_location(
     Some(tower_lsp::lsp_types::Location { uri, range })
 }
 
+/// BT-2244: Convert a runtime [`NavSymbolClass`] to an LSP [`DocumentSymbol`]
+/// for `textDocument/documentSymbol`.
+///
+/// Drops the row when:
+/// * the class has no `source_file` (REPL-only / dynamic — these surface
+///   in `workspace/symbol`, not the per-file outline), or
+/// * the resolved `source_file` doesn't match the requested file (a
+///   different class also lives in `nav-symbols`'s reply — we filter
+///   here to match the AST-walker's per-file scope).
+///
+/// The class entry is tagged `Counter (class)` (BT-2244 preserves the
+/// ADR 0013 outline disambiguator the cold-file path uses) and the
+/// children are the class's locally-defined instance + class-side
+/// method headers. Field children are omitted: the live class registry
+/// doesn't expose field declarations as xref rows, so the runtime path
+/// is method-only by construction. (When the AST fallback runs, fields
+/// still appear — the two paths intentionally differ in detail because
+/// the runtime carries the *current* class shape, not its source-text
+/// declaration.)
+#[expect(deprecated, reason = "LSP DocumentSymbol requires deprecated field")]
+fn runtime_class_to_document_symbol(
+    class: NavSymbolClass,
+    requested_path: &Utf8PathBuf,
+    workspace_roots: &[PathBuf],
+) -> Option<tower_lsp::lsp_types::DocumentSymbol> {
+    let source_file = class.source_file.as_deref()?;
+    if source_file.is_empty() {
+        return None;
+    }
+    // Canonicalise the runtime-reported `source_file` against the
+    // workspace roots the same way nav-query results are canonicalised.
+    // The path must equal the file the editor asked about; otherwise the
+    // class belongs to a different file in the same reply.
+    let resolved = nav_site_to_location(
+        &NavSite {
+            class: class.name.clone(),
+            class_side: false,
+            // `nav_site_to_location` only reads `source_file` + `line`;
+            // we reuse the class name here to satisfy the struct shape
+            // without pulling `ecow` into this crate.
+            method: class.name.clone(),
+            line: class.line.unwrap_or(1),
+            source_file: Some(source_file.to_string()),
+        },
+        workspace_roots,
+    )?;
+    if resolved.file != *requested_path {
+        return None;
+    }
+
+    let class_range = zero_width_range_for_line(class.line.unwrap_or(1));
+    let mut children = Vec::with_capacity(class.methods.len());
+    for m in class.methods {
+        // Runtime-mode methods carry `line: None` when xref has no
+        // method_info entry (primitives whose source is `nil`, or a
+        // method that hasn't re-registered after a hot reload). Render
+        // them at row 0 — better than dropping the row entirely, which
+        // would hide selectors the user knows exist.
+        let line = m.line.unwrap_or(0);
+        let range = zero_width_range_for_line(line);
+        // Class-side methods get a `(class)` detail string so editors
+        // can disambiguate `Counter >> #foo` from `Counter class >> #foo`
+        // in the outline. Instance-side methods carry no detail (parity
+        // with the cold-file path, which leaves detail unset).
+        let detail = if m.class_side {
+            Some("(class)".to_string())
+        } else {
+            None
+        };
+        children.push(tower_lsp::lsp_types::DocumentSymbol {
+            name: m.selector.to_string(),
+            detail,
+            kind: SymbolKind::METHOD,
+            tags: None,
+            deprecated: None,
+            range,
+            selection_range: range,
+            children: None,
+        });
+    }
+
+    Some(tower_lsp::lsp_types::DocumentSymbol {
+        // ADR 0013 — class outline rows carry a ` (class)` suffix so the
+        // editor disambiguates them from same-named selectors. Cold-file
+        // path matches; we mirror it to keep the editor outline stable
+        // across modes.
+        name: format!("{} (class)", class.name),
+        detail: None,
+        kind: SymbolKind::CLASS,
+        tags: None,
+        deprecated: None,
+        range: class_range,
+        selection_range: class_range,
+        children: if children.is_empty() {
+            None
+        } else {
+            Some(children)
+        },
+    })
+}
+
+/// BT-2244: Convert a runtime [`NavSymbolClass`] to an LSP
+/// [`SymbolInformation`] for `workspace/symbol`.
+///
+/// Applies the `query` substring filter (case-insensitive, empty matches
+/// everything) and produces:
+/// * a normal source-anchored row when the class has a backing
+///   `source_file` resolvable against the workspace roots, or
+/// * a zero-width row anchored to the workspace root URI with the
+///   detail `(no source file)` when the class has no source — the
+///   *headline win* of BT-2244 — so REPL-loaded classes still surface
+///   in the editor's Ctrl-T picker.
+///
+/// Returns `None` when the class fails the substring filter, or when
+/// the class has no source AND no workspace root URI is configured (no
+/// safe URI to attach the row to).
+fn runtime_class_to_workspace_symbol(
+    class: &NavSymbolClass,
+    query_lower: &str,
+    workspace_roots: &[PathBuf],
+    workspace_root_uri: Option<&Url>,
+) -> Option<SymbolInformation> {
+    let name = class.name.to_string();
+    if !query_lower.is_empty() && !name.to_ascii_lowercase().contains(query_lower) {
+        return None;
+    }
+
+    let (uri, range, detail) = match class.source_file.as_deref() {
+        Some(source_file) if !source_file.is_empty() => {
+            let resolved = nav_site_to_location(
+                &NavSite {
+                    class: class.name.clone(),
+                    class_side: false,
+                    // `nav_site_to_location` only reads `source_file` + `line`;
+                    // we reuse the class name here to satisfy the struct shape
+                    // without pulling `ecow` into this crate.
+                    method: class.name.clone(),
+                    line: class.line.unwrap_or(1),
+                    source_file: Some(source_file.to_string()),
+                },
+                workspace_roots,
+            )?;
+            let uri = path_to_uri(&resolved.file)?;
+            (uri, zero_width_range_for_line(resolved.line), None)
+        }
+        _ => {
+            // Headline win: surface source-less classes (REPL-loaded,
+            // ClassBuilder, stdlib if the consumer asked for scope=all).
+            // Attach to the workspace root URI with a (0, 0) range so
+            // the editor renders the symbol; clicking opens the root.
+            let uri = workspace_root_uri.cloned()?;
+            (
+                uri,
+                Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(0, 0),
+                },
+                Some("(no source file)".to_string()),
+            )
+        }
+    };
+
+    #[expect(deprecated, reason = "LSP SymbolInformation requires deprecated field")]
+    let info = SymbolInformation {
+        name,
+        kind: SymbolKind::CLASS,
+        tags: None,
+        deprecated: None,
+        location: tower_lsp::lsp_types::Location { uri, range },
+        container_name: detail,
+    };
+    Some(info)
+}
+
+/// BT-2244: 1-based runtime line → zero-width LSP `Range`. Defends
+/// against the runtime emitting line 0 (which it shouldn't) by clamping
+/// to row 0.
+fn zero_width_range_for_line(line: u32) -> Range {
+    let row = line.saturating_sub(1);
+    Range {
+        start: Position::new(row, 0),
+        end: Position::new(row, 0),
+    }
+}
+
+/// BT-2244: Detect whether a runtime [`NavSymbolClass`] is backed by a
+/// stdlib source file. Used by the `workspace/symbol` handler to exclude
+/// stdlib classes from the runtime-attached result set, mirroring the
+/// `ProjectIndex::is_stdlib_file` filter the AST-fallback path applies.
+///
+/// Returns `false` (i.e. *keep the row*) when:
+/// * the class has no `source_file` at all (REPL-loaded / dynamic — the
+///   *headline win*; these aren't stdlib by construction), or
+/// * the class's `source_file` doesn't resolve against any workspace
+///   root, or
+/// * the resolved path isn't in the LSP's stdlib set.
+fn class_source_is_stdlib(
+    class: &NavSymbolClass,
+    workspace_roots: &[PathBuf],
+    stdlib_paths: &HashSet<Utf8PathBuf>,
+) -> bool {
+    let Some(source_file) = class.source_file.as_deref() else {
+        return false;
+    };
+    if source_file.is_empty() {
+        return false;
+    }
+    let Some(resolved) = nav_site_to_location(
+        &NavSite {
+            class: class.name.clone(),
+            class_side: false,
+            method: class.name.clone(),
+            line: class.line.unwrap_or(1),
+            source_file: Some(source_file.to_string()),
+        },
+        workspace_roots,
+    ) else {
+        return false;
+    };
+    stdlib_paths.contains(&resolved.file)
+}
+
 /// BT-2242: Build a `TypeHierarchyItem` for `class_name` when its declaration
 /// site is known. The selection range is collapsed to the class-name token
 /// (the `span` field on the declaration `Location`), and the surrounding
@@ -3684,7 +4076,7 @@ mod tests {
         // falls back to sysroot auto-discovery. Assert against the actual sysroot
         // result so the test is deterministic whether or not the binary is installed.
         let expected: Vec<PathBuf> = sysroot_stdlib_source_dir().into_iter().collect();
-        let dirs = configured_stdlib_source_dirs(None, &[PathBuf::from("/tmp/project")]);
+        let dirs = configured_stdlib_source_dirs(None, &[PathBuf::from("/workspace/project")]);
         assert_eq!(dirs, expected);
     }
 
@@ -4549,7 +4941,7 @@ mod tests {
         let handle = OpenPathsHandle {
             versions: Arc::clone(&versions),
         };
-        let path = Utf8PathBuf::from("/tmp/counter.bt");
+        let path = Utf8PathBuf::from("/workspace/counter.bt");
         assert!(!handle.contains(&path));
         versions
             .lock()
@@ -4566,7 +4958,7 @@ mod tests {
         let handle = OpenPathsHandle {
             versions: Arc::clone(&versions),
         };
-        let path = Utf8PathBuf::from("/tmp/counter.bt");
+        let path = Utf8PathBuf::from("/workspace/counter.bt");
         versions
             .lock()
             .expect("versions lock")
@@ -5338,5 +5730,333 @@ mod tests {
             !names.contains(&"Foo"),
             "receiver Foo must not be in its own subtypes, got {names:?}"
         );
+    }
+
+    // -----------------------------------------------------------------
+    // BT-2244: workspace/document symbol unification.
+    //
+    // The runtime path (`nav-symbols` over WebSocket) needs a live
+    // workspace, which the LSP test harness doesn't spin up. These
+    // tests target the pure conversion helpers
+    // (`runtime_class_to_document_symbol`,
+    // `runtime_class_to_workspace_symbol`, `zero_width_range_for_line`)
+    // and the AST-fallback behaviour of the `document_symbol` and
+    // `symbol` handlers — together they pin the parts of the dispatch
+    // contract that don't require runtime attachment. (The runtime
+    // dispatch itself is exercised end-to-end by the surface-drift +
+    // Erlang EUnit tests in `beamtalk_repl_ops_nav_symbols_tests.erl`.)
+    // -----------------------------------------------------------------
+
+    use beamtalk_core::language_service::{NavSymbolClass as NSClass, NavSymbolMethod as NSMethod};
+
+    #[test]
+    fn zero_width_range_for_line_clamps_zero_to_row_zero() {
+        // Defensive: the runtime should never emit line 0, but if it
+        // does we render the symbol at row 0 rather than panicking on
+        // a `0 - 1` underflow.
+        let r = zero_width_range_for_line(0);
+        assert_eq!(r.start, Position::new(0, 0));
+        assert_eq!(r.end, Position::new(0, 0));
+    }
+
+    #[test]
+    fn zero_width_range_for_line_converts_one_based_runtime_lines() {
+        let r = zero_width_range_for_line(7);
+        assert_eq!(r.start, Position::new(6, 0));
+        assert_eq!(r.end, Position::new(6, 0));
+    }
+
+    #[test]
+    fn runtime_class_to_document_symbol_filters_classes_in_other_files() {
+        // A `nav-symbols` reply lists every loaded class. The per-file
+        // `documentSymbol` handler must drop classes that belong to a
+        // different `source_file` than the requested URI.
+        let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-doc-sym-filter");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let a_path = tmp.join("a.bt");
+        let b_path = tmp.join("b.bt");
+        std::fs::write(&a_path, "").expect("write a.bt");
+        std::fs::write(&b_path, "").expect("write b.bt");
+
+        let class_in_b = NSClass::new(
+            "B",
+            Some(b_path.to_str().unwrap().to_string()),
+            Some(1),
+            vec![],
+        );
+        let requested = Utf8PathBuf::from_path_buf(a_path).expect("utf8");
+        let workspace_roots = vec![tmp.clone()];
+        let out = runtime_class_to_document_symbol(class_in_b, &requested, &workspace_roots);
+        assert!(out.is_none(), "class from b.bt must be filtered out");
+    }
+
+    #[test]
+    fn runtime_class_to_document_symbol_drops_classes_without_source_file() {
+        // Classes without a backing source file (REPL-loaded,
+        // ClassBuilder) belong to `workspace/symbol`, not the per-file
+        // outline.
+        let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-doc-sym-no-src");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("counter.bt");
+        std::fs::write(&path, "").expect("write counter.bt");
+
+        let class = NSClass::new("ReplOnly", None, None, vec![]);
+        let requested = Utf8PathBuf::from_path_buf(path).expect("utf8");
+        let out = runtime_class_to_document_symbol(class, &requested, std::slice::from_ref(&tmp));
+        assert!(out.is_none(), "source-less class must be filtered out");
+    }
+
+    #[test]
+    fn runtime_class_to_document_symbol_emits_class_with_methods() {
+        let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-doc-sym-emit");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("counter.bt");
+        std::fs::write(&path, "").expect("write counter.bt");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let class = NSClass::new(
+            "Counter",
+            Some(path_str),
+            Some(1),
+            vec![
+                NSMethod::new("increment", false, Some(7)),
+                NSMethod::new("withInitial:", true, Some(3)),
+            ],
+        );
+        let requested = Utf8PathBuf::from_path_buf(path).expect("utf8");
+        let sym = runtime_class_to_document_symbol(class, &requested, std::slice::from_ref(&tmp))
+            .expect("class with matching source file should produce a symbol");
+
+        assert_eq!(sym.name, "Counter (class)");
+        assert_eq!(sym.kind, SymbolKind::CLASS);
+        let children = sym.children.expect("Counter has methods");
+        assert_eq!(children.len(), 2);
+        let increment = children.iter().find(|c| c.name == "increment").unwrap();
+        assert!(increment.detail.is_none());
+        assert_eq!(increment.range.start, Position::new(6, 0));
+        let with_initial = children.iter().find(|c| c.name == "withInitial:").unwrap();
+        assert_eq!(with_initial.detail.as_deref(), Some("(class)"));
+        assert_eq!(with_initial.range.start, Position::new(2, 0));
+    }
+
+    #[test]
+    fn runtime_class_to_workspace_symbol_applies_query_filter() {
+        let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-ws-sym-filter");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let path = tmp.join("counter.bt");
+        std::fs::write(&path, "").expect("write counter.bt");
+        let path_str = path.to_str().unwrap().to_string();
+
+        let class = NSClass::new("Counter", Some(path_str), Some(1), vec![]);
+
+        // Empty query — everything matches.
+        let root_uri = Url::from_file_path(&tmp).ok();
+        let s = runtime_class_to_workspace_symbol(
+            &class,
+            "",
+            std::slice::from_ref(&tmp),
+            root_uri.as_ref(),
+        )
+        .expect("empty query matches");
+        assert_eq!(s.name, "Counter");
+
+        // Case-insensitive substring — `count` matches `Counter`.
+        let s2 = runtime_class_to_workspace_symbol(
+            &class,
+            "count",
+            std::slice::from_ref(&tmp),
+            root_uri.as_ref(),
+        )
+        .expect("substring matches");
+        assert_eq!(s2.name, "Counter");
+
+        // Non-matching query.
+        let s3 = runtime_class_to_workspace_symbol(
+            &class,
+            "zzzz",
+            std::slice::from_ref(&tmp),
+            root_uri.as_ref(),
+        );
+        assert!(s3.is_none(), "non-matching query must drop the row");
+    }
+
+    #[test]
+    fn runtime_class_to_workspace_symbol_surfaces_source_less_classes() {
+        // The headline win of BT-2244: classes with no backing source
+        // file (REPL-loaded, ClassBuilder) still appear in
+        // `workspace/symbol`, anchored to the workspace-root URI with a
+        // `(no source file)` detail string.
+        let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-ws-sym-nosrc");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let root_uri = Url::from_file_path(&tmp).expect("root → uri");
+
+        let class = NSClass::new("MyRunner", None, None, vec![]);
+        let s = runtime_class_to_workspace_symbol(
+            &class,
+            "",
+            std::slice::from_ref(&tmp),
+            Some(&root_uri),
+        )
+        .expect("source-less class still surfaces");
+        assert_eq!(s.name, "MyRunner");
+        assert_eq!(s.location.range.start, Position::new(0, 0));
+        // `container_name` carries the `(no source file)` marker (we
+        // overload the field to render visibly distinct rows; the
+        // alternative — `detail`, which isn't on `SymbolInformation`
+        // — is unavailable in the LSP type).
+        let container = s.container_name.as_deref();
+        assert_eq!(container, Some("(no source file)"));
+    }
+
+    #[test]
+    fn class_source_is_stdlib_keeps_source_less_classes() {
+        // Source-less REPL/dynamic classes are *not* stdlib — they must
+        // pass the filter so the headline win still works.
+        let class = NSClass::new("MyRunner", None, None, vec![]);
+        let stdlib_paths: HashSet<Utf8PathBuf> = HashSet::new();
+        assert!(!class_source_is_stdlib(&class, &[], &stdlib_paths));
+    }
+
+    #[test]
+    fn class_source_is_stdlib_keeps_user_classes() {
+        // A class whose resolved source file is *not* in the stdlib set
+        // is kept (this is the typical user-code path).
+        let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-stdlib-keep-user");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let user_path = tmp.join("user.bt");
+        std::fs::write(&user_path, "").expect("write user.bt");
+        let class = NSClass::new(
+            "UserClass",
+            Some(user_path.to_str().unwrap().to_string()),
+            Some(1),
+            vec![],
+        );
+        let stdlib_paths: HashSet<Utf8PathBuf> = HashSet::new();
+        assert!(!class_source_is_stdlib(
+            &class,
+            std::slice::from_ref(&tmp),
+            &stdlib_paths
+        ));
+    }
+
+    #[test]
+    fn class_source_is_stdlib_filters_stdlib_classes() {
+        // A class whose resolved source file *is* in the stdlib set is
+        // filtered out — the runtime-attached `workspace/symbol`
+        // consumer relies on this to keep its result set matching the
+        // cold-file fallback (which only sees user files).
+        let tmp = beamtalk_core::test_helpers::unique_temp_dir("bt-2244-stdlib-filter");
+        std::fs::create_dir_all(&tmp).expect("create temp dir");
+        let stdlib_path = tmp.join("Integer.bt");
+        std::fs::write(&stdlib_path, "").expect("write Integer.bt");
+        let utf8 = Utf8PathBuf::from_path_buf(stdlib_path.clone()).expect("utf8");
+        let stdlib_paths: HashSet<Utf8PathBuf> = std::iter::once(utf8).collect();
+        let class = NSClass::new(
+            "Integer",
+            Some(stdlib_path.to_str().unwrap().to_string()),
+            Some(1),
+            vec![],
+        );
+        assert!(class_source_is_stdlib(
+            &class,
+            std::slice::from_ref(&tmp),
+            &stdlib_paths
+        ));
+    }
+
+    #[test]
+    fn runtime_class_to_workspace_symbol_drops_source_less_without_root() {
+        // No workspace root configured → nowhere safe to anchor the
+        // source-less row, so drop it rather than emit an invalid URI.
+        let class = NSClass::new("Orphan", None, None, vec![]);
+        let s = runtime_class_to_workspace_symbol(&class, "", &[], None);
+        assert!(
+            s.is_none(),
+            "source-less class without a root URI must drop the row"
+        );
+    }
+
+    #[tokio::test]
+    async fn document_symbol_falls_back_to_ast_when_flag_off() {
+        // With `delegateToRuntime` false (the default), `document_symbol`
+        // returns the AST walker's outline byte-for-byte — same shape
+        // the pre-BT-2244 implementation produced. This pins the
+        // "no behaviour change when off" contract.
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2244-doc-sym-fallback").with_extension("bt"),
+        )
+        .expect("utf8 path");
+        let source = "Object subclass: Counter\n  increment => 1\n  value => 2";
+        let uri = open_test_file(backend, &path, source);
+        assert!(!backend.delegate_to_runtime());
+
+        let params = DocumentSymbolParams {
+            text_document: tower_lsp::lsp_types::TextDocumentIdentifier { uri },
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response = backend.document_symbol(params).await.expect("rpc ok");
+        let DocumentSymbolResponse::Nested(symbols) = response.expect("Some(symbols)") else {
+            panic!("expected nested response");
+        };
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "Counter (class)");
+        let children = symbols[0].children.as_ref().expect("methods present");
+        let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"increment"), "got {names:?}");
+        assert!(names.contains(&"value"), "got {names:?}");
+    }
+
+    #[tokio::test]
+    async fn workspace_symbol_falls_back_to_ast_when_flag_off() {
+        // Cold-file path matches the BT-2081 behaviour exactly — one
+        // SymbolInformation per top-level class whose name matches the
+        // (case-insensitive substring) query, drawn from the indexed
+        // user files.
+        let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+        let backend: &Backend = service.inner();
+        let path = Utf8PathBuf::from_path_buf(
+            unique_temp_dir("bt-2244-ws-sym-fallback").with_extension("bt"),
+        )
+        .expect("utf8 path");
+        let source = "Object subclass: Counter\n  increment => 1";
+        let _uri = open_test_file(backend, &path, source);
+        assert!(!backend.delegate_to_runtime());
+
+        // Empty query — matches every user class.
+        let params = WorkspaceSymbolParams {
+            query: String::new(),
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response = backend.symbol(params).await.expect("rpc ok");
+        let syms = response.expect("Some(symbols)");
+        let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Counter"),
+            "fallback should find Counter, got {names:?}"
+        );
+
+        // Case-insensitive substring filter.
+        let params2 = WorkspaceSymbolParams {
+            query: "count".to_string(),
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response2 = backend.symbol(params2).await.expect("rpc ok");
+        let syms2 = response2.expect("Some(symbols)");
+        assert_eq!(syms2.len(), 1);
+        assert_eq!(syms2[0].name, "Counter");
+
+        // Non-matching query.
+        let params3 = WorkspaceSymbolParams {
+            query: "zzzz".to_string(),
+            work_done_progress_params: tower_lsp::lsp_types::WorkDoneProgressParams::default(),
+            partial_result_params: tower_lsp::lsp_types::PartialResultParams::default(),
+        };
+        let response3 = backend.symbol(params3).await.expect("rpc ok");
+        assert!(response3.is_none(), "non-matching query → None");
     }
 }
