@@ -52,7 +52,7 @@ use crate::docvec;
 // build the full thing.
 //
 // Design choice: `Expr` is a single sum type, like OTP's own `cerl` module.
-// `Atom`/`Var`/`Int`/`Lit` are leaves; everything else is a composite.
+// `Atom`/`Var`/`Int` are leaves; everything else is a composite.
 //
 // All `cerl::Expr` values know how to render themselves to a `Document` via
 // `to_doc()`.  This is what production cerl-direct codegen would NOT need
@@ -113,7 +113,8 @@ pub mod cerl {
             /// The expression bound to `var`.
             bound: Box<Expr>,
         },
-        /// `~{ ... }~` continuation — composes several open-lets in sequence.
+        /// Concatenation of fragments — composes several `LetOpen` chains
+        /// (and optionally a terminal value) into a single expression.
         Seq(Vec<Expr>),
         /// A raw escape hatch for fragments we don't need to model in Phase 0a
         /// (e.g. the binary-string `#{ #<104>... }#` body).  Keeping this small
@@ -235,7 +236,8 @@ pub mod cerl {
             bound: Box::new(bound),
         }
     }
-    /// Sequence several `LetOpen` exprs followed by a final value.
+    /// Concatenate several fragments (typically `LetOpen` chains, optionally
+    /// followed by a terminal value).
     #[must_use]
     pub fn seq(parts: Vec<Expr>) -> Expr {
         Expr::Seq(parts)
