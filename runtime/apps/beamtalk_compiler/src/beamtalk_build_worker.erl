@@ -41,6 +41,15 @@ Protocol:
 ]).
 -endif.
 
+%% The `{cerl, Etf}' clause of `compile_core_erlang/1' is exercised only by
+%% the EUnit suite `beamtalk_cerl_wire_tests' — the production caller
+%% (`compile_core_file/2') always passes a binary. Dialyzer's success-typing
+%% therefore narrows the inferred type to `binary()' and flags the `{cerl, _}'
+%% head as unreachable. Suppress that one warning here; the spec on
+%% `compile_core_erlang/1' is the source of truth for the supported input
+%% shapes (see ADR 0088 Phase 0b).
+-dialyzer({no_match, compile_core_erlang/1}).
+
 -spec main() -> no_return().
 main() ->
     ok = io:setopts([binary, {encoding, utf8}]),
