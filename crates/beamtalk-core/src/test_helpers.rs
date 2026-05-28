@@ -228,6 +228,19 @@ pub mod test_support {
         }
 
         #[test]
+        fn make_actor_class_builds_minimal_actor_class() {
+            let class = make_actor_class("CounterActor");
+            assert_eq!(class.name.name.as_str(), "CounterActor");
+            assert_eq!(
+                class.superclass.as_ref().map(|superclass| superclass.name.as_str()),
+                Some("Actor")
+            );
+            assert_eq!(class.class_kind, crate::ast::ClassKind::Actor);
+            assert!(class.methods.is_empty());
+            assert!(class.state.is_empty());
+        }
+
+        #[test]
         fn make_method_builds_unary_method() {
             let method = make_method("increment");
             assert_eq!(method.selector, MessageSelector::Unary("increment".into()));
