@@ -30,11 +30,10 @@ Protocol:
     "beamtalk-specs-result-error" on failure
 """.
 
--export([main/0]).
+-export([main/0, compile_core_erlang/1]).
 
 -ifdef(TEST).
 -export([
-    compile_core_erlang/1,
     compile_core_file/2,
     compile_modules/2,
     handle_read_specs/1
@@ -237,37 +236,69 @@ compile_core_file(CoreFile, OutDir) ->
             error
     end.
 
-%% Compile Core Erlang binary to BEAM bytecode in memory.
-%% Like beamtalk_compiler_server:compile_core_erlang/1 but includes
-%% debug_info for hot code reload support.
-compile_core_erlang(CoreErlangBin) ->
+%% Compile Core Erlang to BEAM bytecode in memory.
+%%
+%% Two input shapes are accepted (mirrors `beamtalk_compiler_server:compile_core_erlang/1'):
+%%
+%%   * A binary — the legacy text wire (ADR 0022).
+%%   * `{cerl, Etf}' — the ADR 0088 Phase 0b napkin wire (BT-2315). The
+%%     `Etf' binary decodes via `binary_to_term(_, [safe])'.
+%%
+%% Includes `debug_info' so hot code reload works on the resulting BEAM
+%% module. ADR 0088 explicitly calls out that the cerl path must be
+%% exercised with `debug_info' on (this is the build path) to surface any
+%% annotation-chunk surprises Phase 1 would otherwise hit.
+%%
+%% The explicit `-spec' widens the input type so dialyzer accepts the
+%% `{cerl, Etf}' clause — the only production caller (`compile_core_file/2')
+%% passes binaries, but the EUnit tests in `beamtalk_cerl_wire_tests'
+%% exercise the cerl arm and are part of the supported surface.
+-spec compile_core_erlang(binary() | {cerl, binary()}) ->
+    {ok, atom(), binary()} | {error, term()}.
+compile_core_erlang({cerl, Etf}) when is_binary(Etf) ->
+    %% ADR 0088 Phase 0b napkin wire (BT-2315). [safe] decode — see the
+    %% matching clause in beamtalk_compiler_server for the atom-safety
+    %% reasoning.
+    try binary_to_term(Etf, [safe]) of
+        CoreModule ->
+            compile_core_forms(CoreModule)
+    catch
+        error:badarg ->
+            {error, {cerl_decode_error, unsafe_atoms_or_malformed_etf}}
+    end;
+compile_core_erlang(CoreErlangBin) when is_binary(CoreErlangBin) ->
     CoreErlangStr = binary_to_list(CoreErlangBin),
     case core_scan:string(CoreErlangStr) of
         {ok, Tokens, _} ->
             case core_parse:parse(Tokens) of
                 {ok, CoreModule} ->
-                    case
-                        compile:forms(
-                            CoreModule,
-                            [
-                                from_core,
-                                binary,
-                                return_errors,
-                                report_warnings,
-                                debug_info
-                            ]
-                        )
-                    of
-                        {ok, ModuleName, Binary} ->
-                            {ok, ModuleName, Binary};
-                        {ok, ModuleName, Binary, _Warnings} ->
-                            {ok, ModuleName, Binary};
-                        {error, Errors, _Warnings} ->
-                            {error, {core_compile_error, Errors}}
-                    end;
+                    compile_core_forms(CoreModule);
                 {error, ParseError} ->
                     {error, {core_parse_error, ParseError}}
             end;
         {error, ScanError, _Loc} ->
             {error, {core_scan_error, ScanError}}
+    end.
+
+%% Internal: shared `compile:forms/2' arm used by both wire shapes.
+%% Includes `debug_info' (this is the build path).
+compile_core_forms(CoreModule) ->
+    case
+        compile:forms(
+            CoreModule,
+            [
+                from_core,
+                binary,
+                return_errors,
+                report_warnings,
+                debug_info
+            ]
+        )
+    of
+        {ok, ModuleName, Binary} ->
+            {ok, ModuleName, Binary};
+        {ok, ModuleName, Binary, _Warnings} ->
+            {ok, ModuleName, Binary};
+        {error, Errors, _Warnings} ->
+            {error, {core_compile_error, Errors}}
     end.
