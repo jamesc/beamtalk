@@ -58,6 +58,11 @@ codegen + wire change + 58K LOC migration) is what's rejected.
   approach via per-leaf metadata or a separate side-band channel.
   Plan as part of the typed-leaves rollout ADR.
 
+**Downstream replacement ADR:** [ADR 0089](0089-typed-document-leaves.md)
+turns the Phase 0c recommendation into a buildable plan — the
+typed-Document-leaves refactor that closes the BT-875 recurrence
+vector structurally without re-opening the cerl-wire question.
+
 ---
 
 **Original Status (now superseded — Proposed, 2026-05-26):** Phase 0a + 0b only. Phases 1–4 are explicitly contingent on two decision gates:
