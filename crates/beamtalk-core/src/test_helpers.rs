@@ -232,7 +232,10 @@ pub mod test_support {
             let class = make_actor_class("CounterActor");
             assert_eq!(class.name.name.as_str(), "CounterActor");
             assert_eq!(
-                class.superclass.as_ref().map(|superclass| superclass.name.as_str()),
+                class
+                    .superclass
+                    .as_ref()
+                    .map(|superclass| superclass.name.as_str()),
                 Some("Actor")
             );
             assert_eq!(class.class_kind, crate::ast::ClassKind::Actor);
