@@ -2943,6 +2943,7 @@ mod tests {
         AutoSlotMethods, compute_auto_slot_methods,
     };
     use crate::source_analysis::Span;
+    use crate::test_helpers::test_support::make_actor_class;
 
     fn s() -> Span {
         Span::new(0, 0)
@@ -2972,16 +2973,6 @@ mod tests {
         // Explicitly set class_kind to avoid relying on constructor inference
         class.class_kind = ClassKind::Value;
         class
-    }
-
-    fn make_actor_class(name: &str) -> ClassDefinition {
-        ClassDefinition::new(
-            Identifier::new(name, s()),
-            Identifier::new("Actor", s()),
-            vec![],
-            vec![],
-            s(),
-        )
     }
 
     #[test]
