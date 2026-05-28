@@ -504,6 +504,70 @@ fn collect_method_def_refs(
     }
 }
 
+/// Find only the **method-definition** sites for a selector across files.
+///
+/// Returns one [`Location`] per method definition whose selector matches —
+/// the same shape `find_selector_references` would return for those sites
+/// (full method `span`, matching the AST-walker's call-site contract), but
+/// **without** the call/cascade sites.
+///
+/// Used by [`crate::language_service`] to overlay declaration sites onto
+/// runtime-attached `textDocument/references` results (BT-2240). The
+/// runtime path returns `senders_of/1` (call sites only); merging this
+/// helper's output back in restores parity with the cold-file walker
+/// when `includeDeclaration = true`.
+pub fn find_selector_declarations<'a>(
+    selector_name: &str,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Vec<Location> {
+    let mut results = Vec::new();
+    for (file_path, module) in files {
+        for class in &module.classes {
+            collect_method_def_refs(&class.methods, selector_name, file_path, &mut results);
+            collect_method_def_refs(&class.class_methods, selector_name, file_path, &mut results);
+        }
+        for smd in &module.method_definitions {
+            if smd.method.selector.name() == selector_name {
+                results.push(Location::new(file_path.clone(), smd.method.span));
+            }
+        }
+    }
+    results
+}
+
+/// Find only the **class/protocol declaration name** sites for a name
+/// across files.
+///
+/// Returns one [`Location`] per class or protocol definition whose name
+/// matches — pointing at the declared name token only (not superclass
+/// references, type-annotation occurrences, or other reference sites).
+///
+/// Used by [`crate::language_service`] to overlay class declaration sites
+/// onto runtime-attached `textDocument/references` results (BT-2240). The
+/// runtime path's `references_to/1` returns sites that *use* the class
+/// (type annotations, class literals, etc.) but never the declaration site
+/// itself; merging this helper's output back in restores parity with the
+/// cold-file walker when `includeDeclaration = true`.
+pub fn find_class_declarations<'a>(
+    class_name: &str,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Vec<Location> {
+    let mut results = Vec::new();
+    for (file_path, module) in files {
+        for class in &module.classes {
+            if class.name.name == class_name {
+                results.push(Location::new(file_path.clone(), class.name.span));
+            }
+        }
+        for protocol in &module.protocols {
+            if protocol.name.name == class_name {
+                results.push(Location::new(file_path.clone(), protocol.name.span));
+            }
+        }
+    }
+    results
+}
+
 /// Recursively collect selector references in expressions.
 fn collect_selector_refs(
     expr: &Expression,
@@ -995,5 +1059,99 @@ mod tests {
         // Expect: class definition + three constructor pattern sites
         // (one with a guard, two without).
         assert_eq!(refs.len(), 4, "expected 4 refs, got {refs:?}");
+    }
+
+    // ----------------------------------------------------------------
+    // BT-2240: declaration-only helpers (declaration-merge support).
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn find_selector_declarations_returns_only_method_definitions() {
+        let file = Utf8PathBuf::from("test.bt");
+        // One method definition + two call sites for `bar`.
+        let module = parse_source("Object subclass: Foo\n  bar => 1\nx bar\ny bar");
+
+        let decls = find_selector_declarations("bar", [(&file, &module)]);
+        let refs = find_selector_references("bar", [(&file, &module)]);
+
+        assert_eq!(decls.len(), 1, "expected 1 declaration, got {decls:?}");
+        // The full reference set is strictly larger (defs + sends).
+        assert!(refs.len() > decls.len());
+        // Every declaration site is also present in the full reference set.
+        for d in &decls {
+            assert!(refs.iter().any(|r| r.file == d.file && r.span == d.span));
+        }
+    }
+
+    #[test]
+    fn find_selector_declarations_cross_file_and_polymorphic() {
+        let file_a = Utf8PathBuf::from("a.bt");
+        let file_b = Utf8PathBuf::from("b.bt");
+        // Two different classes both define `ping` — declaration helper must
+        // surface both (declaration-merge for polymorphic selectors).
+        let module_a = parse_source("Object subclass: Foo\n  ping => 1");
+        let module_b = parse_source("Object subclass: Bar\n  ping => 2\nx ping");
+
+        let decls =
+            find_selector_declarations("ping", [(&file_a, &module_a), (&file_b, &module_b)]);
+        assert_eq!(decls.len(), 2, "expected 2 declarations, got {decls:?}");
+        assert!(decls.iter().any(|r| r.file == file_a));
+        assert!(decls.iter().any(|r| r.file == file_b));
+    }
+
+    #[test]
+    fn find_selector_declarations_includes_class_side_and_standalone() {
+        let file = Utf8PathBuf::from("test.bt");
+        // Instance-side def + class-side def + standalone def of the same
+        // selector. All three must be in the declaration set.
+        let module =
+            parse_source("Object subclass: Foo\n  bar => 1\n  class bar => 2\n\nFoo >> bar => 3");
+
+        let decls = find_selector_declarations("bar", [(&file, &module)]);
+        assert_eq!(decls.len(), 3, "expected 3 declarations, got {decls:?}");
+    }
+
+    #[test]
+    fn find_selector_declarations_empty_for_unknown_selector() {
+        let file = Utf8PathBuf::from("test.bt");
+        let module = parse_source("Object subclass: Foo\n  bar => 1");
+        let decls = find_selector_declarations("baz", [(&file, &module)]);
+        assert!(decls.is_empty());
+    }
+
+    #[test]
+    fn find_class_declarations_returns_only_class_definition_name() {
+        let file = Utf8PathBuf::from("test.bt");
+        // One class def + two use sites of `Foo`.
+        let module = parse_source("Object subclass: Foo\n  bar => 1\nx := Foo new\ny := Foo bar");
+
+        let decls = find_class_declarations("Foo", [(&file, &module)]);
+        let refs = find_class_references("Foo", [(&file, &module)]);
+
+        assert_eq!(decls.len(), 1, "expected 1 declaration, got {decls:?}");
+        assert!(refs.len() > decls.len());
+        for d in &decls {
+            assert!(refs.iter().any(|r| r.file == d.file && r.span == d.span));
+        }
+    }
+
+    #[test]
+    fn find_class_declarations_does_not_match_superclass_or_annotation() {
+        let file = Utf8PathBuf::from("test.bt");
+        // `Base` appears as superclass and in an annotation but is *not*
+        // declared in this file — the helper must return 0.
+        let module = parse_source(
+            "Object subclass: Child of: Base\n  state: b :: Base = nil\n  use: b => b",
+        );
+        let decls = find_class_declarations("Base", [(&file, &module)]);
+        assert!(decls.is_empty(), "expected 0 declarations, got {decls:?}");
+    }
+
+    #[test]
+    fn find_class_declarations_includes_protocol_definitions() {
+        let file = Utf8PathBuf::from("test.bt");
+        let module = parse_source("Protocol define: Printable\n  printOn: aStream");
+        let decls = find_class_declarations("Printable", [(&file, &module)]);
+        assert_eq!(decls.len(), 1, "expected 1 protocol declaration");
     }
 }
