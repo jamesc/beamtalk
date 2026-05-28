@@ -428,6 +428,16 @@ For compiler contributors:
 - Existing codegen functions: migrate when touched for feature work (Phase 3, ongoing). No dedicated migration sprint.
 - Debug-time inspection of generated Core Erlang: use the `--emit-core` debug flag after Phase 4 (which pipes the cerl term through `core_pp:format/1`).
 
+## Implementation Tracking
+
+**Epic:** [BT-2313](https://linear.app/beamtalk/issue/BT-2313) — ADR 0088 Phase 0 — cerl-direct wire decision gates
+
+**Phase 0 issues:**
+- [BT-2314](https://linear.app/beamtalk/issue/BT-2314) — Phase 0a: codegen shrinkage audit (3-function rewrite + projection memo)
+- [BT-2315](https://linear.app/beamtalk/issue/BT-2315) — Phase 0b: napkin, empty-module cerl-ETF round-trip + timing (blocked by BT-2314)
+
+**Status:** Phase 0 planned. Phases 1–4 are NOT planned — they remain contingent on the two memos these issues produce. Re-run `/plan-adr` after Phase 0 completes if the recommendation is to proceed.
+
 ## References
 
 - Related ADRs:
