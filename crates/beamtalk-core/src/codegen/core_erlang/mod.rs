@@ -106,6 +106,8 @@ pub mod selector_mangler;
 mod spec_codegen;
 mod state_codegen;
 mod supervisor_codegen;
+#[cfg(test)]
+mod typed_leaves_audit;
 mod util;
 mod value_type_codegen;
 mod variable_context;
