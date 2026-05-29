@@ -114,7 +114,9 @@ TestCase subclass: FileStreamTest
 
   testUnicodeFileContent =>
     // Unicode content (multi-byte UTF-8) reads correctly through streams
-    self assert: (File lines: "test/fixtures/stream_unicode.txt") isOk
+    self assert: (File open: "test/fixtures/stream_unicode.txt" do: [:h |
+      h lines asList
+    ]) unwrap equals: #("Hello 世界", "café", "über")
 
   testOpenDoConcreteReturnValueCheck =>
     // BT-1273: File open:do: returns Result; unwrap gives the block value.
