@@ -40,6 +40,7 @@
 - **`ClassBuilder` metadata parity setters** — `methodSignatures:`, `classMethodSignatures:`, `methodDocs:`, `classMethodDocs:`, `methodReturnTypes:`, `classMethodReturnTypes:`, `classDoc:`, `meta:`, and `isConstructible:` bring programmatically built classes to `:help` parity with file-defined ones (BT-2268).
 - **`Workspace newClass:at:`** — compiles and installs a brand-new class in memory from a source String and target path, logging a durable `new-class` ChangeEntry for later `Workspace flush`. Validates that the target does not already exist on disk, lies within the project source tree, matches the declared class name, and is not already loaded (BT-2285).
 - **`ChangeLog revert:` / `clear` / `flushKinds:` and `Workspace autoflush`** — `revert:` re-installs a ChangeEntry's previous method body via durable `compile:source:`, `clear` discards all pending entries without touching disk, and `flushKinds:` selectively flushes entries filtered by kind (`#instance`, `#class`, `#'new-class'`) and/or author kind (`#human`, `#agent`). `Workspace autoflush` / `autoflush:` is a persistent workspace setting that, when enabled, immediately flushes every successful durable in-memory patch to disk (BT-2290).
+- **`SystemNavigation messagesSentBy:`** — returns `#{#selector, #line}` for every message send in a `CompiledMethod`'s body — the outgoing-call dual of `sendersOf:`. Excludes Erlang FFI sends. Backs the `callHierarchy/outgoingCalls` LSP query (BT-2243).
 
 ### Runtime
 
@@ -77,6 +78,10 @@
 - **REPL `:flush` / `:changes` / `:dirty` meta-commands** — `:flush` desugars to `Workspace flush`, `:flush <arg>` to `Workspace flush: <arg>` (accepting a class name, symbol kind, or dictionary filter), `:changes` to `Workspace changes`, and `:dirty` to `Workspace changes dirtyMethods` (BT-2287).
 - **MCP `save_method` / `try_method` / `save_class` / `flush` / `list_changes` / `dirty_methods` tools** — six new MCP tools exposing the ADR 0082 ChangeLog and flush operations to IDE and agent clients. `save_method` and `try_method` install durable and ephemeral method patches respectively, `save_class` creates a new class via `Workspace newClass:at:`, `flush` writes pending changes to disk, and `list_changes` / `dirty_methods` query the ChangeLog (BT-2288).
 - **LSP `executeCommand` handlers and `workspace/applyEdit` on flush** — `beamtalk.flush`, `beamtalk.flush.class`, `beamtalk.flush.file`, `beamtalk.flush.kind`, and `beamtalk.saveClass` editor commands dispatch through the attached workspace. After flush the LSP emits `workspace/applyEdit` with a whole-document `TextEdit` for every flushed file currently open in the editor, so buffers refresh automatically (BT-2289).
+- **LSP `textDocument/implementation`** — go-to-implementation for selectors, routing through `NavQuery::ImplementorsOf` via `delegate_nav_query` (runtime path) or AST fallback (BT-2241).
+- **LSP `textDocument/references` declaration-merge** — `context.includeDeclaration` now overlays method-definition sites (selector cursor) or class-declaration spans (class cursor) onto reference results. Both runtime and cold-file paths respect the flag identically (BT-2240).
+- **LSP `textDocument/prepareTypeHierarchy` / `typeHierarchy/supertypes` / `typeHierarchy/subtypes`** — type hierarchy navigation answering from the in-process `ClassHierarchy` index for both runtime-attached and cold-file modes (BT-2242).
+- **LSP `textDocument/prepareCallHierarchy` / `callHierarchy/incomingCalls` / `callHierarchy/outgoingCalls`** — call hierarchy navigation. Incoming calls route through the `nav-query` `senders` channel; outgoing calls walk the method-body AST via `SystemNavigation messagesSentBy:` (BT-2243).
 
 ### Internal
 
