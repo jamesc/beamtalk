@@ -245,6 +245,87 @@ fn test_generate_loose_equality_operator() {
     assert_eq!(output, "call 'erlang':'=='(5, 5)");
 }
 
+// ── Binary-operator error paths (operators.rs lines 38–40, 68–72) ─────────
+
+#[test]
+fn test_binary_op_wrong_argument_count_returns_error() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+    let result = generator.generate_binary_op("+", &left, &[]);
+    assert!(
+        result.is_err(),
+        "generate_binary_op with 0 arguments must return an error"
+    );
+}
+
+#[test]
+fn test_binary_op_unsupported_operator_returns_error() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(1), Span::new(0, 1));
+    let right = vec![Expression::Literal(Literal::Integer(2), Span::new(4, 5))];
+    let result = generator.generate_binary_op("@", &left, &right);
+    assert!(
+        result.is_err(),
+        "generate_binary_op with unsupported operator '@' must return an error"
+    );
+}
+
+// ── Concat-op branches (operators.rs lines 158–197) ───────────────────────
+
+#[test]
+fn test_concat_op_list_literal_uses_list_append() {
+    // Left operand is a list literal → is_list = true → should emit erlang:'++'.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(
+        Literal::List(vec![Literal::Integer(1), Literal::Integer(2)]),
+        Span::new(0, 6),
+    );
+    let right = vec![Expression::Literal(
+        Literal::List(vec![Literal::Integer(3)]),
+        Span::new(10, 13),
+    )];
+    let doc = generator.generate_binary_op("++", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("'erlang':'++'"),
+        "List ++ should use 'erlang':'++', got: {output}"
+    );
+    assert!(
+        !output.contains("iolist_to_binary"),
+        "List ++ must not use iolist_to_binary, got: {output}"
+    );
+}
+
+#[test]
+fn test_concat_op_identifier_left_uses_runtime_dispatch() {
+    // Left operand is an identifier (type unknown at compile time) →
+    // should emit a runtime is_list check that dispatches to either
+    // erlang:'++' or iolist_to_binary depending on the runtime value.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Identifier(Identifier {
+        name: "xs".into(),
+        span: Span::new(0, 2),
+    });
+    let right = vec![Expression::Identifier(Identifier {
+        name: "ys".into(),
+        span: Span::new(6, 8),
+    })];
+    let doc = generator.generate_binary_op("++", &left, &right).unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains("is_list"),
+        "Non-literal ++ should emit a runtime is_list type check, got: {output}"
+    );
+    assert!(
+        output.contains("'erlang':'++'"),
+        "Runtime dispatch must include the list path 'erlang':'++', got: {output}"
+    );
+    assert!(
+        output.contains("iolist_to_binary"),
+        "Runtime dispatch must include the binary path iolist_to_binary, got: {output}"
+    );
+}
+
 #[test]
 fn test_fresh_var_generation() {
     let mut generator = CoreErlangGenerator::new("test");
