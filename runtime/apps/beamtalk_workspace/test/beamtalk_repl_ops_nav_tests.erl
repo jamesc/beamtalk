@@ -420,12 +420,15 @@ nav_tests(_Pid) ->
             %% before measuring, so lazy-loading atoms don't skew the baseline.
             _ = code:ensure_loaded(beamtalk_repl_ops_nav),
             _ = code:ensure_loaded(json),
-            _ = json:decode(beamtalk_repl_ops_nav:handle(
-                <<"nav-query">>,
-                #{<<"kind">> => <<"senders">>, <<"selector">> => <<"warmup">>},
-                Msg,
-                self()
-            )),
+            _ =
+                json:decode(
+                    beamtalk_repl_ops_nav:handle(
+                        <<"nav-query">>,
+                        #{<<"kind">> => <<"senders">>, <<"selector">> => <<"warmup">>},
+                        Msg,
+                        self()
+                    )
+                ),
             Before = erlang:system_info(atom_count),
             lists:foreach(
                 fun(N) ->
@@ -458,12 +461,15 @@ nav_tests(_Pid) ->
             %% before measuring, so lazy-loading atoms don't skew the baseline.
             _ = code:ensure_loaded(beamtalk_repl_ops_nav),
             _ = code:ensure_loaded(json),
-            _ = json:decode(beamtalk_repl_ops_nav:handle(
-                <<"nav-query">>,
-                #{<<"kind">> => <<"references">>, <<"class">> => <<"WarmupClass">>},
-                Msg,
-                self()
-            )),
+            _ =
+                json:decode(
+                    beamtalk_repl_ops_nav:handle(
+                        <<"nav-query">>,
+                        #{<<"kind">> => <<"references">>, <<"class">> => <<"WarmupClass">>},
+                        Msg,
+                        self()
+                    )
+                ),
             Before = erlang:system_info(atom_count),
             lists:foreach(
                 fun(N) ->
