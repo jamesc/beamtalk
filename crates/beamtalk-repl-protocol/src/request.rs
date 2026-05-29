@@ -375,6 +375,35 @@ impl RequestBuilder {
         req
     }
 
+    /// Build a `nav-symbols` request — bulk class+method symbol enumeration
+    /// from the live class registry (BT-2244).
+    ///
+    /// Unlike `nav-query` (which is locked to selector-shaped navigation:
+    /// senders / implementors / references), `nav-symbols` returns the full
+    /// outline that backs the LSP `textDocument/documentSymbol` and
+    /// `workspace/symbol` capabilities: every loaded class with its
+    /// instance- and class-side method headers, including REPL-loaded and
+    /// live-edited classes the AST walker can't see.
+    ///
+    /// `scope` filters the result set:
+    /// * `Some("user")` — only classes with a backing `.bt` file (mirrors
+    ///   `list-classes` `user` filter and matches the narrower
+    ///   `textDocument/documentSymbol` usage).
+    /// * `Some("all")` / `None` — every loaded class, including stdlib /
+    ///   dynamic / REPL-loaded classes (the `workspace/symbol` behavior,
+    ///   including live classes with no source file).
+    #[must_use]
+    pub fn nav_symbols(scope: Option<&str>) -> serde_json::Value {
+        let mut req = serde_json::json!({
+            "op": "nav-symbols",
+            "id": next_msg_id(),
+        });
+        if let Some(s) = scope {
+            req["scope"] = serde_json::Value::String(s.to_owned());
+        }
+        req
+    }
+
     // --- Tracing operations (ADR 0069) ---
 
     /// Build an `enable-tracing` request.
@@ -805,6 +834,28 @@ mod tests {
         assert_eq!(req["kind"], "references");
         assert_eq!(req["class"], "Counter");
         assert!(req.get("selector").is_none());
+    }
+
+    #[test]
+    fn nav_symbols_without_scope_omits_field() {
+        let req = RequestBuilder::nav_symbols(None);
+        assert_eq!(req["op"], "nav-symbols");
+        assert!(req.get("scope").is_none());
+        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
+    }
+
+    #[test]
+    fn nav_symbols_with_scope_user_sets_field() {
+        let req = RequestBuilder::nav_symbols(Some("user"));
+        assert_eq!(req["op"], "nav-symbols");
+        assert_eq!(req["scope"], "user");
+    }
+
+    #[test]
+    fn nav_symbols_with_scope_all_sets_field() {
+        let req = RequestBuilder::nav_symbols(Some("all"));
+        assert_eq!(req["op"], "nav-symbols");
+        assert_eq!(req["scope"], "all");
     }
 
     #[test]

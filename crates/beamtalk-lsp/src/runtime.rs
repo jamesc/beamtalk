@@ -29,7 +29,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 use tracing::{debug, info, warn};
 
-use beamtalk_core::language_service::{NavQuery, NavQueryResponse, NavSite};
+use beamtalk_core::language_service::{
+    NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolsResponse,
+};
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
 
 /// How long to wait for individual WebSocket reads / writes during the auth
@@ -366,6 +368,79 @@ impl RuntimeClient {
             RuntimeError::Protocol(format!("nav-query: malformed reply payload: {e}"))
         })?;
         Ok(payload.sites)
+    }
+
+    /// Submit a `nav-symbols` request (BT-2244) and decode the typed reply.
+    ///
+    /// The op is the bulk-outline sibling of `nav-query` — used by the LSP
+    /// `textDocument/documentSymbol` and `workspace/symbol` handlers to
+    /// source their class+method set from the live class registry (so
+    /// REPL-loaded classes and live-edited methods surface in the editor
+    /// even though they have no `.bt` file the AST walker can index).
+    ///
+    /// `scope` filters the result set:
+    /// * `Some("user")` — only classes with a backing source file (used by
+    ///   `documentSymbol`, where a URI is the natural lookup key)
+    /// * `Some("all")` / `None` — every loaded class (used by
+    ///   `workspace/symbol`, where source-less classes are the headline
+    ///   win)
+    ///
+    /// Returns:
+    /// * `Ok(Vec<NavSymbolClass>)` on success (possibly empty).
+    /// * `Err(RuntimeError::Protocol)` for transport-level failures or a
+    ///   structured `#beamtalk_error{}` reply.
+    pub async fn nav_symbols(
+        &self,
+        scope: Option<&str>,
+    ) -> Result<Vec<NavSymbolClass>, RuntimeError> {
+        let request = RequestBuilder::nav_symbols(scope);
+        let id = request
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| RuntimeError::Protocol("nav-symbols request missing id".to_string()))?
+            .to_string();
+
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let req = EvalRequest {
+            request,
+            id: id.clone(),
+            reply_to: reply_tx,
+        };
+        self.inner
+            .sender
+            .send(req)
+            .await
+            .map_err(|_| RuntimeError::Protocol("runtime client shut down".to_string()))?;
+
+        let response = tokio::time::timeout(IO_TIMEOUT, reply_rx)
+            .await
+            .map_err(|_| {
+                RuntimeError::Protocol(format!(
+                    "nav-symbols timed out after {}s waiting for reply (id={id})",
+                    IO_TIMEOUT.as_secs()
+                ))
+            })?
+            .map_err(|_| {
+                RuntimeError::Protocol(
+                    "nav-symbols reply channel dropped before response".to_string(),
+                )
+            })??;
+
+        if response.is_error() {
+            let msg = response
+                .error
+                .or(response.message)
+                .unwrap_or_else(|| "unknown error".to_string());
+            return Err(RuntimeError::Protocol(format!("nav-symbols error: {msg}")));
+        }
+
+        let value = response.value.ok_or_else(|| {
+            RuntimeError::Protocol("nav-symbols: reply missing `value`".to_string())
+        })?;
+        let payload: NavSymbolsResponse = serde_json::from_value(value).map_err(|e| {
+            RuntimeError::Protocol(format!("nav-symbols: malformed reply payload: {e}"))
+        })?;
+        Ok(payload.classes)
     }
 
     /// Close the underlying connection and abort the listener/writer tasks.

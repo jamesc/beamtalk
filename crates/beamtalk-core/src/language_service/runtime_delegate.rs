@@ -155,6 +155,107 @@ pub struct NavQueryResponse {
     pub sites: Vec<NavSite>,
 }
 
+/// One method-header row inside a [`NavSymbolClass`] (BT-2244).
+///
+/// Decoded from the JSON payload of a successful `nav-symbols` reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Deserialize))]
+pub struct NavSymbolMethod {
+    /// The method selector — e.g. `"increment"`, `"+"`, `"at:put:"`.
+    pub selector: EcoString,
+
+    /// `true` when this is a class-side method (defined on the metaclass),
+    /// `false` for instance-side. Mirrors `NavSite::class_side`.
+    pub class_side: bool,
+
+    /// 1-based line number where the method header lives in the class's
+    /// source file, or `None` when the runtime has no xref entry for this
+    /// selector (live-edited methods that haven't re-registered yet,
+    /// stdlib primitives whose source is `nil`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub line: Option<u32>,
+}
+
+/// One class row in a `nav-symbols` reply (BT-2244).
+///
+/// Each class contributes a name, an optional `source_file` (`None` for
+/// stdlib / bootstrap / `ClassBuilder` classes — the "headline win" of
+/// runtime-attached symbol mode is that these still appear here), and its
+/// instance- and class-side methods.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Deserialize))]
+pub struct NavSymbolClass {
+    /// Bare class name — no `(class)` suffix; consumers add disambiguators
+    /// when rendering outline rows.
+    pub name: EcoString,
+
+    /// Absolute path of the `.bt` file backing the class, or `None` for
+    /// stdlib / bootstrap / `ClassBuilder` (dynamic) classes. The LSP
+    /// `document_symbol` handler filters by URI equivalence; the
+    /// `workspace/symbol` handler still surfaces source-less classes (the
+    /// headline win — REPL-loaded classes appear in Ctrl-T).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub source_file: Option<String>,
+
+    /// 1-based line number of the class header in `source_file`, or
+    /// `None` when the runtime can't resolve one (no source file, or
+    /// the class is not in the xref index — both rare).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub line: Option<u32>,
+
+    /// One entry per locally-defined method (instance + class-side
+    /// combined; `class_side` discriminates). Inherited selectors are not
+    /// included — `nav-symbols` mirrors `Behaviour methods`, not
+    /// `Behaviour allMethods`.
+    pub methods: Vec<NavSymbolMethod>,
+}
+
+/// JSON payload shape of a successful `nav-symbols` reply's `value` field
+/// (BT-2244).
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Deserialize))]
+pub struct NavSymbolsResponse {
+    /// One entry per class returned by the query, sorted by class name
+    /// ascending on the runtime side (so the LSP layer can pass the list
+    /// straight to the editor for stable ordering).
+    pub classes: Vec<NavSymbolClass>,
+}
+
+impl NavSymbolMethod {
+    /// Construct a `NavSymbolMethod` from a `&str` selector. Intended for
+    /// test code and other consumers that don't depend on `ecow`
+    /// directly (e.g. `beamtalk-lsp`'s test helpers, which exercise the
+    /// runtime→LSP conversion without the runtime wire format).
+    #[must_use]
+    pub fn new(selector: &str, class_side: bool, line: Option<u32>) -> Self {
+        Self {
+            selector: EcoString::from(selector),
+            class_side,
+            line,
+        }
+    }
+}
+
+impl NavSymbolClass {
+    /// Construct a `NavSymbolClass` from a `&str` name. See
+    /// [`NavSymbolMethod::new`] for the rationale; same role for the
+    /// outer class-with-methods row.
+    #[must_use]
+    pub fn new(
+        name: &str,
+        source_file: Option<String>,
+        line: Option<u32>,
+        methods: Vec<NavSymbolMethod>,
+    ) -> Self {
+        Self {
+            name: EcoString::from(name),
+            source_file,
+            line,
+            methods,
+        }
+    }
+}
+
 /// A resolved navigation target: the absolute path of the file backing
 /// the [`NavSite`] plus the 1-based line number the runtime reported.
 ///
@@ -346,4 +447,72 @@ mod tests {
     // where `serde_json` is a direct dep. Keeping the structured
     // payload assertions there avoids pulling serde_json into
     // `beamtalk-core`'s dev-dependencies just for an in-place test.
+
+    // --- BT-2244: nav-symbols typed payload ---
+
+    #[test]
+    fn nav_symbol_class_construction_preserves_source_file() {
+        let class = NavSymbolClass {
+            name: EcoString::from("Counter"),
+            source_file: Some("/abs/path/counter.bt".to_string()),
+            line: Some(1),
+            methods: vec![NavSymbolMethod {
+                selector: EcoString::from("increment"),
+                class_side: false,
+                line: Some(7),
+            }],
+        };
+        assert_eq!(class.name, "Counter");
+        assert_eq!(class.source_file.as_deref(), Some("/abs/path/counter.bt"));
+        assert_eq!(class.methods.len(), 1);
+        assert_eq!(class.methods[0].selector, "increment");
+        assert!(!class.methods[0].class_side);
+        assert_eq!(class.methods[0].line, Some(7));
+    }
+
+    #[test]
+    fn nav_symbol_class_allows_missing_source_file() {
+        // The headline win of BT-2244: REPL-loaded classes have no
+        // backing source file. The type accepts that and consumers
+        // surface them with a workspace-root anchor + `(no source file)`
+        // detail rather than dropping the row.
+        let class = NavSymbolClass {
+            name: EcoString::from("MyRunner"),
+            source_file: None,
+            line: None,
+            methods: vec![],
+        };
+        assert!(class.source_file.is_none());
+        assert!(class.line.is_none());
+    }
+
+    #[test]
+    fn nav_symbol_method_carries_class_side_flag() {
+        let instance = NavSymbolMethod {
+            selector: EcoString::from("increment"),
+            class_side: false,
+            line: Some(7),
+        };
+        let class_side = NavSymbolMethod {
+            selector: EcoString::from("withInitial:"),
+            class_side: true,
+            line: Some(3),
+        };
+        assert!(!instance.class_side);
+        assert!(class_side.class_side);
+    }
+
+    #[test]
+    fn nav_symbol_method_allows_missing_line() {
+        // xref has no method_info row for primitives whose source is
+        // `nil` and for methods that haven't been re-registered after a
+        // hot reload. The runtime emits `line: null` in those cases;
+        // consumers render them at row 0 rather than dropping them.
+        let m = NavSymbolMethod {
+            selector: EcoString::from("printString"),
+            class_side: false,
+            line: None,
+        };
+        assert!(m.line.is_none());
+    }
 }

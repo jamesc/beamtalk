@@ -650,6 +650,82 @@ kind.
 > consumers (`textDocument/references`, etc.) are flipped over per-method
 > in BT-2240..2244 once the runtime-attached mode is end-to-end tested.
 
+#### `nav-symbols` — Bulk Class+Method Outline (BT-2244)
+
+Bulk class+method symbol outline channel — the sibling of `nav-query`
+that backs the LSP `textDocument/documentSymbol` and `workspace/symbol`
+capabilities when the editor's `delegateToRuntime` flag is on. `nav-query`
+stays locked to selector-shaped navigation (senders / implementors /
+references); `nav-symbols` carries the per-class-with-method-children
+payload that doesn't fit the flat `sites` schema, mirroring how
+`textDocument/typeHierarchy` (BT-2242) chose to extend the cold-file
+path rather than reshape `nav-query`.
+
+The **headline win**: classes loaded purely at the REPL (no `.bt` file)
+and methods installed via `Behaviour >>` / `compile:source:` since the
+last flush appear in `workspace/symbol` here — the AST walker (used in
+cold-file mode) can't see either.
+
+**Optional `scope` field:**
+
+| `scope`       | Class set                                                                                                |
+|---------------|----------------------------------------------------------------------------------------------------------|
+| `"user"`      | Classes with a backing source file only. Used by `textDocument/documentSymbol` (per-file outline).      |
+| `"all"`       | Every loaded class — including stdlib, `ClassBuilder`-created, and REPL-only. Used by `workspace/symbol`. |
+| absent        | Same as `"all"`.                                                                                         |
+
+**Request:**
+```json
+{"op": "nav-symbols", "id": "msg-090", "scope": "all"}
+```
+
+**Response:**
+```json
+{
+  "id": "msg-090",
+  "status": ["done"],
+  "value": {
+    "classes": [
+      {
+        "name": "Counter",
+        "source_file": "/abs/path/examples/counter.bt",
+        "line": 1,
+        "methods": [
+          {"selector": "increment",    "class_side": false, "line": 7},
+          {"selector": "withInitial:", "class_side": true,  "line": 3}
+        ]
+      },
+      {
+        "name": "MyReplRunner",
+        "source_file": null,
+        "line": null,
+        "methods": [
+          {"selector": "run", "class_side": false, "line": null}
+        ]
+      }
+    ]
+  }
+}
+```
+
+| Field                     | Type                       | Description                                                                                                                                       |
+|---------------------------|----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `classes[].name`          | string                     | Bare class name — no `(class)` suffix; consumers add disambiguators.                                                                              |
+| `classes[].source_file`   | string \| null             | Absolute path of the `.bt` file backing the class, or `null` for stdlib / bootstrap / `ClassBuilder` (dynamic) classes.                           |
+| `classes[].line`          | integer \| null            | 1-based line number of the class header in `source_file` (best-effort — minimum known method line). `null` when no xref entry resolves a line.    |
+| `classes[].methods`       | array                      | One entry per locally-defined selector (instance + class-side combined). Inherited selectors are not included — mirrors `Behaviour methods`.      |
+| `methods[].selector`      | string                     | The method selector — e.g. `"increment"`, `"+"`, `"at:put:"`.                                                                                     |
+| `methods[].class_side`    | boolean                    | `true` for class-side (metaclass) methods, `false` for instance-side.                                                                             |
+| `methods[].line`          | integer \| null            | 1-based line number of the method header in the class's source file. `null` when xref has no `method_info` row (primitives, post-reload races).   |
+
+Classes are sorted by name ascending so the LSP layer can pass the list
+straight to the editor for stable ordering. Methods within a class
+follow the xref-ETS order (`defined_selectors/2` `usort` — alphabetical).
+
+**Error responses** follow the standard `status: ["done", "error"]`
+shape with a human-readable `error` field. Validation errors include an
+unknown `scope` value or a non-string `scope` field.
+
 ### Server Operations
 
 #### `describe` — Capability Discovery
