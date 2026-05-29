@@ -1742,7 +1742,13 @@ describe_ops() ->
     PerfOps = beamtalk_repl_ops_perf:describe_ops(),
     %% BT-2239: structured navigation queries.
     NavOps = beamtalk_repl_ops_nav:describe_ops(),
-    maps:merge(maps:merge(BaseOps, PerfOps), NavOps).
+    %% BT-2244: bulk class+method outline (`nav-symbols`).
+    NavSymbolsOps = beamtalk_repl_ops_nav_symbols:describe_ops(),
+    %% maps:merge(A, B) gives B's value when keys collide — we want the
+    %% per-module op descriptors to win over BaseOps (the keysets are
+    %% disjoint today, but this preserves the override direction the
+    %% original `maps:merge(BaseOps, PerfOps)` line documented).
+    maps:merge(BaseOps, maps:merge(maps:merge(PerfOps, NavOps), NavSymbolsOps)).
 
 -doc "Core ops defined in this module and beamtalk_repl_server.".
 -spec base_ops() -> map().
