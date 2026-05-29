@@ -416,6 +416,16 @@ nav_tests(_Pid) ->
             %% back to a single shared sentinel atom on badarg.
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
             Msg = make_msg(),
+            %% Warm up: ensure all involved modules and code paths are loaded
+            %% before measuring, so lazy-loading atoms don't skew the baseline.
+            _ = code:ensure_loaded(beamtalk_repl_ops_nav),
+            _ = code:ensure_loaded(json),
+            _ = json:decode(beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"senders">>, <<"selector">> => <<"warmup">>},
+                Msg,
+                self()
+            )),
             Before = erlang:system_info(atom_count),
             lists:foreach(
                 fun(N) ->
@@ -444,6 +454,16 @@ nav_tests(_Pid) ->
             %% with_class/1 → binary_to_existing_atom/2.
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
             Msg = make_msg(),
+            %% Warm up: ensure all involved modules and code paths are loaded
+            %% before measuring, so lazy-loading atoms don't skew the baseline.
+            _ = code:ensure_loaded(beamtalk_repl_ops_nav),
+            _ = code:ensure_loaded(json),
+            _ = json:decode(beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"references">>, <<"class">> => <<"WarmupClass">>},
+                Msg,
+                self()
+            )),
             Before = erlang:system_info(atom_count),
             lists:foreach(
                 fun(N) ->
