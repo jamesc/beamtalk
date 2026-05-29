@@ -2908,6 +2908,7 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | `extensionsBy: aPackage` | `List(Dictionary)` | `#{#class, #selector}` for each extension method `aPackage` contributes |
 | `implementorsOf: #sel` | `List(Behaviour)` | Classes that define the given selector |
 | `sendersOf: #sel` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that sends `#sel` |
+| `messagesSentBy: aMethod` | `List(Dictionary)` | `#{#selector, #line}` for every message send in `aMethod`'s body — the outgoing-call dual of `sendersOf:`. `aMethod` must be a `CompiledMethod` (e.g. `Counter >> #increment`). Excludes Erlang FFI sends |
 | `referencesTo: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that references the class name |
 | `ffiSitesFor: aSpec` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that calls Erlang `module:function` (optionally arity-qualified, e.g. `"lists:reverse/1"`) |
 | `fieldReadersOf: #slot in: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method that reads field/class var `#slot` while scanning `aClass` + subclasses on instance and class sides |
@@ -2945,6 +2946,9 @@ nav methodsMatching: (Regex from: "printString") unwrap
 
 nav selectorsMatching: "print"
 // => [#printString, #printOn:, ...]
+
+nav messagesSentBy: (Counter >> #increment)
+// => [#{#selector => #+, #line => 2}, ...]
 
 nav unimplementedSelectors
 // => []  (empty = no typos in the loaded registry)
