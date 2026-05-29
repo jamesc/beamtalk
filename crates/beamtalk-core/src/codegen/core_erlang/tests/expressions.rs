@@ -245,7 +245,7 @@ fn test_generate_loose_equality_operator() {
     assert_eq!(output, "call 'erlang':'=='(5, 5)");
 }
 
-// ── Binary-operator error paths (operators.rs lines 38–40, 68–72) ─────────
+// ── Binary-operator error paths ────────────────────────────────────────────
 
 #[test]
 fn test_binary_op_wrong_argument_count_returns_error() {
@@ -270,7 +270,7 @@ fn test_binary_op_unsupported_operator_returns_error() {
     );
 }
 
-// ── Concat-op branches (operators.rs lines 158–197) ───────────────────────
+// ── Concat-op dispatch branches ────────────────────────────────────────────
 
 #[test]
 fn test_concat_op_list_literal_uses_list_append() {
