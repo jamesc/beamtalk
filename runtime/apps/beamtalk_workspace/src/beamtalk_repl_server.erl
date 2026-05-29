@@ -446,6 +446,12 @@ handle_op(Op, Params, Msg, SessionPid) when
 %% BT-2239: structured navigation queries for runtime-attached LSP / MCP clients.
 handle_op(<<"nav-query">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_nav:handle(<<"nav-query">>, Params, Msg, SessionPid);
+%% BT-2244: bulk class+method symbol outline for runtime-attached LSP
+%% `textDocument/documentSymbol` and `workspace/symbol`. Sibling of
+%% `nav-query` — kept on a separate op so `nav-query`'s wire shape stays
+%% locked to selector-shaped navigation.
+handle_op(<<"nav-symbols">>, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops_nav_symbols:handle(<<"nav-symbols">>, Params, Msg, SessionPid);
 handle_op(Op, _Params, Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(

@@ -208,28 +208,22 @@ impl FileWalker {
     /// Walk from `path`, returning `std::path::PathBuf` results.
     ///
     /// Used by consumers that don't require UTF-8 paths (LSP, MCP, build-corpus).
+    /// Delegates to [`walk`][FileWalker::walk] after converting to a UTF-8 path.
+    /// All beamtalk source files must be valid UTF-8, so non-UTF-8 paths produce
+    /// an early error.
     ///
     /// # Errors
     ///
-    /// Returns an error if the path does not exist, if the file has the wrong
-    /// extension, or if a directory cannot be read (when `strict_errors` is true).
+    /// Returns an error if the path is not valid UTF-8, does not exist, has the
+    /// wrong extension, or if a directory cannot be read (when `strict_errors` is true).
     pub fn walk_pathbuf(&self, path: &std::path::Path) -> miette::Result<Vec<std::path::PathBuf>> {
-        if path.is_file() {
-            return self.validate_single_file_pathbuf(path);
-        }
-
-        if !path.exists() {
-            miette::bail!("Path '{}' does not exist", path.display());
-        }
-
-        let mut files = Vec::new();
-        self.walk_dir_pathbuf(path, &mut files)?;
-
-        if self.sort {
-            files.sort();
-        }
-
-        Ok(files)
+        let utf8 = camino::Utf8Path::from_path(path)
+            .ok_or_else(|| miette::miette!("Non-UTF-8 path '{}'", path.display()))?;
+        Ok(self
+            .walk(utf8)?
+            .into_iter()
+            .map(camino::Utf8PathBuf::into_std_path_buf)
+            .collect())
     }
 
     // ── Internal helpers ────────────────────────────────────────────────
@@ -245,23 +239,6 @@ impl FileWalker {
                 .collect::<Vec<_>>()
                 .join(", ");
             miette::bail!("Expected a {ext_list} file, got '{path}'");
-        }
-    }
-
-    fn validate_single_file_pathbuf(
-        &self,
-        path: &std::path::Path,
-    ) -> miette::Result<Vec<std::path::PathBuf>> {
-        if self.extensions.is_empty() || self.matches_extension_std(path) {
-            Ok(vec![path.to_path_buf()])
-        } else {
-            let ext_list = self
-                .extensions
-                .iter()
-                .map(|e| format!(".{e}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            miette::bail!("Expected a {ext_list} file, got '{}'", path.display());
         }
     }
 
@@ -330,70 +307,6 @@ impl FileWalker {
         Ok(())
     }
 
-    fn walk_dir_pathbuf(
-        &self,
-        dir: &std::path::Path,
-        files: &mut Vec<std::path::PathBuf>,
-    ) -> miette::Result<()> {
-        if self.budget_exhausted(files) {
-            return Ok(());
-        }
-
-        let entries = if self.strict_errors {
-            fs::read_dir(dir)
-                .into_diagnostic()
-                .wrap_err_with(|| format!("Failed to read directory '{}'", dir.display()))?
-        } else {
-            match fs::read_dir(dir) {
-                Ok(entries) => entries,
-                Err(_) => return Ok(()),
-            }
-        };
-
-        for entry in entries {
-            if self.budget_exhausted(files) {
-                return Ok(());
-            }
-
-            let entry: fs::DirEntry = if self.strict_errors {
-                entry.into_diagnostic()?
-            } else {
-                match entry {
-                    Ok(e) => e,
-                    Err(_) => continue,
-                }
-            };
-
-            let file_type = if self.strict_errors {
-                entry.file_type().into_diagnostic()?
-            } else {
-                match entry.file_type() {
-                    Ok(ft) => ft,
-                    Err(_) => continue,
-                }
-            };
-
-            if self.skip_symlinks && file_type.is_symlink() {
-                continue;
-            }
-
-            let path = entry.path();
-
-            if file_type.is_dir() {
-                if self.is_excluded_dir_std(&path) {
-                    continue;
-                }
-                if self.recursive {
-                    self.walk_dir_pathbuf(&path, files)?;
-                }
-            } else if file_type.is_file() && self.matches_extension_std(&path) {
-                files.push(path);
-            }
-        }
-
-        Ok(())
-    }
-
     fn matches_extension_utf8(&self, path: &Utf8Path) -> bool {
         if self.extensions.is_empty() {
             return true;
@@ -402,28 +315,11 @@ impl FileWalker {
             .is_some_and(|ext| self.extensions.iter().any(|e| e == ext))
     }
 
-    fn matches_extension_std(&self, path: &std::path::Path) -> bool {
-        if self.extensions.is_empty() {
-            return true;
-        }
-        path.extension()
-            .is_some_and(|ext| self.extensions.iter().any(|e| e.as_str() == ext))
-    }
-
     fn is_excluded_dir(&self, path: &Utf8Path) -> bool {
         if self.excluded_dirs.is_empty() {
             return false;
         }
         path.file_name()
-            .is_some_and(|name| self.excluded_dirs.contains(name))
-    }
-
-    fn is_excluded_dir_std(&self, path: &std::path::Path) -> bool {
-        if self.excluded_dirs.is_empty() {
-            return false;
-        }
-        path.file_name()
-            .and_then(|name| name.to_str())
             .is_some_and(|name| self.excluded_dirs.contains(name))
     }
 }

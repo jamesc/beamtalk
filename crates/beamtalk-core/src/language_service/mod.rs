@@ -56,7 +56,8 @@ mod value_objects;
 // Re-export value objects at the module level
 pub use project_index::ProjectIndex;
 pub use runtime_delegate::{
-    NavQuery, NavQueryResponse, NavSite, RuntimeLocation, line_to_position, nav_site_to_location,
+    NavQuery, NavQueryResponse, NavSite, NavSymbolClass, NavSymbolMethod, NavSymbolsResponse,
+    RuntimeLocation, line_to_position, nav_site_to_location,
 };
 pub use value_objects::{
     ByteOffset, CallHierarchyTarget, CodeAction, Completion, CompletionKind, Diagnostic,
