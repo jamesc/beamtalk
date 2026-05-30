@@ -251,6 +251,9 @@ mod tests {
     #[test]
     fn raw_text_is_verbatim() {
         assert_eq!(render(&raw_text("a comment")), "a comment");
-        assert_eq!(render(&raw_text("has \" and { chars")), "has \" and { chars");
+        assert_eq!(
+            render(&raw_text("has \" and { chars")),
+            "has \" and { chars"
+        );
     }
 }
