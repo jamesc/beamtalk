@@ -873,7 +873,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
                 "@primitive"
             };
             if *is_quoted {
-                docvec![directive, " \"", leaf::ident(name), "\""]
+                docvec![directive, " \"", leaf::string_content(name), "\""]
             } else {
                 docvec![directive, " ", leaf::ident(name)]
             }
