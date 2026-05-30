@@ -302,10 +302,11 @@ lint-no-new-document-string:
     @echo "🔍 Checking for new Document::String / Document::Eco leaves (ADR 0089)..."
     @bash -c ' \
         baseline=2317; \
-        count=$(grep -rEc --include="*.rs" "Document::(String|Eco)\(" \
+        files=$(grep -rlE --include="*.rs" "Document::(String|Eco)\(" \
             crates/beamtalk-core/src/codegen/core_erlang/ \
-            | grep -vE "document/leaf\.rs|typed_leaves_audit\.rs|cerl_audit\.rs" \
-            | awk -F: "{sum+=\$2} END {print sum+0}"); \
+            | grep -vE "document/leaf\.rs|typed_leaves_audit\.rs|cerl_audit\.rs"); \
+        if [ -z "$files" ]; then count=0; \
+        else count=$(echo "$files" | xargs grep -ohE "Document::(String|Eco)\(" | wc -l | tr -d " "); fi; \
         echo "  open-leaf sites: $count (baseline: $baseline)"; \
         if [ "$count" -gt "$baseline" ]; then \
             echo "❌ $((count - baseline)) new Document::String/Eco leaf(s) introduced."; \

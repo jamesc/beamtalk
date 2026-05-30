@@ -61,8 +61,8 @@ pub fn atom(name: impl Into<String>) -> Document<'static> {
 ///
 /// No escaping is applied: Core Erlang variable names are unquoted identifiers
 /// that codegen already produces in valid form (capitalised, mangled). The
-/// typed `var()` call sites the intent so authors no longer reach for
-/// `Document::String(...)` directly for variables.
+/// typed `var()` helper makes the intent explicit so authors no longer reach
+/// for `Document::String(...)` directly for variables.
 ///
 /// Replaces `Document::String(var_name)` call sites — `let`-bound temporaries,
 /// threaded state variables, and function parameters.
