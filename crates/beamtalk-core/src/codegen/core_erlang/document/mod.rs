@@ -25,6 +25,8 @@
 //!
 //! Based on Gleam's Document implementation, adapted for Beamtalk's needs.
 
+pub mod leaf;
+
 /// Indentation width used throughout Core Erlang generation.
 pub const INDENT: isize = 4;
 

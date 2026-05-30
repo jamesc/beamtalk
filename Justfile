@@ -292,6 +292,31 @@ clippy:
     @cargo clippy --all-targets --quiet -- -D warnings
     @echo "✅ Clippy passed"
 
+# ADR 0089 migration ratchet: block NEW Document::String(...) / Document::Eco(...)
+# leaves from appearing while the typed-leaves migration is in flight.
+# Counts open-leaf sites in codegen, excluding the document::leaf API itself and
+# the throwaway audit modules. Fails if the count exceeds the recorded baseline.
+# Lower the baseline as Phase 2 migration PRs land; the final flag-day PR
+# (Phase 3) removes the variants and retires this task.
+lint-no-new-document-string:
+    @echo "🔍 Checking for new Document::String / Document::Eco leaves (ADR 0089)..."
+    @bash -c ' \
+        baseline=2317; \
+        count=$(grep -rEc --include="*.rs" "Document::(String|Eco)\(" \
+            crates/beamtalk-core/src/codegen/core_erlang/ \
+            | grep -vE "document/leaf\.rs|typed_leaves_audit\.rs|cerl_audit\.rs" \
+            | awk -F: "{sum+=\$2} END {print sum+0}"); \
+        echo "  open-leaf sites: $count (baseline: $baseline)"; \
+        if [ "$count" -gt "$baseline" ]; then \
+            echo "❌ $((count - baseline)) new Document::String/Eco leaf(s) introduced."; \
+            echo "   Use the document::leaf helpers (atom/var/string_lit/int_lit/float_lit/fname/binary_lit) instead."; \
+            exit 1; \
+        elif [ "$count" -lt "$baseline" ]; then \
+            echo "✅ $((baseline - count)) leaf(s) migrated since baseline — lower the baseline in Justfile to lock in progress."; \
+        else \
+            echo "✅ No new open leaves."; \
+        fi'
+
 # Check Rust code formatting
 fmt-check-rust:
     @echo "📋 Checking Rust formatting..."
