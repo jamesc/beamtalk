@@ -301,7 +301,7 @@ clippy:
 lint-no-new-document-string:
     @echo "🔍 Checking for new Document::String / Document::Eco leaves (ADR 0089)..."
     @bash -c ' \
-        baseline=2103; \
+        baseline=2039; \
         files=$(grep -rlE --include="*.rs" "Document::(String|Eco)\(" \
             crates/beamtalk-core/src/codegen/core_erlang/ \
             | grep -vE "document/leaf\.rs|typed_leaves_audit\.rs|cerl_audit\.rs"); \
