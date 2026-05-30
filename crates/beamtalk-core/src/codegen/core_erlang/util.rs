@@ -12,6 +12,7 @@
 
 use std::fmt::Write as _;
 
+use super::document::leaf::{atom, string_lit};
 use super::document::{Document, join};
 use super::{CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Expression, ExpressionStatement};
@@ -80,11 +81,11 @@ pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<
     }
     let entries = classes.iter().map(|c| {
         docvec![
-            "{'",
-            Document::String(c.name.name.to_string()),
-            "', '",
-            Document::String(c.superclass_name().to_string()),
-            "'}"
+            "{",
+            atom(c.name.name.to_string()),
+            ", ",
+            atom(c.superclass_name().to_string()),
+            "}"
         ]
     });
     docvec![
@@ -115,8 +116,7 @@ impl CoreErlangGenerator {
     pub(super) fn file_attr(&self) -> Document<'static> {
         match &self.source_path {
             Some(path) => {
-                let escaped = escape_core_erlang_string(path);
-                docvec![", 'file' = [{\"", Document::String(escaped), "\", 1}]"]
+                docvec![", 'file' = [{", string_lit(path), ", 1}]"]
             }
             None => Document::Nil,
         }
@@ -296,12 +296,7 @@ impl CoreErlangGenerator {
         }
         match &self.source_path {
             Some(path) => {
-                let escaped = escape_core_erlang_string(path);
-                docvec![
-                    ", 'beamtalk_source' = [\"",
-                    Document::String(escaped),
-                    "\"]"
-                ]
+                docvec![", 'beamtalk_source' = [", string_lit(path), "]"]
             }
             None => Document::Nil,
         }
