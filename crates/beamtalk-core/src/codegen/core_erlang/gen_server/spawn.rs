@@ -287,132 +287,49 @@ impl CoreErlangGenerator {
     /// Generates the `new/0` error method for actors (BT-217).
     ///
     /// Actors cannot be instantiated with `new` - they must use `spawn`.
-    /// This function generates a method that throws a structured `#beamtalk_error{}`
-    /// record with `kind=instantiation_error`.
-    ///
-    /// # Generated Code
-    ///
-    /// ```erlang
-    /// 'new'/0 = fun () ->
-    ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
-    ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in
-    ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawn instead">>) in
-    ///     call 'beamtalk_error':'raise'(Error2)
-    /// ```
     #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_actor_new_error_method(
         &self,
     ) -> Result<Document<'static>> {
-        let hint_binary = Self::binary_string_literal("Use spawn instead");
-        let doc = docvec![
+        Ok(Self::instantiation_error_stub(
             "'new'/0 = fun () ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in",
-                    line(),
-                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new') in",
-                    line(),
-                    docvec![
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                        Document::String(hint_binary.clone()),
-                        ") in",
-                    ],
-                    line(),
-                    "call 'beamtalk_error':'raise'(Error2)",
-                ]
-            ),
-            "\n",
-        ];
-        Ok(doc)
+            Document::Str("Actor"),
+            "new",
+            "Use spawn instead",
+        ))
     }
 
     /// Generates the `new/1` error method for actors (BT-217).
     ///
     /// Actors cannot be instantiated with `new:` - they must use `spawnWith:`.
-    /// This function generates a method that throws a structured `#beamtalk_error{}`
-    /// record with `kind=instantiation_error`.
-    ///
-    /// # Generated Code
-    ///
-    /// ```erlang
-    /// 'new'/1 = fun (_InitArgs) ->
-    ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in
-    ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in
-    ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"Use spawnWith: instead">>) in
-    ///     call 'beamtalk_error':'raise'(Error2)
-    /// ```
     #[allow(clippy::unused_self)] // method on impl for API consistency
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_actor_new_with_args_error_method(
         &self,
     ) -> Result<Document<'static>> {
-        let hint_binary = Self::binary_string_literal("Use spawnWith: instead");
-        let doc = docvec![
+        Ok(Self::instantiation_error_stub(
             "'new'/1 = fun (_InitArgs) ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "let Error0 = call 'beamtalk_error':'new'('instantiation_error', 'Actor') in",
-                    line(),
-                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'new:') in",
-                    line(),
-                    docvec![
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                        Document::String(hint_binary.clone()),
-                        ") in",
-                    ],
-                    line(),
-                    "call 'beamtalk_error':'raise'(Error2)",
-                ]
-            ),
-            "\n",
-        ];
-        Ok(doc)
+            Document::Str("Actor"),
+            "new:",
+            "Use spawnWith: instead",
+        ))
     }
 
     /// Generates the `spawn/0` error method for abstract classes (BT-105).
     ///
     /// Abstract classes cannot be instantiated — they must be subclassed first.
-    /// This function generates a method that throws a structured `#beamtalk_error{}`
-    /// record with `kind=instantiation_error`.
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::codegen::core_erlang) fn generate_abstract_spawn_error_method(
         &mut self,
     ) -> Result<Document<'static>> {
         let class_name = self.class_name();
-        let hint_binary = Self::binary_string_literal(
-            "Abstract classes cannot be instantiated. Subclass it first.",
-        );
-        let doc = docvec![
+        Ok(Self::instantiation_error_stub(
             "'spawn'/0 = fun () ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    docvec![
-                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
-                        Document::String(class_name.clone()),
-                        "') in",
-                    ],
-                    line(),
-                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawn') in",
-                    line(),
-                    docvec![
-                        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                        Document::String(hint_binary.clone()),
-                        ") in",
-                    ],
-                    line(),
-                    "call 'beamtalk_error':'raise'(Error2)",
-                ]
-            ),
-            "\n",
-        ];
-        Ok(doc)
+            Document::String(class_name),
+            "spawn",
+            "Abstract classes cannot be instantiated. Subclass it first.",
+        ))
     }
 
     /// Generates the `spawn/1` error method for abstract classes (BT-105).
@@ -421,26 +338,52 @@ impl CoreErlangGenerator {
         &mut self,
     ) -> Result<Document<'static>> {
         let class_name = self.class_name();
-        let hint_binary = Self::binary_string_literal(
-            "Abstract classes cannot be instantiated. Subclass it first.",
-        );
-        let doc = docvec![
+        Ok(Self::instantiation_error_stub(
             "'spawn'/1 = fun (_InitArgs) ->",
+            Document::String(class_name),
+            "spawnWith:",
+            "Abstract classes cannot be instantiated. Subclass it first.",
+        ))
+    }
+
+    /// Builds the 4-step `instantiation_error` let-chain for a stub method that always raises.
+    ///
+    /// Shared by all four actor/abstract instantiation guard methods. Generates:
+    /// ```text
+    /// '<method>'/N = fun (...) ->
+    ///     let Error0 = call 'beamtalk_error':'new'('instantiation_error', '<class>') in
+    ///     let Error1 = call 'beamtalk_error':'with_selector'(Error0, '<selector>') in
+    ///     let Error2 = call 'beamtalk_error':'with_hint'(Error1, <<"hint">>) in
+    ///     call 'beamtalk_error':'raise'(Error2)
+    /// ```
+    fn instantiation_error_stub(
+        fun_decl: &'static str,
+        class_name_doc: Document<'static>,
+        selector: &'static str,
+        hint: &str,
+    ) -> Document<'static> {
+        let hint_binary = Self::binary_string_literal(hint);
+        docvec![
+            fun_decl,
             nest(
                 INDENT,
                 docvec![
                     line(),
                     docvec![
                         "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
-                        Document::String(class_name.clone()),
+                        class_name_doc,
                         "') in",
                     ],
                     line(),
-                    "let Error1 = call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:') in",
+                    docvec![
+                        "let Error1 = call 'beamtalk_error':'with_selector'(Error0, '",
+                        selector,
+                        "') in",
+                    ],
                     line(),
                     docvec![
                         "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                        Document::String(hint_binary.clone()),
+                        Document::String(hint_binary),
                         ") in",
                     ],
                     line(),
@@ -448,8 +391,7 @@ impl CoreErlangGenerator {
                 ]
             ),
             "\n",
-        ];
-        Ok(doc)
+        ]
     }
 
     /// Returns a Core Erlang binary string literal for the given string.
