@@ -82,6 +82,7 @@
 - **LSP `textDocument/references` declaration-merge** — `context.includeDeclaration` now overlays method-definition sites (selector cursor) or class-declaration spans (class cursor) onto reference results. Both runtime and cold-file paths respect the flag identically (BT-2240).
 - **LSP `textDocument/prepareTypeHierarchy` / `typeHierarchy/supertypes` / `typeHierarchy/subtypes`** — type hierarchy navigation answering from the in-process `ClassHierarchy` index for both runtime-attached and cold-file modes (BT-2242).
 - **LSP `textDocument/prepareCallHierarchy` / `callHierarchy/incomingCalls` / `callHierarchy/outgoingCalls`** — call hierarchy navigation. Incoming calls route through the `nav-query` `senders` channel; outgoing calls walk the method-body AST via `SystemNavigation messagesSentBy:` (BT-2243).
+- **LSP `textDocument/documentSymbol` / `workspace/symbol` runtime-attached mode** — document and workspace symbol outlines now source from the live class registry via a new `nav-symbols` REPL op when `delegateToRuntime` is on. REPL-loaded classes with no source file appear in workspace symbols (attached to the workspace-root URI, marked `«no source»`). Cold-file fallback is unchanged (BT-2244).
 
 ### Internal
 
