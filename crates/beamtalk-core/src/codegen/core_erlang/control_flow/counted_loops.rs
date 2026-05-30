@@ -423,6 +423,74 @@ mod tests {
         );
     }
 
+    // ── BT-2308: value-type local threading for counted loops ────────────────
+
+    #[test]
+    fn test_value_type_to_do_write_only_threads_local() {
+        // BT-2308: `[:i | last := i]` mutates an outer local write-only. In value-type
+        // context this must thread `last` back via the {'nil', StateAcc} tuple even
+        // though it is never read inside the block.
+        let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    1 to: 5 do: [:i | last := i]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("CountedLoopResult"),
+            "value-type to:do: should bind loop result to CountedLoopResult. Got:\n{code}"
+        );
+        assert!(
+            code.contains("element'(2,"),
+            "value-type to:do: should extract state from element 2. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "value-type to:do: should extract write-only local 'last'. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_to_do_read_write_threads_local() {
+        // BT-2308: read+write `[:i | sum := sum + i]` must thread `sum` back to the caller.
+        let src = "Object subclass: Calc\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n    sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__sum'"),
+            "value-type to:do: should extract 'sum' from state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_times_repeat_write_only_threads_local() {
+        // BT-2308: timesRepeat: with a write-only outer-local mutation threads it back.
+        let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    3 timesRepeat: [last := 7]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "value-type timesRepeat: should extract write-only local 'last'. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_to_by_do_threads_local() {
+        // BT-2308: to:by:do: threads outer-local mutations in value-type context.
+        let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    1 to: 10 by: 2 do: [:i | last := i]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "value-type to:by:do: should extract write-only local 'last'. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_counted_loop_last_expr_unwraps_nil() {
+        // BT-2308: a mutating counted loop as the method's LAST expression must return
+        // the loop's logical value (element 1 = nil), not the raw {'nil', StateAcc} tuple.
+        let src = "Object subclass: Calc\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("element'(1,"),
+            "last-expr counted loop should unwrap element 1 (nil). Got:\n{code}"
+        );
+    }
+
     #[test]
     fn test_to_do_readonly_field_pre_extracted_as_direct_param() {
         // BT-1326: When the loop body reads a field that it never writes, that field is

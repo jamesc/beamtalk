@@ -14,27 +14,32 @@ TestCase subclass: CountedLoopsTcoTest
     100000 timesRepeat: []
 
   testToDoLargeRange =>
-    // Integer to:do: over 100 000 values — verifies TCO.
-    // Outer-variable mutation does not thread through the recursive Integer
-    // to:do: implementation (pre-existing limitation — see BT-2308), so this is
-    // a no-assertion smoke test.  BUnit passes if no stack overflow is raised.
-    1 to: 100000 do: [:_ | ]
+    // Integer to:do: over 100 000 values — verifies TCO and that outer-variable
+    // mutation threads back to the caller (BT-2308).  The direct-params loop keeps
+    // this tail-recursive, so 100 000 iterations complete without a stack overflow.
+    last := 0
+    1 to: 100000 do: [:i | last := i]
+    self assert: last equals: 100000
 
   testToByDoLargeRange =>
-    // Integer to:by:do: over 100 000 values — verifies TCO.  Same caveat as
-    // testToDoLargeRange (BT-2308).  BUnit passes if no exception is raised.
+    // Integer to:by:do: over 100 000 values — verifies TCO and outer-variable
+    // mutation threading (BT-2308).
+    last := 0
     1
       to: 100000
       by: 1
-      do: [:_ | ]
+      do: [:i | last := i]
+    self assert: last equals: 100000
 
   testToByDoNegativeStep =>
-    // Integer to:by:do: with negative step over 100 000 values — verifies TCO.
-    // Same caveat as testToDoLargeRange (BT-2308).  BUnit passes if no exception is raised.
+    // Integer to:by:do: with negative step over 100 000 values — verifies TCO and
+    // outer-variable mutation threading (BT-2308).
+    last := 0
     100000
       to: 1
       by: -1
-      do: [:_ | ]
+      do: [:i | last := i]
+    self assert: last equals: 1
 
   testToByDoZeroStepIsNoop =>
     // to:by:do: with zero step — body must never execute; asserts early exit

@@ -390,9 +390,16 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[0] {
             let analysis = block_analysis::analyze_block(body_block);
-            // BT-1329: Also check for nested list ops with cross-scope mutations
+            // BT-1329: Also check for nested list ops with cross-scope mutations.
+            // BT-2308: Also thread when the body mutates an outer local (including
+            // write-only mutations like `[last := i]`) that `needs_mutation_threading`
+            // misses in value-type/class-method context. `compute_threaded_locals_for_loop`
+            // is the canonical set the loop codegen actually packs into `StateAcc`.
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
+                || !self
+                    .compute_threaded_locals_for_loop(body_block, None)
+                    .is_empty()
             {
                 let doc = self.generate_times_repeat_with_mutations(receiver, body_block)?;
                 return Ok(Some(doc));
@@ -420,9 +427,13 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[1] {
             let analysis = block_analysis::analyze_block(body_block);
-            // BT-1329: Also check for nested list ops with cross-scope mutations
+            // BT-1329: Also check for nested list ops with cross-scope mutations.
+            // BT-2308: Also thread write-only outer-local mutations (see try_generate_times_repeat).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
+                || !self
+                    .compute_threaded_locals_for_loop(body_block, None)
+                    .is_empty()
             {
                 let doc =
                     self.generate_to_do_with_mutations(receiver, &arguments[0], body_block)?;
@@ -451,9 +462,13 @@ impl CoreErlangGenerator {
         )?;
         if let Expression::Block(body_block) = &arguments[2] {
             let analysis = block_analysis::analyze_block(body_block);
-            // BT-1329: Also check for nested list ops with cross-scope mutations
+            // BT-1329: Also check for nested list ops with cross-scope mutations.
+            // BT-2308: Also thread write-only outer-local mutations (see try_generate_times_repeat).
             if self.needs_mutation_threading(&analysis)
                 || self.body_has_list_op_cross_scope_mutations(body_block)
+                || !self
+                    .compute_threaded_locals_for_loop(body_block, None)
+                    .is_empty()
             {
                 let doc = self.generate_to_by_do_with_mutations(
                     receiver,

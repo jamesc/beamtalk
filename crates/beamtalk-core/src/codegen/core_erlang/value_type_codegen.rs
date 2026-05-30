@@ -11,14 +11,14 @@
 
 use std::fmt::Write as FmtWrite;
 
-use super::document::{Document, concat, join};
+use super::document::{Document, concat, join, leaf};
 use super::intrinsics::validate_block_arity_exact;
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{
-    ClassDefinition, ClassKind, Expression, MessageSelector, MethodDefinition, MethodKind, Module,
-    WellKnownSelector,
+    Block, ClassDefinition, ClassKind, Expression, MessageSelector, MethodDefinition, MethodKind,
+    Module, WellKnownSelector,
 };
 use crate::docvec;
 
@@ -36,6 +36,9 @@ enum VtBodyExprKind {
     DestructureAssignment,
     /// Non-last `do:` loop that mutates captured outer locals (BT-1053).
     DoWithLocalThreading,
+    /// Non-last `to:do:` / `to:by:do:` / `timesRepeat:` counted loop that mutates
+    /// captured outer locals (BT-2308).
+    CountedLoopWithLocalThreading,
     /// Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with local mutations (BT-1392).
     ConditionalWithLocalThreading,
     /// Non-last block value with captured mutations (BT-1213).
@@ -934,6 +937,9 @@ impl CoreErlangGenerator {
         if self.is_do_with_vt_local_threading(expr) {
             return VtBodyExprKind::DoWithLocalThreading;
         }
+        if self.is_counted_loop_with_vt_local_threading(expr) {
+            return VtBodyExprKind::CountedLoopWithLocalThreading;
+        }
         if self.is_while_with_vt_local_threading(expr) {
             return VtBodyExprKind::WhileWithLocalThreading;
         }
@@ -1164,6 +1170,18 @@ impl CoreErlangGenerator {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
                     let doc = self.generate_vt_while_open(expr)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::CountedLoopWithLocalThreading => {
+                // BT-2308: to:do:/to:by:do:/timesRepeat: with captured local mutations.
+                if is_last {
+                    // The loop returns `{'nil', StateAcc}` because it threads locals. As the
+                    // method's last expression those locals don't escape, so unwrap element 1
+                    // (the loop's logical `nil` value) rather than returning the raw tuple.
+                    self.emit_vt_counted_loop_last(expr, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_counted_loop_open(expr)?;
                     body_parts.push(doc);
                 }
             }
@@ -1556,23 +1574,41 @@ impl CoreErlangGenerator {
     fn generate_vt_while_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
         // Generate the while loop expression (returns {'nil', StateAcc} tuple)
         let loop_doc = self.expression_doc(expr)?;
-
-        // Determine threaded locals from the while loop
         let threaded_locals = self.get_while_threaded_locals(expr);
+        Ok(self.emit_vt_loop_open_extraction(
+            loop_doc,
+            &threaded_locals,
+            "WhileResult",
+            "WhileState",
+        ))
+    }
+
+    /// BT-1609/BT-2308: Shared open-let-chain extraction for non-last value-type loops
+    /// that return a `{'nil', StateAcc}` tuple (`whileTrue:`/`whileFalse:` and the counted
+    /// loops `to:do:`/`to:by:do:`/`timesRepeat:`).
+    ///
+    /// 1. Binds the tuple result to a temp var
+    /// 2. Extracts the `StateAcc` from element 2
+    /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`, rebinding the
+    ///    variable names in scope so subsequent code sees the updated values
+    ///
+    /// When there are no threaded locals, falls back to sequencing the loop as a side
+    /// effect (`let _seqN = <loop> in`).
+    fn emit_vt_loop_open_extraction(
+        &mut self,
+        loop_doc: Document<'static>,
+        threaded_locals: &[String],
+        result_var_prefix: &str,
+        state_var_prefix: &str,
+    ) -> Document<'static> {
         if threaded_locals.is_empty() {
             // Fallback: just sequence the expression
             let tmp = self.fresh_temp_var("seq");
-            return Ok(docvec![
-                "    let ",
-                Document::String(tmp),
-                " = ",
-                loop_doc,
-                " in\n",
-            ]);
+            return docvec!["    let ", Document::String(tmp), " = ", loop_doc, " in\n",];
         }
 
-        let tuple_var = self.fresh_temp_var("WhileResult");
-        let state_var = self.fresh_temp_var("WhileState");
+        let tuple_var = self.fresh_temp_var(result_var_prefix);
+        let state_var = self.fresh_temp_var(state_var_prefix);
 
         let mut parts: Vec<Document<'static>> = Vec::new();
 
@@ -1595,7 +1631,7 @@ impl CoreErlangGenerator {
         ]);
 
         // Extract each threaded local from the state map
-        for var_name in &threaded_locals {
+        for var_name in threaded_locals {
             let core_var = self.fresh_var(var_name);
             let key = Self::local_state_key(var_name);
             parts.push(docvec![
@@ -1610,7 +1646,109 @@ impl CoreErlangGenerator {
             self.bind_var(var_name, &core_var);
         }
 
-        Ok(Document::Vec(parts))
+        Document::Vec(parts)
+    }
+
+    /// BT-2308: Returns `true` if `expr` is a `to:do:` / `to:by:do:` / `timesRepeat:`
+    /// counted loop whose body block captures and mutates outer local variables in
+    /// value-type or class-method context.
+    ///
+    /// Mirrors `is_while_with_vt_local_threading`: only triggers when the loop codegen
+    /// will actually pack threaded locals into the `{'nil', StateAcc}` result, so the
+    /// detection and the extraction stay consistent.
+    fn is_counted_loop_with_vt_local_threading(&self, expr: &Expression) -> bool {
+        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+            return false;
+        }
+        let Some(body) = Self::counted_loop_body_block(expr) else {
+            return false;
+        };
+        !self.compute_threaded_locals_for_loop(body, None).is_empty()
+    }
+
+    /// BT-2308: Returns the body block of a counted loop message send
+    /// (`timesRepeat:`, `to:do:`, `to:by:do:`), or `None` if `expr` is not one.
+    fn counted_loop_body_block(expr: &Expression) -> Option<&Block> {
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        let body_arg = match sel.as_str() {
+            "timesRepeat:" if arguments.len() == 1 => &arguments[0],
+            "to:do:" if arguments.len() == 2 => &arguments[1],
+            "to:by:do:" if arguments.len() == 3 => &arguments[2],
+            _ => return None,
+        };
+        if let Expression::Block(body) = body_arg {
+            Some(body)
+        } else {
+            None
+        }
+    }
+
+    /// BT-2308: Generates a non-last counted loop (`to:do:`/`to:by:do:`/`timesRepeat:`)
+    /// with value-type captured local threading as an **open let chain**, extracting the
+    /// threaded locals from the loop's `{'nil', StateAcc}` result (see
+    /// [`Self::emit_vt_loop_open_extraction`]).
+    fn generate_vt_counted_loop_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
+        let loop_doc = self.expression_doc(expr)?;
+        let threaded_locals = Self::counted_loop_body_block(expr)
+            .map(|body| self.compute_threaded_locals_for_loop(body, None))
+            .unwrap_or_default();
+        Ok(self.emit_vt_loop_open_extraction(
+            loop_doc,
+            &threaded_locals,
+            "CountedLoopResult",
+            "CountedLoopState",
+        ))
+    }
+
+    /// BT-2308: Emits a counted loop with captured local threading as the **last**
+    /// expression of a value-type method body.
+    ///
+    /// The loop returns a `{'nil', StateAcc}` tuple because it threads outer locals.
+    /// In last position those locals don't escape, so the method value is the loop's
+    /// logical result — `element(1, ...)`, i.e. `nil` — not the raw tuple. When NLR is
+    /// active the method returns the `{Result, Self{N}}` shape used by all other arms.
+    fn emit_vt_counted_loop_last(
+        &mut self,
+        expr: &Expression,
+        has_nlr: bool,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
+        let loop_doc = self.expression_doc(expr)?;
+        let tuple_var = self.fresh_temp_var("CountedLoopResult");
+        if has_nlr {
+            let final_self = self.current_self_var();
+            body_parts.push(docvec![
+                "    let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                loop_doc,
+                " in\n    {call 'erlang':'element'(1, ",
+                leaf::var(tuple_var),
+                "), ",
+                leaf::var(final_self),
+                "}\n",
+            ]);
+        } else {
+            body_parts.push(docvec![
+                "    let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                loop_doc,
+                " in\n    call 'erlang':'element'(1, ",
+                leaf::var(tuple_var),
+                ")\n",
+            ]);
+        }
+        Ok(())
     }
 
     /// BT-1609: Returns the threaded local variable names for a `whileTrue:` / `whileFalse:`
