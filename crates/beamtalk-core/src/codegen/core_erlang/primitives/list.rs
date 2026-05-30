@@ -9,6 +9,7 @@
 //! Complex operations delegate to `beamtalk_list` helper module.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::{build_dnu_error_doc, call_p0_self, call_self_p0, param};
 use crate::docvec;
 
@@ -192,7 +193,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         // Class-side factory: List class withAll: list is identity (list is already a List)
         "withAll:" => {
             let p0 = param(params, 0, "_List");
-            Some(Document::String(p0.to_string()))
+            Some(leaf::var(p0.to_string()))
         }
         _ => None,
     }

@@ -8,6 +8,7 @@
 //! Contains BIF generators for error-related classes: `Exception`, `StackFrame`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::param;
 use crate::docvec;
 
@@ -79,9 +80,9 @@ pub(crate) fn generate_stack_frame_bif(
     match selector {
         "method" | "receiverClass" | "arguments" | "sourceLocation" | "moduleName" | "line"
         | "file" | "printString" => Some(docvec![
-            "call 'beamtalk_stack_frame':'dispatch'('",
-            Document::String(selector.to_owned()),
-            "', [], Self)",
+            "call 'beamtalk_stack_frame':'dispatch'(",
+            leaf::atom(selector.to_owned()),
+            ", [], Self)",
         ]),
         _ => None,
     }
