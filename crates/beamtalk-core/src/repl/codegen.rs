@@ -18,6 +18,7 @@
 
 use crate::ast::{Expression, Pattern};
 use crate::codegen::core_erlang::document::Document;
+use crate::codegen::core_erlang::document::leaf::{atom, var};
 use crate::codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::docvec;
 
@@ -258,16 +259,12 @@ impl<'a> ReplAssembler<'a> {
                 Document::Str("    let State = Bindings in\n"),
             ];
             parts.extend(binding_docs);
-            parts.push(docvec![
-                "    let Result = ",
-                Document::String(rhs_var),
-                " in\n",
-            ]);
+            parts.push(docvec!["    let Result = ", var(rhs_var), " in\n",]);
             parts.push(docvec![
                 "    {[{",
                 src_bin,
                 ", Result}], ",
-                Document::String(final_state),
+                var(final_state),
                 "}\n",
             ]);
             parts.push(Document::Str("end\n"));
@@ -346,7 +343,7 @@ impl<'a> ReplAssembler<'a> {
             let step_val: Document<'static> = if repl_mutated {
                 docvec!["call 'erlang':'element'(1, ", result_var, ")",]
             } else {
-                Document::String(result_var)
+                var(result_var)
             };
             step_pairs.push((source_texts[i].clone(), step_val));
         }
@@ -388,8 +385,8 @@ impl<'a> ReplAssembler<'a> {
             let mut all_steps = prev_steps;
             all_steps.push((source_text.to_string(), Document::Str("Result")));
             let steps_doc = Self::build_steps_list_doc(all_steps);
-            let trace_return = docvec!["{", steps_doc, ", ", Document::String(final_state), "}"];
-            return Ok((binding_docs, Document::String(rhs_var), trace_return));
+            let trace_return = docvec!["{", steps_doc, ", ", var(final_state), "}"];
+            return Ok((binding_docs, var(rhs_var), trace_return));
         }
 
         if let Expression::Assignment { target, value, .. } = expr {
@@ -543,16 +540,8 @@ impl<'a> ReplAssembler<'a> {
                 Document::Str("    let State = Bindings in\n"),
             ];
             parts.extend(binding_docs);
-            parts.push(docvec![
-                "    let Result = ",
-                Document::String(rhs_var),
-                " in\n",
-            ]);
-            parts.push(docvec![
-                "    {Result, ",
-                Document::String(final_state),
-                "}\n",
-            ]);
+            parts.push(docvec!["    let Result = ", var(rhs_var), " in\n",]);
+            parts.push(docvec!["    {Result, ", var(final_state), "}\n",]);
             parts.push(Document::Str("end\n"));
             return Ok(Document::Vec(parts));
         }
@@ -670,7 +659,7 @@ impl<'a> ReplAssembler<'a> {
                 "    let ",
                 result_var.to_string(),
                 " = ",
-                Document::String(rhs_var),
+                var(rhs_var),
                 " in\n",
             ]);
             return Ok((Document::Vec(result), false));
@@ -743,8 +732,8 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::DestructureAssignment { pattern, value, .. } = expr {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
             let final_state = self.generator.current_state_var();
-            let return_tuple = docvec!["{Result, ", Document::String(final_state), "}"];
-            return Ok((binding_docs, Document::String(rhs_var), return_tuple));
+            let return_tuple = docvec!["{Result, ", var(final_state), "}"];
+            return Ok((binding_docs, var(rhs_var), return_tuple));
         }
 
         if let Expression::Assignment { target, value, .. } = expr {
@@ -807,7 +796,7 @@ impl<'a> ReplAssembler<'a> {
             .expression_doc_with_repl_mutation_tracking(value)?;
         docs.push(docvec![
             "    let ",
-            Document::String(raw_var.clone()),
+            var(raw_var.clone()),
             " = ",
             val_doc,
             " in\n",
@@ -820,16 +809,16 @@ impl<'a> ReplAssembler<'a> {
             let new_state = self.generator.next_state_var();
             docs.push(docvec![
                 "    let ",
-                Document::String(value_var.clone()),
+                var(value_var.clone()),
                 " = call 'erlang':'element'(1, ",
-                Document::String(raw_var.clone()),
+                var(raw_var.clone()),
                 ") in\n",
             ]);
             docs.push(docvec![
                 "    let ",
-                Document::String(new_state),
+                var(new_state),
                 " = call 'erlang':'element'(2, ",
-                Document::String(raw_var),
+                var(raw_var),
                 ") in\n",
             ]);
             value_var
@@ -856,13 +845,13 @@ impl<'a> ReplAssembler<'a> {
             let new_state = self.generator.next_state_var();
             docs.push(docvec![
                 "    let ",
-                Document::String(new_state),
-                " = call 'maps':'put'('",
-                Document::String(name),
-                "', ",
-                Document::String(core_var),
+                var(new_state),
+                " = call 'maps':'put'(",
+                atom(name),
                 ", ",
-                Document::String(current_state),
+                var(core_var),
+                ", ",
+                var(current_state),
                 ") in\n",
             ]);
         }
