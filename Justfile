@@ -273,8 +273,8 @@ lint: lint-rust lint-erlang lint-js lint-beamtalk
 # Lint Beamtalk: formatting check
 lint-beamtalk: fmt-check-beamtalk
 
-# Lint Rust: clippy + formatting check
-lint-rust: clippy fmt-check-rust
+# Lint Rust: clippy + formatting check + ADR 0089 typed-leaves migration ratchet
+lint-rust: clippy fmt-check-rust lint-no-new-document-string
 
 # Lint Erlang: Dialyzer type checking + format check + generated spec validation
 lint-erlang: dialyzer dialyzer-specs fmt-check-erlang
