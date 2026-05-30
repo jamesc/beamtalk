@@ -215,13 +215,6 @@ exists_non_string_returns_false_test() ->
 exists_atom_returns_false_test() ->
     ?assertNot(beamtalk_file:'exists:'(foo)).
 
-exists_absolute_path_test() ->
-    %% /tmp always exists on Unix; on Windows this returns false (no /tmp)
-    case os:type() of
-        {unix, _} -> ?assertNot(beamtalk_file:'exists:'(<<"/tmp">>));
-        _ -> ok
-    end.
-
 exists_tmp_directory_via_tempDirectory_test() ->
     TmpDir = beamtalk_file:'tempDirectory'(),
     %% tempDirectory returns a real directory, but exists: checks regular files
@@ -917,11 +910,8 @@ isDirectory_on_missing_path_test() ->
     ?assertNot(beamtalk_file:'isDirectory:'(<<"_bt_eunit_no_such_dir_xyz">>)).
 
 isDirectory_absolute_path_test() ->
-    %% Absolute paths now work — /tmp is a directory on Unix
-    case os:type() of
-        {unix, _} -> ?assert(beamtalk_file:'isDirectory:'(<<"/tmp">>));
-        _ -> ok
-    end.
+    TmpDir = beamtalk_file:'tempDirectory'(),
+    ?assert(beamtalk_file:'isDirectory:'(TmpDir)).
 
 isDirectory_type_error_returns_false_test() ->
     ?assertNot(beamtalk_file:'isDirectory:'(42)).
@@ -944,11 +934,8 @@ isFile_on_missing_path_test() ->
     ?assertNot(beamtalk_file:'isFile:'(<<"_bt_eunit_no_such_file_xyz.txt">>)).
 
 isFile_absolute_path_test() ->
-    %% Absolute paths now work
-    case os:type() of
-        {unix, _} -> ?assertNot(beamtalk_file:'isFile:'(<<"/tmp">>));
-        _ -> ok
-    end.
+    TmpDir = beamtalk_file:'tempDirectory'(),
+    ?assertNot(beamtalk_file:'isFile:'(TmpDir)).
 
 isFile_type_error_returns_false_test() ->
     ?assertNot(beamtalk_file:'isFile:'(42)).
