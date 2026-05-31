@@ -79,10 +79,8 @@ impl CoreErlangGenerator {
                 let selector_name = method.selector.name();
                 let dispatch_arity = method.selector.arity() + 1; // +1 for Self
                 parts.push(docvec![
-                    ", 'dispatch_",
-                    leaf::var(selector_name.to_string()),
-                    "'/",
-                    leaf::int_lit(i64::try_from(dispatch_arity).unwrap_or(0)),
+                    ", ",
+                    leaf::fname(format!("dispatch_{selector_name}"), dispatch_arity),
                 ]);
             }
             Document::Vec(parts)
@@ -815,10 +813,7 @@ impl CoreErlangGenerator {
         };
 
         docvec![
-            "'dispatch_",
-            leaf::var(selector_name.to_string()),
-            "'/",
-            leaf::int_lit(i64::try_from(dispatch_arity).unwrap_or(0)),
+            leaf::fname(format!("dispatch_{selector_name}"), dispatch_arity),
             " = fun (",
             params_doc,
             ") ->",

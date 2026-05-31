@@ -1693,7 +1693,7 @@ impl CoreErlangGenerator {
                                 "~{'selector' => ",
                                 leaf::atom(selector),
                                 ", 'arity' => ",
-                                leaf::var(arity.to_string()),
+                                leaf::int_lit(i64::try_from(arity).unwrap_or(0)),
                                 "}~"
                             ]
                         })
@@ -2838,7 +2838,7 @@ impl CoreErlangGenerator {
         docvec![
             "~{'class' => ",
             leaf::atom(class_name),
-            ",\n      'superclass' => '",
+            ",\n      'superclass' => ",
             leaf::atom(superclass_name),
             ",\n      'package' => ",
             package_doc,
@@ -3182,7 +3182,7 @@ impl CoreErlangGenerator {
                 "{'type_param', ",
                 leaf::atom(name.clone()),
                 ", ",
-                leaf::var(index.to_string()),
+                leaf::int_lit(i64::from(*index)),
                 "}"
             ],
             MetaTypeRepr::Generic { base, parameters } => {
@@ -3249,7 +3249,7 @@ impl CoreErlangGenerator {
                 "",
                 leaf::atom(sel.clone()),
                 " => ~{'arity' => ",
-                leaf::var(arity.to_string()),
+                leaf::int_lit(i64::try_from(*arity).unwrap_or(0)),
                 ", 'param_types' => ",
                 param_types_doc,
                 ", 'return_type' => ",

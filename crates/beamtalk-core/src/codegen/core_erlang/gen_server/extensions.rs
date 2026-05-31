@@ -119,8 +119,8 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             line(),
-            "let _Ext",
-            leaf::var(idx.to_string()),
+            "let ",
+            leaf::var(format!("_Ext{idx}")),
             " = call 'beamtalk_extensions':'register'(",
             leaf::atom(class_tag),
             ", ",
