@@ -950,6 +950,11 @@ impl CoreErlangGenerator {
                 "}\n",
             ]);
         } else {
+            // ADR 0089: `capture_expression` returns an already-rendered Core Erlang
+            // expression (an arbitrary fragment, not a single typed leaf). No typed
+            // helper models a whole sub-expression; `leaf::var` is the pass-through
+            // for pre-rendered Document text until Phase 3 introduces an explicit
+            // owned-fragment constructor.
             let expr_code = self.capture_expression(expr)?;
             if index > 0 {
                 body_parts.push(Document::Str("    "));
@@ -1245,19 +1250,19 @@ impl CoreErlangGenerator {
         // BT-754/BT-764: Wrap the method body in try/catch to catch non-local
         // returns thrown by ^ inside block closures.
         let body_doc = Document::Vec(body_parts);
-        let params_str = params.join(", ");
+        let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
         let fun_doc = if let Some(token_var) = nlr_token_var {
             let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
             docvec![
                 "fun (",
-                leaf::var(params_str),
+                params_doc,
                 ") ->\n",
                 catch_vars.format_try_prefix(),
                 body_doc,
                 catch_vars.format_catch_suffix(),
             ]
         } else {
-            docvec!["fun (", leaf::var(params_str), ") ->\n", body_doc,]
+            docvec!["fun (", params_doc, ") ->\n", body_doc,]
         };
         let fun_doc = if let Some(line_num) = line_annotation {
             self.annotate_with_line(fun_doc, line_num)
@@ -2114,11 +2119,6 @@ impl CoreErlangGenerator {
     }
 
     /// Encode a string as a Core Erlang binary literal.
-    /// Delegates to the shared UTF-8 binary literal helper.
-    fn core_erlang_binary(s: &str) -> String {
-        Self::binary_string_literal(s)
-    }
-
     /// Generates the `dispatch/3` function for a value type.
     ///
     /// This routes selectors to individual method functions, provides reflection
@@ -2164,13 +2164,10 @@ impl CoreErlangGenerator {
 
         // fieldAt:put: hint — suggest with*: for value objects, assignment for primitives
         let immutable_hint = if is_value_class {
-            Self::core_erlang_binary(
-                "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance",
-            )
+            "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance"
+                .to_string()
         } else {
-            Self::core_erlang_binary(&format!(
-                "{class_name}s are immutable. Use assignment (x := newValue) instead."
-            ))
+            format!("{class_name}s are immutable. Use assignment (x := newValue) instead.")
         };
 
         // Route each class-defined method to its individual function
@@ -2208,15 +2205,12 @@ impl CoreErlangGenerator {
             ]
         } else {
             // Root of hierarchy — raise does_not_understand
-            let dnu_hint = Self::core_erlang_binary(
-                "Check spelling or use 'respondsTo:' to verify method exists",
-            );
             docvec![
                 "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
                 "                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n",
                 "                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n",
                 "                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, ",
-                leaf::var(dnu_hint),
+                leaf::binary_lit("Check spelling or use 'respondsTo:' to verify method exists"),
                 ") in\n",
                 "                    call 'beamtalk_error':'raise'(DnuErr2)\n",
             ]
@@ -2251,7 +2245,7 @@ impl CoreErlangGenerator {
             ") in\n",
             "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'fieldAt:put:') in\n",
             "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, ",
-            leaf::var(immutable_hint),
+            leaf::binary_lit(immutable_hint),
             ") in\n",
             "            call 'beamtalk_error':'raise'(ImmErr2)\n",
             // perform:
@@ -2313,11 +2307,10 @@ impl CoreErlangGenerator {
         if default_str.is_empty() {
             Document::Vec(Vec::new())
         } else {
-            let binary = Self::core_erlang_binary(default_str);
             docvec![
                 "        <'asString'> when 'true' ->\n",
                 "            ",
-                leaf::var(binary),
+                leaf::binary_lit(default_str),
                 "\n",
             ]
         }
@@ -2350,9 +2343,7 @@ impl CoreErlangGenerator {
                 "            call 'beamtalk_reflection':'read_field'(FaName, Self)\n",
             ]
         } else {
-            let iva_hint = Self::core_erlang_binary(&format!(
-                "{class_name}s are immutable and have no fields."
-            ));
+            let iva_hint = format!("{class_name}s are immutable and have no fields.");
             docvec![
                 "        <'fieldAt:'> when 'true' ->\n",
                 "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', ",
@@ -2360,7 +2351,7 @@ impl CoreErlangGenerator {
                 ") in\n",
                 "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
                 "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
-                leaf::var(iva_hint),
+                leaf::binary_lit(iva_hint),
                 ") in\n",
                 "            call 'beamtalk_error':'raise'(IvaErr2)\n",
             ]
@@ -2478,7 +2469,7 @@ impl CoreErlangGenerator {
     /// (field access, class name, etc.).
     #[allow(clippy::too_many_lines)] // Object dispatch with reflection primitives
     fn generate_object_dispatch_4(&self, mod_name: &str) -> Document<'static> {
-        let a_space_binary = Self::core_erlang_binary("a ");
+        let a_space_binary = "a ".to_string();
 
         // fieldAt: arity error
         let inst_var_at_err = self.arity_error_fragment("'fieldAt:'", 1, "                ");
@@ -2549,7 +2540,7 @@ impl CoreErlangGenerator {
             "        <'printString'> when 'true' ->\n",
             "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n",
             "            let <PsStr4> = call 'erlang':'iolist_to_binary'([",
-            leaf::var(a_space_binary),
+            leaf::binary_lit(a_space_binary),
             "|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n",
             "            {'reply', PsStr4, State}\n",
             // --- perform: ---
@@ -2620,9 +2611,7 @@ impl CoreErlangGenerator {
         expected_arity: u32,
         indent: &str,
     ) -> Document<'static> {
-        let hint = Self::core_erlang_binary(&format!(
-            "Expected {expected_arity} argument(s) for {selector}"
-        ));
+        let hint = format!("Expected {expected_arity} argument(s) for {selector}");
         let indent_doc = || leaf::var(indent.to_string());
         let selector_doc = || leaf::var(selector.to_string());
         docvec![
@@ -2634,7 +2623,7 @@ impl CoreErlangGenerator {
             ") in\n",
             indent_doc(),
             "let <ArErr2> = call 'beamtalk_error':'with_hint'(ArErr1, ",
-            leaf::var(hint),
+            leaf::binary_lit(hint),
             ") in\n",
             indent_doc(),
             "{'error', ArErr2, State}",
@@ -2649,7 +2638,6 @@ impl CoreErlangGenerator {
         hint_msg: &str,
         indent: &str,
     ) -> Document<'static> {
-        let hint = Self::core_erlang_binary(hint_msg);
         let indent_doc = || leaf::var(indent.to_string());
         let selector_doc = || leaf::var(selector.to_string());
         docvec![
@@ -2661,7 +2649,7 @@ impl CoreErlangGenerator {
             ") in\n",
             indent_doc(),
             "let <TyErr2> = call 'beamtalk_error':'with_hint'(TyErr1, ",
-            leaf::var(hint),
+            leaf::binary_lit(hint_msg),
             ") in\n",
             indent_doc(),
             "{'error', TyErr2, State}",
