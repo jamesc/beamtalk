@@ -510,11 +510,10 @@ impl CoreErlangGenerator {
                     method_source_docs.push(Document::Str(", "));
                 }
                 let source_str = self.extract_method_source(method);
-                let binary = Self::binary_string_literal(&source_str);
                 method_source_docs.push(docvec![
                     leaf::atom(method.selector.name()),
                     " => ",
-                    leaf::var(binary),
+                    leaf::binary_lit(&source_str),
                 ]);
             }
             let method_source_doc = Document::Vec(method_source_docs);
@@ -526,11 +525,10 @@ impl CoreErlangGenerator {
                     method_sig_docs.push(Document::Str(", "));
                 }
                 let sig_str = unparse_method_display_signature(method);
-                let binary = Self::binary_string_literal(&sig_str);
                 method_sig_docs.push(docvec![
                     leaf::atom(method.selector.name()),
                     " => ",
-                    leaf::var(binary),
+                    leaf::binary_lit(&sig_str),
                 ]);
             }
             let method_sigs_doc = Document::Vec(method_sig_docs);
@@ -547,11 +545,10 @@ impl CoreErlangGenerator {
                     class_method_sig_docs.push(Document::Str(", "));
                 }
                 let sig_str = unparse_method_display_signature(method);
-                let binary = Self::binary_string_literal(&sig_str);
                 class_method_sig_docs.push(docvec![
                     leaf::atom(method.selector.name()),
                     " => ",
-                    leaf::var(binary),
+                    leaf::binary_lit(&sig_str),
                 ]);
             }
             let class_method_sigs_doc = Document::Vec(class_method_sig_docs);
@@ -570,11 +567,10 @@ impl CoreErlangGenerator {
                     class_method_source_docs.push(Document::Str(", "));
                 }
                 let source_str = self.extract_method_source(method);
-                let binary = Self::binary_string_literal(&source_str);
                 class_method_source_docs.push(docvec![
                     leaf::atom(method.selector.name()),
                     " => ",
-                    leaf::var(binary),
+                    leaf::binary_lit(&source_str),
                 ]);
             }
             let class_method_source_doc = Document::Vec(class_method_source_docs);
@@ -608,11 +604,10 @@ impl CoreErlangGenerator {
                     if !method_docs_parts.is_empty() {
                         method_docs_parts.push(Document::Str(", "));
                     }
-                    let binary = Self::binary_string_literal(doc);
                     method_docs_parts.push(docvec![
                         leaf::atom(method.selector.name()),
                         " => ",
-                        leaf::var(binary),
+                        leaf::binary_lit(doc),
                     ]);
                 }
             }

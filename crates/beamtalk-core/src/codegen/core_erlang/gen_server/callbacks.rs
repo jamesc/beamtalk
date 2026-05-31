@@ -498,7 +498,6 @@ impl CoreErlangGenerator {
             let hint_msg = format!(
                 "{owning_class} field '{field_name}' (:: {type_name}) was not initialized",
             );
-            let hint_binary = Self::binary_string_literal(&hint_msg);
 
             body = docvec![
                 "let ",
@@ -530,7 +529,7 @@ impl CoreErlangGenerator {
                                 " = call 'beamtalk_error':'with_hint'(",
                                 leaf::var(err_var0),
                                 ", ",
-                                leaf::var(hint_binary),
+                                leaf::binary_lit(&hint_msg),
                                 ") in",
                                 line(),
                                 "let ",

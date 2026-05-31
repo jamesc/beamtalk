@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::document::leaf::fname;
-use super::super::document::{Document, INDENT, leaf, line, nest};
+use super::super::document::{Document, INDENT, join, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
@@ -212,7 +212,6 @@ impl CoreErlangGenerator {
         // Build method clause as Document tree
         let has_params = !param_vars.is_empty();
         let body_doc: Document = if has_params {
-            let params_pattern = param_vars.join(", ");
             docvec![
                 "<",
                 leaf::atom(selector_name.to_string()),
@@ -227,7 +226,10 @@ impl CoreErlangGenerator {
                             docvec![
                                 line(),
                                 "<[",
-                                leaf::var(params_pattern),
+                                join(
+                                    param_vars.iter().map(|p| leaf::var(p.clone())),
+                                    &Document::Str(", ")
+                                ),
                                 "]> when 'true' ->",
                                 nest(INDENT, docvec![line(), method_body_doc,]),
                                 line(),
@@ -1458,7 +1460,6 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             parts.push(docvec![
-                "",
                 leaf::atom(method.selector.name()),
                 " => ",
                 value_fn(method),
@@ -1480,7 +1481,7 @@ impl CoreErlangGenerator {
                 if !parts.is_empty() {
                     parts.push(Document::Str(", "));
                 }
-                parts.push(docvec!["", leaf::atom(method.selector.name()), " => ", val,]);
+                parts.push(docvec![leaf::atom(method.selector.name()), " => ", val,]);
             }
         }
         Document::Vec(parts)
@@ -1505,12 +1506,7 @@ impl CoreErlangGenerator {
             } else {
                 Document::Str("'nil'")
             };
-            parts.push(docvec![
-                "",
-                leaf::atom(cv.name.name.to_string()),
-                " => ",
-                val,
-            ]);
+            parts.push(docvec![leaf::atom(cv.name.name.to_string()), " => ", val,]);
         }
         Ok(Document::Vec(parts))
     }
@@ -2926,12 +2922,7 @@ impl CoreErlangGenerator {
             } else {
                 Document::Str("'false'")
             };
-            parts.push(docvec![
-                "",
-                leaf::atom(s.name.name.to_string()),
-                " => ",
-                flag,
-            ]);
+            parts.push(docvec![leaf::atom(s.name.name.to_string()), " => ", flag,]);
         }
         parts.push(Document::Str("}~"));
         Document::Vec(parts)
@@ -2956,7 +2947,6 @@ impl CoreErlangGenerator {
                 None => Document::Str("'none'"),
             };
             parts.push(docvec![
-                "",
                 leaf::atom(s.name.name.to_string()),
                 " => ",
                 type_doc,
@@ -3246,7 +3236,6 @@ impl CoreErlangGenerator {
                 Document::Str("'public'")
             };
             parts.push(docvec![
-                "",
                 leaf::atom(sel.clone()),
                 " => ~{'arity' => ",
                 leaf::int_lit(i64::try_from(*arity).unwrap_or(0)),
