@@ -73,46 +73,65 @@ pub fn find_definition_cross_file<'a>(
         return Some(Location::new(current_file.clone(), span));
     }
 
-    // 2. Class or protocol definition in the project index.
-    //
-    // BT-1933 registers protocol names as synthetic class entries, so
-    // `has_class` returns true for both. We walk the indexed files once
-    // looking for a real class declaration — that wins unconditionally.
-    // Otherwise, fall back to a protocol match only when the hierarchy
-    // explicitly marks the name as a protocol class (`is_protocol_class`).
-    //
-    // Built-in/stdlib classes can still have source files (e.g. stdlib/src/*.bt),
-    // so we always search indexed files for a concrete declaration span.
-    if project_index.hierarchy().has_class(name) {
-        let mut protocol_match: Option<Location> = None;
-        for (file_path, module) in files {
-            for class in &module.classes {
-                if class.name.name.as_str() == name {
-                    return Some(Location::new(file_path.clone(), class.name.span));
-                }
-            }
-            if protocol_match.is_none() {
-                for protocol in &module.protocols {
-                    if protocol.name.name.as_str() == name {
-                        protocol_match = Some(Location::new(file_path.clone(), protocol.name.span));
-                        break;
-                    }
-                }
+    // 2. Class or protocol definition in the project index, honouring the
+    //    BT-1933 protocol/class shadowing rule.
+    find_class_or_protocol_declaration(name, project_index, files)
+}
+
+/// Resolve the declaration site of a class or protocol `name`, applying the
+/// BT-1933 protocol/class shadowing rule.
+///
+/// BT-1933 registers protocol names as synthetic class entries, so
+/// [`ClassHierarchy::has_class`] returns true for both real classes and
+/// protocols. We walk the indexed files once looking for a real class
+/// declaration — that wins unconditionally. Otherwise, fall back to a protocol
+/// match only when the hierarchy explicitly marks the name as a protocol class
+/// ([`ClassHierarchy::is_protocol_class`], BT-1936).
+///
+/// Built-in/stdlib classes can still have source files (e.g. `stdlib/src/*.bt`),
+/// so we always search indexed files for a concrete declaration span.
+///
+/// Returns `None` when the name isn't known to the hierarchy, or when it *is*
+/// known but no source span is available (a real class whose source file isn't
+/// open — consistent with stdlib classes that have no indexed source).
+///
+/// This is the single source of truth for class/protocol declaration
+/// resolution, shared by [`find_definition_cross_file`] (goto-definition) and
+/// the language-service type-hierarchy path (BT-2242 / BT-2317), so the two
+/// agree on which declaration a name resolves to.
+#[must_use]
+pub fn find_class_or_protocol_declaration<'a>(
+    name: &str,
+    project_index: &ProjectIndex,
+    files: impl IntoIterator<Item = (&'a Utf8PathBuf, &'a Module)>,
+) -> Option<Location> {
+    if !project_index.hierarchy().has_class(name) {
+        return None;
+    }
+
+    let mut protocol_match: Option<Location> = None;
+    for (file_path, module) in files {
+        for class in &module.classes {
+            if class.name.name.as_str() == name {
+                return Some(Location::new(file_path.clone(), class.name.span));
             }
         }
-        // Only return the protocol fallback when the hierarchy definitively
-        // knows this name as a protocol. Otherwise, the hierarchy entry refers
-        // to a real class whose source isn't open; returning None keeps the
-        // behaviour consistent with class-only lookup (stdlib classes with no
-        // open source file already return None).
-        if let Some(location) = protocol_match {
-            if project_index.hierarchy().is_protocol_class(name) {
-                return Some(location);
+        if protocol_match.is_none() {
+            for protocol in &module.protocols {
+                if protocol.name.name.as_str() == name {
+                    protocol_match = Some(Location::new(file_path.clone(), protocol.name.span));
+                    break;
+                }
             }
         }
     }
 
-    None
+    // Only return the protocol fallback when the hierarchy definitively knows
+    // this name as a protocol. Otherwise, the hierarchy entry refers to a real
+    // class whose source isn't open; returning None keeps the behaviour
+    // consistent with class-only lookup (stdlib classes with no open source
+    // file already return None).
+    protocol_match.filter(|_| project_index.hierarchy().is_protocol_class(name))
 }
 
 /// Find the definition of a method selector, searching across all indexed files.
