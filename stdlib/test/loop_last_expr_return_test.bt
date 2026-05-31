@@ -11,15 +11,30 @@ TestCase subclass: LoopLastExprReturnTest
 
   // ── helpers: each ends in a threading loop as the LAST expression ──────────
   // Bodies read+write the local so no "unused variable" warning is emitted.
+  whileLast =>
+    n := 0
+    [n < 3] whileTrue: [n := n + 1]
 
-  whileLast => n := 0. [n < 3] whileTrue: [n := n + 1]
-  whileFalseLast => n := 0. [n >= 3] whileFalse: [n := n + 1]
-  toDoLast => sum := 0. 1 to: 5 do: [:i | sum := sum + i]
-  toByDoLast => sum := 0. 1 to: 10 by: 2 do: [:i | sum := sum + i]
-  timesRepeatLast => x := 0. 3 timesRepeat: [x := x + 1]
+  whileFalseLast =>
+    n := 0
+    [n >= 3] whileFalse: [n := n + 1]
+
+  toDoLast =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+
+  toByDoLast =>
+    sum := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | sum := sum + i]
+
+  timesRepeatLast =>
+    x := 0
+    3 timesRepeat: [x := x + 1]
 
   // ── the loop's logical value (nil) must be returned, not the tuple ─────────
-
   testWhileTrueLastReturnsNil => self assert: self whileLast equals: nil
 
   testWhileFalseLastReturnsNil => self assert: self whileFalseLast equals: nil
@@ -31,7 +46,6 @@ TestCase subclass: LoopLastExprReturnTest
   testTimesRepeatLastReturnsNil => self assert: self timesRepeatLast equals: nil
 
   // ── non-last threading still works (loop result discarded, locals threaded) ─
-
   testWhileTrueThreadsLocal =>
     n := 0
     [n < 3] whileTrue: [n := n + 1]
