@@ -282,9 +282,9 @@ impl CoreErlangGenerator {
         let default_body = self.generate_dispatch_default_case();
         let indent_spaces = case_clause_indent * INDENT;
         #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
-        let indent_str = " ".repeat(indent_spaces as usize);
+        let indent_width = indent_spaces as usize;
         docs.push(docvec![
-            leaf::var(indent_str),
+            leaf::whitespace(indent_width),
             nest(indent_spaces, default_body),
         ]);
 
@@ -352,8 +352,11 @@ impl CoreErlangGenerator {
 
         let indent_spaces = case_clause_indent * INDENT;
         #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
-        let indent_str = " ".repeat(indent_spaces as usize);
-        let result = docvec![leaf::var(indent_str), nest(indent_spaces, clause_doc)];
+        let indent_width = indent_spaces as usize;
+        let result = docvec![
+            leaf::whitespace(indent_width),
+            nest(indent_spaces, clause_doc)
+        ];
 
         self.pop_scope();
         Ok(result)

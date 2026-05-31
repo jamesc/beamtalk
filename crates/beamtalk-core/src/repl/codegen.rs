@@ -250,10 +250,9 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::DestructureAssignment { pattern, value, .. } = expression {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
             let final_state = self.generator.current_state_var();
-            let src_bin = CoreErlangGenerator::binary_string_literal(source_text);
             let module_name = self.generator.module_name.clone();
             let mut parts: Vec<Document<'static>> = vec![
-                docvec!["module '", leaf::var(module_name), "' ['eval'/1]\n"],
+                docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
                 Document::Str("  attributes []\n"),
                 Document::Str("\n"),
                 Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -263,7 +262,7 @@ impl<'a> ReplAssembler<'a> {
             parts.push(docvec!["    let Result = ", var(rhs_var), " in\n",]);
             parts.push(docvec![
                 "    {[{",
-                leaf::var(src_bin),
+                leaf::binary_lit(source_text),
                 ", Result}], ",
                 var(final_state),
                 "}\n",
@@ -276,32 +275,31 @@ impl<'a> ReplAssembler<'a> {
             .generator
             .expression_doc_with_repl_mutation_tracking(expression)?;
         let final_state = self.generator.current_state_var();
-        let src_bin = CoreErlangGenerator::binary_string_literal(source_text);
 
         let return_tuple: Document<'static> = if repl_mutated {
             docvec![
                 "let _LoopResult = call 'erlang':'element'(1, Result) in \
                  let _LoopState = call 'erlang':'element'(2, Result) in \
                  {[{",
-                leaf::var(src_bin),
+                leaf::binary_lit(source_text),
                 ", _LoopResult}], _LoopState}",
             ]
         } else if final_state != "State" {
             docvec![
                 "{[{",
-                leaf::var(src_bin),
+                leaf::binary_lit(source_text),
                 ", Result}], ",
                 leaf::var(final_state),
                 "}"
             ]
         } else {
-            docvec!["{[{", leaf::var(src_bin), ", Result}], State}"]
+            docvec!["{[{", leaf::binary_lit(source_text), ", Result}], State}"]
         };
 
         let doc = docvec![
-            "module '",
-            leaf::var(self.generator.module_name.clone()),
-            "' ['eval'/1]\n",
+            "module ",
+            leaf::atom(self.generator.module_name.clone()),
+            " ['eval'/1]\n",
             "  attributes []\n",
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
@@ -361,7 +359,7 @@ impl<'a> ReplAssembler<'a> {
 
         let module_name = self.generator.module_name.clone();
         let mut all_parts: Vec<Document<'static>> = vec![
-            docvec!["module '", leaf::var(module_name), "' ['eval'/1]\n"],
+            docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
             Document::Str("  attributes []\n"),
             Document::Str("\n"),
             Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -408,9 +406,9 @@ impl<'a> ReplAssembler<'a> {
                 let trace_return = docvec![
                     "let ",
                     leaf::var(new_state.clone()),
-                    " = call 'maps':'put'('",
-                    leaf::var(var_name),
-                    "', Result, ",
+                    " = call 'maps':'put'(",
+                    leaf::atom(var_name),
+                    ", Result, ",
                     leaf::var(current_state),
                     ") in {",
                     steps_doc,
@@ -462,8 +460,15 @@ impl<'a> ReplAssembler<'a> {
     fn build_steps_list_doc(step_pairs: Vec<(String, Document<'static>)>) -> Document<'static> {
         let mut result: Document<'static> = Document::Str("[]");
         for (src, val_doc) in step_pairs.into_iter().rev() {
-            let src_bin = CoreErlangGenerator::binary_string_literal(&src);
-            result = docvec!["[{", leaf::var(src_bin), ", ", val_doc, "} | ", result, "]"];
+            result = docvec![
+                "[{",
+                leaf::binary_lit(&src),
+                ", ",
+                val_doc,
+                "} | ",
+                result,
+                "]"
+            ];
         }
         result
     }
@@ -540,7 +545,7 @@ impl<'a> ReplAssembler<'a> {
             let final_state = self.generator.current_state_var();
             let module_name = self.generator.module_name.clone();
             let mut parts: Vec<Document<'static>> = vec![
-                docvec!["module '", leaf::var(module_name), "' ['eval'/1]\n"],
+                docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
                 Document::Str("  attributes []\n"),
                 Document::Str("\n"),
                 Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -580,9 +585,9 @@ impl<'a> ReplAssembler<'a> {
         };
 
         let doc = docvec![
-            "module '",
-            leaf::var(self.generator.module_name.clone()),
-            "' ['eval'/1]\n",
+            "module ",
+            leaf::atom(self.generator.module_name.clone()),
+            " ['eval'/1]\n",
             "  attributes []\n",
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
@@ -633,7 +638,7 @@ impl<'a> ReplAssembler<'a> {
 
         let module_name = self.generator.module_name.clone();
         let mut all_parts: Vec<Document<'static>> = vec![
-            docvec!["module '", leaf::var(module_name), "' ['eval'/1]\n"],
+            docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
             Document::Str("  attributes []\n"),
             Document::Str("\n"),
             Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -686,9 +691,9 @@ impl<'a> ReplAssembler<'a> {
                         val_doc,
                         " in let ",
                         leaf::var(new_state),
-                        " = call 'maps':'put'('",
-                        leaf::var(var_name),
-                        "', ",
+                        " = call 'maps':'put'(",
+                        leaf::atom(var_name),
+                        ", ",
                         leaf::var(result_var.to_string()),
                         ", ",
                         leaf::var(current_state),
@@ -758,9 +763,9 @@ impl<'a> ReplAssembler<'a> {
                 let return_tuple = docvec![
                     "let ",
                     leaf::var(new_state.clone()),
-                    " = call 'maps':'put'('",
-                    leaf::var(var_name),
-                    "', Result, ",
+                    " = call 'maps':'put'(",
+                    leaf::atom(var_name),
+                    ", Result, ",
                     leaf::var(current_state),
                     ") in {Result, ",
                     leaf::var(new_state),

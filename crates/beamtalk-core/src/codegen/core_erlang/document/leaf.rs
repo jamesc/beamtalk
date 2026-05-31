@@ -196,6 +196,25 @@ pub fn binary_segments(s: impl AsRef<str>) -> Document<'static> {
     Document::Owned(CoreErlangGenerator::binary_byte_segments(s.as_ref()))
 }
 
+/// `count` literal space characters — a run of pretty-printer indentation.
+///
+/// No escaping is meaningful: spaces are always safe Core Erlang text. The
+/// helper exists so runtime-computed indentation has an intent-declaring path
+/// to a leaf instead of smuggling whitespace through [`var`] (which is reserved
+/// for variable *names*). Used where the column of the first line must be set
+/// explicitly because the pretty-printer does not track the current column —
+/// the leading run pairs with a [`nest`](super::nest) that indents the
+/// continuation lines.
+///
+/// ```text
+/// whitespace(4) => "    " (four spaces)
+/// whitespace(0) => "" (empty)
+/// ```
+#[must_use]
+pub fn whitespace(count: usize) -> Document<'static> {
+    Document::Owned(" ".repeat(count))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +302,12 @@ mod tests {
     fn binary_lit_empty_string() {
         let expected = CoreErlangGenerator::binary_string_literal("");
         assert_eq!(binary_lit("").to_pretty_string(), expected);
+    }
+
+    #[test]
+    fn whitespace_renders_spaces() {
+        assert_eq!(whitespace(4).to_pretty_string(), "    ");
+        assert_eq!(whitespace(0).to_pretty_string(), "");
+        assert_eq!(whitespace(1).to_pretty_string(), " ");
     }
 }

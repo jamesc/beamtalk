@@ -11,7 +11,7 @@
 
 use super::document::leaf;
 use super::document::leaf::{atom, fname};
-use super::document::{Document, INDENT, line, nest};
+use super::document::{Document, INDENT, join, line, nest};
 use super::selector_mangler::safe_class_method_fn_name;
 use super::spec_codegen;
 use super::util::ClassIdentity;
@@ -497,9 +497,13 @@ impl CoreErlangGenerator {
             // BT-940: Annotate the `fun` expression (not just the body) with source line.
             // Annotating the body would create invalid `( ( e -| [...] ) -| [...] )` when the
             // body is itself a single annotated MessageSend expression.
+            let params_doc = join(
+                all_params.iter().cloned().map(leaf::var),
+                &Document::Str(", "),
+            );
             let fun_doc = docvec![
                 "fun (",
-                leaf::var(all_params.join(", ")),
+                params_doc,
                 ") ->",
                 "\n",
                 nest(INDENT, docvec![line(), method_body_doc,]),

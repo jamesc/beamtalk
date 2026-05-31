@@ -16,17 +16,17 @@ the BT-875 recurrence vector.
 
 | Phase | Issue | Description | Status |
 |---|---|---|---|
-| 1 | [BT-2320](https://linear.app/beamtalk/issue/BT-2320) | Add `document::leaf` API + migration lint | Backlog |
-| 1 | [BT-2321](https://linear.app/beamtalk/issue/BT-2321) | Add `unparse::leaf` API + migrate `unparse/mod.rs` | Backlog |
-| 2 | [BT-2322](https://linear.app/beamtalk/issue/BT-2322) | Migrate leaf utilities + small codegen files | Backlog |
-| 2 | [BT-2323](https://linear.app/beamtalk/issue/BT-2323) | Migrate `repl/codegen.rs` | Backlog |
-| 2 | [BT-2324](https://linear.app/beamtalk/issue/BT-2324) | Migrate `expressions.rs` | Backlog |
-| 2 | [BT-2325](https://linear.app/beamtalk/issue/BT-2325) | Migrate `intrinsics.rs` | Backlog |
-| 2 | [BT-2326](https://linear.app/beamtalk/issue/BT-2326) | Migrate `value_type_codegen.rs` | Backlog |
-| 2 | [BT-2327](https://linear.app/beamtalk/issue/BT-2327) | Migrate `dispatch_codegen.rs` | Backlog |
-| 2 | [BT-2328](https://linear.app/beamtalk/issue/BT-2328) | Migrate `gen_server/` | Backlog |
-| 2 | [BT-2329](https://linear.app/beamtalk/issue/BT-2329) | Migrate `control_flow/` | Backlog |
-| 2 | [BT-2330](https://linear.app/beamtalk/issue/BT-2330) | Migrate `mod.rs` + remaining | Backlog |
+| 1 | [BT-2320](https://linear.app/beamtalk/issue/BT-2320) | Add `document::leaf` API + migration lint | Done |
+| 1 | [BT-2321](https://linear.app/beamtalk/issue/BT-2321) | Add `unparse::leaf` API + migrate `unparse/mod.rs` | Done |
+| 2 | [BT-2322](https://linear.app/beamtalk/issue/BT-2322) | Migrate leaf utilities + small codegen files | Done |
+| 2 | [BT-2323](https://linear.app/beamtalk/issue/BT-2323) | Migrate `repl/codegen.rs` | Done |
+| 2 | [BT-2324](https://linear.app/beamtalk/issue/BT-2324) | Migrate `expressions.rs` | Done |
+| 2 | [BT-2325](https://linear.app/beamtalk/issue/BT-2325) | Migrate `intrinsics.rs` | Done |
+| 2 | [BT-2326](https://linear.app/beamtalk/issue/BT-2326) | Migrate `value_type_codegen.rs` | Done |
+| 2 | [BT-2327](https://linear.app/beamtalk/issue/BT-2327) | Migrate `dispatch_codegen.rs` | Done |
+| 2 | [BT-2328](https://linear.app/beamtalk/issue/BT-2328) | Migrate `gen_server/` | Done |
+| 2 | [BT-2329](https://linear.app/beamtalk/issue/BT-2329) | Migrate `control_flow/` | Done |
+| 2 | [BT-2330](https://linear.app/beamtalk/issue/BT-2330) | Migrate `mod.rs` + remaining | Done |
 | 3 | [BT-2331](https://linear.app/beamtalk/issue/BT-2331) | Flag-day: remove `Document::String` and `Document::Eco` | Done |
 
 **Recommended start:** BT-2320 (Phase 1, no dependencies).
@@ -148,8 +148,8 @@ The Beamtalk-side unparser nonetheless depends on the
 `Documentable<'a> for String` impl. To avoid breaking it during
 Phase B, the unparser migrates to construct its `Document<'static>`
 leaves through a small parallel API (`unparse::leaf`) that wraps
-`Document::Str` for compile-time fragments and exposes a
-`pub(crate) Document::Owned(String)` constructor for runtime-derived
+`Document::Str` for compile-time fragments and builds the
+(nominally `pub`) `Document::Owned(String)` variant for runtime-derived
 text. The unparse-leaf API is intentionally separate from
 `document::leaf` because the escaping rules differ (no atom-quote
 ceremony, no Core Erlang string escaping). Implementation epic must
@@ -265,10 +265,13 @@ Rejected alternatives:
 
 A single PR adds the `document::leaf` helpers, migrates all ~2,360 call
 sites mechanically, and removes `Document::String` and `Document::Eco`
-from the public enum. A `pub(super)` variant `Document::Owned(String)`
-survives inside the `document` module as the internal backing for the
-typed-leaf helpers — but it is invisible to codegen call sites. No
-deprecation window, no parallel paths.
+from the public enum. The `Document::Owned(String)` variant survives
+inside the `document` module as the internal backing for the typed-leaf
+helpers. Rust cannot give a variant a narrower visibility than its enum,
+so `Owned` is nominally `pub`; the structural closure comes from deleting
+the `String`/`Eco` variants and the `Documentable for String`/`EcoString`
+impls, leaving the typed-leaf constructors as the only path that builds it.
+No deprecation window, no parallel paths.
 
 This is the most aggressive of the three options the issue called out
 and is chosen for two reasons:
@@ -674,9 +677,11 @@ the enum; the renderer adds new arms for each.
   ~245 codegen unit tests asserting on `to_pretty_string()` output,
   and the full behavioural suite during the flag-day PR.
 - **`Document` enum: `String` and `Eco` removed from public API.**
-  Renamed to `pub(super) Document::Owned(String)` as the internal
-  backing for the typed-leaf helpers (still inside the `document`
-  module; invisible outside it). `Eco` is removed entirely (the
+  Renamed to `Document::Owned(String)` as the internal backing for the
+  typed-leaf helpers. The variant is nominally `pub` (Rust forbids a
+  variant narrower than its enum); closure is structural — the only code
+  that builds `Owned` is the typed-leaf constructors. `Eco` is removed
+  entirely (the
   helpers convert `EcoString` to `String` at the boundary; the
   `EcoString` import cost in the renderer disappears). The renderer
   loses one match arm (`Eco`) and renames one (`String` → `Owned`);
@@ -700,12 +705,14 @@ the level the ADR commits to.
   `float_lit`, `fname`, `binary_lit`. Each has doc comments naming the
   rendered Core Erlang form and links to the call-site classes it
   replaces.
-  Internally, the helpers construct dynamic text via a
-  `pub(super) Document::Owned(String)` variant (renamed from
-  `Document::String` to signal its restricted scope) that is not
-  exported from the `document` module. External codegen code cannot
-  construct `Owned` directly — the typed-leaf helpers are the only
-  public path.
+  Internally, the helpers construct dynamic text via the
+  `Document::Owned(String)` variant (renamed from `Document::String`).
+  The variant is nominally `pub` — Rust forbids a variant narrower than
+  its enum — but the typed-leaf helpers are the only code that builds it,
+  so it is the single sanctioned path for a runtime-derived leaf.
+  (As implemented, two further helpers joined the original seven:
+  `binary_segments` for unwrapped binary byte-segments and `whitespace`
+  for runtime-computed indentation.)
 - Add unit tests for each helper covering the rendered byte form
   (e.g. `atom("foo").to_pretty_string() == "'foo'"`,
   `string_lit("a\"b").to_pretty_string() == "\"a\\\"b\""`).
