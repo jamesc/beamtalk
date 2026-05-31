@@ -32,7 +32,7 @@
 //! a target known to be an `Actor` subclass gets the 3-arity state-threading
 //! shape.
 
-use super::super::document::{Document, INDENT, line, nest};
+use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module, StandaloneMethodDefinition};
 use crate::docvec;
@@ -119,17 +119,17 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             line(),
-            "let _Ext",
-            Document::String(idx.to_string()),
-            " = call 'beamtalk_extensions':'register'('",
-            Document::String(class_tag),
-            "', '",
-            Document::Eco(selector),
-            "', ",
+            "let ",
+            leaf::var(format!("_Ext{idx}")),
+            " = call 'beamtalk_extensions':'register'(",
+            leaf::atom(class_tag),
+            ", ",
+            leaf::atom(selector),
+            ", ",
             fun_doc,
-            ", '",
-            Document::String(owner),
-            "', ",
+            ", ",
+            leaf::atom(owner),
+            ", ",
             source_doc,
             ") in",
         ])
@@ -178,7 +178,7 @@ impl CoreErlangGenerator {
         if source.is_empty() {
             Document::Str("'undefined'")
         } else {
-            Document::String(Self::binary_string_literal(&source))
+            leaf::binary_lit(&source)
         }
     }
 
@@ -387,7 +387,7 @@ impl CoreErlangGenerator {
             }
             parts.push(docvec![
                 "let <",
-                Document::String(var_name),
+                leaf::var(var_name),
                 "> = call 'erlang':'hd'(",
                 access,
                 ") in",

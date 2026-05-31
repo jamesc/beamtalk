@@ -8,7 +8,7 @@
 //! Generates state field initializers for actor `init/1` callbacks,
 //! including inherited fields from parent classes.
 
-use super::super::document::{Document, line};
+use super::super::document::{Document, leaf, line};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Expression, Identifier, Module};
 use crate::docvec;
@@ -42,11 +42,7 @@ impl CoreErlangGenerator {
                 };
                 fields.push(docvec![
                     line(),
-                    docvec![
-                        ", '",
-                        Document::String(state.name.name.to_string()),
-                        "' => "
-                    ],
+                    docvec![", ", leaf::atom(state.name.name.to_string()), " => "],
                     value_code,
                 ]);
             }
@@ -78,7 +74,7 @@ impl CoreErlangGenerator {
                         let value_code = self.expression_doc(value)?;
                         fields.push(docvec![
                             line(),
-                            docvec![", '", Document::String(id.name.to_string()), "' => "],
+                            docvec![", ", leaf::atom(id.name.to_string()), " => "],
                             value_code,
                         ]);
                     }
@@ -101,7 +97,7 @@ impl CoreErlangGenerator {
                 let value_code = self.expression_doc(&default_value)?;
                 fields.push(docvec![
                     line(),
-                    docvec![", '", Document::String(field_name.clone()), "' => "],
+                    docvec![", ", leaf::atom(field_name.clone()), " => "],
                     value_code,
                 ]);
             }
@@ -115,11 +111,7 @@ impl CoreErlangGenerator {
                 };
                 fields.push(docvec![
                     line(),
-                    docvec![
-                        ", '",
-                        Document::String(state.name.name.to_string()),
-                        "' => "
-                    ],
+                    docvec![", ", leaf::atom(state.name.name.to_string()), " => "],
                     value_code,
                 ]);
             }
@@ -134,11 +126,7 @@ impl CoreErlangGenerator {
                     };
                     fields.push(docvec![
                         line(),
-                        docvec![
-                            ", '",
-                            Document::String(state.name.name.to_string()),
-                            "' => "
-                        ],
+                        docvec![", ", leaf::atom(state.name.name.to_string()), " => "],
                         value_code,
                     ]);
                 }
