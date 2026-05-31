@@ -11,6 +11,7 @@
 
 use super::document::leaf::{atom, fname};
 use super::document::{Document, INDENT, line, nest};
+use super::selector_mangler::safe_class_method_fn_name;
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
@@ -358,7 +359,7 @@ impl CoreErlangGenerator {
             parts.push(docvec![
                 ", ",
                 fname(
-                    format!("class_{}", m.selector.name()),
+                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
                     m.selector.arity() + 2
                 ),
             ]);
