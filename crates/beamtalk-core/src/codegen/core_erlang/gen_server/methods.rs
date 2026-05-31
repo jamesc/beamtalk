@@ -9,7 +9,7 @@
 //! and reply tuples, and the `register_class/0` on-load function.
 
 use super::super::document::leaf::fname;
-use super::super::document::{Document, INDENT, line, nest};
+use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
@@ -214,9 +214,9 @@ impl CoreErlangGenerator {
         let body_doc: Document = if has_params {
             let params_pattern = param_vars.join(", ");
             docvec![
-                "<'",
-                Document::String(selector_name.to_string()),
-                "'> when 'true' ->",
+                "<",
+                leaf::atom(selector_name.to_string()),
+                "> when 'true' ->",
                 nest(
                     INDENT,
                     docvec![
@@ -227,7 +227,7 @@ impl CoreErlangGenerator {
                             docvec![
                                 line(),
                                 "<[",
-                                Document::String(params_pattern),
+                                leaf::var(params_pattern),
                                 "]> when 'true' ->",
                                 nest(INDENT, docvec![line(), method_body_doc,]),
                                 line(),
@@ -242,9 +242,9 @@ impl CoreErlangGenerator {
             ]
         } else {
             docvec![
-                "<'",
-                Document::String(selector_name.to_string()),
-                "'> when 'true' ->",
+                "<",
+                leaf::atom(selector_name.to_string()),
+                "> when 'true' ->",
                 nest(INDENT, docvec![line(), method_body_doc,]),
                 "\n",
             ]
@@ -474,29 +474,29 @@ impl CoreErlangGenerator {
                                     let field_state = self.next_state_var();
                                     docs.push(docvec![
                                         "let ",
-                                        Document::String(tuple_var.clone()),
+                                        leaf::var(tuple_var.clone()),
                                         " = ",
                                         rhs_str,
                                         " in let ",
-                                        Document::String(val_var.clone()),
+                                        leaf::var(val_var.clone()),
                                         " = call 'erlang':'element'(1, ",
-                                        Document::String(tuple_var.clone()),
+                                        leaf::var(tuple_var.clone()),
                                         ") in let ",
-                                        Document::String(rhs_state.clone()),
+                                        leaf::var(rhs_state.clone()),
                                         " = call 'erlang':'element'(2, ",
-                                        Document::String(tuple_var),
+                                        leaf::var(tuple_var),
                                         ") in let ",
-                                        Document::String(field_state.clone()),
-                                        " = call 'maps':'put'('",
-                                        Document::String(field.name.to_string()),
-                                        "', ",
-                                        Document::String(val_var.clone()),
+                                        leaf::var(field_state.clone()),
+                                        " = call 'maps':'put'(",
+                                        leaf::atom(field.name.to_string()),
                                         ", ",
-                                        Document::String(rhs_state),
+                                        leaf::var(val_var.clone()),
+                                        ", ",
+                                        leaf::var(rhs_state),
                                         ") in {'reply', ",
-                                        Document::String(val_var),
+                                        leaf::var(val_var),
                                         ", ",
-                                        Document::String(field_state),
+                                        leaf::var(field_state),
                                         "}",
                                     ]);
                                 }
@@ -509,7 +509,7 @@ impl CoreErlangGenerator {
                                 "let _ReturnValue = ",
                                 value_str,
                                 " in {'reply', _ReturnValue, ",
-                                Document::String(final_state),
+                                leaf::var(final_state),
                                 "}",
                             ]);
                         }
@@ -526,9 +526,9 @@ impl CoreErlangGenerator {
                         let final_state = self.current_state_var();
                         docs.push(docvec![
                             "{'reply', ",
-                            Document::String(val_var),
+                            leaf::var(val_var),
                             ", ",
-                            Document::String(final_state),
+                            leaf::var(final_state),
                             "}",
                         ]);
                     }
@@ -543,21 +543,21 @@ impl CoreErlangGenerator {
                                 let new_state = self.next_state_var();
                                 docs.push(docvec![
                                     "let ",
-                                    Document::String(val_var.clone()),
+                                    leaf::var(val_var.clone()),
                                     " = ",
                                     value_str,
                                     " in let ",
-                                    Document::String(new_state.clone()),
-                                    " = call 'maps':'put'('",
-                                    Document::String(field.name.to_string()),
-                                    "', ",
-                                    Document::String(val_var.clone()),
+                                    leaf::var(new_state.clone()),
+                                    " = call 'maps':'put'(",
+                                    leaf::atom(field.name.to_string()),
                                     ", ",
-                                    Document::String(current_state),
+                                    leaf::var(val_var.clone()),
+                                    ", ",
+                                    leaf::var(current_state),
                                     ") in {'reply', ",
-                                    Document::String(val_var),
+                                    leaf::var(val_var),
                                     ", ",
-                                    Document::String(new_state),
+                                    leaf::var(new_state),
                                     "}",
                                 ]);
                             }
@@ -580,25 +580,25 @@ impl CoreErlangGenerator {
                             let field_state = self.next_state_var();
                             let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                                 "let ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 " = ",
                                 value_str,
                                 " in let ",
-                                Document::String(val_var.clone()),
+                                leaf::var(val_var.clone()),
                                 " = call 'erlang':'element'(1, ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 ") in let ",
-                                Document::String(rhs_state.clone()),
+                                leaf::var(rhs_state.clone()),
                                 " = call 'erlang':'element'(2, ",
-                                Document::String(tuple_var),
+                                leaf::var(tuple_var),
                                 ") in let ",
-                                Document::String(field_state.clone()),
-                                " = call 'maps':'put'('",
-                                Document::String(field.name.to_string()),
-                                "', ",
-                                Document::String(val_var.clone()),
+                                leaf::var(field_state.clone()),
+                                " = call 'maps':'put'(",
+                                leaf::atom(field.name.to_string()),
                                 ", ",
-                                Document::String(rhs_state),
+                                leaf::var(val_var.clone()),
+                                ", ",
+                                leaf::var(rhs_state),
                                 ") in ",
                             ]];
                             // Extract threaded locals from the control flow state
@@ -612,11 +612,11 @@ impl CoreErlangGenerator {
                                     );
                                     doc_parts.push(docvec![
                                         "let ",
-                                        Document::String(tv_core),
-                                        " = call 'maps':'get'('",
-                                        Document::String(Self::local_state_key(var)),
-                                        "', ",
-                                        Document::String(field_state.clone()),
+                                        leaf::var(tv_core),
+                                        " = call 'maps':'get'(",
+                                        leaf::atom(Self::local_state_key(var)),
+                                        ", ",
+                                        leaf::var(field_state.clone()),
                                         ") in ",
                                     ]);
                                 }
@@ -625,9 +625,9 @@ impl CoreErlangGenerator {
                             if is_last {
                                 docs.push(docvec![
                                     "{'reply', ",
-                                    Document::String(val_var),
+                                    leaf::var(val_var),
                                     ", ",
-                                    Document::String(field_state),
+                                    leaf::var(field_state),
                                     "}",
                                 ]);
                             }
@@ -646,29 +646,29 @@ impl CoreErlangGenerator {
                         let field_state = self.next_state_var();
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
-                            Document::String(name_var.clone()),
+                            leaf::var(name_var.clone()),
                             " = ",
                             name_code,
                             " in let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             val_code,
                             " in let ",
-                            Document::String(val_var.clone()),
+                            leaf::var(val_var.clone()),
                             " = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             ") in let ",
-                            Document::String(rhs_state.clone()),
+                            leaf::var(rhs_state.clone()),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in let ",
-                            Document::String(field_state.clone()),
+                            leaf::var(field_state.clone()),
                             " = call 'maps':'put'(",
-                            Document::String(name_var),
+                            leaf::var(name_var),
                             ", ",
-                            Document::String(val_var.clone()),
+                            leaf::var(val_var.clone()),
                             ", ",
-                            Document::String(rhs_state),
+                            leaf::var(rhs_state),
                             ") in ",
                         ]];
                         if let Some(threaded_vars) =
@@ -680,11 +680,11 @@ impl CoreErlangGenerator {
                                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                                 doc_parts.push(docvec![
                                     "let ",
-                                    Document::String(tv_core),
-                                    " = call 'maps':'get'('",
-                                    Document::String(Self::local_state_key(var)),
-                                    "', ",
-                                    Document::String(field_state.clone()),
+                                    leaf::var(tv_core),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(field_state.clone()),
                                     ") in ",
                                 ]);
                             }
@@ -693,9 +693,9 @@ impl CoreErlangGenerator {
                         if is_last {
                             docs.push(docvec![
                                 "{'reply', ",
-                                Document::String(val_var),
+                                leaf::var(val_var),
                                 ", ",
-                                Document::String(field_state),
+                                leaf::var(field_state),
                                 "}",
                             ]);
                         }
@@ -711,17 +711,17 @@ impl CoreErlangGenerator {
                         let new_state = self.peek_next_state_var();
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             value_str,
                             " in let ",
-                            Document::String(actual_val.clone()),
+                            leaf::var(actual_val.clone()),
                             " = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             ") in let ",
-                            Document::String(new_state.clone()),
+                            leaf::var(new_state.clone()),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in ",
                         ]];
                         let _ = self.next_state_var();
@@ -733,11 +733,11 @@ impl CoreErlangGenerator {
                                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                                 doc_parts.push(docvec![
                                     "let ",
-                                    Document::String(tv_core),
-                                    " = call 'maps':'get'('",
-                                    Document::String(Self::local_state_key(var)),
-                                    "', ",
-                                    Document::String(new_state.clone()),
+                                    leaf::var(tv_core),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(new_state.clone()),
                                     ") in ",
                                 ]);
                             }
@@ -752,11 +752,7 @@ impl CoreErlangGenerator {
                     }
                     if is_last {
                         let post_state = self.current_state_var();
-                        docs.push(docvec![
-                            "{'reply', 'nil', ",
-                            Document::String(post_state),
-                            "}",
-                        ]);
+                        docs.push(docvec!["{'reply', 'nil', ", leaf::var(post_state), "}",]);
                     }
                 }
                 BodyExprKind::LocalAssignTier2 => {
@@ -772,17 +768,17 @@ impl CoreErlangGenerator {
                             let new_state = self.next_state_var();
                             docs.push(docvec![
                                 "let ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 " = ",
                                 value_str,
                                 " in let ",
-                                Document::String(core_var),
+                                leaf::var(core_var),
                                 " = call 'erlang':'element'(1, ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 ")\n in let ",
-                                Document::String(new_state),
+                                leaf::var(new_state),
                                 " = call 'erlang':'element'(2, ",
-                                Document::String(tuple_var),
+                                leaf::var(tuple_var),
                                 ") in ",
                             ]);
                         }
@@ -803,17 +799,17 @@ impl CoreErlangGenerator {
                             let value_str = self.expression_doc(value)?;
                             let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                                 "let ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 " = ",
                                 value_str,
                                 " in let ",
-                                Document::String(core_var.clone()),
+                                leaf::var(core_var.clone()),
                                 " = call 'erlang':'element'(1, ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 ") in let ",
-                                Document::String(new_state.clone()),
+                                leaf::var(new_state.clone()),
                                 " = call 'erlang':'element'(2, ",
-                                Document::String(tuple_var),
+                                leaf::var(tuple_var),
                                 ") in ",
                             ]];
                             let _ = self.next_state_var();
@@ -828,11 +824,11 @@ impl CoreErlangGenerator {
                                     );
                                     doc_parts.push(docvec![
                                         "let ",
-                                        Document::String(tv_core),
-                                        " = call 'maps':'get'('",
-                                        Document::String(Self::local_state_key(var)),
-                                        "', ",
-                                        Document::String(new_state.clone()),
+                                        leaf::var(tv_core),
+                                        " = call 'maps':'get'(",
+                                        leaf::atom(Self::local_state_key(var)),
+                                        ", ",
+                                        leaf::var(new_state.clone()),
                                         ") in ",
                                     ]);
                                 }
@@ -859,9 +855,9 @@ impl CoreErlangGenerator {
                             self.bind_var(var_name, &core_var);
                             docs.push(docvec![
                                 "let ",
-                                Document::String(core_var),
+                                leaf::var(core_var),
                                 " = call 'erlang':'element'(1, ",
-                                Document::String(dispatch_var),
+                                leaf::var(dispatch_var),
                                 ") in ",
                             ]);
                         }
@@ -881,7 +877,7 @@ impl CoreErlangGenerator {
                             self.bind_var(var_name, &core_var);
                             docs.push(docvec![
                                 "let ",
-                                Document::String(core_var),
+                                leaf::var(core_var),
                                 " = ",
                                 value_str,
                                 " in ",
@@ -901,11 +897,7 @@ impl CoreErlangGenerator {
                     }
                     if is_last {
                         let post_state = self.current_state_var();
-                        docs.push(docvec![
-                            "{'reply', 'nil', ",
-                            Document::String(post_state),
-                            "}",
-                        ]);
+                        docs.push(docvec!["{'reply', 'nil', ", leaf::var(post_state), "}",]);
                     }
                 }
                 BodyExprKind::SuperSend => {
@@ -930,13 +922,7 @@ impl CoreErlangGenerator {
                     } else {
                         let tmp_var = self.fresh_temp_var("seq");
                         let expr_str = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(tmp_var),
-                            " = ",
-                            expr_str,
-                            " in ",
-                        ]);
+                        docs.push(docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in ",]);
                     }
                 }
                 BodyExprKind::Tier2ValueCall => {
@@ -950,17 +936,17 @@ impl CoreErlangGenerator {
                         let new_state = self.next_state_var();
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             expr_str,
                             " in let ",
-                            Document::String(discard_var),
+                            leaf::var(discard_var),
                             " = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             ")\n in let ",
-                            Document::String(new_state.clone()),
+                            leaf::var(new_state.clone()),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in ",
                         ]];
 
@@ -972,11 +958,11 @@ impl CoreErlangGenerator {
                                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                                 doc_parts.push(docvec![
                                     "let ",
-                                    Document::String(core_var),
-                                    " = call 'maps':'get'('",
-                                    Document::String(Self::local_state_key(var)),
-                                    "', ",
-                                    Document::String(new_state.clone()),
+                                    leaf::var(core_var),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(new_state.clone()),
                                     ") in ",
                                 ]);
                             }
@@ -1002,13 +988,13 @@ impl CoreErlangGenerator {
                         let expr_str = self.expression_doc(expr)?;
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             expr_str,
                             " in let ",
-                            Document::String(new_state.clone()),
+                            leaf::var(new_state.clone()),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in ",
                         ]];
                         let _ = self.next_state_var();
@@ -1021,11 +1007,11 @@ impl CoreErlangGenerator {
                                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                                 doc_parts.push(docvec![
                                     "let ",
-                                    Document::String(core_var),
-                                    " = call 'maps':'get'('",
-                                    Document::String(Self::local_state_key(var)),
-                                    "', ",
-                                    Document::String(new_state.clone()),
+                                    leaf::var(core_var),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(new_state.clone()),
                                     ") in ",
                                 ]);
                             }
@@ -1053,19 +1039,13 @@ impl CoreErlangGenerator {
                             "let _Result = ",
                             expr_str,
                             " in {'reply', _Result, ",
-                            Document::String(post_state),
+                            leaf::var(post_state),
                             "}",
                         ]);
                     } else {
                         let tmp_var = self.fresh_temp_var("seq");
                         let expr_str = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(tmp_var),
-                            " = ",
-                            expr_str,
-                            " in ",
-                        ]);
+                        docs.push(docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in ",]);
                     }
                 }
             }
@@ -1079,11 +1059,7 @@ impl CoreErlangGenerator {
     /// Used by local assignments and other open-chain handlers in last position.
     fn emit_pure_reply(&mut self, docs: &mut Vec<Document<'static>>) {
         let post_state = self.current_state_var();
-        docs.push(docvec![
-            "{'reply', 'nil', ",
-            Document::String(post_state),
-            "}",
-        ]);
+        docs.push(docvec!["{'reply', 'nil', ", leaf::var(post_state), "}",]);
     }
 
     /// Emit the last-position reply for a dispatch open call (Tier 2 self-send
@@ -1092,9 +1068,9 @@ impl CoreErlangGenerator {
         let final_state = self.current_state_var();
         docs.push(docvec![
             "{'reply', call 'erlang':'element'(1, ",
-            Document::String(dispatch_var.to_string()),
+            leaf::var(dispatch_var.to_string()),
             "), ",
-            Document::String(final_state),
+            leaf::var(final_state),
             "}",
         ]);
     }
@@ -1110,13 +1086,13 @@ impl CoreErlangGenerator {
         let tuple_var = self.fresh_temp_var(tuple_label);
         docvec![
             "let ",
-            Document::String(tuple_var.clone()),
+            leaf::var(tuple_var.clone()),
             " = ",
             expr_doc,
             " in let _Result = call 'erlang':'element'(1, ",
-            Document::String(tuple_var.clone()),
+            leaf::var(tuple_var.clone()),
             ") in let _NewState = call 'erlang':'element'(2, ",
-            Document::String(tuple_var),
+            leaf::var(tuple_var),
             ") in {'reply', _Result, _NewState}",
         ]
     }
@@ -1148,24 +1124,24 @@ impl CoreErlangGenerator {
             }
             docs.push(docvec![
                 "let ",
-                Document::String(super_result_var.clone()),
-                " = call 'beamtalk_dispatch':'super'('",
-                Document::String(selector_atom),
-                "', [",
+                leaf::var(super_result_var.clone()),
+                " = call 'beamtalk_dispatch':'super'(",
+                leaf::atom(selector_atom),
+                ", [",
                 Document::Vec(arg_docs),
                 "], Self, ",
-                Document::String(current_state),
-                ", '",
-                Document::String(class_name),
-                "')",
+                leaf::var(current_state),
+                ", ",
+                leaf::atom(class_name),
+                ")",
             ]);
         }
 
         docs.push(docvec![
             " in let ",
-            Document::String(new_state),
+            leaf::var(new_state),
             " = call 'erlang':'element'(3, ",
-            Document::String(super_result_var),
+            leaf::var(super_result_var),
             ") in ",
         ]);
         Ok(())
@@ -1309,13 +1285,13 @@ impl CoreErlangGenerator {
             // BT-101: Method source
             let method_source_doc = Self::build_selector_map(&instance_methods, |m| {
                 let source_str = self.extract_method_source(m);
-                Document::String(Self::binary_string_literal(&source_str))
+                leaf::binary_lit(&source_str)
             });
 
             // BT-988: Method display signatures for :help command
             let method_sigs_doc = Self::build_selector_map(&instance_methods, |m| {
                 let sig_str = unparse_method_display_signature(m);
-                Document::String(Self::binary_string_literal(&sig_str))
+                leaf::binary_lit(&sig_str)
             });
 
             // BT-990: Class-side method display signatures for :help command
@@ -1326,7 +1302,7 @@ impl CoreErlangGenerator {
                 .collect();
             let class_method_sigs_doc = Self::build_selector_map(&class_methods_primary, |m| {
                 let sig_str = unparse_method_display_signature(m);
-                Document::String(Self::binary_string_literal(&sig_str))
+                leaf::binary_lit(&sig_str)
             });
 
             // BT-2195: Class-side method source — mirrors method_source for the
@@ -1334,7 +1310,7 @@ impl CoreErlangGenerator {
             // `referencesTo:` / `methodsMatching:` to scan class-side bodies.
             let class_method_source_doc = Self::build_selector_map(&class_methods_primary, |m| {
                 let source_str = self.extract_method_source(m);
-                Document::String(Self::binary_string_literal(&source_str))
+                leaf::binary_lit(&source_str)
             });
 
             // BT-412: Class variable initial values
@@ -1342,24 +1318,20 @@ impl CoreErlangGenerator {
 
             // BT-771: Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
-                Document::String(Self::binary_string_literal(doc))
+                leaf::binary_lit(doc)
             } else {
                 Document::Str("'none'")
             };
 
             // BT-771: Method-level doc comments
             let method_docs_doc = Self::build_selector_map_filtered(&instance_methods, |m| {
-                m.doc_comment
-                    .as_ref()
-                    .map(|doc| Document::String(Self::binary_string_literal(doc)))
+                m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
             });
 
             // BT-1634: Class method doc comments
             let class_method_docs_doc =
                 Self::build_selector_map_filtered(&class_methods_primary, |m| {
-                    m.doc_comment
-                        .as_ref()
-                        .map(|doc| Document::String(Self::binary_string_literal(doc)))
+                    m.doc_comment.as_ref().map(|doc| leaf::binary_lit(doc))
                 });
 
             // BT-877: Detect non-constructible classes at compile time.
@@ -1486,9 +1458,9 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             parts.push(docvec![
-                "'",
-                Document::Eco(method.selector.name()),
-                "' => ",
+                "",
+                leaf::atom(method.selector.name()),
+                " => ",
                 value_fn(method),
             ]);
         }
@@ -1508,12 +1480,7 @@ impl CoreErlangGenerator {
                 if !parts.is_empty() {
                     parts.push(Document::Str(", "));
                 }
-                parts.push(docvec![
-                    "'",
-                    Document::Eco(method.selector.name()),
-                    "' => ",
-                    val,
-                ]);
+                parts.push(docvec!["", leaf::atom(method.selector.name()), " => ", val,]);
             }
         }
         Document::Vec(parts)
@@ -1539,9 +1506,9 @@ impl CoreErlangGenerator {
                 Document::Str("'nil'")
             };
             parts.push(docvec![
-                "'",
-                Document::String(cv.name.name.to_string()),
-                "' => ",
+                "",
+                leaf::atom(cv.name.name.to_string()),
+                " => ",
                 val,
             ]);
         }
@@ -1589,23 +1556,15 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    docvec![
-                        "'className' => '",
-                        Document::String(class_name.to_string()),
-                        "',"
-                    ],
+                    docvec!["'className' => ", leaf::atom(class_name.to_string()), ","],
                     line(),
                     docvec![
-                        "'superclassRef' => '",
-                        Document::String(superclass_name.to_string()),
-                        "',"
+                        "'superclassRef' => ",
+                        leaf::atom(superclass_name.to_string()),
+                        ","
                     ],
                     line(),
-                    docvec![
-                        "'moduleName' => '",
-                        Document::String(module_name.to_string()),
-                        "',"
-                    ],
+                    docvec!["'moduleName' => ", leaf::atom(module_name.to_string()), ","],
                     line(),
                     "'methodSource' => ~{",
                     method_source_doc,
@@ -1731,10 +1690,10 @@ impl CoreErlangGenerator {
                             let selector = sig.selector.name().to_string();
                             let arity = sig.selector.arity();
                             docvec![
-                                "~{'selector' => '",
-                                Document::String(selector),
-                                "', 'arity' => ",
-                                Document::String(arity.to_string()),
+                                "~{'selector' => ",
+                                leaf::atom(selector),
+                                ", 'arity' => ",
+                                leaf::var(arity.to_string()),
                                 "}~"
                             ]
                         })
@@ -1770,25 +1729,25 @@ impl CoreErlangGenerator {
 
             // Build extending value
             let extending_doc: Document<'static> = if let Some(ref ext) = protocol.extending {
-                docvec!["'", Document::String(ext.name.to_string()), "'"]
+                leaf::atom(ext.name.to_string())
             } else {
                 Document::Str("'undefined'")
             };
 
             // Build doc value — propagate doc comments to runtime for protocol class objects
             let doc_doc: Document<'static> = if let Some(ref doc) = protocol.doc_comment {
-                Document::String(Self::binary_string_literal(doc))
+                leaf::binary_lit(doc)
             } else {
                 Document::Str("'none'")
             };
 
             parts.push(docvec![
                 "\nlet <_ProtoReg_",
-                Document::String(name.clone()),
+                leaf::var(name.clone()),
                 "> = call 'beamtalk_protocol_registry':'register_protocol'(",
-                "~{'name' => '",
-                Document::String(name),
-                "', 'required_methods' => ",
+                "~{'name' => ",
+                leaf::atom(name),
+                ", 'required_methods' => ",
                 methods_doc,
                 ", 'required_class_methods' => ",
                 class_methods_doc,
@@ -2233,7 +2192,7 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = Vec::new();
         for var in param_vars {
             parts.push(Document::Str(", "));
-            parts.push(Document::String(var.clone()));
+            parts.push(leaf::var(var.clone()));
         }
         Document::Vec(parts)
     }
@@ -2290,7 +2249,7 @@ impl CoreErlangGenerator {
             let result_var = self.fresh_temp_var("Ret");
             let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
             let (preamble, value_doc) = if let Some(open_scope_result) = open_scope {
-                (value_str, Document::String(open_scope_result))
+                (value_str, leaf::var(open_scope_result))
             } else {
                 (Document::Nil, value_str)
             };
@@ -2299,31 +2258,31 @@ impl CoreErlangGenerator {
                 Ok(docvec![
                     preamble,
                     "let ",
-                    Document::String(result_var.clone()),
+                    leaf::var(result_var.clone()),
                     " = ",
                     value_doc,
                     " in {'class_var_result', ",
-                    Document::String(result_var),
+                    leaf::var(result_var),
                     ", ",
-                    Document::String(final_cv),
+                    leaf::var(final_cv),
                     "}",
                 ])
             } else {
                 Ok(docvec![
                     preamble,
                     "let ",
-                    Document::String(result_var.clone()),
+                    leaf::var(result_var.clone()),
                     " = ",
                     value_doc,
                     " in ",
-                    Document::String(result_var),
+                    leaf::var(result_var),
                 ])
             }
         } else {
             // BT-1942: Same treatment for the no-class-vars path.
             let (value_str, open_scope) = self.expression_doc_with_open_scope(value)?;
             if let Some(open_scope_result) = open_scope {
-                Ok(docvec![value_str, Document::String(open_scope_result)])
+                Ok(docvec![value_str, leaf::var(open_scope_result)])
             } else {
                 Ok(value_str)
             }
@@ -2355,16 +2314,16 @@ impl CoreErlangGenerator {
                 Ok(docvec![
                     expr_str,
                     "{'class_var_result', ",
-                    Document::String(result_var),
+                    leaf::var(result_var),
                     ", ",
-                    Document::String(final_cv),
+                    leaf::var(final_cv),
                     "}",
                 ])
             } else {
                 Ok(docvec![
                     expr_str,
                     "{'class_var_result', 'nil', ",
-                    Document::String(final_cv),
+                    leaf::var(final_cv),
                     "}",
                 ])
             }
@@ -2379,39 +2338,39 @@ impl CoreErlangGenerator {
                     Ok(docvec![
                         expr_str,
                         "let ",
-                        Document::String(result_var.clone()),
+                        leaf::var(result_var.clone()),
                         " = ",
-                        Document::String(open_scope_result),
+                        leaf::var(open_scope_result),
                         " in {'class_var_result', ",
-                        Document::String(result_var),
+                        leaf::var(result_var),
                         ", ",
-                        Document::String(final_cv),
+                        leaf::var(final_cv),
                         "}",
                     ])
                 } else {
-                    Ok(docvec![expr_str, Document::String(open_scope_result)])
+                    Ok(docvec![expr_str, leaf::var(open_scope_result)])
                 }
             } else if self.class_var_mutated() {
                 let final_cv = self.current_class_var();
                 Ok(docvec![
                     "let ",
-                    Document::String(result_var.clone()),
+                    leaf::var(result_var.clone()),
                     " = ",
                     expr_str,
                     " in {'class_var_result', ",
-                    Document::String(result_var),
+                    leaf::var(result_var),
                     ", ",
-                    Document::String(final_cv),
+                    leaf::var(final_cv),
                     "}",
                 ])
             } else {
                 Ok(docvec![
                     "let ",
-                    Document::String(result_var.clone()),
+                    leaf::var(result_var.clone()),
                     " = ",
                     expr_str,
                     " in ",
-                    Document::String(result_var),
+                    leaf::var(result_var),
                 ])
             }
         }
@@ -2426,7 +2385,7 @@ impl CoreErlangGenerator {
             // BT-891: Class method self-send as last expression with no class vars.
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
             if let Some(result_var) = open_scope {
-                Ok(docvec![expr_str, Document::String(result_var)])
+                Ok(docvec![expr_str, leaf::var(result_var)])
             } else {
                 Ok(expr_str)
             }
@@ -2434,7 +2393,7 @@ impl CoreErlangGenerator {
             // BT-1201: Use expression_doc_with_open_scope to detect open-scope results.
             let (expr_str, open_scope) = self.expression_doc_with_open_scope(expr)?;
             if let Some(open_scope_result) = open_scope {
-                Ok(docvec![expr_str, Document::String(open_scope_result)])
+                Ok(docvec![expr_str, leaf::var(open_scope_result)])
             } else {
                 Ok(expr_str)
             }
@@ -2473,19 +2432,13 @@ impl CoreErlangGenerator {
                 Ok(docvec![
                     expr_str,
                     "let ",
-                    Document::String(tmp_var),
+                    leaf::var(tmp_var),
                     " = ",
-                    Document::String(result_var),
+                    leaf::var(result_var),
                     " in "
                 ])
             } else {
-                Ok(docvec![
-                    "let ",
-                    Document::String(tmp_var),
-                    " = ",
-                    expr_str,
-                    " in "
-                ])
+                Ok(docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "])
             }
         }
     }
@@ -2508,19 +2461,13 @@ impl CoreErlangGenerator {
                     return Ok(docvec![
                         val_doc,
                         "let ",
-                        Document::String(core_var),
+                        leaf::var(core_var),
                         " = ",
-                        Document::String(open_scope_result),
+                        leaf::var(open_scope_result),
                         " in "
                     ]);
                 }
-                return Ok(docvec![
-                    "let ",
-                    Document::String(core_var),
-                    " = ",
-                    val_doc,
-                    " in "
-                ]);
+                return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in "]);
             }
         }
         Ok(Document::Nil)
@@ -2877,7 +2824,7 @@ impl CoreErlangGenerator {
 
         // ADR 0070 Phase 4: Emit package name as compile-time constant
         let package_doc: Document<'static> = match package_name {
-            Some(pkg) => docvec!["'", Document::String(pkg.to_string()), "'"],
+            Some(pkg) => leaf::atom(pkg.to_string()),
             None => Document::Str("'none'"),
         };
 
@@ -2889,11 +2836,11 @@ impl CoreErlangGenerator {
         };
 
         docvec![
-            "~{'class' => '",
-            Document::String(class_name),
-            "',\n      'superclass' => '",
-            Document::String(superclass_name),
-            "',\n      'package' => ",
+            "~{'class' => ",
+            leaf::atom(class_name),
+            ",\n      'superclass' => '",
+            leaf::atom(superclass_name),
+            ",\n      'package' => ",
             package_doc,
             ",\n      'kind' => ",
             kind_doc,
@@ -2942,7 +2889,7 @@ impl CoreErlangGenerator {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            parts.push(docvec!["'", Document::String(name.clone()), "'"]);
+            parts.push(leaf::atom(name.clone()));
         }
         parts.push(Document::Str("]"));
         Document::Vec(parts)
@@ -2980,9 +2927,9 @@ impl CoreErlangGenerator {
                 Document::Str("'false'")
             };
             parts.push(docvec![
-                "'",
-                Document::String(s.name.name.to_string()),
-                "' => ",
+                "",
+                leaf::atom(s.name.name.to_string()),
+                " => ",
                 flag,
             ]);
         }
@@ -3005,13 +2952,13 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             let type_doc = match &s.type_annotation {
-                Some(ta) => docvec!["'", Document::String(ta.type_name().to_string()), "'"],
+                Some(ta) => leaf::atom(ta.type_name().to_string()),
                 None => Document::Str("'none'"),
             };
             parts.push(docvec![
-                "'",
-                Document::String(s.name.name.to_string()),
-                "' => ",
+                "",
+                leaf::atom(s.name.name.to_string()),
+                " => ",
                 type_doc,
             ]);
         }
@@ -3230,12 +3177,12 @@ impl CoreErlangGenerator {
     pub(super) fn meta_type_repr_doc(repr: &MetaTypeRepr) -> Document<'static> {
         match repr {
             MetaTypeRepr::None => Document::Str("'none'"),
-            MetaTypeRepr::Atom(name) => docvec!["'", Document::String(name.clone()), "'"],
+            MetaTypeRepr::Atom(name) => leaf::atom(name.clone()),
             MetaTypeRepr::TypeParam { name, index } => docvec![
-                "{'type_param', '",
-                Document::String(name.clone()),
-                "', ",
-                Document::String(index.to_string()),
+                "{'type_param', ",
+                leaf::atom(name.clone()),
+                ", ",
+                leaf::var(index.to_string()),
                 "}"
             ],
             MetaTypeRepr::Generic { base, parameters } => {
@@ -3249,9 +3196,9 @@ impl CoreErlangGenerator {
                 }
                 params.push(Document::Str("]"));
                 docvec![
-                    "{'generic', '",
-                    Document::String(base.clone()),
-                    "', ",
+                    "{'generic', ",
+                    leaf::atom(base.clone()),
+                    ", ",
                     Document::Vec(params),
                     "}"
                 ]
@@ -3299,10 +3246,10 @@ impl CoreErlangGenerator {
                 Document::Str("'public'")
             };
             parts.push(docvec![
-                "'",
-                Document::String(sel.clone()),
-                "' => ~{'arity' => ",
-                Document::String(arity.to_string()),
+                "",
+                leaf::atom(sel.clone()),
+                " => ~{'arity' => ",
+                leaf::var(arity.to_string()),
                 ", 'param_types' => ",
                 param_types_doc,
                 ", 'return_type' => ",

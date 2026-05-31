@@ -8,7 +8,7 @@
 //! Generates the method table, `has_method/1`, `safe_dispatch/3`, and
 //! `dispatch/4` functions for runtime message routing.
 
-use super::super::document::{Document, INDENT, line, nest};
+use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Block, Expression, MethodKind, Module};
 use crate::docvec;
@@ -67,10 +67,9 @@ impl CoreErlangGenerator {
                 entry_docs.push(Document::Str(", "));
             }
             entry_docs.push(docvec![
-                "'",
-                Document::String(name.clone()),
-                "' => ",
-                Document::String(arity.to_string()),
+                leaf::atom(name.clone()),
+                " => ",
+                leaf::int_lit(i64::try_from(*arity).unwrap_or(0)),
             ]);
         }
         let entries_doc = Document::Vec(entry_docs);
@@ -135,7 +134,7 @@ impl CoreErlangGenerator {
             if i > 0 {
                 method_list_docs.push(Document::Str(", "));
             }
-            method_list_docs.push(docvec!["'", Document::String(name.clone()), "'"]);
+            method_list_docs.push(leaf::atom(name.clone()));
         }
         let method_list_doc = Document::Vec(method_list_docs);
 
@@ -173,9 +172,8 @@ impl CoreErlangGenerator {
         _module: &Module,
     ) -> Result<Document<'static>> {
         let doc = docvec![
-            "'class_name'/0 = fun () -> '",
-            Document::String(self.class_name()),
-            "'",
+            "'class_name'/0 = fun () -> ",
+            leaf::atom(self.class_name()),
             "\n\n",
         ];
         Ok(doc)
@@ -217,9 +215,9 @@ impl CoreErlangGenerator {
                     line(),
                     // Core Erlang try uses simple variable patterns in of/catch, not case-style
                     docvec![
-                        "try call '",
-                        Document::Eco(module_name.clone()),
-                        "':'dispatch'(Selector, Args, Self, State)"
+                        "try call ",
+                        leaf::atom(module_name.clone()),
+                        ":'dispatch'(Selector, Args, Self, State)"
                     ],
                     line(),
                     "of Result -> Result",
@@ -364,11 +362,7 @@ impl CoreErlangGenerator {
         param_vars: &[String],
         body_doc: Document<'static>,
     ) -> Document<'static> {
-        let header = docvec![
-            "<'",
-            Document::String(name.to_string()),
-            "'> when 'true' ->",
-        ];
+        let header = docvec!["<", leaf::atom(name.to_string()), "> when 'true' ->",];
 
         if param_vars.is_empty() {
             return docvec![header, nest(INDENT, docvec![line(), body_doc,]), "\n",];
@@ -379,7 +373,7 @@ impl CoreErlangGenerator {
             if i > 0 {
                 param_docs.push(Document::Str(", "));
             }
-            param_docs.push(Document::String(v.clone()));
+            param_docs.push(leaf::var(v.clone()));
         }
         let params_doc = Document::Vec(param_docs);
         let args_case = docvec![
@@ -437,9 +431,9 @@ impl CoreErlangGenerator {
     #[allow(clippy::unused_self)] // method on impl for API consistency
     fn generate_extension_lookup(&self, class_name: &str) -> Document<'static> {
         docvec![
-            "let ExtLookup = try call 'beamtalk_extensions':'lookup'('",
-            Document::String(class_name.to_string()),
-            "', OtherSelector)",
+            "let ExtLookup = try call 'beamtalk_extensions':'lookup'(",
+            leaf::atom(class_name.to_string()),
+            ", OtherSelector)",
             nest(
                 INDENT,
                 docvec![
@@ -499,9 +493,9 @@ impl CoreErlangGenerator {
         docvec![
             "%% ADR 0006: Try hierarchy walk before DNU",
             line(),
-            "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, '",
-            Document::String(class_name.to_string()),
-            "') of",
+            "case call 'beamtalk_dispatch':'super'(OtherSelector, Args, Self, State, ",
+            leaf::atom(class_name.to_string()),
+            ") of",
             nest(
                 INDENT,
                 docvec![
@@ -525,27 +519,26 @@ impl CoreErlangGenerator {
     fn generate_dnu_fallback(&self, class_name: &str) -> Document<'static> {
         let module_name = &self.module_name;
         let hint = "Check spelling or use 'respondsTo:' to verify method exists";
-        let hint_binary = Self::binary_string_literal(hint);
 
         let dnu_dispatch = docvec![
-            "call '",
-            Document::Eco(module_name.clone()),
-            "':'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
+            "call ",
+            leaf::atom(module_name.clone()),
+            ":'dispatch'(DnuSelector, [OtherSelector, Args], Self, State)"
         ];
 
         let dnu_error = docvec![
             "%% No DNU handler - return #beamtalk_error{} record",
             line(),
-            "let ClassName = '",
-            Document::String(class_name.to_string()),
-            "' in",
+            "let ClassName = ",
+            leaf::atom(class_name.to_string()),
+            " in",
             line(),
             "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
             line(),
             "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
             line(),
             "let HintMsg = ",
-            Document::String(hint_binary),
+            leaf::binary_lit(hint),
             " in",
             line(),
             "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
@@ -558,9 +551,9 @@ impl CoreErlangGenerator {
             line(),
             "let DnuSelector = 'doesNotUnderstand:args:' in",
             line(),
-            "let Methods = call '",
-            Document::Eco(module_name.clone()),
-            "':'method_table'() in",
+            "let Methods = call ",
+            leaf::atom(module_name.clone()),
+            ":'method_table'() in",
             line(),
             "case call 'maps':'is_key'(DnuSelector, Methods) of",
             nest(

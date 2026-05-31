@@ -8,7 +8,7 @@
 //! Generates `spawn/0`, `spawn/1` class methods and `new/0`, `new/1` error
 //! methods that prevent incorrect actor instantiation.
 
-use super::super::document::{Document, INDENT, line, nest};
+use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::Module;
 use crate::docvec;
@@ -20,9 +20,9 @@ impl CoreErlangGenerator {
     pub(super) fn instance_registration_doc(class_name: &str) -> Document<'static> {
         docvec![
             docvec![
-                "let _InstReg = try call 'beamtalk_object_instances':'register'('",
-                Document::String(class_name.to_string()),
-                "', Pid)",
+                "let _InstReg = try call 'beamtalk_object_instances':'register'(",
+                leaf::atom(class_name.to_string()),
+                ", Pid)",
             ],
             nest(
                 INDENT,
@@ -70,11 +70,11 @@ impl CoreErlangGenerator {
         let module_name = self.module_name.clone();
 
         let ok_body = docvec![
-            "{'beamtalk_object', '",
-            Document::String(class_name.clone()),
-            "', '",
-            Document::Eco(module_name.clone()),
-            "', Pid}",
+            "{'beamtalk_object', ",
+            leaf::atom(class_name.clone()),
+            ", ",
+            leaf::atom(module_name.clone()),
+            ", Pid}",
         ];
 
         // BT-1541: Use safe_spawn which handles trap_exit + await_initialize
@@ -85,9 +85,9 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     docvec![
-                        "case call 'beamtalk_actor':'safe_spawn'('",
-                        Document::Eco(module_name.clone()),
-                        "', ~{}~) of",
+                        "case call 'beamtalk_actor':'safe_spawn'(",
+                        leaf::atom(module_name.clone()),
+                        ", ~{}~) of",
                     ],
                     nest(
                         INDENT,
@@ -111,9 +111,9 @@ impl CoreErlangGenerator {
                                 docvec![
                                     line(),
                                     docvec![
-                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '",
-                                        Document::String(class_name.clone()),
-                                        "') in",
+                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', ",
+                                        leaf::atom(class_name.clone()),
+                                        ") in",
                                     ],
                                     line(),
                                     "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawn') in",
@@ -174,18 +174,17 @@ impl CoreErlangGenerator {
         let module_name = self.module_name.clone();
 
         let ok_body = docvec![
-            "{'beamtalk_object', '",
-            Document::String(class_name.clone()),
-            "', '",
-            Document::Eco(module_name.clone()),
-            "', Pid}",
+            "{'beamtalk_object', ",
+            leaf::atom(class_name.clone()),
+            ", ",
+            leaf::atom(module_name.clone()),
+            ", Pid}",
         ];
 
         // BT-473: Validate InitArgs is a map before passing to gen_server
         // BT-476: This is the single source of truth for spawnWith: argument validation.
         // The runtime (beamtalk_object_class.erl handle_call({spawn, Args})) delegates
         // validation to this generated code for both static and dynamic dispatch paths.
-        let hint_binary = Self::binary_string_literal("spawnWith: expects a Dictionary argument");
         let doc = docvec![
             "'spawn'/1 = fun (InitArgs) ->",
             nest(
@@ -203,16 +202,18 @@ impl CoreErlangGenerator {
                                 docvec![
                                     line(),
                                     docvec![
-                                        "let TypeErr0 = call 'beamtalk_error':'new'('type_error', '",
-                                        Document::String(class_name.clone()),
-                                        "') in",
+                                        "let TypeErr0 = call 'beamtalk_error':'new'('type_error', ",
+                                        leaf::atom(class_name.clone()),
+                                        ") in",
                                     ],
                                     line(),
                                     "let TypeErr1 = call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:') in",
                                     line(),
                                     docvec![
                                         "let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, ",
-                                        Document::String(hint_binary.clone()),
+                                        leaf::binary_lit(
+                                            "spawnWith: expects a Dictionary argument"
+                                        ),
                                         ") in",
                                     ],
                                     line(),
@@ -227,9 +228,9 @@ impl CoreErlangGenerator {
                                 docvec![
                                     line(),
                                     docvec![
-                                        "case call 'beamtalk_actor':'safe_spawn'('",
-                                        Document::Eco(module_name.clone()),
-                                        "', InitArgs) of",
+                                        "case call 'beamtalk_actor':'safe_spawn'(",
+                                        leaf::atom(module_name.clone()),
+                                        ", InitArgs) of",
                                     ],
                                     nest(
                                         INDENT,
@@ -253,9 +254,9 @@ impl CoreErlangGenerator {
                                                 docvec![
                                                     line(),
                                                     docvec![
-                                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', '",
-                                                        Document::String(class_name.clone()),
-                                                        "') in",
+                                                        "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', ",
+                                                        leaf::atom(class_name.clone()),
+                                                        ") in",
                                                     ],
                                                     line(),
                                                     "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
@@ -326,7 +327,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name();
         Ok(Self::instantiation_error_stub(
             "'spawn'/0 = fun () ->",
-            Document::String(class_name),
+            leaf::var(class_name),
             "spawn",
             "Abstract classes cannot be instantiated. Subclass it first.",
         ))
@@ -340,7 +341,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name();
         Ok(Self::instantiation_error_stub(
             "'spawn'/1 = fun (_InitArgs) ->",
-            Document::String(class_name),
+            leaf::var(class_name),
             "spawnWith:",
             "Abstract classes cannot be instantiated. Subclass it first.",
         ))
@@ -362,7 +363,6 @@ impl CoreErlangGenerator {
         selector: &'static str,
         hint: &str,
     ) -> Document<'static> {
-        let hint_binary = Self::binary_string_literal(hint);
         docvec![
             fun_decl,
             nest(
@@ -383,7 +383,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-                        Document::String(hint_binary),
+                        leaf::binary_lit(hint),
                         ") in",
                     ],
                     line(),
@@ -443,9 +443,8 @@ impl CoreErlangGenerator {
 
         let doc = docvec![
             docvec![
-                "'superclass'/0 = fun () -> '",
-                Document::String(superclass_atom.to_string()),
-                "'",
+                "'superclass'/0 = fun () -> ",
+                leaf::atom(superclass_atom.to_string()),
             ],
             "\n",
             "\n",
