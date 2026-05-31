@@ -503,7 +503,7 @@ impl CoreErlangGenerator {
                         if let Some(default_value) = &field.default_value {
                             self.expression_doc(default_value)?
                         } else {
-                            Document::Str("'nil'")
+                            leaf::atom("nil")
                         };
                     own_field_parts.push(docvec![
                         leaf::atom(field.name.name.clone()),
@@ -533,7 +533,7 @@ impl CoreErlangGenerator {
             {
                 self.expression_doc(default_value)?
             } else {
-                Document::Str("'nil'")
+                leaf::atom("nil")
             };
             field_parts.push(docvec![
                 ", ",
