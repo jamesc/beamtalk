@@ -826,17 +826,32 @@ impl Parser {
                 }
             }
             TokenKind::Float(s) => {
-                if let Ok(val) = s.parse::<f64>() {
-                    Literal::Float(val)
-                } else {
-                    self.diagnostics.push(Diagnostic::error(
-                        format!("Invalid float literal: {s}"),
-                        span,
-                    ));
-                    return Expression::Error {
-                        message: "Invalid float literal".into(),
-                        span,
-                    };
+                match s.parse::<f64>() {
+                    // Reject values that overflow `f64` to `inf`/`-inf` (e.g. `1e309`)
+                    // or that parse to `NaN`. A non-finite literal would otherwise reach
+                    // codegen and emit `inf.0` / `NaN.0`, which Core Erlang cannot parse,
+                    // surfacing as a confusing `erlc` failure instead of a diagnostic here.
+                    Ok(val) if val.is_finite() => Literal::Float(val),
+                    Ok(_) => {
+                        self.diagnostics.push(Diagnostic::error(
+                            format!("Float literal out of range: {s}"),
+                            span,
+                        ));
+                        return Expression::Error {
+                            message: "Float literal out of range".into(),
+                            span,
+                        };
+                    }
+                    Err(_) => {
+                        self.diagnostics.push(Diagnostic::error(
+                            format!("Invalid float literal: {s}"),
+                            span,
+                        ));
+                        return Expression::Error {
+                            message: "Invalid float literal".into(),
+                            span,
+                        };
+                    }
                 }
             }
             TokenKind::String(s) => Literal::String(s),
@@ -1352,6 +1367,8 @@ impl Parser {
                         let expr = self.parse_literal();
                         let span = start.merge(expr.span());
                         if let Expression::Literal(lit, _) = expr {
+                            // `parse_literal` already rejects non-finite floats, so
+                            // negating `f` here cannot produce `inf`/`NaN`.
                             let neg_lit = match lit {
                                 Literal::Integer(n) => Literal::Integer(-n),
                                 Literal::Float(f) => Literal::Float(-f),
@@ -1565,6 +1582,8 @@ impl Parser {
                         let expr = self.parse_literal();
                         let span = start.merge(expr.span());
                         if let Expression::Literal(lit, _) = expr {
+                            // `parse_literal` already rejects non-finite floats, so
+                            // negating `f` here cannot produce `inf`/`NaN`.
                             let neg_lit = match lit {
                                 Literal::Integer(n) => Literal::Integer(-n),
                                 Literal::Float(f) => Literal::Float(-f),

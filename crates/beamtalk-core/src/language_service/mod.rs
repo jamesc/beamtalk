@@ -590,23 +590,22 @@ impl SimpleLanguageService {
     /// the language service hasn't indexed (the editor still shows the
     /// item via the name returned from
     /// [`Self::type_hierarchy_prepare_at`]; navigation just doesn't have a
-    /// jump target). Protocol declarations are also resolved here so
-    /// `prepareTypeHierarchy` on a protocol name lands on the protocol
-    /// header.
+    /// jump target).
+    ///
+    /// BT-2317: resolution delegates to
+    /// [`definition_provider::find_class_or_protocol_declaration`], the same
+    /// helper goto-definition uses, so the BT-1933 protocol/class shadowing
+    /// rule applies on this path too. When a name is defined as both a real
+    /// class and a synthetic protocol (across separate files), the real class
+    /// wins; a protocol declaration is only returned when the hierarchy marks
+    /// the name as a protocol class — so `prepareTypeHierarchy` on a protocol
+    /// name still lands on the protocol header.
     fn find_class_declaration_location(&self, class_name: &str) -> Option<Location> {
-        for (file_path, data) in &self.files {
-            for class in &data.module.classes {
-                if class.name.name.as_str() == class_name {
-                    return Some(Location::new(file_path.clone(), class.name.span));
-                }
-            }
-            for protocol in &data.module.protocols {
-                if protocol.name.name.as_str() == class_name {
-                    return Some(Location::new(file_path.clone(), protocol.name.span));
-                }
-            }
-        }
-        None
+        crate::queries::definition_provider::find_class_or_protocol_declaration(
+            class_name,
+            &self.project_index,
+            self.files.iter().map(|(path, data)| (path, &data.module)),
+        )
     }
 
     /// BT-2242: Resolve the supertype chain of `class_name` to declaration
@@ -3467,5 +3466,42 @@ mod tests {
         service.update_file(file.clone(), "Object subclass: Foo\n".to_string());
         let subs = service.subtypes_of("Foo");
         assert!(subs.is_empty());
+    }
+
+    // ---------- BT-2317: protocol/class shadowing on the type-hierarchy path ----------
+
+    #[test]
+    fn type_hierarchy_prepare_at_prefers_class_over_same_named_protocol() {
+        // BT-2317: a name defined as both a real class and a synthetic
+        // protocol (BT-1933) across separate files must resolve to the class
+        // on the type-hierarchy path, mirroring goto-definition. Before the
+        // fix this depended on `HashMap` iteration order and could land on the
+        // protocol header.
+        let mut service = SimpleLanguageService::new();
+        let class_file = Utf8PathBuf::from("real_class.bt");
+        let protocol_file = Utf8PathBuf::from("protocol_foo.bt");
+        let ref_file = Utf8PathBuf::from("uses_foo.bt");
+
+        service.update_file(
+            class_file.clone(),
+            "Object subclass: Foo\n  bar => 1\n".to_string(),
+        );
+        service.update_file(
+            protocol_file.clone(),
+            "Protocol define: Foo\n  baz -> Integer\n".to_string(),
+        );
+        // `Foo subclass: Sub` gives us a `Foo` reference token to put the
+        // cursor on (col 1 lands inside the `Foo` identifier).
+        service.update_file(ref_file.clone(), "Foo subclass: Sub\n".to_string());
+
+        let (name, loc) = service
+            .type_hierarchy_prepare_at(&ref_file, Position::new(0, 1))
+            .expect("Some for cursor on the Foo class reference");
+        assert_eq!(name.as_str(), "Foo");
+        let loc = loc.expect("Foo's real class declaration is indexed");
+        assert_eq!(
+            loc.file, class_file,
+            "type hierarchy must resolve to the real class, not the protocol header"
+        );
     }
 }
