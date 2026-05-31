@@ -1071,4 +1071,17 @@ mod tests {
             "value-type whileFalse: should extract counter from state. Got:\n{code}"
         );
     }
+
+    #[test]
+    fn test_value_type_while_last_expr_unwraps_nil() {
+        // BT-2308: a mutating whileTrue: as the method's LAST expression must return the
+        // loop's logical value (element 1 = nil), not the raw {nil, StateAcc} tuple.
+        let src =
+            "Object subclass: Calc\n\n  run =>\n    n := 0\n    [n < 3] whileTrue: [n := n + 1]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("element'(1,"),
+            "last-expr whileTrue: should unwrap element 1 (nil). Got:\n{code}"
+        );
+    }
 }

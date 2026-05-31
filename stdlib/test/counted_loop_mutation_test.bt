@@ -1,0 +1,90 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2308: outer-local mutation inside a block passed to Integer to:do: /
+// to:by:do: / timesRepeat: must thread the final value back to the caller.
+//
+// These run in value-type (TestCase) context, which previously dropped the
+// mutation: write-only mutations never triggered the threading path, and even
+// read+write mutations were discarded because counted loops were not extracted
+// in the value-type method body sequencer.
+
+TestCase subclass: CountedLoopMutationTest
+
+  // ── to:do: ───────────────────────────────────────────────────────────────
+  testToDoWriteOnly =>
+    last := 0
+    1 to: 5 do: [:i | last := i]
+    self assert: last equals: 5
+
+  testToDoReadWriteAccumulate =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+    self assert: sum equals: 15
+
+  testToDoMutationVisibleToLaterStatements =>
+    sum := 0
+    1 to: 3 do: [:i | sum := sum + i]
+    doubled := sum * 2
+    self assert: doubled equals: 12
+
+  testToDoEmptyRangeLeavesOuterValue =>
+    last := 42
+    1 to: 0 do: [:i | last := i]
+    self assert: last equals: 42
+
+  // ── to:by:do: ──────────────────────────────────────────────────────────────
+  testToByDoWriteOnly =>
+    last := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | last := i]
+    self assert: last equals: 9
+
+  testToByDoReadWriteAccumulate =>
+    sum := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | sum := sum + i]
+    self assert: sum equals: 25
+
+  testToByDoNegativeStep =>
+    last := 0
+    10
+      to: 1
+      by: -1
+      do: [:i | last := i]
+    self assert: last equals: 1
+
+  // ── timesRepeat: ─────────────────────────────────────────────────────────
+  testTimesRepeatWriteOnly =>
+    last := 0
+    3 timesRepeat: [last := 7]
+    self assert: last equals: 7
+
+  testTimesRepeatReadWriteCount =>
+    count := 0
+    5 timesRepeat: [count := count + 1]
+    self assert: count equals: 5
+
+  // ── loop as the last expression of a method ────────────────────────────────
+
+  // Helper: a mutating counted loop as the method's last expression. The loop
+  // threads `sum` internally but, as the last expression, its value is `nil`
+  // (BT-2308 must not leak the internal {nil, StateAcc} tuple as the return value).
+  loopAsLastExpr =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+
+  testLoopAsLastExprReturnsNil => self assert: self loopAsLastExpr equals: nil
+
+  // ── multiple loops in one method ───────────────────────────────────────────
+  testSequentialLoopsThreadIndependently =>
+    a := 0
+    b := 0
+    1 to: 3 do: [:i | a := a + i]
+    1 to: 4 do: [:i | b := b + i]
+    self assert: a equals: 6
+    self assert: b equals: 10
