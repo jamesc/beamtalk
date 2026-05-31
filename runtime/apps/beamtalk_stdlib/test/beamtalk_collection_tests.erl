@@ -140,3 +140,29 @@ inject_into_interval_test() ->
     %% Sum 1..10 = 55
     Sum = beamtalk_collection:inject_into(Interval, 0, fun(Acc, E) -> Acc + E end),
     ?assertEqual(55, Sum).
+
+%%% ============================================================================
+%%% from_list_like/2 — result reconstruction (BT-2342)
+%%% ============================================================================
+%%%
+%%% Reconstructs a collect:/select:/reject: fold result so its type matches the
+%%% original receiver, mirroring the pure (non-mutating) list-op path.
+
+from_list_like_binary_receiver_test() ->
+    %% String (binary) receiver → binary result via iolist_to_binary.
+    ?assertEqual(<<"abc">>, beamtalk_collection:from_list_like(<<"xyz">>, [$a, $b, $c])).
+
+from_list_like_array_receiver_test() ->
+    %% Array receiver → Array result (matches the pure collect: path).
+    Array = beamtalk_array:from_list([1, 2, 3]),
+    Result = beamtalk_collection:from_list_like(Array, [2, 4, 6]),
+    ?assertEqual(beamtalk_array:from_list([2, 4, 6]), Result).
+
+from_list_like_list_receiver_test() ->
+    %% Raw Erlang list receiver → list result, unchanged.
+    ?assertEqual([2, 4, 6], beamtalk_collection:from_list_like([1, 2, 3], [2, 4, 6])).
+
+from_list_like_other_receiver_test() ->
+    %% Non-Array, non-binary, non-list receiver (e.g. a Set map) → list unchanged.
+    Set = #{'$beamtalk_class' => 'Set', data => #{}},
+    ?assertEqual([1, 2], beamtalk_collection:from_list_like(Set, [1, 2])).

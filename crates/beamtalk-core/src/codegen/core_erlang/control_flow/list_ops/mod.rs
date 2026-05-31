@@ -176,22 +176,21 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// BT-1489: Generates a `let` binding that converts a list result to a
-    /// binary string when the original receiver was a binary (String).
+    /// BT-1489/BT-2342: Generates a `let` binding that reconstructs a list result
+    /// so its type matches the original receiver, mirroring the pure list-op path.
     ///
     /// Returns `(binding_code, result_var)` where `binding_code` is:
     /// ```text
-    /// let <out_var> = case call 'erlang':'is_binary'(<recv_var>) of
-    ///   <'true'> when 'true' -> call 'erlang':'iolist_to_binary'(<list_var>)
-    ///   <'false'> when 'true' -> <list_var>
-    /// end
+    /// let <out_var> = call 'beamtalk_collection':'from_list_like'(<recv_var>, <list_var>)
     /// ```
     ///
     /// Note: does NOT include a trailing ` in ` — callers chain with ` in `.
     ///
-    /// This allows `collect:`, `select:`, and `reject:` to return a binary
-    /// string when the receiver is a String, while still returning a list
-    /// when the receiver is a List.
+    /// `beamtalk_collection:from_list_like/2` wraps the raw fold result back into:
+    /// - a binary when the receiver was a String,
+    /// - an `Array` when the receiver was an `Array` (BT-2342: the stateful foldl
+    ///   path previously leaked a raw list where the pure path returns an Array),
+    /// - the list unchanged otherwise (already-an-Erlang-list receivers).
     pub(in crate::codegen::core_erlang) fn generate_string_aware_result_binding(
         &mut self,
         recv_var: &str,
@@ -201,13 +200,11 @@ impl CoreErlangGenerator {
         let binding = docvec![
             "let ",
             leaf::var(out_var.clone()),
-            " = case call 'erlang':'is_binary'(",
+            " = call 'beamtalk_collection':'from_list_like'(",
             leaf::var(recv_var.to_string()),
-            ") of <'true'> when 'true' -> call 'erlang':'iolist_to_binary'(",
+            ", ",
             leaf::var(list_var.to_string()),
-            ") <'false'> when 'true' -> ",
-            leaf::var(list_var.to_string()),
-            " end"
+            ")"
         ];
         (binding, out_var)
     }
