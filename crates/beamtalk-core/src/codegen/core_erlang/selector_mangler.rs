@@ -93,59 +93,9 @@ fn fnv1a_64(data: &[u8]) -> u64 {
     hash
 }
 
-/// Checks if a selector name requires quoting in Erlang.
-///
-/// Erlang atoms that start with a lowercase letter and contain only
-/// alphanumeric characters and underscores don't need quoting. All others do.
-///
-/// In Core Erlang, we always quote atoms for consistency, but this function
-/// is useful for debugging and documentation.
-///
-/// # Returns
-///
-/// `true` if the name requires quoting, `false` otherwise.
-/// Empty strings always require quoting.
-#[must_use]
-pub fn requires_quoting(name: &str) -> bool {
-    let Some(first) = name.chars().next() else {
-        return true;
-    };
-
-    // Must start with lowercase letter
-    if !first.is_ascii_lowercase() {
-        return true;
-    }
-
-    // Rest must be alphanumeric or underscore
-    for c in name.chars().skip(1) {
-        if !c.is_ascii_alphanumeric() && c != '_' {
-            return true;
-        }
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn simple_atom_no_quoting() {
-        assert!(!requires_quoting("increment"));
-        assert!(!requires_quoting("getValue"));
-        assert!(!requires_quoting("some_method"));
-    }
-
-    #[test]
-    fn special_chars_require_quoting() {
-        assert!(requires_quoting("+"));
-        assert!(requires_quoting("at:"));
-        assert!(requires_quoting("at:put:"));
-        assert!(requires_quoting(""));
-        assert!(requires_quoting("123"));
-        assert!(requires_quoting("Uppercase"));
-    }
 
     #[test]
     fn safe_class_method_selector_short_unchanged() {
