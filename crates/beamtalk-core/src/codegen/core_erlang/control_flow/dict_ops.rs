@@ -10,6 +10,7 @@
 //! `maps:to_list` (for `doWithKey:`) using `lists:foldl` with state threading.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
@@ -68,17 +69,17 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(docvec![
                 "let ",
-                Document::String(dict_var.clone()),
+                leaf::var(dict_var.clone()),
                 " = ",
                 recv_code,
                 " in let ",
-                Document::String(values_var.clone()),
+                leaf::var(values_var.clone()),
                 " = call 'maps':'values'(",
-                Document::String(dict_var),
+                leaf::var(dict_var),
                 ") in let ",
-                Document::String(lambda_var.clone()),
+                leaf::var(lambda_var.clone()),
                 " = fun (",
-                Document::String(item_var.clone()),
+                leaf::var(item_var.clone()),
                 ", StateAcc) -> ",
             ]);
 
@@ -99,26 +100,26 @@ impl CoreErlangGenerator {
                 self.last_open_scope_result = Some("_".to_string());
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(values_var),
+                    leaf::var(values_var),
                     ") in ",
                     extract_doc,
                 ]
             } else if matches!(plan.context, CodeGenContext::ValueType) {
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(values_var),
+                    leaf::var(values_var),
                     ") in ",
                     extract_doc,
                     "'nil'",
@@ -127,18 +128,18 @@ impl CoreErlangGenerator {
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(values_var),
+                    leaf::var(values_var),
                     ") in ",
                     extract_doc,
                     repack_doc,
                     "{'nil', ",
-                    Document::String(stateacc),
+                    leaf::var(stateacc),
                     "}",
                 ]
             };
@@ -153,17 +154,17 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(docvec![
             "let ",
-            Document::String(dict_var.clone()),
+            leaf::var(dict_var.clone()),
             " = ",
             recv_code,
             " in let ",
-            Document::String(values_var.clone()),
+            leaf::var(values_var.clone()),
             " = call 'maps':'values'(",
-            Document::String(dict_var),
+            leaf::var(dict_var),
             ") in let ",
-            Document::String(lambda_var.clone()),
+            leaf::var(lambda_var.clone()),
             " = fun (",
-            Document::String(item_var.clone()),
+            leaf::var(item_var.clone()),
             ", StateAcc) -> ",
         ]);
 
@@ -180,13 +181,13 @@ impl CoreErlangGenerator {
         let fold_result = self.fresh_temp_var("FoldResult");
         let mut post_docs: Vec<Document<'static>> = vec![docvec![
             " in let ",
-            Document::String(fold_result.clone()),
+            leaf::var(fold_result.clone()),
             " = call 'lists':'foldl'(",
-            Document::String(lambda_var),
+            leaf::var(lambda_var),
             ", ",
-            Document::String(init_state),
+            leaf::var(init_state),
             ", ",
-            Document::String(values_var),
+            leaf::var(values_var),
             ") in ",
         ]];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
@@ -194,7 +195,7 @@ impl CoreErlangGenerator {
         if !plan.threaded_locals.is_empty() && matches!(plan.context, CodeGenContext::ValueType) {
             post_docs.push(Document::Str("'nil'"));
         } else {
-            post_docs.push(docvec!["{'nil', ", Document::String(fold_result), "}",]);
+            post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
         }
         docs.push(Document::Vec(post_docs));
 
@@ -261,25 +262,25 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(docvec![
                 "let ",
-                Document::String(dict_var.clone()),
+                leaf::var(dict_var.clone()),
                 " = ",
                 recv_code,
                 " in let ",
-                Document::String(pairs_var.clone()),
+                leaf::var(pairs_var.clone()),
                 " = call 'maps':'to_list'(",
-                Document::String(dict_var),
+                leaf::var(dict_var),
                 ") in let ",
-                Document::String(lambda_var.clone()),
+                leaf::var(lambda_var.clone()),
                 " = fun (",
-                Document::String(pair_var.clone()),
+                leaf::var(pair_var.clone()),
                 ", StateAcc) -> let ",
-                Document::String(key_var.clone()),
+                leaf::var(key_var.clone()),
                 " = call 'erlang':'element'(1, ",
-                Document::String(pair_var.clone()),
+                leaf::var(pair_var.clone()),
                 ") in let ",
-                Document::String(val_var.clone()),
+                leaf::var(val_var.clone()),
                 " = call 'erlang':'element'(2, ",
-                Document::String(pair_var),
+                leaf::var(pair_var),
                 ") in ",
             ]);
 
@@ -303,26 +304,26 @@ impl CoreErlangGenerator {
                 self.last_open_scope_result = Some("_".to_string());
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(pairs_var),
+                    leaf::var(pairs_var),
                     ") in ",
                     extract_doc,
                 ]
             } else if matches!(plan.context, CodeGenContext::ValueType) {
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(pairs_var),
+                    leaf::var(pairs_var),
                     ") in ",
                     extract_doc,
                     "'nil'",
@@ -331,18 +332,18 @@ impl CoreErlangGenerator {
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(pairs_var),
+                    leaf::var(pairs_var),
                     ") in ",
                     extract_doc,
                     repack_doc,
                     "{'nil', ",
-                    Document::String(stateacc),
+                    leaf::var(stateacc),
                     "}",
                 ]
             };
@@ -357,25 +358,25 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(docvec![
             "let ",
-            Document::String(dict_var.clone()),
+            leaf::var(dict_var.clone()),
             " = ",
             recv_code,
             " in let ",
-            Document::String(pairs_var.clone()),
+            leaf::var(pairs_var.clone()),
             " = call 'maps':'to_list'(",
-            Document::String(dict_var),
+            leaf::var(dict_var),
             ") in let ",
-            Document::String(lambda_var.clone()),
+            leaf::var(lambda_var.clone()),
             " = fun (",
-            Document::String(pair_var.clone()),
+            leaf::var(pair_var.clone()),
             ", StateAcc) -> let ",
-            Document::String(key_var.clone()),
+            leaf::var(key_var.clone()),
             " = call 'erlang':'element'(1, ",
-            Document::String(pair_var.clone()),
+            leaf::var(pair_var.clone()),
             ") in let ",
-            Document::String(val_var.clone()),
+            leaf::var(val_var.clone()),
             " = call 'erlang':'element'(2, ",
-            Document::String(pair_var),
+            leaf::var(pair_var),
             ") in ",
         ]);
 
@@ -395,13 +396,13 @@ impl CoreErlangGenerator {
         let fold_result = self.fresh_temp_var("FoldResult");
         let mut post_docs: Vec<Document<'static>> = vec![docvec![
             " in let ",
-            Document::String(fold_result.clone()),
+            leaf::var(fold_result.clone()),
             " = call 'lists':'foldl'(",
-            Document::String(lambda_var),
+            leaf::var(lambda_var),
             ", ",
-            Document::String(init_state),
+            leaf::var(init_state),
             ", ",
-            Document::String(pairs_var),
+            leaf::var(pairs_var),
             ") in ",
         ]];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
@@ -409,7 +410,7 @@ impl CoreErlangGenerator {
         if !plan.threaded_locals.is_empty() && matches!(plan.context, CodeGenContext::ValueType) {
             post_docs.push(Document::Str("'nil'"));
         } else {
-            post_docs.push(docvec!["{'nil', ", Document::String(fold_result), "}",]);
+            post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
         }
         docs.push(Document::Vec(post_docs));
 

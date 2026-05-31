@@ -4,6 +4,7 @@
 //! Basic list iteration operations: `do:` and `collect:`.
 
 use super::super::super::document::Document;
+use super::super::super::document::leaf;
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CodeGenContext, CoreErlangGenerator, Result, block_analysis};
 use super::super::{BodyKind, ThreadingPlan};
@@ -68,21 +69,21 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(docvec![
                 "let ",
-                Document::String(list_var.clone()),
+                leaf::var(list_var.clone()),
                 " = ",
                 recv_code,
                 " in let ",
-                Document::String(safe_list_var.clone()),
+                leaf::var(safe_list_var.clone()),
                 " = case call 'erlang':'is_list'(",
-                Document::String(list_var.clone()),
+                leaf::var(list_var.clone()),
                 ") of <'true'> when 'true' -> ",
-                Document::String(list_var.clone()),
+                leaf::var(list_var.clone()),
                 " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-                Document::String(list_var),
+                leaf::var(list_var),
                 ") end in let ",
-                Document::String(lambda_var.clone()),
+                leaf::var(lambda_var.clone()),
                 " = fun (",
-                Document::String(item_var.clone()),
+                leaf::var(item_var.clone()),
                 ", StateAcc) -> ",
             ]);
 
@@ -110,13 +111,13 @@ impl CoreErlangGenerator {
                 self.last_open_scope_result = Some("_".to_string());
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(safe_list_var),
+                    leaf::var(safe_list_var),
                     ") in ",
                     extract_doc,
                 ]
@@ -124,13 +125,13 @@ impl CoreErlangGenerator {
                 // ValueType context: skip StateAcc repack (no actor State to pack into).
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(safe_list_var),
+                    leaf::var(safe_list_var),
                     ") in ",
                     extract_doc,
                     "'nil'",
@@ -141,18 +142,18 @@ impl CoreErlangGenerator {
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(safe_list_var),
+                    leaf::var(safe_list_var),
                     ") in ",
                     extract_doc,
                     repack_doc,
                     "{'nil', ",
-                    Document::String(stateacc),
+                    leaf::var(stateacc),
                     "}",
                 ]
             };
@@ -167,21 +168,21 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(docvec![
             "let ",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             " = ",
             recv_code,
             " in let ",
-            Document::String(safe_list_var.clone()),
+            leaf::var(safe_list_var.clone()),
             " = case call 'erlang':'is_list'(",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             ") of <'true'> when 'true' -> ",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-            Document::String(list_var),
+            leaf::var(list_var),
             ") end in let ",
-            Document::String(lambda_var.clone()),
+            leaf::var(lambda_var.clone()),
             " = fun (",
-            Document::String(item_var.clone()),
+            leaf::var(item_var.clone()),
             ", StateAcc) -> ",
         ]);
 
@@ -199,13 +200,13 @@ impl CoreErlangGenerator {
         let fold_result = self.fresh_temp_var("FoldResult");
         let mut post_docs: Vec<Document<'static>> = vec![docvec![
             " in let ",
-            Document::String(fold_result.clone()),
+            leaf::var(fold_result.clone()),
             " = call 'lists':'foldl'(",
-            Document::String(lambda_var),
+            leaf::var(lambda_var),
             ", ",
-            Document::String(init_state),
+            leaf::var(init_state),
             ", ",
-            Document::String(safe_list_var),
+            leaf::var(safe_list_var),
             ") in ",
         ]];
         post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
@@ -214,7 +215,7 @@ impl CoreErlangGenerator {
         if !plan.threaded_locals.is_empty() && matches!(plan.context, CodeGenContext::ValueType) {
             post_docs.push(Document::Str("'nil'"));
         } else {
-            post_docs.push(docvec!["{'nil', ", Document::String(fold_result), "}",]);
+            post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
         }
         docs.push(Document::Vec(post_docs));
 
@@ -280,25 +281,25 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(docvec![
                 "let ",
-                Document::String(list_var.clone()),
+                leaf::var(list_var.clone()),
                 " = ",
                 recv_code,
                 " in let ",
-                Document::String(safe_list_var.clone()),
+                leaf::var(safe_list_var.clone()),
                 " = case call 'erlang':'is_list'(",
-                Document::String(list_var.clone()),
+                leaf::var(list_var.clone()),
                 ") of <'true'> when 'true' -> ",
-                Document::String(list_var.clone()),
+                leaf::var(list_var.clone()),
                 " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-                Document::String(list_var),
+                leaf::var(list_var),
                 ") end in let ",
-                Document::String(lambda_var.clone()),
+                leaf::var(lambda_var.clone()),
                 " = fun (",
-                Document::String(item_var.clone()),
+                leaf::var(item_var.clone()),
                 ", ",
-                Document::String(acc_state_var.clone()),
+                leaf::var(acc_state_var.clone()),
                 ") -> let AccList = call 'erlang':'element'(1, ",
-                Document::String(acc_state_var.clone()),
+                leaf::var(acc_state_var.clone()),
                 ") in ",
             ]);
 
@@ -332,21 +333,21 @@ impl CoreErlangGenerator {
                 self.direct_params_list_op_result = Some(str_result);
                 docs.push(docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(safe_list_var),
+                    leaf::var(safe_list_var),
                     ") in let ",
-                    Document::String(rev_list.clone()),
+                    leaf::var(rev_list.clone()),
                     " = call 'erlang':'element'(1, ",
-                    Document::String(fold_result),
+                    leaf::var(fold_result),
                     ") in let ",
-                    Document::String(final_list.clone()),
+                    leaf::var(final_list.clone()),
                     " = call 'lists':'reverse'(",
-                    Document::String(rev_list),
+                    leaf::var(rev_list),
                     ") in ",
                     str_binding.clone(),
                     " in ",
@@ -357,30 +358,30 @@ impl CoreErlangGenerator {
                 let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self);
                 docs.push(docvec![
                     " in let ",
-                    Document::String(fold_result.clone()),
+                    leaf::var(fold_result.clone()),
                     " = call 'lists':'foldl'(",
-                    Document::String(lambda_var),
+                    leaf::var(lambda_var),
                     ", ",
                     init_tuple_doc,
                     ", ",
-                    Document::String(safe_list_var),
+                    leaf::var(safe_list_var),
                     ") in let ",
-                    Document::String(rev_list.clone()),
+                    leaf::var(rev_list.clone()),
                     " = call 'erlang':'element'(1, ",
-                    Document::String(fold_result),
+                    leaf::var(fold_result),
                     ") in let ",
-                    Document::String(final_list.clone()),
+                    leaf::var(final_list.clone()),
                     " = call 'lists':'reverse'(",
-                    Document::String(rev_list),
+                    leaf::var(rev_list),
                     ") in ",
                     str_binding.clone(),
                     " in ",
                     extract_doc,
                     repack_doc,
                     "{",
-                    Document::String(str_result),
+                    leaf::var(str_result),
                     ", ",
-                    Document::String(stateacc),
+                    leaf::var(stateacc),
                     "}",
                 ]);
             }
@@ -394,27 +395,27 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(docvec![
             "let ",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             " = ",
             recv_code,
             " in let ",
-            Document::String(safe_list_var.clone()),
+            leaf::var(safe_list_var.clone()),
             " = case call 'erlang':'is_list'(",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             ") of <'true'> when 'true' -> ",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-            Document::String(list_var),
+            leaf::var(list_var),
             ") end in let ",
-            Document::String(lambda_var.clone()),
+            leaf::var(lambda_var.clone()),
             " = fun (",
-            Document::String(item_var.clone()),
+            leaf::var(item_var.clone()),
             ", ",
-            Document::String(acc_state_var.clone()),
+            leaf::var(acc_state_var.clone()),
             ") -> let AccList = call 'erlang':'element'(1, ",
-            Document::String(acc_state_var.clone()),
+            leaf::var(acc_state_var.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            Document::String(acc_state_var),
+            leaf::var(acc_state_var),
             ") in ",
         ]);
 
@@ -440,34 +441,34 @@ impl CoreErlangGenerator {
 
         let pre_doc = docvec![
             " in let ",
-            Document::String(fold_result.clone()),
+            leaf::var(fold_result.clone()),
             " = call 'lists':'foldl'(",
-            Document::String(lambda_var),
+            leaf::var(lambda_var),
             ", {[], ",
-            Document::String(init_state),
+            leaf::var(init_state),
             "}, ",
-            Document::String(safe_list_var),
+            leaf::var(safe_list_var),
             ") in let ",
-            Document::String(rev_list.clone()),
+            leaf::var(rev_list.clone()),
             " = call 'erlang':'element'(1, ",
-            Document::String(fold_result.clone()),
+            leaf::var(fold_result.clone()),
             ") in let ",
-            Document::String(final_list.clone()),
+            leaf::var(final_list.clone()),
             " = call 'lists':'reverse'(",
-            Document::String(rev_list),
+            leaf::var(rev_list),
             ") in ",
         ];
         let post_doc = docvec![
             " in let ",
-            Document::String(state_out.clone()),
+            leaf::var(state_out.clone()),
             " = call 'erlang':'element'(2, ",
-            Document::String(fold_result),
+            leaf::var(fold_result),
             ") in ",
             plan.generate_extract_suffix_doc(&state_out, self),
             "{",
-            Document::String(str_result),
+            leaf::var(str_result),
             ", ",
-            Document::String(state_out),
+            leaf::var(state_out),
             "}",
         ];
         docs.push(docvec![pre_doc, str_binding_doc, post_doc]);
