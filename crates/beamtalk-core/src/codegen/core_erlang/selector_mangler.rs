@@ -17,20 +17,14 @@
 //!
 //! # Usage
 //!
-//! The primary method is [`MessageSelector::to_erlang_atom()`], which is defined
-//! on the AST type itself. This module provides additional utilities for more
-//! complex mangling scenarios.
+//! Selectors are converted to Erlang atom *strings* by
+//! [`MessageSelector::to_erlang_atom()`], defined on the AST type itself. This
+//! module provides the atom-length-safe mangling utilities layered on top —
+//! [`safe_class_method_selector`] and [`safe_class_method_fn_name`].
 //!
-//! ```
-//! use beamtalk_core::ast::MessageSelector;
-//! use beamtalk_core::codegen::core_erlang::selector_mangler::format_as_atom;
-//!
-//! let selector = MessageSelector::Unary("increment".into());
-//! let atom = format_as_atom(&selector);
-//! assert_eq!(atom, "'increment'");
-//! ```
-
-use crate::ast::MessageSelector;
+//! Quoting an atom string for Core Erlang output is **not** done here: that is
+//! the job of the `document::leaf::atom` typed-leaf helper (ADR 0089), which
+//! escapes and wraps the name so no raw `'…'` fragment is built by hand.
 
 /// Maximum length for an Erlang/Core Erlang atom (hard VM limit).
 const MAX_ATOM_LEN: usize = 255;
@@ -99,28 +93,6 @@ fn fnv1a_64(data: &[u8]) -> u64 {
     hash
 }
 
-/// Formats a selector as a quoted Core Erlang atom.
-///
-/// This wraps the selector name in single quotes, which is required for
-/// Core Erlang atom syntax.
-///
-/// # Examples
-///
-/// ```
-/// use beamtalk_core::ast::MessageSelector;
-/// use beamtalk_core::codegen::core_erlang::selector_mangler::format_as_atom;
-///
-/// let selector = MessageSelector::Unary("increment".into());
-/// assert_eq!(format_as_atom(&selector), "'increment'");
-///
-/// let selector = MessageSelector::Binary("+".into());
-/// assert_eq!(format_as_atom(&selector), "'+'");
-/// ```
-#[must_use]
-pub fn format_as_atom(selector: &MessageSelector) -> String {
-    format!("'{}'", selector.to_erlang_atom())
-}
-
 /// Checks if a selector name requires quoting in Erlang.
 ///
 /// Erlang atoms that start with a lowercase letter and contain only
@@ -157,29 +129,6 @@ pub fn requires_quoting(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::KeywordPart;
-    use crate::source_analysis::Span;
-
-    #[test]
-    fn format_unary_selector() {
-        let selector = MessageSelector::Unary("increment".into());
-        assert_eq!(format_as_atom(&selector), "'increment'");
-    }
-
-    #[test]
-    fn format_binary_selector() {
-        let selector = MessageSelector::Binary("+".into());
-        assert_eq!(format_as_atom(&selector), "'+'");
-    }
-
-    #[test]
-    fn format_keyword_selector() {
-        let selector = MessageSelector::Keyword(vec![
-            KeywordPart::new("at:", Span::new(0, 3)),
-            KeywordPart::new("put:", Span::new(5, 9)),
-        ]);
-        assert_eq!(format_as_atom(&selector), "'at:put:'");
-    }
 
     #[test]
     fn simple_atom_no_quoting() {
