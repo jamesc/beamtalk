@@ -499,15 +499,16 @@ impl CoreErlangGenerator {
                     leaf::atom(class_name.clone()),
                 ]);
                 for field in &class.state {
-                    let default_code = if let Some(default_value) = &field.default_value {
-                        self.capture_expression(default_value)?
-                    } else {
-                        "'nil'".to_string()
-                    };
+                    let default_code: Document<'static> =
+                        if let Some(default_value) = &field.default_value {
+                            self.expression_doc(default_value)?
+                        } else {
+                            Document::Str("'nil'")
+                        };
                     own_field_parts.push(docvec![
                         leaf::atom(field.name.name.clone()),
                         " => ",
-                        leaf::var(default_code),
+                        default_code,
                     ]);
                 }
                 return Ok(docvec![
@@ -528,16 +529,17 @@ impl CoreErlangGenerator {
 
         // Add each field with its default value
         for field in &class.state {
-            let default_code = if let Some(default_value) = &field.default_value {
-                self.capture_expression(default_value)?
+            let default_code: Document<'static> = if let Some(default_value) = &field.default_value
+            {
+                self.expression_doc(default_value)?
             } else {
-                "'nil'".to_string()
+                Document::Str("'nil'")
             };
             field_parts.push(docvec![
                 ", ",
                 leaf::atom(field.name.name.clone()),
                 " => ",
-                leaf::var(default_code),
+                default_code,
             ]);
         }
 
@@ -993,16 +995,14 @@ impl CoreErlangGenerator {
                 "}\n",
             ]);
         } else {
-            // ADR 0089: `capture_expression` returns an already-rendered Core Erlang
-            // expression (an arbitrary fragment, not a single typed leaf). No typed
-            // helper models a whole sub-expression; `leaf::var` is the pass-through
-            // for pre-rendered Document text until Phase 3 introduces an explicit
-            // owned-fragment constructor.
-            let expr_code = self.capture_expression(expr)?;
+            // ADR 0089 (BT-2348): splice the expression Document directly. The typed
+            // leaves the expression is built from carry the Core Erlang structure, so
+            // there is no raw rendered fragment to re-wrap in `leaf::var`.
+            let expr_doc = self.expression_doc(expr)?;
             if index > 0 {
                 body_parts.push(Document::Str("    "));
             }
-            body_parts.push(leaf::var(expr_code));
+            body_parts.push(expr_doc);
         }
         Ok(())
     }
@@ -1081,11 +1081,11 @@ impl CoreErlangGenerator {
                             "}\n",
                         ]);
                     } else {
-                        let expr_code = self.capture_expression(value)?;
+                        let expr_doc = self.expression_doc(value)?;
                         if i > 0 {
                             body_parts.push(Document::Str("    "));
                         }
-                        body_parts.push(leaf::var(expr_code));
+                        body_parts.push(expr_doc);
                     }
                 }
                 break;
@@ -1236,12 +1236,12 @@ impl CoreErlangGenerator {
                 } else {
                     // Non-last expressions: wrap in let to sequence side effects
                     let tmp_var = self.fresh_temp_var("seq");
-                    let expr_code = self.capture_expression(expr)?;
+                    let expr_doc = self.expression_doc(expr)?;
                     body_parts.push(docvec![
                         "    let ",
                         leaf::var(tmp_var),
                         " = ",
-                        leaf::var(expr_code),
+                        expr_doc,
                         " in\n",
                     ]);
                 }
@@ -1390,12 +1390,12 @@ impl CoreErlangGenerator {
         }
         // Fallback: sequence as a side-effecting expression
         let tmp_var = self.fresh_temp_var("seq");
-        let expr_code = self.capture_expression(expr)?;
+        let expr_doc = self.expression_doc(expr)?;
         Ok(docvec![
             "    let ",
             leaf::var(tmp_var),
             " = ",
-            leaf::var(expr_code),
+            expr_doc,
             " in\n",
         ])
     }
