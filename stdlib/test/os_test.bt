@@ -13,12 +13,10 @@ TestCase subclass: OSTest
     result := OS run: "echo hello"
     self assert: result class equals: String
 
-  // => _
   testRunTrimsTrailingWhitespace =>
     result := OS run: "echo hello"
     self assert: result equals: "hello"
 
-  // => _
   testRunWithNonStringRaisesTypeError =>
     @expect type
     self should: [OS run: 42] raise: #type_error
@@ -27,7 +25,6 @@ TestCase subclass: OSTest
     result := OS run: "echo hello" timeout: 5000
     self assert: result equals: "hello"
 
-  // => _
   testRunTimeoutWithNonStringRaisesTypeError =>
     @expect type
     self should: [OS run: 42 timeout: 5000] raise: #type_error
@@ -35,4 +32,3 @@ TestCase subclass: OSTest
   testRunTimeoutExpiryRaisesTimeout =>
     cmd := self.isUnix ifTrue: ["sleep 60"] ifFalse: ["ping -n 100 127.0.0.1"]
     self should: [OS run: cmd timeout: 100] raise: #timeout
-// => _
