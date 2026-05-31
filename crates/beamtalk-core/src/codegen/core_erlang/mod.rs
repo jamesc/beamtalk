@@ -437,13 +437,6 @@ impl CodegenOptions {
         self
     }
 
-    /// Sets the source file path to embed as `beamtalk_source` module attribute (BT-845/BT-860).
-    #[must_use]
-    pub fn with_source_path(mut self, path: &str) -> Self {
-        self.source_path = Some(path.to_string());
-        self
-    }
-
     /// Sets the source file path from an optional value (BT-845/BT-860).
     #[must_use]
     pub fn with_source_path_opt(mut self, path: Option<&str>) -> Self {

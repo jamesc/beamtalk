@@ -172,16 +172,6 @@ impl ClassIdentity {
 }
 
 impl CoreErlangGenerator {
-    /// Captures the output of `generate_expression` as a `String`.
-    ///
-    /// ADR 0018: Renders the expression Document to a string. Used by code
-    /// that needs string interpolation or direct string manipulation
-    /// (e.g., cascade generation, value type default values).
-    pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
-        let doc = self.generate_expression(expr)?;
-        Ok(doc.to_pretty_string())
-    }
-
     /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
     /// ADR 0018: Simple forwarding to `generate_expression`.
