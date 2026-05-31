@@ -10,6 +10,7 @@
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::super::{CoreErlangGenerator, Result};
 use super::{CountedLoopFrame, ThreadingPlan};
 use crate::ast::{Block, Expression};
@@ -30,19 +31,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("BodyFun");
         let body_code = self.expression_doc(body)?;
         Ok(docvec![
-            "letrec '",
-            Document::String(loop_fn.clone()),
-            "'/0 = fun () -> let ",
-            Document::String(body_var.clone()),
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let ",
+            leaf::var(body_var.clone()),
             " = ",
             body_code,
             " in let _ = apply ",
-            Document::String(body_var),
-            " () in apply '",
-            Document::String(loop_fn.clone()),
-            "'/0 () in apply '",
-            Document::String(loop_fn),
-            "'/0 ()",
+            leaf::var(body_var),
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
         ])
     }
 
@@ -60,7 +61,7 @@ impl CoreErlangGenerator {
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
-                Document::String(n_var.clone()),
+                leaf::var(n_var.clone()),
                 " = ",
                 receiver_code,
                 " in"
@@ -68,12 +69,12 @@ impl CoreErlangGenerator {
             fn_name: "repeat".to_string(),
             continue_header: docvec![
                 "case call 'erlang':'=<'(I, ",
-                Document::String(n_var),
+                leaf::var(n_var),
                 ") of ",
                 "<'true'> when 'true' -> ",
             ],
             next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
-            initial_counter: "1".to_string(),
+            initial_counter: leaf::int_lit(1),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param: None,
         };
@@ -101,11 +102,11 @@ impl CoreErlangGenerator {
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
-                Document::String(start_var.clone()),
+                leaf::var(start_var.clone()),
                 " = ",
                 receiver_code,
                 " in let ",
-                Document::String(end_var.clone()),
+                leaf::var(end_var.clone()),
                 " = ",
                 limit_code,
                 " in",
@@ -113,12 +114,12 @@ impl CoreErlangGenerator {
             fn_name: "loop".to_string(),
             continue_header: docvec![
                 "case call 'erlang':'=<'(I, ",
-                Document::String(end_var),
+                leaf::var(end_var),
                 ") of ",
                 "<'true'> when 'true' -> ",
             ],
             next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
-            initial_counter: start_var,
+            initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
         };
@@ -148,15 +149,15 @@ impl CoreErlangGenerator {
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
-                Document::String(start_var.clone()),
+                leaf::var(start_var.clone()),
                 " = ",
                 receiver_code,
                 " in let ",
-                Document::String(end_var.clone()),
+                leaf::var(end_var.clone()),
                 " = ",
                 limit_code,
                 " in let ",
-                Document::String(step_var.clone()),
+                leaf::var(step_var.clone()),
                 " = ",
                 step_code,
                 " in",
@@ -164,25 +165,25 @@ impl CoreErlangGenerator {
             fn_name: "loop".to_string(),
             continue_header: docvec![
                 "let Continue = case call 'erlang':'>'(",
-                Document::String(step_var.clone()),
+                leaf::var(step_var.clone()),
                 ", 0) of ",
                 "<'true'> when 'true' -> call 'erlang':'=<'(I, ",
-                Document::String(end_var.clone()),
+                leaf::var(end_var.clone()),
                 ") ",
                 "<'false'> when 'true' -> ",
                 "case call 'erlang':'<'(",
-                Document::String(step_var.clone()),
+                leaf::var(step_var.clone()),
                 ", 0) of ",
                 "<'true'> when 'true' -> call 'erlang':'>='(I, ",
-                Document::String(end_var),
+                leaf::var(end_var),
                 ") ",
                 "<'false'> when 'true' -> 'false' ",
                 "end ",
                 "end in case Continue of ",
                 "<'true'> when 'true' -> ",
             ],
-            next_counter: docvec!["call 'erlang':'+'(I, ", Document::String(step_var), ")"],
-            initial_counter: start_var,
+            next_counter: docvec!["call 'erlang':'+'(I, ", leaf::var(step_var), ")"],
+            initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
         };
@@ -420,6 +421,74 @@ mod tests {
         assert!(
             code.contains("maps':'put'('__local__sum'"),
             "to:by:do: full-extract: exit arm must pack sum into ExitSA. Got:\n{code}"
+        );
+    }
+
+    // ── BT-2308: value-type local threading for counted loops ────────────────
+
+    #[test]
+    fn test_value_type_to_do_write_only_threads_local() {
+        // BT-2308: `[:i | last := i]` mutates an outer local write-only. In value-type
+        // context this must thread `last` back via the {'nil', StateAcc} tuple even
+        // though it is never read inside the block.
+        let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    1 to: 5 do: [:i | last := i]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("CountedLoopResult"),
+            "value-type to:do: should bind loop result to CountedLoopResult. Got:\n{code}"
+        );
+        assert!(
+            code.contains("element'(2,"),
+            "value-type to:do: should extract state from element 2. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "value-type to:do: should extract write-only local 'last'. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_to_do_read_write_threads_local() {
+        // BT-2308: read+write `[:i | sum := sum + i]` must thread `sum` back to the caller.
+        let src = "Object subclass: Calc\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n    sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__sum'"),
+            "value-type to:do: should extract 'sum' from state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_times_repeat_write_only_threads_local() {
+        // BT-2308: timesRepeat: with a write-only outer-local mutation threads it back.
+        let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    3 timesRepeat: [last := 7]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "value-type timesRepeat: should extract write-only local 'last'. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_to_by_do_threads_local() {
+        // BT-2308: to:by:do: threads outer-local mutations in value-type context.
+        let src = "Object subclass: Calc\n\n  run =>\n    last := 0\n    1 to: 10 by: 2 do: [:i | last := i]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "value-type to:by:do: should extract write-only local 'last'. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_counted_loop_last_expr_unwraps_nil() {
+        // BT-2308: a mutating counted loop as the method's LAST expression must return
+        // the loop's logical value (element 1 = nil), not the raw {'nil', StateAcc} tuple.
+        let src = "Object subclass: Calc\n\n  run =>\n    sum := 0\n    1 to: 5 do: [:i | sum := sum + i]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("element'(1,"),
+            "last-expr counted loop should unwrap element 1 (nil). Got:\n{code}"
         );
     }
 
