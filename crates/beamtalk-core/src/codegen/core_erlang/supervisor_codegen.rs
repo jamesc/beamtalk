@@ -23,6 +23,7 @@
 
 use super::document::Document;
 use super::document::leaf::{atom, fname};
+use super::selector_mangler::safe_class_method_fn_name;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, spec_codegen};
 use crate::ast::{MethodKind, Module, SupervisorKind};
@@ -73,7 +74,10 @@ impl CoreErlangGenerator {
             class_method_exports = docvec![
                 class_method_exports,
                 ", ",
-                fname(format!("class_{}", m.selector.name()), arity),
+                fname(
+                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
+                    arity
+                ),
             ];
         }
 
@@ -146,7 +150,10 @@ impl CoreErlangGenerator {
             class_method_exports = docvec![
                 class_method_exports,
                 ", ",
-                fname(format!("class_{}", m.selector.name()), arity),
+                fname(
+                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
+                    arity
+                ),
             ];
         }
 
