@@ -55,3 +55,23 @@ TestCase subclass: LoopLastExprReturnTest
     n := 0
     [n >= 3] whileFalse: [n := n + 1]
     self assert: n equals: 3
+
+  // ── NLR active + counted loop as last expression ───────────────────────────
+  // When a method contains a non-local return (^ inside a block) it returns a
+  // {Result, Self} tuple. A counted loop as the last expression must unwrap its
+  // {nil, StateAcc} into that shape: nil result when no early return fires, and
+  // the thrown value when it does.
+  nlrNoEarlyReturn =>
+    #[1, 2, 3] do: [:x | x > 5 ifTrue: [^x]]
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+
+  nlrEarlyReturn =>
+    #[10] do: [:x | x > 5 ifTrue: [^x]]
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+
+  testNlrNoEarlyReturnReturnsNil =>
+    self assert: self nlrNoEarlyReturn equals: nil
+
+  testNlrEarlyReturnReturnsValue => self assert: self nlrEarlyReturn equals: 10
