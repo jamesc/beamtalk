@@ -544,7 +544,7 @@ impl CoreErlangGenerator {
         Ok(docvec![
             "'new'/0 = fun () ->\n",
             "    ~{'$beamtalk_class' => '",
-            class_name,
+            leaf::var(class_name),
             "'",
             concat(field_parts),
             "}~\n",
@@ -651,7 +651,7 @@ impl CoreErlangGenerator {
         Ok(docvec![
             "'new'/1 = fun (InitArgs) ->\n",
             "    let DefaultState = call '",
-            module_name,
+            leaf::var(module_name),
             "':'new'() in\n",
             "    call 'maps':'merge'(DefaultState, InitArgs)\n",
             "\n",
@@ -698,7 +698,7 @@ impl CoreErlangGenerator {
         docvec![
             "'new'/0 = fun () ->\n",
             "    ",
-            empty_value.to_string(),
+            leaf::var(empty_value.to_string()),
             "\n",
             "\n",
         ]
@@ -983,11 +983,11 @@ impl CoreErlangGenerator {
             let final_self = self.current_self_var();
             body_parts.push(docvec![
                 "    let ",
-                tmp.clone(),
+                leaf::var(tmp.clone()),
                 " = ",
                 val_doc,
                 " in\n    {",
-                tmp,
+                leaf::var(tmp),
                 ", ",
                 leaf::var(final_self),
                 "}\n",
@@ -1071,11 +1071,11 @@ impl CoreErlangGenerator {
                         let final_self = self.current_self_var();
                         body_parts.push(docvec![
                             "    let ",
-                            tmp.clone(),
+                            leaf::var(tmp.clone()),
                             " = ",
                             val_doc,
                             " in\n    {",
-                            tmp,
+                            leaf::var(tmp),
                             ", ",
                             leaf::var(final_self),
                             "}\n",
@@ -1128,7 +1128,7 @@ impl CoreErlangGenerator {
                         // BT-854: NLR methods return {Self{N}, Self{N}} tuple.
                         body_parts.push(docvec![
                             "    {",
-                            final_self.clone(),
+                            leaf::var(final_self.clone()),
                             ", ",
                             leaf::var(final_self),
                             "}\n",
@@ -1152,7 +1152,13 @@ impl CoreErlangGenerator {
                                 .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
                             let val_doc = self.expression_doc(value)?;
                             self.bind_var(var_name, &core_var);
-                            body_parts.push(docvec!["    let ", core_var, " = ", val_doc, " in\n"]);
+                            body_parts.push(docvec![
+                                "    let ",
+                                leaf::var(core_var),
+                                " = ",
+                                val_doc,
+                                " in\n"
+                            ]);
                         }
                     }
                 }

@@ -9,6 +9,7 @@
 //! `gen_server`-based Erlang modules with async messaging, error isolation,
 //! and hot code reload support.
 
+use super::document::leaf;
 use super::document::leaf::{atom, fname};
 use super::document::{Document, INDENT, line, nest};
 use super::selector_mangler::safe_class_method_fn_name;
@@ -498,7 +499,7 @@ impl CoreErlangGenerator {
             // body is itself a single annotated MessageSend expression.
             let fun_doc = docvec![
                 "fun (",
-                all_params.join(", "),
+                leaf::var(all_params.join(", ")),
                 ") ->",
                 "\n",
                 nest(INDENT, docvec![line(), method_body_doc,]),

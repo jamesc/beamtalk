@@ -8,6 +8,7 @@
 //! Dictionaries are Erlang maps — immutable key-value collections.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::{call_p0_self, call_self_p0, param};
 use crate::docvec;
 
@@ -26,9 +27,9 @@ pub(crate) fn generate_dictionary_bif(
             let p1 = param(params, 1, "_Block");
             Some(docvec![
                 "call 'beamtalk_map':'at_if_absent'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ")",
             ])
         }
@@ -37,9 +38,9 @@ pub(crate) fn generate_dictionary_bif(
             let p1 = param(params, 1, "_Value");
             Some(docvec![
                 "call 'maps':'put'(",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ", Self)"
             ])
         }

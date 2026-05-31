@@ -9,6 +9,7 @@
 //! Simple operations use direct BIFs; predicates delegate to `beamtalk_character`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::{generate_comparison_bif, param};
 use crate::docvec;
 
@@ -52,7 +53,7 @@ pub(crate) fn generate_character_bif(
         // Factory class method
         "value:" => Some(docvec![
             "call 'beamtalk_character':'value'(",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         _ => None,

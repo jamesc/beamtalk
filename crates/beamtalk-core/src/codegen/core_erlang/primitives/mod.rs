@@ -170,7 +170,7 @@ pub(crate) fn binary_bif(erlang_op: &'static str, params: &[String]) -> Option<D
         "call 'erlang':'",
         erlang_op,
         "'(Self, ",
-        p0.clone(),
+        leaf::var(p0.clone()),
         ")",
     ])
 }
@@ -198,7 +198,7 @@ pub(crate) fn call_self_p0(
         "':'",
         function,
         "'(Self, ",
-        p0.to_string(),
+        leaf::var(p0),
         ")",
     ]
 }
@@ -219,7 +219,7 @@ pub(crate) fn call_p0_self(
         "':'",
         function,
         "'(",
-        p0.to_string(),
+        leaf::var(p0),
         ", Self)",
     ]
 }
@@ -230,7 +230,7 @@ pub(crate) fn power_bif(params: &[String]) -> Option<Document<'static>> {
     Some(docvec![
         "call 'erlang':'round'(call 'math':'pow'(\
          call 'erlang':'float'(Self), call 'erlang':'float'(",
-        p0.clone(),
+        leaf::var(p0.clone()),
         ")))",
     ])
 }

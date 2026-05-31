@@ -256,7 +256,7 @@ impl CoreErlangGenerator {
         let indent_spaces = indent_level * INDENT;
         #[allow(clippy::cast_sign_loss)] // indent_spaces is always non-negative
         let indent_str = " ".repeat(indent_spaces as usize);
-        let result_doc = docvec![indent_str, nest(indent_spaces, body_doc)];
+        let result_doc = docvec![leaf::var(indent_str), nest(indent_spaces, body_doc)];
 
         // Pop the scope when done with this method
         self.pop_scope();
@@ -400,7 +400,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if body.is_empty() {
             let state = self.current_state_var();
-            return Ok(docvec!["{'reply', Self, ", state, "}"]);
+            return Ok(docvec!["{'reply', Self, ", leaf::var(state), "}"]);
         }
 
         // Phase 1: classify every expression upfront.  Classification is

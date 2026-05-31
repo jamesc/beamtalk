@@ -6,6 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::{binary_bif, generate_comparison_bif, power_bif};
 use crate::docvec;
 
@@ -36,13 +37,13 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
             let p0 = params.first()?.clone();
             Some(docvec![
                 "case call 'erlang':'>='(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ", 0) of \
                  'true' when 'true' -> call 'erlang':'bsl'(Self, ",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ") \
                  'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, ",
-                p0,
+                leaf::var(p0),
                 ")) end",
             ])
         }
@@ -80,24 +81,24 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
             // Return Integer when exponent is a non-negative integer, Float otherwise.
             Some(docvec![
                 "case call 'erlang':'is_integer'(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ") of \
                  'true' when 'true' -> \
                    case call 'erlang':'>='(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ", 0) of \
                      'true' when 'true' -> \
                        call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 "))) \
                      'false' when 'true' -> \
                        call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ")) \
                    end \
                  'false' when 'true' -> \
                    call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ")) \
                end",
             ])

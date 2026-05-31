@@ -9,6 +9,7 @@
 //! `Pid`, `Port`, `Reference`, `Future`, `FileHandle`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::{binary_bif, param};
 use crate::docvec;
 
@@ -76,7 +77,11 @@ pub(crate) fn pid_extra(selector: &str, params: &[String]) -> Option<Document<'s
         // BT-1553: exit with arbitrary reason (erlang:exit(Pid, Reason))
         "exit:" => {
             let p0 = param(params, 0, "_Reason");
-            Some(docvec!["call 'erlang':'exit'(Self, ", p0.to_string(), ")"])
+            Some(docvec![
+                "call 'erlang':'exit'(Self, ",
+                leaf::var(p0.to_string()),
+                ")"
+            ])
         }
         _ => None,
     }
@@ -110,17 +115,17 @@ pub(crate) fn generate_future_bif(selector: &str, params: &[String]) -> Option<D
         )),
         "await:" => Some(docvec![
             "call 'beamtalk_future':'await'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "whenResolved:" => Some(docvec![
             "call 'beamtalk_future':'when_resolved'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "whenRejected:" => Some(docvec![
             "call 'beamtalk_future':'when_rejected'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "printString" => Some(super::PRINT_STRING),

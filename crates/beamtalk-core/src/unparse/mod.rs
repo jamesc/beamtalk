@@ -26,10 +26,9 @@
 //! - All output goes through the [`Document`] API — **never** `format!()` or
 //!   string concatenation (CLAUDE.md / ADR 0018).
 //! - Text leaves derived from AST data (identifiers, literal values, comments,
-//!   etc.) are constructed through the intent-carrying [`leaf`] helpers rather
-//!   than the open `Document::String` escape hatch (ADR 0089). When Phase 3 of
-//!   ADR 0089 removes `Document::String`, [`leaf`] is the single place that
-//!   needs updating.
+//!   etc.) are constructed through the intent-carrying [`leaf`] helpers. After
+//!   ADR 0089 Phase 3 removed the open `Document::String` escape hatch, [`leaf`]
+//!   is the single place in the unparser that constructs an owned-string leaf.
 
 mod leaf;
 

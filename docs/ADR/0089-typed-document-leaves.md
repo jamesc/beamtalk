@@ -2,10 +2,13 @@
 
 ## Status
 
-**Accepted (2026-05-28).** Long-term fix for the BT-875 recurrence
+**Implemented (2026-05-31).** Long-term fix for the BT-875 recurrence
 vector, replacing the withdrawn Phases 1–4 of
-[ADR 0088](0088-direct-cerl-emission.md). Acceptance authorises the
-flag-day migration described in *Implementation* below.
+[ADR 0088](0088-direct-cerl-emission.md). All three phases have landed:
+the typed-leaf API (`document::leaf`, `unparse::leaf`) is the only path to
+a runtime-derived leaf, and the Phase 3 flag-day PR (BT-2331) removed the
+public `Document::String` / `Document::Eco` variants, structurally closing
+the BT-875 recurrence vector.
 
 ## Implementation Tracking
 
@@ -24,7 +27,7 @@ flag-day migration described in *Implementation* below.
 | 2 | [BT-2328](https://linear.app/beamtalk/issue/BT-2328) | Migrate `gen_server/` | Backlog |
 | 2 | [BT-2329](https://linear.app/beamtalk/issue/BT-2329) | Migrate `control_flow/` | Backlog |
 | 2 | [BT-2330](https://linear.app/beamtalk/issue/BT-2330) | Migrate `mod.rs` + remaining | Backlog |
-| 3 | [BT-2331](https://linear.app/beamtalk/issue/BT-2331) | Flag-day: remove `Document::String` and `Document::Eco` | Backlog |
+| 3 | [BT-2331](https://linear.app/beamtalk/issue/BT-2331) | Flag-day: remove `Document::String` and `Document::Eco` | Done |
 
 **Recommended start:** BT-2320 (Phase 1, no dependencies).
 
@@ -321,10 +324,18 @@ shape that BT-875 catalogs. The CLAUDE.md rule + review process
 catch new instances; the type system does not prevent them.
 
 Once Phase B lands and `Document::String` and `Document::Eco` are
-removed from the public `Document` enum, no codegen call site can
-construct an arbitrary-text leaf. The internal `Document::Owned(String)` variant is
-`pub(super)` — visible only to the `document` module and its `leaf`
-submodule, where it is wrapped in typed helpers.
+removed from the public `Document` enum, no codegen call site constructs
+an arbitrary-text leaf. The internal `Document::Owned(String)` variant
+survives as the backing for the typed-leaf helpers and is built only
+inside them (`document::leaf` for Core Erlang, `unparse::leaf` for
+Beamtalk source). Rust does not permit an enum variant to have a
+narrower visibility than its enum, so `Owned` is nominally `pub`; the
+structural closure comes from deleting the `Document::String` /
+`Document::Eco` variants and the `Documentable for String` / `EcoString`
+impls, which removes every ergonomic path (`"…".to_string().to_doc()`,
+`docvec![owned_string]`) to an open leaf. The CLAUDE.md codegen rule
+records the convention that `Owned` is built only inside the leaf
+helpers.
 
 `Document::Str(&'static str)` remains public, but it accepts only
 compile-time string constants. An author cannot pass a runtime-computed

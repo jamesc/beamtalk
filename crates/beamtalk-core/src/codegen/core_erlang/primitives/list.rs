@@ -87,9 +87,9 @@ fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Docu
             let p1 = param(params, 1, "_Default");
             Some(docvec![
                 "call 'beamtalk_list':'detect_if_none'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ")",
             ])
         }
@@ -101,9 +101,9 @@ fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Docu
             let p1 = param(params, 1, "_Block");
             Some(docvec![
                 "call 'beamtalk_collection':'inject_into'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ")"
             ])
         }
@@ -113,7 +113,7 @@ fn generate_list_iteration_bif(selector: &str, params: &[String]) -> Option<Docu
         "flatMap:" => Some(call_p0_self("lists", "flatmap", p0)),
         "count:" => Some(docvec![
             "call 'erlang':'length'(call 'lists':'filter'(",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ", Self))",
         ]),
         "anySatisfy:" => Some(call_p0_self("lists", "any", p0)),
@@ -156,13 +156,13 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
         )),
         "addFirst:" => {
             let p0 = param(params, 0, "_Item");
-            Some(docvec!["[", p0.to_string(), "|Self]"])
+            Some(docvec!["[", leaf::var(p0.to_string()), "|Self]"])
         }
         "add:" => {
             let p0 = param(params, 0, "_Item");
             Some(docvec![
                 "call 'erlang':'++'(Self, [",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 "|[]])"
             ])
         }
@@ -172,9 +172,9 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             let p1 = param(params, 1, "_End");
             Some(docvec![
                 "call 'beamtalk_list':'from_to'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ")",
             ])
         }
@@ -186,7 +186,7 @@ fn generate_list_misc_bif(selector: &str, params: &[String]) -> Option<Document<
             let p0 = param(params, 0, "_Sep");
             Some(docvec![
                 "call 'erlang':'iolist_to_binary'(call 'lists':'join'(",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", Self))"
             ])
         }

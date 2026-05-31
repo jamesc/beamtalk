@@ -110,12 +110,11 @@ impl CoreErlangGenerator {
             match segment {
                 StringSegment::Literal(s) => {
                     if !s.is_empty() {
-                        // ADR 0089: no typed leaf fits here. `binary_byte_segments`
-                        // emits the *unwrapped* inner segments (no surrounding
-                        // `#{...}#`) so they can be spliced between interpolation
-                        // segments — `leaf::binary_lit` would add the wrapper and
-                        // corrupt the construction. Remains an open leaf by design.
-                        binary_parts.push(Document::String(Self::binary_byte_segments(s)));
+                        // ADR 0089: `leaf::binary_segments` emits the *unwrapped*
+                        // inner segments (no surrounding `#{...}#`) so they can be
+                        // spliced between interpolation segments — `leaf::binary_lit`
+                        // would add the wrapper and corrupt the construction.
+                        binary_parts.push(leaf::binary_segments(s));
                     }
                 }
                 StringSegment::Interpolation(expr) => {
@@ -148,9 +147,9 @@ impl CoreErlangGenerator {
                     // itself async for actors, returning a nested future).
                     let_bindings.push(docvec![
                         "let ",
-                        str_var.clone(),
+                        leaf::var(str_var.clone()),
                         " = call 'beamtalk_primitive':'display_string'(",
-                        raw_str_var.clone(),
+                        leaf::var(raw_str_var.clone()),
                         ") in "
                     ]);
 
@@ -203,7 +202,7 @@ impl CoreErlangGenerator {
             "self" => {
                 // BT-411: Check if self is explicitly bound (e.g., in class methods)
                 if let Some(var_name) = self.lookup_var("self").cloned() {
-                    Ok(docvec![var_name])
+                    Ok(docvec![leaf::var(var_name)])
                 } else if self.context == super::CodeGenContext::ValueType {
                     // BT-833: In value type context, self resolves to the latest Self{N}
                     // snapshot after any preceding field assignments.
@@ -223,7 +222,7 @@ impl CoreErlangGenerator {
             _ => {
                 // Check if it's a bound variable in current or outer scopes
                 if let Some(var_name) = self.lookup_var(id.name.as_str()).cloned() {
-                    Ok(docvec![var_name])
+                    Ok(docvec![leaf::var(var_name)])
                 } else {
                     // BT-1326: In hybrid mode, check if this is a read-only field
                     // accessed implicitly (bare name without self. prefix).
