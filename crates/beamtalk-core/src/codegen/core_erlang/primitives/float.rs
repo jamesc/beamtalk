@@ -6,6 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::{binary_bif, generate_comparison_bif};
 use crate::docvec;
 
@@ -39,7 +40,7 @@ pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Do
             let p0 = params.first()?;
             Some(docvec![
                 "call 'math':'atan2'(Self, call 'erlang':'float'(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 "))",
             ])
         }
@@ -53,7 +54,7 @@ pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Do
             let p0 = params.first()?;
             Some(docvec![
                 "call 'math':'pow'(Self, call 'erlang':'float'(",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 "))",
             ])
         }

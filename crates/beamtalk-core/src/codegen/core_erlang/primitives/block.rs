@@ -6,6 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::param;
 use crate::docvec;
 
@@ -21,7 +22,11 @@ pub(crate) fn generate_block_bif(selector: &str, params: &[String]) -> Option<Do
         }
         "valueWithArguments:" => {
             let p0 = param(params, 0, "_Args");
-            Some(docvec!["call 'erlang':'apply'(Self, ", p0.to_string(), ")"])
+            Some(docvec![
+                "call 'erlang':'apply'(Self, ",
+                leaf::var(p0.to_string()),
+                ")"
+            ])
         }
         // on:do: and ensure: are structural intrinsics handled at the call site
         // (see control_flow/exception_handling.rs), not here.

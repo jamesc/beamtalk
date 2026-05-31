@@ -9,6 +9,7 @@
 //! to direct calls into `beamtalk_protocol_registry`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use crate::docvec;
 
 /// Generates Core Erlang for a Protocol class method primitive.
@@ -21,7 +22,7 @@ pub fn generate_protocol_bif(selector: &str, params: &[String]) -> Option<Docume
             let arg = params.first()?;
             Some(docvec![
                 "call 'beamtalk_protocol_registry':'required_methods'(",
-                arg.clone(),
+                leaf::var(arg.clone()),
                 ")"
             ])
         }
@@ -30,7 +31,7 @@ pub fn generate_protocol_bif(selector: &str, params: &[String]) -> Option<Docume
             // Returns class name atoms — runtime converts to class objects
             Some(docvec![
                 "call 'beamtalk_protocol_registry':'conforming_classes'(",
-                arg.clone(),
+                leaf::var(arg.clone()),
                 ")"
             ])
         }
@@ -38,7 +39,7 @@ pub fn generate_protocol_bif(selector: &str, params: &[String]) -> Option<Docume
             let arg = params.first()?;
             Some(docvec![
                 "call 'beamtalk_protocol_registry':'is_protocol'(",
-                arg.clone(),
+                leaf::var(arg.clone()),
                 ")"
             ])
         }

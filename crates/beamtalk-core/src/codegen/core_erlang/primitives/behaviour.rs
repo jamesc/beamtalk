@@ -24,6 +24,7 @@
 //! separate domain service.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use crate::docvec;
 
 /// Zero-arg tower intrinsics: the selector name is also the
@@ -61,7 +62,7 @@ const TOWER_ZERO_ARG: &[&str] = &[
 fn intrinsic_self(func: &str) -> Document<'static> {
     docvec![
         "call 'beamtalk_behaviour_intrinsics':'",
-        func.to_owned(),
+        leaf::var(func.to_owned()),
         "'(Self)"
     ]
 }
@@ -70,9 +71,9 @@ fn intrinsic_self(func: &str) -> Document<'static> {
 fn intrinsic_self_arg(func: &str, arg: &str) -> Document<'static> {
     docvec![
         "call 'beamtalk_behaviour_intrinsics':'",
-        func.to_owned(),
+        leaf::var(func.to_owned()),
         "'(Self, ",
-        arg.to_owned(),
+        leaf::var(arg.to_owned()),
         ")"
     ]
 }
@@ -100,7 +101,7 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let arg = params.first()?;
             Some(docvec![
                 "call 'beamtalk_method_resolver':'resolve'(Self, ",
-                arg.clone(),
+                leaf::var(arg.clone()),
                 ")"
             ])
         }
@@ -109,9 +110,9 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let doc = params.get(1)?;
             Some(docvec![
                 "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, ",
-                sel.clone(),
+                leaf::var(sel.clone()),
                 ", ",
-                doc.clone(),
+                leaf::var(doc.clone()),
                 ")"
             ])
         }
@@ -124,11 +125,11 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let source = params.get(1)?;
             Some(docvec![
                 "call 'beamtalk_behaviour_intrinsics':'",
-                selector.to_owned(),
+                leaf::var(selector.to_owned()),
                 "'(Self, ",
-                sel.clone(),
+                leaf::var(sel.clone()),
                 ", ",
-                source.clone(),
+                leaf::var(source.clone()),
                 ")"
             ])
         }

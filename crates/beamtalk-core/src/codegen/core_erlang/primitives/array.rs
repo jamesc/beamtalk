@@ -11,6 +11,7 @@
 //!   `#{'$beamtalk_class' => 'Array', 'data' => ErlangArray}`
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::param;
 use crate::docvec;
 
@@ -22,52 +23,52 @@ pub(crate) fn generate_array_bif(selector: &str, params: &[String]) -> Option<Do
         "isEmpty" => Some(Document::Str("call 'beamtalk_array':'is_empty'(Self)")),
         "do:" => Some(docvec![
             "call 'beamtalk_array':'do'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "at:" => Some(docvec![
             "call 'beamtalk_array':'at'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "at:put:" => {
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_array':'at_put'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ")"
             ])
         }
         "withAll:" => Some(docvec![
             "call 'beamtalk_array':'from_list'(",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "collect:" => Some(docvec![
             "call 'beamtalk_array':'collect'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "select:" => Some(docvec![
             "call 'beamtalk_array':'select'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "inject:into:" => {
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_array':'inject_into'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ")"
             ])
         }
         "includes:" => Some(docvec![
             "call 'beamtalk_array':'includes'(Self, ",
-            p0.to_string(),
+            leaf::var(p0.to_string()),
             ")"
         ]),
         "printString" => Some(Document::Str("call 'beamtalk_array':'print_string'(Self)")),

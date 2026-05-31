@@ -9,6 +9,7 @@
 //! functions in `beamtalk_binary`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::param;
 use crate::docvec;
 
@@ -21,7 +22,7 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
             let block = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_binary':'do'(Self, ",
-                block.to_string(),
+                leaf::var(block.to_string()),
                 ")",
             ])
         }
@@ -32,7 +33,7 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
             let index = param(params, 0, "_Index");
             Some(docvec![
                 "call 'beamtalk_binary':'at'(Self, ",
-                index.to_string(),
+                leaf::var(index.to_string()),
                 ")",
             ])
         }
@@ -40,7 +41,7 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
             let offset = param(params, 0, "_Offset");
             Some(docvec![
                 "call 'beamtalk_binary':'byte_at'(Self, ",
-                offset.to_string(),
+                leaf::var(offset.to_string()),
                 ")",
             ])
         }
@@ -50,9 +51,9 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
             let length = param(params, 1, "_Length");
             Some(docvec![
                 "call 'beamtalk_binary':'part'(Self, ",
-                offset.to_string(),
+                leaf::var(offset.to_string()),
                 ", ",
-                length.to_string(),
+                leaf::var(length.to_string()),
                 ")",
             ])
         }
@@ -60,7 +61,7 @@ pub(crate) fn generate_binary_bif(selector: &str, params: &[String]) -> Option<D
             let other = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_binary':'concat'(Self, ",
-                other.to_string(),
+                leaf::var(other.to_string()),
                 ")",
             ])
         }

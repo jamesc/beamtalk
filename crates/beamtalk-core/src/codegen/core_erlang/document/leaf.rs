@@ -5,18 +5,19 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
-//! The open `Document::String(arbitrary_string)` leaf is the BT-875 recurrence
-//! vector: any author can stuff an unquoted atom, a misformatted variable name,
-//! or a hand-rendered `format!()` fragment into a leaf and the compiler accepts
-//! it. This module replaces that open leaf with a small set of *typed* leaf
-//! constructors — "what kind of leaf is this?" — that do the Core Erlang
-//! punctuation and escaping for you.
+//! Historically the open `Document::String(arbitrary_string)` leaf was the
+//! BT-875 recurrence vector: any author could stuff an unquoted atom, a
+//! misformatted variable name, or a hand-rendered `format!()` fragment into a
+//! leaf and the compiler accepted it. This module replaces that open leaf with
+//! a small set of *typed* leaf constructors — "what kind of leaf is this?" —
+//! that do the Core Erlang punctuation and escaping for you.
 //!
 //! Each helper returns a `Document<'static>` directly: typed leaves live inside
-//! the existing [`Document`] pretty-printer rather than building
-//! a separate Core Erlang AST. During the migration window (ADR 0089 Phase 2)
-//! these helpers wrap `Document::String` internally; the `Document::String` /
-//! `Document::Eco` variants are removed in the Phase 3 flag-day PR.
+//! the existing [`Document`] pretty-printer rather than building a separate
+//! Core Erlang AST. After ADR 0089 Phase 3 (the flag-day removal), the public
+//! `Document::String` / `Document::Eco` variants no longer exist; these helpers
+//! are the only sanctioned way to introduce a runtime-derived leaf, wrapping
+//! the crate-internal [`Document::Owned`] backing variant.
 //!
 //! # Helper map
 //!
@@ -54,7 +55,7 @@ use crate::docvec;
 #[must_use]
 pub fn atom(name: impl Into<String>) -> Document<'static> {
     let escaped = escape_atom_chars(&name.into());
-    docvec!["'", Document::String(escaped), "'"]
+    docvec!["'", Document::Owned(escaped), "'"]
 }
 
 /// `VarName` — a bare Core Erlang variable name.
@@ -73,7 +74,7 @@ pub fn atom(name: impl Into<String>) -> Document<'static> {
 /// ```
 #[must_use]
 pub fn var(name: impl Into<String>) -> Document<'static> {
-    Document::String(name.into())
+    Document::Owned(name.into())
 }
 
 /// `"escaped string"` — a Core Erlang double-quoted string literal.
@@ -93,7 +94,7 @@ pub fn var(name: impl Into<String>) -> Document<'static> {
 #[must_use]
 pub fn string_lit(s: impl AsRef<str>) -> Document<'static> {
     let escaped = escape_core_erlang_string(s.as_ref());
-    docvec!["\"", Document::String(escaped), "\""]
+    docvec!["\"", Document::Owned(escaped), "\""]
 }
 
 /// `42` — a Core Erlang integer literal.
@@ -108,7 +109,7 @@ pub fn string_lit(s: impl AsRef<str>) -> Document<'static> {
 /// ```
 #[must_use]
 pub fn int_lit(i: i64) -> Document<'static> {
-    Document::String(i.to_string())
+    Document::Owned(i.to_string())
 }
 
 /// `3.14` / `5.0` — a Core Erlang float literal.
@@ -129,9 +130,9 @@ pub fn float_lit(f: f64) -> Document<'static> {
     // Ensure Core Erlang float literals always contain a decimal point,
     // otherwise Erlang interprets them as integers (e.g. 5.0 -> "5" -> int 5).
     if s.contains('.') || s.contains('e') || s.contains('E') {
-        Document::String(s)
+        Document::Owned(s)
     } else {
-        docvec![Document::String(s), ".0"]
+        docvec![Document::Owned(s), ".0"]
     }
 }
 
@@ -151,9 +152,9 @@ pub fn fname(name: impl Into<String>, arity: usize) -> Document<'static> {
     let escaped = escape_atom_chars(&name.into());
     docvec![
         "'",
-        Document::String(escaped),
+        Document::Owned(escaped),
         "'/",
-        Document::String(arity.to_string())
+        Document::Owned(arity.to_string())
     ]
 }
 
@@ -172,7 +173,46 @@ pub fn fname(name: impl Into<String>, arity: usize) -> Document<'static> {
 /// ```
 #[must_use]
 pub fn binary_lit(s: impl AsRef<str>) -> Document<'static> {
-    Document::String(CoreErlangGenerator::binary_string_literal(s.as_ref()))
+    Document::Owned(CoreErlangGenerator::binary_string_literal(s.as_ref()))
+}
+
+/// `#<104>(8,1,'integer',['unsigned'|['big']]),#<105>(…)` — the *unwrapped*
+/// inner byte segments of a Core Erlang binary literal, with **no** surrounding
+/// `#{…}#`.
+///
+/// Used by string-interpolation codegen, where literal segments are spliced
+/// between interpolated expression segments inside a single enclosing `#{…}#`.
+/// [`binary_lit`] would add its own wrapper and corrupt that construction, so
+/// this helper is the typed-leaf entry point for the unwrapped form. The bytes
+/// are rendered by the canonical
+/// `CoreErlangGenerator::binary_byte_segments` builder, so the output is
+/// byte-for-byte identical to the call site it replaces.
+///
+/// ```text
+/// binary_segments("hi") => #<104>(8,1,'integer',['unsigned'|['big']]),#<105>(...)
+/// ```
+#[must_use]
+pub fn binary_segments(s: impl AsRef<str>) -> Document<'static> {
+    Document::Owned(CoreErlangGenerator::binary_byte_segments(s.as_ref()))
+}
+
+/// `count` literal space characters — a run of pretty-printer indentation.
+///
+/// No escaping is meaningful: spaces are always safe Core Erlang text. The
+/// helper exists so runtime-computed indentation has an intent-declaring path
+/// to a leaf instead of smuggling whitespace through [`var`] (which is reserved
+/// for variable *names*). Used where the column of the first line must be set
+/// explicitly because the pretty-printer does not track the current column —
+/// the leading run pairs with a [`nest`](super::nest) that indents the
+/// continuation lines.
+///
+/// ```text
+/// whitespace(4) => "    " (four spaces)
+/// whitespace(0) => "" (empty)
+/// ```
+#[must_use]
+pub fn whitespace(count: usize) -> Document<'static> {
+    Document::Owned(" ".repeat(count))
 }
 
 #[cfg(test)]
@@ -262,5 +302,12 @@ mod tests {
     fn binary_lit_empty_string() {
         let expected = CoreErlangGenerator::binary_string_literal("");
         assert_eq!(binary_lit("").to_pretty_string(), expected);
+    }
+
+    #[test]
+    fn whitespace_renders_spaces() {
+        assert_eq!(whitespace(4).to_pretty_string(), "    ");
+        assert_eq!(whitespace(0).to_pretty_string(), "");
+        assert_eq!(whitespace(1).to_pretty_string(), " ");
     }
 }

@@ -7,8 +7,8 @@
 //!
 //! The unparser in [`super`] turns AST nodes back into Beamtalk source text.
 //! Every text-shaped [`Document`] leaf it emits used to be built with the open
-//! [`Document::String`] escape hatch, which accepts arbitrary text and carries
-//! no intent. ADR 0089 replaces those open leaves with this small parallel API
+//! `Document::String` escape hatch, which accepted arbitrary text and carried
+//! no intent. ADR 0089 replaced those open leaves with this small parallel API
 //! so each call site declares *what kind* of leaf it produces.
 //!
 //! # Why this is separate from `document::leaf`
@@ -26,10 +26,10 @@
 //!
 //! # The single chokepoint
 //!
-//! Every helper wraps [`Document::String`] internally. When Phase 3 of ADR 0089
-//! removes the `Document::String` variant, this module is the *only* place in
-//! the unparser that needs to switch to the replacement owned-string
-//! constructor.
+//! Every helper wraps the crate-internal [`Document::Owned`] backing variant
+//! internally. After ADR 0089 Phase 3 removed the public `Document::String`
+//! variant, this module remains the *only* place in the unparser that
+//! constructs an owned-string leaf.
 
 use crate::codegen::core_erlang::document::Document;
 
@@ -40,20 +40,20 @@ use crate::codegen::core_erlang::document::Document;
 /// and class names need no escaping.
 #[must_use]
 pub(super) fn ident(name: impl AsRef<str>) -> Document<'static> {
-    Document::String(name.as_ref().to_string())
+    Document::Owned(name.as_ref().to_string())
 }
 
 /// An integer literal (`42`, `-7`).
 #[must_use]
 pub(super) fn int_lit(value: i64) -> Document<'static> {
-    Document::String(value.to_string())
+    Document::Owned(value.to_string())
 }
 
 /// A non-negative integer rendered in decimal — e.g. a binary-segment unit size
 /// (`:8`). Distinct from [`int_lit`] only in the source type it accepts.
 #[must_use]
 pub(super) fn nat_lit(value: usize) -> Document<'static> {
-    Document::String(value.to_string())
+    Document::Owned(value.to_string())
 }
 
 /// A float literal, rendered so it always reads back as a float (`2.0`, not `2`).
@@ -68,7 +68,7 @@ pub(super) fn float_lit(value: f64) -> Document<'static> {
     } else {
         format!("{value}.0")
     };
-    Document::String(rendered)
+    Document::Owned(rendered)
 }
 
 /// A character literal (`$a`, `$\n`).
@@ -84,7 +84,7 @@ pub(super) fn char_lit(c: char) -> Document<'static> {
         '\\' => "\\\\".to_string(),
         _ => c.to_string(),
     };
-    Document::String(format!("${repr}"))
+    Document::Owned(format!("${repr}"))
 }
 
 /// The *inner* content of a Beamtalk string literal, with delimiters escaped.
@@ -114,7 +114,7 @@ pub(super) fn string_content(s: impl AsRef<str>) -> Document<'static> {
             _ => result.push(c),
         }
     }
-    Document::String(result)
+    Document::Owned(result)
 }
 
 /// The *inner* content of a symbol literal (`#name`, `#'with spaces'`).
@@ -123,15 +123,15 @@ pub(super) fn string_content(s: impl AsRef<str>) -> Document<'static> {
 /// itself is emitted verbatim (no escaping).
 #[must_use]
 pub(super) fn symbol_content(s: impl AsRef<str>) -> Document<'static> {
-    Document::String(s.as_ref().to_string())
+    Document::Owned(s.as_ref().to_string())
 }
 
 /// A class reference, optionally package-qualified (`Foo` or `pkg@Foo`).
 #[must_use]
 pub(super) fn class_ref(package: Option<&str>, name: &str) -> Document<'static> {
     match package {
-        Some(pkg) => Document::String(format!("{pkg}@{name}")),
-        None => Document::String(name.to_string()),
+        Some(pkg) => Document::Owned(format!("{pkg}@{name}")),
+        None => Document::Owned(name.to_string()),
     }
 }
 
@@ -143,7 +143,7 @@ pub(super) fn class_ref(package: Option<&str>, name: &str) -> Document<'static> 
 /// inside a block comment).
 #[must_use]
 pub(super) fn raw_text(s: impl AsRef<str>) -> Document<'static> {
-    Document::String(s.as_ref().to_string())
+    Document::Owned(s.as_ref().to_string())
 }
 
 #[cfg(test)]

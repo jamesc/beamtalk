@@ -17,6 +17,7 @@
 //! overrides handled by `list.rs`, `misc.rs`, and `dictionary.rs`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::param;
 use crate::docvec;
 
@@ -31,9 +32,9 @@ pub(crate) fn generate_collection_bif(
             let p1 = param(params, 1, "_Block");
             Some(docvec![
                 "call 'beamtalk_collection':'inject_into'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1.to_string()),
                 ")"
             ])
         }

@@ -47,7 +47,7 @@ pub(crate) fn generate_exception_bif(
             let p0 = param(params, 0, "_Msg");
             Some(docvec![
                 "call 'beamtalk_exception_handler':'dispatch'('signal:', [",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 "], Self)",
             ])
         }
@@ -59,7 +59,7 @@ pub(crate) fn generate_exception_bif(
             let p0 = param(params, 0, "_Msg");
             Some(docvec![
                 "call 'beamtalk_exception_handler':'class_signal_message'(",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ", ClassSelf)"
             ])
         }
