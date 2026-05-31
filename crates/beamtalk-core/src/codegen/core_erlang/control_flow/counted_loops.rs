@@ -10,6 +10,7 @@
 //! Non-mutating cases are handled by the pure-BT tail-recursive Integer methods (BT-1054).
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::super::{CoreErlangGenerator, Result};
 use super::{CountedLoopFrame, ThreadingPlan};
 use crate::ast::{Block, Expression};
@@ -30,19 +31,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("BodyFun");
         let body_code = self.expression_doc(body)?;
         Ok(docvec![
-            "letrec '",
-            Document::String(loop_fn.clone()),
-            "'/0 = fun () -> let ",
-            Document::String(body_var.clone()),
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let ",
+            leaf::var(body_var.clone()),
             " = ",
             body_code,
             " in let _ = apply ",
-            Document::String(body_var),
-            " () in apply '",
-            Document::String(loop_fn.clone()),
-            "'/0 () in apply '",
-            Document::String(loop_fn),
-            "'/0 ()",
+            leaf::var(body_var),
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
         ])
     }
 
@@ -60,7 +61,7 @@ impl CoreErlangGenerator {
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
-                Document::String(n_var.clone()),
+                leaf::var(n_var.clone()),
                 " = ",
                 receiver_code,
                 " in"
@@ -68,12 +69,12 @@ impl CoreErlangGenerator {
             fn_name: "repeat".to_string(),
             continue_header: docvec![
                 "case call 'erlang':'=<'(I, ",
-                Document::String(n_var),
+                leaf::var(n_var),
                 ") of ",
                 "<'true'> when 'true' -> ",
             ],
             next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
-            initial_counter: "1".to_string(),
+            initial_counter: leaf::int_lit(1),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param: None,
         };
@@ -101,11 +102,11 @@ impl CoreErlangGenerator {
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
-                Document::String(start_var.clone()),
+                leaf::var(start_var.clone()),
                 " = ",
                 receiver_code,
                 " in let ",
-                Document::String(end_var.clone()),
+                leaf::var(end_var.clone()),
                 " = ",
                 limit_code,
                 " in",
@@ -113,12 +114,12 @@ impl CoreErlangGenerator {
             fn_name: "loop".to_string(),
             continue_header: docvec![
                 "case call 'erlang':'=<'(I, ",
-                Document::String(end_var),
+                leaf::var(end_var),
                 ") of ",
                 "<'true'> when 'true' -> ",
             ],
             next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
-            initial_counter: start_var,
+            initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
         };
@@ -148,15 +149,15 @@ impl CoreErlangGenerator {
         let frame = CountedLoopFrame {
             preamble: docvec![
                 "let ",
-                Document::String(start_var.clone()),
+                leaf::var(start_var.clone()),
                 " = ",
                 receiver_code,
                 " in let ",
-                Document::String(end_var.clone()),
+                leaf::var(end_var.clone()),
                 " = ",
                 limit_code,
                 " in let ",
-                Document::String(step_var.clone()),
+                leaf::var(step_var.clone()),
                 " = ",
                 step_code,
                 " in",
@@ -164,25 +165,25 @@ impl CoreErlangGenerator {
             fn_name: "loop".to_string(),
             continue_header: docvec![
                 "let Continue = case call 'erlang':'>'(",
-                Document::String(step_var.clone()),
+                leaf::var(step_var.clone()),
                 ", 0) of ",
                 "<'true'> when 'true' -> call 'erlang':'=<'(I, ",
-                Document::String(end_var.clone()),
+                leaf::var(end_var.clone()),
                 ") ",
                 "<'false'> when 'true' -> ",
                 "case call 'erlang':'<'(",
-                Document::String(step_var.clone()),
+                leaf::var(step_var.clone()),
                 ", 0) of ",
                 "<'true'> when 'true' -> call 'erlang':'>='(I, ",
-                Document::String(end_var),
+                leaf::var(end_var),
                 ") ",
                 "<'false'> when 'true' -> 'false' ",
                 "end ",
                 "end in case Continue of ",
                 "<'true'> when 'true' -> ",
             ],
-            next_counter: docvec!["call 'erlang':'+'(I, ", Document::String(step_var), ")"],
-            initial_counter: start_var,
+            next_counter: docvec!["call 'erlang':'+'(I, ", leaf::var(step_var), ")"],
+            initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
         };

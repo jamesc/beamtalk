@@ -42,6 +42,7 @@
 //! `State{N}` chain managed by the method body generator.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::super::gen_server::BodyExprKind;
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{Block, Expression};
@@ -66,7 +67,7 @@ impl CoreErlangGenerator {
         // the case binding so ClassVarsN stays in scope inside the case.
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
-            (cond_chain, Document::String(result_var))
+            (cond_chain, leaf::var(result_var))
         } else {
             (Document::Nil, cond_chain)
         };
@@ -79,17 +80,17 @@ impl CoreErlangGenerator {
         Ok(docvec![
             cond_preamble,
             "let ",
-            Document::String(cond_var.clone()),
+            leaf::var(cond_var.clone()),
             " = ",
             cond_val_doc,
             " in case ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " of <'true'> when 'true' -> let StateAcc = ",
-            Document::String(outer_state.clone()),
+            leaf::var(outer_state.clone()),
             " in ",
             branch_doc,
             " <'false'> when 'true' -> {'nil', ",
-            Document::String(outer_state),
+            leaf::var(outer_state),
             "} end",
         ])
     }
@@ -108,7 +109,7 @@ impl CoreErlangGenerator {
         // BT-1942: Split open let-chain from class method self-send sub-expressions.
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
-            (cond_chain, Document::String(result_var))
+            (cond_chain, leaf::var(result_var))
         } else {
             (Document::Nil, cond_chain)
         };
@@ -121,15 +122,15 @@ impl CoreErlangGenerator {
         Ok(docvec![
             cond_preamble,
             "let ",
-            Document::String(cond_var.clone()),
+            leaf::var(cond_var.clone()),
             " = ",
             cond_val_doc,
             " in case ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " of <'true'> when 'true' -> {'nil', ",
-            Document::String(outer_state.clone()),
+            leaf::var(outer_state.clone()),
             "} <'false'> when 'true' -> let StateAcc = ",
-            Document::String(outer_state),
+            leaf::var(outer_state),
             " in ",
             branch_doc,
             " end",
@@ -149,7 +150,7 @@ impl CoreErlangGenerator {
         // BT-1942: Split open let-chain from class method self-send sub-expressions.
         let (cond_chain, cond_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (cond_preamble, cond_val_doc) = if let Some(result_var) = cond_open_scope {
-            (cond_chain, Document::String(result_var))
+            (cond_chain, leaf::var(result_var))
         } else {
             (Document::Nil, cond_chain)
         };
@@ -167,17 +168,17 @@ impl CoreErlangGenerator {
         Ok(docvec![
             cond_preamble,
             "let ",
-            Document::String(cond_var.clone()),
+            leaf::var(cond_var.clone()),
             " = ",
             cond_val_doc,
             " in case ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " of <'true'> when 'true' -> let StateAcc = ",
-            Document::String(outer_state.clone()),
+            leaf::var(outer_state.clone()),
             " in ",
             true_branch_doc,
             " <'false'> when 'true' -> let StateAcc = ",
-            Document::String(outer_state),
+            leaf::var(outer_state),
             " in ",
             false_branch_doc,
             " end",
@@ -201,7 +202,7 @@ impl CoreErlangGenerator {
         // BT-1942: Split open let-chain from class method self-send sub-expressions.
         let (recv_chain, recv_open_scope) = self.expression_doc_with_open_scope(receiver)?;
         let (recv_preamble, recv_val_doc) = if let Some(result_var) = recv_open_scope {
-            (recv_chain, Document::String(result_var))
+            (recv_chain, leaf::var(result_var))
         } else {
             (Document::Nil, recv_chain)
         };
@@ -223,15 +224,15 @@ impl CoreErlangGenerator {
         Ok(docvec![
             recv_preamble,
             "let ",
-            Document::String(obj_var.clone()),
+            leaf::var(obj_var.clone()),
             " = ",
             recv_val_doc,
             " in case ",
-            Document::String(obj_var),
+            leaf::var(obj_var),
             " of <'nil'> when 'true' -> {'nil', ",
-            Document::String(outer_state.clone()),
+            leaf::var(outer_state.clone()),
             "} <_> when 'true' -> let StateAcc = ",
-            Document::String(outer_state),
+            leaf::var(outer_state),
             " in ",
             branch_doc,
             " end",
@@ -262,10 +263,7 @@ impl CoreErlangGenerator {
             let final_state = self.current_state_var();
             let version = self.state_version();
             self.pop_scope();
-            return Ok((
-                docvec!["{'nil', ", Document::String(final_state), "}"],
-                version,
-            ));
+            return Ok((docvec!["{'nil', ", leaf::var(final_state), "}"], version));
         }
 
         // Classify every expression upfront using the shared classifier (BT-1447).
@@ -339,25 +337,25 @@ impl CoreErlangGenerator {
                             let new_state = self.next_state_var();
                             let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                                 "let ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 " = ",
                                 rhs_doc,
                                 " in let ",
-                                Document::String(val_var.clone()),
+                                leaf::var(val_var.clone()),
                                 " = call 'erlang':'element'(1, ",
-                                Document::String(tuple_var.clone()),
+                                leaf::var(tuple_var.clone()),
                                 ") in let ",
-                                Document::String(rhs_state.clone()),
+                                leaf::var(rhs_state.clone()),
                                 " = call 'erlang':'element'(2, ",
-                                Document::String(tuple_var),
+                                leaf::var(tuple_var),
                                 ") in let ",
-                                Document::String(new_state.clone()),
-                                " = call 'maps':'put'('",
-                                Document::String(field.name.to_string()),
-                                "', ",
-                                Document::String(val_var.clone()),
+                                leaf::var(new_state.clone()),
+                                " = call 'maps':'put'(",
+                                leaf::atom(field.name.to_string()),
                                 ", ",
-                                Document::String(rhs_state),
+                                leaf::var(val_var.clone()),
+                                ", ",
+                                leaf::var(rhs_state),
                                 ") in ",
                             ]];
                             // Rebind threaded __local__ vars from the updated state
@@ -371,11 +369,11 @@ impl CoreErlangGenerator {
                                     );
                                     doc_parts.push(docvec![
                                         "let ",
-                                        Document::String(tv_core.clone()),
-                                        " = call 'maps':'get'('",
-                                        Document::String(Self::local_state_key(var)),
-                                        "', ",
-                                        Document::String(new_state.clone()),
+                                        leaf::var(tv_core.clone()),
+                                        " = call 'maps':'get'(",
+                                        leaf::atom(Self::local_state_key(var)),
+                                        ", ",
+                                        leaf::var(new_state.clone()),
                                         ") in ",
                                     ]);
                                     self.bind_var(var, &tv_core);
@@ -408,29 +406,29 @@ impl CoreErlangGenerator {
                         let new_state = self.next_state_var();
                         let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
-                            Document::String(name_var.clone()),
+                            leaf::var(name_var.clone()),
                             " = ",
                             name_code,
                             " in let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             val_code,
                             " in let ",
-                            Document::String(val_var.clone()),
+                            leaf::var(val_var.clone()),
                             " = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             ") in let ",
-                            Document::String(rhs_state.clone()),
+                            leaf::var(rhs_state.clone()),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in let ",
-                            Document::String(new_state.clone()),
+                            leaf::var(new_state.clone()),
                             " = call 'maps':'put'(",
-                            Document::String(name_var),
+                            leaf::var(name_var),
                             ", ",
-                            Document::String(val_var.clone()),
+                            leaf::var(val_var.clone()),
                             ", ",
-                            Document::String(rhs_state),
+                            leaf::var(rhs_state),
                             ") in ",
                         ]];
                         // Rebind threaded __local__ vars from the updated state
@@ -444,11 +442,11 @@ impl CoreErlangGenerator {
                                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                                 doc_parts.push(docvec![
                                     "let ",
-                                    Document::String(tv_core.clone()),
-                                    " = call 'maps':'get'('",
-                                    Document::String(Self::local_state_key(var)),
-                                    "', ",
-                                    Document::String(new_state.clone()),
+                                    leaf::var(tv_core.clone()),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(new_state.clone()),
                                     ") in ",
                                 ]);
                                 self.bind_var(var, &tv_core);
@@ -469,17 +467,17 @@ impl CoreErlangGenerator {
                         let next_state = self.next_state_var();
                         docs.push(docvec![
                             "let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             value_str,
                             " in let ",
-                            Document::String(actual_val.clone()),
+                            leaf::var(actual_val.clone()),
                             " = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             ") in let ",
-                            Document::String(next_state.clone()),
+                            leaf::var(next_state.clone()),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in ",
                         ]);
                         // Rebind threaded __local__ vars from the updated state
@@ -491,11 +489,11 @@ impl CoreErlangGenerator {
                                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                                 docs.push(docvec![
                                     "let ",
-                                    Document::String(tv_core.clone()),
-                                    " = call 'maps':'get'('",
-                                    Document::String(Self::local_state_key(var)),
-                                    "', ",
-                                    Document::String(next_state.clone()),
+                                    leaf::var(tv_core.clone()),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(next_state.clone()),
                                     ") in ",
                                 ]);
                                 self.bind_var(var, &tv_core);
@@ -518,17 +516,17 @@ impl CoreErlangGenerator {
                         let next_state = self.next_state_var();
                         docs.push(docvec![
                             "let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             expr_doc,
                             " in let ",
-                            Document::String(result_var.clone()),
+                            leaf::var(result_var.clone()),
                             " = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             ") in let ",
-                            Document::String(next_state),
+                            leaf::var(next_state),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in ",
                         ]);
                         last_result = Some(result_var);
@@ -540,13 +538,13 @@ impl CoreErlangGenerator {
                         let next_state = self.next_state_var();
                         docs.push(docvec![
                             "let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             expr_doc,
                             " in let ",
-                            Document::String(next_state),
+                            leaf::var(next_state),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in ",
                         ]);
                     }
@@ -561,7 +559,7 @@ impl CoreErlangGenerator {
                         let expr_doc = self.expression_doc(expr)?;
                         docs.push(docvec![
                             "let ",
-                            Document::String(result_var.clone()),
+                            leaf::var(result_var.clone()),
                             " = ",
                             expr_doc,
                             " in ",
@@ -571,13 +569,7 @@ impl CoreErlangGenerator {
                         // Non-last, non-assignment: discard result
                         let seq_var = self.fresh_temp_var("seq");
                         let expr_doc = self.expression_doc(expr)?;
-                        docs.push(docvec![
-                            "let ",
-                            Document::String(seq_var),
-                            " = ",
-                            expr_doc,
-                            " in ",
-                        ]);
+                        docs.push(docvec!["let ", leaf::var(seq_var), " = ", expr_doc, " in ",]);
                     }
                 }
             }
@@ -590,9 +582,9 @@ impl CoreErlangGenerator {
         // Close with {result, final_state} tuple
         docs.push(docvec![
             "{",
-            Document::String(result),
+            leaf::var(result),
             ", ",
-            Document::String(final_state),
+            leaf::var(final_state),
             "}",
         ]);
 
