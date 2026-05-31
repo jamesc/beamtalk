@@ -963,6 +963,42 @@ impl CoreErlangGenerator {
         has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
+        // BT-2308: A last expression that is a local-threading loop or foldl list-op
+        // (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:,
+        // collect:/select:/reject:/inject:into:) returns a `{value, StateAcc}` tuple so
+        // the open-extraction machinery can rebind the threaded locals. In last position
+        // those locals don't escape, so the method value is the construct's *logical*
+        // result — element 1 — not the raw tuple. Unwrap it here.
+        if self.vt_last_expr_returns_threaded_tuple(expr) {
+            let tuple_var = self.fresh_temp_var("ThreadedResult");
+            let loop_doc = self.expression_doc(expr)?;
+            if has_nlr {
+                let final_self = self.current_self_var();
+                body_parts.push(docvec![
+                    "    let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    loop_doc,
+                    " in\n    {call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var),
+                    "), ",
+                    leaf::var(final_self),
+                    "}\n",
+                ]);
+            } else {
+                body_parts.push(docvec![
+                    "    let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    loop_doc,
+                    " in\n    call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var),
+                    ")\n",
+                ]);
+            }
+            return Ok(());
+        }
+
         if has_nlr {
             // BT-854: NLR methods return {Result, Self{N}} tuple so
             // the normal and NLR catch paths produce the same shape.
@@ -988,6 +1024,25 @@ impl CoreErlangGenerator {
             body_parts.push(Document::String(expr_code));
         }
         Ok(())
+    }
+
+    /// BT-2308: Returns `true` if `expr`, as a value-type method's last expression,
+    /// generates a `{'nil', StateAcc}` threaded tuple whose element 1 is the logical
+    /// result (`nil`).
+    ///
+    /// Covers the local-threading **loops** — `whileTrue:`/`whileFalse:` and the counted
+    /// loops `to:do:`/`to:by:do:`/`timesRepeat:` — using the same predicates that route
+    /// these to their `VtBodyExprKind`, so detection and the open-extraction path stay
+    /// consistent.
+    ///
+    /// Deliberately **excludes** the foldl list-ops (`collect:`/`select:`/`reject:`/
+    /// `inject:into:`): those are not yet supported for value-type local threading in any
+    /// position (they leak `{value, StateAcc}` on assignment too and don't thread locals
+    /// back), so unwrapping only their last-position result would be a misleading partial
+    /// fix. `do:` is also excluded — its value-type codegen already returns a bare `nil`.
+    fn vt_last_expr_returns_threaded_tuple(&self, expr: &Expression) -> bool {
+        self.is_while_with_vt_local_threading(expr)
+            || self.is_counted_loop_with_vt_local_threading(expr)
     }
 
     /// Generate a fallback body for an empty value-type method.
@@ -1175,11 +1230,9 @@ impl CoreErlangGenerator {
             }
             VtBodyExprKind::CountedLoopWithLocalThreading => {
                 // BT-2308: to:do:/to:by:do:/timesRepeat: with captured local mutations.
+                // In last position emit_vt_last_expr unwraps the {'nil', StateAcc} tuple.
                 if is_last {
-                    // The loop returns `{'nil', StateAcc}` because it threads locals. As the
-                    // method's last expression those locals don't escape, so unwrap element 1
-                    // (the loop's logical `nil` value) rather than returning the raw tuple.
-                    self.emit_vt_counted_loop_last(expr, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
                     let doc = self.generate_vt_counted_loop_open(expr)?;
                     body_parts.push(doc);
@@ -1707,48 +1760,6 @@ impl CoreErlangGenerator {
             "CountedLoopResult",
             "CountedLoopState",
         ))
-    }
-
-    /// BT-2308: Emits a counted loop with captured local threading as the **last**
-    /// expression of a value-type method body.
-    ///
-    /// The loop returns a `{'nil', StateAcc}` tuple because it threads outer locals.
-    /// In last position those locals don't escape, so the method value is the loop's
-    /// logical result — `element(1, ...)`, i.e. `nil` — not the raw tuple. When NLR is
-    /// active the method returns the `{Result, Self{N}}` shape used by all other arms.
-    fn emit_vt_counted_loop_last(
-        &mut self,
-        expr: &Expression,
-        has_nlr: bool,
-        body_parts: &mut Vec<Document<'static>>,
-    ) -> Result<()> {
-        let loop_doc = self.expression_doc(expr)?;
-        let tuple_var = self.fresh_temp_var("CountedLoopResult");
-        if has_nlr {
-            let final_self = self.current_self_var();
-            body_parts.push(docvec![
-                "    let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                loop_doc,
-                " in\n    {call 'erlang':'element'(1, ",
-                leaf::var(tuple_var),
-                "), ",
-                leaf::var(final_self),
-                "}\n",
-            ]);
-        } else {
-            body_parts.push(docvec![
-                "    let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                loop_doc,
-                " in\n    call 'erlang':'element'(1, ",
-                leaf::var(tuple_var),
-                ")\n",
-            ]);
-        }
-        Ok(())
     }
 
     /// BT-1609: Returns the threaded local variable names for a `whileTrue:` / `whileFalse:`
