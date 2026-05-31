@@ -963,12 +963,14 @@ impl CoreErlangGenerator {
         has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
-        // BT-2308: A last expression that is a local-threading loop or foldl list-op
-        // (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:,
-        // collect:/select:/reject:/inject:into:) returns a `{value, StateAcc}` tuple so
-        // the open-extraction machinery can rebind the threaded locals. In last position
-        // those locals don't escape, so the method value is the construct's *logical*
-        // result — element 1 — not the raw tuple. Unwrap it here.
+        // BT-2308: A last expression that is a local-threading loop
+        // (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:) returns a
+        // `{value, StateAcc}` tuple so the open-extraction machinery can rebind the
+        // threaded locals. In last position those locals don't escape, so the method
+        // value is the construct's *logical* result — element 1 — not the raw tuple.
+        // Unwrap it here. Foldl list-ops (collect:/select:/reject:/inject:into:) are
+        // deliberately NOT covered by `vt_last_expr_returns_threaded_tuple` yet — that
+        // gap is tracked in BT-2342.
         if self.vt_last_expr_returns_threaded_tuple(expr) {
             let tuple_var = self.fresh_temp_var("ThreadedResult");
             let loop_doc = self.expression_doc(expr)?;
