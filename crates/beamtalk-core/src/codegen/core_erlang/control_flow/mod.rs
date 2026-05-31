@@ -604,9 +604,9 @@ impl ThreadingPlan {
             pack_docs.push(docvec![
                 "let ",
                 leaf::var(packed_var.clone()),
-                " = call 'maps':'put'('",
-                leaf::var(key),
-                "', ",
+                " = call 'maps':'put'(",
+                leaf::atom(key),
+                ", ",
                 leaf::var(core_var),
                 ", ",
                 leaf::var(current),
@@ -637,9 +637,9 @@ impl ThreadingPlan {
                 docs.push(docvec![
                     "let ",
                     leaf::var(core_var),
-                    " = call 'maps':'get'('",
-                    leaf::var(key),
-                    "', StateAcc) in ",
+                    " = call 'maps':'get'(",
+                    leaf::atom(key),
+                    ", StateAcc) in ",
                 ]);
             }
         }
@@ -699,9 +699,9 @@ impl ThreadingPlan {
             docs.push(docvec![
                 "let ",
                 leaf::var(next_var.clone()),
-                " = call 'maps':'put'('",
-                leaf::var(key),
-                "', ",
+                " = call 'maps':'put'(",
+                leaf::atom(key),
+                ", ",
                 leaf::var(param.clone()),
                 ", ",
                 leaf::var(current),
@@ -744,9 +744,9 @@ impl ThreadingPlan {
             docs.push(docvec![
                 "let ",
                 leaf::var(next_var.clone()),
-                " = call 'maps':'put'('",
-                leaf::var(field_name.clone()),
-                "', ",
+                " = call 'maps':'put'(",
+                leaf::atom(field_name.clone()),
+                ", ",
                 leaf::var(param.clone()),
                 ", ",
                 leaf::var(current),
@@ -762,9 +762,9 @@ impl ThreadingPlan {
             docs.push(docvec![
                 "let ",
                 leaf::var(next_var.clone()),
-                " = call 'maps':'put'('",
-                leaf::var(key),
-                "', ",
+                " = call 'maps':'put'(",
+                leaf::atom(key),
+                ", ",
                 leaf::var(param.clone()),
                 ", ",
                 leaf::var(current),
@@ -797,9 +797,9 @@ impl ThreadingPlan {
             docs.push(docvec![
                 "let ",
                 leaf::var(core_var),
-                " = call 'maps':'get'('",
-                leaf::var(key),
-                "', ",
+                " = call 'maps':'get'(",
+                leaf::atom(key),
+                ", ",
                 leaf::var(final_state_var.to_string()),
                 ") in ",
             ]);
@@ -862,7 +862,7 @@ impl ThreadingPlan {
                 "let ",
                 leaf::var(core_var),
                 " = call 'erlang':'element'(",
-                leaf::var(idx.to_string()),
+                leaf::int_lit(i64::try_from(idx).unwrap_or(0)),
                 ", ",
                 leaf::var(source_var.to_string()),
                 ") in ",
@@ -894,7 +894,7 @@ impl ThreadingPlan {
                 "let ",
                 leaf::var(core_var),
                 " = call 'erlang':'element'(",
-                leaf::var(idx.to_string()),
+                leaf::int_lit(i64::try_from(idx).unwrap_or(0)),
                 ", ",
                 leaf::var(final_acc_var.to_string()),
                 ") in ",
@@ -927,9 +927,9 @@ impl ThreadingPlan {
             docs.push(docvec![
                 "let ",
                 leaf::var(pack_var.clone()),
-                " = call 'maps':'put'('",
-                leaf::var(key),
-                "', ",
+                " = call 'maps':'put'(",
+                leaf::atom(key),
+                ", ",
                 leaf::var(core_var),
                 ", ",
                 leaf::var(current),
@@ -1048,8 +1048,9 @@ pub(super) struct CountedLoopFrame {
     /// Expression used as the next counter in the recursive call
     /// (e.g. `"call 'erlang':'+'(I, 1)"`).
     pub next_counter: Document<'static>,
-    /// Initial counter argument for the first `apply` call (e.g. `"1"` or `StartVar`).
-    pub initial_counter: String,
+    /// Initial counter argument for the first `apply` call: an integer literal
+    /// (e.g. `1`) for `timesRepeat:`, or a variable (e.g. `StartVar`) for `to:do:`.
+    pub initial_counter: Document<'static>,
     /// The `false` arm and `end` (e.g. `"<'false'> when 'true' -> {'nil', StateAcc} end"`).
     pub false_arm: Document<'static>,
     /// Optional Beamtalk block-parameter name to bind to `"I"`.
@@ -2269,9 +2270,9 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(frame.preamble.clone());
         docs.push(docvec![
-            " letrec '",
-            leaf::var(frame.fn_name.clone()),
-            "'/2 = fun (I, StateAcc) -> ",
+            " letrec ",
+            leaf::fname(frame.fn_name.clone(), 2),
+            " = fun (I, StateAcc) -> ",
         ]);
 
         self.push_scope();
@@ -2302,19 +2303,19 @@ impl CoreErlangGenerator {
 
         // Recursive call + false arm + initial apply
         docs.push(docvec![
-            " apply '",
-            leaf::var(frame.fn_name.clone()),
-            "'/2 (",
+            " apply ",
+            leaf::fname(frame.fn_name.clone(), 2),
+            " (",
             frame.next_counter.clone(),
             ", ",
             leaf::var(final_state_var),
             ") ",
             frame.false_arm.clone(),
             docvec![
-                "in apply '",
-                leaf::var(frame.fn_name.clone()),
-                "'/2 (",
-                leaf::var(frame.initial_counter.clone()),
+                "in apply ",
+                leaf::fname(frame.fn_name.clone(), 2),
+                " (",
+                frame.initial_counter.clone(),
                 ", ",
                 leaf::var(init_state),
                 ")",
@@ -2353,10 +2354,8 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(frame.preamble.clone());
         docs.push(docvec![
-            " letrec '",
-            leaf::var(frame.fn_name.clone()),
-            "'/",
-            leaf::var(arity.to_string()),
+            " letrec ",
+            leaf::fname(frame.fn_name.clone(), arity),
             " = fun (",
             param_list_doc,
             ") -> ",
@@ -2405,31 +2404,27 @@ impl CoreErlangGenerator {
         // Build Document arg lists for the recursive call and the initial apply.
         let recursive_args_doc = join(
             std::iter::once(frame.next_counter.clone())
-                .chain(final_args.into_iter().map(Document::String)),
+                .chain(final_args.into_iter().map(leaf::var)),
             &Document::Str(", "),
         );
         let initial_args_doc = join(
-            std::iter::once(leaf::var(frame.initial_counter.clone()))
-                .chain(initial_direct_args.into_iter().map(Document::String)),
+            std::iter::once(frame.initial_counter.clone())
+                .chain(initial_direct_args.into_iter().map(leaf::var)),
             &Document::Str(", "),
         );
 
         // Recursive call + false arm (with rebuilt StateAcc) + initial apply.
         docs.push(docvec![
-            " apply '",
-            leaf::var(frame.fn_name.clone()),
-            "'/",
-            leaf::var(arity.to_string()),
+            " apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
             " (",
             recursive_args_doc,
             ") ",
             "<'false'> when 'true' -> ",
             exit_stateacc,
             " end ",
-            "in apply '",
-            leaf::var(frame.fn_name.clone()),
-            "'/",
-            leaf::var(arity.to_string()),
+            "in apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
             " (",
             initial_args_doc,
             ")",
@@ -2488,10 +2483,8 @@ impl CoreErlangGenerator {
         docs.push(frame.preamble.clone());
         docs.extend(pre_extract_docs);
         docs.push(docvec![
-            " letrec '",
-            leaf::var(frame.fn_name.clone()),
-            "'/",
-            leaf::var(arity.to_string()),
+            " letrec ",
+            leaf::fname(frame.fn_name.clone(), arity),
             " = fun (",
             param_list_doc,
             ") -> ",
@@ -2625,36 +2618,32 @@ impl CoreErlangGenerator {
         // Recursive call args: next_counter, updated locals, readonly fields (unchanged), updated mutated fields
         let recursive_args_doc = join(
             std::iter::once(frame.next_counter.clone())
-                .chain(final_local_args.into_iter().map(Document::String))
+                .chain(final_local_args.into_iter().map(leaf::var))
                 .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(final_mutated_field_args.into_iter().map(Document::String)),
+                .chain(final_mutated_field_args.into_iter().map(leaf::var)),
             &Document::Str(", "),
         );
 
         // Initial apply args: initial_counter, initial locals, initial readonly vals, initial mutated vals
         let initial_args_doc = join(
-            std::iter::once(leaf::var(frame.initial_counter.clone()))
-                .chain(initial_local_args.into_iter().map(Document::String))
+            std::iter::once(frame.initial_counter.clone())
+                .chain(initial_local_args.into_iter().map(leaf::var))
                 .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
                 .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
             &Document::Str(", "),
         );
 
         docs.push(docvec![
-            " apply '",
-            leaf::var(frame.fn_name.clone()),
-            "'/",
-            leaf::var(arity.to_string()),
+            " apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
             " (",
             recursive_args_doc,
             ") ",
             "<'false'> when 'true' -> ",
             exit_stateacc,
             " end ",
-            "in apply '",
-            leaf::var(frame.fn_name.clone()),
-            "'/",
-            leaf::var(arity.to_string()),
+            "in apply ",
+            leaf::fname(frame.fn_name.clone(), arity),
             " (",
             initial_args_doc,
             ")",
@@ -2997,9 +2986,9 @@ impl CoreErlangGenerator {
                             leaf::var(t2_tuple),
                             ") in let ",
                             leaf::var(new_state),
-                            " = call 'maps':'put'('",
-                            state_key.to_string(),
-                            "', ",
+                            " = call 'maps':'put'(",
+                            leaf::atom(state_key.to_string()),
+                            ", ",
                             leaf::var(val_var.clone()),
                             ", ",
                             leaf::var(t2_state),
@@ -3034,12 +3023,12 @@ impl CoreErlangGenerator {
                             leaf::var(open_scope_result),
                             " in let ",
                             leaf::var(new_state),
-                            " = call 'maps':'put'('",
-                            state_key.to_string(),
-                            "', ",
+                            " = call 'maps':'put'(",
+                            leaf::atom(state_key.to_string()),
+                            ", ",
                             leaf::var(val_var.clone()),
                             ", ",
-                            current_state,
+                            leaf::var(current_state),
                             ") in ",
                         ],
                         val_var,
@@ -3051,17 +3040,17 @@ impl CoreErlangGenerator {
                 return Ok((
                     docvec![
                         "let ",
-                        val_var.clone(),
+                        leaf::var(val_var.clone()),
                         " = ",
                         value_code,
                         " in let ",
-                        new_state,
-                        " = call 'maps':'put'('",
-                        state_key.to_string(),
-                        "', ",
-                        val_var.clone(),
+                        leaf::var(new_state),
+                        " = call 'maps':'put'(",
+                        leaf::atom(state_key.to_string()),
                         ", ",
-                        current_state,
+                        leaf::var(val_var.clone()),
+                        ", ",
+                        leaf::var(current_state),
                         ") in ",
                     ],
                     val_var,

@@ -78,9 +78,9 @@ impl CoreErlangGenerator {
         let body_code = self.expression_doc(body)?;
 
         let doc = docvec![
-            "letrec '",
-            leaf::var(loop_fn.clone()),
-            "'/0 = fun () -> let ",
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let ",
             leaf::var(cond_var.clone()),
             " = ",
             cond_code,
@@ -92,11 +92,11 @@ impl CoreErlangGenerator {
             body_code,
             " in let _ = apply ",
             leaf::var(body_var),
-            " () in apply '",
-            leaf::var(loop_fn.clone()),
-            "'/0 () <'false'> when 'true' -> 'nil' end in apply '",
-            leaf::var(loop_fn),
-            "'/0 ()",
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () <'false'> when 'true' -> 'nil' end in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
         ];
 
         Ok(doc)
@@ -154,9 +154,9 @@ impl CoreErlangGenerator {
         let body_code = self.expression_doc(body)?;
 
         let doc = docvec![
-            "letrec '",
-            leaf::var(loop_fn.clone()),
-            "'/0 = fun () -> let ",
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let ",
             leaf::var(cond_var.clone()),
             " = ",
             cond_code,
@@ -168,11 +168,11 @@ impl CoreErlangGenerator {
             body_code,
             " in let _ = apply ",
             leaf::var(body_var),
-            " () in apply '",
-            leaf::var(loop_fn.clone()),
-            "'/0 () <'true'> when 'true' -> 'nil' end in apply '",
-            leaf::var(loop_fn),
-            "'/0 ()",
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () <'true'> when 'true' -> 'nil' end in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
         ];
 
         Ok(doc)
@@ -314,8 +314,8 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(docvec![
-            "letrec 'while'/",
-            leaf::var(arity.to_string()),
+            "letrec ",
+            leaf::fname("while", arity),
             " = fun (",
             param_list_doc(),
             ") -> ",
@@ -369,18 +369,15 @@ impl CoreErlangGenerator {
         // Build exit StateAcc using the CURRENT iteration's param names.
         let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
 
-        let final_args_doc = join(
-            final_args.into_iter().map(Document::String),
-            &Document::Str(", "),
-        );
+        let final_args_doc = join(final_args.into_iter().map(leaf::var), &Document::Str(", "));
         let exit_arm = if negate {
             "<'true'> when 'true' -> "
         } else {
             "<'false'> when 'true' -> "
         };
         docs.push(docvec![
-            " apply 'while'/",
-            leaf::var(arity.to_string()),
+            " apply ",
+            leaf::fname("while", arity),
             " (",
             final_args_doc,
             ") ",
@@ -392,12 +389,12 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         let initial_args_doc = join(
-            initial_direct_args.into_iter().map(Document::String),
+            initial_direct_args.into_iter().map(leaf::var),
             &Document::Str(", "),
         );
         docs.push(docvec![
-            "in apply 'while'/",
-            leaf::var(arity.to_string()),
+            "in apply ",
+            leaf::fname("while", arity),
             " (",
             initial_args_doc,
             ")",
@@ -455,8 +452,8 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.extend(pre_extract_docs);
         docs.push(docvec![
-            "letrec 'while'/",
-            leaf::var(arity.to_string()),
+            "letrec ",
+            leaf::fname("while", arity),
             " = fun (",
             param_list_doc(),
             ") -> ",
@@ -553,9 +550,9 @@ impl CoreErlangGenerator {
                     prefix,
                     "let ",
                     leaf::var(var_name.clone()),
-                    " = call 'maps':'get'('",
-                    leaf::var(field.to_string()),
-                    "', ",
+                    " = call 'maps':'get'(",
+                    leaf::atom(field.to_string()),
+                    ", ",
                     leaf::var(initial_state.to_string()),
                     ") in",
                     suffix,
@@ -733,7 +730,7 @@ impl CoreErlangGenerator {
                 .iter()
                 .map(|v| leaf::var(v.clone()))
                 .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
-                .chain(final_mutated_field_args.into_iter().map(Document::String)),
+                .chain(final_mutated_field_args.into_iter().map(leaf::var)),
             &Document::Str(", "),
         );
         let exit_arm = if negate {
@@ -742,8 +739,8 @@ impl CoreErlangGenerator {
             "<'false'> when 'true' -> "
         };
         docs.push(docvec![
-            " apply 'while'/",
-            leaf::var(arity.to_string()),
+            " apply ",
+            leaf::fname("while", arity),
             " (",
             final_args_doc,
             ") ",
@@ -765,16 +762,14 @@ impl CoreErlangGenerator {
         let initial_args_doc = join(
             initial_local_args
                 .into_iter()
-                .map(Document::String)
+                .map(leaf::var)
                 .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
                 .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
             &Document::Str(", "),
         );
         docs.push(docvec![
-            "in apply '",
-            leaf::var(fn_name.to_string()),
-            "'/",
-            leaf::var(arity.to_string()),
+            "in apply ",
+            leaf::fname(fn_name.to_string(), arity),
             " (",
             initial_args_doc,
             ")",

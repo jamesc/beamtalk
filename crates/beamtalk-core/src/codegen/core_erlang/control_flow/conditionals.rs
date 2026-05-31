@@ -350,9 +350,9 @@ impl CoreErlangGenerator {
                                 leaf::var(tuple_var),
                                 ") in let ",
                                 leaf::var(new_state.clone()),
-                                " = call 'maps':'put'('",
-                                leaf::var(field.name.to_string()),
-                                "', ",
+                                " = call 'maps':'put'(",
+                                leaf::atom(field.name.to_string()),
+                                ", ",
                                 leaf::var(val_var.clone()),
                                 ", ",
                                 leaf::var(rhs_state),
@@ -370,9 +370,9 @@ impl CoreErlangGenerator {
                                     doc_parts.push(docvec![
                                         "let ",
                                         leaf::var(tv_core.clone()),
-                                        " = call 'maps':'get'('",
-                                        leaf::var(Self::local_state_key(var)),
-                                        "', ",
+                                        " = call 'maps':'get'(",
+                                        leaf::atom(Self::local_state_key(var)),
+                                        ", ",
                                         leaf::var(new_state.clone()),
                                         ") in ",
                                     ]);
@@ -443,9 +443,9 @@ impl CoreErlangGenerator {
                                 doc_parts.push(docvec![
                                     "let ",
                                     leaf::var(tv_core.clone()),
-                                    " = call 'maps':'get'('",
-                                    leaf::var(Self::local_state_key(var)),
-                                    "', ",
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
                                     leaf::var(new_state.clone()),
                                     ") in ",
                                 ]);
@@ -490,9 +490,9 @@ impl CoreErlangGenerator {
                                 docs.push(docvec![
                                     "let ",
                                     leaf::var(tv_core.clone()),
-                                    " = call 'maps':'get'('",
-                                    leaf::var(Self::local_state_key(var)),
-                                    "', ",
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
                                     leaf::var(next_state.clone()),
                                     ") in ",
                                 ]);

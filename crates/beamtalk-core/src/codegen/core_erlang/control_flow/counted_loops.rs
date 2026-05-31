@@ -31,19 +31,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("BodyFun");
         let body_code = self.expression_doc(body)?;
         Ok(docvec![
-            "letrec '",
-            leaf::var(loop_fn.clone()),
-            "'/0 = fun () -> let ",
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let ",
             leaf::var(body_var.clone()),
             " = ",
             body_code,
             " in let _ = apply ",
             leaf::var(body_var),
-            " () in apply '",
-            leaf::var(loop_fn.clone()),
-            "'/0 () in apply '",
-            leaf::var(loop_fn),
-            "'/0 ()",
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
         ])
     }
 
@@ -74,7 +74,7 @@ impl CoreErlangGenerator {
                 "<'true'> when 'true' -> ",
             ],
             next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
-            initial_counter: "1".to_string(),
+            initial_counter: leaf::int_lit(1),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param: None,
         };
@@ -119,7 +119,7 @@ impl CoreErlangGenerator {
                 "<'true'> when 'true' -> ",
             ],
             next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
-            initial_counter: start_var,
+            initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
         };
@@ -183,7 +183,7 @@ impl CoreErlangGenerator {
                 "<'true'> when 'true' -> ",
             ],
             next_counter: docvec!["call 'erlang':'+'(I, ", leaf::var(step_var), ")"],
-            initial_counter: start_var,
+            initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
         };
