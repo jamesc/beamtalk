@@ -8,7 +8,9 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples, and the `register_class/0` on-load function.
 
+use super::super::document::leaf::fname;
 use super::super::document::{Document, INDENT, line, nest};
+use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair, MessageSelector,
@@ -1972,10 +1974,7 @@ impl CoreErlangGenerator {
             // Core Erlang fragments must use the Document API, BT-875).
             let doc = docvec![
                 "\n",
-                "'class_",
-                Document::String(selector_name.to_string()),
-                "'/",
-                Document::String(arity.to_string()),
+                fname(safe_class_method_fn_name(&selector_name), arity),
                 " = fun (ClassSelf, ClassVars",
                 Self::class_method_params_suffix_doc(&param_vars),
                 ") ->",

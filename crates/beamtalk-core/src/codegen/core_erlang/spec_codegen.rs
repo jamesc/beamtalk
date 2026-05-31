@@ -52,6 +52,7 @@
 
 use super::document::leaf::{atom, int_lit};
 use super::document::{Document, join};
+use super::selector_mangler::safe_class_method_fn_name;
 use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, TypeAnnotation};
 use crate::docvec;
 
@@ -262,7 +263,7 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
         return None;
     }
 
-    let erlang_name = format!("class_{}", method.selector.to_erlang_atom());
+    let erlang_name = safe_class_method_fn_name(&method.selector.to_erlang_atom());
 
     let mut param_types: Vec<Document<'static>> = vec![
         Document::Str("{'type', 0, 'any', []}"),    // ClassSelf
