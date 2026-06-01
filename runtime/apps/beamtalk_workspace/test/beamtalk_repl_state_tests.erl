@@ -154,6 +154,39 @@ complex_state_test() ->
     ?assertEqual(2, beamtalk_repl_state:get_eval_counter(State6)),
     ?assertEqual([point, counter], beamtalk_repl_state:get_loaded_modules(State6)).
 
+%%% BT-2366: pending session-local mutations (ADR 0081 Phase 2)
+
+pending_mutations_starts_empty_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    ?assertEqual([], beamtalk_repl_state:get_pending_mutations(State)).
+
+add_pending_mutation_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    State2 = beamtalk_repl_state:add_pending_mutation({put, x, 1}, State),
+    ?assertEqual([{put, x, 1}], beamtalk_repl_state:get_pending_mutations(State2)).
+
+pending_mutations_preserve_enqueue_order_test() ->
+    %% Newest is appended at the tail so the queue replays in issue order.
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    State1 = beamtalk_repl_state:add_pending_mutation({put, x, 1}, State0),
+    State2 = beamtalk_repl_state:add_pending_mutation({remove, y, undefined}, State1),
+    State3 = beamtalk_repl_state:add_pending_mutation({clear, undefined, undefined}, State2),
+    ?assertEqual(
+        [{put, x, 1}, {remove, y, undefined}, {clear, undefined, undefined}],
+        beamtalk_repl_state:get_pending_mutations(State3)
+    ).
+
+clear_pending_mutations_test() ->
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    State1 = beamtalk_repl_state:add_pending_mutation({put, x, 1}, State0),
+    State2 = beamtalk_repl_state:clear_pending_mutations(State1),
+    ?assertEqual([], beamtalk_repl_state:get_pending_mutations(State2)).
+
+pending_mutations_immutability_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    _State2 = beamtalk_repl_state:add_pending_mutation({put, x, 1}, State),
+    ?assertEqual([], beamtalk_repl_state:get_pending_mutations(State)).
+
 state_independence_test() ->
     %% Test that operations on one state don't affect other states
     State1 = beamtalk_repl_state:new(undefined, 0),

@@ -471,6 +471,194 @@ class_removed_drained_on_worker_crash_test_() ->
         ]
     end}.
 
+%%====================================================================
+%% BT-2366: pending session-local mutations (ADR 0081 Phase 2)
+%%====================================================================
+
+%% Inject a fake worker + a queued list of pending mutations + seed locals,
+%% then return the shell pid.  Mirrors the BT-1242 worker-injection pattern.
+setup_shell_with_mutations(SessionId, Locals, Mutations) ->
+    {ok, Pid} = beamtalk_repl_shell:start_link(SessionId),
+    FakeWorkerPid = spawn(fun() ->
+        receive
+            _ -> ok
+        end
+    end),
+    sys:replace_state(Pid, fun({SId, State, _W}) ->
+        State1 = beamtalk_repl_state:set_bindings(Locals, State),
+        State2 = lists:foldl(
+            fun(M, S) -> beamtalk_repl_state:add_pending_mutation(M, S) end,
+            State1,
+            Mutations
+        ),
+        {SId, State2, {FakeWorkerPid, make_ref(), {async, self()}}}
+    end),
+    {Pid, FakeWorkerPid}.
+
+%% enqueue_mutation/2 appends to the pending queue (handle_call path).
+enqueue_mutation_appends_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-enqueue-1">>),
+                ok = beamtalk_repl_shell:enqueue_mutation(Pid, {put, x, 1}),
+                ok = beamtalk_repl_shell:enqueue_mutation(Pid, {put, y, 2}),
+                {_SId, State, _W} = sys:get_state(Pid),
+                ?assertEqual(
+                    [{put, x, 1}, {put, y, 2}],
+                    beamtalk_repl_state:get_pending_mutations(State)
+                ),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Success path: removals + all mutations apply on top of the worker's locals.
+pending_mutations_applied_on_success_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {Pid, FakeWorker} = setup_shell_with_mutations(
+                    <<"test-mut-success-1">>,
+                    #{},
+                    [{put, x, 1}, {put, y, 2}, {remove, z, undefined}]
+                ),
+                %% Worker returns locals carrying z (to be removed) and its own w.
+                WorkerState = worker_state_with_bindings(#{z => 99, w => 7}),
+                Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
+                timer:sleep(50),
+                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+                ?assertEqual(#{x => 1, y => 2, w => 7}, Bindings),
+                {_SId, CleanState, undefined} = sys:get_state(Pid),
+                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Success path: a queued `clear` empties the worker's locals.
+pending_clear_applied_on_success_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {Pid, FakeWorker} = setup_shell_with_mutations(
+                    <<"test-mut-clear-success-1">>,
+                    #{},
+                    [{clear, undefined, undefined}]
+                ),
+                WorkerState = worker_state_with_bindings(#{a => 1, b => 2}),
+                Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
+                timer:sleep(50),
+                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+                ?assertEqual(#{}, Bindings),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Error path: put/remove apply, but a queued `clear` is DROPPED.
+pending_clear_dropped_on_error_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {Pid, FakeWorker} = setup_shell_with_mutations(
+                    <<"test-mut-error-1">>,
+                    #{},
+                    [{put, x, 1}, {clear, undefined, undefined}]
+                ),
+                %% Worker carries an existing local; clear must NOT wipe it.
+                WorkerState = worker_state_with_bindings(#{keep => 42}),
+                Err = beamtalk_error:new(runtime_error, 'Test'),
+                Pid ! {eval_result, FakeWorker, {error, Err, <<>>, [], WorkerState}},
+                timer:sleep(50),
+                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+                %% put applied, keep preserved, clear dropped
+                ?assertEqual(#{keep => 42, x => 1}, Bindings),
+                {_SId, CleanState, undefined} = sys:get_state(Pid),
+                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Interrupt path: all mutations drain over the shell's own state.
+pending_mutations_drained_on_interrupt_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {Pid, _FakeWorker} = setup_shell_with_mutations(
+                    <<"test-mut-interrupt-1">>,
+                    #{existing => 5},
+                    [{put, x, 1}, {clear, undefined, undefined}, {put, y, 2}]
+                ),
+                ok = beamtalk_repl_shell:interrupt(Pid),
+                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+                %% clear wipes existing+x, then y is set after clear
+                ?assertEqual(#{y => 2}, Bindings),
+                {_SId, CleanState, undefined} = sys:get_state(Pid),
+                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Worker-crash path: the mutation queue is DISCARDED.
+pending_mutations_discarded_on_crash_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-mut-crash-1">>),
+                {FakeWorkerPid, MonRef} = spawn_monitor(fun() ->
+                    receive
+                        _ -> ok
+                    end
+                end),
+                erlang:demonitor(MonRef, [flush]),
+                sys:replace_state(Pid, fun({SId, State, _W}) ->
+                    State1 = beamtalk_repl_state:set_bindings(#{existing => 5}, State),
+                    State2 = beamtalk_repl_state:add_pending_mutation({put, x, 1}, State1),
+                    WorkerMonRef = erlang:monitor(process, FakeWorkerPid),
+                    {SId, State2, {FakeWorkerPid, WorkerMonRef, {async, self()}}}
+                end),
+                exit(FakeWorkerPid, kill),
+                timer:sleep(50),
+                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+                %% Mutation discarded: existing preserved, x NOT applied
+                ?assertEqual(#{existing => 5}, Bindings),
+                {_SId, CleanState, undefined} = sys:get_state(Pid),
+                ?assertEqual([], beamtalk_repl_state:get_pending_mutations(CleanState)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% clear-then-put ordering: clear empties, then the later put survives (success).
+pending_clear_then_put_ordering_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {Pid, FakeWorker} = setup_shell_with_mutations(
+                    <<"test-mut-clear-put-1">>,
+                    #{},
+                    [{put, a, 1}, {clear, undefined, undefined}, {put, b, 2}]
+                ),
+                WorkerState = worker_state_with_bindings(#{old => 99}),
+                Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
+                timer:sleep(50),
+                {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
+                %% a set, then clear wipes (old + a), then b set
+                ?assertEqual(#{b => 2}, Bindings),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Build a worker-result state record carrying the given locals map.  The worker
+%% always returns pending_mutations = [] (it never enqueues into its own snapshot).
+worker_state_with_bindings(Bindings) ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    beamtalk_repl_state:set_bindings(Bindings, State).
+
 unload_module_in_use_returns_error_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [

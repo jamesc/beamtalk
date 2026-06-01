@@ -31,10 +31,15 @@ for manipulating state during REPL sessions.
     %% BT-1242: pending module removals (deferred during active eval)
     get_pending_module_removals/1,
     add_pending_module_removal/2,
-    clear_pending_module_removals/1
+    clear_pending_module_removals/1,
+    %% BT-2366 (ADR 0081 Phase 2): pending session-local mutations (deferred
+    %% during active eval).
+    get_pending_mutations/1,
+    add_pending_mutation/2,
+    clear_pending_mutations/1
 ]).
 
--export_type([state/0]).
+-export_type([state/0, mutation/0]).
 
 -record(state, {
     listen_socket :: gen_tcp:socket() | undefined,
@@ -51,8 +56,21 @@ for manipulating state during REPL sessions.
     %% is active.  Deferred here so they can be applied to the worker's returned
     %% state when eval_result arrives (prevents the worker snapshot from
     %% reinstating modules that were removed during the eval).
-    pending_module_removals :: [atom()]
+    pending_module_removals :: [atom()],
+    %% BT-2366 (ADR 0081 Phase 2): session-local mutations issued by primitives
+    %% (Session bindings at:put:/removeKey:, Session clear) while an eval worker
+    %% is active.  Primitives enqueue {op, Key, Value} tuples here via a
+    %% gen_server:call to the shell rather than writing directly, because the
+    %% worker holds a state snapshot whose writeback would clobber a direct edit.
+    %% Drained in the eval-exit clauses (apply_pending_mutations/2) in enqueue
+    %% order — preserves insertion order (newest appended at the tail).
+    pending_mutations :: [mutation()]
 }).
+
+-type mutation() ::
+    {put, atom(), term()}
+    | {remove, atom(), undefined}
+    | {clear, undefined, undefined}.
 
 -opaque state() :: #state{}.
 
@@ -72,7 +90,8 @@ new(ListenSocket, Port, _Options) ->
         loaded_modules = [],
         actor_registry = undefined,
         module_tracker = beamtalk_repl_modules:new(),
-        pending_module_removals = []
+        pending_module_removals = [],
+        pending_mutations = []
     }.
 
 -doc "Get current variable bindings.".
@@ -174,3 +193,37 @@ so the shell returns to idle with a clean slate.
 -spec clear_pending_module_removals(state()) -> state().
 clear_pending_module_removals(State) ->
     State#state{pending_module_removals = []}.
+
+-doc """
+Get pending session-local mutations (deferred during active eval).
+
+BT-2366 (ADR 0081 Phase 2): returns the queued `{op, Key, Value}` tuples in
+enqueue order (oldest first).  Drained by the eval-exit clauses in
+`beamtalk_repl_shell` (`apply_pending_mutations/2`).
+""".
+-spec get_pending_mutations(state()) -> [mutation()].
+get_pending_mutations(#state{pending_mutations = Mutations}) ->
+    Mutations.
+
+-doc """
+Append a session-local mutation to the pending queue.
+
+BT-2366 (ADR 0081 Phase 2): called by `beamtalk_session_primitives` (via the
+shell `enqueue_mutation` handler) when a session-scope write is issued during
+an active eval.  Appends at the tail so the queue preserves enqueue order; the
+fold in `apply_pending_mutations/2` then replays `put`/`remove`/`clear` in the
+order the user issued them.
+""".
+-spec add_pending_mutation(mutation(), state()) -> state().
+add_pending_mutation(Mutation, #state{pending_mutations = Mutations} = State) ->
+    State#state{pending_mutations = Mutations ++ [Mutation]}.
+
+-doc """
+Clear the pending session-local mutations queue.
+
+BT-2366 (ADR 0081 Phase 2): called after applying (or discarding) the queue on
+an eval-exit path, so the shell returns to idle with an empty queue.
+""".
+-spec clear_pending_mutations(state()) -> state().
+clear_pending_mutations(State) ->
+    State#state{pending_mutations = []}.
