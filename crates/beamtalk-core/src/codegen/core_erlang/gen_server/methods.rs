@@ -2237,6 +2237,18 @@ impl CoreErlangGenerator {
         value: &Expression,
         has_class_vars: bool,
     ) -> Result<Document<'static>> {
+        // BT-2358: An explicit `^` return of a value-type threading construct
+        // (counted/while loop, foldl list-op, or read+write conditional) must
+        // unwrap the construct's logical value rather than leak the raw
+        // `{value, StateAcc}` tuple (or crash dispatching a read+write
+        // conditional's stateful block at the wrong arity). This mirrors the
+        // implicit last-expression path (`generate_class_method_last_expr`);
+        // the shared helper applies the `{class_var_result, …}` wrapping based on
+        // `class_var_mutated()`, identical to the wrapping below — so it is
+        // correct for both the class-vars and no-class-vars cases.
+        if let Some(doc) = self.try_generate_class_method_threaded_last(value)? {
+            return Ok(doc);
+        }
         // BT-1942: Use `expression_doc_with_open_scope` so an explicit
         // `^ expr` where `expr` produces an open let-chain (e.g.
         // `(self tick) class` or any ProtoObject/Object intrinsic fed a
@@ -2324,6 +2336,12 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Option<Document<'static>>> {
+        // BT-2358: see through redundant parentheses (e.g. `^(items collect: …)`
+        // or `(flag ifTrue: [...])`), which are semantically transparent, so the
+        // threading construct inside is unwrapped to its logical value rather than
+        // leaking its raw `{value, StateAcc}` tuple. Applies to both the explicit
+        // `^`-return and the implicit last-expression callers.
+        let expr = Self::peel_parens(expr);
         let mut parts: Vec<Document<'static>> = Vec::new();
         let result_var = if self.expr_yields_vt_threaded_tuple(expr) {
             self.emit_vt_threaded_tuple_unwrap_to_var(expr, &mut parts)?
