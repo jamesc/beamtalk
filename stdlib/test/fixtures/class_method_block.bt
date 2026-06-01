@@ -60,3 +60,59 @@ Object subclass: ClassMethodBlock
         count := count + 1
       ]
     #(sum, count)
+
+  // BT-2349: last-position foldl list-op (inject:into:) that mutates an outer local.
+  // Must return the accumulator (the folded value), not the {value, StateAcc} tuple.
+  class sumCounting: items =>
+    n := 0
+    items
+      inject: 0
+      into: [:acc :x |
+        n := n + 1
+        acc + x
+      ]
+
+  // BT-2349: local-assignment of a foldl list-op (collect:) that mutates an outer local.
+  // result is bound to the collected Array; n must thread out the mutated count.
+  class doubleCounting: items =>
+    n := 0
+    result := items
+      collect: [:x |
+        n := n + 1
+        x * 2
+      ]
+    #(result, n)
+
+  // BT-2349: last-position select: that reads+writes an outer local.
+  // Must return the filtered Array (element 1), threading dropped is fine in last position.
+  class evensCounting: items =>
+    seen := 0
+    items
+      select: [:x |
+        seen := seen + 1
+        x isEven
+      ]
+
+  // BT-2349: last-position counted loop (to:do:) that mutates an outer local.
+  // Must unwrap the {'nil', StateAcc} tuple and return the loop's logical value (nil).
+  class countToLast: n =>
+    total := 0
+    1 to: n do: [:i | total := total + i]
+
+  // BT-2349: counted loop in local-assignment position. total threads out; the loop's
+  // logical value (nil) is assigned to _ignored, then total is returned.
+  class sumViaLoop: n =>
+    total := 0
+    _ignored := 1 to: n do: [:i | total := total + i]
+    total
+
+  // BT-2349: last-position read+write conditional. Must return the branch value
+  // (no 0-arg stateful-block dispatch crash) and not leak the tuple.
+  class condLast: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+
+  // BT-2349: last-position ifTrue:ifFalse: that reads+writes an outer local in both branches.
+  class condBothLast: flag =>
+    sum := 1
+    flag ifTrue: [sum := sum + 10] ifFalse: [sum := sum + 100]

@@ -208,3 +208,14 @@ TestCase subclass: ClassVarSubExprTest
 
   testTickReturnIsNilReturnsFalse =>
     self assert: ClassVarSubExpr tickReturnIsNil equals: false
+
+  // BT-2349: class var mutated earlier, then a last-position foldl list-op that
+  // mutates an outer local. The folded value must be returned (not the raw
+  // {value, StateAcc} tuple) AND the earlier class var mutation must persist —
+  // i.e. the result is wrapped in `{class_var_result, Value, ClassVarsN}`.
+  testTickThenSumReturnsAccumulator =>
+    self assert: (ClassVarSubExpr tickThenSum: #(1, 2, 3)) equals: 6
+
+  testTickThenSumPersistsClassVar =>
+    ClassVarSubExpr tickThenSum: #(1, 2, 3)
+    self assert: ClassVarSubExpr currentCounter equals: 1

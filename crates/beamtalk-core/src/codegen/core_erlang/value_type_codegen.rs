@@ -939,7 +939,7 @@ impl CoreErlangGenerator {
     ///
     /// When NLR is active, wraps the expression in a `{Result, Self{N}}` tuple.
     /// Otherwise, emits the expression value directly (with proper indentation).
-    fn emit_vt_last_expr(
+    pub(in crate::codegen::core_erlang) fn emit_vt_last_expr(
         &mut self,
         expr: &Expression,
         index: usize,
@@ -953,32 +953,8 @@ impl CoreErlangGenerator {
         // those locals don't escape, so the method value is the construct's *logical*
         // result — element 1 — not the raw tuple. Unwrap it here.
         if self.expr_yields_vt_threaded_tuple(expr) {
-            let tuple_var = self.fresh_temp_var("ThreadedResult");
-            let loop_doc = self.expression_doc(expr)?;
-            if has_nlr {
-                let final_self = self.current_self_var();
-                body_parts.push(docvec![
-                    "    let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    loop_doc,
-                    " in\n    {call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var),
-                    "), ",
-                    leaf::var(final_self),
-                    "}\n",
-                ]);
-            } else {
-                body_parts.push(docvec![
-                    "    let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    loop_doc,
-                    " in\n    call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var),
-                    ")\n",
-                ]);
-            }
+            let result_var = self.emit_vt_threaded_tuple_unwrap_to_var(expr, body_parts)?;
+            self.emit_vt_value_return(&result_var, has_nlr, body_parts);
             return Ok(());
         }
 
@@ -1012,6 +988,37 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    /// BT-2308/BT-2342/BT-2349: Emits a last-position threading construct (loop or foldl
+    /// list-op yielding a `{value, StateAcc}` tuple) as an open let chain that binds the
+    /// logical value (element 1) to a fresh result var, returning that var name.
+    ///
+    /// The threaded locals don't escape in last position, so element 2 (the `StateAcc`) is
+    /// discarded. Used both by [`Self::emit_vt_last_expr`] (value-type bodies wrap the result
+    /// in `{Result, Self{N}}` when NLR is active) and by the class-method body generator
+    /// (which wraps it in `{class_var_result, Result, ClassVarsN}` when class vars were
+    /// mutated).
+    pub(in crate::codegen::core_erlang) fn emit_vt_threaded_tuple_unwrap_to_var(
+        &mut self,
+        expr: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<String> {
+        let tuple_var = self.fresh_temp_var("ThreadedResult");
+        let result_var = self.fresh_temp_var("ThreadedValue");
+        let loop_doc = self.expression_doc(expr)?;
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            loop_doc,
+            " in\n    let ",
+            leaf::var(result_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple_var),
+            ") in\n",
+        ]);
+        Ok(result_var)
+    }
+
     /// BT-2308/BT-2342: Returns `true` if `expr` evaluates to a `{value, StateAcc}` threaded
     /// tuple in value-type / class-method context, whose element 1 is the logical result and
     /// element 2 is the `StateAcc` map of mutated outer locals.
@@ -1029,7 +1036,10 @@ impl CoreErlangGenerator {
     /// stay consistent.
     ///
     /// `do:` is excluded — its value-type codegen already returns a bare `nil`.
-    fn expr_yields_vt_threaded_tuple(&self, expr: &Expression) -> bool {
+    pub(in crate::codegen::core_erlang) fn expr_yields_vt_threaded_tuple(
+        &self,
+        expr: &Expression,
+    ) -> bool {
         self.is_while_with_vt_local_threading(expr)
             || self.is_counted_loop_with_vt_local_threading(expr)
             || self.is_foldl_list_op_with_vt_local_threading(expr)
@@ -1577,7 +1587,10 @@ impl CoreErlangGenerator {
     /// to decide whether to emit the stateful variant (returning `{'nil', StateAcc}`)
     /// or the simple variant (returning `'nil'`). This ensures the detection and codegen
     /// are consistent — we only extract threaded locals when the codegen actually packed them.
-    fn is_while_with_vt_local_threading(&self, expr: &Expression) -> bool {
+    pub(in crate::codegen::core_erlang) fn is_while_with_vt_local_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
         if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
@@ -1624,7 +1637,10 @@ impl CoreErlangGenerator {
     /// 2. Extracts the `StateAcc` from element 2
     /// 3. Extracts each threaded local from the `StateAcc` via `maps:get`
     /// 4. Rebinds the variable names in scope so subsequent code sees the updated values
-    fn generate_vt_while_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+    pub(in crate::codegen::core_erlang) fn generate_vt_while_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
         // Generate the while loop expression (returns {'nil', StateAcc} tuple)
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = self.get_while_threaded_locals(expr);
@@ -1709,7 +1725,10 @@ impl CoreErlangGenerator {
     /// Used by [`Self::emit_vt_threaded_local_assignment`] to rebind the threaded locals
     /// after extracting them from the `StateAcc`. Returns the same set the construct's
     /// codegen packed into the `StateAcc` (`compute_threaded_locals_for_loop`).
-    fn vt_construct_threaded_locals(&self, expr: &Expression) -> Vec<String> {
+    pub(in crate::codegen::core_erlang) fn vt_construct_threaded_locals(
+        &self,
+        expr: &Expression,
+    ) -> Vec<String> {
         if self.is_while_with_vt_local_threading(expr) {
             self.get_while_threaded_locals(expr)
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
@@ -1733,7 +1752,7 @@ impl CoreErlangGenerator {
     /// locals would keep their pre-construct values.
     ///
     /// Returns the Core Erlang variable bound to the assignment target.
-    fn emit_vt_threaded_local_assignment(
+    pub(in crate::codegen::core_erlang) fn emit_vt_threaded_local_assignment(
         &mut self,
         var_name: &str,
         value: &Expression,
@@ -1826,7 +1845,10 @@ impl CoreErlangGenerator {
     /// Mirrors `is_while_with_vt_local_threading`: only triggers when the loop codegen
     /// will actually pack threaded locals into the `{'nil', StateAcc}` result, so the
     /// detection and the extraction stay consistent.
-    fn is_counted_loop_with_vt_local_threading(&self, expr: &Expression) -> bool {
+    pub(in crate::codegen::core_erlang) fn is_counted_loop_with_vt_local_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
         if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
@@ -1865,7 +1887,10 @@ impl CoreErlangGenerator {
     /// with value-type captured local threading as an **open let chain**, extracting the
     /// threaded locals from the loop's `{'nil', StateAcc}` result (see
     /// [`Self::emit_vt_loop_open_extraction`]).
-    fn generate_vt_counted_loop_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+    pub(in crate::codegen::core_erlang) fn generate_vt_counted_loop_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
         // Generate the counted loop expression (returns {'nil', StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::counted_loop_body_block(expr)
@@ -1887,7 +1912,10 @@ impl CoreErlangGenerator {
     /// codegen will actually pack threaded locals into the `{value, StateAcc}` result
     /// (i.e. the mutation-threading path is taken), so detection and the extraction stay
     /// consistent.
-    fn is_foldl_list_op_with_vt_local_threading(&self, expr: &Expression) -> bool {
+    pub(in crate::codegen::core_erlang) fn is_foldl_list_op_with_vt_local_threading(
+        &self,
+        expr: &Expression,
+    ) -> bool {
         if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
             return false;
         }
@@ -1931,7 +1959,10 @@ impl CoreErlangGenerator {
     ///
     /// In non-last position the list-op's logical value (element 1) is discarded; only the
     /// threaded-local mutations need to escape.
-    fn generate_vt_foldl_list_op_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+    pub(in crate::codegen::core_erlang) fn generate_vt_foldl_list_op_open(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Document<'static>> {
         // Generate the list-op expression (returns a {value, StateAcc} tuple).
         let loop_doc = self.expression_doc(expr)?;
         let threaded_locals = Self::foldl_list_op_body_block(expr)
@@ -2178,12 +2209,39 @@ impl CoreErlangGenerator {
     /// entirely. The threaded locals don't need to escape in last position, so the case just
     /// yields each branch's logical value (the block's last expression, or `'nil'` for the
     /// missing branch of `ifTrue:`/`ifFalse:`).
-    fn emit_vt_conditional_last(
+    pub(in crate::codegen::core_erlang) fn emit_vt_conditional_last(
         &mut self,
         expr: &Expression,
         has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
+        match self.emit_vt_conditional_case_to_var(expr, body_parts)? {
+            Some(result_var) => {
+                self.emit_vt_value_return(&result_var, has_nlr, body_parts);
+                Ok(())
+            }
+            // Not a recognized read+write conditional — fall back to the generic path.
+            None => self.emit_vt_last_expr(expr, 0, has_nlr, body_parts),
+        }
+    }
+
+    /// BT-2342/BT-2349: Emits a read+write conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
+    /// whose branch blocks read+write an outer local) as an inline `case` binding its logical
+    /// value to a fresh result var, pushed onto `body_parts` as an open let chain
+    /// (`let CondVal = case ... in\n`). Returns the result var name.
+    ///
+    /// Returns `None` when `expr` is not one of the supported conditional shapes, so the caller
+    /// can fall back to the generic last-expression path. The threaded locals don't escape in
+    /// last position, so each branch yields only its logical value (its last expression).
+    ///
+    /// Used both by [`Self::emit_vt_conditional_last`] (value-type bodies, which wrap the result
+    /// in `{Result, Self{N}}` when NLR is active) and by the class-method body generator (which
+    /// wraps it in `{class_var_result, Result, ClassVarsN}` when class vars were mutated).
+    pub(in crate::codegen::core_erlang) fn emit_vt_conditional_case_to_var(
+        &mut self,
+        expr: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<Option<String>> {
         let (receiver, selector_name, arguments) = match expr {
             Expression::MessageSend {
                 receiver,
@@ -2194,21 +2252,20 @@ impl CoreErlangGenerator {
                 let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
                 (receiver.as_ref(), sel, arguments)
             }
-            // Not a keyword conditional — fall back to the generic last-expression path.
-            _ => return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts),
+            _ => return Ok(None),
         };
 
         let nil_branch = || Document::Str("'nil'");
         let (true_branch, false_branch) = match selector_name.as_str() {
             "ifTrue:" => {
                 let Some(Expression::Block(block)) = arguments.first() else {
-                    return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts);
+                    return Ok(None);
                 };
                 (self.build_vt_conditional_branch_value(block)?, nil_branch())
             }
             "ifFalse:" => {
                 let Some(Expression::Block(block)) = arguments.first() else {
-                    return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts);
+                    return Ok(None);
                 };
                 (nil_branch(), self.build_vt_conditional_branch_value(block)?)
             }
@@ -2216,14 +2273,14 @@ impl CoreErlangGenerator {
                 let (Some(Expression::Block(tb)), Some(Expression::Block(fb))) =
                     (arguments.first(), arguments.get(1))
                 else {
-                    return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts);
+                    return Ok(None);
                 };
                 (
                     self.build_vt_conditional_branch_value(tb)?,
                     self.build_vt_conditional_branch_value(fb)?,
                 )
             }
-            _ => return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts),
+            _ => return Ok(None),
         };
 
         let cond_var = self.fresh_temp_var("Cond");
@@ -2244,8 +2301,7 @@ impl CoreErlangGenerator {
             false_branch,
             " end in\n",
         ]);
-        self.emit_vt_value_return(&result_var, has_nlr, body_parts);
-        Ok(())
+        Ok(Some(result_var))
     }
 
     /// BT-2342: Inlines a conditional branch's block body, returning the block's logical
