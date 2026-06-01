@@ -2690,6 +2690,7 @@ impl CoreErlangGenerator {
 
     /// Inner implementation for [`Self::build_vt_conditional_value_and_mutations`], bracketed
     /// by `push_scope`/`pop_scope` so the fallible work always restores scope.
+    #[allow(clippy::too_many_lines)] // Branch threading dispatch spans many small arms
     fn build_vt_conditional_value_and_mutations_parts(
         &mut self,
         block: &crate::ast::Block,
@@ -2705,20 +2706,47 @@ impl CoreErlangGenerator {
                 if Self::is_local_var_assignment(body_expr) {
                     if let Expression::Assignment { target, value, .. } = body_expr {
                         if let Expression::Identifier(id) = target.as_ref() {
-                            let core_var = self
-                                .lookup_var(&id.name)
-                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                            let val_doc = self.expression_doc(value)?;
-                            parts.push(docvec![
-                                "let ",
-                                leaf::var(core_var.clone()),
-                                " = ",
-                                val_doc,
-                                " in ",
-                            ]);
-                            self.bind_var(&id.name, &core_var);
+                            // BT-2359: a nested threading construct as the assignment RHS —
+                            // mirror the method-body / branch-value paths so the outer local
+                            // is rebound (loop/foldl via emit_vt_threaded_local_assignment,
+                            // conditional via emit_vt_conditional_assign_rhs) instead of being
+                            // bound to the raw {value, StateAcc} tuple.
+                            let rhs = Self::peel_parens(value);
+                            if self.expr_yields_vt_threaded_tuple(value) {
+                                self.emit_vt_threaded_local_assignment(
+                                    &id.name, value, &mut parts,
+                                )?;
+                            } else if self.is_conditional_with_vt_local_threading(rhs) {
+                                self.emit_vt_conditional_assign_rhs(&id.name, rhs, &mut parts)?;
+                            } else {
+                                let core_var = self.lookup_var(&id.name).map_or_else(
+                                    || Self::to_core_erlang_var(&id.name),
+                                    String::clone,
+                                );
+                                let val_doc = self.expression_doc(value)?;
+                                parts.push(docvec![
+                                    "let ",
+                                    leaf::var(core_var.clone()),
+                                    " = ",
+                                    val_doc,
+                                    " in ",
+                                ]);
+                                self.bind_var(&id.name, &core_var);
+                            }
                         }
                     }
+                } else if self.expr_yields_vt_threaded_tuple(body_expr) {
+                    // BT-2359: a non-last threaded loop/foldl that mutates a captured local
+                    // returns {value, StateAcc}; extract and rebind the threaded locals so a
+                    // later expression in this branch sees the update (value discarded).
+                    let loop_doc = self.expression_doc(body_expr)?;
+                    let threaded_locals = self.vt_construct_threaded_locals(body_expr);
+                    parts.push(self.emit_vt_loop_open_extraction(
+                        loop_doc,
+                        &threaded_locals,
+                        "BranchThreadedResult",
+                        "BranchThreadedState",
+                    ));
                 } else {
                     let tmp = self.fresh_temp_var("seq");
                     let doc = self.expression_doc(body_expr)?;
@@ -2731,25 +2759,53 @@ impl CoreErlangGenerator {
             if Self::is_local_var_assignment(last_expr) {
                 if let Expression::Assignment { target, value, .. } = last_expr {
                     if let Expression::Identifier(id) = target.as_ref() {
-                        let core_var = self
-                            .lookup_var(&id.name)
-                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        let val_doc = self.expression_doc(value)?;
-                        parts.push(docvec![
-                            "let ",
-                            leaf::var(core_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in ",
-                        ]);
-                        self.bind_var(&id.name, &core_var);
-                        leaf::var(core_var)
+                        // BT-2359: a threaded construct as the final assignment RHS rebinds the
+                        // target via element 1 of its {value, StateAcc} tuple and threads any
+                        // sibling local; the block value is the rebound target.
+                        let rhs = Self::peel_parens(value);
+                        if self.expr_yields_vt_threaded_tuple(value) {
+                            let core_var = self
+                                .emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
+                            leaf::var(core_var)
+                        } else if self.is_conditional_with_vt_local_threading(rhs) {
+                            let core_var =
+                                self.emit_vt_conditional_assign_rhs(&id.name, rhs, &mut parts)?;
+                            leaf::var(core_var)
+                        } else {
+                            let core_var = self
+                                .lookup_var(&id.name)
+                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                            let val_doc = self.expression_doc(value)?;
+                            parts.push(docvec![
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in ",
+                            ]);
+                            self.bind_var(&id.name, &core_var);
+                            leaf::var(core_var)
+                        }
                     } else {
                         self.expression_doc(last_expr)?
                     }
                 } else {
                     self.expression_doc(last_expr)?
                 }
+            } else if self.expr_yields_vt_threaded_tuple(last_expr) {
+                // BT-2359: a threaded construct as the block's logical value — its result is
+                // element 1 of the {value, StateAcc} tuple, not the raw tuple. The threaded
+                // locals don't need to escape in value position, so unwrap without extracting.
+                let tuple_var = self.fresh_temp_var("BranchThreadedResult");
+                let val_doc = self.expression_doc(last_expr)?;
+                parts.push(docvec![
+                    "let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    val_doc,
+                    " in ",
+                ]);
+                docvec!["call 'erlang':'element'(1, ", leaf::var(tuple_var), ")"]
             } else {
                 self.expression_doc(last_expr)?
             }

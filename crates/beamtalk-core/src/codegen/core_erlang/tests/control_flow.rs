@@ -948,3 +948,19 @@ fn test_vt_conditional_as_assign_rhs_threads_sibling_local() {
         "Conditional assign-RHS must compile to an inline case. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_vt_nested_loop_in_conditional_assign_rhs_threads_local() {
+    // BT-2359 (CodeRabbit follow-up): a threaded loop *nested* inside an
+    // assign-RHS conditional branch must still rebind its outer local, so a
+    // later read in the same branch (and after) sees the update.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: flag =>\n    sum := 0\n    _r := flag ifTrue: [1 to: 5 do: [:i | sum := sum + i]. sum] ifFalse: [0]\n    sum\n";
+    let code = codegen(src);
+    eprintln!("Generated code for nested loop in conditional assign-RHS:\n{code}");
+    // The nested loop packs sum into its StateAcc; the branch must extract it
+    // back via maps:get('__local__sum', ...).
+    assert!(
+        code.contains("'__local__sum'"),
+        "Nested loop inside a conditional assign-RHS branch must thread 'sum'. Got:\n{code}"
+    );
+}
