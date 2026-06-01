@@ -946,15 +946,19 @@ impl CoreErlangGenerator {
         has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
-        // BT-2308/BT-2342: A last expression that is a local-threading construct — a loop
-        // (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:) or a foldl list-op
-        // (collect:/select:/reject:/inject:into:) — returns a `{value, StateAcc}` tuple so
-        // the open-extraction machinery can rebind the threaded locals. In last position
-        // those locals don't escape, so the method value is the construct's *logical*
-        // result — element 1 — not the raw tuple. Unwrap it here.
-        if self.expr_yields_vt_threaded_tuple(expr) {
-            let result_var = self.emit_vt_threaded_tuple_unwrap_to_var(expr, body_parts)?;
-            self.emit_vt_value_return(&result_var, has_nlr, body_parts);
+        // BT-2308/BT-2342/BT-2361: A last expression that is a local-threading construct —
+        // a loop (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:), a foldl list-op
+        // (collect:/select:/reject:/inject:into:), or a read+write conditional — yields a
+        // `{value, StateAcc}` tuple. In last position the threaded locals don't escape, so
+        // the method value is the construct's *logical* result — element 1 — not the raw
+        // tuple. Route through the shared `ThreadedExpr` emitter, which unwraps it and
+        // applies the value-type boundary.
+        if self.emit_threaded_last(
+            expr,
+            super::threaded_expr::ThreadingPosition::Last,
+            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+            body_parts,
+        )? {
             return Ok(());
         }
 
@@ -1163,32 +1167,22 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::LocalAssignment => {
-                // BT-2342: When the RHS is a threading construct (value-type loop or foldl
-                // list-op) it returns a `{value, StateAcc}` tuple. Bind the target to the
-                // logical value (element 1) and rebind the threaded locals from the StateAcc
+                // BT-2342/BT-2359: a threading construct (value-type loop / foldl list-op
+                // yielding `{value, StateAcc}`) or a read+write conditional as the RHS
+                // threads its mutations through the tuple. Bind the target to the logical
+                // value (element 1) and rebind the threaded siblings from the StateAcc
                 // (element 2), rather than binding the target to the raw tuple.
                 if let Expression::Assignment { target, value, .. } = expr {
                     if let Expression::Identifier(id) = target.as_ref() {
-                        if self.expr_yields_vt_threaded_tuple(value) {
-                            let var_name = id.name.clone();
-                            let core_var = self
-                                .emit_vt_threaded_local_assignment(&var_name, value, body_parts)?;
+                        let var_name = id.name.clone();
+                        if let Some(core_var) =
+                            self.emit_threaded_assign_rhs(&var_name, value, body_parts)?
+                        {
                             if is_last {
-                                self.emit_vt_value_return(&core_var, has_nlr, body_parts);
-                            }
-                            return Ok(());
-                        }
-                        // BT-2359: a threading conditional as the assignment RHS — possibly
-                        // parenthesized — threads a sibling outer-local (`x`) that would
-                        // otherwise be dropped. Bind the target to the conditional's logical
-                        // value and rebind the threaded sibling from the same `case`.
-                        let rhs = Self::peel_parens(value);
-                        if self.is_conditional_with_vt_local_threading(rhs) {
-                            let var_name = id.name.clone();
-                            let core_var =
-                                self.emit_vt_conditional_assign_rhs(&var_name, rhs, body_parts)?;
-                            if is_last {
-                                self.emit_vt_value_return(&core_var, has_nlr, body_parts);
+                                body_parts.push(self.threading_result_tail(
+                                    &core_var,
+                                    super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+                                ));
                             }
                             return Ok(());
                         }
@@ -1838,28 +1832,6 @@ impl CoreErlangGenerator {
         Ok(core_var)
     }
 
-    /// BT-2342: Emits a value-type method's final return of an already-bound Core Erlang
-    /// variable: `{Var, Self{N}}` when NLR is active, or `Var` otherwise.
-    fn emit_vt_value_return(
-        &self,
-        core_var: &str,
-        has_nlr: bool,
-        body_parts: &mut Vec<Document<'static>>,
-    ) {
-        if has_nlr {
-            let final_self = self.current_self_var();
-            body_parts.push(docvec![
-                "    {",
-                leaf::var(core_var.to_string()),
-                ", ",
-                leaf::var(final_self),
-                "}\n",
-            ]);
-        } else {
-            body_parts.push(docvec!["    ", leaf::var(core_var.to_string()), "\n"]);
-        }
-    }
-
     /// BT-2308: Returns `true` if `expr` is a `to:do:` / `to:by:do:` / `timesRepeat:`
     /// counted loop whose body block captures and mutates outer local variables in
     /// value-type or class-method context.
@@ -2244,13 +2216,16 @@ impl CoreErlangGenerator {
         has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
-        match self.emit_vt_conditional_case_to_var(expr, body_parts)? {
-            Some(result_var) => {
-                self.emit_vt_value_return(&result_var, has_nlr, body_parts);
-                Ok(())
-            }
+        if self.emit_threaded_last(
+            expr,
+            super::threaded_expr::ThreadingPosition::Last,
+            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+            body_parts,
+        )? {
+            Ok(())
+        } else {
             // Not a recognized read+write conditional — fall back to the generic path.
-            None => self.emit_vt_last_expr(expr, 0, has_nlr, body_parts),
+            self.emit_vt_last_expr(expr, 0, has_nlr, body_parts)
         }
     }
 
