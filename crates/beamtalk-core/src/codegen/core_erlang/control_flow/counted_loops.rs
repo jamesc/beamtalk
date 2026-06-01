@@ -601,4 +601,17 @@ mod bt2363_nested_counted_loops {
             "write-only nested mutation of 'last' must be threaded. Got:\n{code}"
         );
     }
+
+    // BT-2363 (Copilot review): the inner counted loop may be parenthesized
+    // (`(2 timesRepeat: [...])`). The cross-scope mutation collectors must peel
+    // parens or the write-only detection is silently skipped.
+    #[test]
+    fn test_nested_parenthesized_times_repeat_threaded() {
+        let src = "Object subclass: NestedRepro\n\n  run =>\n    last := 0\n    3 timesRepeat: [(2 timesRepeat: [last := 7])]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "parenthesized nested mutation of 'last' must be threaded. Got:\n{code}"
+        );
+    }
 }

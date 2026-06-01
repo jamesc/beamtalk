@@ -151,3 +151,9 @@ TestCase subclass: CountedLoopMutationTest
     total := 0
     2 timesRepeat: [2 timesRepeat: [2 timesRepeat: [total := total + 1]]]
     self assert: total equals: 8
+
+  // Parenthesized inner loop must still thread the outer local.
+  testNestedParenthesizedTimesRepeat =>
+    last := 0
+    3 timesRepeat: [(2 timesRepeat: [last := 7])]
+    self assert: last equals: 7

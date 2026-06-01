@@ -1865,12 +1865,12 @@ impl CoreErlangGenerator {
         facts: &crate::semantic_analysis::SemanticFacts,
         out: &mut std::collections::HashSet<String>,
     ) {
-        match expr {
+        match Self::peel_parens(expr) {
             Expression::Assignment { value, .. } => {
                 Self::collect_list_op_cross_scope_mutations_recursive(value, facts, out);
             }
-            Expression::MessageSend { .. } => {
-                Self::collect_list_op_cross_scope_mutations(expr, facts, out);
+            send @ Expression::MessageSend { .. } => {
+                Self::collect_list_op_cross_scope_mutations(send, facts, out);
             }
             _ => {}
         }
@@ -1895,8 +1895,11 @@ impl CoreErlangGenerator {
         use crate::ast::MessageSelector;
         use crate::codegen::core_erlang::block_analysis::analyze_block;
 
-        let inner = match expr {
-            Expression::Assignment { value, .. } => value.as_ref(),
+        // Peel parens then an assignment RHS (which may itself be parenthesized) so
+        // forms like `_r := (1 to: 5 do: [...])` are still inspected — mirrors
+        // `expr_has_nested_counted_loop_threading`.
+        let inner = match Self::peel_parens(expr) {
+            Expression::Assignment { value, .. } => Self::peel_parens(value),
             other => other,
         };
         let Expression::MessageSend {
