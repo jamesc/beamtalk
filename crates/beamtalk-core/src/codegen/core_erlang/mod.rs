@@ -2651,6 +2651,10 @@ impl CoreErlangGenerator {
     /// Check if an expression is a control flow construct (whileTrue:, whileFalse:, timesRepeat:, etc.)
     /// with literal blocks that has threaded mutations. Returns the threaded variable names if so.
     fn get_control_flow_threaded_vars(&self, expr: &Expression) -> Option<Vec<String>> {
+        // BT-2355: `_r := (loop)` wraps the construct in parentheses; peel them so
+        // the threaded locals are still discovered when the construct is an
+        // assignment RHS or sub-expression.
+        let expr = Self::peel_parens(expr);
         let Expression::MessageSend {
             receiver,
             selector,
@@ -2681,14 +2685,99 @@ impl CoreErlangGenerator {
             // BT-1276: collect:/select:/reject: pack updated locals into the StateAcc map
             // returned as element(2, ...) of the result tuple, so the outer method body can
             // extract them via maps:get — same pattern as do:/inject:into:.
-            "do:" | "collect:" | "select:" | "reject:" => {
-                self.threaded_vars_single_block_simple(arguments)
-            }
+            //
+            // BT-2355: foldl predicate ops (count:/detect:/detect:ifNone:) follow the same
+            // shape — the mutating predicate is the first argument and its updated locals are
+            // packed into the StateAcc map at the end of the fold (always, regardless of
+            // iteration count). Any trailing handler (e.g. detect:ifNone:'s ifNone block) is
+            // not part of the fold, so it is ignored here.
+            "do:" | "collect:" | "select:" | "reject:" | "count:" | "detect:"
+            | "detect:ifNone:" => self.threaded_vars_single_block_simple(arguments),
             "inject:into:" if arguments.len() == 2 => {
                 self.threaded_vars_single_block_simple(&arguments[1..])
             }
+            // BT-2355: conditionals thread outer-local mutations through the StateAcc
+            // map under `__local__` keys (see generate_*_with_mutations, which also seed
+            // those keys so extraction is safe even when the taken branch did not write
+            // them). Only the selectors that (a) `is_conditional_selector` recognises as
+            // state-threading and (b) have a `generate_*_with_mutations` inline-case
+            // generator are listed here — others (`ifNil:`, `ifFalse:ifTrue:`, …) are not
+            // routed through that path, so adding them here would be unreachable.
+            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:" => {
+                let blocks = Self::block_args(arguments);
+                let threaded = self.conditional_threaded_locals(&blocks);
+                if threaded.is_empty() {
+                    None
+                } else {
+                    Some(threaded)
+                }
+            }
             _ => None,
         }
+    }
+
+    /// BT-2355: Peels any `Expression::Parenthesized` wrappers, returning the inner
+    /// expression. Used so control-flow classification/threading sees through the
+    /// parentheses in forms like `_r := (1 to: 5 do: [...])`.
+    fn peel_parens(expr: &Expression) -> &Expression {
+        let mut current = expr;
+        while let Expression::Parenthesized { expression, .. } = current {
+            current = expression;
+        }
+        current
+    }
+
+    /// BT-2355: Collects the `Block` arguments of a message send (e.g. the branch
+    /// blocks of a conditional), preserving order.
+    fn block_args(arguments: &[Expression]) -> Vec<&Block> {
+        arguments
+            .iter()
+            .filter_map(|a| {
+                if let Expression::Block(b) = a {
+                    Some(b)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// BT-2355: Computes the outer-local variables that a conditional's branch
+    /// blocks mutate and that must be threaded back through the `StateAcc` map.
+    ///
+    /// A variable is threaded when it is written in some branch, is bound in the
+    /// enclosing (outer) scope, and is not a block parameter. This covers both
+    /// write-only (`flag ifTrue: [m := 9]`) and read+write
+    /// (`flag ifTrue: [sum := sum + 7]`) mutations, while excluding block-local
+    /// temporaries (which are not bound in the outer scope).
+    ///
+    /// The same set drives both the seeding emitted by `generate_*_with_mutations`
+    /// and the extraction emitted by the method-body sequencer, keeping them in
+    /// sync so a non-taken branch never leaves a `__local__` key missing.
+    pub(super) fn conditional_threaded_locals(&self, blocks: &[&Block]) -> Vec<String> {
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        let mut set = HashSet::new();
+        for block in blocks {
+            let analysis = self
+                .semantic_facts
+                .block_profile(&block.span)
+                .cloned()
+                .unwrap_or_else(|| analyze_block(block));
+            let params = Self::block_param_names(block);
+            for v in &analysis.local_writes {
+                if params.contains(v) {
+                    continue;
+                }
+                if self.lookup_var(v).is_some() {
+                    set.insert(v.clone());
+                }
+            }
+        }
+        let mut out: Vec<String> = set.into_iter().collect();
+        // Deterministic order for stable codegen output.
+        out.sort();
+        out
     }
 
     /// Computes threaded vars for `whileTrue:` / `whileFalse:` — the condition block

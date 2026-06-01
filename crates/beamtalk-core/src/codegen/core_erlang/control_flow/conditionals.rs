@@ -49,6 +49,56 @@ use crate::ast::{Block, Expression};
 use crate::docvec;
 
 impl CoreErlangGenerator {
+    /// BT-2355: Seeds the `__local__` keys for the outer locals a conditional's
+    /// branches thread, returning `(seed_doc, base_state_var)`.
+    ///
+    /// Each branch — including the synthetic non-taken branch (`{'nil', State}`)
+    /// and any branch that does not itself write a given local — must return a
+    /// state map that already contains every threaded `__local__` key, so the
+    /// method-body sequencer's `maps:get/2` extraction never hits a missing key.
+    /// Seeding the keys from the locals' current (pre-conditional) bindings before
+    /// the `case` makes the base state self-consistent; taken branches simply
+    /// overwrite the seeded value via `maps:put`.
+    ///
+    /// When there are no threaded locals, returns `(Document::Nil, outer_state)`
+    /// so field-only conditionals emit byte-for-byte the same code as before.
+    fn seed_conditional_locals(
+        &mut self,
+        blocks: &[&Block],
+        outer_state: &str,
+    ) -> (Document<'static>, String) {
+        let threaded = self.conditional_threaded_locals(blocks);
+        if threaded.is_empty() {
+            return (Document::Nil, outer_state.to_string());
+        }
+
+        let seeded_state = self.fresh_temp_var("SeededState");
+        let mut chain: Document<'static> = leaf::var(outer_state.to_string());
+        // Fold from the last var inward so the emitted nesting reads naturally.
+        for var in threaded.iter().rev() {
+            let core_var = self
+                .lookup_var(var)
+                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            chain = docvec![
+                "call 'maps':'put'(",
+                leaf::atom(Self::local_state_key(var)),
+                ", ",
+                leaf::var(core_var),
+                ", ",
+                chain,
+                ")",
+            ];
+        }
+        let seed_doc = docvec![
+            "let ",
+            leaf::var(seeded_state.clone()),
+            " = ",
+            chain,
+            " in "
+        ];
+        (seed_doc, seeded_state)
+    }
+
     /// Generates inline code for `flag ifTrue: [block]` in actor context
     /// when the block contains field mutations.
     ///
@@ -73,12 +123,16 @@ impl CoreErlangGenerator {
         };
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so the non-taken (false) branch and
+        // the post-conditional extraction always see the `__local__` keys.
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
         let (branch_doc, _) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
 
         Ok(docvec![
             cond_preamble,
+            seed_doc,
             "let ",
             leaf::var(cond_var.clone()),
             " = ",
@@ -86,11 +140,11 @@ impl CoreErlangGenerator {
             " in case ",
             leaf::var(cond_var),
             " of <'true'> when 'true' -> let StateAcc = ",
-            leaf::var(outer_state.clone()),
+            leaf::var(base_state.clone()),
             " in ",
             branch_doc,
             " <'false'> when 'true' -> {'nil', ",
-            leaf::var(outer_state),
+            leaf::var(base_state),
             "} end",
         ])
     }
@@ -115,12 +169,16 @@ impl CoreErlangGenerator {
         };
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so the non-taken (true) branch and
+        // the post-conditional extraction always see the `__local__` keys.
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
         let (branch_doc, _) =
             self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
 
         Ok(docvec![
             cond_preamble,
+            seed_doc,
             "let ",
             leaf::var(cond_var.clone()),
             " = ",
@@ -128,9 +186,9 @@ impl CoreErlangGenerator {
             " in case ",
             leaf::var(cond_var),
             " of <'true'> when 'true' -> {'nil', ",
-            leaf::var(outer_state.clone()),
+            leaf::var(base_state.clone()),
             "} <'false'> when 'true' -> let StateAcc = ",
-            leaf::var(outer_state),
+            leaf::var(base_state),
             " in ",
             branch_doc,
             " end",
@@ -156,6 +214,11 @@ impl CoreErlangGenerator {
         };
         let cond_var = self.fresh_temp_var("Cond");
         let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so a branch that does not itself
+        // write a given local (and the post-conditional extraction) still sees the
+        // `__local__` key.
+        let (seed_doc, base_state) =
+            self.seed_conditional_locals(&[true_block, false_block], &outer_state);
 
         // True branch
         let (true_branch_doc, _) =
@@ -167,6 +230,7 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             cond_preamble,
+            seed_doc,
             "let ",
             leaf::var(cond_var.clone()),
             " = ",
@@ -174,11 +238,11 @@ impl CoreErlangGenerator {
             " in case ",
             leaf::var(cond_var),
             " of <'true'> when 'true' -> let StateAcc = ",
-            leaf::var(outer_state.clone()),
+            leaf::var(base_state.clone()),
             " in ",
             true_branch_doc,
             " <'false'> when 'true' -> let StateAcc = ",
-            leaf::var(outer_state),
+            leaf::var(base_state),
             " in ",
             false_branch_doc,
             " end",
@@ -208,6 +272,9 @@ impl CoreErlangGenerator {
         };
         let obj_var = self.fresh_temp_var("Obj");
         let outer_state = self.current_state_var();
+        // BT-2355: seed threaded outer-locals so the non-taken (nil) branch and the
+        // post-conditional extraction always see the `__local__` keys.
+        let (seed_doc, base_state) = self.seed_conditional_locals(&[block], &outer_state);
 
         let (branch_doc, _) = self.with_branch_context(|this| {
             // Push a scope so the block-parameter binding is cleaned up after generation
@@ -223,6 +290,7 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             recv_preamble,
+            seed_doc,
             "let ",
             leaf::var(obj_var.clone()),
             " = ",
@@ -230,9 +298,9 @@ impl CoreErlangGenerator {
             " in case ",
             leaf::var(obj_var),
             " of <'nil'> when 'true' -> {'nil', ",
-            leaf::var(outer_state.clone()),
+            leaf::var(base_state.clone()),
             "} <_> when 'true' -> let StateAcc = ",
-            leaf::var(outer_state),
+            leaf::var(base_state),
             " in ",
             branch_doc,
             " end",
@@ -536,17 +604,40 @@ impl CoreErlangGenerator {
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let expr_doc = self.expression_doc(expr)?;
                         let next_state = self.next_state_var();
-                        docs.push(docvec![
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
                             leaf::var(tuple_var.clone()),
                             " = ",
                             expr_doc,
                             " in let ",
-                            leaf::var(next_state),
+                            leaf::var(next_state.clone()),
                             " = call 'erlang':'element'(2, ",
                             leaf::var(tuple_var),
                             ") in ",
-                        ]);
+                        ]];
+                        // BT-2355: rebind the nested construct's threaded `__local__`
+                        // vars so a later read in THIS branch sees the mutated value
+                        // (mirrors the DestructureAssignmentControlFlow arm above and the
+                        // method-body sequencer). Without this, the state is forwarded but
+                        // the in-scope local binding stays stale.
+                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
+                            for var in &threaded_vars {
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    leaf::var(tv_core.clone()),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(next_state.clone()),
+                                    ") in ",
+                                ]);
+                                self.bind_var(var, &tv_core);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
                     }
                 }
                 // All other kinds (EarlyReturn, SuperSend, ErrorSend,
@@ -661,6 +752,53 @@ mod tests {
         assert!(
             put_count >= 2,
             "Both branches should call maps:put for 'n'. Found {put_count}. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_bt2355_write_only_conditional_seeds_and_extracts_local() {
+        // BT-2355: `flag ifTrue: [m := 9]` then read `m` (non-last). The outer
+        // local `m` must thread back even though the block only writes it.
+        let src = "Actor subclass: Cps\n\n  m: flag =>\n    val := 0\n    flag ifTrue: [val := 9]\n    val\n";
+        let code = codegen(src);
+        // The non-taken branch and extraction need the seeded key.
+        assert!(
+            code.contains("maps':'put'('__local__val'"),
+            "write-only conditional should seed/put '__local__val'. Got:\n{code}"
+        );
+        // After the conditional, the local is read back out of the threaded state.
+        assert!(
+            code.contains("maps':'get'('__local__val'"),
+            "outer local 'val' should be extracted via maps:get after the conditional. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_bt2355_read_write_conditional_extracts_local() {
+        // BT-2355: `flag ifTrue: [sum := sum + 7]` then read `sum` (non-last).
+        let src = "Actor subclass: Cps\n\n  m: flag =>\n    sum := 0\n    flag ifTrue: [sum := sum + 7]\n    sum\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__sum'"),
+            "outer local 'sum' should be extracted via maps:get after the conditional. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_bt2355_if_true_if_false_seeds_local_for_both_branches() {
+        // BT-2355: a local written in only one branch must still be extractable, so
+        // the seed key must precede the case (be present in both branches' base).
+        let src = "Actor subclass: Cps\n\n  m: flag =>\n    x := 1\n    flag ifTrue: [x := x + 1] ifFalse: [x := x + 100]\n    x\n";
+        let code = codegen(src);
+        // One seed put (before the case) + one put per branch = 3 puts of '__local__x'.
+        let put_count = code.matches("maps':'put'('__local__x'").count();
+        assert!(
+            put_count >= 3,
+            "expected a seed put plus a put in each branch for '__local__x' (>=3), found {put_count}. Got:\n{code}"
+        );
+        assert!(
+            code.contains("maps':'get'('__local__x'"),
+            "outer local 'x' should be extracted after ifTrue:ifFalse:. Got:\n{code}"
         );
     }
 

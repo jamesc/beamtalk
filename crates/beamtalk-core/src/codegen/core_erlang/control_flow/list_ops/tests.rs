@@ -693,9 +693,16 @@ fn test_detect_with_local_mutation_uses_tuple_acc() {
         code.contains("FoundFlag"),
         "detect: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
     );
+    // BT-2355: the fold packs the final 'count' into the StateAcc map at exit so the
+    // outer method body can thread it back via maps:get — the tuple accumulator is an
+    // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
     assert!(
-        !code.contains("maps':'get'('__local__count'"),
-        "detect: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
+        code.contains("maps':'put'('__local__count'"),
+        "detect: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'get'('__local__count'"),
+        "detect: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
     );
 }
 
@@ -748,8 +755,14 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
         code.contains("FoundFlag"),
         "detect:ifNone: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
     );
+    // BT-2355: pack the final 'count' into StateAcc at fold exit and thread it back
+    // to the outer method body via maps:get.
     assert!(
-        !code.contains("maps':'get'('__local__count'"),
-        "detect:ifNone: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
+        code.contains("maps':'put'('__local__count'"),
+        "detect:ifNone: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'get'('__local__count'"),
+        "detect:ifNone: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
     );
 }

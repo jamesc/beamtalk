@@ -1,0 +1,96 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2355: Actor-context outer-local threading corpus.
+//
+// Each method threads an *outer local* (not an Actor state field) inside an
+// Actor method body and returns the final threaded value. These exercise the
+// construct families that previously dropped the mutation in Actor context:
+//   - write-only / read+write conditionals (ifTrue:, ifTrue:ifFalse:) non-last
+//   - foldl predicate ops (count:, detect:) non-last
+//   - threading-construct local-assignment RHS (loops, conditionals)
+//
+// Sibling to the value-type corpus exercised by vt_threading_constructs_test.bt
+// (BT-2342); this is the Actor-context companion.
+
+Actor subclass: ActorThreadingCorpus
+
+  // ── write-only conditional, non-last ───────────────────────────────────────
+  ifTrueNonLastWriteOnly: flag =>
+    m := 0
+    flag ifTrue: [m := 9]
+    m
+
+  // ── read+write conditional, non-last ───────────────────────────────────────
+  ifTrueNonLastReadWrite: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+    sum
+
+  // ── ifTrue:ifFalse:, non-last ───────────────────────────────────────────────
+  ifTrueIfFalseNonLastReadWrite: flag =>
+    x := 1
+    flag ifTrue: [x := x + 1] ifFalse: [x := x + 100]
+    x
+
+  // ── conditional local-assignment RHS ────────────────────────────────────────
+  ifTrueIfFalseAssignRhsReadWrite: flag =>
+    x := 0
+    _r := flag
+      ifTrue: [
+        x := 5
+        42
+      ]
+      ifFalse: [0]
+    x
+
+  // ── count: (foldl predicate), non-last ──────────────────────────────────────
+  countNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      count: [:i |
+        n := n + 1
+        i > 0
+      ]
+    n
+
+  // ── detect: (foldl predicate), non-last ─────────────────────────────────────
+  detectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      detect: [:i |
+        n := n + 1
+        i > 10
+      ]
+      ifNone: [-1]
+    n
+
+  // ── loop local-assignment RHS ────────────────────────────────────────────────
+  toDoAssignRhsReadWrite =>
+    sum := 0
+    _r := (1 to: 5 do: [:i | sum := sum + i])
+    sum
+
+  // ── ifFalse:, non-last ──────────────────────────────────────────────────────
+  ifFalseNonLastReadWrite: flag =>
+    sum := 0
+    flag ifFalse: [sum := sum + 7]
+    sum
+
+  // ── ifNotNil:, non-last ─────────────────────────────────────────────────────
+  ifNotNilNonLastReadWrite: obj =>
+    total := 0
+    obj ifNotNil: [:it | total := total + it]
+    total
+
+  // ── nested conditional inside a branch, then read the local in the same branch ─
+  // Exercises the intra-branch rebind: the inner conditional mutates `sum`; the
+  // read after it (still inside the outer branch) must see the mutated value.
+  nestedConditionalIntraBranchRead: flag =>
+    sum := 0
+    flag
+      ifTrue: [
+        flag ifTrue: [sum := sum + 5]
+        sum := sum + 1
+      ]
+    sum
