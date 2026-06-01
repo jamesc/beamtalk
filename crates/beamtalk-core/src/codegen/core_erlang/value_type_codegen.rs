@@ -1175,12 +1175,16 @@ impl CoreErlangGenerator {
                 if let Expression::Assignment { target, value, .. } = expr {
                     if let Expression::Identifier(id) = target.as_ref() {
                         let var_name = id.name.clone();
-                        if let Some(core_var) =
-                            self.emit_threaded_assign_rhs(&var_name, value, body_parts)?
-                        {
+                        if let Some(core_var) = self.emit_threaded_assign_rhs(
+                            &var_name,
+                            value,
+                            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+                            body_parts,
+                        )? {
                             if is_last {
                                 body_parts.push(self.threading_result_tail(
                                     &core_var,
+                                    None,
                                     super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
                                 ));
                             }

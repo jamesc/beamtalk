@@ -29,9 +29,19 @@
 //!   class-method `try_generate_class_method_threaded_last`.
 //! * **Boundary (per-context adapter, the only thing that varies).** A
 //!   [`ThreadingBoundary`] captures how the bound result var is returned/stored:
-//!   the value-type `{Result, Self{N}}` / bare-`Result` shape, or the class-method
-//!   `{class_var_result, Result, ClassVarsN}` / bare-`Result` shape. This mirrors the
+//!   the value-type `{Result, Self{N}}` / bare-`Result` shape, the class-method
+//!   `{class_var_result, Result, ClassVarsN}` / bare-`Result` shape, or the Actor
+//!   `{'reply', Reply, NewState}` `gen_server` reply shape (BT-2378). This mirrors the
 //!   [`NlrBoundary`](super::NlrBoundary) precedent (BT-2361 step 4 / PR #2408).
+//!
+//! The Actor boundary is structurally distinct from the other two: its mutated outer
+//! locals do not ride a *separate* `StateAcc` map that is discarded at the boundary —
+//! element 2 of the construct's `{Value, NewState}` tuple **is** the `gen_server` `State`
+//! map (with `__local__`-prefixed local keys threaded in). The boundary therefore binds
+//! element 2 to the next state version and threads it onward, supplying that primitive
+//! via [`CoreErlangGenerator::lower_actor_threaded_last`] /
+//! [`CoreErlangGenerator::emit_actor_threaded_assign_rhs`] — a genuine *extension* of the
+//! seam, not a fold of the existing `{Value, StateAcc}` transform.
 
 use super::document::{Document, leaf};
 use super::{CoreErlangGenerator, Result};
@@ -75,6 +85,19 @@ pub(super) enum ThreadingBoundary {
     /// constructs mutate *locals*, not class vars, so the wrapping is driven solely by
     /// `class_var_mutated()`.
     ClassMethod,
+    /// Actor (`gen_server`) methods: BT-2378. Structurally distinct from the value-type
+    /// and class-method boundaries:
+    ///
+    /// * **Where threaded state lives.** Actors do not carry mutated outer locals in a
+    ///   *separate* `StateAcc` map that is discarded at the boundary; element 2 of the
+    ///   construct's `{Value, NewState}` tuple **is** the `gen_server` `State` map (with
+    ///   `__local__`-prefixed local keys threaded in). The boundary therefore binds
+    ///   element 2 to the next state version and threads it onward, rather than discarding
+    ///   it.
+    /// * **How the body returns.** Actor method bodies return the `gen_server` reply tuple
+    ///   `{'reply', Reply, NewState}`, not a bare value (or a `{Value, Self}` /
+    ///   `{class_var_result, …}` value-type shape).
+    Actor,
 }
 
 /// A threading construct normalized for the boundary to consume.
@@ -90,6 +113,12 @@ pub(super) struct ThreadedExpr {
     pub(super) value_doc: Document<'static>,
     /// Core Erlang variable bound to the construct's logical value (tuple element 1).
     pub(super) result_var: String,
+    /// Core Erlang variable bound to the construct's threaded state (tuple element 2),
+    /// when the boundary needs it. `None` for value-type / class-method last position,
+    /// where the mutated outer locals ride a *separate* `StateAcc` map that does not
+    /// escape and is discarded. `Some` for the Actor boundary (BT-2378), where element 2
+    /// **is** the `gen_server` `State` map that must be returned in the reply tuple.
+    pub(super) state_var: Option<String>,
     /// Outer locals the construct threads via tuple element 2. Unused in last position
     /// (the mutations do not escape), retained for the design's representation and any
     /// future non-last routing through the unified emitter.
@@ -102,12 +131,15 @@ pub(super) struct ThreadedExpr {
 
 impl CoreErlangGenerator {
     /// Lowers a last/return-position threading construct into a [`ThreadedExpr`],
-    /// binding its logical value (tuple element 1) to a fresh result var via the shared
-    /// value-type transform primitives.
+    /// binding its logical value (tuple element 1) to a fresh result var. The transform is
+    /// selected by `boundary`: the value-type / class-method boundaries share the BT-2342
+    /// `{Value, StateAcc}` transform primitives below; the Actor boundary delegates to
+    /// [`Self::lower_actor_threaded_last`] (BT-2378), whose element 2 is the threaded
+    /// `gen_server` `State` rather than a discardable `StateAcc`.
     ///
     /// Returns `None` when `expr` (after peeling redundant parentheses) is not a
     /// recognized threading construct, so the caller falls back to its generic
-    /// last-expression path. Handles:
+    /// last-expression path. Handles (value-type / class-method boundaries):
     ///
     /// * loops / foldl list-ops yielding `{Value, StateAcc}` — element 1 is unwrapped
     ///   (loops put `'nil'` there; foldl list-ops put the collected/folded value);
@@ -121,7 +153,11 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
         position: ThreadingPosition,
+        boundary: ThreadingBoundary,
     ) -> Result<Option<ThreadedExpr>> {
+        if matches!(boundary, ThreadingBoundary::Actor) {
+            return self.lower_actor_threaded_last(expr, position);
+        }
         let expr = Self::peel_parens(expr);
         let mut parts: Vec<Document<'static>> = Vec::new();
         let result_var = if self.expr_yields_vt_threaded_tuple(expr) {
@@ -137,6 +173,52 @@ impl CoreErlangGenerator {
         Ok(Some(ThreadedExpr {
             value_doc: Document::Vec(parts),
             result_var,
+            state_var: None,
+            threaded_locals: Vec::new(),
+            position,
+        }))
+    }
+
+    /// BT-2378: Actor-boundary transform for a last/return-position control-flow construct
+    /// that threads state (field mutations, conditionals, loops, foldl list-ops, exception
+    /// handlers). Such a construct lowers — via the actor-context `expression_doc` path — to
+    /// a `{Value, NewState}` tuple whose element 2 **is** the `gen_server` `State` map (with
+    /// any `__local__`-prefixed outer-local keys threaded in).
+    ///
+    /// Binds element 1 to a fresh result var and element 2 to the next state version, so the
+    /// boundary tail can emit `{'reply', Result, NewState}`. Returns `None` when `expr` is not
+    /// a state-threading control-flow construct, so the caller falls back to its generic path.
+    fn lower_actor_threaded_last(
+        &mut self,
+        expr: &Expression,
+        position: ThreadingPosition,
+    ) -> Result<Option<ThreadedExpr>> {
+        if !self.control_flow_has_mutations(expr) {
+            return Ok(None);
+        }
+        let tuple_var = self.fresh_temp_var("Tuple");
+        let result_var = self.fresh_temp_var("Result");
+        let expr_doc = self.expression_doc(expr)?;
+        let new_state = self.next_state_var();
+        let value_doc = docvec![
+            "let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            expr_doc,
+            " in let ",
+            leaf::var(result_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple_var.clone()),
+            ") in let ",
+            leaf::var(new_state.clone()),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(tuple_var),
+            ") in ",
+        ];
+        Ok(Some(ThreadedExpr {
+            value_doc,
+            result_var,
+            state_var: Some(new_state),
             threaded_locals: Vec::new(),
             position,
         }))
@@ -156,11 +238,15 @@ impl CoreErlangGenerator {
         boundary: ThreadingBoundary,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<bool> {
-        let Some(threaded) = self.lower_threaded_last(expr, position)? else {
+        let Some(threaded) = self.lower_threaded_last(expr, position, boundary)? else {
             return Ok(false);
         };
         body_parts.push(threaded.value_doc);
-        body_parts.push(self.threading_result_tail(&threaded.result_var, boundary));
+        body_parts.push(self.threading_result_tail(
+            &threaded.result_var,
+            threaded.state_var.as_deref(),
+            boundary,
+        ));
         Ok(true)
     }
 
@@ -183,8 +269,12 @@ impl CoreErlangGenerator {
         &mut self,
         var_name: &str,
         value: &Expression,
+        boundary: ThreadingBoundary,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<Option<String>> {
+        if matches!(boundary, ThreadingBoundary::Actor) {
+            return self.emit_actor_threaded_assign_rhs(var_name, value, body_parts);
+        }
         if self.expr_yields_vt_threaded_tuple(value) {
             return Ok(Some(
                 self.emit_vt_threaded_local_assignment(var_name, value, body_parts)?,
@@ -199,6 +289,67 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
+    /// BT-2378: Actor-boundary assign-RHS transform — `var := <control-flow-with-mutations>`.
+    ///
+    /// The RHS lowers to a `{Value, NewState}` tuple whose element 2 **is** the `gen_server`
+    /// `State` map. Binds the target to element 1, advances the state version to element 2,
+    /// and rebinds any `__local__`-threaded sibling outer-locals from the new state so both
+    /// the assigned value and the mutations are visible to subsequent statements. Returns the
+    /// Core Erlang variable bound to the target, or `None` (without mutating `body_parts`)
+    /// when the RHS is not a state-threading control-flow construct.
+    fn emit_actor_threaded_assign_rhs(
+        &mut self,
+        var_name: &str,
+        value: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<Option<String>> {
+        if !self.control_flow_has_mutations(value) {
+            return Ok(None);
+        }
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        let tuple_var = self.fresh_temp_var("Tuple");
+        let new_state = self.peek_next_state_var();
+        let value_str = self.expression_doc(value)?;
+        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
+            "let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            value_str,
+            " in let ",
+            leaf::var(core_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple_var.clone()),
+            ") in let ",
+            leaf::var(new_state.clone()),
+            " = call 'erlang':'element'(2, ",
+            leaf::var(tuple_var),
+            ") in ",
+        ]];
+        let _ = self.next_state_var();
+        self.bind_var(var_name, &core_var);
+
+        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
+            for var in &threaded_vars {
+                let tv_core = self
+                    .lookup_var(var)
+                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                doc_parts.push(docvec![
+                    "let ",
+                    leaf::var(tv_core),
+                    " = call 'maps':'get'(",
+                    leaf::atom(Self::local_state_key(var)),
+                    ", ",
+                    leaf::var(new_state.clone()),
+                    ") in ",
+                ]);
+            }
+        }
+        body_parts.push(Document::Vec(doc_parts));
+        Ok(Some(core_var))
+    }
+
     /// Builds the Document that returns/stores an already-bound threaded result var for
     /// `boundary`. This is the single place the value-type vs class-method divergence
     /// lives — the boundary adapter the design calls for.
@@ -207,9 +358,25 @@ impl CoreErlangGenerator {
     pub(super) fn threading_result_tail(
         &self,
         result_var: &str,
+        state_var: Option<&str>,
         boundary: ThreadingBoundary,
     ) -> Document<'static> {
         match boundary {
+            ThreadingBoundary::Actor => {
+                // BT-2378: gen_server reply. `state_var` is element 2 of the construct's
+                // `{Value, NewState}` tuple — the threaded gen_server `State` map.
+                let state = state_var.map_or_else(
+                    || self.current_state_var(),
+                    std::string::ToString::to_string,
+                );
+                docvec![
+                    "{'reply', ",
+                    leaf::var(result_var.to_string()),
+                    ", ",
+                    leaf::var(state),
+                    "}",
+                ]
+            }
             ThreadingBoundary::ValueType { has_nlr: true } => {
                 let final_self = self.current_self_var();
                 docvec![
