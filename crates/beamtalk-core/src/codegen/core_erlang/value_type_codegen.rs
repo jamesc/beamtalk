@@ -39,6 +39,10 @@ enum VtBodyExprKind {
     /// Non-last `to:do:` / `to:by:do:` / `timesRepeat:` counted loop that mutates
     /// captured outer locals (BT-2308).
     CountedLoopWithLocalThreading,
+    /// `collect:` / `select:` / `reject:` / `inject:into:` foldl list-op that mutates
+    /// captured outer locals (BT-2342). Unlike the loops, element 1 of the threaded
+    /// `{value, StateAcc}` tuple is a *meaningful* result (the collected/folded value).
+    FoldlListOpWithLocalThreading,
     /// Non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with local mutations (BT-1392).
     ConditionalWithLocalThreading,
     /// Non-last block value with captured mutations (BT-1213).
@@ -919,6 +923,9 @@ impl CoreErlangGenerator {
         if self.is_while_with_vt_local_threading(expr) {
             return VtBodyExprKind::WhileWithLocalThreading;
         }
+        if self.is_foldl_list_op_with_vt_local_threading(expr) {
+            return VtBodyExprKind::FoldlListOpWithLocalThreading;
+        }
         if self.is_conditional_with_vt_local_threading(expr) {
             return VtBodyExprKind::ConditionalWithLocalThreading;
         }
@@ -939,15 +946,13 @@ impl CoreErlangGenerator {
         has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
-        // BT-2308: A last expression that is a local-threading loop
-        // (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:) returns a
-        // `{value, StateAcc}` tuple so the open-extraction machinery can rebind the
-        // threaded locals. In last position those locals don't escape, so the method
-        // value is the construct's *logical* result — element 1 — not the raw tuple.
-        // Unwrap it here. Foldl list-ops (collect:/select:/reject:/inject:into:) are
-        // deliberately NOT covered by `vt_last_expr_returns_threaded_tuple` yet — that
-        // gap is tracked in BT-2342.
-        if self.vt_last_expr_returns_threaded_tuple(expr) {
+        // BT-2308/BT-2342: A last expression that is a local-threading construct — a loop
+        // (whileTrue:/whileFalse:, to:do:/to:by:do:/timesRepeat:) or a foldl list-op
+        // (collect:/select:/reject:/inject:into:) — returns a `{value, StateAcc}` tuple so
+        // the open-extraction machinery can rebind the threaded locals. In last position
+        // those locals don't escape, so the method value is the construct's *logical*
+        // result — element 1 — not the raw tuple. Unwrap it here.
+        if self.expr_yields_vt_threaded_tuple(expr) {
             let tuple_var = self.fresh_temp_var("ThreadedResult");
             let loop_doc = self.expression_doc(expr)?;
             if has_nlr {
@@ -1007,23 +1012,27 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// BT-2308: Returns `true` if `expr`, as a value-type method's last expression,
-    /// generates a `{'nil', StateAcc}` threaded tuple whose element 1 is the logical
-    /// result (`nil`).
+    /// BT-2308/BT-2342: Returns `true` if `expr` evaluates to a `{value, StateAcc}` threaded
+    /// tuple in value-type / class-method context, whose element 1 is the logical result and
+    /// element 2 is the `StateAcc` map of mutated outer locals.
     ///
-    /// Covers the local-threading **loops** — `whileTrue:`/`whileFalse:` and the counted
-    /// loops `to:do:`/`to:by:do:`/`timesRepeat:` — using the same predicates that route
-    /// these to their `VtBodyExprKind`, so detection and the open-extraction path stay
-    /// consistent.
+    /// Covers:
+    /// - the local-threading **loops** — `whileTrue:`/`whileFalse:` and the counted loops
+    ///   `to:do:`/`to:by:do:`/`timesRepeat:` — whose element 1 is `'nil'`;
+    /// - the foldl **list-ops** — `collect:`/`select:`/`reject:`/`inject:into:` — whose
+    ///   element 1 is the meaningful collected/folded result (BT-2342).
     ///
-    /// Deliberately **excludes** the foldl list-ops (`collect:`/`select:`/`reject:`/
-    /// `inject:into:`): those are not yet supported for value-type local threading in any
-    /// position (they leak `{value, StateAcc}` on assignment too and don't thread locals
-    /// back), so unwrapping only their last-position result would be a misleading partial
-    /// fix. `do:` is also excluded — its value-type codegen already returns a bare `nil`.
-    fn vt_last_expr_returns_threaded_tuple(&self, expr: &Expression) -> bool {
+    /// Used both to unwrap such a construct as a method's last expression
+    /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment RHS
+    /// ([`Self::emit_vt_threaded_local_assignment`]). All branches use the same predicates
+    /// that route these to their `VtBodyExprKind`, so detection and the open-extraction path
+    /// stay consistent.
+    ///
+    /// `do:` is excluded — its value-type codegen already returns a bare `nil`.
+    fn expr_yields_vt_threaded_tuple(&self, expr: &Expression) -> bool {
         self.is_while_with_vt_local_threading(expr)
             || self.is_counted_loop_with_vt_local_threading(expr)
+            || self.is_foldl_list_op_with_vt_local_threading(expr)
     }
 
     /// Generate a fallback body for an empty value-type method.
@@ -1139,6 +1148,23 @@ impl CoreErlangGenerator {
                 }
             }
             VtBodyExprKind::LocalAssignment => {
+                // BT-2342: When the RHS is a threading construct (value-type loop or foldl
+                // list-op) it returns a `{value, StateAcc}` tuple. Bind the target to the
+                // logical value (element 1) and rebind the threaded locals from the StateAcc
+                // (element 2), rather than binding the target to the raw tuple.
+                if let Expression::Assignment { target, value, .. } = expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        if self.expr_yields_vt_threaded_tuple(value) {
+                            let var_name = id.name.clone();
+                            let core_var = self
+                                .emit_vt_threaded_local_assignment(&var_name, value, body_parts)?;
+                            if is_last {
+                                self.emit_vt_value_return(&core_var, has_nlr, body_parts);
+                            }
+                            return Ok(());
+                        }
+                    }
+                }
                 if is_last {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
@@ -1195,8 +1221,13 @@ impl CoreErlangGenerator {
             }
             VtBodyExprKind::ConditionalWithLocalThreading => {
                 // BT-1392: Non-last conditional with captured local mutations.
+                // BT-2342: In last position the block is stateful (it reads+writes an outer
+                // local), so the normal dispatch (`True>>ifTrue:`) would call the block with
+                // 0 args and crash. Inline the conditional as a `case` returning the branch's
+                // logical value instead — the threaded locals don't need to escape in last
+                // position.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_conditional_last(expr, has_nlr, body_parts)?;
                 } else {
                     let doc = self.generate_vt_conditional_open(expr)?;
                     body_parts.push(doc);
@@ -1218,6 +1249,18 @@ impl CoreErlangGenerator {
                     self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
                     let doc = self.generate_vt_counted_loop_open(expr)?;
+                    body_parts.push(doc);
+                }
+            }
+            VtBodyExprKind::FoldlListOpWithLocalThreading => {
+                // BT-2342: collect:/select:/reject:/inject:into: with captured local
+                // mutations. These emit a `{value, StateAcc}` tuple where element 1 is the
+                // meaningful result. In last position emit_vt_last_expr unwraps element 1;
+                // in non-last position we extract the threaded locals (discarding the value).
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_foldl_list_op_open(expr)?;
                     body_parts.push(doc);
                 }
             }
@@ -1659,6 +1702,123 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
+    /// BT-2342: Returns the threaded local variable names for any value-type threading
+    /// construct that yields a `{value, StateAcc}` tuple (a `whileTrue:`/`whileFalse:` or
+    /// counted loop, or a `collect:`/`select:`/`reject:`/`inject:into:` foldl list-op).
+    ///
+    /// Used by [`Self::emit_vt_threaded_local_assignment`] to rebind the threaded locals
+    /// after extracting them from the `StateAcc`. Returns the same set the construct's
+    /// codegen packed into the `StateAcc` (`compute_threaded_locals_for_loop`).
+    fn vt_construct_threaded_locals(&self, expr: &Expression) -> Vec<String> {
+        if self.is_while_with_vt_local_threading(expr) {
+            self.get_while_threaded_locals(expr)
+        } else if self.is_counted_loop_with_vt_local_threading(expr) {
+            Self::counted_loop_body_block(expr)
+                .map(|body| self.compute_threaded_locals_for_loop(body, None))
+                .unwrap_or_default()
+        } else {
+            Self::foldl_list_op_body_block(expr)
+                .map(|body| self.compute_threaded_locals_for_loop(body, None))
+                .unwrap_or_default()
+        }
+    }
+
+    /// BT-2342: Emits a value-type local assignment whose RHS is a threading construct
+    /// returning a `{value, StateAcc}` tuple (a loop or foldl list-op).
+    ///
+    /// Binds the target variable to element 1 (the construct's logical value), then rebinds
+    /// each threaded local from the `StateAcc` map at element 2 — so both the assigned value
+    /// and the mutated locals are visible to subsequent method-body expressions. Without
+    /// this, the target would be bound to the raw `{value, StateAcc}` tuple and the threaded
+    /// locals would keep their pre-construct values.
+    ///
+    /// Returns the Core Erlang variable bound to the assignment target.
+    fn emit_vt_threaded_local_assignment(
+        &mut self,
+        var_name: &str,
+        value: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<String> {
+        let rhs_doc = self.expression_doc(value)?;
+        let tuple_var = self.fresh_temp_var("AssignThreaded");
+
+        // Bind the {value, StateAcc} tuple.
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(tuple_var.clone()),
+            " = ",
+            rhs_doc,
+            " in\n",
+        ]);
+
+        // Bind the assignment target to element 1 (the logical value).
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(core_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(tuple_var.clone()),
+            ") in\n",
+        ]);
+        self.bind_var(var_name, &core_var);
+
+        // Extract the StateAcc (element 2) and rebind each threaded local from it.
+        let threaded_locals = self.vt_construct_threaded_locals(value);
+        let rebind: Vec<&String> = threaded_locals
+            .iter()
+            .filter(|tl| *tl != var_name)
+            .collect();
+        if !rebind.is_empty() {
+            let state_var = self.fresh_temp_var("AssignThreadedState");
+            body_parts.push(docvec![
+                "    let ",
+                leaf::var(state_var.clone()),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var),
+                ") in\n",
+            ]);
+            for tl in rebind {
+                let tl_core = self.fresh_var(tl);
+                let key = Self::local_state_key(tl);
+                body_parts.push(docvec![
+                    "    let ",
+                    leaf::var(tl_core.clone()),
+                    " = call 'maps':'get'(",
+                    leaf::atom(key),
+                    ", ",
+                    leaf::var(state_var.clone()),
+                    ") in\n",
+                ]);
+                self.bind_var(tl, &tl_core);
+            }
+        }
+        Ok(core_var)
+    }
+
+    /// BT-2342: Emits a value-type method's final return of an already-bound Core Erlang
+    /// variable: `{Var, Self{N}}` when NLR is active, or `Var` otherwise.
+    fn emit_vt_value_return(
+        &self,
+        core_var: &str,
+        has_nlr: bool,
+        body_parts: &mut Vec<Document<'static>>,
+    ) {
+        if has_nlr {
+            let final_self = self.current_self_var();
+            body_parts.push(docvec![
+                "    {",
+                leaf::var(core_var.to_string()),
+                ", ",
+                leaf::var(final_self),
+                "}\n",
+            ]);
+        } else {
+            body_parts.push(docvec!["    ", leaf::var(core_var.to_string()), "\n"]);
+        }
+    }
+
     /// BT-2308: Returns `true` if `expr` is a `to:do:` / `to:by:do:` / `timesRepeat:`
     /// counted loop whose body block captures and mutates outer local variables in
     /// value-type or class-method context.
@@ -1716,6 +1876,72 @@ impl CoreErlangGenerator {
             &threaded_locals,
             "CountedLoopResult",
             "CountedLoopState",
+        ))
+    }
+
+    /// BT-2342: Returns `true` if `expr` is a `collect:` / `select:` / `reject:` /
+    /// `inject:into:` foldl list-op whose body block captures and mutates outer local
+    /// variables in value-type or class-method context.
+    ///
+    /// Mirrors `is_counted_loop_with_vt_local_threading`: only triggers when the list-op
+    /// codegen will actually pack threaded locals into the `{value, StateAcc}` result
+    /// (i.e. the mutation-threading path is taken), so detection and the extraction stay
+    /// consistent.
+    fn is_foldl_list_op_with_vt_local_threading(&self, expr: &Expression) -> bool {
+        if !self.in_class_method() && !matches!(self.context, CodeGenContext::ValueType) {
+            return false;
+        }
+        let Some(body) = Self::foldl_list_op_body_block(expr) else {
+            return false;
+        };
+        !self.compute_threaded_locals_for_loop(body, None).is_empty()
+    }
+
+    /// BT-2342: Returns the body block of a foldl list-op message send
+    /// (`collect:`, `select:`, `reject:`, `inject:into:`), or `None` if `expr` is not one.
+    ///
+    /// The block argument position differs by selector: `collect:`/`select:`/`reject:`
+    /// take the block as their only argument; `inject:into:` takes it as the second.
+    fn foldl_list_op_body_block(expr: &Expression) -> Option<&Block> {
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        let body_arg = match sel.as_str() {
+            "collect:" | "select:" | "reject:" if arguments.len() == 1 => &arguments[0],
+            "inject:into:" if arguments.len() == 2 => &arguments[1],
+            _ => return None,
+        };
+        if let Expression::Block(body) = body_arg {
+            Some(body)
+        } else {
+            None
+        }
+    }
+
+    /// BT-2342: Generates a non-last foldl list-op (`collect:`/`select:`/`reject:`/
+    /// `inject:into:`) with value-type captured local threading as an **open let chain**,
+    /// extracting the threaded locals from the list-op's `{value, StateAcc}` result (see
+    /// [`Self::emit_vt_loop_open_extraction`]).
+    ///
+    /// In non-last position the list-op's logical value (element 1) is discarded; only the
+    /// threaded-local mutations need to escape.
+    fn generate_vt_foldl_list_op_open(&mut self, expr: &Expression) -> Result<Document<'static>> {
+        // Generate the list-op expression (returns a {value, StateAcc} tuple).
+        let loop_doc = self.expression_doc(expr)?;
+        let threaded_locals = Self::foldl_list_op_body_block(expr)
+            .map(|body| self.compute_threaded_locals_for_loop(body, None))
+            .unwrap_or_default();
+        Ok(self.emit_vt_loop_open_extraction(
+            loop_doc,
+            &threaded_locals,
+            "FoldlListOpResult",
+            "FoldlListOpState",
         ))
     }
 
@@ -1939,6 +2165,190 @@ impl CoreErlangGenerator {
             .collect();
         result.sort();
         result
+    }
+
+    /// BT-2342: Emits a last-position `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose block
+    /// reads+writes an outer local, as an inline `case` returning the branch's logical
+    /// value.
+    ///
+    /// The normal last-expression path dispatches `True>>ifTrue:` (etc.), which invokes the
+    /// block with 0 args — but a block that captures and mutates an outer local is compiled
+    /// to a stateful arity-1 `fun (StateAcc) -> {value, StateAcc1}`, so the 0-arg dispatch
+    /// crashes (BT-2342 failure mode B). Inlining the block into a `case` avoids the dispatch
+    /// entirely. The threaded locals don't need to escape in last position, so the case just
+    /// yields each branch's logical value (the block's last expression, or `'nil'` for the
+    /// missing branch of `ifTrue:`/`ifFalse:`).
+    fn emit_vt_conditional_last(
+        &mut self,
+        expr: &Expression,
+        has_nlr: bool,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<()> {
+        let (receiver, selector_name, arguments) = match expr {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                (receiver.as_ref(), sel, arguments)
+            }
+            // Not a keyword conditional — fall back to the generic last-expression path.
+            _ => return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts),
+        };
+
+        let nil_branch = || Document::Str("'nil'");
+        let (true_branch, false_branch) = match selector_name.as_str() {
+            "ifTrue:" => {
+                let Some(Expression::Block(block)) = arguments.first() else {
+                    return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts);
+                };
+                (self.build_vt_conditional_branch_value(block)?, nil_branch())
+            }
+            "ifFalse:" => {
+                let Some(Expression::Block(block)) = arguments.first() else {
+                    return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts);
+                };
+                (nil_branch(), self.build_vt_conditional_branch_value(block)?)
+            }
+            "ifTrue:ifFalse:" => {
+                let (Some(Expression::Block(tb)), Some(Expression::Block(fb))) =
+                    (arguments.first(), arguments.get(1))
+                else {
+                    return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts);
+                };
+                (
+                    self.build_vt_conditional_branch_value(tb)?,
+                    self.build_vt_conditional_branch_value(fb)?,
+                )
+            }
+            _ => return self.emit_vt_last_expr(expr, 0, has_nlr, body_parts),
+        };
+
+        let cond_var = self.fresh_temp_var("Cond");
+        let cond_doc = self.expression_doc(receiver)?;
+        let result_var = self.fresh_temp_var("CondVal");
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(cond_var.clone()),
+            " = ",
+            cond_doc,
+            " in\n    let ",
+            leaf::var(result_var.clone()),
+            " = case ",
+            leaf::var(cond_var),
+            " of <'true'> when 'true' -> ",
+            true_branch,
+            " <'false'> when 'true' -> ",
+            false_branch,
+            " end in\n",
+        ]);
+        self.emit_vt_value_return(&result_var, has_nlr, body_parts);
+        Ok(())
+    }
+
+    /// BT-2342: Inlines a conditional branch's block body, returning the block's logical
+    /// value (its last expression) rather than the mutated-local tuple that
+    /// [`Self::generate_vt_conditional_branch`] produces.
+    ///
+    /// Intermediate expressions are emitted as sequential `let` bindings (assignments rebind
+    /// their target in scope so later expressions see the update); the final expression is
+    /// the branch's value. An empty block yields `'nil'`.
+    fn build_vt_conditional_branch_value(
+        &mut self,
+        block: &crate::ast::Block,
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        let result = self.build_vt_conditional_branch_value_parts(block);
+        self.pop_scope();
+        result
+    }
+
+    /// Inner implementation for [`Self::build_vt_conditional_branch_value`], bracketed by
+    /// `push_scope`/`pop_scope` so the fallible work always restores scope.
+    fn build_vt_conditional_branch_value_parts(
+        &mut self,
+        block: &crate::ast::Block,
+    ) -> Result<Document<'static>> {
+        let body = super::util::collect_body_exprs(&block.body);
+        if body.is_empty() {
+            return Ok(Document::Str("'nil'"));
+        }
+        let last = body.len() - 1;
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for (i, body_expr) in body.iter().enumerate() {
+            if i == last {
+                // Value position: the assignment's value (for `x := v`) or the expression.
+                let value_expr = match body_expr {
+                    Expression::Assignment { value, .. } => value.as_ref(),
+                    other => *other,
+                };
+                // BT-2342: a threading construct (loop / foldl list-op mutating captured
+                // locals) here yields a `{value, StateAcc}` tuple. The branch value is its
+                // logical result — element 1 — not the raw tuple. The threaded locals don't
+                // need to escape in value position, so unwrap without extracting them.
+                if self.expr_yields_vt_threaded_tuple(value_expr) {
+                    let tuple_var = self.fresh_temp_var("BranchThreadedResult");
+                    let val_doc = self.expression_doc(value_expr)?;
+                    parts.push(docvec![
+                        "let ",
+                        leaf::var(tuple_var.clone()),
+                        " = ",
+                        val_doc,
+                        " in call 'erlang':'element'(1, ",
+                        leaf::var(tuple_var),
+                        ")",
+                    ]);
+                } else {
+                    parts.push(self.expression_doc(value_expr)?);
+                }
+            } else if Self::is_local_var_assignment(body_expr) {
+                if let Expression::Assignment { target, value, .. } = body_expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        // BT-2342: a threading-construct RHS returns a `{value, StateAcc}`
+                        // tuple. Bind the target to element 1 and rebind the threaded locals
+                        // from the StateAcc, so both the assigned value and the mutated locals
+                        // are visible to later statements in this branch — rather than binding
+                        // the target to the raw tuple.
+                        if self.expr_yields_vt_threaded_tuple(value) {
+                            self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
+                        } else {
+                            let core_var = self
+                                .lookup_var(&id.name)
+                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                            let val_doc = self.expression_doc(value)?;
+                            parts.push(docvec![
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in ",
+                            ]);
+                            self.bind_var(&id.name, &core_var);
+                        }
+                    }
+                }
+            } else if self.expr_yields_vt_threaded_tuple(body_expr) {
+                // BT-2342: a non-last loop / foldl list-op that mutates captured locals returns
+                // a `{value, StateAcc}` tuple. Extract and rebind the threaded locals so later
+                // statements in this branch see the updates (the value itself is discarded).
+                let loop_doc = self.expression_doc(body_expr)?;
+                let threaded_locals = self.vt_construct_threaded_locals(body_expr);
+                let doc = self.emit_vt_loop_open_extraction(
+                    loop_doc,
+                    &threaded_locals,
+                    "BranchThreadedResult",
+                    "BranchThreadedState",
+                );
+                parts.push(doc);
+            } else {
+                let tmp = self.fresh_temp_var("seq");
+                let doc = self.expression_doc(body_expr)?;
+                parts.push(docvec!["let ", leaf::var(tmp), " = ", doc, " in ",]);
+            }
+        }
+        Ok(Document::Vec(parts))
     }
 
     /// BT-1392: Generates a non-last `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` with captured

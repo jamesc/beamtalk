@@ -44,8 +44,10 @@ TestCase subclass: ControlFlowRhsStateTest
 
   testFieldAssignFromCollect =>
     // self.x := items collect: [:item | self.y := self.y + 1. item * 2]
-    // y should be incremented for each item, x should be the collected result
+    // y should be incremented for each item, x should be the collected result.
+    // BT-2342: the receiver is an Array (#[...]), so the result reconstructs an
+    // Array (#[...]) to match the pure collect: path — not a raw list (#(...)).
     a := ControlFlowRhsActor spawn
     result := a assignFieldFromCollect: #[1, 2, 3]
-    self assert: result equals: #(2, 4, 6)
+    self assert: result equals: #[2, 4, 6]
     self assert: a getY equals: 3

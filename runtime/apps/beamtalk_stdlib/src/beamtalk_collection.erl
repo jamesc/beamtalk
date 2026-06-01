@@ -20,6 +20,7 @@ Erlang helpers.
 """.
 
 -export([
+    from_list_like/2,
     inject_into/3,
     to_list/1
 ]).
@@ -46,6 +47,28 @@ inject_into(Self, Initial, Block) ->
         Initial,
         List
     ).
+
+-doc """
+Reconstruct a `collect:`/`select:`/`reject:` result so its type matches the
+original receiver, mirroring the pure (non-mutating) list-op path.
+
+The stateful (mutation-threading) list-op codegen folds over `to_list/1` of the
+receiver and produces a raw Erlang list. This helper wraps that list back into
+the receiver's representation:
+
+- String receiver (binary) → binary (`iolist_to_binary/1`)
+- Array receiver → `Array` (`beamtalk_array:from_list/1`)
+- anything else (already an Erlang list, or another collection) → the list as-is
+
+Called from compiler-generated Core Erlang (`list_ops`) — see BT-2342.
+""".
+-spec from_list_like(term(), list()) -> term().
+from_list_like(Recv, List) when is_binary(Recv) ->
+    erlang:iolist_to_binary(List);
+from_list_like(#{'$beamtalk_class' := 'Array'}, List) ->
+    beamtalk_array:from_list(List);
+from_list_like(_Recv, List) ->
+    List.
 
 -doc """
 Convert any collection to a list by iterating with do:.
