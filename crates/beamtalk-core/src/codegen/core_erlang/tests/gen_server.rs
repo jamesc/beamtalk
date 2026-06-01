@@ -363,10 +363,17 @@ fn test_generate_repl_module_with_while_true_mutation() {
         code.contains("fun (StateAcc) ->"),
         "Condition lambda should accept StateAcc parameter. Got:\n{code}"
     );
-    // BT-181: Condition should read x from StateAcc, not outer scope
+    // BT-181 + BT-2365: Condition should read x from StateAcc, not outer scope.
+    // Lazy resolution (ADR 0081 Phase 1) now applies inside loop bodies too, so
+    // the read is a `maps:find` against StateAcc with a `resolve_name`
+    // fallthrough rather than a bare `maps:get` (which would `badkey` on a miss).
     assert!(
-        code.contains("maps':'get'('x', StateAcc)"),
-        "Condition should read x from StateAcc. Got:\n{code}"
+        code.contains("maps':'find'('x', StateAcc)"),
+        "Condition should look up x in StateAcc via maps:find. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_workspace':'resolve_name'(StateAcc, 'x')"),
+        "Condition should fall through to resolve_name on a StateAcc miss. Got:\n{code}"
     );
     // BT-181: Condition should be applied with StateAcc argument
     assert!(
@@ -859,11 +866,18 @@ fn test_repl_loop_mutations_accumulate_plain_key() {
         "BT-800: REPL mode must never use __local__ prefix for x. Got:\n{code}"
     );
 
-    // BT-800: Reads inside loop body must use StateAcc (not State) so they get
-    // the accumulated value from the previous iteration.
+    // BT-800 + BT-2365: Reads inside loop body must use StateAcc (not State) so
+    // they get the accumulated value from the previous iteration. Lazy
+    // resolution (ADR 0081 Phase 1) now applies inside loop bodies too, so the
+    // read is a `maps:find` against StateAcc with a `resolve_name` fallthrough
+    // rather than a bare `maps:get` (which would `badkey` on a miss).
     assert!(
-        code.contains("maps':'get'('x', StateAcc)"),
-        "BT-800: Read inside loop must use StateAcc to get accumulated value. Got:\n{code}"
+        code.contains("maps':'find'('x', StateAcc)"),
+        "BT-800: Read inside loop must look up x in StateAcc via maps:find. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_workspace':'resolve_name'(StateAcc, 'x')"),
+        "BT-800: Read inside loop must fall through to resolve_name on a StateAcc miss. Got:\n{code}"
     );
 
     // BT-800: Loop must thread state correctly (arity-2 letrec, returns {nil, StateAcc}).

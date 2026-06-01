@@ -81,6 +81,37 @@ lazyBound
 // => ERROR: Undefined variable
 
 // ===========================================================================
+// LAZY RESOLUTION FROM INSIDE A LOOP / BLOCK BODY (BT-2365 CodeRabbit fix)
+// ===========================================================================
+//
+// Free workspace globals referenced from inside a do:/collect: block body must
+// also resolve lazily. Before the fix, identifiers inside loop bodies still
+// emitted a bare maps:get/2 (and singleton dispatch resolved post-arg), so any
+// singleton or bind:as: name used inside a block crashed with {badkey,_}.
+
+// A singleton (Transcript) dispatched from inside a do: block — no badkey.
+#(1, 2, 3) do: [:n | Transcript show: "tick"]
+// => _
+
+// A bind:as: global read from inside a collect: block resolves lazily and is
+// folded into the result (1000 + each element). A large base keeps the result
+// list out of the small-integer range so it renders as an array rather than a
+// charlist (an unrelated, pre-existing display heuristic).
+Workspace bind: 1000 as: #loopBase
+// => nil
+
+#(1, 2, 3) collect: [:n | loopBase + n]
+// => [1001,1002,1003]
+
+// The same global is also resolvable inside an inject:into: block body.
+#(1, 2, 3) inject: 0 into: [:acc :n | acc + n + loopBase]
+// => 3006
+
+// Clean up.
+Workspace unbind: #loopBase
+// => nil
+
+// ===========================================================================
 // UNDEFINED VARIABLE STILL RAISED FOR GENUINELY UNKNOWN NAMES
 // ===========================================================================
 

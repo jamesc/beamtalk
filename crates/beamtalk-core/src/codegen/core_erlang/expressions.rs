@@ -256,7 +256,7 @@ impl CoreErlangGenerator {
                             }
                         }
                     };
-                    // BT-2365 (ADR 0081 Phase 1): in REPL top-level context a free
+                    // BT-2365 (ADR 0081 Phase 1): in REPL context a free
                     // identifier is no longer guaranteed to be present in State —
                     // workspace globals (singletons, bind:as:) are resolved lazily
                     // rather than eagerly injected into the session map. So instead
@@ -265,10 +265,22 @@ impl CoreErlangGenerator {
                     // runtime resolver, which checks bind:as: -> singletons ->
                     // classes -> undefined_variable. Actor/ValueType field access is
                     // unchanged (the field must exist in State/Self).
-                    if self.context == super::CodeGenContext::Repl
-                        && !self.in_loop_body
-                        && !self.in_hybrid_loop
-                    {
+                    //
+                    // This applies in loop/hybrid-loop bodies too: `state_var`
+                    // above already resolves to the context-appropriate map
+                    // (`StateAcc`/`StateAccN` for plain loops, `StateN` for hybrid
+                    // loops), and a free workspace global referenced inside a
+                    // `do:`/`collect:` block must resolve lazily rather than crash
+                    // with `badkey`. Captured locals (the loop accumulator and any
+                    // `__local__*` keys) are unpacked into bound vars at the loop
+                    // body entry, so they are handled by the `lookup_var` branch
+                    // above and never reach this fallthrough.
+                    //
+                    // Note: `resolve_name/2` does its own `maps:find(Name, Locals)`
+                    // as tier 1, then falls through to the live workspace tiers, so
+                    // passing `StateAcc`/`StateN` as the locals map is correct — a
+                    // miss there proceeds to bind:as: -> singletons -> classes.
+                    if self.context == super::CodeGenContext::Repl {
                         let resolved_var = self.fresh_var("Resolved");
                         Ok(docvec![
                             "case call 'maps':'find'(",
