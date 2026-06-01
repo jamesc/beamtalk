@@ -178,6 +178,11 @@ struct BodyEffects {
     has_tier2_threaded_assign: bool,
     /// Body has nested list ops incompatible with direct-params (BT-1329).
     has_non_tuple_safe_list_op: bool,
+    /// BT-2363: Body has a nested counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`)
+    /// that mutates a threaded outer local. The inner loop returns a `{value, StateAcc}`
+    /// tuple that must be unpacked via `element(2, …)` to thread the local back out —
+    /// incompatible with direct-params mode (which has no `StateAcc` to rebuild into).
+    has_nested_counted_loop_mutation: bool,
     /// Body has control-flow sub-expressions with field mutations.
     has_cf_mutations: bool,
     /// Body has inline conditionals writing to threaded locals.
@@ -226,6 +231,13 @@ impl BodyEffects {
             )
         });
 
+        // BT-2363: Detect a nested counted loop that mutates a threaded outer local.
+        // Such an inner loop returns a `{value, StateAcc}` tuple; the outer loop must
+        // unpack `element(2, …)` to propagate the local — only possible in StateAcc mode.
+        let has_nested_counted_loop_mutation = body.body.iter().any(|s| {
+            generator.expr_has_nested_counted_loop_threading(&s.expression, threaded_locals)
+        });
+
         // Guard: control-flow sub-expressions with field mutations (e.g.
         // `flag ifTrue: [self.n := ...]`). These generate `StateAcc`-dependent code.
         let has_cf_mutations = body
@@ -255,6 +267,7 @@ impl BodyEffects {
             cond_has_state_effects,
             has_tier2_threaded_assign,
             has_non_tuple_safe_list_op,
+            has_nested_counted_loop_mutation,
             has_cf_mutations,
             has_conditional_threaded_writes,
             last_is_destructure,
@@ -421,6 +434,7 @@ impl ThreadingPlan {
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
             && !effects.has_non_tuple_safe_list_op
+            && !effects.has_nested_counted_loop_mutation
     }
 
     /// BT-1276: Select tuple accumulator for foldl list-ops when eligible: body has
@@ -2729,6 +2743,15 @@ impl CoreErlangGenerator {
                 &mut list_op_cross_scope_writes,
             );
         }
+        // BT-2363: also thread write-only outer locals mutated inside nested counted/list-op
+        // loops (those that the read+write `collect_list_op_cross_scope_mutations` misses).
+        for stmt in &body.body {
+            self.collect_nested_loop_outer_local_writes(
+                &stmt.expression,
+                &block_params,
+                &mut list_op_cross_scope_writes,
+            );
+        }
 
         match self.context {
             CodeGenContext::Actor => {
@@ -3131,16 +3154,33 @@ impl CoreErlangGenerator {
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
         let body_block = match sel.as_str() {
-            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:" => {
-                if let Some(Expression::Block(block)) = arguments.first() {
+            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
+            // BT-2363: nested counted loops (`timesRepeat:`/`to:do:`/`to:by:do:`)
+            // capture and mutate outer locals just like list ops. Their body block
+            // is the last argument. Including them here makes the *outer* loop's
+            // threaded-locals computation see writes buried in an inner counted loop,
+            // so the outer loop threads them via StateAcc instead of dropping them.
+            | "timesRepeat:" => {
+                if let Some(Expression::Block(block)) = arguments.last() {
                     block
                 } else {
                     return;
                 }
             }
-            "inject:into:" => {
+            "inject:into:" | "to:do:" => {
                 if arguments.len() == 2 {
                     if let Expression::Block(block) = &arguments[1] {
+                        block
+                    } else {
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+            "to:by:do:" => {
+                if arguments.len() == 3 {
+                    if let Expression::Block(block) = &arguments[2] {
                         block
                     } else {
                         return;
@@ -3168,6 +3208,76 @@ impl CoreErlangGenerator {
                 out.insert(v.clone());
             }
         }
+
+        // BT-2363: Recurse into the inner block's statements so deeper nesting
+        // (a counted/list op nested two or more levels deep) is still detected.
+        // `analyze_block` does not propagate writes out of nested non-conditional
+        // blocks, so a write buried in a doubly-nested loop is invisible above
+        // without this recursion. Block parameters of the inner block are not
+        // outer locals, so drop any cross-scope name shadowed by a block param.
+        let mut nested = std::collections::HashSet::new();
+        for stmt in &body_block.body {
+            Self::collect_list_op_cross_scope_mutations_recursive(
+                &stmt.expression,
+                facts,
+                &mut nested,
+            );
+        }
+        for v in nested {
+            if !block_params.contains(v.as_str()) {
+                out.insert(v);
+            }
+        }
+    }
+
+    /// BT-2363: Returns `true` if `expr` is (or wraps, via assignment RHS or parens) a
+    /// nested counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`) whose body mutates one
+    /// of the outer loop's `threaded_locals`.
+    ///
+    /// Such an inner loop returns a `{value, StateAcc}` tuple whose `element(2, …)` must
+    /// be unpacked to thread the local back out; that is only possible when the outer loop
+    /// uses `StateAcc` mode, so the presence of this pattern disqualifies direct-params.
+    pub(super) fn expr_has_nested_counted_loop_threading(
+        &self,
+        expr: &Expression,
+        threaded_locals: &[String],
+    ) -> bool {
+        use crate::ast::MessageSelector;
+
+        let inner = match Self::peel_parens(expr) {
+            Expression::Assignment { value, .. } => Self::peel_parens(value),
+            other => other,
+        };
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = inner
+        else {
+            return false;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        let body_block = match sel.as_str() {
+            "timesRepeat:" => match arguments.last() {
+                Some(Expression::Block(block)) => block,
+                _ => return false,
+            },
+            "to:do:" if arguments.len() == 2 => match &arguments[1] {
+                Expression::Block(block) => block,
+                _ => return false,
+            },
+            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
+                Expression::Block(block) => block,
+                _ => return false,
+            },
+            _ => return false,
+        };
+
+        // The inner counted loop threads back exactly the outer locals its own body
+        // mutates (read+write or write-only). If any of those overlap the threaded set
+        // the outer loop must thread, the inner tuple must be unpacked into StateAcc.
+        let inner_threaded = self.compute_threaded_locals_for_loop(body_block, None);
+        inner_threaded.iter().any(|v| threaded_locals.contains(v))
     }
 
     /// BT-1329: Returns `true` if `expr` is a list op (do:, collect:, select:, reject:,
@@ -3298,6 +3408,7 @@ mod tests {
             cond_has_state_effects: false,
             has_tier2_threaded_assign: false,
             has_non_tuple_safe_list_op: false,
+            has_nested_counted_loop_mutation: false,
             has_cf_mutations: false,
             has_conditional_threaded_writes: false,
             last_is_destructure: false,

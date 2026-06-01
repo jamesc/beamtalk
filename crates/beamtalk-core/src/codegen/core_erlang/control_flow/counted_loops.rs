@@ -553,3 +553,52 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod bt2363_nested_counted_loops {
+    use crate::codegen::core_erlang::tests::codegen;
+
+    // BT-2363: A nested `timesRepeat:` mutating an outer local must thread the inner
+    // loop's `{value, StateAcc}` result back out through the OUTER loop. Previously the
+    // outer loop was emitted as a plain `beamtalk_message_dispatch:send` (no threading)
+    // and the inner mutation was dropped, returning 0 instead of the accumulated value.
+    #[test]
+    fn test_nested_times_repeat_threads_outer_local() {
+        let src = "Object subclass: NestedRepro\n\n  run =>\n    total := 0\n    3 timesRepeat: [2 timesRepeat: [total := total + 1]]\n    total\n";
+        let code = codegen(src);
+        // Outer loop must thread via StateAcc (not direct-params), so it can unpack the
+        // inner loop's tuple result.
+        assert!(
+            code.contains("fun (_loopidx") && code.contains(", StateAcc) ->"),
+            "outer nested-loop must use StateAcc threading, not direct-params. Got:\n{code}"
+        );
+        // The inner loop's tuple result is unpacked via element(2, _NestTuple...) and the
+        // updated StateAcc is fed to the next outer iteration.
+        assert!(
+            code.contains("_NestTuple"),
+            "outer loop must bind the inner loop result to a _NestTuple var. Got:\n{code}"
+        );
+        assert!(
+            code.contains("element'(2, _NestTuple"),
+            "outer loop must extract element(2) of the inner loop tuple. Got:\n{code}"
+        );
+        // `total` is packed/unpacked under the __local__ key throughout.
+        assert!(
+            code.contains("maps':'get'('__local__total'")
+                && code.contains("maps':'put'('__local__total'"),
+            "nested loop must thread 'total' under the __local__ key. Got:\n{code}"
+        );
+    }
+
+    // BT-2363: write-only outer-local mutation inside a nested counted loop must also be
+    // threaded back (the read+write detector alone misses write-only mutations).
+    #[test]
+    fn test_nested_times_repeat_write_only_outer_local_threaded() {
+        let src = "Object subclass: NestedRepro\n\n  run =>\n    last := 0\n    3 timesRepeat: [2 timesRepeat: [last := 7]]\n    last\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("maps':'get'('__local__last'"),
+            "write-only nested mutation of 'last' must be threaded. Got:\n{code}"
+        );
+    }
+}

@@ -119,3 +119,35 @@ TestCase subclass: CountedLoopMutationTest
       by: 2
       do: [:j | i := i + 1]
     self assert: i equals: 5
+
+  // ── BT-2363: nested counted loops must thread the outer local back out ────────
+  // A nested timesRepeat: previously dropped the inner loop's mutation of an outer
+  // local (the inner {value, StateAcc} tuple was never threaded through the outer
+  // loop), returning 0 instead of the accumulated value.
+  testNestedTimesRepeatReadWrite =>
+    total := 0
+    3 timesRepeat: [2 timesRepeat: [total := total + 1]]
+    self assert: total equals: 6
+
+  testNestedTimesRepeatWriteOnly =>
+    last := 0
+    3 timesRepeat: [2 timesRepeat: [last := 7]]
+    self assert: last equals: 7
+
+  // Inner to:do: accumulates the index inside an outer timesRepeat:.
+  testNestedToDoInsideTimesRepeat =>
+    sum := 0
+    2 timesRepeat: [1 to: 3 do: [:i | sum := sum + i]]
+    self assert: sum equals: 12
+
+  // Outer to:do: with an inner timesRepeat: mutating an outer local.
+  testNestedTimesRepeatInsideToDo =>
+    count := 0
+    1 to: 3 do: [:i | 4 timesRepeat: [count := count + 1]]
+    self assert: count equals: 12
+
+  // Triple nesting: 2 * 2 * 2 = 8 increments.
+  testTriplyNestedTimesRepeat =>
+    total := 0
+    2 timesRepeat: [2 timesRepeat: [2 timesRepeat: [total := total + 1]]]
+    self assert: total equals: 8
