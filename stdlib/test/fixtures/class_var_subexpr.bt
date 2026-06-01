@@ -125,3 +125,17 @@ Object subclass: ClassVarSubExpr
 
   // BT-1942: Explicit `^` return of a nil-protocol intrinsic result.
   class tickReturnIsNil => ^(self tick) isNil
+
+  // BT-2349: class var mutated earlier, then a last-position foldl list-op that
+  // mutates an outer local. The method result must be the folded value wrapped in
+  // `{class_var_result, Value, ClassVarsN}` so the earlier counter mutation persists
+  // AND the call returns the accumulator (not the raw threading tuple).
+  class tickThenSum: items =>
+    _ignored := self tick
+    seen := 0
+    items
+      inject: 0
+      into: [:acc :x |
+        seen := seen + 1
+        acc + x
+      ]
