@@ -1,7 +1,7 @@
 # ADR 0081: First-Class Session Object — Walkable Binding Layers
 
 ## Status
-Proposed (2026-05-09)
+Accepted (2026-06-01)
 
 ## Context
 
