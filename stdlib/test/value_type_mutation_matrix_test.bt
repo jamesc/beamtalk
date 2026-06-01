@@ -35,10 +35,10 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   actorCorpus => MutationCorpusActor spawn
 
-  // Pending switch for BT-2342 value-type gaps. While this returns `true` the
-  // affected value-type cells `skip` (their ground-truth asserts are kept,
-  // ready to run). When BT-2342 lands, flip this to `false` to enable them.
-  bt2342Pending => true
+  // Pending switch for BT-2342 value-type gaps. BT-2342 has landed, so the
+  // affected value-type cells now run their ground-truth asserts. Kept as a
+  // switch for documentation/bisection.
+  bt2342Pending => false
 
   // Pending switch for BT-2355 Actor-context outer-local threading gaps
   // surfaced by this matrix (write-only/read+write conditionals, ifTrue:ifFalse:
