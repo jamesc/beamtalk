@@ -332,6 +332,16 @@ impl CoreErlangGenerator {
 
         if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value) {
             for var in &threaded_vars {
+                // BT-2378: skip the assignment target itself. When the RHS construct mutates
+                // the same local internally (`x := (1 to: 3 do: [:i | x := x + i])`), `var_name`
+                // appears in `threaded_vars`; rebinding it from `NewState` would emit a second
+                // `let` overwriting the value already bound from element 1 (the construct's
+                // *logical* result) with the threaded-local value. The target must observe the
+                // logical result, so it is excluded here — mirroring the value-type assign-RHS
+                // guard in `emit_vt_threaded_local_assignment`.
+                if var == var_name {
+                    continue;
+                }
                 let tv_core = self
                     .lookup_var(var)
                     .map_or_else(|| Self::to_core_erlang_var(var), String::clone);

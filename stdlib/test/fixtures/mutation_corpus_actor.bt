@@ -169,6 +169,21 @@ Actor subclass: MutationCorpusActor
       ]
     t
 
+  // BT-2378: AssignRhs where the assignment *target* is itself the threaded local
+  // mutated inside the construct. The target must observe the construct's logical
+  // result (element 1 of the {value, StateAcc} tuple — here the inject fold = 106),
+  // NOT the threaded accumulator value (__local__total = 6). The Actor assign-RHS path
+  // wrongly rebound the target from the threaded state before the fix.
+  injectAssignRhsTargetMutated =>
+    total := 0
+    total := (#(1, 2, 3)
+      inject: 100
+      into: [:a :b |
+        total := total + b
+        a + b
+      ])
+    total
+
   // ── detect: ─────────────────────────────────────────────────────────────────
   detectNonLastReadWrite =>
     n := 0
