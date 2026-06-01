@@ -14,6 +14,8 @@
 - **`ClassBuilder classMethods:` arity validation** — a `classMethods:` block whose parameter count does not match its selector (e.g. `#{ #greet => [42] }`, forgetting the leading `:self`) is now rejected at compile time with a clear diagnostic naming the selector and expected shape, instead of silently lowering to a wrong-arity fun that crashed with an opaque `error:undef` only when the class method was first called. A computed (non-literal) `classMethods:` fun of the wrong arity is rejected at registration time with a structured `#beamtalk_error{}` (`arity_mismatch`), since its arity is unknown until runtime. Correctly-shaped blocks and funs (following the `fun(ClassSelf, ClassVars, …)` convention) are unaffected (BT-2276).
 - **`Behaviour compile:source:` / `tryCompile:source:`** — keyword method-patching primitives (ADR 0082 Phase 1). `aClass compile: #sel source: "body"` installs a method and logs a durable ChangeEntry; `tryCompile:source:` does the same with ephemeral intent. Both take the body as a String value (no escaping needed) and are equivalent in effect to `>>` — tools (MCP, LSP, browser editors) call these directly. Every successful in-memory patch (including `>>`) now emits a ChangeEntry to the workspace ChangeLog (BT-2283).
 - Fix `addClassMethod:body:` allowing `super` in blocks with non-literal selectors — the name resolver now mirrors codegen's literal-symbol gate, correctly rejecting `super` when the selector is not a compile-time known symbol (BT-2279).
+- Fix `Integer to:do:` / `to:by:do:` not threading outer-variable mutations back to the caller — `last := 0. 1 to: 5 do: [:i | last := i]` now correctly leaves `last` at 5 instead of silently dropping the mutation (BT-2308).
+- Fix float literals that overflow `f64` (e.g. `1e309`) producing confusing `erlc` failures — now rejected at parse time with a clear "Float literal out of range" diagnostic (BT-2338).
 
 ### Standard Library
 
@@ -82,6 +84,7 @@
 - **LSP `textDocument/references` declaration-merge** — `context.includeDeclaration` now overlays method-definition sites (selector cursor) or class-declaration spans (class cursor) onto reference results. Both runtime and cold-file paths respect the flag identically (BT-2240).
 - **LSP `textDocument/prepareTypeHierarchy` / `typeHierarchy/supertypes` / `typeHierarchy/subtypes`** — type hierarchy navigation answering from the in-process `ClassHierarchy` index for both runtime-attached and cold-file modes (BT-2242).
 - **LSP `textDocument/prepareCallHierarchy` / `callHierarchy/incomingCalls` / `callHierarchy/outgoingCalls`** — call hierarchy navigation. Incoming calls route through the `nav-query` `senders` channel; outgoing calls walk the method-body AST via `SystemNavigation messagesSentBy:` (BT-2243).
+- Fix LSP `textDocument/prepareTypeHierarchy` resolving to synthetic protocol headers instead of real classes when both shared a name — now honours the BT-1933 protocol/class shadowing rule, so goto-definition and type-hierarchy agree on resolution (#2381).
 
 ### Internal
 
@@ -110,6 +113,10 @@
 - Byte-span resolver validates that the parser can resolve exact method byte spans for flush-time splice replacement — 1347 methods across 161 files pass no-op round-trip (ADR 0082 Phase 0) (BT-2281).
 - Extract `kill_and_wait/1` and `delegate_error/1` helpers in `beamtalk_actor.erl` — zero behavior change (BT-2272).
 - Replace 7 `format!()` calls with `versioned_var` helper in Core Erlang variable-name generators — continues the BT-875 cleanup (BT-2305).
+- **ADR 0089 Phase 3 flag-day** — removed `Document::String` and `Document::Eco` from the public API, structurally closing the BT-875 recurrence vector. All codegen now flows exclusively through typed `document::leaf` / `unparse::leaf` helpers (BT-2331).
+- Migrate remaining codegen modules (`expressions.rs`, `intrinsics.rs`, `repl/codegen.rs`, `control_flow/`, `dispatch_codegen.rs`, `value_type_codegen.rs`, `gen_server/`, `mod.rs`, primitives) to `document::leaf` API (ADR 0089 Phase 2) (BT-2320..BT-2330).
+- Use canonical `safe_class_method_fn_name` in supervisor and spec codegen — adds atom-length safety guard for pathologically long selectors (BT-2339).
+- Remove `capture_expression` in favour of direct `Document` splicing, closing the value-type raw-fragment leaf seam (BT-2348).
 
 ## 0.4.0 — 2026-04-27
 
