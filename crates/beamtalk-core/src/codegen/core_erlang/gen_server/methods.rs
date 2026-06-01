@@ -2702,6 +2702,15 @@ impl CoreErlangGenerator {
                     if self.needs_mutation_threading(&analysis) {
                         return true;
                     }
+                    // BT-2356: a nested list op inside a branch may mutate an outer
+                    // local even when the branch block itself has no direct mutation
+                    // (`analyze_block` does not propagate writes out of nested blocks).
+                    // Without this the conditional is classified as pure and the
+                    // nested op's mutation is dropped — e.g.
+                    // `flag ifTrue: [ items do: [:x | sum := sum + x] ]`.
+                    if self.body_has_list_op_cross_scope_mutations(block) {
+                        return true;
+                    }
                 }
             }
             return false;

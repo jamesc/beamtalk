@@ -664,9 +664,16 @@ fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
         code.contains("let Count = call 'erlang':'element'(2, "),
         "anySatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
+    // BT-2356: the fold packs the final 'count' into the StateAcc map at exit so the
+    // outer method body can thread it back via maps:get — the tuple accumulator is an
+    // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
     assert!(
-        !code.contains("maps':'get'('__local__count'"),
-        "anySatisfy: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
+        code.contains("maps':'put'('__local__count'"),
+        "anySatisfy: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'get'('__local__count'"),
+        "anySatisfy: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
     );
 }
 
@@ -726,9 +733,16 @@ fn test_all_satisfy_with_local_mutation_uses_tuple_acc() {
         code.contains("let Count = call 'erlang':'element'(2, "),
         "allSatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
     );
+    // BT-2356: the fold packs the final 'count' into the StateAcc map at exit so the
+    // outer method body can thread it back via maps:get — the tuple accumulator is an
+    // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
     assert!(
-        !code.contains("maps':'get'('__local__count'"),
-        "allSatisfy: with local mutation should NOT use maps:get for '__local__count'. Got:\n{code}"
+        code.contains("maps':'put'('__local__count'"),
+        "allSatisfy: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'get'('__local__count'"),
+        "allSatisfy: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
     );
 }
 

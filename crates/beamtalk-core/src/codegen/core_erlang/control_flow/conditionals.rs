@@ -718,6 +718,40 @@ mod tests {
     }
 
     #[test]
+    fn test_nested_list_op_in_branch_threads_outer_local() {
+        // BT-2356 case (B): a nested list op (`do:`) inside an `ifTrue:` branch
+        // mutates an outer local. The conditional must be recognised as
+        // state-threading (via the nested cross-scope mutation), the local must be
+        // seeded, packed by the nested op, and extracted after the conditional.
+        let src = concat!(
+            "Actor subclass: Ctr\n",
+            "  state: x = 0\n\n",
+            "  run: flag =>\n",
+            "    sum := 0\n",
+            "    flag ifTrue: [#(1, 2, 3) do: [:i | sum := sum + i]]\n",
+            "    sum\n",
+        );
+        let code = codegen(src);
+        // The conditional must compile to an inline case, NOT a runtime dispatch.
+        // A runtime `send(_, 'ifTrue:', [Fun])` returns `nil` on the false branch, so
+        // the sequencer's `element(2, _)` unpack crashes with badarg (BT-2356 regression).
+        assert!(
+            !code.contains("'ifTrue:'"),
+            "nested-op-in-branch must inline ifTrue: (no runtime 'ifTrue:' dispatch). Got:\n{code}"
+        );
+        // The outer local 'sum' is seeded into the StateAcc before the branch.
+        assert!(
+            code.contains("maps':'put'('__local__sum'"),
+            "nested-op-in-branch should pack/seed '__local__sum'. Got:\n{code}"
+        );
+        // The method body must extract the threaded 'sum' back after the conditional.
+        assert!(
+            code.contains("maps':'get'('__local__sum'"),
+            "nested-op-in-branch should extract 'sum' via maps:get after the conditional. Got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_if_false_mutation_threads_state_in_false_arm() {
         // Actor ifFalse: with field mutation compiles to inline case with false branch mutating
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  dec: flag =>\n    flag ifFalse: [self.n := self.n - 1].\n    self.n\n";
