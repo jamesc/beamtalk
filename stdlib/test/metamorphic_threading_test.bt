@@ -70,12 +70,13 @@ TestCase subclass: MetamorphicThreadingTest
 
   actorCorpus => MutationCorpusActor spawn
 
-  // BT-2371: class-method conditional-as-parenthesized-assignment-RHS still
-  // drops sibling-local threading. Mirrors the matrix test's
-  // bt2360ClassMethodCondAssignRhsPending switch. While true, the class-method
-  // context is excluded from the ifTrueIfFalseAssignRhs context-invariance
-  // relation. Flip off when BT-2371 lands.
-  bt2371ClassMethodCondAssignRhsPending => true
+  // Class-method conditional-as-parenthesized-assignment-RHS still drops
+  // sibling-local threading (tracked as BT-2371). Same switch name as the
+  // matrix test (value_type_mutation_matrix_test.bt) for cross-file
+  // consistency. While true, the class-method context is excluded from the
+  // ifTrueIfFalseAssignRhs context-invariance relation. Flip off when BT-2371
+  // lands.
+  bt2360ClassMethodCondAssignRhsPending => true
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods. These mirror
@@ -266,7 +267,7 @@ TestCase subclass: MetamorphicThreadingTest
   testContextInvarianceIfTrueIfFalseAssignRhsReadWrite =>
     ref := self valueCorpus ifTrueIfFalseAssignRhsReadWrite: true
     self assert: (self actorCorpus ifTrueIfFalseAssignRhsReadWrite: true) equals: ref
-    self bt2371ClassMethodCondAssignRhsPending
+    self bt2360ClassMethodCondAssignRhsPending
       ifFalse: [
         self assert: (MutationCorpusClassMethod ifTrueIfFalseAssignRhsReadWrite: true) equals: ref
       ]
@@ -312,30 +313,39 @@ TestCase subclass: MetamorphicThreadingTest
   //  RELATION 3 — Construct equivalence
   //
   //  The four semantically equivalent loop forms summing 1..5 must all yield
-  //  the same total. Checked in every context that exposes the corpus loop
-  //  fragments:
+  //  the same total. Checked in every context using THAT context's own
+  //  fragments, so a context-specific regression in any single construct is
+  //  caught (the accumulators are not borrowed from a foreign context):
   //    `1 to: 5 do:`     (toDoNonLastReadWrite, the reference)
   //    `(1 to: 5) do:`   (rangeDoNonLastReadWrite)
-  //    `5 timesRepeat:`  (fragTimesRepeatAccumulator — corpus timesRepeat only
-  //                       counts, so a summing variant is used)
-  //    `whileTrue:`      (fragWhileTrueAccumulator — hand-rolled accumulator)
+  //    `5 timesRepeat:`  (timesRepeatAccumulatorReadWrite — corpus timesRepeat
+  //                       only counts, so a summing variant is used)
+  //    `whileTrue:`      (whileTrueAccumulatorReadWrite — hand-rolled accumulator)
   //  This relation is a hand-frozen equivalence class and does NOT generalize
   //  beyond these loop forms.
   // ════════════════════════════════════════════════════════════════════════
   testConstructEquivalenceValue =>
     ref := self valueCorpus toDoNonLastReadWrite
     self assert: self valueCorpus rangeDoNonLastReadWrite equals: ref
-    self assert: self fragTimesRepeatAccumulator equals: ref
-    self assert: self fragWhileTrueAccumulator equals: ref
+    self assert: self valueCorpus timesRepeatAccumulatorReadWrite equals: ref
+    self assert: self valueCorpus whileTrueAccumulatorReadWrite equals: ref
 
   testConstructEquivalenceActor =>
     ref := self actorCorpus toDoNonLastReadWrite
     self assert: self actorCorpus rangeDoNonLastReadWrite equals: ref
-    self assert: self fragTimesRepeatAccumulator equals: ref
-    self assert: self fragWhileTrueAccumulator equals: ref
+    self assert: self actorCorpus timesRepeatAccumulatorReadWrite equals: ref
+    self assert: self actorCorpus whileTrueAccumulatorReadWrite equals: ref
 
   testConstructEquivalenceClassMethod =>
     ref := MutationCorpusClassMethod toDoNonLastReadWrite
     self assert: MutationCorpusClassMethod rangeDoNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod timesRepeatAccumulatorReadWrite equals: ref
+    self assert: MutationCorpusClassMethod whileTrueAccumulatorReadWrite equals: ref
+
+  // TestCase context (the test class is itself a value-type); uses the local
+  // frag* accumulators, which run in this TestCase context.
+  testConstructEquivalenceTestCase =>
+    ref := self fragToDoNonLastReadWrite
+    self assert: self fragRangeDoNonLastReadWrite equals: ref
     self assert: self fragTimesRepeatAccumulator equals: ref
     self assert: self fragWhileTrueAccumulator equals: ref

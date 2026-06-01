@@ -83,6 +83,32 @@ Object subclass: MutationCorpusClassMethod
     (1 to: 5) do: [:i | sum := sum + i]
     sum
 
+  // ── construct-equivalence summing accumulators (BT-2345) ────────────────────
+  // timesRepeat: / whileTrue: variants that SUM 1..5 (the count/n fragments
+  // above only count iterations). Carry their own index so they are
+  // sum-equivalent to to:do: / rangeDo, letting the metamorphic harness assert
+  // construct equivalence *within the class-method context*. See
+  // metamorphic_threading_test.bt relation 3.
+  class timesRepeatAccumulatorReadWrite =>
+    sum := 0
+    i := 1
+    5
+      timesRepeat: [
+        sum := sum + i
+        i := i + 1
+      ]
+    sum
+
+  class whileTrueAccumulatorReadWrite =>
+    sum := 0
+    i := 1
+    [i <= 5]
+      whileTrue: [
+        sum := sum + i
+        i := i + 1
+      ]
+    sum
+
   // ── collect: ────────────────────────────────────────────────────────────────
   // NonLast: collect is a bare side-effect statement; result is discarded.
   class collectNonLastReadWrite =>
