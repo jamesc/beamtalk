@@ -1058,9 +1058,11 @@ pub(super) struct CountedLoopFrame {
     /// BT-2354: gensym'd Core Erlang counter variable name (e.g. `_loopidx3`).
     ///
     /// Used as the loop fun's first parameter and threaded through
-    /// `continue_header`/`next_counter`. Gensym'd (leading underscore) so it can
-    /// never collide with a user local named `i`, which maps to `I` via
-    /// `to_core_var`.
+    /// `continue_header`/`next_counter`. Produced by `fresh_temp_var` (leading
+    /// underscore + a monotonic counter), so it does not collide with the common
+    /// case of a user local named `i`, which maps to `I` via `to_core_var`. The
+    /// unique suffix also keeps it distinct from underscore-prefixed user
+    /// identifiers (which `to_core_var` passes through verbatim).
     pub counter: String,
 }
 
@@ -2347,7 +2349,7 @@ impl CoreErlangGenerator {
         // Collect initial arg values from the outer scope (before push_scope overwrites them).
         let initial_direct_args = plan.initial_direct_args(self);
 
-        // Build the fun parameter list: (I, Var1, ..., VarN)
+        // Build the fun parameter list: (<counter>, Var1, ..., VarN)
         let param_names: Vec<String> = plan
             .threaded_locals
             .iter()
@@ -2479,7 +2481,7 @@ impl CoreErlangGenerator {
         let arity =
             1 + local_param_names.len() + readonly_param_names.len() + mutated_param_names.len();
 
-        // Build param list doc: (I, Var1, ..., VarN, RField1, ..., MField1, ...)
+        // Build param list doc: (<counter>, Var1, ..., VarN, RField1, ..., MField1, ...)
         let param_list_doc = join(
             std::iter::once(leaf::var(frame.counter.clone()))
                 .chain(local_param_names.iter().map(|v| leaf::var(v.clone())))
