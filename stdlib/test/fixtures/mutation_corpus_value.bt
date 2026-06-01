@@ -5,8 +5,9 @@
 //
 // This is the *shared fragment corpus* referenced by BT-2346 (absolute oracle:
 // each fragment's final threaded value is asserted by hand in
-// mutation_matrix_test.bt) and BT-2345 (relative/metamorphic oracle: the same
-// fragment names run in every context and are asserted equal across contexts).
+// value_type_mutation_matrix_test.bt) and BT-2345 (relative/metamorphic oracle:
+// the same fragment names run in every context and are asserted equal across
+// contexts).
 //
 // Each method is one corpus fragment, named `<construct><Position><WriteMode>`,
 // and returns the *final threaded value* of an outer local mutated inside the

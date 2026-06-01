@@ -20,7 +20,7 @@
 //
 // The existing mutation_matrix_test.bt (BT-1480) exercises Actor *state-field*
 // threading densely; this file fills the previously thin axis — outer-LOCAL
-// threading in the value-type / class-method / TestCase contexts — to the same
+// threading in the Value subclass, Actor, and TestCase contexts — to the same
 // density, so the asymmetry that let BT-2342 hide cannot recur.
 //
 // Cells referencing BT-2342 currently leak value+state tuples or crash in

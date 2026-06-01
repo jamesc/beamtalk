@@ -4,8 +4,8 @@
 // BT-2346: Shared mutation-fragment corpus — Actor context.
 //
 // Same fragment method names as MutationCorpusValue (the value-type corpus),
-// so both the absolute oracle (BT-2346, mutation_matrix_test.bt) and the
-// relative/metamorphic oracle (BT-2345) can run the *same* fragments across
+// so both the absolute oracle (BT-2346, value_type_mutation_matrix_test.bt) and
+// the relative/metamorphic oracle (BT-2345) can run the *same* fragments across
 // the Actor and value-type contexts and assert ground truth / cross-context
 // equality respectively.
 //
