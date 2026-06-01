@@ -343,6 +343,19 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testInjectAssignRhsReadWriteClassMethod =>
     self assert: MutationCorpusClassMethod injectAssignRhsReadWrite equals: 6
 
+  // BT-2378: the assignment target is itself mutated inside the inject:into: RHS.
+  // The target must bind to the construct's logical result (the fold, 100+1+2+3 = 106),
+  // not the threaded accumulator (__local__total = 6). The Actor assign-RHS path
+  // rebound the target from threaded state before the fix (returning 6 here).
+  testInjectAssignRhsTargetMutatedValue =>
+    self assert: self valueCorpus injectAssignRhsTargetMutated equals: 106
+
+  testInjectAssignRhsTargetMutatedActor =>
+    self assert: self actorCorpus injectAssignRhsTargetMutated equals: 106
+
+  testInjectAssignRhsTargetMutatedClassMethod =>
+    self assert: MutationCorpusClassMethod injectAssignRhsTargetMutated equals: 106
+
   // ════════════════════════════════════════════════════════════════════════
   //  detect: / count:  — BT-2342 (failure mode A, foldl predicate)
   // ════════════════════════════════════════════════════════════════════════

@@ -793,52 +793,24 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::LocalAssignControlFlow => {
+                    // BT-2378: route the actor `var := <control-flow-with-mutations>` assign-RHS
+                    // through the shared `ThreadedExpr` emitter. The Actor boundary binds the
+                    // target to element 1, advances the state version to element 2 (the threaded
+                    // gen_server `State`), and rebinds `__local__`-threaded sibling outer-locals.
                     if let Expression::Assignment { target, value, .. } = expr {
                         if let Expression::Identifier(id) = target.as_ref() {
-                            let var_name = &id.name;
-                            let core_var = self
-                                .lookup_var(var_name)
-                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            let tuple_var = self.fresh_temp_var("Tuple");
-                            let new_state = self.peek_next_state_var();
-                            let value_str = self.expression_doc(value)?;
-                            let mut doc_parts: Vec<Document<'static>> = vec![docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                leaf::var(core_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var.clone()),
-                                ") in let ",
-                                leaf::var(new_state.clone()),
-                                " = call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ") in ",
-                            ]];
-                            let _ = self.next_state_var();
-                            self.bind_var(var_name, &core_var);
-
-                            if let Some(threaded_vars) = self.get_control_flow_threaded_vars(value)
-                            {
-                                for var in &threaded_vars {
-                                    let tv_core = self.lookup_var(var).map_or_else(
-                                        || Self::to_core_erlang_var(var),
-                                        String::clone,
-                                    );
-                                    doc_parts.push(docvec![
-                                        "let ",
-                                        leaf::var(tv_core),
-                                        " = call 'maps':'get'(",
-                                        leaf::atom(Self::local_state_key(var)),
-                                        ", ",
-                                        leaf::var(new_state.clone()),
-                                        ") in ",
-                                    ]);
-                                }
-                            }
-                            docs.push(Document::Vec(doc_parts));
+                            let routed = self
+                                .emit_threaded_assign_rhs(
+                                    &id.name,
+                                    value,
+                                    super::super::threaded_expr::ThreadingBoundary::Actor,
+                                    &mut docs,
+                                )?
+                                .is_some();
+                            debug_assert!(
+                                routed,
+                                "LocalAssignControlFlow must route through the Actor threaded emitter"
+                            );
                         }
                     }
                     if is_last {
@@ -985,8 +957,20 @@ impl CoreErlangGenerator {
                 }
                 BodyExprKind::ControlFlowWithMutations => {
                     if is_last {
-                        let expr_str = self.expression_doc(expr)?;
-                        docs.push(self.emit_tuple_unpack_reply("Tuple", expr_str));
+                        // BT-2378: route the last-position actor control-flow construct through
+                        // the shared `ThreadedExpr` emitter. The Actor boundary binds element 1
+                        // (Reply) and element 2 (the threaded gen_server `State`) and returns
+                        // `{'reply', Reply, NewState}`.
+                        let routed = self.emit_threaded_last(
+                            expr,
+                            super::super::threaded_expr::ThreadingPosition::Last,
+                            super::super::threaded_expr::ThreadingBoundary::Actor,
+                            &mut docs,
+                        )?;
+                        debug_assert!(
+                            routed,
+                            "ControlFlowWithMutations must route through the Actor threaded emitter"
+                        );
                     } else {
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let new_state = self.peek_next_state_var();
@@ -2530,7 +2514,12 @@ impl CoreErlangGenerator {
                 // body sequencer via `emit_threaded_assign_rhs`.
                 let mut parts: Vec<Document<'static>> = Vec::new();
                 if self
-                    .emit_threaded_assign_rhs(&id.name, value, &mut parts)?
+                    .emit_threaded_assign_rhs(
+                        &id.name,
+                        value,
+                        super::super::threaded_expr::ThreadingBoundary::ClassMethod,
+                        &mut parts,
+                    )?
                     .is_some()
                 {
                     return Ok(Document::Vec(parts));

@@ -228,6 +228,14 @@ TestCase subclass: MetamorphicThreadingTest
     self assert: self actorCorpus injectAssignRhsReadWrite equals: ref
     self assert: MutationCorpusClassMethod injectAssignRhsReadWrite equals: ref
 
+  // BT-2378: assignment target itself mutated inside the inject:into: RHS — must be
+  // context-invariant. The Actor path diverged (rebinding the target from threaded
+  // state) before the fix; this asserts all three contexts agree.
+  testContextInvarianceInjectAssignRhsTargetMutated =>
+    ref := self valueCorpus injectAssignRhsTargetMutated
+    self assert: self actorCorpus injectAssignRhsTargetMutated equals: ref
+    self assert: MutationCorpusClassMethod injectAssignRhsTargetMutated equals: ref
+
   // ── detect: / count: ────────────────────────────────────────────────────────
   testContextInvarianceDetectNonLastReadWrite =>
     ref := self valueCorpus detectNonLastReadWrite
