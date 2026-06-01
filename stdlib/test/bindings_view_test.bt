@@ -17,6 +17,7 @@ TestCase subclass: BindingsViewTest
     // A workspace-scoped view is just a tagged map (no liveness/PID needed),
     // so it can be minted directly. Reads return empty in the BUnit context.
     self.view := (Erlang beamtalk_session_primitives) globalsView
+    self
 
   // ===== Dictionary-protocol selectors present =====
   testIncludesSelectorAt => self assert: (BindingsView includesSelector: #at:)
