@@ -1,0 +1,303 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2372: REPL-context arm of the metamorphic threading invariance harness.
+//
+// This is the REPL-eval-path counterpart to the BUnit harness in
+// stdlib/test/metamorphic_threading_test.bt (BT-2345), which implements the
+// context-invariance relation across the value-type, Actor, class-method, and
+// TestCase contexts but could not drive the REPL eval path (a BUnit TestCase
+// cannot evaluate through the REPL). This driver runs the SAME shared fragment
+// corpus through the REPL and asserts equality with the compiled-context
+// results.
+//
+// It consumes the single shared fragment corpus via `// @load` — it does NOT
+// fork a parallel fragment list:
+//
+//   stdlib/test/fixtures/mutation_corpus_value.bt          (Value subclass)
+//   stdlib/test/fixtures/mutation_corpus_actor.bt          (Actor)
+//   stdlib/test/fixtures/mutation_corpus_class_method.bt   (class-method)
+//
+// The compiled contexts all agree on a single ground-truth value per fragment
+// (asserted by hand in value_type_mutation_matrix_test.bt and proven equal
+// across contexts in metamorphic_threading_test.bt). The REPL context adds a
+// fifth context to the context-invariance relation: each fragment is evaluated
+// through the REPL eval path in the value-type, Actor, and class-method
+// contexts, and its result is asserted EQUAL to that shared compiled-context
+// ground truth. Any divergence between the REPL eval path and the compiled
+// contexts therefore surfaces here as a wrong `// =>` value.
+//
+// Gating: the same single still-open cell the BUnit harness gates is excluded
+// here too — the BT-2371 class-method conditional-as-parenthesized-assignment-
+// RHS cell (bt2360ClassMethodCondAssignRhsPending) still drops the sibling
+// outer-local mutation in class-method context, so the class-method context is
+// omitted from exactly that one fragment (the value-type and Actor contexts of
+// it are still asserted). Flip it on once BT-2371 lands.
+
+// @load stdlib/test/fixtures/mutation_corpus_value.bt
+// @load stdlib/test/fixtures/mutation_corpus_actor.bt
+// @load stdlib/test/fixtures/mutation_corpus_class_method.bt
+
+// ===========================================================================
+// Fresh receivers. A value-type instance and a class object are reused across
+// turns (the fragments do not mutate receiver state — they thread method-local
+// outer locals only). The Actor is spawned per construct group below so a hung
+// message in one group cannot bleed into the next.
+// ===========================================================================
+v := MutationCorpusValue new
+// => _
+
+cm := Beamtalk classNamed: #MutationCorpusClassMethod
+// => MutationCorpusClassMethod
+
+// ===========================================================================
+//  to:do:
+// ===========================================================================
+a := MutationCorpusActor spawn
+// => _
+
+v toDoNonLastWriteOnly
+// => 5
+
+a toDoNonLastWriteOnly
+// => 5
+
+cm toDoNonLastWriteOnly
+// => 5
+
+v toDoNonLastReadWrite
+// => 15
+
+a toDoNonLastReadWrite
+// => 15
+
+cm toDoNonLastReadWrite
+// => 15
+
+v toDoAssignRhsReadWrite
+// => 15
+
+a toDoAssignRhsReadWrite
+// => 15
+
+cm toDoAssignRhsReadWrite
+// => 15
+
+// ===========================================================================
+//  to:by:do:
+// ===========================================================================
+v toByDoNonLastWriteOnly
+// => 9
+
+a toByDoNonLastWriteOnly
+// => 9
+
+cm toByDoNonLastWriteOnly
+// => 9
+
+v toByDoNonLastReadWrite
+// => 25
+
+a toByDoNonLastReadWrite
+// => 25
+
+cm toByDoNonLastReadWrite
+// => 25
+
+// ===========================================================================
+//  timesRepeat:
+// ===========================================================================
+v timesRepeatNonLastWriteOnly
+// => 7
+
+a timesRepeatNonLastWriteOnly
+// => 7
+
+cm timesRepeatNonLastWriteOnly
+// => 7
+
+v timesRepeatNonLastReadWrite
+// => 5
+
+a timesRepeatNonLastReadWrite
+// => 5
+
+cm timesRepeatNonLastReadWrite
+// => 5
+
+// ===========================================================================
+//  whileTrue: / whileFalse:
+// ===========================================================================
+v whileTrueNonLastReadWrite
+// => 5
+
+a whileTrueNonLastReadWrite
+// => 5
+
+cm whileTrueNonLastReadWrite
+// => 5
+
+v whileFalseNonLastReadWrite
+// => 5
+
+a whileFalseNonLastReadWrite
+// => 5
+
+cm whileFalseNonLastReadWrite
+// => 5
+
+// ===========================================================================
+//  (1 to: n) do:
+// ===========================================================================
+v rangeDoNonLastReadWrite
+// => 15
+
+a rangeDoNonLastReadWrite
+// => 15
+
+cm rangeDoNonLastReadWrite
+// => 15
+
+// ===========================================================================
+//  collect:
+// ===========================================================================
+b := MutationCorpusActor spawn
+// => _
+
+v collectNonLastReadWrite
+// => 3
+
+b collectNonLastReadWrite
+// => 3
+
+cm collectNonLastReadWrite
+// => 3
+
+v collectAssignRhsReadWrite
+// => 3
+
+b collectAssignRhsReadWrite
+// => 3
+
+cm collectAssignRhsReadWrite
+// => 3
+
+// ===========================================================================
+//  select: / reject:
+// ===========================================================================
+v selectNonLastReadWrite
+// => 4
+
+b selectNonLastReadWrite
+// => 4
+
+cm selectNonLastReadWrite
+// => 4
+
+v rejectNonLastReadWrite
+// => 4
+
+b rejectNonLastReadWrite
+// => 4
+
+cm rejectNonLastReadWrite
+// => 4
+
+// ===========================================================================
+//  inject:into:
+// ===========================================================================
+v injectNonLastReadWrite
+// => 6
+
+b injectNonLastReadWrite
+// => 6
+
+cm injectNonLastReadWrite
+// => 6
+
+v injectAssignRhsReadWrite
+// => 6
+
+b injectAssignRhsReadWrite
+// => 6
+
+cm injectAssignRhsReadWrite
+// => 6
+
+// ===========================================================================
+//  detect: / count:
+// ===========================================================================
+v detectNonLastReadWrite
+// => 3
+
+b detectNonLastReadWrite
+// => 3
+
+cm detectNonLastReadWrite
+// => 3
+
+v countNonLastReadWrite
+// => 3
+
+b countNonLastReadWrite
+// => 3
+
+cm countNonLastReadWrite
+// => 3
+
+// ===========================================================================
+//  ifTrue:
+// ===========================================================================
+d := MutationCorpusActor spawn
+// => _
+
+v ifTrueNonLastWriteOnly: true
+// => 9
+
+d ifTrueNonLastWriteOnly: true
+// => 9
+
+cm ifTrueNonLastWriteOnly: true
+// => 9
+
+v ifTrueNonLastReadWrite: true
+// => 7
+
+d ifTrueNonLastReadWrite: true
+// => 7
+
+cm ifTrueNonLastReadWrite: true
+// => 7
+
+v ifTrueLastReadWrite: true
+// => 7
+
+d ifTrueLastReadWrite: true
+// => 7
+
+cm ifTrueLastReadWrite: true
+// => 7
+
+// ===========================================================================
+//  ifTrue:ifFalse:
+// ===========================================================================
+v ifTrueIfFalseNonLastReadWrite: true
+// => 2
+
+d ifTrueIfFalseNonLastReadWrite: true
+// => 2
+
+cm ifTrueIfFalseNonLastReadWrite: true
+// => 2
+
+// Class-method context excluded while BT-2371 is open: the class-method
+// conditional-as-parenthesized-assignment-RHS cell drops the sibling-local
+// mutation, so `cm ifTrueIfFalseAssignRhsReadWrite: true` would NOT equal the
+// shared ground truth (5). The value-type and Actor contexts are still
+// asserted. Add the `cm` line below once BT-2371 lands (flips
+// bt2360ClassMethodCondAssignRhsPending off in the BUnit harness).
+v ifTrueIfFalseAssignRhsReadWrite: true
+// => 5
+
+d ifTrueIfFalseAssignRhsReadWrite: true
+// => 5
