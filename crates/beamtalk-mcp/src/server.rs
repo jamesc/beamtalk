@@ -13,6 +13,7 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_core::unparse::escape_string_literal;
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -226,19 +227,6 @@ fn pretty_json(value: &serde_json::Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
-/// Escape a Rust string so it can be embedded as a Beamtalk String literal.
-///
-/// Beamtalk strings use `\` and `"` like Rust, plus `{` triggers interpolation
-/// (ADR 0023), so `\{` is required to embed a literal `{`. Used by ADR 0082
-/// Phase 3 MCP tools (`save_method`, `try_method`, `save_class`, `flush`)
-/// to forward user-supplied bodies and paths through the `evaluate` op without
-/// the body needing to be valid Beamtalk source on its own.
-fn escape_beamtalk_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('{', "\\{")
-}
-
 /// Build the Beamtalk expression for the `save_method` MCP tool — durable
 /// patch path (ADR 0082 Phase 3). Selector is the bare form (no leading `#`).
 fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
@@ -246,7 +234,7 @@ fn save_method_expr(class: &str, selector: &str, body: &str) -> String {
         "{} compile: #{} source: \"{}\"",
         class,
         selector,
-        escape_beamtalk_string(body),
+        escape_string_literal(body),
     )
 }
 
@@ -257,7 +245,7 @@ fn try_method_expr(class: &str, selector: &str, body: &str) -> String {
         "{} tryCompile: #{} source: \"{}\"",
         class,
         selector,
-        escape_beamtalk_string(body),
+        escape_string_literal(body),
     )
 }
 
@@ -266,8 +254,8 @@ fn try_method_expr(class: &str, selector: &str, body: &str) -> String {
 fn save_class_expr(source: &str, path: &str) -> String {
     format!(
         "Workspace newClass: \"{}\" at: \"{}\"",
-        escape_beamtalk_string(source),
-        escape_beamtalk_string(path),
+        escape_string_literal(source),
+        escape_string_literal(path),
     )
 }
 
@@ -292,7 +280,7 @@ fn flush_expr(filter: FlushFilter<'_>) -> String {
         FlushFilter::Class(class) => format!("Workspace flush: {class}"),
         FlushFilter::File(file) => format!(
             "Workspace flush: #{{ #file => \"{}\" }}",
-            escape_beamtalk_string(file)
+            escape_string_literal(file)
         ),
         FlushFilter::Kind(kind) => format!("Workspace flush: #'{kind}'"),
     }
@@ -923,7 +911,7 @@ impl BeamtalkMcp {
         // Use native Beamtalk API: Workspace load: "path"
         let expr = format!(
             "Workspace load: \"{}\"",
-            escape_beamtalk_string(&params.path)
+            escape_string_literal(&params.path)
         );
         let response = self
             .client
@@ -3408,19 +3396,6 @@ mod tests {
     // matching the REPL meta-command tests in
     // crates/beamtalk-cli/src/commands/repl/mod.rs. Surface drift in the
     // expression mapping fails CI through these tests.
-
-    #[test]
-    fn escape_beamtalk_string_handles_backslash_quote_and_brace() {
-        // Brace escaping prevents Beamtalk's '{x}' interpolation (ADR 0023).
-        assert_eq!(escape_beamtalk_string("hello"), "hello");
-        assert_eq!(escape_beamtalk_string("a\"b"), "a\\\"b");
-        assert_eq!(escape_beamtalk_string("a\\b"), "a\\\\b");
-        assert_eq!(escape_beamtalk_string("a{b}"), "a\\{b}");
-        // Order matters: backslash escape must run first so a literal '\{'
-        // arriving from the caller does not become '\\\\{' (which would expand
-        // to a literal backslash followed by an interpolation).
-        assert_eq!(escape_beamtalk_string("\\{x}"), "\\\\\\{x}");
-    }
 
     #[test]
     fn save_method_expr_compiles_durable_patch() {

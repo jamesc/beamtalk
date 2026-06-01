@@ -36,6 +36,7 @@
 
 use beamtalk_cli::repl_startup;
 use beamtalk_core::source_analysis::is_input_complete;
+use beamtalk_core::unparse::escape_string_literal;
 use beamtalk_repl_protocol::{ReplResponse, RequestBuilder};
 use serial_test::serial;
 use std::env;
@@ -706,8 +707,7 @@ impl ReplClient {
     /// returned value is a Beamtalk list of class objects which renders as a
     /// JSON array of class-name strings.
     fn load_file(&mut self, path: &str) -> Result<Vec<String>, String> {
-        // Escape backslashes and double quotes for embedding in a Beamtalk string literal.
-        let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
+        let escaped = escape_string_literal(path);
         let expr = format!("Workspace load: \"{escaped}\"");
         self.write_json(&RequestBuilder::eval(&expr))?;
 

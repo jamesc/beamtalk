@@ -26,7 +26,7 @@ use beamtalk_core::language_service::{
 use beamtalk_core::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
 use beamtalk_core::semantic_analysis::ClassHierarchy;
 use beamtalk_core::source_analysis::{Severity, Span};
-use beamtalk_core::unparse::format_source;
+use beamtalk_core::unparse::{escape_string_literal, format_source};
 use camino::Utf8PathBuf;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::{
@@ -2702,7 +2702,7 @@ pub(crate) fn build_command_expression(
             // dictionary; the path is passed as a String value.
             Ok(format!(
                 "Workspace flush: #{{ #file => \"{}\" }}",
-                escape_beamtalk_string(&file)
+                escape_string_literal(&file)
             ))
         }
         CMD_FLUSH_KIND => {
@@ -2736,8 +2736,8 @@ pub(crate) fn build_command_expression(
             // rather than re-parsed Beamtalk source.
             Ok(format!(
                 "Workspace newClass: \"{}\" at: \"{}\"",
-                escape_beamtalk_string(&source),
-                escape_beamtalk_string(&path)
+                escape_string_literal(&source),
+                escape_string_literal(&path)
             ))
         }
         _ => Err(format!("unknown LSP command: {command}")),
@@ -2800,16 +2800,6 @@ fn validate_class_name(name: &str) -> std::result::Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// Escape an arbitrary Rust string for embedding inside a Beamtalk double-
-/// quoted string literal. Mirrors `beamtalk-mcp::escape_beamtalk_string`:
-/// Beamtalk strings use `\` and `"` like Rust plus `{` triggers
-/// interpolation (ADR 0023), so `\{` is required for a literal `{`.
-fn escape_beamtalk_string(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('{', "\\{")
 }
 
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
@@ -4878,8 +4868,8 @@ mod tests {
         )
         .expect("ok");
         // Roundtrip the source through the Beamtalk escaper.
-        let expected_source = escape_beamtalk_string(source);
-        let expected_path = escape_beamtalk_string(path);
+        let expected_source = escape_string_literal(source);
+        let expected_path = escape_string_literal(path);
         assert_eq!(
             expr,
             format!("Workspace newClass: \"{expected_source}\" at: \"{expected_path}\"")
@@ -4930,15 +4920,6 @@ mod tests {
     fn build_unknown_command_returns_error() {
         let err = build_command_expression("not.a.real.command", &[]).expect_err("err");
         assert!(err.contains("unknown LSP command"));
-    }
-
-    #[test]
-    fn escape_beamtalk_string_handles_quotes_backslashes_and_braces() {
-        assert_eq!(escape_beamtalk_string("hello"), "hello");
-        assert_eq!(escape_beamtalk_string("\"q\""), "\\\"q\\\"");
-        assert_eq!(escape_beamtalk_string("a\\b"), "a\\\\b");
-        assert_eq!(escape_beamtalk_string("{x}"), "\\{x}");
-        assert_eq!(escape_beamtalk_string("\\\"{"), "\\\\\\\"\\{");
     }
 
     #[test]
