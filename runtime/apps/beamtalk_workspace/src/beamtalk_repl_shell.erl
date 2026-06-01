@@ -155,13 +155,12 @@ remove_from_tracker(SessionPid, Module) ->
 init(SessionId) ->
     %% Create session-specific REPL state
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
-    State0 = beamtalk_repl_state:new(undefined, 0),
-
-    %% BT-883: Inject non-class workspace globals (singletons + bind:as: names)
-    %% as session bindings so they resolve from the bindings map.
-    Bindings0 = inject_workspace_bindings(#{}),
-    State0b = beamtalk_repl_state:set_bindings(Bindings0, State0),
-    State0c = beamtalk_repl_state:set_injected_ws_keys(maps:keys(Bindings0), State0b),
+    %%
+    %% BT-2365 (ADR 0081 Phase 1): the session binding map starts EMPTY — it holds
+    %% only session locals. Workspace globals (singletons + bind:as: names) are no
+    %% longer eagerly injected here; a free identifier that misses the locals map is
+    %% resolved lazily at eval time via beamtalk_workspace:resolve_name/2.
+    State0c = beamtalk_repl_state:new(undefined, 0),
 
     %% Get workspace-wide actor registry
     %% The registry is registered globally in the workspace
@@ -190,6 +189,9 @@ handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
     %% Spawn eval in a monitored worker process so it can be interrupted (BT-666)
     Self = self(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        %% BT-2365 (ADR 0081): seed the worker process context so primitives that
+        %% read it (Session current / Workspace currentSession) see this session.
+        seed_session_context(Self, SessionId),
         Result = beamtalk_repl_eval:do_eval(Expression, State),
         Self ! {eval_result, self(), Result}
     end),
@@ -197,6 +199,8 @@ handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
 handle_call({eval_trace, Expression}, From, {SessionId, State, undefined}) ->
     Self = self(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        %% BT-2365 (ADR 0081): seed worker process context (same as the eval path).
+        seed_session_context(Self, SessionId),
         Result = beamtalk_repl_eval:do_eval_trace(Expression, State),
         Self ! {eval_result, self(), Result}
     end),
@@ -236,13 +240,12 @@ handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
     Bindings = beamtalk_repl_state:get_bindings(State),
     {reply, {ok, Bindings}, {SessionId, State, Worker}};
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
-    %% BT-883: Re-inject workspace globals after clearing bindings
-    %% so that singletons and bind:as: names remain available.
-    Bindings = inject_workspace_bindings(#{}),
-    NewState = beamtalk_repl_state:set_bindings(Bindings, State),
-    NewState1 = beamtalk_repl_state:set_injected_ws_keys(maps:keys(Bindings), NewState),
+    %% BT-2365 (ADR 0081 Phase 1): clear only the session locals. Workspace globals
+    %% (singletons + bind:as: names) are no longer copied into the session map, so
+    %% there is nothing to re-inject — they remain available via lazy resolution.
+    NewState = beamtalk_repl_state:clear_bindings(State),
     beamtalk_bindings_events:on_bindings_changed(SessionId),
-    {reply, ok, {SessionId, NewState1, Worker}};
+    {reply, ok, {SessionId, NewState, Worker}};
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load(Path, State) of
         {ok, LoadedModules, NewState} ->
@@ -327,6 +330,9 @@ handle_call(_Request, _From, State) ->
 handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined}) ->
     Self = self(),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        %% BT-2365 (ADR 0081): seed worker process context on the streaming path too
+        %% so Session current behaves identically to the synchronous eval path.
+        seed_session_context(Self, SessionId),
         Result = beamtalk_repl_eval:do_eval(Expression, State, Subscriber),
         Self ! {eval_result, self(), Result}
     end),
@@ -356,10 +362,11 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
     case Result of
         {ok, Value, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_done, Value, Output, Warnings}),
-            MergedState = apply_pending_removals(ShellState, WorkerState),
-            %% Refresh session workspace bindings to reflect any bind:as:/unbind: changes
-            %% made during this expression. Keeps session-local vars, replaces ws-injected keys.
-            FinalState = refresh_ws_bindings(MergedState),
+            %% BT-2365 (ADR 0081 Phase 1): no refresh_ws_bindings — workspace globals
+            %% are resolved live, not injected into the session map, so there is no
+            %% injected copy to reconcile after an eval. The session map holds only
+            %% locals (the worker's returned WorkerState).
+            FinalState = apply_pending_removals(ShellState, WorkerState),
             beamtalk_bindings_events:on_bindings_changed(SessionId),
             {noreply, {SessionId, FinalState, undefined}};
         {error, Reason, Output, Warnings, WorkerState} ->
@@ -424,29 +431,22 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 
 -doc """
-BT-883: Inject workspace globals (minus class objects) as session bindings.
-Walks Workspace globals via beamtalk_workspace_interface_primitives:get_session_bindings/0
-instead of the hardcoded singletons list. Returns singletons (Transcript,
-Beamtalk, Workspace) plus any user-registered bind:as: names.
-""".
-inject_workspace_bindings(Bindings) ->
-    maps:merge(Bindings, beamtalk_workspace_interface_primitives:get_session_bindings()).
+BT-2365 (ADR 0081): seed the eval-worker process dictionary with the session
+context that session-aware primitives read.
 
--doc """
-Refresh workspace bindings in session state after an eval.
-Removes stale workspace-injected keys and overlays fresh ETS bindings,
-so that bind:as:/unbind: changes are reflected immediately in the next eval
-and in get_bindings queries.
+`beamtalk_session_pid` is the shell's pid (the long-lived gen_server, not the
+short-lived worker) so cross-session reads target the shell; `beamtalk_session_id`
+is the protocol session id. A primitive that finds `beamtalk_session_pid =:=
+undefined` (e.g. eval outside a shell-spawned worker) returns nil.
+
+Seeded on BOTH spawn paths (synchronous eval/eval_trace and streaming
+eval_async) so Session current behaves consistently regardless of eval mode.
 """.
--spec refresh_ws_bindings(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
-refresh_ws_bindings(State) ->
-    InjectedWsKeys = beamtalk_repl_state:get_injected_ws_keys(State),
-    FreshWs = beamtalk_workspace_interface_primitives:get_session_bindings(),
-    CurrentBindings = beamtalk_repl_state:get_bindings(State),
-    WithoutStaleWs = maps:without(InjectedWsKeys, CurrentBindings),
-    FreshBindings = maps:merge(FreshWs, WithoutStaleWs),
-    State1 = beamtalk_repl_state:set_bindings(FreshBindings, State),
-    beamtalk_repl_state:set_injected_ws_keys(maps:keys(FreshWs), State1).
+-spec seed_session_context(pid(), binary()) -> ok.
+seed_session_context(ShellPid, SessionId) ->
+    put(beamtalk_session_pid, ShellPid),
+    put(beamtalk_session_id, SessionId),
+    ok.
 
 -doc """
 BT-1242: Apply pending module removals from ShellState to WorkerState.

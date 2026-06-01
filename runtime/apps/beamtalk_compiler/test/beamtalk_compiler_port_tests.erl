@@ -60,10 +60,12 @@ known_vars_test() ->
     with_port(fun(Port) ->
         {ok, CoreErlang, []} =
             beamtalk_compiler_port:compile_expression(Port, <<"x + 1">>, <<"test">>, [<<"x">>]),
-        %% Variable x is fetched via `call 'maps':'get'\n\t\t\t ('x', State)`.
-        %% Assert both the qualified call and the `'x'` key are present so that
-        %% the test still guards variable-lookup specifically.
-        ?assert(binary:match(CoreErlang, <<"'maps':'get'">>) =/= nomatch),
+        %% ADR 0081: REPL free identifiers now look up via `maps:find` with a
+        %% `beamtalk_workspace:resolve_name/2` fallthrough (locals-first, then
+        %% the lazy global resolver) instead of a bare `maps:get`. Assert the
+        %% new lookup call and the `'x'` key so the test still guards lookup.
+        ?assert(binary:match(CoreErlang, <<"'maps':'find'">>) =/= nomatch),
+        ?assert(binary:match(CoreErlang, <<"'beamtalk_workspace':'resolve_name'">>) =/= nomatch),
         ?assert(binary:match(CoreErlang, <<"'x'">>) =/= nomatch)
     end).
 

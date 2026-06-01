@@ -55,7 +55,14 @@ handle(<<"bindings">>, _Params, Msg, SessionPid) ->
     TargetPid = beamtalk_session_table:resolve_pid(
         beamtalk_repl_protocol:get_session(Msg), SessionPid
     ),
-    {ok, Bindings} = beamtalk_repl_shell:get_bindings(TargetPid),
+    {ok, SessionLocals} = beamtalk_repl_shell:get_bindings(TargetPid),
+    %% BT-2365 (ADR 0081 Phase 1): a session's binding map now holds only locals —
+    %% bind:as: entries live in the shared workspace registry and are resolved
+    %% lazily rather than copied into the session. Merge them back in here so the
+    %% :bindings display keeps showing user-registered bind:as: names (locals win
+    %% on key collision, matching shadowing semantics).
+    WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
+    Bindings = maps:merge(WorkspaceUserBindings, SessionLocals),
     %% ADR 0019 Phase 3: Filter out workspace convenience bindings from display.
     UserBindings = maps:without(beamtalk_workspace_config:binding_names(), Bindings),
     beamtalk_repl_protocol:encode_bindings(

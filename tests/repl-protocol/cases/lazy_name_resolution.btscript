@@ -1,0 +1,121 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E parity tests for BT-2365 (ADR 0081 Phase 1): locals-only binding storage
+// with lazy global resolution.
+//
+// These tests require E2E because they exercise the runtime name resolver
+// (beamtalk_workspace:resolve_name/2) wired in by the REPL codegen: a free
+// identifier that misses the session locals map falls through to the shared
+// resolver (locals -> bind:as: ETS -> singleton registry -> class registry ->
+// undefined_variable). The behaviour must match the pre-injection model.
+
+// ===========================================================================
+// LAZY SINGLETON RESOLUTION (no eager injection)
+// ===========================================================================
+
+// A workspace singleton resolves even though it is never injected into the
+// session binding map — it is resolved lazily from the singleton registry.
+Transcript
+// => _
+
+// Singleton receiver dispatch still works (binding-aware class send).
+Transcript show: "hi"
+// => _
+
+// ===========================================================================
+// SHADOWING: a session local shadows a workspace binding of the same name
+// ===========================================================================
+//
+// resolve_name/2 checks the session locals map BEFORE the bind:as: registry,
+// so a local assignment shadows a workspace binding within that session.
+// (Singletons like Transcript are capitalised ClassReferences and cannot be
+// assignment targets, so shadowing is demonstrated with a lowercase name.)
+
+// Register a workspace (global) binding.
+Workspace bind: 100 as: #shadowProbe
+// => nil
+
+// Without a local, the bare name resolves to the global value.
+shadowProbe
+// => 100
+
+// Assign a session local of the same name — it shadows the global.
+shadowProbe := 5
+// => 5
+
+// The bare name now resolves to the local value (locals checked first).
+shadowProbe
+// => 5
+
+// Arithmetic confirms it is the integer local, not the global 100.
+shadowProbe + 1
+// => 6
+
+// Clean up the workspace binding (the local stays in this session).
+Workspace unbind: #shadowProbe
+// => nil
+
+// ===========================================================================
+// BIND:AS: VISIBILITY ON THE NEXT EVAL (lazy, read live from ETS)
+// ===========================================================================
+
+// Register a value via bind:as: ...
+Workspace bind: 7 as: #lazyBound
+// => nil
+
+// ... and it is visible on the very next eval via lazy resolution.
+lazyBound
+// => 7
+
+lazyBound * 6
+// => 42
+
+// Clean up the workspace binding.
+Workspace unbind: #lazyBound
+// => nil
+
+// After unbind the name is no longer resolvable — it errors instead of
+// returning a stale injected copy.
+lazyBound
+// => ERROR: Undefined variable
+
+// ===========================================================================
+// LAZY RESOLUTION FROM INSIDE A LOOP / BLOCK BODY (BT-2365 CodeRabbit fix)
+// ===========================================================================
+//
+// Free workspace globals referenced from inside a do:/collect: block body must
+// also resolve lazily. Before the fix, identifiers inside loop bodies still
+// emitted a bare maps:get/2 (and singleton dispatch resolved post-arg), so any
+// singleton or bind:as: name used inside a block crashed with {badkey,_}.
+
+// A singleton (Transcript) dispatched from inside a do: block — no badkey.
+#(1, 2, 3) do: [:n | Transcript show: "tick"]
+// => _
+
+// A bind:as: global read from inside a collect: block resolves lazily and is
+// folded into the result (1000 + each element). A large base keeps the result
+// list out of the small-integer range so it renders as an array rather than a
+// charlist (an unrelated, pre-existing display heuristic).
+Workspace bind: 1000 as: #loopBase
+// => nil
+
+#(1, 2, 3) collect: [:n | loopBase + n]
+// => [1001,1002,1003]
+
+// The same global is also resolvable inside an inject:into: block body.
+#(1, 2, 3) inject: 0 into: [:acc :n | acc + n + loopBase]
+// => 3006
+
+// Clean up.
+Workspace unbind: #loopBase
+// => nil
+
+// ===========================================================================
+// UNDEFINED VARIABLE STILL RAISED FOR GENUINELY UNKNOWN NAMES
+// ===========================================================================
+
+// A genuinely unknown bare identifier still raises undefined_variable
+// (same phase as before: caught for a lowercase free name).
+genuinelyUnknownName
+// => ERROR: Undefined variable

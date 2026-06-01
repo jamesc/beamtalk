@@ -2361,16 +2361,47 @@ impl CoreErlangGenerator {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
             };
 
-        // BT-1942: `let Lookup = maps:find(...) in <arg_preamble> case Lookup of ...`
-        // — lookup first, then args, then the dispatch branches.
+        // BT-2365 (ADR 0081 Phase 1): resolve the receiver — session locals first,
+        // then lazy singleton resolution — BEFORE the arg preamble runs, so the
+        // receiver is fully determined ahead of any argument side effects (the
+        // "receiver first, then args" evaluation order). Singletons
+        // (Transcript/Beamtalk/Workspace) are no longer eagerly injected into the
+        // session map, so `Workspace bind:as:` would otherwise mis-route to a
+        // non-existent `Workspace` class. resolve_singleton_instance/1 returns
+        // `{ok, Instance}` for a singleton name and `error` for any other name,
+        // so real class names (`Counter someClassMethod`) still fall through to
+        // class_fallback.
+        //
+        // The combined lookup binds `Lookup` to `{ok, Receiver}` (from locals or
+        // singleton registry) or `error` (use class-side fallback):
+        //
+        //   let Lookup = case maps:find(ClassName, State) of
+        //                  {ok, V} -> {ok, V}
+        //                  error   -> resolve_singleton_instance(ClassName)
+        //                end
+        //   in <arg_preamble>
+        //   case Lookup of
+        //     {ok, Receiver} -> beamtalk_message_dispatch:send(Receiver, Sel, Args)
+        //     error          -> class_fallback
+        //   end
+        let singleton_val_var = self.fresh_var("SingletonVal");
         let lookup_binding = docvec![
             "let ",
             leaf::var(lookup_var.clone()),
-            " = call 'maps':'find'(",
+            " = case call 'maps':'find'(",
             leaf::atom(class_name.to_string()),
             ", ",
             leaf::var(state_var),
-            ") in ",
+            ") of ",
+            "<{'ok', ",
+            leaf::var(singleton_val_var.clone()),
+            "}> when 'true' -> {'ok', ",
+            leaf::var(singleton_val_var),
+            "} ",
+            "<'error'> when 'true' -> call 'beamtalk_workspace':'resolve_singleton_instance'(",
+            leaf::atom(class_name.to_string()),
+            ") ",
+            "end in ",
         ];
         let case_doc = docvec![
             "case ",

@@ -858,3 +858,82 @@ autoflush_default_is_false_test() ->
             %% it returns a Boolean.
             ?assert(is_boolean(beamtalk_workspace_interface_primitives:autoflush()))
     end.
+
+%%====================================================================
+%% resolve_name/2 Tests (BT-2365, ADR 0081 Phase 1)
+%%
+%% Resolution order: locals -> bind:as: ETS -> singleton registry ->
+%% class registry -> undefined_variable. Tiers 1, 2, 5 and ordering are
+%% deterministic in EUnit; tiers 3/4 need a live workspace and are exercised
+%% by the repl-protocol parity tests.
+%%====================================================================
+
+%% Tier 1: a name present in the locals map resolves to its local value.
+resolve_name_tier1_locals_hit_test() ->
+    Locals = #{x => 42},
+    ?assertEqual(42, beamtalk_workspace_interface_primitives:resolve_name(Locals, x)).
+
+%% Tier 2: a name absent from locals but present in the bind:as: ETS table
+%% resolves to the registered value.
+resolve_name_tier2_bind_as_hit_test() ->
+    cleanup_ets_for(self()),
+    beamtalk_workspace_interface_primitives:create_bindings_table(),
+    ets:insert(beamtalk_wi_user_bindings, {greeting, <<"hi">>}),
+    try
+        ?assertEqual(
+            <<"hi">>,
+            beamtalk_workspace_interface_primitives:resolve_name(#{}, greeting)
+        )
+    after
+        cleanup_ets_for(self())
+    end.
+
+%% Tier 5: a genuinely unknown name raises undefined_variable.
+resolve_name_tier5_undefined_variable_test() ->
+    cleanup_ets_for(self()),
+    try
+        beamtalk_workspace_interface_primitives:resolve_name(#{}, noSuchName),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(undefined_variable, Err#beamtalk_error.kind)
+    end.
+
+%% Ordering: locals shadow a bind:as: entry of the same name (tier 1 wins).
+resolve_name_locals_shadow_bind_as_test() ->
+    cleanup_ets_for(self()),
+    beamtalk_workspace_interface_primitives:create_bindings_table(),
+    ets:insert(beamtalk_wi_user_bindings, {shadowed, <<"global">>}),
+    try
+        %% Local value must win over the bind:as: entry.
+        ?assertEqual(
+            <<"local">>,
+            beamtalk_workspace_interface_primitives:resolve_name(
+                #{shadowed => <<"local">>}, shadowed
+            )
+        )
+    after
+        cleanup_ets_for(self())
+    end.
+
+%% A nil local value still resolves as a tier-1 hit (maps:find distinguishes
+%% an absent key from a key bound to nil).
+resolve_name_nil_local_is_a_hit_test() ->
+    ?assertEqual(nil, beamtalk_workspace_interface_primitives:resolve_name(#{n => nil}, n)).
+
+%%====================================================================
+%% resolve_class_reference/2 Tests (BT-2365)
+%%====================================================================
+
+%% A genuinely unknown class raises class_not_found (NOT undefined_variable),
+%% preserving the existing REPL "Class 'X' not found" error.
+resolve_class_reference_unknown_raises_class_not_found_test() ->
+    cleanup_ets_for(self()),
+    try
+        beamtalk_workspace_interface_primitives:resolve_class_reference(#{}, 'NoSuchClassXyz'),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(class_not_found, Err#beamtalk_error.kind),
+            ?assertEqual('NoSuchClassXyz', Err#beamtalk_error.class)
+    end.
