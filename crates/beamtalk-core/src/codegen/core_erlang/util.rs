@@ -197,6 +197,28 @@ impl CoreErlangGenerator {
         Ok((doc, self.last_open_scope_result.take()))
     }
 
+    /// Generates an expression as a self-contained doc, closing any open scope.
+    ///
+    /// BT-2350: `expression_doc` forwards to `generate_expression`, which for a
+    /// class-method self-send (or class-var assignment) emits an *open* let-chain
+    /// ending in `... in ` and records the result variable in
+    /// `last_open_scope_result` for the caller to append. When such a doc is used
+    /// directly as the RHS of an enclosing `let X = <doc> in ...` — e.g. the
+    /// `is_last` foldl block bodies (`collect:` / `select:` / `inject:into:` /
+    /// `detect:` / `count:` / …) — the dangling `in` produces invalid Core Erlang
+    /// (`{core_parse_error, …, "syntax error before: in"}`). This helper closes
+    /// the scope by appending the result variable so the doc stands alone.
+    pub(super) fn closed_expression_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<super::document::Document<'static>> {
+        let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+        Ok(match open_scope {
+            Some(result_var) => docvec![doc, super::document::leaf::var(result_var)],
+            None => doc,
+        })
+    }
+
     /// Generates an expression and returns whether it set `repl_loop_mutated`.
     ///
     /// BT-1448: Replaces the manual reset-before/read-after pattern on `repl_loop_mutated`.

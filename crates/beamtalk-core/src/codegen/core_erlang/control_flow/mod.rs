@@ -2124,7 +2124,7 @@ impl CoreErlangGenerator {
                 }
                 if is_last {
                     let result_var = self.fresh_temp_var("CollectItem");
-                    let expr_code = self.expression_doc(expr)?;
+                    let expr_code = self.closed_expression_doc(expr)?;
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
@@ -2176,7 +2176,7 @@ impl CoreErlangGenerator {
                 }
                 if is_last {
                     if let Some(pv) = pred_var {
-                        let expr_code = self.expression_doc(expr)?;
+                        let expr_code = self.closed_expression_doc(expr)?;
                         docs.push(docvec![
                             "let ",
                             leaf::var(pv.clone()),
@@ -2197,7 +2197,7 @@ impl CoreErlangGenerator {
                 }
                 if is_last {
                     let acc_var = self.fresh_temp_var("AccOut");
-                    let expr_code = self.expression_doc(expr)?;
+                    let expr_code = self.closed_expression_doc(expr)?;
                     if plan.use_tuple_acc {
                         // BT-1276: Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);

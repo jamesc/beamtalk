@@ -97,3 +97,20 @@ TestCase subclass: ClassMethodBlockTest
   testClassMethodConditionalBothFalse =>
     result := ClassMethodBlock condBothLast: false
     self assert: result equals: 101
+
+  // BT-2350: collect: block combining a self-send AND a captured-local mutation.
+  // Previously emitted invalid Core Erlang (dangling `in`); now the collected
+  // self-send results and the threaded counter both come back.
+  testClassMethodCollectSelfSendAndMutation =>
+    result := ClassMethodBlock doubleAllCounting: #(1, 2, 3)
+    self assert: result equals: #(#(2, 4, 6), 3)
+
+  // BT-2350: select: variant — self-send predicate + captured-local mutation.
+  testClassMethodSelectSelfSendAndMutation =>
+    result := ClassMethodBlock bigCounting: #(1, 2, 3, 4)
+    self assert: result equals: #(#(3, 4), 4)
+
+  // BT-2350: inject:into: variant — self-send + captured-local mutation.
+  testClassMethodInjectSelfSendAndMutation =>
+    result := ClassMethodBlock addCounting: #(1, 2, 3)
+    self assert: result equals: #(6, 3)
