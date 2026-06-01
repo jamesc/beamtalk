@@ -165,11 +165,16 @@ TestCase subclass: VtThreadingConstructsTest
   // later `total := total + n` in the same branch.
   branchNestedCollect: flag =>
     total := 0
-    flag ifTrue: [
-      n := 0
-      #[1, 2, 3] collect: [:i | n := n + 1. i * 2]
-      total := total + n
-    ]
+    flag
+      ifTrue: [
+        n := 0
+        #[1, 2, 3]
+          collect: [:i |
+            n := n + 1
+            i * 2
+          ]
+        total := total + n
+      ]
 
   testBranchNonLastThreadingVisibleLater =>
     self assert: (self branchNestedCollect: true) equals: 3
@@ -180,12 +185,17 @@ TestCase subclass: VtThreadingConstructsTest
   // collect: as an assignment RHS inside the branch: `r` must be the reconstructed
   // Array (so `r size` works) and `n` must thread back, not bind to a raw tuple.
   branchNestedAssign: flag =>
-    acc := 0
-    flag ifTrue: [
-      n := 0
-      r := #[1, 2, 3] collect: [:i | n := n + 1. i * 2]
-      acc := r size + n
-    ]
+    _acc := 0
+    flag
+      ifTrue: [
+        n := 0
+        r := #[1, 2, 3]
+          collect: [:i |
+            n := n + 1
+            i * 2
+          ]
+        _acc := r size + n
+      ]
 
   testBranchAssignRhsThreading =>
     self assert: (self branchNestedAssign: true) equals: 6
@@ -194,10 +204,15 @@ TestCase subclass: VtThreadingConstructsTest
   // (element 1), not the raw {value, StateAcc} tuple.
   branchValueCollect: flag =>
     hits := 0
-    flag ifTrue: [
-      hits := hits + 1
-      #[1, 2, 3] collect: [:i | hits := hits + 1. i * 2]
-    ]
+    flag
+      ifTrue: [
+        hits := hits + 1
+        #[1, 2, 3]
+          collect: [:i |
+            hits := hits + 1
+            i * 2
+          ]
+      ]
 
   testBranchValuePositionThreading =>
     self assert: (self branchValueCollect: true) equals: #[2, 4, 6]
