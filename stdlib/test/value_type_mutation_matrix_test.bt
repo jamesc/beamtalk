@@ -1,0 +1,379 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2346: Backfill the mutation coverage matrix across
+//   {construct × context × position × write-mode}.
+//
+// This is the *absolute* oracle that complements the metamorphic (relative)
+// oracle in BT-2345: every cell here asserts a hand-written ground-truth final
+// threaded value, so it catches a construct broken *uniformly across all
+// contexts* — the case the cross-context-equality relations of BT-2345 cannot
+// see. The two oracles are only jointly complete because they share one
+// fragment corpus:
+//
+//   stdlib/test/fixtures/mutation_corpus_value.bt   (Value subclass context)
+//   stdlib/test/fixtures/mutation_corpus_actor.bt   (Actor context)
+//
+// plus the TestCase-context fragments defined as `frag*` helpers in this file.
+// BT-2345, when it lands, consumes the same fragment names for its equality
+// relations rather than maintaining a parallel list.
+//
+// The existing mutation_matrix_test.bt (BT-1480) exercises Actor *state-field*
+// threading densely; this file fills the previously thin axis — outer-LOCAL
+// threading in the Value subclass, Actor, and TestCase contexts — to the same
+// density, so the asymmetry that let BT-2342 hide cannot recur.
+//
+// BT-2342 (value-type foldl list-ops / conditionals / local-assignment) has
+// landed, so those value-type cells now run their ground-truth asserts. The
+// remaining `skip`ped cells track still-open gaps: BT-2355 (Actor-context
+// outer-local threading) and BT-2359 (value-type count:/detect: predicates and
+// parenthesized assignment-RHS threading). Loop regression cells come from BT-2308.
+
+TestCase subclass: ValueTypeMutationMatrixTest
+
+  // Each fixture exposes the SAME fragment method names; these helpers build a
+  // fresh instance per cell so state cannot bleed between assertions.
+  valueCorpus => MutationCorpusValue new
+
+  actorCorpus => MutationCorpusActor spawn
+
+  // Pending switch for BT-2342 value-type gaps. BT-2342 has landed, so the
+  // affected value-type cells now run their ground-truth asserts. Kept as a
+  // switch for documentation/bisection.
+  bt2342Pending => false
+
+  // Pending switch for BT-2355 Actor-context outer-local threading gaps
+  // surfaced by this matrix (write-only/read+write conditionals, ifTrue:ifFalse:
+  // non-last, count:/detect: foldl predicates, and loop local-assignment all
+  // fail to thread — and the read+write conditional only threads on the first
+  // invocation). Flip to `false` once BT-2355 lands.
+  bt2355Pending => true
+
+  // Pending switch for BT-2359 value-type outer-local threading gaps that
+  // BT-2342 did NOT cover: count:/detect: foldl predicates, and a threading
+  // construct (loop/conditional) used as a parenthesized assignment RHS that
+  // threads a *sibling* outer local. Flip to `false` once BT-2359 lands.
+  bt2359Pending => true
+
+  // ── TestCase-context fragments (the test class is itself a value-type) ──────
+  // `frag` prefix keeps BUnit from treating them as test methods.
+  fragToDoNonLastWriteOnly =>
+    last := 0
+    1 to: 5 do: [:i | last := i]
+    last
+
+  fragToDoNonLastReadWrite =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+    sum
+
+  fragToByDoNonLastReadWrite =>
+    sum := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | sum := sum + i]
+    sum
+
+  fragTimesRepeatNonLastReadWrite =>
+    count := 0
+    5 timesRepeat: [count := count + 1]
+    count
+
+  fragWhileTrueNonLastReadWrite =>
+    n := 0
+    [n < 5] whileTrue: [n := n + 1]
+    n
+
+  fragWhileFalseNonLastReadWrite =>
+    n := 0
+    [n >= 5] whileFalse: [n := n + 1]
+    n
+
+  fragRangeDoNonLastReadWrite =>
+    sum := 0
+    (1 to: 5) do: [:i | sum := sum + i]
+    sum
+
+  fragIfTrueNonLastReadWrite: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+    sum
+
+  fragIfTrueIfFalseNonLastReadWrite: flag =>
+    x := 1
+    flag ifTrue: [x := x + 1] ifFalse: [x := x + 100]
+    x
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  to:do:  (construct) — BT-2308 regression cells
+  // ════════════════════════════════════════════════════════════════════════
+
+  // to:do: × non-last × write-only
+  testToDoNonLastWriteOnlyValue =>
+    self assert: self valueCorpus toDoNonLastWriteOnly equals: 5
+
+  testToDoNonLastWriteOnlyActor =>
+    self assert: self actorCorpus toDoNonLastWriteOnly equals: 5
+
+  testToDoNonLastWriteOnlyTestCase =>
+    self assert: self fragToDoNonLastWriteOnly equals: 5
+
+  // to:do: × non-last × read+write
+  testToDoNonLastReadWriteValue =>
+    self assert: self valueCorpus toDoNonLastReadWrite equals: 15
+
+  testToDoNonLastReadWriteActor =>
+    self assert: self actorCorpus toDoNonLastReadWrite equals: 15
+
+  testToDoNonLastReadWriteTestCase =>
+    self assert: self fragToDoNonLastReadWrite equals: 15
+
+  // to:do: × local-assignment RHS × read+write
+  testToDoAssignRhsReadWriteValue =>
+    self bt2359Pending
+      ifTrue: [
+        ^self skip: "BT-2359: loop as a parenthesized assignment RHS drops sibling-local threading in value-type context"
+      ]
+    self assert: self valueCorpus toDoAssignRhsReadWrite equals: 15
+
+  testToDoAssignRhsReadWriteActor =>
+    self bt2355Pending
+      ifTrue: [
+        ^self skip: "BT-2355: loop local-assignment drops threading in Actor method body"
+      ]
+    self assert: self actorCorpus toDoAssignRhsReadWrite equals: 15
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  to:by:do:  — BT-2308 regression cells
+  // ════════════════════════════════════════════════════════════════════════
+  testToByDoNonLastWriteOnlyValue =>
+    self assert: self valueCorpus toByDoNonLastWriteOnly equals: 9
+
+  testToByDoNonLastWriteOnlyActor =>
+    self assert: self actorCorpus toByDoNonLastWriteOnly equals: 9
+
+  testToByDoNonLastReadWriteValue =>
+    self assert: self valueCorpus toByDoNonLastReadWrite equals: 25
+
+  testToByDoNonLastReadWriteActor =>
+    self assert: self actorCorpus toByDoNonLastReadWrite equals: 25
+
+  testToByDoNonLastReadWriteTestCase =>
+    self assert: self fragToByDoNonLastReadWrite equals: 25
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  timesRepeat:  — BT-2308 regression cells
+  // ════════════════════════════════════════════════════════════════════════
+  testTimesRepeatNonLastWriteOnlyValue =>
+    self assert: self valueCorpus timesRepeatNonLastWriteOnly equals: 7
+
+  testTimesRepeatNonLastWriteOnlyActor =>
+    self assert: self actorCorpus timesRepeatNonLastWriteOnly equals: 7
+
+  testTimesRepeatNonLastReadWriteValue =>
+    self assert: self valueCorpus timesRepeatNonLastReadWrite equals: 5
+
+  testTimesRepeatNonLastReadWriteActor =>
+    self assert: self actorCorpus timesRepeatNonLastReadWrite equals: 5
+
+  testTimesRepeatNonLastReadWriteTestCase =>
+    self assert: self fragTimesRepeatNonLastReadWrite equals: 5
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  whileTrue: / whileFalse:
+  // ════════════════════════════════════════════════════════════════════════
+  testWhileTrueNonLastReadWriteValue =>
+    self assert: self valueCorpus whileTrueNonLastReadWrite equals: 5
+
+  testWhileTrueNonLastReadWriteActor =>
+    self assert: self actorCorpus whileTrueNonLastReadWrite equals: 5
+
+  testWhileTrueNonLastReadWriteTestCase =>
+    self assert: self fragWhileTrueNonLastReadWrite equals: 5
+
+  testWhileFalseNonLastReadWriteValue =>
+    self assert: self valueCorpus whileFalseNonLastReadWrite equals: 5
+
+  testWhileFalseNonLastReadWriteActor =>
+    self assert: self actorCorpus whileFalseNonLastReadWrite equals: 5
+
+  testWhileFalseNonLastReadWriteTestCase =>
+    self assert: self fragWhileFalseNonLastReadWrite equals: 5
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  (1 to: n) do:
+  // ════════════════════════════════════════════════════════════════════════
+  testRangeDoNonLastReadWriteValue =>
+    self assert: self valueCorpus rangeDoNonLastReadWrite equals: 15
+
+  testRangeDoNonLastReadWriteActor =>
+    self assert: self actorCorpus rangeDoNonLastReadWrite equals: 15
+
+  testRangeDoNonLastReadWriteTestCase =>
+    self assert: self fragRangeDoNonLastReadWrite equals: 15
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  collect:  — BT-2342 (failure mode A): value-type leaks value+state tuple
+  // ════════════════════════════════════════════════════════════════════════
+  testCollectNonLastReadWriteValue =>
+    self bt2342Pending ifTrue: [
+      ^self skip: "BT-2342: collect: leaks value+state tuple in value-type context"
+    ]
+    self assert: self valueCorpus collectNonLastReadWrite equals: 3
+
+  testCollectNonLastReadWriteActor =>
+    self assert: self actorCorpus collectNonLastReadWrite equals: 3
+
+  testCollectAssignRhsReadWriteValue =>
+    self bt2342Pending
+      ifTrue: [
+        ^self skip: "BT-2342: collect: local-assignment leaks tuple in value-type context"
+      ]
+    self assert: self valueCorpus collectAssignRhsReadWrite equals: 3
+
+  testCollectAssignRhsReadWriteActor =>
+    self assert: self actorCorpus collectAssignRhsReadWrite equals: 3
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  select: / reject:  — BT-2342 (failure mode A)
+  // ════════════════════════════════════════════════════════════════════════
+  testSelectNonLastReadWriteValue =>
+    self bt2342Pending ifTrue: [
+      ^self skip: "BT-2342: select: leaks value+state tuple in value-type context"
+    ]
+    self assert: self valueCorpus selectNonLastReadWrite equals: 4
+
+  testSelectNonLastReadWriteActor =>
+    self assert: self actorCorpus selectNonLastReadWrite equals: 4
+
+  testRejectNonLastReadWriteValue =>
+    self bt2342Pending ifTrue: [
+      ^self skip: "BT-2342: reject: leaks value+state tuple in value-type context"
+    ]
+    self assert: self valueCorpus rejectNonLastReadWrite equals: 4
+
+  testRejectNonLastReadWriteActor =>
+    self assert: self actorCorpus rejectNonLastReadWrite equals: 4
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  inject:into:  — BT-2342 (failure mode A)
+  // ════════════════════════════════════════════════════════════════════════
+  testInjectNonLastReadWriteValue =>
+    self bt2342Pending
+      ifTrue: [
+        ^self skip: "BT-2342: inject:into: leaks value+state tuple in value-type context"
+      ]
+    self assert: self valueCorpus injectNonLastReadWrite equals: 6
+
+  testInjectNonLastReadWriteActor =>
+    self assert: self actorCorpus injectNonLastReadWrite equals: 6
+
+  testInjectAssignRhsReadWriteValue =>
+    self bt2342Pending
+      ifTrue: [
+        ^self skip: "BT-2342: inject:into: local-assignment leaks tuple in value-type context"
+      ]
+    self assert: self valueCorpus injectAssignRhsReadWrite equals: 6
+
+  testInjectAssignRhsReadWriteActor =>
+    self assert: self actorCorpus injectAssignRhsReadWrite equals: 6
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  detect: / count:  — BT-2342 (failure mode A, foldl predicate)
+  // ════════════════════════════════════════════════════════════════════════
+  testDetectNonLastReadWriteValue =>
+    self bt2359Pending
+      ifTrue: [
+        ^self skip: "BT-2359: detect: predicate does not thread outer local in value-type context"
+      ]
+    self assert: self valueCorpus detectNonLastReadWrite equals: 3
+
+  testDetectNonLastReadWriteActor =>
+    self bt2355Pending ifTrue: [
+      ^self skip: "BT-2355: detect: does not thread outer local in Actor context"
+    ]
+    self assert: self actorCorpus detectNonLastReadWrite equals: 3
+
+  testCountNonLastReadWriteValue =>
+    self bt2359Pending
+      ifTrue: [
+        ^self skip: "BT-2359: count: predicate does not thread outer local in value-type context"
+      ]
+    self assert: self valueCorpus countNonLastReadWrite equals: 3
+
+  testCountNonLastReadWriteActor =>
+    self bt2355Pending ifTrue: [
+      ^self skip: "BT-2355: count: does not thread outer local in Actor context"
+    ]
+    self assert: self actorCorpus countNonLastReadWrite equals: 3
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ifTrue:  (conditionals)
+  // ════════════════════════════════════════════════════════════════════════
+
+  // write-only conditional threads in non-last position
+  testIfTrueNonLastWriteOnlyValue =>
+    self assert: (self valueCorpus ifTrueNonLastWriteOnly: true) equals: 9
+
+  testIfTrueNonLastWriteOnlyActor =>
+    self bt2355Pending
+      ifTrue: [
+        ^self skip: "BT-2355: write-only conditional does not thread outer local in Actor context"
+      ]
+    self assert: (self actorCorpus ifTrueNonLastWriteOnly: true) equals: 9
+
+  // read+write conditional, non-last
+  testIfTrueNonLastReadWriteValue =>
+    self assert: (self valueCorpus ifTrueNonLastReadWrite: true) equals: 7
+
+  testIfTrueNonLastReadWriteActor =>
+    self bt2355Pending
+      ifTrue: [
+        ^self skip: "BT-2355: read+write conditional only threads on first Actor invocation"
+      ]
+    self assert: (self actorCorpus ifTrueNonLastReadWrite: true) equals: 7
+
+  testIfTrueNonLastReadWriteTestCase =>
+    self assert: (self fragIfTrueNonLastReadWrite: true) equals: 7
+
+  // BT-2342 (failure mode B): read+write conditional as last expression
+  testIfTrueLastReadWriteValue =>
+    self bt2342Pending
+      ifTrue: [
+        ^self skip: "BT-2342: read+write ifTrue: as last expr crashes (arity-0 dispatch)"
+      ]
+    self assert: (self valueCorpus ifTrueLastReadWrite: true) equals: 7
+
+  testIfTrueLastReadWriteActor =>
+    self assert: (self actorCorpus ifTrueLastReadWrite: true) equals: 7
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  ifTrue:ifFalse:
+  // ════════════════════════════════════════════════════════════════════════
+  testIfTrueIfFalseNonLastReadWriteValue =>
+    self assert: (self valueCorpus ifTrueIfFalseNonLastReadWrite: true) equals: 2
+
+  testIfTrueIfFalseNonLastReadWriteActor =>
+    self bt2355Pending
+      ifTrue: [
+        ^self skip: "BT-2355: ifTrue:ifFalse: does not thread outer local in Actor context"
+      ]
+    self assert: (self actorCorpus ifTrueIfFalseNonLastReadWrite: true) equals: 2
+
+  testIfTrueIfFalseNonLastReadWriteTestCase =>
+    self assert: (self fragIfTrueIfFalseNonLastReadWrite: true) equals: 2
+
+  testIfTrueIfFalseAssignRhsReadWriteValue =>
+    self bt2359Pending
+      ifTrue: [
+        ^self skip: "BT-2359: conditional as a parenthesized assignment RHS drops sibling-local threading in value-type context"
+      ]
+    self assert: (self valueCorpus ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
+
+  testIfTrueIfFalseAssignRhsReadWriteActor =>
+    self bt2355Pending
+      ifTrue: [
+        ^self skip: "BT-2355: conditional local-assignment drops threading in Actor method body"
+      ]
+    self assert: (self actorCorpus ifTrueIfFalseAssignRhsReadWrite: true) equals: 5

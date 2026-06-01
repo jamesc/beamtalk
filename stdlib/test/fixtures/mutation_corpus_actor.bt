@@ -1,0 +1,198 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2346: Shared mutation-fragment corpus — Actor context.
+//
+// Same fragment method names as MutationCorpusValue (the value-type corpus),
+// so both the absolute oracle (BT-2346, value_type_mutation_matrix_test.bt) and
+// the relative/metamorphic oracle (BT-2345) can run the *same* fragments across
+// the Actor and value-type contexts and assert ground truth / cross-context
+// equality respectively.
+//
+// These fragments thread *outer locals* (not Actor state fields) inside an
+// Actor method body — the Actor context is the historically dense, working
+// baseline that BT-2308/BT-2342 brought the value-type context up to. Each
+// method returns the final threaded value, so a tuple-leak or dropped-mutation
+// regression in either context surfaces as a wrong asserted value.
+
+Actor subclass: MutationCorpusActor
+
+  // ── to:do: ────────────────────────────────────────────────────────────────
+  toDoNonLastWriteOnly =>
+    last := 0
+    1 to: 5 do: [:i | last := i]
+    last
+
+  toDoNonLastReadWrite =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+    sum
+
+  toDoAssignRhsReadWrite =>
+    sum := 0
+    _r := (1 to: 5 do: [:i | sum := sum + i])
+    sum
+
+  // ── to:by:do: ───────────────────────────────────────────────────────────────
+  toByDoNonLastWriteOnly =>
+    last := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | last := i]
+    last
+
+  toByDoNonLastReadWrite =>
+    sum := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | sum := sum + i]
+    sum
+
+  // ── timesRepeat: ────────────────────────────────────────────────────────────
+  timesRepeatNonLastWriteOnly =>
+    last := 0
+    3 timesRepeat: [last := 7]
+    last
+
+  timesRepeatNonLastReadWrite =>
+    count := 0
+    5 timesRepeat: [count := count + 1]
+    count
+
+  // ── whileTrue: ──────────────────────────────────────────────────────────────
+  whileTrueNonLastReadWrite =>
+    n := 0
+    [n < 5] whileTrue: [n := n + 1]
+    n
+
+  // ── whileFalse: ─────────────────────────────────────────────────────────────
+  whileFalseNonLastReadWrite =>
+    n := 0
+    [n >= 5] whileFalse: [n := n + 1]
+    n
+
+  // ── (1 to: n) do: ──────────────────────────────────────────────────────────
+  rangeDoNonLastReadWrite =>
+    sum := 0
+    (1 to: 5) do: [:i | sum := sum + i]
+    sum
+
+  // ── collect: ────────────────────────────────────────────────────────────────
+  // NonLast: collect is a bare side-effect statement; result is discarded.
+  collectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+    n
+
+  // AssignRhs: collect result is bound to a local (different codegen path).
+  collectAssignRhsReadWrite =>
+    n := 0
+    _r := #(1, 2, 3)
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+    n
+
+  // ── select: ─────────────────────────────────────────────────────────────────
+  selectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3, 4)
+      select: [:i |
+        n := n + 1
+        i > 2
+      ]
+    n
+
+  // ── reject: ─────────────────────────────────────────────────────────────────
+  rejectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3, 4)
+      reject: [:i |
+        n := n + 1
+        i > 2
+      ]
+    n
+
+  // ── inject:into: ─────────────────────────────────────────────────────────────
+  // NonLast: inject result is discarded; only the outer local matters.
+  injectNonLastReadWrite =>
+    t := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :b |
+        t := t + b
+        a + b
+      ]
+    t
+
+  // AssignRhs: inject result bound to a local.
+  injectAssignRhsReadWrite =>
+    t := 0
+    _r := #(1, 2, 3)
+      inject: 0
+      into: [:a :b |
+        t := t + b
+        a + b
+      ]
+    t
+
+  // ── detect: ─────────────────────────────────────────────────────────────────
+  detectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      detect: [:i |
+        n := n + 1
+        i > 10
+      ]
+      ifNone: [-1]
+    n
+
+  // ── count: ──────────────────────────────────────────────────────────────────
+  countNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      count: [:i |
+        n := n + 1
+        i > 0
+      ]
+    n
+
+  // ── ifTrue: ─────────────────────────────────────────────────────────────────
+  // Conditions are passed in (not literals) so the always-true/false lint does
+  // not fire; callers pass `true` to drive the threading path.
+  ifTrueNonLastWriteOnly: flag =>
+    m := 0
+    flag ifTrue: [m := 9]
+    m
+
+  ifTrueNonLastReadWrite: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+    sum
+
+  ifTrueLastReadWrite: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+
+  // ── ifTrue:ifFalse: ──────────────────────────────────────────────────────────
+  ifTrueIfFalseNonLastReadWrite: flag =>
+    x := 1
+    flag ifTrue: [x := x + 1] ifFalse: [x := x + 100]
+    x
+
+  ifTrueIfFalseAssignRhsReadWrite: flag =>
+    x := 0
+    _r := flag
+      ifTrue: [
+        x := 5
+        42
+      ]
+      ifFalse: [0]
+    x

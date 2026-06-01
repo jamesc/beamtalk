@@ -1,0 +1,219 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2346: Shared mutation-fragment corpus — value-type (Value subclass) context.
+//
+// This is the *shared fragment corpus* referenced by BT-2346 (absolute oracle:
+// each fragment's final threaded value is asserted by hand in
+// value_type_mutation_matrix_test.bt) and BT-2345 (relative/metamorphic oracle:
+// the same fragment names run in every context and are asserted equal across
+// contexts).
+//
+// Each method is one corpus fragment, named `<construct><Position><WriteMode>`,
+// and returns the *final threaded value* of an outer local mutated inside the
+// construct. The matrix axes encoded here:
+//
+//   construct : toDo / toByDo / timesRepeat / whileTrue / whileFalse /
+//               rangeDo / collect / select / reject / inject / detect /
+//               count / ifTrue / ifTrueIfFalse
+//   position  : Last (construct is the method's last expression)
+//               NonLast (construct is a side-effect statement; a later
+//                        statement reads the threaded local)
+//               AssignRhs (construct is the RHS of a local assignment)
+//   write-mode: WriteOnly (block only writes the outer local)
+//               ReadWrite (block reads and writes the outer local)
+//
+// Loops in last position thread internally but evaluate to nil as the method's
+// value (BT-2308); those fragments return the threaded local via a later read,
+// so every fragment returns a concrete ground-truth integer/array.
+//
+// Fragments marked `// BT-2342:` exercise value-type gaps that currently leak
+// {value, StateAcc} tuples or crash; their matrix cells are `skip`ped until
+// BT-2342 lands, then flipped on.
+
+Value subclass: MutationCorpusValue
+
+  // ── to:do: ────────────────────────────────────────────────────────────────
+  toDoNonLastWriteOnly =>
+    last := 0
+    1 to: 5 do: [:i | last := i]
+    last
+
+  toDoNonLastReadWrite =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+    sum
+
+  toDoAssignRhsReadWrite =>
+    sum := 0
+    _r := (1 to: 5 do: [:i | sum := sum + i])
+    sum
+
+  // ── to:by:do: ───────────────────────────────────────────────────────────────
+  toByDoNonLastWriteOnly =>
+    last := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | last := i]
+    last
+
+  toByDoNonLastReadWrite =>
+    sum := 0
+    1
+      to: 10
+      by: 2
+      do: [:i | sum := sum + i]
+    sum
+
+  // ── timesRepeat: ────────────────────────────────────────────────────────────
+  timesRepeatNonLastWriteOnly =>
+    last := 0
+    3 timesRepeat: [last := 7]
+    last
+
+  timesRepeatNonLastReadWrite =>
+    count := 0
+    5 timesRepeat: [count := count + 1]
+    count
+
+  // ── whileTrue: ──────────────────────────────────────────────────────────────
+  whileTrueNonLastReadWrite =>
+    n := 0
+    [n < 5] whileTrue: [n := n + 1]
+    n
+
+  // ── whileFalse: ─────────────────────────────────────────────────────────────
+  whileFalseNonLastReadWrite =>
+    n := 0
+    [n >= 5] whileFalse: [n := n + 1]
+    n
+
+  // ── (1 to: n) do: ──────────────────────────────────────────────────────────
+  rangeDoNonLastReadWrite =>
+    sum := 0
+    (1 to: 5) do: [:i | sum := sum + i]
+    sum
+
+  // ── collect: ────────────────────────────────────────────────────────────────
+  // BT-2342 (failure mode A): foldl list-ops leak {value, StateAcc} in every
+  // position and do not thread the outer local back in value-type context.
+
+  // NonLast: collect is a bare side-effect statement; result is discarded.
+  collectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+    n
+
+  // AssignRhs: collect result is bound to a local (different codegen path).
+  collectAssignRhsReadWrite =>
+    n := 0
+    _r := #(1, 2, 3)
+      collect: [:i |
+        n := n + 1
+        i * 2
+      ]
+    n
+
+  // ── select: ─────────────────────────────────────────────────────────────────
+  selectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3, 4)
+      select: [:i |
+        n := n + 1
+        i > 2
+      ]
+    n
+
+  // ── reject: ─────────────────────────────────────────────────────────────────
+  rejectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3, 4)
+      reject: [:i |
+        n := n + 1
+        i > 2
+      ]
+    n
+
+  // ── inject:into: ─────────────────────────────────────────────────────────────
+  // NonLast: inject result is discarded; only the outer local matters.
+  injectNonLastReadWrite =>
+    t := 0
+    #(1, 2, 3)
+      inject: 0
+      into: [:a :b |
+        t := t + b
+        a + b
+      ]
+    t
+
+  // AssignRhs: inject result bound to a local.
+  injectAssignRhsReadWrite =>
+    t := 0
+    _r := #(1, 2, 3)
+      inject: 0
+      into: [:a :b |
+        t := t + b
+        a + b
+      ]
+    t
+
+  // ── detect: ─────────────────────────────────────────────────────────────────
+  detectNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      detect: [:i |
+        n := n + 1
+        i > 10
+      ]
+      ifNone: [-1]
+    n
+
+  // ── count: ──────────────────────────────────────────────────────────────────
+  countNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      count: [:i |
+        n := n + 1
+        i > 0
+      ]
+    n
+
+  // ── ifTrue: ─────────────────────────────────────────────────────────────────
+  // Conditions are passed in (not literals) so the always-true/false lint does
+  // not fire; callers pass `true` to drive the threading path.
+  ifTrueNonLastWriteOnly: flag =>
+    m := 0
+    flag ifTrue: [m := 9]
+    m
+
+  ifTrueNonLastReadWrite: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+    sum
+
+  // BT-2342 (failure mode B): read+write conditional as the last expression
+  // crashes at runtime (arity-0 dispatch into True>>ifTrue:).
+  ifTrueLastReadWrite: flag =>
+    sum := 0
+    flag ifTrue: [sum := sum + 7]
+
+  // ── ifTrue:ifFalse: ──────────────────────────────────────────────────────────
+  ifTrueIfFalseNonLastReadWrite: flag =>
+    x := 1
+    flag ifTrue: [x := x + 1] ifFalse: [x := x + 100]
+    x
+
+  ifTrueIfFalseAssignRhsReadWrite: flag =>
+    x := 0
+    _r := flag
+      ifTrue: [
+        x := 5
+        42
+      ]
+      ifFalse: [0]
+    x
