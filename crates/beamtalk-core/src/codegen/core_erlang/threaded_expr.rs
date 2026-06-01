@@ -5,14 +5,18 @@
 //!
 //! **DDD Context:** Code Generation
 //!
-//! Every threading construct — a captured-local loop (`whileTrue:`/`whileFalse:`,
-//! `to:do:`/`to:by:do:`/`timesRepeat:`), a foldl list-op
-//! (`collect:`/`select:`/`reject:`/`inject:into:`/`count:`/`detect:`), or a
-//! read+write conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`) — lowers to the
-//! same runtime shape: a `{Value, StateAcc}` 2-tuple whose element 1 is the logical
-//! result and element 2 is a map of the mutated outer locals (ADR 0041's calling
-//! convention). The three former consumption paths (value-type, class-method, …)
-//! did not disagree about that tuple — they only disagreed about what to do with it
+//! A captured-local loop (`whileTrue:`/`whileFalse:`, `to:do:`/`to:by:do:`/
+//! `timesRepeat:`) or a foldl list-op
+//! (`collect:`/`select:`/`reject:`/`inject:into:`/`count:`/`detect:`) lowers to a
+//! `{Value, StateAcc}` 2-tuple whose element 1 is the logical result and element 2 is
+//! a map of the mutated outer locals (ADR 0041's calling convention). A read+write
+//! conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`) is instead inlined as a
+//! `case` — in last position binding only its branch's logical value, in non-last /
+//! assign-RHS position yielding a flat `{LogicalValue, Mut1, …, MutN}` tuple whose
+//! trailing elements rebind the threaded locals positionally. Either way every
+//! construct exposes the same two things — a logical value and the outer-local
+//! mutations — so the three former consumption paths (value-type, class-method, …)
+//! did not disagree about *what* a construct produces, only about what to do with it
 //! at the **method boundary**.
 //!
 //! This module splits that tangle along one line:
@@ -37,10 +41,13 @@ use crate::docvec;
 /// Where a threading construct sits in its enclosing method body. Drives how the
 /// bound logical value (tuple element 1) is returned/stored.
 ///
-/// Only `Last` is currently produced through the unified emitter; the non-last
-/// open-let-chain paths (`generate_vt_*_open`) are already context-shared and feed
-/// the same `{Value, StateAcc}` tuple. `Return` is the explicit `^`-return variant of
-/// `Last` — identical post-construct treatment, recorded distinctly for clarity.
+/// Both `Last` and `Return` flow through the unified emitter (the class-method
+/// generator passes `Return` for explicit `^ expr` and `Last` for the implicit final
+/// expression; the value-type generator passes `Last`). They currently receive
+/// identical post-construct treatment — `Return` is recorded distinctly so the call
+/// site's intent is preserved for the later non-last / assign-RHS migration steps. The
+/// non-last open-let-chain paths (`generate_vt_*_open`) are already context-shared and
+/// are not (yet) routed through this emitter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ThreadingPosition {
     /// Implicit last expression of the method body.
