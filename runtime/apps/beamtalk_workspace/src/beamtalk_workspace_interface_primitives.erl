@@ -945,8 +945,9 @@ BT-2365 (ADR 0081 Phase 1): the single shared resolver. Replaces eager workspace
 injection — instead of copying globals into each session at init, a free
 identifier is resolved lazily, in order:
 
-1. session locals map (`Locals`) — checked first so locals **shadow** globals
-   (`Transcript := 5` then `Transcript` returns `5` within that session);
+1. session locals map (`Locals`) — checked first so a session local **shadows**
+   a workspace global of the same name (e.g. `x := 5` then `x` resolves to the
+   local even if `x` is also a `bind:as:` entry);
 2. `bind:as:` registry (the workspace user-bindings ETS table);
 3. singleton registry (`Transcript`/`Beamtalk`/`Workspace`, resolved live from
    their class instances via `beamtalk_workspace_config:singletons/0` +
@@ -955,9 +956,11 @@ identifier is resolved lazily, in order:
 5. otherwise raise `undefined_variable`.
 
 Used by **both** the REPL codegen free-identifier fallthrough and (later)
-`Session resolve:`, so the two cannot drift. Internal binding keys
-(`?WORKSPACE_BINDINGS_KEY`, `?INTERNAL_REGISTRY_KEY`) in `Locals` are ignored
-by `maps:find` because callers never reference them as source names.
+`Session resolve:`, so the two cannot drift. `Locals` is the eval-time
+bindings map, which carries internal keys (the `__`-prefixed convention, e.g.
+`__workspace_user_bindings__`); these never collide with a resolved name
+because they are not valid source identifiers, so callers never look them up
+here.
 """.
 -spec resolve_name(map(), atom()) -> term().
 resolve_name(Locals, Name) when is_map(Locals), is_atom(Name) ->
@@ -1058,11 +1061,15 @@ raise_undefined_variable(Name) ->
 Resolve a capitalised class reference whose name is not a session local.
 
 BT-2365 (ADR 0081 Phase 1): the REPL codegen for a `ClassReference` checks the
-session locals map first (so `Transcript := 5` shadows the singleton) and, on a
-miss, calls this. Reuses the same singleton + class-registry tiers as
+session locals map first (so a session local of the same name takes precedence)
+and, on a miss, calls this. Reuses the same singleton + class-registry tiers as
 `resolve_name/2` so resolution cannot drift, but raises `class_not_found`
 (not `undefined_variable`) for a genuinely unknown class — preserving the
 existing "Class 'X' not found" REPL error.
+
+(Note: a capitalised name parses as a `ClassReference`, not an assignment
+target, so it cannot itself be rebound via `:=`; the locals check still runs
+for symmetry with `resolve_name/2` and is essentially always a miss here.)
 
 `Locals` is accepted for symmetry with `resolve_name/2` and to allow a future
 caller to thread the session map; the codegen has already excluded a local hit

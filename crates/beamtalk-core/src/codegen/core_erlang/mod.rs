@@ -2547,15 +2547,18 @@ impl CoreErlangGenerator {
         // Actor methods compiled in workspace mode should NOT check REPL bindings.
         //
         // BT-2365 (ADR 0081 Phase 1): for an unqualified class reference, check the
-        // session locals map first so a local assignment shadows a singleton/class
-        // (`Transcript := 5` then `Transcript` returns `5`). On a miss, delegate to
-        // the shared runtime resolver, which consults the live singleton + class
-        // registries — the singletons (Transcript/Beamtalk/Workspace) are no longer
-        // eagerly injected into State, so this lazy lookup replaces the old inline
-        // class-registry branch. The resolver raises the same class_not_found error
-        // for a genuinely unknown class, preserving REPL output. Package-qualified
-        // references (`json@Parser`) keep the inline path below because the resolver
-        // does not carry the package-qualified display name.
+        // session locals map first so a session local of the same name takes
+        // precedence. (A capitalised name parses as a ClassReference, not an
+        // assignment target, so it cannot itself be rebound via `:=`; the locals
+        // check is for symmetry with resolve_name/2 and is essentially always a
+        // miss.) On a miss, delegate to the shared runtime resolver, which consults
+        // the live singleton + class registries — the singletons
+        // (Transcript/Beamtalk/Workspace) are no longer eagerly injected into
+        // State, so this lazy lookup replaces the old inline class-registry branch.
+        // The resolver raises the same class_not_found error for a genuinely
+        // unknown class, preserving REPL output. Package-qualified references
+        // (`json@Parser`) keep the inline path below because the resolver does not
+        // carry the package-qualified display name.
         if self.workspace_mode() && self.context == CodeGenContext::Repl && package.is_none() {
             let state_var = self.current_state_var();
             let resolved_var = self.fresh_var("ResolvedClass");
