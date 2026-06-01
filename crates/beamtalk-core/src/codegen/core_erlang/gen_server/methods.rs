@@ -2246,7 +2246,10 @@ impl CoreErlangGenerator {
         // the shared helper applies the `{class_var_result, …}` wrapping based on
         // `class_var_mutated()`, identical to the wrapping below — so it is
         // correct for both the class-vars and no-class-vars cases.
-        if let Some(doc) = self.try_generate_class_method_threaded_last(value)? {
+        if let Some(doc) = self.try_generate_class_method_threaded_last(
+            value,
+            super::super::threaded_expr::ThreadingPosition::Return,
+        )? {
             return Ok(doc);
         }
         // BT-1942: Use `expression_doc_with_open_scope` so an explicit
@@ -2313,7 +2316,10 @@ impl CoreErlangGenerator {
         // is identical whether or not the class declares class vars — threading constructs
         // mutate *locals*, not class vars, so the wrapping is driven solely by whether an
         // earlier statement mutated a class var (`class_var_mutated()`).
-        if let Some(doc) = self.try_generate_class_method_threaded_last(expr)? {
+        if let Some(doc) = self.try_generate_class_method_threaded_last(
+            expr,
+            super::super::threaded_expr::ThreadingPosition::Last,
+        )? {
             return Ok(doc);
         }
         if has_class_vars {
@@ -2335,42 +2341,23 @@ impl CoreErlangGenerator {
     fn try_generate_class_method_threaded_last(
         &mut self,
         expr: &Expression,
+        position: super::super::threaded_expr::ThreadingPosition,
     ) -> Result<Option<Document<'static>>> {
-        // BT-2358: see through redundant parentheses (e.g. `^(items collect: …)`
-        // or `(flag ifTrue: [...])`), which are semantically transparent, so the
-        // threading construct inside is unwrapped to its logical value rather than
-        // leaking its raw `{value, StateAcc}` tuple. Applies to both the explicit
-        // `^`-return and the implicit last-expression callers.
-        let expr = Self::peel_parens(expr);
+        // BT-2361: route through the shared `ThreadedExpr` transform + boundary emitter.
+        // BT-2358: it peels redundant parentheses (e.g. `^(items collect: …)` or
+        // `(flag ifTrue: [...])`) so the threading construct inside is unwrapped to its
+        // logical value rather than leaking its raw `{value, StateAcc}` tuple. Applies to
+        // both the explicit `^`-return and the implicit last-expression callers.
         let mut parts: Vec<Document<'static>> = Vec::new();
-        let result_var = if self.expr_yields_vt_threaded_tuple(expr) {
-            self.emit_vt_threaded_tuple_unwrap_to_var(expr, &mut parts)?
-        } else if self.is_conditional_with_vt_local_threading(expr) {
-            match self.emit_vt_conditional_case_to_var(expr, &mut parts)? {
-                Some(result_var) => result_var,
-                None => return Ok(None),
-            }
+        if self.emit_threaded_last(
+            expr,
+            position,
+            super::super::threaded_expr::ThreadingBoundary::ClassMethod,
+            &mut parts,
+        )? {
+            Ok(Some(Document::Vec(parts)))
         } else {
-            return Ok(None);
-        };
-        parts.push(self.class_method_result_tail(&result_var));
-        Ok(Some(Document::Vec(parts)))
-    }
-
-    /// BT-2349: Builds the tail that returns an already-bound class-method result var:
-    /// `{class_var_result, Result, ClassVarsN}` when a class var was mutated, else `Result`.
-    fn class_method_result_tail(&self, result_var: &str) -> Document<'static> {
-        if self.class_var_mutated() {
-            let final_cv = self.current_class_var();
-            docvec![
-                "{'class_var_result', ",
-                leaf::var(result_var.to_string()),
-                ", ",
-                leaf::var(final_cv),
-                "}",
-            ]
-        } else {
-            leaf::var(result_var.to_string())
+            Ok(None)
         }
     }
 
@@ -2535,27 +2522,17 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
-                // BT-2349: When the RHS is a threading construct (value-type loop or foldl
-                // list-op) it returns a `{value, StateAcc}` tuple. Bind the target to the
-                // logical value (element 1) and rebind the threaded locals from the StateAcc
-                // (element 2), rather than binding the target to the raw tuple. Mirrors the
-                // value-type instance-method body sequencer (BT-2342).
-                if self.expr_yields_vt_threaded_tuple(value) {
-                    let mut parts: Vec<Document<'static>> = Vec::new();
-                    self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
-                    return Ok(Document::Vec(parts));
-                }
-                // BT-2371: When the RHS is a read+write conditional (`ifTrue:`/`ifFalse:`/
-                // `ifTrue:ifFalse:` whose branches mutate sibling outer-locals), each branch
-                // emits `{LogicalValue, Mut1..MutN}`. Bind the target to element 1 and rebind
-                // the threaded siblings from elements 2.., so a later read of a sibling local
-                // sees the branch's mutation rather than its pre-conditional value. This is the
-                // class-method-context analogue of the value-type fix (BT-2359). See-through
-                // parentheses first (BT-2358), mirroring the loop/foldl assign-RHS path.
-                let rhs = Self::peel_parens(value);
-                if self.is_conditional_with_vt_local_threading(rhs) {
-                    let mut parts: Vec<Document<'static>> = Vec::new();
-                    self.emit_vt_conditional_assign_rhs(&id.name, rhs, &mut parts)?;
+                // BT-2349/BT-2371: When the RHS is a threading construct (value-type loop /
+                // foldl list-op yielding `{value, StateAcc}`) or a read+write conditional
+                // (each branch emits `{LogicalValue, Mut1..MutN}`), bind the target to the
+                // logical value and rebind the threaded siblings — rather than binding the
+                // target to the raw tuple. BT-2361: shared with the value-type instance-method
+                // body sequencer via `emit_threaded_assign_rhs`.
+                let mut parts: Vec<Document<'static>> = Vec::new();
+                if self
+                    .emit_threaded_assign_rhs(&id.name, value, &mut parts)?
+                    .is_some()
+                {
                     return Ok(Document::Vec(parts));
                 }
                 let var_name = &id.name;

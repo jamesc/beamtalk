@@ -104,6 +104,7 @@ pub mod selector_mangler;
 mod spec_codegen;
 mod state_codegen;
 mod supervisor_codegen;
+mod threaded_expr;
 mod util;
 mod value_type_codegen;
 mod variable_context;
@@ -1688,7 +1689,7 @@ impl CoreErlangGenerator {
     }
 
     /// BT-412: Returns the current class variable state variable name.
-    fn current_class_var(&self) -> String {
+    pub(super) fn current_class_var(&self) -> String {
         util::versioned_var("ClassVars", self.class_var_version())
     }
 
