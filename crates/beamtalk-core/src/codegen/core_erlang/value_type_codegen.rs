@@ -2280,28 +2280,68 @@ impl CoreErlangGenerator {
         for (i, body_expr) in body.iter().enumerate() {
             if i == last {
                 // Value position: the assignment's value (for `x := v`) or the expression.
-                if let Expression::Assignment { value, .. } = body_expr {
-                    parts.push(self.expression_doc(value)?);
+                let value_expr = match body_expr {
+                    Expression::Assignment { value, .. } => value.as_ref(),
+                    other => *other,
+                };
+                // BT-2342: a threading construct (loop / foldl list-op mutating captured
+                // locals) here yields a `{value, StateAcc}` tuple. The branch value is its
+                // logical result — element 1 — not the raw tuple. The threaded locals don't
+                // need to escape in value position, so unwrap without extracting them.
+                if self.expr_yields_vt_threaded_tuple(value_expr) {
+                    let tuple_var = self.fresh_temp_var("BranchThreadedResult");
+                    let val_doc = self.expression_doc(value_expr)?;
+                    parts.push(docvec![
+                        "let ",
+                        leaf::var(tuple_var.clone()),
+                        " = ",
+                        val_doc,
+                        " in call 'erlang':'element'(1, ",
+                        leaf::var(tuple_var),
+                        ")",
+                    ]);
                 } else {
-                    parts.push(self.expression_doc(body_expr)?);
+                    parts.push(self.expression_doc(value_expr)?);
                 }
             } else if Self::is_local_var_assignment(body_expr) {
                 if let Expression::Assignment { target, value, .. } = body_expr {
                     if let Expression::Identifier(id) = target.as_ref() {
-                        let core_var = self
-                            .lookup_var(&id.name)
-                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        let val_doc = self.expression_doc(value)?;
-                        parts.push(docvec![
-                            "let ",
-                            leaf::var(core_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in ",
-                        ]);
-                        self.bind_var(&id.name, &core_var);
+                        // BT-2342: a threading-construct RHS returns a `{value, StateAcc}`
+                        // tuple. Bind the target to element 1 and rebind the threaded locals
+                        // from the StateAcc, so both the assigned value and the mutated locals
+                        // are visible to later statements in this branch — rather than binding
+                        // the target to the raw tuple.
+                        if self.expr_yields_vt_threaded_tuple(value) {
+                            self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
+                        } else {
+                            let core_var = self
+                                .lookup_var(&id.name)
+                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                            let val_doc = self.expression_doc(value)?;
+                            parts.push(docvec![
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in ",
+                            ]);
+                            self.bind_var(&id.name, &core_var);
+                        }
                     }
                 }
+            } else if self.expr_yields_vt_threaded_tuple(body_expr) {
+                // BT-2342: a non-last loop / foldl list-op that mutates captured locals returns
+                // a `{value, StateAcc}` tuple. Extract and rebind the threaded locals so later
+                // statements in this branch see the updates (the value itself is discarded).
+                let loop_doc = self.expression_doc(body_expr)?;
+                let threaded_locals = self.vt_construct_threaded_locals(body_expr);
+                let doc = self.emit_vt_loop_open_extraction(
+                    loop_doc,
+                    &threaded_locals,
+                    "BranchThreadedResult",
+                    "BranchThreadedState",
+                );
+                parts.push(doc);
             } else {
                 let tmp = self.fresh_temp_var("seq");
                 let doc = self.expression_doc(body_expr)?;

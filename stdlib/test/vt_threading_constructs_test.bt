@@ -149,3 +149,55 @@ TestCase subclass: VtThreadingConstructsTest
     result := 1 to: 5 do: [:i | sum := sum + i]
     self assert: result equals: nil
     self assert: sum equals: 15
+
+  // ── D. threading constructs nested inside a last-position conditional ───────
+  //
+  // A read+write conditional as the method's last expression inlines each branch
+  // as a let-chain (build_vt_conditional_branch_value). A threading construct
+  // (loop / foldl list-op) used *inside* that branch still yields a
+  // {value, StateAcc} tuple; previously the branch sequencer did not unwrap it,
+  // so a later statement saw a stale local (non-last), an assignment target bound
+  // to the raw tuple (RHS), or the branch value leaked the tuple (value position).
+  // Each branch directly mutates a method-level local (`total`/`acc`/`hits`) so
+  // the conditional is classified as read+write threading and routed here.
+
+  // Non-last collect inside the branch: its threaded `n` must be visible to the
+  // later `total := total + n` in the same branch.
+  branchNestedCollect: flag =>
+    total := 0
+    flag ifTrue: [
+      n := 0
+      #[1, 2, 3] collect: [:i | n := n + 1. i * 2]
+      total := total + n
+    ]
+
+  testBranchNonLastThreadingVisibleLater =>
+    self assert: (self branchNestedCollect: true) equals: 3
+
+  testBranchNonLastThreadingFalseReturnsNil =>
+    self assert: (self branchNestedCollect: false) equals: nil
+
+  // collect: as an assignment RHS inside the branch: `r` must be the reconstructed
+  // Array (so `r size` works) and `n` must thread back, not bind to a raw tuple.
+  branchNestedAssign: flag =>
+    acc := 0
+    flag ifTrue: [
+      n := 0
+      r := #[1, 2, 3] collect: [:i | n := n + 1. i * 2]
+      acc := r size + n
+    ]
+
+  testBranchAssignRhsThreading =>
+    self assert: (self branchNestedAssign: true) equals: 6
+
+  // collect: as the branch's own value: the branch yields the reconstructed Array
+  // (element 1), not the raw {value, StateAcc} tuple.
+  branchValueCollect: flag =>
+    hits := 0
+    flag ifTrue: [
+      hits := hits + 1
+      #[1, 2, 3] collect: [:i | hits := hits + 1. i * 2]
+    ]
+
+  testBranchValuePositionThreading =>
+    self assert: (self branchValueCollect: true) equals: #[2, 4, 6]
