@@ -42,12 +42,10 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // switch for documentation/bisection.
   bt2342Pending => false
 
-  // Pending switch for BT-2355 Actor-context outer-local threading gaps
-  // surfaced by this matrix (write-only/read+write conditionals, ifTrue:ifFalse:
-  // non-last, count:/detect: foldl predicates, and loop local-assignment all
-  // fail to thread — and the read+write conditional only threads on the first
-  // invocation). Flip to `false` once BT-2355 lands.
-  bt2355Pending => true
+  // Pending switch for BT-2355 Actor-context outer-local threading gaps. BT-2355
+  // has landed, so the affected Actor cells now run their ground-truth asserts.
+  // Kept as a switch for documentation/bisection.
+  bt2355Pending => false
 
   // Pending switch for BT-2359 value-type outer-local threading gaps that
   // BT-2342 did NOT cover: count:/detect: foldl predicates, and a threading
