@@ -116,3 +116,81 @@ Object subclass: ClassMethodBlock
   class condBothLast: flag =>
     sum := 1
     flag ifTrue: [sum := sum + 10] ifFalse: [sum := sum + 100]
+
+  // BT-2350: predicate helper for the self-send + captured-local select: case.
+  class isBig: x => x > 2
+
+  // BT-2350: collect: block combining a class self-send (`self double:`) AND a
+  // captured-local mutation (`count`). This combination previously emitted invalid
+  // Core Erlang (dangling `in`) — the open class-var scope was not closed before the
+  // enclosing `let _CollectItem = … in {…}`. The collected self-send result and the
+  // threaded counter must both come back.
+  class doubleAllCounting: items =>
+    count := 0
+    result := items
+      collect: [:item |
+        count := count + 1
+        self double: item
+      ]
+    #(result, count)
+
+  // BT-2350: select: variant — self-send predicate (`self isBig:`) + captured-local
+  // mutation (`seen`), exercising the foldl-filter block-body path.
+  class bigCounting: items =>
+    seen := 0
+    result := items
+      select: [:item |
+        seen := seen + 1
+        self isBig: item
+      ]
+    #(result, seen)
+
+  // BT-2350: inject:into: variant — self-send (`self add:to:`) + captured-local
+  // mutation (`n`), exercising the foldl-inject block-body path.
+  class addCounting: items =>
+    n := 0
+    result := items
+      inject: 0
+      into: [:acc :item |
+        n := n + 1
+        self add: acc to: item
+      ]
+    #(result, n)
+
+  // BT-2350: identity helper used as a discarded *non-last* self-send.
+  class logIt: x => x
+
+  // BT-2350 (Copilot follow-up): a *non-last* class self-send (discarded result)
+  // inside a threaded foldl block must close its open class-var scope while
+  // keeping `ClassVarsN` visible to the following self-send. collect: form.
+  class doubleAllCountingNonLast: items =>
+    count := 0
+    result := items
+      collect: [:item |
+        count := count + 1
+        self logIt: item
+        self double: item
+      ]
+    #(result, count)
+
+  // BT-2350 (Copilot follow-up): do: form with a non-last discarded self-send.
+  class doCountingNonLast: items =>
+    count := 0
+    items
+      do: [:item |
+        self logIt: item
+        count := count + 1
+      ]
+    count
+
+  // BT-2350 (Copilot follow-up): inject:into: form with a non-last discarded self-send.
+  class addCountingNonLast: items =>
+    n := 0
+    result := items
+      inject: 0
+      into: [:acc :item |
+        self logIt: item
+        n := n + 1
+        self add: acc to: item
+      ]
+    #(result, n)

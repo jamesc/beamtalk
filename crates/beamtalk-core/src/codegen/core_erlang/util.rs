@@ -197,6 +197,62 @@ impl CoreErlangGenerator {
         Ok((doc, self.last_open_scope_result.take()))
     }
 
+    /// Generates an expression as a self-contained doc, closing any open scope.
+    ///
+    /// BT-2350: `expression_doc` forwards to `generate_expression`, which for a
+    /// class-method self-send (or class-var assignment) emits an *open* let-chain
+    /// ending in `... in ` and records the result variable in
+    /// `last_open_scope_result` for the caller to append. When such a doc is used
+    /// directly as the RHS of an enclosing `let X = <doc> in ...` — e.g. the
+    /// `is_last` foldl block bodies (`collect:` / `select:` / `inject:into:` /
+    /// `detect:` / `count:` / …) — the dangling `in` produces invalid Core Erlang
+    /// (`{core_parse_error, …, "syntax error before: in"}`). This helper closes
+    /// the scope by appending the result variable so the doc stands alone.
+    pub(super) fn closed_expression_doc(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<super::document::Document<'static>> {
+        let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+        Ok(match open_scope {
+            Some(result_var) => docvec![doc, super::document::leaf::var(result_var)],
+            None => doc,
+        })
+    }
+
+    /// Pushes a non-last, result-discarded statement of a threaded foldl block
+    /// body, closing any class-var open scope **while keeping its `ClassVarsN`
+    /// binding visible** to subsequent statements.
+    ///
+    /// BT-2350: a class self-send emits an open let-chain ending in `… in ` and
+    /// bumps the class-var version *without* rolling it back, so later statements
+    /// reference the new `ClassVarsN`. Closing such a chain by wrapping it inside
+    /// `let _ = (<chain> result_var) in …` (as [`closed_expression_doc`] does)
+    /// would scope `ClassVarsN` away and leave the later reference unbound. So we
+    /// keep the chain at the current level and append `let _ = <result_var> in `
+    /// to discard the value and sequence on. With no open scope this is the
+    /// original `let _ = <expr> in `.
+    pub(super) fn push_discarded_stmt(
+        &mut self,
+        docs: &mut Vec<super::document::Document<'static>>,
+        expr: &Expression,
+    ) -> Result<()> {
+        let (doc, open_scope) = self.expression_doc_with_open_scope(expr)?;
+        match open_scope {
+            Some(result_var) => {
+                docs.push(doc);
+                docs.push(docvec![
+                    "let _ = ",
+                    super::document::leaf::var(result_var),
+                    " in "
+                ]);
+            }
+            None => {
+                docs.push(docvec!["let _ = ", doc, " in "]);
+            }
+        }
+        Ok(())
+    }
+
     /// Generates an expression and returns whether it set `repl_loop_mutated`.
     ///
     /// BT-1448: Replaces the manual reset-before/read-after pattern on `repl_loop_mutated`.
