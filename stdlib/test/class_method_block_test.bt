@@ -129,3 +129,24 @@ TestCase subclass: ClassMethodBlockTest
   testClassMethodInjectNonLastSelfSend =>
     result := ClassMethodBlock addCountingNonLast: #(1, 2, 3)
     self assert: result equals: #(6, 3)
+
+  // BT-2358: explicit `^` return of a parenthesized collect: returns the Array,
+  // not the raw {Array, StateAcc} tuple.
+  testClassMethodReturnCollect =>
+    result := ClassMethodBlock doubleCountingRet: #(1, 2, 3)
+    self assert: result equals: #(2, 4, 6)
+
+  // BT-2358: explicit `^` return of inject:into: (no parens) returns the accumulator.
+  testClassMethodReturnInject =>
+    result := ClassMethodBlock sumCountingRet: #(1, 2, 3)
+    self assert: result equals: 6
+
+  // BT-2358: explicit `^` return of a read+write conditional returns the branch value.
+  testClassMethodReturnConditionalTrue =>
+    result := ClassMethodBlock condRet: true
+    self assert: result equals: 7
+
+  // BT-2358: explicit `^` return of a read+write conditional returns nil when skipped.
+  testClassMethodReturnConditionalFalse =>
+    result := ClassMethodBlock condRet: false
+    self assert: result equals: nil

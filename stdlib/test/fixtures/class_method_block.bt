@@ -117,6 +117,34 @@ Object subclass: ClassMethodBlock
     sum := 1
     flag ifTrue: [sum := sum + 10] ifFalse: [sum := sum + 100]
 
+  // BT-2358: explicit `^` return of a (parenthesized) foldl list-op that mutates a
+  // captured local. Must return the Array (threading the mutation), not the raw
+  // {Array, StateAcc} tuple.
+  class doubleCountingRet: items =>
+    n := 0
+    ^(items
+      collect: [:x |
+        n := n + 1
+        x * 2
+      ])
+
+  // BT-2358: explicit `^` return of a foldl list-op WITHOUT parens — returns the
+  // folded accumulator, threading the captured local.
+  class sumCountingRet: items =>
+    n := 0
+    ^items
+      inject: 0
+      into: [:acc :x |
+        n := n + 1
+        acc + x
+      ]
+
+  // BT-2358: explicit `^` return of a read+write conditional. Must return the
+  // branch value (no 0-arg stateful-block dispatch crash, no tuple leak).
+  class condRet: flag =>
+    sum := 0
+    ^(flag ifTrue: [sum := sum + 7])
+
   // BT-2350: predicate helper for the self-send + captured-local select: case.
   class isBig: x => x > 2
 
