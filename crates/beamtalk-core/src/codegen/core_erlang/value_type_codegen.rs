@@ -1040,6 +1040,11 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
+        // BT-2359: a threading construct used as a (parenthesized) assignment RHS —
+        // `_r := (1 to: 5 do: [...])` — wraps the construct in `Expression::Parenthesized`.
+        // Peel the wrappers so the `{value, StateAcc}` predicates (which only match
+        // `MessageSend`) see the real construct.
+        let expr = Self::peel_parens(expr);
         self.is_while_with_vt_local_threading(expr)
             || self.is_counted_loop_with_vt_local_threading(expr)
             || self.is_foldl_list_op_with_vt_local_threading(expr)
@@ -1168,6 +1173,20 @@ impl CoreErlangGenerator {
                             let var_name = id.name.clone();
                             let core_var = self
                                 .emit_vt_threaded_local_assignment(&var_name, value, body_parts)?;
+                            if is_last {
+                                self.emit_vt_value_return(&core_var, has_nlr, body_parts);
+                            }
+                            return Ok(());
+                        }
+                        // BT-2359: a threading conditional as the assignment RHS — possibly
+                        // parenthesized — threads a sibling outer-local (`x`) that would
+                        // otherwise be dropped. Bind the target to the conditional's logical
+                        // value and rebind the threaded sibling from the same `case`.
+                        let rhs = Self::peel_parens(value);
+                        if self.is_conditional_with_vt_local_threading(rhs) {
+                            let var_name = id.name.clone();
+                            let core_var =
+                                self.emit_vt_conditional_assign_rhs(&var_name, rhs, body_parts)?;
                             if is_last {
                                 self.emit_vt_value_return(&core_var, has_nlr, body_parts);
                             }
@@ -1729,6 +1748,9 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> Vec<String> {
+        // BT-2359: peel `Expression::Parenthesized` so a parenthesized construct
+        // (`(1 to: 5 do: [...])`) reports the same threaded locals its codegen packed.
+        let expr = Self::peel_parens(expr);
         if self.is_while_with_vt_local_threading(expr) {
             self.get_while_threaded_locals(expr)
         } else if self.is_counted_loop_with_vt_local_threading(expr) {
@@ -1904,9 +1926,9 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// BT-2342: Returns `true` if `expr` is a `collect:` / `select:` / `reject:` /
-    /// `inject:into:` foldl list-op whose body block captures and mutates outer local
-    /// variables in value-type or class-method context.
+    /// BT-2342/BT-2359: Returns `true` if `expr` is a `collect:` / `select:` / `reject:` /
+    /// `inject:into:` / `count:` / `detect:` / `detect:ifNone:` foldl list-op whose body
+    /// block captures and mutates outer local variables in value-type or class-method context.
     ///
     /// Mirrors `is_counted_loop_with_vt_local_threading`: only triggers when the list-op
     /// codegen will actually pack threaded locals into the `{value, StateAcc}` result
@@ -1925,11 +1947,15 @@ impl CoreErlangGenerator {
         !self.compute_threaded_locals_for_loop(body, None).is_empty()
     }
 
-    /// BT-2342: Returns the body block of a foldl list-op message send
-    /// (`collect:`, `select:`, `reject:`, `inject:into:`), or `None` if `expr` is not one.
+    /// BT-2342/BT-2359: Returns the body block of a foldl list-op message send
+    /// (`collect:`, `select:`, `reject:`, `inject:into:`, `count:`, `detect:`,
+    /// `detect:ifNone:`), or `None` if `expr` is not one.
     ///
-    /// The block argument position differs by selector: `collect:`/`select:`/`reject:`
-    /// take the block as their only argument; `inject:into:` takes it as the second.
+    /// The block argument position differs by selector: `collect:`/`select:`/`reject:`/
+    /// `count:`/`detect:`/`detect:ifNone:` take the predicate/transform block as their first
+    /// argument; `inject:into:` takes it as the second. All of these emit a `{value, StateAcc}`
+    /// result (state in element 2) when their body threads captured outer locals, so the
+    /// same open-let extraction applies uniformly.
     fn foldl_list_op_body_block(expr: &Expression) -> Option<&Block> {
         let Expression::MessageSend {
             selector: MessageSelector::Keyword(parts),
@@ -1941,8 +1967,11 @@ impl CoreErlangGenerator {
         };
         let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
         let body_arg = match sel.as_str() {
-            "collect:" | "select:" | "reject:" if arguments.len() == 1 => &arguments[0],
+            "collect:" | "select:" | "reject:" | "count:" | "detect:" if arguments.len() == 1 => {
+                &arguments[0]
+            }
             "inject:into:" if arguments.len() == 2 => &arguments[1],
+            "detect:ifNone:" if arguments.len() == 2 => &arguments[0],
             _ => return None,
         };
         if let Expression::Block(body) = body_arg {
@@ -2508,6 +2537,313 @@ impl CoreErlangGenerator {
         self.rebind_vt_conditional_mutations(&mut docs, &all_mutations, &result_var);
 
         Ok(Document::Vec(docs))
+    }
+
+    /// BT-2359: Emits a threading conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose
+    /// branches read+write a captured outer local) used as the RHS of an assignment to a
+    /// *different* local — `_r := flag ifTrue: [x := 5. 42] ifFalse: [0]` — binding the
+    /// assignment target (`_r`) to the conditional's logical branch value and rebinding each
+    /// threaded outer-local (`x`) from the same `case`, so the sibling mutation escapes into
+    /// the surrounding method scope.
+    ///
+    /// Each `case` branch returns `{LogicalValue, Mut1, ..., MutN}`; element 1 is bound to the
+    /// target and elements 2.. are rebound to the threaded locals. The non-writing arm of an
+    /// `ifTrue:`/`ifFalse:` passes the outer locals through unchanged (and yields `'nil'` as
+    /// its logical value, matching the conditional's run-time result when the branch is absent).
+    ///
+    /// Returns the Core Erlang variable bound to the assignment target.
+    #[allow(clippy::too_many_lines)] // Document-based conditional case scaffolding spans many lines
+    pub(in crate::codegen::core_erlang) fn emit_vt_conditional_assign_rhs(
+        &mut self,
+        var_name: &str,
+        expr: &Expression,
+        body_parts: &mut Vec<Document<'static>>,
+    ) -> Result<String> {
+        let (receiver, selector_name, arguments) = match expr {
+            Expression::MessageSend {
+                receiver,
+                selector: MessageSelector::Keyword(parts),
+                arguments,
+                ..
+            } => {
+                let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+                (receiver.as_ref(), sel, arguments)
+            }
+            _ => unreachable!("emit_vt_conditional_assign_rhs called on non-conditional"),
+        };
+
+        // Collect all outer-scope mutations across every block argument (stable order).
+        let mut all_mutations: Vec<String> = Vec::new();
+        for arg in arguments {
+            if let Expression::Block(block) = arg {
+                for var in self.outer_scope_mutations_in_block(block) {
+                    if !all_mutations.contains(&var) {
+                        all_mutations.push(var);
+                    }
+                }
+            }
+        }
+
+        let cond_var = self.fresh_temp_var("Cond");
+        let cond_doc = self.expression_doc(receiver)?;
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(cond_var.clone()),
+            " = ",
+            cond_doc,
+            " in\n",
+        ]);
+
+        let (true_branch, false_branch) = match selector_name.as_str() {
+            "ifTrue:" => {
+                let Expression::Block(block) = &arguments[0] else {
+                    unreachable!("ifTrue: argument is not a block");
+                };
+                let tb = self.build_vt_conditional_value_and_mutations(block, &all_mutations)?;
+                let fb = self.build_vt_conditional_passthrough_with_value(&all_mutations);
+                (tb, fb)
+            }
+            "ifFalse:" => {
+                let Expression::Block(block) = &arguments[0] else {
+                    unreachable!("ifFalse: argument is not a block");
+                };
+                let passthrough = self.build_vt_conditional_passthrough_with_value(&all_mutations);
+                let fb = self.build_vt_conditional_value_and_mutations(block, &all_mutations)?;
+                (passthrough, fb)
+            }
+            "ifTrue:ifFalse:" => {
+                let Expression::Block(true_block) = &arguments[0] else {
+                    unreachable!("ifTrue:ifFalse: first argument is not a block");
+                };
+                let Expression::Block(false_block) = &arguments[1] else {
+                    unreachable!("ifTrue:ifFalse: second argument is not a block");
+                };
+                let tb =
+                    self.build_vt_conditional_value_and_mutations(true_block, &all_mutations)?;
+                let fb =
+                    self.build_vt_conditional_value_and_mutations(false_block, &all_mutations)?;
+                (tb, fb)
+            }
+            _ => unreachable!("unsupported conditional selector in assign-rhs path"),
+        };
+
+        let result_var = self.fresh_temp_var("CondAssign");
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(result_var.clone()),
+            " = case ",
+            leaf::var(cond_var),
+            " of <'true'> when 'true' -> ",
+            true_branch,
+            " <'false'> when 'true' -> ",
+            false_branch,
+            " end in\n",
+        ]);
+
+        // Element 1 of the branch tuple is the conditional's logical value → bind the target.
+        let core_var = self
+            .lookup_var(var_name)
+            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        body_parts.push(docvec![
+            "    let ",
+            leaf::var(core_var.clone()),
+            " = call 'erlang':'element'(1, ",
+            leaf::var(result_var.clone()),
+            ") in\n",
+        ]);
+        self.bind_var(var_name, &core_var);
+
+        // Elements 2.. are the threaded outer-locals → rebind each (skip the target itself).
+        for (i, var) in all_mutations.iter().enumerate() {
+            if var == var_name {
+                continue;
+            }
+            let tl_core = self.fresh_var(var);
+            body_parts.push(docvec![
+                "    let ",
+                leaf::var(tl_core.clone()),
+                " = call 'erlang':'element'(",
+                leaf::int_lit(i64::try_from(i + 2).unwrap_or(i64::MAX)),
+                ", ",
+                leaf::var(result_var.clone()),
+                ") in\n",
+            ]);
+            self.bind_var(var, &tl_core);
+        }
+
+        Ok(core_var)
+    }
+
+    /// BT-2359: Builds a conditional branch for the assign-RHS path, inlining the block body
+    /// and returning `{LogicalValue, Mut1, ..., MutN}` — the branch's logical value followed by
+    /// the post-branch values of every threaded outer-local in `all_mutations`.
+    fn build_vt_conditional_value_and_mutations(
+        &mut self,
+        block: &crate::ast::Block,
+        all_mutations: &[String],
+    ) -> Result<Document<'static>> {
+        self.push_scope();
+        let result = self.build_vt_conditional_value_and_mutations_parts(block, all_mutations);
+        self.pop_scope();
+        result
+    }
+
+    /// Inner implementation for [`Self::build_vt_conditional_value_and_mutations`], bracketed
+    /// by `push_scope`/`pop_scope` so the fallible work always restores scope.
+    #[allow(clippy::too_many_lines)] // Branch threading dispatch spans many small arms
+    fn build_vt_conditional_value_and_mutations_parts(
+        &mut self,
+        block: &crate::ast::Block,
+        all_mutations: &[String],
+    ) -> Result<Document<'static>> {
+        let body = super::util::collect_body_exprs(&block.body);
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        let value_doc = if body.is_empty() {
+            Document::Str("'nil'")
+        } else {
+            let last = body.len() - 1;
+            for body_expr in &body[..last] {
+                if Self::is_local_var_assignment(body_expr) {
+                    if let Expression::Assignment { target, value, .. } = body_expr {
+                        if let Expression::Identifier(id) = target.as_ref() {
+                            // BT-2359: a nested threading construct as the assignment RHS —
+                            // mirror the method-body / branch-value paths so the outer local
+                            // is rebound (loop/foldl via emit_vt_threaded_local_assignment,
+                            // conditional via emit_vt_conditional_assign_rhs) instead of being
+                            // bound to the raw {value, StateAcc} tuple.
+                            let rhs = Self::peel_parens(value);
+                            if self.expr_yields_vt_threaded_tuple(value) {
+                                self.emit_vt_threaded_local_assignment(
+                                    &id.name, value, &mut parts,
+                                )?;
+                            } else if self.is_conditional_with_vt_local_threading(rhs) {
+                                self.emit_vt_conditional_assign_rhs(&id.name, rhs, &mut parts)?;
+                            } else {
+                                let core_var = self.lookup_var(&id.name).map_or_else(
+                                    || Self::to_core_erlang_var(&id.name),
+                                    String::clone,
+                                );
+                                let val_doc = self.expression_doc(value)?;
+                                parts.push(docvec![
+                                    "let ",
+                                    leaf::var(core_var.clone()),
+                                    " = ",
+                                    val_doc,
+                                    " in ",
+                                ]);
+                                self.bind_var(&id.name, &core_var);
+                            }
+                        }
+                    }
+                } else if self.expr_yields_vt_threaded_tuple(body_expr) {
+                    // BT-2359: a non-last threaded loop/foldl that mutates a captured local
+                    // returns {value, StateAcc}; extract and rebind the threaded locals so a
+                    // later expression in this branch sees the update (value discarded).
+                    let loop_doc = self.expression_doc(body_expr)?;
+                    let threaded_locals = self.vt_construct_threaded_locals(body_expr);
+                    parts.push(self.emit_vt_loop_open_extraction(
+                        loop_doc,
+                        &threaded_locals,
+                        "BranchThreadedResult",
+                        "BranchThreadedState",
+                    ));
+                } else {
+                    let tmp = self.fresh_temp_var("seq");
+                    let doc = self.expression_doc(body_expr)?;
+                    parts.push(docvec!["let ", leaf::var(tmp), " = ", doc, " in ",]);
+                }
+            }
+            // The block's logical value is its last expression — for an assignment, the
+            // assigned value (also rebinding the target so the mutation is reflected below).
+            let last_expr = body[last];
+            if Self::is_local_var_assignment(last_expr) {
+                if let Expression::Assignment { target, value, .. } = last_expr {
+                    if let Expression::Identifier(id) = target.as_ref() {
+                        // BT-2359: a threaded construct as the final assignment RHS rebinds the
+                        // target via element 1 of its {value, StateAcc} tuple and threads any
+                        // sibling local; the block value is the rebound target.
+                        let rhs = Self::peel_parens(value);
+                        if self.expr_yields_vt_threaded_tuple(value) {
+                            let core_var = self
+                                .emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
+                            leaf::var(core_var)
+                        } else if self.is_conditional_with_vt_local_threading(rhs) {
+                            let core_var =
+                                self.emit_vt_conditional_assign_rhs(&id.name, rhs, &mut parts)?;
+                            leaf::var(core_var)
+                        } else {
+                            let core_var = self
+                                .lookup_var(&id.name)
+                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                            let val_doc = self.expression_doc(value)?;
+                            parts.push(docvec![
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in ",
+                            ]);
+                            self.bind_var(&id.name, &core_var);
+                            leaf::var(core_var)
+                        }
+                    } else {
+                        self.expression_doc(last_expr)?
+                    }
+                } else {
+                    self.expression_doc(last_expr)?
+                }
+            } else if self.expr_yields_vt_threaded_tuple(last_expr) {
+                // BT-2359: a threaded construct as the block's logical value — its result is
+                // element 1 of the {value, StateAcc} tuple, not the raw tuple. The threaded
+                // locals don't need to escape in value position, so unwrap without extracting.
+                let tuple_var = self.fresh_temp_var("BranchThreadedResult");
+                let val_doc = self.expression_doc(last_expr)?;
+                parts.push(docvec![
+                    "let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    val_doc,
+                    " in ",
+                ]);
+                docvec!["call 'erlang':'element'(1, ", leaf::var(tuple_var), ")"]
+            } else {
+                self.expression_doc(last_expr)?
+            }
+        };
+
+        // Return {LogicalValue, Mut1, ..., MutN}.
+        let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{"), value_doc];
+        for var in all_mutations {
+            tuple_parts.push(Document::Str(", "));
+            let core_var = self
+                .lookup_var(var)
+                .cloned()
+                .unwrap_or_else(|| Self::to_core_erlang_var(var));
+            tuple_parts.push(leaf::var(core_var));
+        }
+        tuple_parts.push(Document::Str("}"));
+        parts.push(Document::Vec(tuple_parts));
+        Ok(Document::Vec(parts))
+    }
+
+    /// BT-2359: Pass-through branch for the assign-RHS path — the conditional's logical value
+    /// is `'nil'` (the absent branch's run-time result) and every threaded outer-local keeps
+    /// its current (pre-conditional) value: `{'nil', Mut1, ..., MutN}`.
+    fn build_vt_conditional_passthrough_with_value(
+        &self,
+        all_mutations: &[String],
+    ) -> Document<'static> {
+        let mut tuple_parts: Vec<Document<'static>> = vec![Document::Str("{'nil'")];
+        for var in all_mutations {
+            tuple_parts.push(Document::Str(", "));
+            let core_var = self
+                .lookup_var(var)
+                .cloned()
+                .unwrap_or_else(|| Self::to_core_erlang_var(var));
+            tuple_parts.push(leaf::var(core_var));
+        }
+        tuple_parts.push(Document::Str("}"));
+        Document::Vec(tuple_parts)
     }
 
     /// Generates a branch body for a VT conditional that inlines the block and returns
