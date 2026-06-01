@@ -19,7 +19,7 @@ TestCase subclass: PerformLocallyTest
   testUnaryClassMethod =>
     // performLocally: works with zero-argument class methods
     result := LocalCallHelper performLocally: #callerPid withArguments: #()
-    self assert: result notNil
+    self assert: result equals: (Erlang erlang self)
 
   testKeywordClassMethod =>
     // performLocally: works with one-argument keyword methods
