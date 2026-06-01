@@ -256,13 +256,46 @@ impl CoreErlangGenerator {
                             }
                         }
                     };
-                    Ok(docvec![
-                        "call 'maps':'get'(",
-                        leaf::atom(id.name.to_string()),
-                        ", ",
-                        leaf::var(state_var),
-                        ")",
-                    ])
+                    // BT-2365 (ADR 0081 Phase 1): in REPL top-level context a free
+                    // identifier is no longer guaranteed to be present in State —
+                    // workspace globals (singletons, bind:as:) are resolved lazily
+                    // rather than eagerly injected into the session map. So instead
+                    // of `maps:get/2` (which throws {badkey,_} on a miss) we look up
+                    // the locals map and, on a miss, fall through to the shared
+                    // runtime resolver, which checks bind:as: -> singletons ->
+                    // classes -> undefined_variable. Actor/ValueType field access is
+                    // unchanged (the field must exist in State/Self).
+                    if self.context == super::CodeGenContext::Repl
+                        && !self.in_loop_body
+                        && !self.in_hybrid_loop
+                    {
+                        let resolved_var = self.fresh_var("Resolved");
+                        Ok(docvec![
+                            "case call 'maps':'find'(",
+                            leaf::atom(id.name.to_string()),
+                            ", ",
+                            leaf::var(state_var.clone()),
+                            ") of ",
+                            "<{'ok', ",
+                            leaf::var(resolved_var.clone()),
+                            "}> when 'true' -> ",
+                            leaf::var(resolved_var),
+                            " <'error'> when 'true' -> call 'beamtalk_workspace':'resolve_name'(",
+                            leaf::var(state_var),
+                            ", ",
+                            leaf::atom(id.name.to_string()),
+                            ") ",
+                            "end",
+                        ])
+                    } else {
+                        Ok(docvec![
+                            "call 'maps':'get'(",
+                            leaf::atom(id.name.to_string()),
+                            ", ",
+                            leaf::var(state_var),
+                            ")",
+                        ])
+                    }
                 }
             }
         }

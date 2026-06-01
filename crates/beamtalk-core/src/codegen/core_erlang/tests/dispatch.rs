@@ -1049,10 +1049,16 @@ fn test_cascade_repl_expression() {
         "Should have module header. Got:\n{code}"
     );
 
-    // Should bind the underlying receiver once
+    // Should bind the underlying receiver once. BT-2365 (ADR 0081 Phase 1): a
+    // free REPL identifier now resolves via a locals maps:find with a runtime
+    // resolve_name fallthrough rather than a bare maps:get.
     assert!(
-        code.contains("let _Receiver1 = call 'maps':'get'('x', State) in"),
-        "Should bind receiver x from State. Got:\n{code}"
+        code.contains("let _Receiver1 = case call 'maps':'find'('x', State) of"),
+        "Should bind receiver x via locals find. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_workspace':'resolve_name'(State, 'x')"),
+        "Should fall through to resolve_name for free identifier x. Got:\n{code}"
     );
 
     // Should send both messages
@@ -1246,28 +1252,27 @@ fn test_standalone_class_reference_uses_dynamic_module_name() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // Should call whereis_class to get the class PID
+    // BT-2365 (ADR 0081 Phase 1): an unqualified REPL class reference checks the
+    // session locals map first (so a local shadows the class), then delegates to
+    // the shared runtime resolver. The class object construction and dynamic
+    // module_name lookup now live in beamtalk_workspace:resolve_class_reference/2.
+
+    // Should check the session locals map first (shadowing support).
     assert!(
-        code.contains("call 'beamtalk_class_registry':'whereis_class'('Point')"),
-        "Should call whereis_class to get class PID. Got:\n{code}"
+        code.contains("call 'maps':'find'('Point', "),
+        "Should check locals map for the class name first. Got:\n{code}"
     );
 
-    // Should call module_name to get the module name dynamically
+    // Should delegate the miss path to the shared runtime resolver.
     assert!(
-        code.contains("call 'beamtalk_object_class':'module_name'("),
-        "Should call module_name to get module name dynamically. Got:\n{code}"
+        code.contains("call 'beamtalk_workspace':'resolve_class_reference'("),
+        "Should delegate to resolve_class_reference on a locals miss. Got:\n{code}"
     );
 
-    // Should NOT hardcode 'beamtalk_object_class' as the module name
+    // Should pass the class name as an atom to the resolver.
     assert!(
-        !code.contains("'beamtalk_object', 'Point class', 'beamtalk_object_class'"),
-        "Should not hardcode 'beamtalk_object_class' as module name. Got:\n{code}"
-    );
-
-    // Should create beamtalk_object with dynamic ClassModName variable
-    assert!(
-        code.contains("'beamtalk_object'") && code.contains("'Point class'"),
-        "Should create beamtalk_object with metaclass name. Got:\n{code}"
+        code.contains("'resolve_class_reference'(") && code.contains("'Point')"),
+        "Should pass the class name atom to the resolver. Got:\n{code}"
     );
 }
 
@@ -1297,30 +1302,23 @@ fn test_standalone_class_reference_validates_undefined_classes() {
     let code = generate_repl_expression(&module.expressions[0].expression, "repl_eval")
         .expect("codegen should succeed");
 
-    // Should use a case expression to check for undefined
+    // BT-2365 (ADR 0081 Phase 1): undefined-class validation now happens in the
+    // runtime resolver (beamtalk_workspace:resolve_class_reference/2), which
+    // raises the same class_not_found error. The REPL codegen emits a locals
+    // check then delegates to that resolver.
+
+    // Should check the session locals map first (shadowing support).
     assert!(
-        code.contains("case call 'beamtalk_class_registry':'whereis_class'('NonExistentClass')"),
-        "Should use case expression to handle whereis_class result. Got:\n{code}"
+        code.contains("call 'maps':'find'('NonExistentClass', "),
+        "Should check locals map for the class name first. Got:\n{code}"
     );
 
-    // Should raise class_not_found error when class is undefined (BT-597)
+    // Should delegate to the shared resolver, which raises class_not_found for
+    // a genuinely unknown class.
     assert!(
-        code.contains("beamtalk_error':'new'('class_not_found', 'NonExistentClass')"),
-        "Should raise class_not_found error when whereis_class returns 'undefined'. Got:\n{code}"
-    );
-
-    // Should include actionable hint via with_hint call
-    assert!(
-        code.contains("beamtalk_error':'with_hint'"),
-        "Should include hint via with_hint call. Got:\n{code}"
-    );
-
-    // Should create beamtalk_object in the success branch
-    assert!(
-        code.contains('<')
-            && code.contains("> when 'true' ->")
-            && code.contains("'beamtalk_object'"),
-        "Should create beamtalk_object in success branch of case. Got:\n{code}"
+        code.contains("call 'beamtalk_workspace':'resolve_class_reference'(")
+            && code.contains("'NonExistentClass')"),
+        "Should delegate undefined-class handling to resolve_class_reference. Got:\n{code}"
     );
 }
 

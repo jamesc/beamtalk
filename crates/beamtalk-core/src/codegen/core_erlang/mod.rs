@@ -2545,7 +2545,41 @@ impl CoreErlangGenerator {
 
         // ADR 0019 Phase 3: Only check bindings in REPL top-level context.
         // Actor methods compiled in workspace mode should NOT check REPL bindings.
-        if self.workspace_mode() && self.context == CodeGenContext::Repl {
+        //
+        // BT-2365 (ADR 0081 Phase 1): for an unqualified class reference, check the
+        // session locals map first so a local assignment shadows a singleton/class
+        // (`Transcript := 5` then `Transcript` returns `5`). On a miss, delegate to
+        // the shared runtime resolver, which consults the live singleton + class
+        // registries — the singletons (Transcript/Beamtalk/Workspace) are no longer
+        // eagerly injected into State, so this lazy lookup replaces the old inline
+        // class-registry branch. The resolver raises the same class_not_found error
+        // for a genuinely unknown class, preserving REPL output. Package-qualified
+        // references (`json@Parser`) keep the inline path below because the resolver
+        // does not carry the package-qualified display name.
+        if self.workspace_mode() && self.context == CodeGenContext::Repl && package.is_none() {
+            let state_var = self.current_state_var();
+            let resolved_var = self.fresh_var("ResolvedClass");
+
+            Ok(docvec![
+                "case call 'maps':'find'(",
+                leaf::atom(class_name.to_string()),
+                ", ",
+                leaf::var(state_var.clone()),
+                ") of ",
+                "<{'ok', ",
+                leaf::var(resolved_var.clone()),
+                "}> when 'true' -> ",
+                leaf::var(resolved_var),
+                " <'error'> when 'true' -> call 'beamtalk_workspace':'resolve_class_reference'(",
+                leaf::var(state_var),
+                ", ",
+                leaf::atom(class_name.to_string()),
+                ") ",
+                "end",
+            ])
+        } else if self.workspace_mode() && self.context == CodeGenContext::Repl {
+            // Package-qualified REPL class reference: keep the original
+            // locals-then-registry path with the package-qualified display name.
             let class_pid_var = self.fresh_var("ClassPid");
             let class_mod_var = self.fresh_var("ClassModName");
             let state_var = self.current_state_var();

@@ -2361,6 +2361,33 @@ impl CoreErlangGenerator {
                 self.generate_class_send_fallback(class_name, &raw, args_doc.clone())
             };
 
+        // BT-2365 (ADR 0081 Phase 1): the locals `maps:find` miss branch first tries
+        // lazy singleton resolution before the class-side fallback. Singletons
+        // (Transcript/Beamtalk/Workspace) are no longer eagerly injected into the
+        // session map, so `Workspace bind:as:` would otherwise mis-route to a
+        // non-existent `Workspace` class. resolve_singleton_instance/1 returns the
+        // live instance for a singleton name and `error` for any other name, so
+        // real class names (`Counter someClassMethod`) still hit class_fallback.
+        let singleton_val_var = self.fresh_var("SingletonVal");
+        let miss_branch = docvec![
+            "case call 'beamtalk_workspace':'resolve_singleton_instance'(",
+            leaf::atom(class_name.to_string()),
+            ") of ",
+            "<{'ok', ",
+            leaf::var(singleton_val_var.clone()),
+            "}> when 'true' -> ",
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(singleton_val_var),
+            ", ",
+            leaf::atom(instance_selector.clone()),
+            ", [",
+            args_doc.clone(),
+            "]) ",
+            "<'error'> when 'true' -> ",
+            class_fallback,
+            " end",
+        ];
+
         // BT-1942: `let Lookup = maps:find(...) in <arg_preamble> case Lookup of ...`
         // — lookup first, then args, then the dispatch branches.
         let lookup_binding = docvec![
@@ -2387,7 +2414,7 @@ impl CoreErlangGenerator {
             args_doc,
             "]) ",
             "<'error'> when 'true' -> ",
-            class_fallback,
+            miss_branch,
             " end"
         ];
 

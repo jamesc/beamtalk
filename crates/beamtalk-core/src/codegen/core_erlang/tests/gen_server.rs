@@ -81,10 +81,17 @@ fn test_generate_repl_module_aliases_state_to_bindings() {
         "REPL module should alias State to Bindings. Got:\n{code}"
     );
 
-    // Check that identifier lookup uses maps:get with State
+    // BT-2365 (ADR 0081 Phase 1): a free REPL identifier now resolves via a
+    // locals maps:find against State with a runtime resolve_name fallthrough,
+    // instead of a bare maps:get (which would throw {badkey,_} once workspace
+    // globals are no longer eagerly injected into State).
     assert!(
-        code.contains("call 'maps':'get'('x', State)"),
-        "Identifier lookup should use State (aliased to Bindings). Got:\n{code}"
+        code.contains("call 'maps':'find'('x', State)"),
+        "Identifier lookup should check locals (State, aliased to Bindings). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_workspace':'resolve_name'(State, 'x')"),
+        "Identifier lookup should fall through to resolve_name. Got:\n{code}"
     );
 }
 
@@ -522,10 +529,16 @@ fn test_generate_repl_module_with_arithmetic() {
         "REPL module should alias State to Bindings. Got:\n{code}"
     );
 
-    // Check that x lookup works through State
+    // Check that x lookup works through State. BT-2365 (ADR 0081 Phase 1): a free
+    // REPL identifier resolves via a locals maps:find with a resolve_name
+    // fallthrough rather than a bare maps:get.
     assert!(
-        code.contains("call 'maps':'get'('x', State)"),
-        "Variable x should be looked up from State. Got:\n{code}"
+        code.contains("call 'maps':'find'('x', State)"),
+        "Variable x should be looked up from State (locals). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_workspace':'resolve_name'(State, 'x')"),
+        "Variable x lookup should fall through to resolve_name. Got:\n{code}"
     );
 
     // Check the arithmetic operation
@@ -943,10 +956,16 @@ fn test_repl_multi_stmt_loop_accumulates_from_zero() {
         "BT-800: Must extract updated StateAcc from loop result. Got:\n{code}"
     );
 
-    // BT-800: Final read of x must use the state produced by the loop (State2+)
+    // BT-800: Final read of x must use the state produced by the loop (State2+).
+    // BT-2365 (ADR 0081 Phase 1): the post-loop free-identifier read resolves via
+    // a locals maps:find (with a resolve_name fallthrough) against State2.
     assert!(
-        code.contains("maps':'get'('x', State2)"),
+        code.contains("maps':'find'('x', State2)"),
         "BT-800: Final x read must use loop-updated state (State2). Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_workspace':'resolve_name'(State2, 'x')"),
+        "BT-2365: Final x read must fall through to resolve_name. Got:\n{code}"
     );
 }
 

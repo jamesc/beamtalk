@@ -52,6 +52,17 @@ into REPL session state. Workspace readiness is detected via
 -export([dispatch/3]).
 %% Stable external API (called by repl_eval and repl_shell)
 -export([get_user_bindings/0, get_session_bindings/0]).
+%% BT-2365 (ADR 0081 Phase 1): shared lazy name resolver. Single source of truth
+%% for bare-name resolution (REPL codegen fallthrough) and Session resolve:.
+-export([resolve_name/2]).
+%% BT-2365: capitalised class-reference resolution (REPL codegen). Shares the
+%% singleton + class-registry tiers with resolve_name/2 but keeps the
+%% class_not_found terminal so the "Class 'X' not found" error is preserved.
+-export([resolve_class_reference/2]).
+%% BT-2365: singleton-instance lookup for the binding-aware class-send fallback
+%% (a message sent to a singleton receiver, e.g. `Workspace bind:as:`). Returns
+%% the live instance so dispatch goes to it rather than a non-existent class.
+-export([resolve_singleton_instance/1]).
 %% Called by beamtalk_workspace_bootstrap to create the ETS table under a
 %% long-lived process (prevents table from being deleted when eval workers exit)
 -export([create_bindings_table/0]).
@@ -926,6 +937,176 @@ get_session_bindings() ->
             UserBindings = all_user_bindings(),
             handle_session_bindings(UserBindings)
     end.
+
+-doc """
+Resolve a bare name against the session locals and the live workspace sources.
+
+BT-2365 (ADR 0081 Phase 1): the single shared resolver. Replaces eager workspace
+injection — instead of copying globals into each session at init, a free
+identifier is resolved lazily, in order:
+
+1. session locals map (`Locals`) — checked first so locals **shadow** globals
+   (`Transcript := 5` then `Transcript` returns `5` within that session);
+2. `bind:as:` registry (the workspace user-bindings ETS table);
+3. singleton registry (`Transcript`/`Beamtalk`/`Workspace`, resolved live from
+   their class instances via `beamtalk_workspace_config:singletons/0` +
+   `value_singletons/0`);
+4. class registry (`Counter`, `Integer`, `Session`, …) → a class object;
+5. otherwise raise `undefined_variable`.
+
+Used by **both** the REPL codegen free-identifier fallthrough and (later)
+`Session resolve:`, so the two cannot drift. Internal binding keys
+(`?WORKSPACE_BINDINGS_KEY`, `?INTERNAL_REGISTRY_KEY`) in `Locals` are ignored
+by `maps:find` because callers never reference them as source names.
+""".
+-spec resolve_name(map(), atom()) -> term().
+resolve_name(Locals, Name) when is_map(Locals), is_atom(Name) ->
+    case maps:find(Name, Locals) of
+        {ok, Value} ->
+            Value;
+        error ->
+            resolve_workspace_name(Name)
+    end.
+
+%% Tiers 2–5 of resolve_name/2: the live workspace sources, checked after locals.
+-spec resolve_workspace_name(atom()) -> term().
+resolve_workspace_name(Name) ->
+    case lookup_user_binding(Name) of
+        {ok, BindValue} ->
+            BindValue;
+        error ->
+            case lookup_singleton(Name) of
+                {ok, SingletonValue} ->
+                    SingletonValue;
+                error ->
+                    case lookup_class_object(Name) of
+                        {ok, ClassObj} ->
+                            ClassObj;
+                        error ->
+                            raise_undefined_variable(Name)
+                    end
+            end
+    end.
+
+%% Tier 2: bind:as: registry (workspace user bindings ETS).
+-spec lookup_user_binding(atom()) -> {ok, term()} | error.
+lookup_user_binding(Name) ->
+    case ets:info(?WI_BINDINGS_TABLE, id) of
+        undefined ->
+            error;
+        _ ->
+            case ets:lookup(?WI_BINDINGS_TABLE, Name) of
+                [{Name, Value}] -> {ok, Value};
+                [] -> error
+            end
+    end.
+
+%% Tier 3: singleton registry (Transcript/Beamtalk/Workspace), resolved live.
+%%
+%% Delegates to handle_session_bindings/1 — the same builder the eager-injection
+%% path used — so a singleton resolves to exactly the value it would have had if
+%% injected (including the `Workspace` tagged-map fallback when its class var is
+%% not yet wired). Only the three singleton binding names ever match here; any
+%% other name returns `error` so resolution falls through to the class registry.
+-spec lookup_singleton(atom()) -> {ok, term()} | error.
+lookup_singleton(Name) ->
+    case is_singleton_binding_name(Name) of
+        false ->
+            error;
+        true ->
+            Singletons = handle_session_bindings(#{}),
+            case maps:find(Name, Singletons) of
+                {ok, Value} -> {ok, Value};
+                error -> error
+            end
+    end.
+
+%% True iff Name is one of the configured singleton binding names
+%% (Transcript / Beamtalk / Workspace).
+-spec is_singleton_binding_name(atom()) -> boolean().
+is_singleton_binding_name(Name) ->
+    Configs =
+        beamtalk_workspace_config:singletons() ++
+            beamtalk_workspace_config:value_singletons(),
+    lists:any(fun(#{binding_name := BName}) -> BName =:= Name end, Configs).
+
+%% Tier 4: class registry → a class object tuple, mirroring REPL codegen for a
+%% capitalised name (`{beamtalk_object, '<Name> class', Module, ClassPid}`).
+-spec lookup_class_object(atom()) -> {ok, tuple()} | error.
+lookup_class_object(Name) ->
+    case beamtalk_runtime_api:whereis_class(Name) of
+        undefined ->
+            error;
+        ClassPid ->
+            try beamtalk_runtime_api:module_name(ClassPid) of
+                Module ->
+                    Tag = beamtalk_runtime_api:class_object_tag(Name),
+                    {ok, {beamtalk_object, Tag, Module, ClassPid}}
+            catch
+                %% Class died between whereis and module_name — treat as unknown.
+                _:_ -> error
+            end
+    end.
+
+%% Tier 5: genuinely unknown name — raise undefined_variable (same error the
+%% REPL surfaces today for an unbound identifier).
+-spec raise_undefined_variable(atom()) -> no_return().
+raise_undefined_variable(Name) ->
+    beamtalk_error:raise(beamtalk_repl_errors:ensure_structured_error({undefined_variable, Name})).
+
+-doc """
+Resolve a capitalised class reference whose name is not a session local.
+
+BT-2365 (ADR 0081 Phase 1): the REPL codegen for a `ClassReference` checks the
+session locals map first (so `Transcript := 5` shadows the singleton) and, on a
+miss, calls this. Reuses the same singleton + class-registry tiers as
+`resolve_name/2` so resolution cannot drift, but raises `class_not_found`
+(not `undefined_variable`) for a genuinely unknown class — preserving the
+existing "Class 'X' not found" REPL error.
+
+`Locals` is accepted for symmetry with `resolve_name/2` and to allow a future
+caller to thread the session map; the codegen has already excluded a local hit
+before reaching here.
+""".
+-spec resolve_class_reference(map(), atom()) -> term().
+resolve_class_reference(_Locals, Name) when is_atom(Name) ->
+    case lookup_singleton(Name) of
+        {ok, SingletonValue} ->
+            SingletonValue;
+        error ->
+            case lookup_class_object(Name) of
+                {ok, ClassObj} ->
+                    ClassObj;
+                error ->
+                    raise_class_not_found(Name)
+            end
+    end.
+
+-doc """
+Resolve a singleton binding name to its live instance, or `error`.
+
+BT-2365 (ADR 0081 Phase 1): used by the REPL codegen's binding-aware class-send
+fallback. When a message is sent to a singleton receiver (`Workspace bind:as:`,
+`Transcript show:`) the name is no longer eagerly injected into the session map,
+so the `maps:find` receiver lookup misses. This recovers the live instance so the
+message dispatches to it (via `beamtalk_message_dispatch:send`) instead of being
+mis-routed to a non-existent class. Returns `error` for any non-singleton name so
+real class names still fall through to class-method dispatch.
+""".
+-spec resolve_singleton_instance(atom()) -> {ok, term()} | error.
+resolve_singleton_instance(Name) when is_atom(Name) ->
+    lookup_singleton(Name).
+
+-spec raise_class_not_found(atom()) -> no_return().
+raise_class_not_found(Name) ->
+    Err0 = beamtalk_error:new(class_not_found, Name),
+    Hint = iolist_to_binary([
+        <<"Define ">>,
+        atom_to_binary(Name, utf8),
+        <<" with: Object subclass: ">>,
+        atom_to_binary(Name, utf8)
+    ]),
+    beamtalk_error:raise(beamtalk_error:with_hint(Err0, Hint)).
 
 %%% ============================================================================
 %%% Internal helpers — ETS management
