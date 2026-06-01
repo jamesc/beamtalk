@@ -94,3 +94,156 @@ Actor subclass: ActorThreadingCorpus
         sum := sum + 1
       ]
     sum
+
+  // ── BT-2356: remaining state-threading list/dict ops thread outer locals ──────
+  // Each runs a counter-mutating block in non-last position; the predicate runs
+  // for every element (no short-circuit), so the threaded counter must equal the
+  // collection size after the op.
+  allSatisfyNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      allSatisfy: [:i |
+        n := n + 1
+        i > 0
+      ]
+    n
+
+  anySatisfyNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      anySatisfy: [:i |
+        n := n + 1
+        i > 5
+      ]
+    n
+
+  flatMapNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      flatMap: [:i |
+        n := n + 1
+        #(i)
+      ]
+    n
+
+  takeWhileNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      takeWhile: [:i |
+        n := n + 1
+        i > 0
+      ]
+    n
+
+  dropWhileNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      dropWhile: [:i |
+        n := n + 1
+        i > 0
+      ]
+    n
+
+  groupByNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      groupBy: [:i |
+        n := n + 1
+        i isEven
+      ]
+    n
+
+  partitionNonLastReadWrite =>
+    n := 0
+    #(1, 2, 3)
+      partition: [:i |
+        n := n + 1
+        i > 1
+      ]
+    n
+
+  // sort: comparator runs an algorithm-dependent number of times, so thread a
+  // write-only flag (set to a constant) rather than a counter for a deterministic
+  // result: at least one comparison runs for a 3-element list.
+  sortNonLastWriteOnly =>
+    touched := 0
+    #(3, 1, 2)
+      sort: [:a :b |
+        touched := 1
+        a <= b
+      ]
+    touched
+
+  doWithKeyNonLastReadWrite =>
+    n := 0
+    #{#a => 1, #b => 2} doWithKey: [:k :v | n := n + 1]
+    n
+
+  keysAndValuesDoNonLastReadWrite =>
+    n := 0
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | n := n + 1]
+    n
+
+  // ── BT-2356 (A): write-only outer locals through foldl list ops ──────────────
+  // A write-only local (never read inside the block) is packed into the StateAcc
+  // by the loop machinery but was previously never extracted back. Each returns
+  // the final write-only value.
+  doWriteOnlyNonLast =>
+    found := 0
+    #(1, 2, 3) do: [:i | found := 7]
+    found
+
+  collectWriteOnlyNonLast =>
+    found := 0
+    #(1, 2, 3)
+      collect: [:i |
+        found := 7
+        i * 2
+      ]
+    found
+
+  selectWriteOnlyNonLast =>
+    found := 0
+    #(1, 2, 3)
+      select: [:i |
+        found := 7
+        i > 1
+      ]
+    found
+
+  rejectWriteOnlyNonLast =>
+    found := 0
+    #(1, 2, 3)
+      reject: [:i |
+        found := 7
+        i > 1
+      ]
+    found
+
+  countWriteOnlyNonLast =>
+    found := 0
+    #(1, 2, 3)
+      count: [:i |
+        found := 7
+        i > 1
+      ]
+    found
+
+  // The issue's exact repro: a write-only boolean flag set inside a detect: block.
+  detectWriteOnlyNonLast =>
+    found := false
+    #(1, 2, 3)
+      detect: [:i |
+        found := true
+        i > 0
+      ]
+    found
+
+  // ── BT-2356 (B): nested list-op mutation inside a conditional branch ──────────
+  // The nested `do:` mutates the outer local `sum`; the branch body must thread
+  // that mutation back into the branch's StateAcc, and the outer body must seed
+  // and extract it.
+  nestedListOpInBranch: flag =>
+    sum := 0
+    flag ifTrue: [#(1, 2, 3) do: [:x | sum := sum + x]]
+    sum

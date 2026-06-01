@@ -2691,10 +2691,19 @@ impl CoreErlangGenerator {
             // packed into the StateAcc map at the end of the fold (always, regardless of
             // iteration count). Any trailing handler (e.g. detect:ifNone:'s ifNone block) is
             // not part of the fold, so it is ignored here.
+            //
+            // BT-2356: the remaining state-threading list/dict ops pack via the same
+            // `ThreadingPlan::new_for_foldl_list_op` machinery and so must be extracted with
+            // the identical local set. All route through `threaded_vars_foldl_list_op`, which
+            // mirrors `compute_threaded_locals_for_loop` (the packing side) so every packed
+            // `__local__` key — including write-only and nested cross-scope mutations — is read
+            // back (no missing key ⇒ no `{badkey}`).
             "do:" | "collect:" | "select:" | "reject:" | "count:" | "detect:"
-            | "detect:ifNone:" => self.threaded_vars_single_block_simple(arguments),
+            | "detect:ifNone:" | "anySatisfy:" | "allSatisfy:" | "flatMap:" | "takeWhile:"
+            | "dropWhile:" | "groupBy:" | "partition:" | "sort:" | "doWithKey:"
+            | "keysAndValuesDo:" => self.threaded_vars_foldl_list_op(arguments.first()),
             "inject:into:" if arguments.len() == 2 => {
-                self.threaded_vars_single_block_simple(&arguments[1..])
+                self.threaded_vars_foldl_list_op(arguments.get(1))
             }
             // BT-2355: conditionals thread outer-local mutations through the StateAcc
             // map under `__local__` keys (see generate_*_with_mutations, which also seed
@@ -2765,7 +2774,23 @@ impl CoreErlangGenerator {
                 .cloned()
                 .unwrap_or_else(|| analyze_block(block));
             let params = Self::block_param_names(block);
-            for v in &analysis.local_writes {
+            // BT-2356: `analyze_block` does not propagate `local_writes` out of nested
+            // (non-conditional) blocks, so an outer local mutated by a nested list op in a
+            // branch — e.g. `flag ifTrue: [ items do: [:x | sum := sum + x] ]` — is invisible
+            // to `analysis.local_writes`. Collect those cross-scope mutations too so the var is
+            // both seeded (by `seed_conditional_locals`) and extracted by the method-body
+            // sequencer. The branch body re-threads the nested op's mutation into the branch's
+            // returned StateAcc (the nested op is itself classified as state-threading), so the
+            // seeded key is overwritten with the live value rather than left stale.
+            let mut cross_scope = HashSet::new();
+            for stmt in &block.body {
+                Self::collect_list_op_cross_scope_mutations_recursive(
+                    &stmt.expression,
+                    &self.semantic_facts,
+                    &mut cross_scope,
+                );
+            }
+            for v in analysis.local_writes.iter().chain(cross_scope.iter()) {
                 if params.contains(v) {
                     continue;
                 }
@@ -2888,32 +2913,44 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Computes threaded vars for loop forms whose body block needs only simple
-    /// captured-reads vs local-writes analysis (no cross-scope mutations).
-    /// Used for `do:`, `inject:into:`, `collect:`, `select:`, `reject:`.
-    fn threaded_vars_single_block_simple(&self, arguments: &[Expression]) -> Option<Vec<String>> {
-        use crate::codegen::core_erlang::block_analysis::analyze_block;
-
-        let Some(Expression::Block(body_block)) = arguments.first() else {
+    /// BT-2356: Computes the threaded outer-locals to extract after a foldl-style
+    /// list/dict op (`do:`, `collect:`, `select:`, `reject:`, `count:`, `detect:`,
+    /// `detect:ifNone:`, `inject:into:`, `anySatisfy:`, `allSatisfy:`, `flatMap:`,
+    /// `takeWhile:`, `dropWhile:`, `groupBy:`, `partition:`, `sort:`, `doWithKey:`,
+    /// `keysAndValuesDo:`).
+    ///
+    /// `body_arg` is the op's mutating body block (the first argument for most ops,
+    /// the second for `inject:into:`).
+    ///
+    /// These ops all pack their threaded locals into the returned `StateAcc` via
+    /// `ThreadingPlan::new_for_foldl_list_op` → `compute_threaded_locals_for_loop`,
+    /// whose set is **captured-reads ∩ writes, widened with nested-list-op cross-scope
+    /// mutations (BT-1329) and outer-scope write-only locals**. The extraction side must
+    /// use the *same* set, otherwise a write-only or cross-scope local is packed but never
+    /// read back (the BT-2342/BT-2355/BT-2356 bug class). This helper reproduces that set
+    /// via `augment_with_cross_scope_mutations`, the same widening the packing side applies,
+    /// so pack and extract stay symmetric and no `maps:get/2` hits a missing key.
+    fn threaded_vars_foldl_list_op(&self, body_arg: Option<&Expression>) -> Option<Vec<String>> {
+        let Some(Expression::Block(body_block)) = body_arg else {
             return None;
         };
 
-        let body_analysis = self
-            .semantic_facts
-            .block_profile(&body_block.span)
-            .cloned()
-            .unwrap_or_else(|| analyze_block(body_block));
-
         let block_params = Self::block_param_names(body_block);
+        let (mut captured, mut writes) = self.collect_block_vars(body_block);
+        self.augment_with_cross_scope_mutations(
+            body_block,
+            &mut captured,
+            &mut writes,
+            &block_params,
+        );
 
-        // BT-1224: Use captured_reads to exclude block-local vars from threading.
-        // Block params are implicitly excluded since they're not in captured_reads.
-        let threaded: Vec<String> = body_analysis
-            .captured_reads
-            .intersection(&body_analysis.local_writes)
+        let mut threaded: Vec<String> = captured
+            .intersection(&writes)
             .filter(|v| !block_params.contains(*v))
             .cloned()
             .collect();
+        // Deterministic order, matching `compute_threaded_locals_for_loop`'s BTreeSet output.
+        threaded.sort();
 
         if threaded.is_empty() {
             None

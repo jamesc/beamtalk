@@ -1297,7 +1297,9 @@ impl CoreErlangGenerator {
                 if self.context == CodeGenContext::Actor || self.in_loop_body {
                     if let Expression::Block(block) = &arguments[0] {
                         let analysis = block_analysis::analyze_block(block);
+                        // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
                         let needs_threading = self.needs_mutation_threading(&analysis)
+                            || self.body_has_list_op_cross_scope_mutations(block)
                             || (self.in_loop_body && !analysis.local_writes.is_empty());
                         if needs_threading {
                             // Validate arity before generating mutation-threaded code.
@@ -1940,7 +1942,12 @@ impl CoreErlangGenerator {
                     let analysis = block_analysis::analyze_block(block);
                     // BT-1053: When inside a loop body, also trigger for any local write
                     // (the outer loop has already determined which locals need threading).
+                    // BT-2356: also inline when the branch contains a nested list op that
+                    // mutates an outer local — otherwise the conditional falls through to a
+                    // runtime `send` whose `nil`-on-false result breaks the `{Value, State}`
+                    // contract the method-body sequencer expects (badarg on element/2).
                     let needs_threading = self.needs_mutation_threading(&analysis)
+                        || self.body_has_list_op_cross_scope_mutations(block)
                         || (self.in_loop_body && !analysis.local_writes.is_empty());
                     if needs_threading {
                         // BT-1392: Set repl_loop_mutated so the REPL unpacks {Result, State}
@@ -1956,7 +1963,9 @@ impl CoreErlangGenerator {
                 debug_assert_eq!(arguments.len(), 1);
                 if let Expression::Block(block) = &arguments[0] {
                     let analysis = block_analysis::analyze_block(block);
+                    // BT-2356: inline when a nested list op mutates an outer local (see IfTrue).
                     let needs_threading = self.needs_mutation_threading(&analysis)
+                        || self.body_has_list_op_cross_scope_mutations(block)
                         || (self.in_loop_body && !analysis.local_writes.is_empty());
                     if needs_threading {
                         if self.is_repl_mode() {
@@ -1974,8 +1983,12 @@ impl CoreErlangGenerator {
                 {
                     let true_analysis = block_analysis::analyze_block(true_block);
                     let false_analysis = block_analysis::analyze_block(false_block);
+                    // BT-2356: inline when either branch has a nested list op mutating an
+                    // outer local (see IfTrue).
                     let needs_threading = self.needs_mutation_threading(&true_analysis)
                         || self.needs_mutation_threading(&false_analysis)
+                        || self.body_has_list_op_cross_scope_mutations(true_block)
+                        || self.body_has_list_op_cross_scope_mutations(false_block)
                         || (self.in_loop_body
                             && (!true_analysis.local_writes.is_empty()
                                 || !false_analysis.local_writes.is_empty()));

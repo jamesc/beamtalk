@@ -99,3 +99,78 @@ TestCase subclass: ActorThreadingConstructsTest
   testNestedConditionalIntraBranchReadFalse =>
     a := ActorThreadingCorpus spawn
     self assert: (a nestedConditionalIntraBranchRead: false) equals: 0
+
+  // ── BT-2356: remaining state-threading list/dict ops thread outer locals ──────
+  testAllSatisfyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a allSatisfyNonLastReadWrite equals: 3
+
+  testAnySatisfyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a anySatisfyNonLastReadWrite equals: 3
+
+  testFlatMapNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a flatMapNonLastReadWrite equals: 3
+
+  testTakeWhileNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a takeWhileNonLastReadWrite equals: 3
+
+  testDropWhileNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a dropWhileNonLastReadWrite equals: 3
+
+  testGroupByNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a groupByNonLastReadWrite equals: 3
+
+  testPartitionNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a partitionNonLastReadWrite equals: 3
+
+  testSortNonLastWriteOnlyThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a sortNonLastWriteOnly equals: 1
+
+  testDoWithKeyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a doWithKeyNonLastReadWrite equals: 2
+
+  testKeysAndValuesDoNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a keysAndValuesDoNonLastReadWrite equals: 2
+
+  // ── BT-2356 (A): write-only outer locals through foldl list ops ──────────────
+  testDoWriteOnlyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a doWriteOnlyNonLast equals: 7
+
+  testCollectWriteOnlyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a collectWriteOnlyNonLast equals: 7
+
+  testSelectWriteOnlyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a selectWriteOnlyNonLast equals: 7
+
+  testRejectWriteOnlyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a rejectWriteOnlyNonLast equals: 7
+
+  testCountWriteOnlyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a countWriteOnlyNonLast equals: 7
+
+  testDetectWriteOnlyNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a detectWriteOnlyNonLast equals: true
+
+  // ── BT-2356 (B): nested list-op mutation inside a conditional branch ──────────
+  testNestedListOpInBranchThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a nestedListOpInBranch: true) equals: 6
+
+  testNestedListOpInBranchFalseUnchanged =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a nestedListOpInBranch: false) equals: 0
