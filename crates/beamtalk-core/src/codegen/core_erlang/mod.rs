@@ -2697,11 +2697,13 @@ impl CoreErlangGenerator {
                 self.threaded_vars_single_block_simple(&arguments[1..])
             }
             // BT-2355: conditionals thread outer-local mutations through the StateAcc
-            // map under `__local__` keys (see generate_*_with_mutations). The branch
-            // codegen seeds those keys so extraction is safe even when the taken branch
-            // did not write them.
-            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifFalse:ifTrue:" | "ifNil:"
-            | "ifNotNil:" | "ifNil:ifNotNil:" | "ifNotNil:ifNil:" => {
+            // map under `__local__` keys (see generate_*_with_mutations, which also seed
+            // those keys so extraction is safe even when the taken branch did not write
+            // them). Only the selectors that (a) `is_conditional_selector` recognises as
+            // state-threading and (b) have a `generate_*_with_mutations` inline-case
+            // generator are listed here — others (`ifNil:`, `ifFalse:ifTrue:`, …) are not
+            // routed through that path, so adding them here would be unreachable.
+            "ifTrue:" | "ifFalse:" | "ifTrue:ifFalse:" | "ifNotNil:" => {
                 let blocks = Self::block_args(arguments);
                 let threaded = self.conditional_threaded_locals(&blocks);
                 if threaded.is_empty() {

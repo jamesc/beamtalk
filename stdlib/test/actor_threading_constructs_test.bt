@@ -72,3 +72,30 @@ TestCase subclass: ActorThreadingConstructsTest
   testToDoAssignRhsThreads =>
     a := ActorThreadingCorpus spawn
     self assert: a toDoAssignRhsReadWrite equals: 15
+
+  // ── ifFalse: threads in non-last position ──────────────────────────────────
+  testIfFalseNonLastTrueBranchUnchanged =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifFalseNonLastReadWrite: true) equals: 0
+
+  testIfFalseNonLastFalseBranchThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifFalseNonLastReadWrite: false) equals: 7
+
+  // ── ifNotNil: threads in non-last position ─────────────────────────────────
+  testIfNotNilNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifNotNilNonLastReadWrite: 10) equals: 10
+
+  testIfNotNilNonLastNilUnchanged =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifNotNilNonLastReadWrite: nil) equals: 0
+
+  // ── nested conditional in a branch rebinds the local for an intra-branch read ─
+  testNestedConditionalIntraBranchRead =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a nestedConditionalIntraBranchRead: true) equals: 6
+
+  testNestedConditionalIntraBranchReadFalse =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a nestedConditionalIntraBranchRead: false) equals: 0

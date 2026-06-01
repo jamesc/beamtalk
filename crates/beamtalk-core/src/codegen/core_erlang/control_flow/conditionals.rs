@@ -604,17 +604,41 @@ impl CoreErlangGenerator {
                         let tuple_var = self.fresh_temp_var("Tuple");
                         let expr_doc = self.expression_doc(expr)?;
                         let next_state = self.next_state_var();
-                        docs.push(docvec![
+                        let mut doc_parts: Vec<Document<'static>> = vec![docvec![
                             "let ",
                             leaf::var(tuple_var.clone()),
                             " = ",
                             expr_doc,
                             " in let ",
-                            leaf::var(next_state),
+                            leaf::var(next_state.clone()),
                             " = call 'erlang':'element'(2, ",
                             leaf::var(tuple_var),
                             ") in ",
-                        ]);
+                        ]];
+                        // BT-2355: rebind the nested construct's threaded `__local__`
+                        // vars so a later read in THIS branch sees the mutated value
+                        // (mirrors the DestructureAssignmentControlFlow arm above and the
+                        // method-body sequencer). Without this, the state is forwarded but
+                        // the in-scope local binding stays stale.
+                        if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
+                            for var in &threaded_vars {
+                                let tv_core = self.lookup_var(var).map_or_else(
+                                    || Self::to_core_erlang_var(var),
+                                    String::clone,
+                                );
+                                doc_parts.push(docvec![
+                                    "let ",
+                                    leaf::var(tv_core.clone()),
+                                    " = call 'maps':'get'(",
+                                    leaf::atom(Self::local_state_key(var)),
+                                    ", ",
+                                    leaf::var(next_state.clone()),
+                                    ") in ",
+                                ]);
+                                self.bind_var(var, &tv_core);
+                            }
+                        }
+                        docs.push(Document::Vec(doc_parts));
                     }
                 }
                 // All other kinds (EarlyReturn, SuperSend, ErrorSend,

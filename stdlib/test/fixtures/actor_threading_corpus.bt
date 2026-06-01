@@ -70,3 +70,27 @@ Actor subclass: ActorThreadingCorpus
     sum := 0
     _r := (1 to: 5 do: [:i | sum := sum + i])
     sum
+
+  // ── ifFalse:, non-last ──────────────────────────────────────────────────────
+  ifFalseNonLastReadWrite: flag =>
+    sum := 0
+    flag ifFalse: [sum := sum + 7]
+    sum
+
+  // ── ifNotNil:, non-last ─────────────────────────────────────────────────────
+  ifNotNilNonLastReadWrite: obj =>
+    total := 0
+    obj ifNotNil: [:it | total := total + it]
+    total
+
+  // ── nested conditional inside a branch, then read the local in the same branch ─
+  // Exercises the intra-branch rebind: the inner conditional mutates `sum`; the
+  // read after it (still inside the outer branch) must see the mutated value.
+  nestedConditionalIntraBranchRead: flag =>
+    sum := 0
+    flag
+      ifTrue: [
+        flag ifTrue: [sum := sum + 5]
+        sum := sum + 1
+      ]
+    sum
