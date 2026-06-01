@@ -84,11 +84,12 @@ sealed typed Object subclass: Session
   bindings -> BindingsView =>
     (Erlang beamtalk_session_primitives) bindingsViewFor: self
 
-  /// Walk both binding layers, return first match or nil.
-  /// Lookup order: session locals → workspace globals.
-  /// Primarily a REPL debugging tool: answers "where does this name
-  /// resolve from?" interactively. Reads workspace globals internally
-  /// (the same registries name resolution uses).
+  /// Resolve a name exactly the way bare-name lookup does, returning the
+  /// first match or nil. Order: session locals → workspace globals
+  /// (bind:as: + singletons) → class registry. Primarily a REPL debugging
+  /// tool: answers "where does this name resolve from?" interactively.
+  /// Uses the one shared resolver (see "Binding storage model"), so it can
+  /// never disagree with how the name actually resolves.
   resolve: aName :: Symbol -> Object =>
     (Erlang beamtalk_session_primitives) resolveFor: self name: aName
 
@@ -162,7 +163,7 @@ userSession ifNotNil: [
   candidates := userSession bindings keys
 ]
 
-// Or for full search across all sessions (future):
+// Discover session ids without knowing them out-of-band (Phase 7):
 Workspace sessions collect: [:s | s id]
 ```
 
@@ -566,7 +567,9 @@ The meta-commands existed only on the REPL surface. Removing them is a small los
 - ADR 0004 — Persistent Workspace Management (workspace lifecycle context)
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_eval.erl:62-77` — current `:bindings` / `:clear` handlers
 - `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl:155-244` — shell init and binding lifecycle
-- `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl:432` — `inject_workspace_bindings/1` (the actual injection of workspace globals into session bindings at init)
-- `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_interface_primitives.erl:765-786` — `handle_session_bindings/1` (resolves singletons + `bind:as:` entries that injection copies in)
+- `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl:432` — `inject_workspace_bindings/1` (today's eager injection of workspace globals into session bindings at init; **removed in Phase 1** in favour of lazy resolution)
+- `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_interface_primitives.erl:765-786` — `handle_session_bindings/1` (resolves singletons + `bind:as:` entries that injection copies in today)
+- `runtime/apps/beamtalk_workspace/src/beamtalk_workspace_interface_primitives.erl` — `globals/0` (the `Workspace globals` primitive, upgraded to a live `BindingsView` in Phase 4)
+- `crates/beamtalk-mcp/src/server.rs` — the `get_bindings` MCP tool (removed in Phase 6)
 - `runtime/apps/beamtalk_workspace/src/beamtalk_session_table.erl` — session registry
 - Pharo Workspace `bindings` accessor; Squeak `Environment`; IPython `get_ipython()` — prior art for first-class binding scope objects
