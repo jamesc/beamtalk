@@ -88,3 +88,34 @@ TestCase subclass: CountedLoopMutationTest
     1 to: 4 do: [:i | b := b + i]
     self assert: a equals: 6
     self assert: b equals: 10
+
+  // ── BT-2354: user local named `i` must not collide with the loop counter ─────
+  // The internal counted-loop counter used to be a hardcoded Core Erlang `I`.
+  // A user local named `i` maps to `I`, so `i := ...` inside the body emitted a
+  // duplicate `I` binding and failed core_lint with {duplicate_var,'I',...}.
+  // The counter is now gensym'd, so these compile and run.
+  testTimesRepeatUserLocalI =>
+    sum := 0
+    i := 0
+    5
+      timesRepeat: [
+        i := i + 1
+        sum := sum + i
+      ]
+    self assert: i equals: 5
+    self assert: sum equals: 15
+
+  // A local `i` that is distinct from the block parameter `j`. Previously the
+  // unrelated local `i` collided with the loop counter in to:do: as well.
+  testToDoUnrelatedLocalI =>
+    i := 0
+    1 to: 5 do: [:j | i := i + j]
+    self assert: i equals: 15
+
+  testToByDoUnrelatedLocalI =>
+    i := 0
+    1
+      to: 10
+      by: 2
+      do: [:j | i := i + 1]
+    self assert: i equals: 5
