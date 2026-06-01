@@ -371,10 +371,18 @@ maybe_unregister_meta() ->
     end.
 
 wait_dead(Pid) ->
+    %% Bounded wait via monitor so an unterminated shell fails the test fast
+    %% instead of hanging the whole EUnit run on infinite recursion.
     case is_process_alive(Pid) of
         false ->
             ok;
         true ->
-            timer:sleep(10),
-            wait_dead(Pid)
+            Ref = erlang:monitor(process, Pid),
+            receive
+                {'DOWN', Ref, process, Pid, _Reason} ->
+                    ok
+            after 5000 ->
+                erlang:demonitor(Ref, [flush]),
+                ?assert(false)
+            end
     end.

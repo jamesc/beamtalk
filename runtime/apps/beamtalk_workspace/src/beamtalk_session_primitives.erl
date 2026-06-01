@@ -117,7 +117,7 @@ send to a `Session` value fails consistently once the session is gone.
 """.
 -spec idOf(session() | term()) -> binary().
 idOf(Session) ->
-    {Id, Pid} = session_id_pid(Session, 'id'),
+    {Id, Pid} = session_id_pid(Session, 'idOf:'),
     ensure_alive(Pid, Id),
     Id.
 
@@ -134,7 +134,7 @@ target shell's `get_bindings` (its locals-only map after BT-2365).
 """.
 -spec bindingsViewFor(session() | term()) -> bindings_view().
 bindingsViewFor(Session) ->
-    {Id, Pid} = session_id_pid(Session, 'bindings'),
+    {Id, Pid} = session_id_pid(Session, 'bindingsViewFor:'),
     ensure_alive(Pid, Id),
     #{'$beamtalk_class' => 'BindingsView', scope => session, id => Id, pid => Pid}.
 
@@ -149,7 +149,7 @@ terminal), matching how the name would behave as a bare identifier.
 """.
 -spec resolveFor(session() | term(), atom() | binary() | string() | term()) -> term().
 resolveFor(Session, Name) ->
-    {Id, Pid} = session_id_pid(Session, 'resolve:'),
+    {Id, Pid} = session_id_pid(Session, 'resolveFor:'),
     Locals = session_bindings(Pid, Id),
     NameAtom = to_name_atom(Name),
     beamtalk_workspace:resolve_name(Locals, NameAtom).
@@ -165,8 +165,8 @@ eval's pending queue does not reach the target.
 """.
 -spec clearFor(session() | term()) -> nil.
 clearFor(Session) ->
-    {Id, Pid} = session_id_pid(Session, 'clear'),
-    enqueue_session_mutation(Pid, Id, {clear, undefined, undefined}, 'clear'),
+    {Id, Pid} = session_id_pid(Session, 'clearFor:'),
+    enqueue_session_mutation(Pid, Id, {clear, undefined, undefined}, 'clearFor:'),
     nil.
 
 %%% ============================================================================
@@ -400,8 +400,21 @@ to_binary_id(_) ->
 to_name_atom(Name) when is_atom(Name) -> Name;
 to_name_atom(Name) when is_binary(Name) -> binary_to_atom(Name, utf8);
 to_name_atom(Name) when is_list(Name) ->
-    binary_to_atom(unicode:characters_to_binary(Name), utf8);
+    %% A list with invalid codepoints makes `unicode:characters_to_binary/1`
+    %% return an error tuple (not a binary); feeding that to `binary_to_atom`
+    %% throws a raw badarg. Funnel any such failure into the consistent
+    %% type_error path instead of leaking a badarg.
+    try unicode:characters_to_binary(Name) of
+        Bin when is_binary(Bin) -> binary_to_atom(Bin, utf8);
+        _ -> raise_name_type_error(Name)
+    catch
+        _:_ -> raise_name_type_error(Name)
+    end;
 to_name_atom(Other) ->
+    raise_name_type_error(Other).
+
+-spec raise_name_type_error(term()) -> no_return().
+raise_name_type_error(Other) ->
     Err0 = beamtalk_error:new(type_error, 'BindingsView'),
     beamtalk_error:raise(
         beamtalk_error:with_message(
