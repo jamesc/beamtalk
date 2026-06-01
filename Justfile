@@ -279,8 +279,15 @@ lint: lint-rust lint-erlang lint-js lint-beamtalk lint-workaround-comments
 # to the offending comment line (or an adjacent line). To regenerate the
 # allowlist (e.g. for a genuine false positive), run with `--update`:
 #   scripts/ci/lint-workaround-comments.sh --update
+# Unix-only (shells out to bash); Linux CI covers it, so the Windows variant
+# is a no-op, consistent with the `[windows] ci`/`fmt-check` splits.
+[unix]
 lint-workaround-comments:
     @bash scripts/ci/lint-workaround-comments.sh
+
+[windows]
+lint-workaround-comments:
+    @echo "lint-workaround-comments: skipped on Windows (covered by Linux CI)"
 
 # Lint Beamtalk: formatting check
 lint-beamtalk: fmt-check-beamtalk

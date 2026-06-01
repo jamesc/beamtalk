@@ -47,7 +47,7 @@ ALLOWLIST="scripts/ci/workaround-comments-allowlist.txt"
 # `nonexistent_type_XXXX` or `does_XXX_understand`):
 WORD_MARKERS='HACK|FIXME|XXX'
 # Phrase markers (matched anywhere, case-insensitive):
-PHRASE_MARKERS='workaround|work around|does ?n.t thread|does not thread|pre-existing limitation|known limitation|language limitation|parser limitation'
+PHRASE_MARKERS='workaround|work around|does not thread|doesn'\''t thread|pre-existing limitation|known limitation|language limitation|parser limitation'
 
 # A combined ERE used to find candidate lines.
 MARKER_RE="(\\b(${WORD_MARKERS})\\b|(${PHRASE_MARKERS}))"
