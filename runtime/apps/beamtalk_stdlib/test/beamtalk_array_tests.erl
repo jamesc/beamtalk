@@ -131,6 +131,31 @@ at_put_non_integer_index_test() ->
         beamtalk_array:at_put(A, <<"1">>, 99)
     ).
 
+%% BT-2362: at_put must return an Array whose internal representation is
+%% structurally identical (=:=) to a literal-equivalent Array, so that
+%% `#[1,2,3] at: 2 put: 99` compares equal to `#[1,99,3]`. array:set/3 alone
+%% leaves a stale copy-on-write cache node and breaks this invariant.
+at_put_equals_literal_equivalent_test() ->
+    Updated = beamtalk_array:at_put(make_array([1, 2, 3]), 2, 99),
+    Literal = make_array([1, 99, 3]),
+    ?assert(Updated =:= Literal),
+    ?assertEqual(Literal, Updated).
+
+%% BT-2362: equality must be reflected by hashing — two arrays that compare
+%% equal must produce the same phash2, otherwise dictionary/set keys break.
+at_put_hash_matches_literal_equivalent_test() ->
+    Updated = beamtalk_array:at_put(make_array([1, 2, 3]), 2, 99),
+    Literal = make_array([1, 99, 3]),
+    ?assertEqual(erlang:phash2(Literal), erlang:phash2(Updated)).
+
+%% BT-2362: chained at_put calls must also stay canonical.
+at_put_chained_equals_literal_equivalent_test() ->
+    Updated = beamtalk_array:at_put(
+        beamtalk_array:at_put(make_array([1, 2, 3]), 1, 7), 3, 9
+    ),
+    Literal = make_array([7, 2, 9]),
+    ?assert(Updated =:= Literal).
+
 %%% ============================================================================
 %%% do/2
 %%% ============================================================================

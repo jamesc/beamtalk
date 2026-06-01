@@ -87,7 +87,21 @@ at(#{'$beamtalk_class' := 'Array'}, _Index) ->
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),
     beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Index must be an Integer">>)).
 
--doc "Return a new Array with the element at `Index` (1-based) replaced by `Value`.".
+-doc """
+Return a new Array with the element at `Index` (1-based) replaced by `Value`.
+
+The result is re-canonicalised via `from_list/1` so that its internal
+`array` representation is structurally identical (`=:=`) to an array literal
+with the same elements. `array:set/3` alone leaves a stale copy-on-write cache
+node inside the `array` tuple, which makes `#[1,2,3] at: 2 put: 99` compare
+unequal to the literal `#[1,99,3]` even though both render the same (BT-2362).
+
+Complexity: the re-canonicalisation is `O(n)` in the array size (vs `array:set/3`'s
+`O(log n)`), so repeated `at:put:` over a large array in a loop is `O(n^2)`. This is
+deliberate — element-wise structural equality and hash consistency are required for
+arrays used as dict/set keys. A future option is to compare arrays structurally in
+`=`/`hash` instead, letting `at:put:` stay `O(log n)`.
+""".
 -spec at_put(map(), integer(), term()) -> map().
 at_put(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Index, Value) when
     is_integer(Index), Index >= 1
@@ -100,7 +114,8 @@ at_put(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Index, Value) when
             Error2 = beamtalk_error:with_hint(Error1, <<"Index is beyond array size">>),
             beamtalk_error:raise(Error2);
         true ->
-            #{'$beamtalk_class' => 'Array', 'data' => array:set(Index - 1, Value, Arr)}
+            Updated = array:set(Index - 1, Value, Arr),
+            from_list(array:to_list(Updated))
     end;
 at_put(#{'$beamtalk_class' := 'Array'}, Index, _Value) when is_integer(Index) ->
     Error0 = beamtalk_error:new(index_out_of_bounds, 'Array'),
