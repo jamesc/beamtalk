@@ -2294,10 +2294,65 @@ impl CoreErlangGenerator {
         expr: &Expression,
         has_class_vars: bool,
     ) -> Result<Document<'static>> {
+        // BT-2349: A last-position threading construct (counted/while loop or foldl list-op
+        // yielding a `{value, StateAcc}` tuple) or a read+write conditional must unwrap the
+        // construct's logical value rather than leak the raw tuple (or crash on the 0-arg
+        // stateful-block dispatch). Handled here because the `{class_var_result, ...}` wrapping
+        // is identical whether or not the class declares class vars — threading constructs
+        // mutate *locals*, not class vars, so the wrapping is driven solely by whether an
+        // earlier statement mutated a class var (`class_var_mutated()`).
+        if let Some(doc) = self.try_generate_class_method_threaded_last(expr)? {
+            return Ok(doc);
+        }
         if has_class_vars {
             self.generate_class_method_last_expr_with_class_vars(expr)
         } else {
             self.generate_class_method_last_expr_no_class_vars(expr)
+        }
+    }
+
+    /// BT-2349: Handles a class method's last expression when it is a value-type threading
+    /// construct (counted/while loop or foldl list-op) or a read+write conditional.
+    ///
+    /// Returns `None` when `expr` is neither, so the caller falls back to the standard
+    /// last-expression paths.
+    ///
+    /// Both shapes produce a logical value bound to a fresh result var (via the shared BT-2342
+    /// value-type primitives), which is then wrapped in `{class_var_result, Result, ClassVarsN}`
+    /// when an earlier statement mutated a class var, or returned bare otherwise.
+    fn try_generate_class_method_threaded_last(
+        &mut self,
+        expr: &Expression,
+    ) -> Result<Option<Document<'static>>> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        let result_var = if self.expr_yields_vt_threaded_tuple(expr) {
+            self.emit_vt_threaded_tuple_unwrap_to_var(expr, &mut parts)?
+        } else if self.is_conditional_with_vt_local_threading(expr) {
+            match self.emit_vt_conditional_case_to_var(expr, &mut parts)? {
+                Some(result_var) => result_var,
+                None => return Ok(None),
+            }
+        } else {
+            return Ok(None);
+        };
+        parts.push(self.class_method_result_tail(&result_var));
+        Ok(Some(Document::Vec(parts)))
+    }
+
+    /// BT-2349: Builds the tail that returns an already-bound class-method result var:
+    /// `{class_var_result, Result, ClassVarsN}` when a class var was mutated, else `Result`.
+    fn class_method_result_tail(&self, result_var: &str) -> Document<'static> {
+        if self.class_var_mutated() {
+            let final_cv = self.current_class_var();
+            docvec![
+                "{'class_var_result', ",
+                leaf::var(result_var.to_string()),
+                ", ",
+                leaf::var(final_cv),
+                "}",
+            ]
+        } else {
+            leaf::var(result_var.to_string())
         }
     }
 
@@ -2416,6 +2471,19 @@ impl CoreErlangGenerator {
         } else if self.is_do_with_vt_local_threading(expr) {
             // BT-1414: Non-last `do:` loop that mutates captured outer locals.
             self.generate_value_type_do_open(expr)
+        } else if self.is_counted_loop_with_vt_local_threading(expr) {
+            // BT-2349: Non-last counted loop (to:do:/to:by:do:/timesRepeat:) that
+            // mutates captured outer locals. Extracts the threaded locals from the
+            // `{'nil', StateAcc}` tuple so subsequent statements see the updates.
+            self.generate_vt_counted_loop_open(expr)
+        } else if self.is_while_with_vt_local_threading(expr) {
+            // BT-2349: Non-last whileTrue:/whileFalse: that mutates captured outer locals.
+            self.generate_vt_while_open(expr)
+        } else if self.is_foldl_list_op_with_vt_local_threading(expr) {
+            // BT-2349: Non-last collect:/select:/reject:/inject:into: that mutates captured
+            // outer locals. Extracts the threaded locals from the `{value, StateAcc}` tuple
+            // (the logical value is discarded in non-last position).
+            self.generate_vt_foldl_list_op_open(expr)
         } else if self.is_conditional_with_vt_local_threading(expr) {
             // BT-1392: Non-last conditional that mutates captured outer locals.
             self.generate_vt_conditional_open(expr)
@@ -2449,6 +2517,16 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
+                // BT-2349: When the RHS is a threading construct (value-type loop or foldl
+                // list-op) it returns a `{value, StateAcc}` tuple. Bind the target to the
+                // logical value (element 1) and rebind the threaded locals from the StateAcc
+                // (element 2), rather than binding the target to the raw tuple. Mirrors the
+                // value-type instance-method body sequencer (BT-2342).
+                if self.expr_yields_vt_threaded_tuple(value) {
+                    let mut parts: Vec<Document<'static>> = Vec::new();
+                    self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
+                    return Ok(Document::Vec(parts));
+                }
                 let var_name = &id.name;
                 let core_var = self
                     .lookup_var(var_name)

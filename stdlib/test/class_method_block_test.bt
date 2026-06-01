@@ -50,3 +50,50 @@ TestCase subclass: ClassMethodBlockTest
   testActorClassMethodDoWithMutation =>
     result := ActorClassMethodBlock countItems: #(1, 2, 3, 4, 5)
     self assert: result equals: 5
+
+  // BT-2349: last-position inject:into: in a class method returns the accumulator,
+  // not the raw {value, StateAcc} threading tuple.
+  testClassMethodInjectLastReturnsValue =>
+    result := ClassMethodBlock sumCounting: #(1, 2, 3)
+    self assert: result equals: 6
+
+  // BT-2349: local-assignment of collect: in a class method binds the collected Array
+  // and threads the mutated counter out to later statements.
+  testClassMethodCollectAssignmentThreads =>
+    result := ClassMethodBlock doubleCounting: #(1, 2, 3)
+    self assert: result equals: #(#(2, 4, 6), 3)
+
+  // BT-2349: last-position select: in a class method returns the filtered Array.
+  testClassMethodSelectLastReturnsValue =>
+    result := ClassMethodBlock evensCounting: #(1, 2, 3, 4)
+    self assert: result equals: #(2, 4)
+
+  // BT-2349: last-position counted loop in a class method unwraps to the loop value (nil).
+  testClassMethodCountedLoopLastReturnsNil =>
+    result := ClassMethodBlock countToLast: 3
+    self assert: result equals: nil
+
+  // BT-2349: counted loop in local-assignment position threads the mutated total out.
+  testClassMethodLoopAssignmentThreads =>
+    result := ClassMethodBlock sumViaLoop: 3
+    self assert: result equals: 6
+
+  // BT-2349: last-position read+write conditional returns the branch value (true).
+  testClassMethodConditionalLastTrue =>
+    result := ClassMethodBlock condLast: true
+    self assert: result equals: 7
+
+  // BT-2349: last-position read+write conditional returns nil when the branch is skipped.
+  testClassMethodConditionalLastFalse =>
+    result := ClassMethodBlock condLast: false
+    self assert: result equals: nil
+
+  // BT-2349: last-position ifTrue:ifFalse: read+write conditional returns the true branch.
+  testClassMethodConditionalBothTrue =>
+    result := ClassMethodBlock condBothLast: true
+    self assert: result equals: 11
+
+  // BT-2349: last-position ifTrue:ifFalse: read+write conditional returns the false branch.
+  testClassMethodConditionalBothFalse =>
+    result := ClassMethodBlock condBothLast: false
+    self assert: result equals: 101
