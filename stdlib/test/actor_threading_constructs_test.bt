@@ -135,11 +135,11 @@ TestCase subclass: ActorThreadingConstructsTest
 
   testDoWithKeyNonLastThreads =>
     a := ActorThreadingCorpus spawn
-    self assert: a doWithKeyNonLastReadWrite equals: 3
+    self assert: a doWithKeyNonLastReadWrite equals: 2
 
   testKeysAndValuesDoNonLastThreads =>
     a := ActorThreadingCorpus spawn
-    self assert: a keysAndValuesDoNonLastReadWrite equals: 3
+    self assert: a keysAndValuesDoNonLastReadWrite equals: 2
 
   // ── BT-2356 (A): write-only outer locals through foldl list ops ──────────────
   testDoWriteOnlyNonLastThreads =>

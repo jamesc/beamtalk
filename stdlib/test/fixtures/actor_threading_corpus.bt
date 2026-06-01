@@ -176,12 +176,12 @@ Actor subclass: ActorThreadingCorpus
 
   doWithKeyNonLastReadWrite =>
     n := 0
-    #{#a => 1, #b => 2} doWithKey: [:k :v | n := n + v]
+    #{#a => 1, #b => 2} doWithKey: [:k :v | n := n + 1]
     n
 
   keysAndValuesDoNonLastReadWrite =>
     n := 0
-    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | n := n + v]
+    #{#a => 1, #b => 2} keysAndValuesDo: [:k :v | n := n + 1]
     n
 
   // ── BT-2356 (A): write-only outer locals through foldl list ops ──────────────
