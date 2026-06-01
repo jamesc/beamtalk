@@ -24,7 +24,10 @@ session_table_test_() ->
         fun insert_and_lookup/1,
         fun lookup_missing_returns_error/1,
         fun delete_removes_entry/1,
-        fun delete_missing_is_safe/1
+        fun delete_missing_is_safe/1,
+        fun lookup_alive_returns_live_pid/1,
+        fun lookup_alive_missing_returns_error/1,
+        fun lookup_alive_dead_pid_returns_error/1
     ]}.
 
 setup() ->
@@ -75,3 +78,26 @@ delete_removes_entry(_) ->
 delete_missing_is_safe(_) ->
     %% ets:delete/2 on a missing key returns true — must not raise.
     [?_assertEqual(true, beamtalk_session_table:delete(<<"ghost">>))].
+
+%%% lookup_alive/1 tests (BT-2366)
+
+lookup_alive_returns_live_pid(_) ->
+    Pid = self(),
+    beamtalk_session_table:insert(<<"alive1">>, Pid),
+    [?_assertEqual({ok, Pid}, beamtalk_session_table:lookup_alive(<<"alive1">>))].
+
+lookup_alive_missing_returns_error(_) ->
+    [?_assertEqual(error, beamtalk_session_table:lookup_alive(<<"no_such_session">>))].
+
+lookup_alive_dead_pid_returns_error(_) ->
+    %% A registered entry pointing at a dead process must return error, not the
+    %% dead PID (the whole point of the liveness check).
+    DeadPid = spawn(fun() -> ok end),
+    %% Wait for the spawned process to finish.
+    Ref = monitor(process, DeadPid),
+    receive
+        {'DOWN', Ref, process, DeadPid, _} -> ok
+    after 1000 -> ok
+    end,
+    beamtalk_session_table:insert(<<"dead1">>, DeadPid),
+    [?_assertEqual(error, beamtalk_session_table:lookup_alive(<<"dead1">>))].

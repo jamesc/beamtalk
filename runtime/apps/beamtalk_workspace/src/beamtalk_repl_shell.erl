@@ -32,6 +32,7 @@ bindings while sharing access to actors and loaded modules.
     interrupt/1,
     get_bindings/1,
     clear_bindings/1,
+    enqueue_mutation/2,
     load_file/2,
     load_file/3,
     load_source/2,
@@ -112,6 +113,18 @@ get_bindings(SessionPid) ->
 -spec clear_bindings(pid()) -> ok.
 clear_bindings(SessionPid) ->
     gen_server:call(SessionPid, clear_bindings).
+
+-doc """
+Enqueue a deferred session-local mutation (BT-2366, ADR 0081 Phase 2).
+
+Called by `beamtalk_session_primitives` from inside this session's eval worker.
+The `{op, Key, Value}` tuple is appended to `pending_mutations`; it is applied
+(or dropped) by the eval-exit clauses when the worker completes.  Safe from the
+worker because the shell is in `noreply` while the worker runs.
+""".
+-spec enqueue_mutation(pid(), beamtalk_repl_state:mutation()) -> ok.
+enqueue_mutation(SessionPid, Mutation) ->
+    gen_server:call(SessionPid, {enqueue_mutation, Mutation}).
 
 -doc "Load a Beamtalk source file in this session.".
 -spec load_file(pid(), string()) -> {ok, [map()]} | {error, term()}.
@@ -231,11 +244,24 @@ handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}})
     %% BT-1242: Apply any pending module removals that accumulated while the
     %% worker was running.  No WorkerState is returned on interrupt, so we
     %% drain directly from ShellState.
-    CleanState = drain_pending_removals(State),
+    CleanState0 = drain_pending_removals(State),
+    %% BT-2366 (ADR 0081 Phase 2): drain session-local mutations too — an
+    %% interrupted eval's issued put/remove/clear edits are not lost.
+    CleanState = drain_pending_mutations(CleanState0),
     {reply, ok, {SessionId, CleanState, undefined}};
 handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
     %% No eval in progress — nothing to interrupt
     {reply, ok, FullState};
+handle_call({enqueue_mutation, Mutation}, _From, {SessionId, State, Worker}) ->
+    %% BT-2366 (ADR 0081 Phase 2): a session-scope write issued by a primitive
+    %% running inside this session's eval worker.  Enqueue the {op, Key, Value}
+    %% tuple on pending_mutations rather than writing the bindings directly: the
+    %% worker holds a state snapshot whose returned WorkerState would clobber a
+    %% direct edit when {eval_result, ...} arrives.  This call is synchronous and
+    %% completes before the worker sends {eval_result, ...}, so the ShellState
+    %% bound in the eval-result handler always reflects the enqueued mutation.
+    NewState = beamtalk_repl_state:add_pending_mutation(Mutation, State),
+    {reply, ok, {SessionId, NewState, Worker}};
 handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
     Bindings = beamtalk_repl_state:get_bindings(State),
     {reply, {ok, Bindings}, {SessionId, State, Worker}};
@@ -366,12 +392,23 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             %% are resolved live, not injected into the session map, so there is no
             %% injected copy to reconcile after an eval. The session map holds only
             %% locals (the worker's returned WorkerState).
-            FinalState = apply_pending_removals(ShellState, WorkerState),
+            %% BT-2366 (ADR 0081 Phase 2): apply removals first, then session-local
+            %% mutations on top of the worker's returned locals (so the worker's
+            %% own `x := …` is visible and a same-line `bindings at:put:` overrides
+            %% it).  Success path applies all queued ops, including `clear`.
+            FinalState0 = apply_pending_removals(ShellState, WorkerState),
+            FinalState = apply_pending_mutations(ShellState, FinalState0),
             beamtalk_bindings_events:on_bindings_changed(SessionId),
             {noreply, {SessionId, FinalState, undefined}};
         {error, Reason, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_error, Reason, Output, Warnings}),
-            MergedState = apply_pending_removals(ShellState, WorkerState),
+            %% BT-2366 (ADR 0081 Phase 2): on the error path apply put/remove only
+            %% (explicit per-key edits the user issued, independent of the failed
+            %% expression) and DROP a queued `clear` — `Session current clear. typo`
+            %% must not wipe every local because the line after `clear` failed.
+            MergedState0 = apply_pending_removals(ShellState, WorkerState),
+            MergedState = apply_pending_mutations_no_clear(ShellState, MergedState0),
+            beamtalk_bindings_events:on_bindings_changed(SessionId),
             {noreply, {SessionId, MergedState, undefined}}
     end;
 %% Worker process crashed (BT-666)
@@ -387,7 +424,10 @@ handle_info(
     reply_eval(From, {eval_error, Err1, <<>>, []}),
     %% BT-1242: Apply any pending module removals that arrived while the
     %% worker was running.  No WorkerState is returned on crash.
-    CleanState = drain_pending_removals(State),
+    CleanState0 = drain_pending_removals(State),
+    %% BT-2366 (ADR 0081 Phase 2): DISCARD session-local mutations — a crashed
+    %% worker's partial mutations are not trustworthy.  Reset the queue to [].
+    CleanState = beamtalk_repl_state:clear_pending_mutations(CleanState0),
     {noreply, {SessionId, CleanState, undefined}};
 %% BT-1242: Class removed via Beamtalk code path — clean up session tracker.
 %% Only updates tracker when no eval worker is active: if a worker is running it
@@ -497,6 +537,83 @@ drain_pending_removals(State) ->
             State1 = beamtalk_repl_state:set_module_tracker(NewTracker, State),
             beamtalk_repl_state:clear_pending_module_removals(State1)
     end.
+
+-doc """
+BT-2366 (ADR 0081 Phase 2): apply queued session-local mutations on the success
+exit path.
+
+Reads the `pending_mutations` queue from ShellState (which accumulated the
+primitive enqueues that completed before `{eval_result, …}`) and folds it over
+TargetState's locals map in enqueue order, then resets the queue to `[]`.
+
+`put`/`remove` edit a single key; `clear` empties the locals map (no
+injected-key caveat now that the map is locals-only, BT-2365).  Mutations apply
+on top of the worker's returned bindings already merged into TargetState, so a
+same-line `bindings at:put:` overrides the worker's own assignment.
+""".
+-spec apply_pending_mutations(beamtalk_repl_state:state(), beamtalk_repl_state:state()) ->
+    beamtalk_repl_state:state().
+apply_pending_mutations(ShellState, TargetState) ->
+    Mutations = beamtalk_repl_state:get_pending_mutations(ShellState),
+    fold_mutations(Mutations, TargetState).
+
+-doc """
+BT-2366 (ADR 0081 Phase 2): apply queued session-local mutations on the error
+exit path — `put`/`remove` only.
+
+A queued `clear` (whole-session destruction) is dropped: `Session current
+clear. someTypo` should not wipe every local because the line after `clear`
+failed.  `clear` applies only on the success path.  `put`/`remove` are explicit
+per-key edits the user issued, independent of the failed expression, so they
+take effect.
+""".
+-spec apply_pending_mutations_no_clear(beamtalk_repl_state:state(), beamtalk_repl_state:state()) ->
+    beamtalk_repl_state:state().
+apply_pending_mutations_no_clear(ShellState, TargetState) ->
+    Mutations = beamtalk_repl_state:get_pending_mutations(ShellState),
+    Kept = [M || M <- Mutations, element(1, M) =/= clear],
+    fold_mutations(Kept, TargetState).
+
+-doc """
+BT-2366 (ADR 0081 Phase 2): apply pending session-local mutations directly to
+State and clear the queue.
+
+Used when the worker exits via interrupt (no WorkerState is returned).  The
+shell resumes using its own ShellState, so we fold the queue over that state's
+locals and reset the queue to `[]`.  All ops apply (interrupt is not an error
+path — the user's issued edits stand).
+""".
+-spec drain_pending_mutations(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
+drain_pending_mutations(State) ->
+    Mutations = beamtalk_repl_state:get_pending_mutations(State),
+    fold_mutations(Mutations, State).
+
+-doc """
+BT-2366 (ADR 0081 Phase 2): fold a list of `{op, Key, Value}` mutations over the
+locals map of State in order, then clear the pending-mutations queue.
+
+Returns State unchanged (apart from clearing the queue) when the list is empty.
+""".
+-spec fold_mutations([beamtalk_repl_state:mutation()], beamtalk_repl_state:state()) ->
+    beamtalk_repl_state:state().
+fold_mutations([], State) ->
+    %% Always reset the queue, even when empty, so the shell returns to idle with
+    %% a clean slate regardless of which fold path ran.
+    beamtalk_repl_state:clear_pending_mutations(State);
+fold_mutations(Mutations, State) ->
+    Bindings0 = beamtalk_repl_state:get_bindings(State),
+    Bindings1 = lists:foldl(fun apply_one_mutation/2, Bindings0, Mutations),
+    State1 = beamtalk_repl_state:set_bindings(Bindings1, State),
+    beamtalk_repl_state:clear_pending_mutations(State1).
+
+-doc "BT-2366: apply a single {op, Key, Value} mutation to a locals map.".
+-spec apply_one_mutation(beamtalk_repl_state:mutation(), map()) -> map().
+apply_one_mutation({put, Key, Value}, Bindings) ->
+    Bindings#{Key => Value};
+apply_one_mutation({remove, Key, _}, Bindings) ->
+    maps:remove(Key, Bindings);
+apply_one_mutation({clear, _, _}, _Bindings) ->
+    #{}.
 
 -doc "BT-696: Dispatch eval result to sync caller or async subscriber.".
 reply_eval({async, Subscriber}, Msg) ->

@@ -17,7 +17,7 @@ delete, and lookup operations go through this module so that:
   * The common "resolve session ID → live PID" pattern lives in one place.
 """.
 
--export([new/0, insert/2, delete/1, lookup/1, resolve_pid/2]).
+-export([new/0, insert/2, delete/1, lookup/1, lookup_alive/1, resolve_pid/2]).
 
 -doc """
 Create the session ETS table if it does not already exist.
@@ -53,6 +53,31 @@ lookup(SessionId) when is_binary(SessionId) ->
     case ets:lookup(beamtalk_sessions, SessionId) of
         [{_, Pid}] -> {ok, Pid};
         [] -> error
+    end.
+
+-doc """
+Look up a session by ID, returning the PID only if its process is alive.
+
+BT-2366 (ADR 0081 Phase 3): the liveness-checked variant of `lookup/1`.  Unlike
+`lookup/1` (which can return a dead PID) and `resolve_pid/2` (which substitutes
+a default), this returns `{ok, Pid}` only when the registered process is alive,
+and `error` for not-found, dead-process, or ETS-unavailable cases.  Used by the
+factory `withId/1` primitive so a captured `Session` never carries a dead PID.
+""".
+-spec lookup_alive(binary()) -> {ok, pid()} | error.
+lookup_alive(SessionId) when is_binary(SessionId) ->
+    try
+        case ets:lookup(beamtalk_sessions, SessionId) of
+            [{_, Pid}] when is_pid(Pid) ->
+                case is_process_alive(Pid) of
+                    true -> {ok, Pid};
+                    false -> error
+                end;
+            _ ->
+                error
+        end
+    catch
+        _:_ -> error
     end.
 
 -doc """
