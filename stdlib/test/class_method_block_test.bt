@@ -114,3 +114,18 @@ TestCase subclass: ClassMethodBlockTest
   testClassMethodInjectSelfSendAndMutation =>
     result := ClassMethodBlock addCounting: #(1, 2, 3)
     self assert: result equals: #(6, 3)
+
+  // BT-2350 (Copilot follow-up): non-last discarded self-send in a collect: block.
+  testClassMethodCollectNonLastSelfSend =>
+    result := ClassMethodBlock doubleAllCountingNonLast: #(1, 2, 3)
+    self assert: result equals: #(#(2, 4, 6), 3)
+
+  // BT-2350 (Copilot follow-up): non-last discarded self-send in a do: block.
+  testClassMethodDoNonLastSelfSend =>
+    result := ClassMethodBlock doCountingNonLast: #(1, 2, 3)
+    self assert: result equals: 3
+
+  // BT-2350 (Copilot follow-up): non-last discarded self-send in an inject:into: block.
+  testClassMethodInjectNonLastSelfSend =>
+    result := ClassMethodBlock addCountingNonLast: #(1, 2, 3)
+    self assert: result equals: #(6, 3)

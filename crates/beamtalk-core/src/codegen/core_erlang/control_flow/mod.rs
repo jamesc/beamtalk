@@ -2098,30 +2098,35 @@ impl CoreErlangGenerator {
                 }
             }
             BodyKind::FoldlDo => {
-                // BT-1290: When preceding let-bindings exist (has_mutations/has_plain_lets),
-                // the last expression must also be bound with `let _ =` before `in StateAcc`.
-                // Without this, `let Y = ... in <expr> in StateAcc` is invalid Core Erlang
-                // (the `in StateAcc` has no corresponding `let`).
-                if !is_last || (has_mutations || has_plain_lets) {
-                    docs.push(Document::Str("let _ = "));
-                }
-                let doc = self.generate_expression(expr)?;
-                docs.push(doc);
-                if is_last && (has_mutations || has_plain_lets) {
-                    if plan.use_tuple_acc {
-                        // BT-1276: Repack threaded locals as tuple.
-                        docs.push(docvec![" in {", plan.current_vars_doc(self), "}"]);
-                    } else {
-                        docs.push(docvec![" in ", leaf::var(self.current_state_var())]);
+                if is_last {
+                    // BT-1290: When preceding let-bindings exist (has_mutations/
+                    // has_plain_lets), the last expression must also be bound with
+                    // `let _ =` before `in StateAcc`. Without this,
+                    // `let Y = ... in <expr> in StateAcc` is invalid Core Erlang
+                    // (the `in StateAcc` has no corresponding `let`).
+                    if has_mutations || has_plain_lets {
+                        docs.push(Document::Str("let _ = "));
                     }
-                } else if !is_last {
-                    docs.push(Document::Str(" in "));
+                    // BT-2350: close any class self-send open scope so the trailing
+                    // `… in {vars}` / `… in StateAcc` does not dangle a second `in`.
+                    let doc = self.closed_expression_doc(expr)?;
+                    docs.push(doc);
+                    if has_mutations || has_plain_lets {
+                        if plan.use_tuple_acc {
+                            // BT-1276: Repack threaded locals as tuple.
+                            docs.push(docvec![" in {", plan.current_vars_doc(self), "}"]);
+                        } else {
+                            docs.push(docvec![" in ", leaf::var(self.current_state_var())]);
+                        }
+                    }
+                } else {
+                    // BT-2350: ClassVars-visible discard for non-last statements
+                    // (a class self-send leaves an open let-chain whose ClassVarsN
+                    // must stay visible to following statements).
+                    self.push_discarded_stmt(docs, expr)?;
                 }
             }
             BodyKind::FoldlCollect => {
-                if !is_last {
-                    docs.push(Document::Str("let _ = "));
-                }
                 if is_last {
                     let result_var = self.fresh_temp_var("CollectItem");
                     let expr_code = self.closed_expression_doc(expr)?;
@@ -2158,9 +2163,10 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 } else {
-                    let doc = self.generate_expression(expr)?;
-                    docs.push(doc);
-                    docs.push(Document::Str(" in "));
+                    // BT-2350: a non-last statement may be a class self-send that
+                    // emits an open let-chain; close it (keeping ClassVarsN visible)
+                    // so the surrounding sequencing does not dangle a second `in`.
+                    self.push_discarded_stmt(docs, expr)?;
                 }
             }
             BodyKind::FoldlFilter { .. }
@@ -2171,9 +2177,6 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlDropWhile { .. }
             | BodyKind::FoldlPartition { .. }
             | BodyKind::FoldlGroupBy { .. } => {
-                if !is_last {
-                    docs.push(Document::Str("let _ = "));
-                }
                 if is_last {
                     if let Some(pv) = pred_var {
                         let expr_code = self.closed_expression_doc(expr)?;
@@ -2186,15 +2189,12 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 } else {
-                    let doc = self.generate_expression(expr)?;
-                    docs.push(doc);
-                    docs.push(Document::Str(" in "));
+                    // BT-2350: see FoldlCollect — close a non-last open scope while
+                    // keeping ClassVarsN visible for following statements.
+                    self.push_discarded_stmt(docs, expr)?;
                 }
             }
             BodyKind::FoldlInject => {
-                if !is_last {
-                    docs.push(Document::Str("let _ = "));
-                }
                 if is_last {
                     let acc_var = self.fresh_temp_var("AccOut");
                     let expr_code = self.closed_expression_doc(expr)?;
@@ -2231,9 +2231,9 @@ impl CoreErlangGenerator {
                         ]);
                     }
                 } else {
-                    let doc = self.generate_expression(expr)?;
-                    docs.push(doc);
-                    docs.push(Document::Str(" in "));
+                    // BT-2350: see FoldlCollect — close a non-last open scope while
+                    // keeping ClassVarsN visible for following statements.
+                    self.push_discarded_stmt(docs, expr)?;
                 }
             }
             BodyKind::FoldlSort => {
