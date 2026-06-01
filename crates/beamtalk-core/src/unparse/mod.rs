@@ -119,9 +119,9 @@ pub fn format_source(source: &str) -> Option<String> {
 /// literal `{` must be written as `\{`.
 ///
 /// The escape order is significant: `\\` must be processed first so a caller-
-/// supplied `\{` is rendered as `\\{` (a literal backslash then a literal
-/// brace) rather than `\\\{` (a literal backslash followed by an
-/// interpolation).
+/// supplied `\{` is rendered as `\\\{` (escaped backslash `\\` then escaped
+/// brace `\{`) rather than `\\{` (escaped backslash followed by an unescaped
+/// `{` that would start interpolation).
 #[must_use]
 pub fn escape_string_literal(s: &str) -> String {
     s.replace('\\', "\\\\")
@@ -3017,8 +3017,16 @@ mod tests {
 
     #[test]
     fn escape_string_literal_backslash_before_brace_both_escaped() {
-        // Backslash must be escaped before brace so "\{x}" → "\\{x}" (literal
-        // backslash + literal brace), not "\\\{x}" (backslash + interpolation).
+        // Backslash must be escaped before brace so "\{x}" → "\\\{x}" (escaped
+        // backslash `\\` + escaped brace `\{`), not "\\{x}" (escaped backslash
+        // followed by an unescaped `{` that would start interpolation).
         assert_eq!(escape_string_literal("\\{x}"), "\\\\\\{x}");
+    }
+
+    #[test]
+    fn escape_string_literal_mixed_backslash_quote_brace() {
+        // Verifies all three escape rules fire correctly in one input and that
+        // replacement order does not corrupt any of them.
+        assert_eq!(escape_string_literal("\\\"\\{"), "\\\\\\\"\\\\\\{");
     }
 }
