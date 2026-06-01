@@ -1865,14 +1865,88 @@ impl CoreErlangGenerator {
         facts: &crate::semantic_analysis::SemanticFacts,
         out: &mut std::collections::HashSet<String>,
     ) {
-        match expr {
+        match Self::peel_parens(expr) {
             Expression::Assignment { value, .. } => {
                 Self::collect_list_op_cross_scope_mutations_recursive(value, facts, out);
             }
-            Expression::MessageSend { .. } => {
-                Self::collect_list_op_cross_scope_mutations(expr, facts, out);
+            send @ Expression::MessageSend { .. } => {
+                Self::collect_list_op_cross_scope_mutations(send, facts, out);
             }
             _ => {}
+        }
+    }
+
+    /// BT-2363: Collects outer-scope locals that are *written* inside a nested
+    /// counted loop (`timesRepeat:`/`to:do:`/`to:by:do:`) or list op, including
+    /// write-only mutations that `collect_list_op_cross_scope_mutations` (read+write
+    /// only) misses.
+    ///
+    /// A name is collected when it is in the nested block's `local_writes`, is not a
+    /// parameter of any enclosing block (`excluded_params` or the nested block's own
+    /// params), and resolves to an existing outer-scope binding (`lookup_var`). The
+    /// `lookup_var` guard is why this needs `&self` rather than being a free function:
+    /// it distinguishes a genuine outer local from a block-internal temporary.
+    fn collect_nested_loop_outer_local_writes(
+        &self,
+        expr: &Expression,
+        excluded_params: &HashSet<String>,
+        out: &mut HashSet<String>,
+    ) {
+        use crate::ast::MessageSelector;
+        use crate::codegen::core_erlang::block_analysis::analyze_block;
+
+        // Peel parens then an assignment RHS (which may itself be parenthesized) so
+        // forms like `_r := (1 to: 5 do: [...])` are still inspected — mirrors
+        // `expr_has_nested_counted_loop_threading`.
+        let inner = match Self::peel_parens(expr) {
+            Expression::Assignment { value, .. } => Self::peel_parens(value),
+            other => other,
+        };
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = inner
+        else {
+            return;
+        };
+        let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
+        let body_block = match sel.as_str() {
+            "do:" | "collect:" | "select:" | "reject:" | "anySatisfy:" | "allSatisfy:"
+            | "timesRepeat:" => match arguments.last() {
+                Some(Expression::Block(block)) => block,
+                _ => return,
+            },
+            "inject:into:" | "to:do:" if arguments.len() == 2 => match &arguments[1] {
+                Expression::Block(block) => block,
+                _ => return,
+            },
+            "to:by:do:" if arguments.len() == 3 => match &arguments[2] {
+                Expression::Block(block) => block,
+                _ => return,
+            },
+            _ => return,
+        };
+
+        let analysis = self
+            .semantic_facts
+            .block_profile(&body_block.span)
+            .cloned()
+            .unwrap_or_else(|| analyze_block(body_block));
+        // Accumulate enclosing params with this block's own params so a loop variable
+        // bound at any enclosing level is never mistaken for a threadable outer local.
+        let mut all_excluded: HashSet<String> = excluded_params.clone();
+        all_excluded.extend(Self::block_param_names(body_block));
+
+        for v in &analysis.local_writes {
+            if !all_excluded.contains(v.as_str()) && self.lookup_var(v).is_some() {
+                out.insert(v.clone());
+            }
+        }
+
+        // Recurse so deeper nesting (loops two or more levels deep) is detected.
+        for stmt in &body_block.body {
+            self.collect_nested_loop_outer_local_writes(&stmt.expression, &all_excluded, out);
         }
     }
 
@@ -2728,7 +2802,7 @@ impl CoreErlangGenerator {
     /// BT-2355: Peels any `Expression::Parenthesized` wrappers, returning the inner
     /// expression. Used so control-flow classification/threading sees through the
     /// parentheses in forms like `_r := (1 to: 5 do: [...])`.
-    fn peel_parens(expr: &Expression) -> &Expression {
+    pub(super) fn peel_parens(expr: &Expression) -> &Expression {
         let mut current = expr;
         while let Expression::Parenthesized { expression, .. } = current {
             current = expression;
@@ -3001,6 +3075,20 @@ impl CoreErlangGenerator {
         }
         *captured = captured.union(&cross_scope).cloned().collect();
         *writes = writes.union(&cross_scope).cloned().collect();
+        // BT-2363: Include write-only outer locals mutated inside nested counted/list-op
+        // loops. `collect_list_op_cross_scope_mutations` only sees read+write (captured ∩
+        // writes) names; a write-only inner mutation (e.g. `[2 timesRepeat: [last := 7]]`)
+        // needs `self` to confirm the name is an outer-scope local before threading it.
+        let mut nested_writes = HashSet::new();
+        for stmt in &block.body {
+            self.collect_nested_loop_outer_local_writes(
+                &stmt.expression,
+                excluded_params,
+                &mut nested_writes,
+            );
+        }
+        *captured = captured.union(&nested_writes).cloned().collect();
+        *writes = writes.union(&nested_writes).cloned().collect();
         // BT-1329: Include outer-scope write-only variables.
         for v in &writes.clone() {
             if !excluded_params.contains(v.as_str())
