@@ -6,9 +6,9 @@
 // BUnit runs in compiled context with no live REPL session and no running
 // workspace meta process, so a workspace-scoped view reads empty here. Live
 // read + write-through against a real session and a real workspace are covered
-// by tests/repl-protocol/cases/session_object.btscript and
-// tests/repl-protocol/cases/workspace_globals_view.btscript. These tests verify
-// the Dictionary-protocol shape and the empty-view read behaviour.
+// by tests/repl-protocol/cases/session_object.btscript (session-locals view +
+// the synchronous Workspace globals view). These tests verify the
+// Dictionary-protocol shape and the empty-view read behaviour.
 
 TestCase subclass: BindingsViewTest
   field: view = nil

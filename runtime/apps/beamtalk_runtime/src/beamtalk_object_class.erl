@@ -830,11 +830,12 @@ handle_call(
     %% ADR 0081 (BT-2367): class-method dispatch hops from the eval worker to
     %% this class gen_server, so the session context that `seed_session_context/2`
     %% put on the *worker* is invisible here. Factory class methods like
-    %% `Session current` / `Workspace currentSession` read that context, so
-    %% mirror the caller's `beamtalk_session_pid`/`beamtalk_session_id` into this
-    %% process for the duration of the call, then restore. Reading the caller's
-    %% process dictionary via `process_info/2` avoids changing the (hot, widely
-    %% used) class_method_call message shape.
+    %% `Session current` (and the future `Workspace currentSession` navigation
+    %% alias, a later ADR 0081 phase) read that context, so mirror the caller's
+    %% `beamtalk_session_pid`/`beamtalk_session_id` into this process for the
+    %% duration of the call, then restore. Reading the caller's process
+    %% dictionary via `process_info/2` avoids changing the (hot, widely used)
+    %% class_method_call message shape.
     Restore = seed_caller_session_context(From),
     try
         beamtalk_class_dispatch:handle_class_method_call(
