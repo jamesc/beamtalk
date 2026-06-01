@@ -23,9 +23,11 @@
 // threading in the Value subclass, Actor, and TestCase contexts — to the same
 // density, so the asymmetry that let BT-2342 hide cannot recur.
 //
-// Cells referencing BT-2342 currently leak value+state tuples or crash in
-// value-type context; they are `skip`ped here with a BT-2342 reference and must
-// be flipped on once BT-2342 lands. Loop regression cells come from BT-2308.
+// BT-2342 (value-type foldl list-ops / conditionals / local-assignment) has
+// landed, so those value-type cells now run their ground-truth asserts. The
+// remaining `skip`ped cells track still-open gaps: BT-2355 (Actor-context
+// outer-local threading) and BT-2359 (value-type count:/detect: predicates and
+// parenthesized assignment-RHS threading). Loop regression cells come from BT-2308.
 
 TestCase subclass: ValueTypeMutationMatrixTest
 
@@ -46,6 +48,12 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // fail to thread — and the read+write conditional only threads on the first
   // invocation). Flip to `false` once BT-2355 lands.
   bt2355Pending => true
+
+  // Pending switch for BT-2359 value-type outer-local threading gaps that
+  // BT-2342 did NOT cover: count:/detect: foldl predicates, and a threading
+  // construct (loop/conditional) used as a parenthesized assignment RHS that
+  // threads a *sibling* outer local. Flip to `false` once BT-2359 lands.
+  bt2359Pending => true
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
@@ -123,9 +131,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   // to:do: × local-assignment RHS × read+write
   testToDoAssignRhsReadWriteValue =>
-    self bt2342Pending
+    self bt2359Pending
       ifTrue: [
-        ^self skip: "BT-2342: loop local-assignment drops threading in value-type context"
+        ^self skip: "BT-2359: loop as a parenthesized assignment RHS drops sibling-local threading in value-type context"
       ]
     self assert: self valueCorpus toDoAssignRhsReadWrite equals: 15
 
@@ -275,9 +283,10 @@ TestCase subclass: ValueTypeMutationMatrixTest
   //  detect: / count:  — BT-2342 (failure mode A, foldl predicate)
   // ════════════════════════════════════════════════════════════════════════
   testDetectNonLastReadWriteValue =>
-    self bt2342Pending ifTrue: [
-      ^self skip: "BT-2342: detect: leaks value+state tuple in value-type context"
-    ]
+    self bt2359Pending
+      ifTrue: [
+        ^self skip: "BT-2359: detect: predicate does not thread outer local in value-type context"
+      ]
     self assert: self valueCorpus detectNonLastReadWrite equals: 3
 
   testDetectNonLastReadWriteActor =>
@@ -287,9 +296,10 @@ TestCase subclass: ValueTypeMutationMatrixTest
     self assert: self actorCorpus detectNonLastReadWrite equals: 3
 
   testCountNonLastReadWriteValue =>
-    self bt2342Pending ifTrue: [
-      ^self skip: "BT-2342: count: leaks value+state tuple in value-type context"
-    ]
+    self bt2359Pending
+      ifTrue: [
+        ^self skip: "BT-2359: count: predicate does not thread outer local in value-type context"
+      ]
     self assert: self valueCorpus countNonLastReadWrite equals: 3
 
   testCountNonLastReadWriteActor =>
@@ -355,9 +365,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
     self assert: (self fragIfTrueIfFalseNonLastReadWrite: true) equals: 2
 
   testIfTrueIfFalseAssignRhsReadWriteValue =>
-    self bt2342Pending
+    self bt2359Pending
       ifTrue: [
-        ^self skip: "BT-2342: conditional local-assignment leaks tuple in value-type context"
+        ^self skip: "BT-2359: conditional as a parenthesized assignment RHS drops sibling-local threading in value-type context"
       ]
     self assert: (self valueCorpus ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
 
