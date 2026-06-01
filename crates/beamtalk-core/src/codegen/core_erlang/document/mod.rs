@@ -25,6 +25,8 @@
 //!
 //! Based on Gleam's Document implementation, adapted for Beamtalk's needs.
 
+pub mod leaf;
+
 /// Indentation width used throughout Core Erlang generation.
 pub const INDENT: isize = 4;
 
@@ -40,10 +42,20 @@ pub const DEFAULT_LINE_WIDTH: isize = 80;
 pub enum Document<'a> {
     /// A borrowed string literal.
     Str(&'a str),
-    /// An owned string.
-    String(String),
-    /// A ref-counted string (O(1) clone via `EcoString`).
-    Eco(ecow::EcoString),
+    /// An owned string — the internal backing for the typed-leaf helpers
+    /// (`document::leaf` and `unparse::leaf`).
+    ///
+    /// **Internal, not part of the public `Document` API (ADR 0089 Phase 3).**
+    /// Codegen call sites must construct text leaves through a typed-leaf
+    /// helper (`leaf::atom`, `leaf::var`, `leaf::int_lit`, …), never build this
+    /// variant directly. Rust cannot give an enum variant a narrower visibility
+    /// than its enum, so this variant is nominally `pub`; the open-leaf escape
+    /// hatch that drove BT-875 is closed structurally instead by removing the
+    /// `Document::String`/`Document::Eco` variants and the
+    /// `Documentable for String`/`EcoString` impls. The only sanctioned way to
+    /// introduce a runtime-derived leaf is a typed-leaf constructor, which is
+    /// the single place this variant is built.
+    Owned(String),
     /// A newline followed by current indentation.
     Line,
     /// Increase indentation for nested content.
@@ -75,18 +87,6 @@ impl<'a> Documentable<'a> for &'a str {
     }
 }
 
-impl<'a> Documentable<'a> for String {
-    fn to_doc(self) -> Document<'a> {
-        Document::String(self)
-    }
-}
-
-impl<'a> Documentable<'a> for ecow::EcoString {
-    fn to_doc(self) -> Document<'a> {
-        Document::Eco(self)
-    }
-}
-
 impl<'a> Documentable<'a> for Document<'a> {
     fn to_doc(self) -> Document<'a> {
         self
@@ -101,13 +101,16 @@ impl<'a> Documentable<'a> for Vec<Document<'a>> {
 
 impl<'a> Documentable<'a> for usize {
     fn to_doc(self) -> Document<'a> {
-        Document::String(self.to_string())
+        // Delegate to the typed integer-leaf helper (ADR 0089) so integer
+        // leaves flow through the single sanctioned constructor.
+        leaf::int_lit(i64::try_from(self).unwrap_or(i64::MAX))
     }
 }
 
 impl<'a> Documentable<'a> for isize {
     fn to_doc(self) -> Document<'a> {
-        Document::String(self.to_string())
+        // Delegate to the typed integer-leaf helper (ADR 0089).
+        leaf::int_lit(i64::try_from(self).unwrap_or(i64::MAX))
     }
 }
 
@@ -282,14 +285,7 @@ impl Document<'_> {
                     output.push_str(s);
                     col += len_as_isize(s.len());
                 }
-                Document::String(s) => {
-                    if let Some(ind) = pending_indent.take() {
-                        write_indent(&mut output, ind);
-                    }
-                    output.push_str(s.as_str());
-                    col += len_as_isize(s.len());
-                }
-                Document::Eco(s) => {
+                Document::Owned(s) => {
                     if let Some(ind) = pending_indent.take() {
                         write_indent(&mut output, ind);
                     }
@@ -393,8 +389,7 @@ fn fits_deque(
         match current {
             Document::Nil => {}
             Document::Str(s) => remaining -= len_as_isize(s.len()),
-            Document::String(s) => remaining -= len_as_isize(s.len()),
-            Document::Eco(s) => remaining -= len_as_isize(s.len()),
+            Document::Owned(s) => remaining -= len_as_isize(s.len()),
             Document::Line => return true,
             Document::Break { unbroken, .. } => match mode {
                 Mode::Flat => remaining -= len_as_isize(unbroken.len()),
@@ -448,8 +443,8 @@ mod tests {
     }
 
     #[test]
-    fn string_document() {
-        let doc = Document::String("world".to_string());
+    fn owned_document() {
+        let doc = Document::Owned("world".to_string());
         assert_eq!(doc.to_pretty_string(), "world");
     }
 
@@ -518,7 +513,7 @@ mod tests {
     #[test]
     fn docvec_macro_mixed_types() {
         let owned = "world".to_string();
-        let doc = docvec!["hello ", Document::String(owned)];
+        let doc = docvec!["hello ", Document::Owned(owned)];
         assert_eq!(doc.to_pretty_string(), "hello world");
     }
 
@@ -574,7 +569,7 @@ mod tests {
     fn group_breaks_when_too_long() {
         // 80 'x' chars + " y" overflows width=80, so group breaks
         let long = "x".repeat(79);
-        let doc = group(docvec![Document::String(long), break_("", " "), "y"]);
+        let doc = group(docvec![Document::Owned(long), break_("", " "), "y"]);
         assert_eq!(doc.to_pretty_string(), "x".repeat(79) + "\ny");
     }
 

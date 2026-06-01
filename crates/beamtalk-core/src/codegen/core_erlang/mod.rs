@@ -89,8 +89,6 @@
 mod actor_codegen;
 mod block_analysis;
 pub mod cerl;
-#[cfg(test)]
-mod cerl_audit;
 mod class_builder_source;
 mod control_flow;
 mod dispatch_codegen;
@@ -106,8 +104,6 @@ pub mod selector_mangler;
 mod spec_codegen;
 mod state_codegen;
 mod supervisor_codegen;
-#[cfg(test)]
-mod typed_leaves_audit;
 mod util;
 mod value_type_codegen;
 mod variable_context;
@@ -119,6 +115,7 @@ pub use util::to_module_name;
 use crate::ast::{Block, Expression, MessageSelector, Module, WellKnownSelector};
 use crate::docvec;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use document::leaf;
 use document::{Document, INDENT, line, nest};
 use ecow::EcoString;
 use primitive_bindings::PrimitiveBindingTable;
@@ -437,13 +434,6 @@ impl CodegenOptions {
         classes: Vec<crate::semantic_analysis::class_hierarchy::ClassInfo>,
     ) -> Self {
         self.pre_class_hierarchy = classes;
-        self
-    }
-
-    /// Sets the source file path to embed as `beamtalk_source` module attribute (BT-845/BT-860).
-    #[must_use]
-    pub fn with_source_path(mut self, path: &str) -> Self {
-        self.source_path = Some(path.to_string());
         self
     }
 
@@ -783,7 +773,7 @@ impl NlrValueTypeCatchVars {
     pub fn format_try_prefix(&self) -> Document<'static> {
         docvec![
             "    let ",
-            self.token_var.clone(),
+            leaf::var(self.token_var.clone()),
             " = call 'erlang':'make_ref'() in",
             nest(INDENT, line()),
             "try",
@@ -808,50 +798,50 @@ impl NlrValueTypeCatchVars {
         docvec![
             nest(INDENT, line()),
             "of ",
-            self.result_var.clone(),
+            leaf::var(self.result_var.clone()),
             " -> ",
-            self.result_var.clone(),
+            leaf::var(self.result_var.clone()),
             nest(INDENT, line()),
             "catch <",
-            self.cls_var.clone(),
+            leaf::var(self.cls_var.clone()),
             ", ",
-            self.err_var.clone(),
+            leaf::var(self.err_var.clone()),
             ", ",
-            self.stk_var.clone(),
+            leaf::var(self.stk_var.clone()),
             "> ->",
             nest(INDENT + 2, line()),
             "case {",
-            self.cls_var.clone(),
+            leaf::var(self.cls_var.clone()),
             ", ",
-            self.err_var.clone(),
+            leaf::var(self.err_var.clone()),
             "} of",
             nest(INDENT + 4, line()),
             "<{'throw', {'$bt_nlr', ",
-            self.ctk_var.clone(),
+            leaf::var(self.ctk_var.clone()),
             ", ",
-            self.val_var.clone(),
+            leaf::var(self.val_var.clone()),
             ", ",
-            self.state_var.clone(),
+            leaf::var(self.state_var.clone()),
             "}}> ",
             "when call 'erlang':'=:='(",
-            self.ctk_var.clone(),
+            leaf::var(self.ctk_var.clone()),
             ", ",
-            self.token_var.clone(),
+            leaf::var(self.token_var.clone()),
             ") -> {",
-            self.val_var.clone(),
+            leaf::var(self.val_var.clone()),
             ", ",
-            self.state_var.clone(),
+            leaf::var(self.state_var.clone()),
             "}",
             nest(INDENT + 4, line()),
             "<",
-            self.ot_pair_var.clone(),
+            leaf::var(self.ot_pair_var.clone()),
             "> when 'true' -> ",
             "primop 'raw_raise'(",
-            self.cls_var.clone(),
+            leaf::var(self.cls_var.clone()),
             ", ",
-            self.err_var.clone(),
+            leaf::var(self.err_var.clone()),
             ", ",
-            self.stk_var.clone(),
+            leaf::var(self.stk_var.clone()),
             ")",
             nest(INDENT + 2, line()),
             "end",
@@ -1784,15 +1774,14 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         match &self.source_path {
             Some(path) => {
-                let escaped = util::escape_core_erlang_string(path);
                 docvec![
                     "( ",
                     doc,
                     " -| [{",
-                    Document::String(line_num.to_string()),
-                    ", 1}, {'file', \"",
-                    Document::String(escaped),
-                    "\"}] )"
+                    leaf::int_lit(i64::from(line_num)),
+                    ", 1}, {'file', ",
+                    leaf::string_lit(path),
+                    "}] )"
                 ]
             }
             None => {
@@ -1801,7 +1790,7 @@ impl CoreErlangGenerator {
                     "( ",
                     doc,
                     " -| [",
-                    Document::String(line_num.to_string()),
+                    leaf::int_lit(i64::from(line_num)),
                     "] )"
                 ]
             }
@@ -1932,54 +1921,54 @@ impl CoreErlangGenerator {
 
         let try_catch = docvec![
             "let ",
-            token_var.to_string(),
+            leaf::var(token_var.to_string()),
             " = call 'erlang':'make_ref'() in\n",
             "try\n",
             body_doc,
             "\n",
             "of ",
-            result_var.clone(),
+            leaf::var(result_var.clone()),
             " -> ",
-            result_var,
+            leaf::var(result_var),
             "\n",
             "catch <",
-            cls_var.clone(),
+            leaf::var(cls_var.clone()),
             ", ",
-            err_var.clone(),
+            leaf::var(err_var.clone()),
             ", ",
-            stk_var.clone(),
+            leaf::var(stk_var.clone()),
             "> ->\n",
             "  case {",
-            cls_var.clone(),
+            leaf::var(cls_var.clone()),
             ", ",
-            err_var.clone(),
+            leaf::var(err_var.clone()),
             "} of\n",
             "    <{'throw', {'$bt_nlr', ",
-            ctk_var.clone(),
+            leaf::var(ctk_var.clone()),
             ", ",
-            val_var.clone(),
+            leaf::var(val_var.clone()),
             ", ",
-            state_var.clone(),
+            leaf::var(state_var.clone()),
             "}}> ",
             "when call 'erlang':'=:='(",
-            ctk_var,
+            leaf::var(ctk_var),
             ", ",
-            token_var.to_string(),
+            leaf::var(token_var.to_string()),
             ") -> ",
             "{'reply', ",
-            val_var,
+            leaf::var(val_var),
             ", ",
-            state_var,
+            leaf::var(state_var),
             "}\n",
             "    <",
-            ot_pair_var,
+            leaf::var(ot_pair_var),
             "> when 'true' -> ",
             "primop 'raw_raise'(",
-            cls_var,
+            leaf::var(cls_var),
             ", ",
-            err_var,
+            leaf::var(err_var),
             ", ",
-            stk_var,
+            leaf::var(stk_var),
             ")\n",
             "  end",
         ];
@@ -2022,62 +2011,62 @@ impl CoreErlangGenerator {
         let nlr_arm_result: Document<'static> = if has_class_vars {
             docvec![
                 "{'class_var_result', ",
-                Document::String(val_var.clone()),
+                leaf::var(val_var.clone()),
                 ", ",
-                Document::String(state_var.clone()),
+                leaf::var(state_var.clone()),
                 "}",
             ]
         } else {
-            Document::String(val_var.clone())
+            leaf::var(val_var.clone())
         };
 
         docvec![
             "let ",
-            token_var.to_string(),
+            leaf::var(token_var.to_string()),
             " = call 'erlang':'make_ref'() in\n",
             "try\n",
             body_doc,
             "\n",
             "of ",
-            result_var.clone(),
+            leaf::var(result_var.clone()),
             " -> ",
-            result_var,
+            leaf::var(result_var),
             "\n",
             "catch <",
-            cls_var.clone(),
+            leaf::var(cls_var.clone()),
             ", ",
-            err_var.clone(),
+            leaf::var(err_var.clone()),
             ", ",
-            stk_var.clone(),
+            leaf::var(stk_var.clone()),
             "> ->\n",
             "  case {",
-            cls_var.clone(),
+            leaf::var(cls_var.clone()),
             ", ",
-            err_var.clone(),
+            leaf::var(err_var.clone()),
             "} of\n",
             "    <{'throw', {'$bt_nlr', ",
-            ctk_var.clone(),
+            leaf::var(ctk_var.clone()),
             ", ",
-            Document::String(val_var),
+            leaf::var(val_var),
             ", ",
-            Document::String(state_var),
+            leaf::var(state_var),
             "}}> ",
             "when call 'erlang':'=:='(",
-            ctk_var,
+            leaf::var(ctk_var),
             ", ",
-            token_var.to_string(),
+            leaf::var(token_var.to_string()),
             ") -> ",
             nlr_arm_result,
             "\n",
             "    <",
-            ot_pair_var,
+            leaf::var(ot_pair_var),
             "> when 'true' -> ",
             "primop 'raw_raise'(",
-            cls_var,
+            leaf::var(cls_var),
             ", ",
-            err_var,
+            leaf::var(err_var),
             ", ",
-            stk_var,
+            leaf::var(stk_var),
             ")\n",
             "  end",
         ]
@@ -2278,9 +2267,9 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     docvec![
-                        "call 'gen_server':'start_link'('",
-                        Document::Eco(self.module_name.clone()),
-                        "', InitArgs, [])",
+                        "call 'gen_server':'start_link'(",
+                        leaf::atom(self.module_name.to_string()),
+                        ", InitArgs, [])",
                     ],
                 ]
             ),
@@ -2308,9 +2297,9 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     docvec![
-                        "call 'gen_server':'start_link'(ServerName, '",
-                        Document::Eco(self.module_name.clone()),
-                        "', InitArgs, [])",
+                        "call 'gen_server':'start_link'(ServerName, ",
+                        leaf::atom(self.module_name.to_string()),
+                        ", InitArgs, [])",
                     ],
                 ]
             ),
@@ -2338,10 +2327,10 @@ impl CoreErlangGenerator {
         // If `to_module_name` already emits a `beamtalk_` prefix (e.g.
         // `BeamtalkInterface` → `beamtalk_interface`), use it as-is.
         let snake_name = to_module_name(&self.class_name());
-        let actor_module: Document<'static> = if snake_name.starts_with("beamtalk_") {
-            Document::String(snake_name)
+        let actor_module_name = if snake_name.starts_with("beamtalk_") {
+            snake_name
         } else {
-            docvec!["beamtalk_", Document::String(snake_name)]
+            format!("beamtalk_{snake_name}")
         };
         docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->",
@@ -2349,7 +2338,11 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    docvec!["call '", actor_module, "':'dispatch'(Selector, Args, Self)",],
+                    docvec![
+                        "call ",
+                        leaf::atom(actor_module_name),
+                        ":'dispatch'(Selector, Args, Self)",
+                    ],
                 ]
             ),
             "\n\n",
@@ -2472,11 +2465,11 @@ impl CoreErlangGenerator {
                     };
                     Ok(docvec![
                         "call 'erlang':'throw'({'$bt_nlr', ",
-                        nlr_token,
+                        leaf::var(nlr_token),
                         ", ",
                         val_doc,
                         ", ",
-                        state,
+                        leaf::var(state),
                         "})"
                     ])
                 } else {
@@ -2559,31 +2552,31 @@ impl CoreErlangGenerator {
             let error_doc = self.class_not_found_error_doc(class_name);
 
             Ok(docvec![
-                "case call 'maps':'find'('",
-                Document::String(class_name.to_string()),
-                "', ",
-                Document::String(state_var),
+                "case call 'maps':'find'(",
+                leaf::atom(class_name.to_string()),
+                ", ",
+                leaf::var(state_var),
                 ") of ",
                 "<{'ok', _BindingVal}> when 'true' -> _BindingVal ",
                 "<'error'> when 'true' -> ",
-                "case call 'beamtalk_class_registry':'whereis_class'('",
-                Document::String(class_name.to_string()),
-                "') of ",
+                "case call 'beamtalk_class_registry':'whereis_class'(",
+                leaf::atom(class_name.to_string()),
+                ") of ",
                 error_doc,
                 "<",
-                Document::String(class_pid_var.clone()),
+                leaf::var(class_pid_var.clone()),
                 "> when 'true' -> ",
                 "let ",
-                Document::String(class_mod_var.clone()),
+                leaf::var(class_mod_var.clone()),
                 " = call 'beamtalk_object_class':'module_name'(",
-                Document::String(class_pid_var.clone()),
+                leaf::var(class_pid_var.clone()),
                 ") in ",
-                "{'beamtalk_object', '",
-                Document::String(display_name),
-                " class', ",
-                Document::String(class_mod_var),
+                "{'beamtalk_object', ",
+                leaf::atom(format!("{display_name} class")),
                 ", ",
-                Document::String(class_pid_var),
+                leaf::var(class_mod_var),
+                ", ",
+                leaf::var(class_pid_var),
                 "} ",
                 "end end",
             ])
@@ -2595,24 +2588,24 @@ impl CoreErlangGenerator {
             let error_doc = self.class_not_found_error_doc(class_name);
 
             Ok(docvec![
-                "case call 'beamtalk_class_registry':'whereis_class'('",
-                Document::String(class_name.to_string()),
-                "') of ",
+                "case call 'beamtalk_class_registry':'whereis_class'(",
+                leaf::atom(class_name.to_string()),
+                ") of ",
                 error_doc,
                 "<",
-                Document::String(class_pid_var.clone()),
+                leaf::var(class_pid_var.clone()),
                 "> when 'true' -> ",
                 "let ",
-                Document::String(class_mod_var.clone()),
+                leaf::var(class_mod_var.clone()),
                 " = call 'beamtalk_object_class':'module_name'(",
-                Document::String(class_pid_var.clone()),
+                leaf::var(class_pid_var.clone()),
                 ") in ",
-                "{'beamtalk_object', '",
-                Document::String(display_name),
-                " class', ",
-                Document::String(class_mod_var),
+                "{'beamtalk_object', ",
+                leaf::atom(format!("{display_name} class")),
                 ", ",
-                Document::String(class_pid_var),
+                leaf::var(class_mod_var),
+                ", ",
+                leaf::var(class_pid_var),
                 "} ",
                 "end",
             ])
@@ -2626,23 +2619,22 @@ impl CoreErlangGenerator {
         let err0_var = self.fresh_var("CnfErr");
         let err1_var = self.fresh_var("CnfErr");
         let hint = format!("Define {class_name} with: Object subclass: {class_name}");
-        let hint_binary = Self::binary_string_literal(&hint);
 
         docvec![
             "<'undefined'> when 'true' -> let ",
-            Document::String(err0_var.clone()),
-            " = call 'beamtalk_error':'new'('class_not_found', '",
-            Document::String(class_name.to_string()),
-            "') in ",
+            leaf::var(err0_var.clone()),
+            " = call 'beamtalk_error':'new'('class_not_found', ",
+            leaf::atom(class_name.to_string()),
+            ") in ",
             "let ",
-            Document::String(err1_var.clone()),
+            leaf::var(err1_var.clone()),
             " = call 'beamtalk_error':'with_hint'(",
-            Document::String(err0_var),
+            leaf::var(err0_var),
             ", ",
-            Document::String(hint_binary),
+            leaf::binary_lit(hint),
             ") in ",
             "call 'beamtalk_error':'raise'(",
-            Document::String(err1_var),
+            leaf::var(err1_var),
             ") ",
         ]
     }
@@ -3007,7 +2999,7 @@ impl CoreErlangGenerator {
                         "call 'beamtalk_class_instantiation':'class_self_new'(",
                         "call 'erlang':'get'('beamtalk_class_name'), ",
                         "call 'erlang':'get'('beamtalk_class_module'), [",
-                        Document::String(param),
+                        leaf::var(param),
                         "])",
                     ]);
                 }
@@ -3033,9 +3025,9 @@ impl CoreErlangGenerator {
                         .unwrap_or_else(|| "Arguments".to_string());
                     return Ok(docvec![
                         "call 'beamtalk_erlang_proxy':'dispatch'(",
-                        Document::String(selector_param),
+                        leaf::var(selector_param),
                         ", ",
-                        Document::String(args_param),
+                        leaf::var(args_param),
                         ", Self)"
                     ]);
                 }
@@ -3051,9 +3043,9 @@ impl CoreErlangGenerator {
                         .unwrap_or_else(|| "Arguments".to_string());
                     return Ok(docvec![
                         "call 'beamtalk_erlang_class':'dispatch'(",
-                        Document::String(selector_param),
+                        leaf::var(selector_param),
                         ", ",
-                        Document::String(args_param),
+                        leaf::var(args_param),
                         ", Self)"
                     ]);
                 }
@@ -3134,7 +3126,12 @@ impl CoreErlangGenerator {
             }
         }
 
-        let params_str = self.current_method_params.join(", ");
+        let params_doc = document::join(
+            self.current_method_params
+                .iter()
+                .map(|p| leaf::var(p.clone())),
+            &Document::Str(", "),
+        );
         // BT-677: In class methods, self is bound to ClassSelf, not Self
         let self_var = if self.in_class_method() {
             "ClassSelf"
@@ -3142,12 +3139,12 @@ impl CoreErlangGenerator {
             "Self"
         };
         Ok(docvec![
-            "call '",
-            Document::String(runtime_module),
-            "':'dispatch'('",
-            Document::String(name.to_string()),
-            "', [",
-            Document::String(params_str),
+            "call ",
+            leaf::atom(runtime_module),
+            ":'dispatch'(",
+            leaf::atom(name.to_string()),
+            ", [",
+            params_doc,
             "], ",
             Document::Str(self_var),
             ")"
@@ -3191,12 +3188,11 @@ impl CoreErlangGenerator {
         let metadata_map_doc = docvec![
             "~{",
             "'domain' => ['beamtalk' | ['user']], ",
-            "'beamtalk_class' => '",
-            Document::String(ctx_class),
-            "', ",
-            "'beamtalk_selector' => '",
-            Document::String(ctx_selector),
-            "'",
+            "'beamtalk_class' => ",
+            leaf::atom(ctx_class),
+            ", ",
+            "'beamtalk_selector' => ",
+            leaf::atom(ctx_selector),
             "}~",
         ];
 
@@ -3207,25 +3203,25 @@ impl CoreErlangGenerator {
             let merge_var = self.fresh_temp_var("LogMeta");
             docvec![
                 "let ",
-                Document::String(merge_var.clone()),
+                leaf::var(merge_var.clone()),
                 " = call 'maps':'merge'(",
-                Document::String(meta_param),
+                leaf::var(meta_param),
                 ", ",
                 metadata_map_doc,
-                ") in call 'logger':'log'('",
-                Document::String(level.to_string()),
-                "', ",
-                Document::String(msg_param),
+                ") in call 'logger':'log'(",
+                leaf::atom(level.to_string()),
                 ", ",
-                Document::String(merge_var),
+                leaf::var(msg_param),
+                ", ",
+                leaf::var(merge_var),
                 ")"
             ]
         } else {
             docvec![
-                "call 'logger':'log'('",
-                Document::String(level.to_string()),
-                "', ",
-                Document::String(msg_param),
+                "call 'logger':'log'(",
+                leaf::atom(level.to_string()),
+                ", ",
+                leaf::var(msg_param),
                 ", ",
                 metadata_map_doc,
                 ")"
@@ -3234,7 +3230,7 @@ impl CoreErlangGenerator {
 
         let doc = docvec![
             "let ",
-            Document::String(discard_var),
+            leaf::var(discard_var),
             " = ",
             log_call_doc,
             " in 'nil'"
@@ -3277,33 +3273,33 @@ impl CoreErlangGenerator {
 
         docvec![
             "let ",
-            Document::String(pid_var.clone()),
+            leaf::var(pid_var.clone()),
             " = call 'erlang':'self'() in ",
             "let ",
-            Document::String(state_var.clone()),
+            leaf::var(state_var.clone()),
             " = call 'maps':'put'('builderPid', ",
-            Document::String(pid_var),
+            leaf::var(pid_var),
             ", ",
-            Document::String(current_state),
+            leaf::var(current_state),
             ") in ",
             "case call 'beamtalk_class_builder':'register'(",
-            Document::String(state_var),
+            leaf::var(state_var),
             ") of ",
             "<{'ok', ",
-            Document::String(class_pid_var.clone()),
+            leaf::var(class_pid_var.clone()),
             "}> when 'true' -> ",
             // BT-2258: return the canonical class-object shape
             // {'beamtalk_object', <Name> ++ " class", ModuleName, ClassPid}
             // built by the runtime helper, instead of an unusable hardcoded
             // {'beamtalk_object', 'Class', 'beamtalk_class_bt', ClassPid} wrapper.
             "call 'beamtalk_class_registry':'class_object_from_pid'(",
-            Document::String(class_pid_var),
+            leaf::var(class_pid_var),
             ") ",
             "<{'error', ",
-            Document::String(error_var.clone()),
+            leaf::var(error_var.clone()),
             "}> when 'true' -> ",
             "call 'beamtalk_error':'raise'(",
-            Document::String(error_var),
+            leaf::var(error_var),
             ") ",
             "end"
         ]

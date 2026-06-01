@@ -22,6 +22,8 @@
 //! - `init/1` — `simple_one_for_one` with `childClass`, `maxRestarts`, `restartWindow`
 
 use super::document::Document;
+use super::document::leaf::{atom, fname};
+use super::selector_mangler::safe_class_method_fn_name;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, spec_codegen};
 use crate::ast::{MethodKind, Module, SupervisorKind};
@@ -71,10 +73,11 @@ impl CoreErlangGenerator {
             let arity = m.selector.arity() + 2; // +2 for ClassSelf + ClassVars
             class_method_exports = docvec![
                 class_method_exports,
-                ", 'class_",
-                Document::Eco(m.selector.name()),
-                "'/",
-                Document::String(arity.to_string()),
+                ", ",
+                fname(
+                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
+                    arity
+                ),
             ];
         }
 
@@ -90,9 +93,9 @@ impl CoreErlangGenerator {
 
         // Module header
         docs.push(docvec![
-            "module '",
-            Document::Eco(module_name.clone()),
-            "' ['start_link'/0, 'init'/1",
+            "module ",
+            atom(module_name.to_string()),
+            " ['start_link'/0, 'init'/1",
             class_method_exports,
             ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
             "  attributes ['behaviour' = ['supervisor'], 'on_load' = [{'register_class', 0}]",
@@ -146,10 +149,11 @@ impl CoreErlangGenerator {
             let arity = m.selector.arity() + 2;
             class_method_exports = docvec![
                 class_method_exports,
-                ", 'class_",
-                Document::Eco(m.selector.name()),
-                "'/",
-                Document::String(arity.to_string()),
+                ", ",
+                fname(
+                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
+                    arity
+                ),
             ];
         }
 
@@ -167,9 +171,9 @@ impl CoreErlangGenerator {
         // BT-1220: childClass/0 is called directly by beamtalk_supervisor:startChild/1,2
         // (SupMod:'childClass'() at `beamtalk_supervisor.erl (startChild/1,2)`)
         docs.push(docvec![
-            "module '",
-            Document::Eco(module_name.clone()),
-            "' ['start_link'/0, 'init'/1, 'childClass'/0",
+            "module ",
+            atom(module_name.to_string()),
+            " ['start_link'/0, 'init'/1, 'childClass'/0",
             class_method_exports,
             ", 'superclass'/0, '__beamtalk_meta'/0, 'register_class'/0]\n",
             "  attributes ['behaviour' = ['supervisor'], 'on_load' = [{'register_class', 0}]",
@@ -221,11 +225,11 @@ impl CoreErlangGenerator {
     fn generate_sup_start_link(module_name: &str) -> Document<'static> {
         docvec![
             "'start_link'/0 = fun () ->",
-            "\n    call 'supervisor':'start_link'({'local', '",
-            Document::String(module_name.to_string()),
-            "'}, '",
-            Document::String(module_name.to_string()),
-            "', [])",
+            "\n    call 'supervisor':'start_link'({'local', ",
+            atom(module_name.to_string()),
+            "}, ",
+            atom(module_name.to_string()),
+            ", [])",
         ]
     }
 
@@ -243,11 +247,11 @@ impl CoreErlangGenerator {
     fn generate_static_sup_init(class_name: &str, module_name: &str) -> Document<'static> {
         docvec![
             "'init'/1 = fun (_Args) ->",
-            "\n    call 'beamtalk_supervisor':'static_init'('",
-            Document::String(module_name.to_string()),
-            "', '",
-            Document::String(class_name.to_string()),
-            "')",
+            "\n    call 'beamtalk_supervisor':'static_init'(",
+            atom(module_name.to_string()),
+            ", ",
+            atom(class_name.to_string()),
+            ")",
         ]
     }
 
@@ -264,11 +268,11 @@ impl CoreErlangGenerator {
     fn generate_dynamic_sup_init(class_name: &str, module_name: &str) -> Document<'static> {
         docvec![
             "'init'/1 = fun (_Args) ->",
-            "\n    call 'beamtalk_supervisor':'dynamic_init'('",
-            Document::String(module_name.to_string()),
-            "', '",
-            Document::String(class_name.to_string()),
-            "')",
+            "\n    call 'beamtalk_supervisor':'dynamic_init'(",
+            atom(module_name.to_string()),
+            ", ",
+            atom(class_name.to_string()),
+            ")",
         ]
     }
 
@@ -285,9 +289,9 @@ impl CoreErlangGenerator {
     fn generate_dynamic_child_class(class_name: &str) -> Document<'static> {
         docvec![
             "'childClass'/0 = fun () ->",
-            "\n    let SupCp = call 'beamtalk_class_registry':'whereis_class'('",
-            Document::String(class_name.to_string()),
-            "') in",
+            "\n    let SupCp = call 'beamtalk_class_registry':'whereis_class'(",
+            atom(class_name.to_string()),
+            ") in",
             "\n    call 'beamtalk_object_class':'class_send'(SupCp, 'childClass', [])",
         ]
     }

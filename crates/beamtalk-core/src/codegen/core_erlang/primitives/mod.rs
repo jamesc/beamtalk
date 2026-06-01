@@ -31,6 +31,7 @@ mod string;
 mod value_types;
 
 use super::document::Document;
+use super::document::leaf;
 use crate::docvec;
 
 /// Core Erlang expression for `printString` — delegates to the runtime's
@@ -169,7 +170,7 @@ pub(crate) fn binary_bif(erlang_op: &'static str, params: &[String]) -> Option<D
         "call 'erlang':'",
         erlang_op,
         "'(Self, ",
-        p0.clone(),
+        leaf::var(p0.clone()),
         ")",
     ])
 }
@@ -197,7 +198,7 @@ pub(crate) fn call_self_p0(
         "':'",
         function,
         "'(Self, ",
-        p0.to_string(),
+        leaf::var(p0),
         ")",
     ]
 }
@@ -218,7 +219,7 @@ pub(crate) fn call_p0_self(
         "':'",
         function,
         "'(",
-        p0.to_string(),
+        leaf::var(p0),
         ", Self)",
     ]
 }
@@ -229,7 +230,7 @@ pub(crate) fn power_bif(params: &[String]) -> Option<Document<'static>> {
     Some(docvec![
         "call 'erlang':'round'(call 'math':'pow'(\
          call 'erlang':'float'(Self), call 'erlang':'float'(",
-        p0.clone(),
+        leaf::var(p0.clone()),
         ")))",
     ])
 }
@@ -276,7 +277,7 @@ pub(crate) fn core_erlang_binary_string(s: &str) -> Document<'static> {
             parts.push(Document::Str(","));
         }
         parts.push(Document::Str("#<"));
-        parts.push(Document::String(b.to_string()));
+        parts.push(leaf::int_lit(i64::from(b)));
         parts.push(Document::Str(">(8,1,'integer',['unsigned'|['big']])"));
     }
     parts.push(Document::Str("}#"));

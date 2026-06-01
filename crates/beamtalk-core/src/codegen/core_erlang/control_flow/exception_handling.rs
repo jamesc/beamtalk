@@ -49,6 +49,7 @@
 //! ```
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::super::intrinsics::{validate_block_arity_exact, validate_on_do_handler};
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{Block, Expression};
@@ -58,7 +59,7 @@ impl CoreErlangGenerator {
     fn state_acc_var_doc(state_version: usize) -> Document<'static> {
         match state_version {
             0 => docvec!["StateAcc"],
-            n => docvec!["StateAcc", Document::String(n.to_string())],
+            n => leaf::var(format!("StateAcc{n}")),
         }
     }
 
@@ -88,67 +89,67 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         docvec![
             "catch <",
-            Document::String(type_var.to_string()),
+            leaf::var(type_var.to_string()),
             ", ",
-            Document::String(error_var.to_string()),
+            leaf::var(error_var.to_string()),
             ", ",
-            Document::String(stack_var.clone()),
+            leaf::var(stack_var.clone()),
             "> -> ",
             "case {",
-            Document::String(type_var.to_string()),
+            leaf::var(type_var.to_string()),
             ", ",
-            Document::String(error_var.to_string()),
+            leaf::var(error_var.to_string()),
             "} of ",
             "<{'throw', {'$bt_nlr', ",
-            Document::String(nlr_tok_var),
+            leaf::var(nlr_tok_var),
             ", ",
-            Document::String(nlr_val_var),
+            leaf::var(nlr_val_var),
             ", ",
-            Document::String(nlr_state_var),
+            leaf::var(nlr_state_var),
             "}}> when 'true' -> primop 'raw_raise'(",
-            Document::String(type_var.to_string()),
+            leaf::var(type_var.to_string()),
             ", ",
-            Document::String(error_var.to_string()),
+            leaf::var(error_var.to_string()),
             ", ",
-            Document::String(stack_var.clone()),
+            leaf::var(stack_var.clone()),
             ") ",
             "<{'throw', {'$bt_nlr', ",
-            Document::String(nlr_tok_var2),
+            leaf::var(nlr_tok_var2),
             ", ",
-            Document::String(nlr_val_var2),
+            leaf::var(nlr_val_var2),
             "}}> when 'true' -> primop 'raw_raise'(",
-            Document::String(type_var.to_string()),
+            leaf::var(type_var.to_string()),
             ", ",
-            Document::String(error_var.to_string()),
+            leaf::var(error_var.to_string()),
             ", ",
-            Document::String(stack_var.clone()),
+            leaf::var(stack_var.clone()),
             ") ",
             "<",
-            Document::String(other_pair_var),
+            leaf::var(other_pair_var),
             "> when 'true' -> ",
             "let ",
-            Document::String(built_stack_var.clone()),
+            leaf::var(built_stack_var.clone()),
             " = primop 'build_stacktrace'(",
-            Document::String(stack_var),
+            leaf::var(stack_var),
             ") in ",
             "let ",
-            Document::String(ex_obj_var.clone()),
+            leaf::var(ex_obj_var.clone()),
             " = call 'beamtalk_exception_handler':'ensure_wrapped'(",
-            Document::String(type_var.to_string()),
+            leaf::var(type_var.to_string()),
             ", ",
-            Document::String(error_var.to_string()),
+            leaf::var(error_var.to_string()),
             ", ",
-            Document::String(built_stack_var),
+            leaf::var(built_stack_var),
             ") in ",
             "let ",
-            Document::String(match_var.clone()),
+            leaf::var(match_var.clone()),
             " = call 'beamtalk_exception_handler':'matches_class'(",
-            Document::String(ex_class_var),
+            leaf::var(ex_class_var),
             ", ",
-            Document::String(ex_obj_var),
+            leaf::var(ex_obj_var),
             ") in ",
             "case ",
-            Document::String(match_var),
+            leaf::var(match_var),
             " of ",
             "<'true'> when 'true' -> ",
         ]
@@ -164,13 +165,13 @@ impl CoreErlangGenerator {
         if takes_arg {
             docvec![
                 "apply ",
-                Document::String(handler_var),
+                leaf::var(handler_var),
                 " (",
-                Document::String(ex_obj_var),
+                leaf::var(ex_obj_var),
                 ")",
             ]
         } else {
-            docvec!["apply ", Document::String(handler_var), " ()"]
+            docvec!["apply ", leaf::var(handler_var), " ()"]
         }
     }
 
@@ -250,24 +251,24 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             "let ",
-            Document::String(block_var.clone()),
+            leaf::var(block_var.clone()),
             " = ",
             receiver_code,
             " in let ",
-            Document::String(ex_class_var.clone()),
+            leaf::var(ex_class_var.clone()),
             " = ",
             ex_class_code,
             " in let ",
-            Document::String(handler_var),
+            leaf::var(handler_var),
             " = ",
             handler_code,
             " in try apply ",
-            Document::String(block_var),
+            leaf::var(block_var),
             " () ",
             "of ",
-            Document::String(result_var.clone()),
+            leaf::var(result_var.clone()),
             " -> ",
-            Document::String(result_var),
+            leaf::var(result_var),
             " ",
             Self::on_do_catch_preamble(
                 &type_var,
@@ -287,11 +288,11 @@ impl CoreErlangGenerator {
             handler_apply,
             " ",
             "<'false'> when 'true' -> primop 'raw_raise'(",
-            Document::String(type_var),
+            leaf::var(type_var),
             ", ",
-            Document::String(error_var),
+            leaf::var(error_var),
             ", ",
-            Document::String(stack_var),
+            leaf::var(stack_var),
             ") end ",
             "end",
         ])
@@ -354,11 +355,11 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = vec![docvec![
             "let ",
-            Document::String(ex_class_var.clone()),
+            leaf::var(ex_class_var.clone()),
             " = ",
             ex_class_code,
             " in let StateAcc = ",
-            Document::String(current_state),
+            leaf::var(current_state),
             " in try ",
         ]];
 
@@ -372,14 +373,14 @@ impl CoreErlangGenerator {
         // BT-754/BT-761/BT-854: NLR re-raise via on_do_catch_preamble (see generate_on_do).
         docs.push(docvec![
             " {",
-            Document::String(try_result_var),
+            leaf::var(try_result_var),
             ", ",
             Self::state_acc_var_doc(try_final),
             "} ",
             "of ",
-            Document::String(state_after_try.clone()),
+            leaf::var(state_after_try.clone()),
             " -> ",
-            Document::String(state_after_try),
+            leaf::var(state_after_try),
             " ",
             Self::on_do_catch_preamble(
                 &type_var,
@@ -404,9 +405,9 @@ impl CoreErlangGenerator {
             self.bind_var(&param.name, &param_var);
             docs.push(docvec![
                 "let ",
-                Document::String(param_var),
+                leaf::var(param_var),
                 " = ",
-                Document::String(ex_obj_var),
+                leaf::var(ex_obj_var),
                 " in ",
             ]);
         }
@@ -419,7 +420,7 @@ impl CoreErlangGenerator {
         // BT-483: Return {Result, State} from handler
         docs.push(docvec![
             " {",
-            Document::String(handler_result_var),
+            leaf::var(handler_result_var),
             ", ",
             Self::state_acc_var_doc(handler_final),
             "} ",
@@ -429,11 +430,11 @@ impl CoreErlangGenerator {
         // Re-raise non-matching exceptions; close the matches_class case and the outer NLR case.
         docs.push(docvec![
             "<'false'> when 'true' -> primop 'raw_raise'(",
-            Document::String(type_var.clone()),
+            leaf::var(type_var.clone()),
             ", ",
-            Document::String(error_var.clone()),
+            leaf::var(error_var.clone()),
             ", ",
-            Document::String(stack_var),
+            leaf::var(stack_var),
             ") end end",
         ]);
 
@@ -493,41 +494,41 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             "let ",
-            Document::String(block_var.clone()),
+            leaf::var(block_var.clone()),
             " = ",
             receiver_code,
             " in let ",
-            Document::String(cleanup_var.clone()),
+            leaf::var(cleanup_var.clone()),
             " = ",
             cleanup_code,
             " in try let ",
-            Document::String(try_result_var.clone()),
+            leaf::var(try_result_var.clone()),
             " = apply ",
-            Document::String(block_var),
+            leaf::var(block_var),
             " () in ",
-            Document::String(try_result_var),
+            leaf::var(try_result_var),
             " ",
             "of ",
-            Document::String(result_var.clone()),
+            leaf::var(result_var.clone()),
             " -> let _ = apply ",
-            Document::String(cleanup_var.clone()),
+            leaf::var(cleanup_var.clone()),
             " () in ",
-            Document::String(result_var),
+            leaf::var(result_var),
             " ",
             "catch <",
-            Document::String(type_var.clone()),
+            leaf::var(type_var.clone()),
             ", ",
-            Document::String(error_var.clone()),
+            leaf::var(error_var.clone()),
             ", ",
-            Document::String(stack_var.clone()),
+            leaf::var(stack_var.clone()),
             "> -> do apply ",
-            Document::String(cleanup_var),
+            leaf::var(cleanup_var),
             " () primop 'raw_raise'(",
-            Document::String(type_var),
+            leaf::var(type_var),
             ", ",
-            Document::String(error_var),
+            leaf::var(error_var),
             ", ",
-            Document::String(stack_var),
+            leaf::var(stack_var),
             ")",
         ])
     }
@@ -570,7 +571,7 @@ impl CoreErlangGenerator {
         let current_state = self.current_state_var();
         let mut docs: Vec<Document<'static>> = vec![docvec![
             "let StateAcc = ",
-            Document::String(current_state),
+            leaf::var(current_state),
             " in try ",
         ]];
 
@@ -582,7 +583,7 @@ impl CoreErlangGenerator {
         // BT-483: Return {Result, State} from try body
         docs.push(docvec![
             " {",
-            Document::String(try_result_var),
+            leaf::var(try_result_var),
             ", ",
             Self::state_acc_var_doc(try_final),
             "} ",
@@ -593,13 +594,13 @@ impl CoreErlangGenerator {
         let result_from_try = self.fresh_temp_var("TryResult");
         docs.push(docvec![
             "of ",
-            Document::String(state_after_try.clone()),
+            leaf::var(state_after_try.clone()),
             " -> let ",
-            Document::String(result_from_try.clone()),
+            leaf::var(result_from_try.clone()),
             " = call 'erlang':'element'(1, ",
-            Document::String(state_after_try.clone()),
+            leaf::var(state_after_try.clone()),
             ") in let StateAcc = call 'erlang':'element'(2, ",
-            Document::String(state_after_try),
+            leaf::var(state_after_try),
             ") in ",
         ]);
 
@@ -609,7 +610,7 @@ impl CoreErlangGenerator {
         // BT-483: Return try body result with cleanup's final state
         docs.push(docvec![
             " {",
-            Document::String(result_from_try),
+            leaf::var(result_from_try),
             ", ",
             Self::state_acc_var_doc(cleanup_success_final),
             "} ",
@@ -618,11 +619,11 @@ impl CoreErlangGenerator {
         // Error: run cleanup for side effects (from original StateAcc), then re-raise
         docs.push(docvec![
             "catch <",
-            Document::String(type_var.clone()),
+            leaf::var(type_var.clone()),
             ", ",
-            Document::String(error_var.clone()),
+            leaf::var(error_var.clone()),
             ", ",
-            Document::String(stack_var.clone()),
+            leaf::var(stack_var.clone()),
             "> -> ",
         ]);
 
@@ -633,11 +634,11 @@ impl CoreErlangGenerator {
 
         docs.push(docvec![
             " primop 'raw_raise'(",
-            Document::String(type_var),
+            leaf::var(type_var),
             ", ",
-            Document::String(error_var),
+            leaf::var(error_var),
             ", ",
-            Document::String(stack_var),
+            leaf::var(stack_var),
             ")",
         ]);
 
@@ -703,9 +704,9 @@ impl CoreErlangGenerator {
                     let rv = self.fresh_temp_var("ExResult");
                     docs.push(docvec![
                         "let ",
-                        Document::String(rv.clone()),
+                        leaf::var(rv.clone()),
                         " = call 'erlang':'element'(1, ",
-                        Document::String(dispatch_var),
+                        leaf::var(dispatch_var),
                         ") in ",
                     ]);
                     result_var = rv;
@@ -725,7 +726,7 @@ impl CoreErlangGenerator {
                     let expr_doc = self.expression_doc(expr)?;
                     docs.push(docvec![
                         "let ",
-                        Document::String(rv.clone()),
+                        leaf::var(rv.clone()),
                         " = ",
                         expr_doc,
                         " in",
@@ -743,18 +744,18 @@ impl CoreErlangGenerator {
                         let expr_doc = self.expression_doc(expr)?;
                         docs.push(docvec![
                             "let ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             " = ",
                             expr_doc,
                             " in let ",
-                            Document::String(rv.clone()),
+                            leaf::var(rv.clone()),
                             " = call 'erlang':'element'(1, ",
-                            Document::String(tuple_var.clone()),
+                            leaf::var(tuple_var.clone()),
                             ") in ",
                             "let ",
-                            Document::String(next_var),
+                            leaf::var(next_var),
                             " = call 'erlang':'element'(2, ",
-                            Document::String(tuple_var),
+                            leaf::var(tuple_var),
                             ") in",
                         ]);
                         let _ = self.next_state_var();
@@ -765,7 +766,7 @@ impl CoreErlangGenerator {
                         let expr_doc = self.expression_doc(expr)?;
                         docs.push(docvec![
                             "let ",
-                            Document::String(rv.clone()),
+                            leaf::var(rv.clone()),
                             " = ",
                             expr_doc,
                             " in",

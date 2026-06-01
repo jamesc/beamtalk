@@ -180,3 +180,188 @@ pub(crate) fn walk_block<'ast, V: Visitor<'ast>>(v: &mut V, block: &'ast Block) 
         v.visit_expr(&stmt.expression);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Block, Expression, Visitor, walk_block, walk_expr};
+    use crate::test_helpers::test_support::parse_bt;
+
+    /// Visitor that counts every `visit_expr` call and recurses into children
+    /// via `walk_expr`. Blocks are **opaque** (default `visit_block` is a no-op).
+    struct Counter(usize);
+
+    impl<'ast> Visitor<'ast> for Counter {
+        fn visit_expr(&mut self, expr: &'ast Expression) {
+            self.0 += 1;
+            walk_expr(self, expr);
+        }
+    }
+
+    /// Like `Counter` but overrides `visit_block` to call `walk_block`,
+    /// descending into nested block bodies.
+    struct BlockDescendingCounter(usize);
+
+    impl<'ast> Visitor<'ast> for BlockDescendingCounter {
+        fn visit_expr(&mut self, expr: &'ast Expression) {
+            self.0 += 1;
+            walk_expr(self, expr);
+        }
+        fn visit_block(&mut self, block: &'ast Block) {
+            walk_block(self, block);
+        }
+    }
+
+    fn first_module_expr(source: &str) -> Expression {
+        let module = parse_bt(source);
+        module
+            .expressions
+            .first()
+            .expect("at least one module-level expression")
+            .expression
+            .clone()
+    }
+
+    fn count_visits(expr: &Expression) -> usize {
+        let mut c = Counter(0);
+        c.visit_expr(expr);
+        c.0
+    }
+
+    fn count_with_block_descent(expr: &Expression) -> usize {
+        let mut c = BlockDescendingCounter(0);
+        c.visit_expr(expr);
+        c.0
+    }
+
+    // ── Opaque-block default ─────────────────────────────────────────────
+
+    #[test]
+    fn default_visitor_block_is_opaque() {
+        // Core semantic: the default visitor must NOT descend into block bodies.
+        // Only the Block node itself is counted.
+        let expr = first_module_expr("[42]\n");
+        assert!(matches!(expr, Expression::Block(_)));
+        assert_eq!(
+            count_visits(&expr),
+            1,
+            "block body must not be visited by default"
+        );
+    }
+
+    // ── walk_block ────────────────────────────────────────────────────────
+
+    #[test]
+    fn walk_block_descends_into_body_when_visit_block_overridden() {
+        // `[1. 2. 3]`: Block (1) + 3 body literals = 4 when visit_block overridden.
+        let expr = first_module_expr("[1. 2. 3]\n");
+        assert!(matches!(expr, Expression::Block(_)));
+        assert_eq!(count_with_block_descent(&expr), 4);
+    }
+
+    // ── walk_expr: FieldAccess ────────────────────────────────────────────
+
+    #[test]
+    fn walk_field_access_visits_receiver() {
+        // `self.x` — only valid inside a method with a state field.
+        // FieldAccess (1) + receiver (1) = 2.
+        let module = parse_bt("Object subclass: C\n  state: x = 0\n  m => self.x\n");
+        let expr = module.classes[0].methods[0].body[0].expression.clone();
+        assert!(matches!(expr, Expression::FieldAccess { .. }));
+        assert_eq!(count_visits(&expr), 2);
+    }
+
+    // ── walk_expr: Assignment ─────────────────────────────────────────────
+
+    #[test]
+    fn walk_assignment_visits_target_and_value() {
+        // `x := 42` → Assignment (1) + target Identifier (1) + value Literal (1) = 3.
+        let expr = first_module_expr("x := 42\n");
+        assert!(matches!(expr, Expression::Assignment { .. }));
+        assert_eq!(count_visits(&expr), 3);
+    }
+
+    // ── walk_expr: Cascade inner-messages loop ────────────────────────────
+
+    #[test]
+    fn walk_cascade_visits_cascade_message_arguments() {
+        // `obj foo: 1; bar: 2`
+        // Cascade (1) + receiver MessageSend(obj foo: 1): send(1)+obj(1)+1(1)
+        // + cascade-message arg 2 (1) = 5.
+        let expr = first_module_expr("obj foo: 1; bar: 2\n");
+        assert!(matches!(expr, Expression::Cascade { .. }));
+        assert_eq!(count_visits(&expr), 5);
+    }
+
+    // ── walk_expr: Parenthesized ──────────────────────────────────────────
+
+    #[test]
+    fn walk_parenthesized_visits_inner_expression() {
+        // `(42)` → Parenthesized (1) + inner Literal (1) = 2.
+        let expr = first_module_expr("(42)\n");
+        assert!(matches!(expr, Expression::Parenthesized { .. }));
+        assert_eq!(count_visits(&expr), 2);
+    }
+
+    // ── walk_expr: Match ──────────────────────────────────────────────────
+
+    #[test]
+    fn walk_match_visits_value_and_arm_body() {
+        // `x match: [_ -> 1]` → Match (1) + value x (1) + arm body 1 (1) = 3.
+        let expr = first_module_expr("x match: [_ -> 1]\n");
+        assert!(matches!(expr, Expression::Match { .. }));
+        assert_eq!(count_visits(&expr), 3);
+    }
+
+    #[test]
+    fn walk_match_with_guard_visits_guard_expression() {
+        // Guard is stored as the inner expression of the `when: [...]` block.
+        // Match (1) + value x (1) + guard true (1) + body 1 (1) = 4.
+        let expr = first_module_expr("x match: [_ when: [true] -> 1]\n");
+        assert!(matches!(expr, Expression::Match { .. }));
+        assert_eq!(count_visits(&expr), 4);
+    }
+
+    // ── walk_expr: MapLiteral ─────────────────────────────────────────────
+
+    #[test]
+    fn walk_map_literal_visits_keys_and_values() {
+        // `#{#a => 1, #b => 2}` → MapLiteral (1) + 2 keys + 2 values = 5.
+        let expr = first_module_expr("#{#a => 1, #b => 2}\n");
+        assert!(matches!(expr, Expression::MapLiteral { .. }));
+        assert_eq!(count_visits(&expr), 5);
+    }
+
+    // ── walk_expr: ListLiteral tail branch ────────────────────────────────
+
+    #[test]
+    fn walk_list_literal_with_tail_visits_tail() {
+        // `#(1 | rest)` → ListLiteral (1) + element 1 (1) + tail rest (1) = 3.
+        let expr = first_module_expr("#(1 | rest)\n");
+        assert!(matches!(
+            &expr,
+            Expression::ListLiteral { tail: Some(_), .. }
+        ));
+        assert_eq!(count_visits(&expr), 3);
+    }
+
+    // ── walk_expr: ArrayLiteral ───────────────────────────────────────────
+
+    #[test]
+    fn walk_array_literal_visits_all_elements() {
+        // `#[1, 2, 3]` → ArrayLiteral (1) + 3 Literal elements = 4.
+        let expr = first_module_expr("#[1, 2, 3]\n");
+        assert!(matches!(expr, Expression::ArrayLiteral { .. }));
+        assert_eq!(count_visits(&expr), 4);
+    }
+
+    // ── walk_expr: StringInterpolation ────────────────────────────────────
+
+    #[test]
+    fn walk_string_interpolation_visits_only_interpolated_segments() {
+        // `"hi {name}!"` → StringInterpolation (1) + identifier name (1) = 2.
+        // Literal text segments are not Expression nodes and are not visited.
+        let expr = first_module_expr("\"hi {name}!\"\n");
+        assert!(matches!(expr, Expression::StringInterpolation { .. }));
+        assert_eq!(count_visits(&expr), 2);
+    }
+}

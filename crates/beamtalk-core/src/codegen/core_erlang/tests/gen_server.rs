@@ -3194,6 +3194,26 @@ fn test_native_facade_meta_includes_native_flag() {
 }
 
 #[test]
+fn test_meta_superclass_is_single_quoted_atom() {
+    // BT-2328: the document::leaf migration must emit the meta-map superclass as a
+    // single-quoted atom (`'superclass' => 'Actor'`). A stray leading quote ahead of
+    // leaf::atom produced `''Actor'`, which desyncs Core Erlang atom quoting.
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    let meta_fn =
+        extract_core_fn(&code, "'__beamtalk_meta'/0 = fun").expect("__beamtalk_meta/0 not found");
+    assert!(
+        meta_fn.contains("'superclass' => 'Actor'"),
+        "__beamtalk_meta/0 body should include 'superclass' => 'Actor'. Got:\n{meta_fn}"
+    );
+    assert!(
+        !meta_fn.contains("=> ''"),
+        "__beamtalk_meta/0 must not emit doubled-quote atoms (e.g. ''Actor'). Got:\n{meta_fn}"
+    );
+}
+
+#[test]
 fn test_native_facade_no_gen_server_behaviour() {
     // ADR 0056: Native facade does not declare gen_server behaviour
     let module = make_native_actor_module();

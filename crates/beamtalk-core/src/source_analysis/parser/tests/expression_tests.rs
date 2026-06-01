@@ -26,6 +26,25 @@ fn parse_float_literal() {
 }
 
 #[test]
+fn parse_float_literal_out_of_range_is_rejected() {
+    // `1e309` overflows f64 to +inf; the parser must surface a diagnostic
+    // rather than constructing a non-finite literal that codegen would emit
+    // as `inf.0` (which Core Erlang cannot parse).
+    use crate::source_analysis::Severity;
+    let diagnostics = parse_err("1e309");
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert_eq!(errors.len(), 1, "expected one error, got: {errors:?}");
+    assert!(
+        errors[0].message.contains("out of range"),
+        "message: {}",
+        errors[0].message
+    );
+}
+
+#[test]
 fn parse_string_literal() {
     let module = parse_ok("\"hello\"");
     assert_eq!(module.expressions.len(), 1);

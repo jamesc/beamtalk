@@ -50,7 +50,9 @@
 //! | Union | `union(...)` |
 //! | Singleton `#foo` | atom `foo` |
 
+use super::document::leaf::{atom, int_lit};
 use super::document::{Document, join};
+use super::selector_mangler::safe_class_method_fn_name;
 use crate::ast::{ClassDefinition, MethodDefinition, MethodKind, TypeAnnotation};
 use crate::docvec;
 
@@ -68,7 +70,7 @@ fn type_annotation_to_spec(annotation: &TypeAnnotation) -> Document<'static> {
             ]
         }
         TypeAnnotation::Singleton { name, .. } => {
-            docvec!["{'atom', 0, '", Document::String(name.to_string()), "'}"]
+            docvec!["{'atom', 0, ", atom(name.to_string()), "}"]
         }
         TypeAnnotation::Generic {
             base, parameters, ..
@@ -219,6 +221,8 @@ pub fn generate_method_spec(
     } else {
         method.parameters.len()
     };
+    // Method arities are bounded by the parameter count and always fit in i64.
+    let arity = i64::try_from(arity).unwrap_or(i64::MAX);
 
     let product = if param_types.is_empty() {
         Document::Str("{'type', 0, 'product', []}")
@@ -231,10 +235,10 @@ pub fn generate_method_spec(
     };
 
     Some(docvec![
-        "{'",
-        Document::String(erlang_name),
-        "', ",
-        Document::String(arity.to_string()),
+        "{",
+        atom(erlang_name),
+        ", ",
+        int_lit(arity),
         "}",
         ", [{'type', 0, 'fun', [",
         product,
@@ -259,7 +263,7 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
         return None;
     }
 
-    let erlang_name = format!("class_{}", method.selector.to_erlang_atom());
+    let erlang_name = safe_class_method_fn_name(&method.selector.to_erlang_atom());
 
     let mut param_types: Vec<Document<'static>> = vec![
         Document::Str("{'type', 0, 'any', []}"),    // ClassSelf
@@ -284,6 +288,8 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
         });
 
     let arity = method.parameters.len() + 2;
+    // Method arities are bounded by the parameter count and always fit in i64.
+    let arity = i64::try_from(arity).unwrap_or(i64::MAX);
 
     let product = docvec![
         "{'type', 0, 'product', [",
@@ -292,10 +298,10 @@ fn generate_class_method_spec(method: &MethodDefinition) -> Option<Document<'sta
     ];
 
     Some(docvec![
-        "{'",
-        Document::String(erlang_name),
-        "', ",
-        Document::String(arity.to_string()),
+        "{",
+        atom(erlang_name),
+        ", ",
+        int_lit(arity),
         "}",
         ", [{'type', 0, 'fun', [",
         product,
@@ -382,22 +388,22 @@ pub fn generate_type_alias(class: &ClassDefinition, class_name: &str) -> Option<
 
     // '$beamtalk_class' tag field: always present, value = the class atom
     field_types.push(docvec![
-        "{'type', 0, 'map_field_exact', [{'atom', 0, '$beamtalk_class'}, {'atom', 0, '",
-        Document::String(class_name.to_string()),
-        "'}]}"
+        "{'type', 0, 'map_field_exact', [{'atom', 0, '$beamtalk_class'}, {'atom', 0, ",
+        atom(class_name.to_string()),
+        "}]}"
     ]);
 
     // One required field entry per declared state: field
     for field in &class.state {
-        let fname = Document::String(field.name.name.to_string());
+        let fname = atom(field.name.name.to_string());
         let ftype = field.type_annotation.as_ref().map_or(
             Document::Str("{'type', 0, 'any', []}"),
             type_annotation_to_spec,
         );
         field_types.push(docvec![
-            "{'type', 0, 'map_field_exact', [{'atom', 0, '",
+            "{'type', 0, 'map_field_exact', [{'atom', 0, ",
             fname,
-            "'}, ",
+            "}, ",
             ftype,
             "]}"
         ]);

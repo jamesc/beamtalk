@@ -25,8 +25,12 @@
 //!
 //! - All output goes through the [`Document`] API — **never** `format!()` or
 //!   string concatenation (CLAUDE.md / ADR 0018).
-//! - Functions return `Document<'static>` using `Document::String` for all
-//!   content derived from AST data (identifiers, literal values, etc.).
+//! - Text leaves derived from AST data (identifiers, literal values, comments,
+//!   etc.) are constructed through the intent-carrying [`leaf`] helpers. After
+//!   ADR 0089 Phase 3 removed the open `Document::String` escape hatch, [`leaf`]
+//!   is the single place in the unparser that constructs an owned-string leaf.
+
+mod leaf;
 
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
@@ -107,16 +111,34 @@ pub fn format_source(source: &str) -> Option<String> {
     Some(formatted)
 }
 
+/// Escapes an arbitrary string for embedding inside a Beamtalk double-quoted
+/// string literal.
+///
+/// Beamtalk strings share `\\` and `"` escaping with most languages, and also
+/// treat `{` as the start of an interpolation sequence (ADR 0023), so a
+/// literal `{` must be written as `\{`.
+///
+/// The escape order is significant: `\\` must be processed first so a caller-
+/// supplied `\{` is rendered as `\\\{` (escaped backslash `\\` then escaped
+/// brace `\{`) rather than `\\{` (escaped backslash followed by an unescaped
+/// `{` that would start interpolation).
+#[must_use]
+pub fn escape_string_literal(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('{', "\\{")
+}
+
 /// Builds a [`Document`] for a method display signature (no `sealed`, no ` =>`).
 fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'static> {
     let sig = match &method.selector {
-        MessageSelector::Unary(name) => Document::String(name.to_string()),
+        MessageSelector::Unary(name) => leaf::ident(name),
         MessageSelector::Binary(op) => {
             let param = &method.parameters[0];
             docvec![
-                Document::String(op.to_string()),
+                leaf::ident(op),
                 " ",
-                Document::String(param.name.name.to_string()),
+                leaf::ident(&param.name.name),
                 unparse_type_annotation_opt(param.type_annotation.as_ref()),
             ]
         }
@@ -130,7 +152,7 @@ fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'
                 if i < method.parameters.len() {
                     sig_docs.push(Document::Str(" "));
                     let param = &method.parameters[i];
-                    sig_docs.push(Document::String(param.name.name.to_string()));
+                    sig_docs.push(leaf::ident(&param.name.name));
                     sig_docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
                 }
             }
@@ -225,7 +247,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
             if line_text.is_empty() {
                 docs.push(Document::Str("///"));
             } else {
-                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+                docs.push(docvec!["/// ", leaf::raw_text(line_text)]);
             }
             docs.push(line());
         }
@@ -252,7 +274,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     }
 
     let class_name_doc = if class.type_params.is_empty() {
-        Document::String(class.name.name.to_string())
+        leaf::ident(&class.name.name)
     } else {
         let params: Vec<Document<'static>> = class
             .type_params
@@ -260,13 +282,9 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
             .enumerate()
             .map(|(i, p)| {
                 let param_doc = if let Some(ref bound) = p.bound {
-                    docvec![
-                        Document::String(p.name.name.to_string()),
-                        " :: ",
-                        Document::String(bound.name.to_string())
-                    ]
+                    docvec![leaf::ident(&p.name.name), " :: ", leaf::ident(&bound.name)]
                 } else {
-                    Document::String(p.name.name.to_string())
+                    leaf::ident(&p.name.name)
                 };
                 if i == 0 {
                     param_doc
@@ -275,24 +293,19 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
                 }
             })
             .collect();
-        docvec![
-            Document::String(class.name.name.to_string()),
-            "(",
-            concat(params),
-            ")"
-        ]
+        docvec![leaf::ident(&class.name.name), "(", concat(params), ")"]
     };
 
     // Emit superclass type args: `Collection(E)` or `Collection(Integer)`
     let superclass_with_type_args = if class.superclass_type_args.is_empty() {
-        Document::String(superclass)
+        leaf::ident(&superclass)
     } else {
-        let mut parts = vec![Document::String(superclass), Document::Str("(")];
+        let mut parts = vec![leaf::ident(&superclass), Document::Str("(")];
         for (i, ta) in class.superclass_type_args.iter().enumerate() {
             if i > 0 {
                 parts.push(Document::Str(", "));
             }
-            parts.push(Document::String(ta.type_name().to_string()));
+            parts.push(leaf::ident(ta.type_name()));
         }
         parts.push(Document::Str(")"));
         concat(parts)
@@ -306,11 +319,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
     ];
 
     let header = if let Some(module) = &class.backing_module {
-        docvec![
-            class_header,
-            " native: ",
-            Document::String(module.name.to_string())
-        ]
+        docvec![class_header, " native: ", leaf::ident(&module.name)]
     } else {
         class_header
     };
@@ -385,7 +394,7 @@ pub(crate) fn unparse_class_definition(class: &ClassDefinition) -> Document<'sta
 pub(crate) fn unparse_standalone_method_definition(
     smd: &StandaloneMethodDefinition,
 ) -> Document<'static> {
-    let class = Document::String(smd.class_name.name.to_string());
+    let class = leaf::ident(&smd.class_name.name);
     let separator = if smd.is_class_method {
         Document::Str(" class >> ")
     } else {
@@ -411,7 +420,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
             if line_text.is_empty() {
                 docs.push(Document::Str("///"));
             } else {
-                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+                docs.push(docvec!["/// ", leaf::raw_text(line_text)]);
             }
             docs.push(line());
         }
@@ -420,7 +429,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     // Protocol header: `Protocol define: Name`
     let mut header: Vec<Document<'static>> = vec![
         Document::Str("Protocol define: "),
-        Document::String(protocol.name.name.to_string()),
+        leaf::ident(&protocol.name.name),
     ];
 
     // Type parameters: `(E)`, `(K, V)`
@@ -430,7 +439,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
             if i > 0 {
                 header.push(Document::Str(", "));
             }
-            header.push(Document::String(tp.name.name.to_string()));
+            header.push(leaf::ident(&tp.name.name));
         }
         header.push(Document::Str(")"));
     }
@@ -440,10 +449,7 @@ fn unparse_protocol_definition(protocol: &ProtocolDefinition) -> Document<'stati
     // `extending: ParentProtocol`
     if let Some(ext) = &protocol.extending {
         docs.push(line());
-        docs.push(docvec![
-            "  extending: ",
-            Document::String(ext.name.to_string())
-        ]);
+        docs.push(docvec!["  extending: ", leaf::ident(&ext.name)]);
     }
 
     // Instance method signatures (indented by 2 spaces)
@@ -487,7 +493,7 @@ fn unparse_protocol_method_signature(
             if line_text.is_empty() {
                 docs.push(Document::Str("///"));
             } else {
-                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+                docs.push(docvec!["/// ", leaf::raw_text(line_text)]);
             }
             docs.push(line());
         }
@@ -501,13 +507,13 @@ fn unparse_protocol_method_signature(
     // Selector and parameters
     match &sig.selector {
         MessageSelector::Unary(name) => {
-            docs.push(Document::String(name.to_string()));
+            docs.push(leaf::ident(name));
         }
         MessageSelector::Binary(op) => {
-            docs.push(Document::String(op.to_string()));
+            docs.push(leaf::ident(op));
             if let Some(param) = sig.parameters.first() {
                 docs.push(Document::Str(" "));
-                docs.push(Document::String(param.name.name.to_string()));
+                docs.push(leaf::ident(&param.name.name));
                 docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
             }
         }
@@ -516,10 +522,10 @@ fn unparse_protocol_method_signature(
                 if i > 0 {
                     docs.push(Document::Str(" "));
                 }
-                docs.push(Document::String(part.keyword.to_string()));
+                docs.push(leaf::ident(&part.keyword));
                 if let Some(param) = sig.parameters.get(i) {
                     docs.push(Document::Str(" "));
-                    docs.push(Document::String(param.name.name.to_string()));
+                    docs.push(leaf::ident(&param.name.name));
                     docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
                 }
             }
@@ -571,7 +577,7 @@ fn unparse_method_definition_with_prefix(
             if line_text.is_empty() {
                 docs.push(Document::Str("///"));
             } else {
-                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+                docs.push(docvec!["/// ", leaf::raw_text(line_text)]);
             }
             docs.push(line());
         }
@@ -581,12 +587,7 @@ fn unparse_method_definition_with_prefix(
     if let Some((cat, ref reason, _)) = method.expect {
         let base = docvec!["@expect ", unparse_expect_category(cat)];
         if let Some(reason) = reason {
-            docs.push(docvec![
-                base,
-                " \"",
-                Document::String(escape_string_literal(reason)),
-                "\""
-            ]);
+            docs.push(docvec![base, " \"", leaf::string_content(reason), "\""]);
         } else {
             docs.push(base);
         }
@@ -660,13 +661,13 @@ fn unparse_method_definition_with_prefix(
 /// Builds the method signature (selector + parameters + return type + arrow).
 fn unparse_method_signature(method: &MethodDefinition) -> Document<'static> {
     let sig = match &method.selector {
-        MessageSelector::Unary(name) => Document::String(name.to_string()),
+        MessageSelector::Unary(name) => leaf::ident(name),
         MessageSelector::Binary(op) => {
             let param = &method.parameters[0];
             docvec![
-                Document::String(op.to_string()),
+                leaf::ident(op),
                 " ",
-                Document::String(param.name.name.to_string()),
+                leaf::ident(&param.name.name),
                 unparse_type_annotation_opt(param.type_annotation.as_ref()),
             ]
         }
@@ -680,7 +681,7 @@ fn unparse_method_signature(method: &MethodDefinition) -> Document<'static> {
                 if i < method.parameters.len() {
                     sig_docs.push(Document::Str(" "));
                     let param = &method.parameters[i];
-                    sig_docs.push(Document::String(param.name.name.to_string()));
+                    sig_docs.push(leaf::ident(&param.name.name));
                     sig_docs.push(unparse_type_annotation_opt(param.type_annotation.as_ref()));
                 }
             }
@@ -710,7 +711,7 @@ fn unparse_method_signature(method: &MethodDefinition) -> Document<'static> {
 }
 
 fn unparse_keyword_part(part: &KeywordPart) -> Document<'static> {
-    Document::String(part.keyword.to_string())
+    leaf::ident(&part.keyword)
 }
 
 /// Builds a [`Document`] for a [`StateDeclaration`].
@@ -738,7 +739,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
             if line_text.is_empty() {
                 docs.push(Document::Str("///"));
             } else {
-                docs.push(docvec!["/// ", Document::String(line_text.to_string())]);
+                docs.push(docvec!["/// ", leaf::raw_text(line_text)]);
             }
             docs.push(line());
         }
@@ -751,7 +752,7 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
                 "@expect ",
                 unparse_expect_category(cat),
                 " \"",
-                Document::String(escape_string_literal(reason)),
+                leaf::string_content(reason),
                 "\""
             ]);
         } else {
@@ -765,10 +766,8 @@ fn unparse_state_declaration_inner(state: &StateDeclaration, is_class: bool) -> 
     } else {
         state.declared_keyword.as_str()
     };
-    let mut decl: Vec<Document<'static>> = vec![
-        Document::Str(keyword),
-        Document::String(state.name.name.to_string()),
-    ];
+    let mut decl: Vec<Document<'static>> =
+        vec![Document::Str(keyword), leaf::ident(&state.name.name)];
 
     if let Some(ty) = &state.type_annotation {
         decl.push(Document::Str(" :: "));
@@ -821,21 +820,13 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         Expression::Literal(lit, _) => unparse_literal(lit),
         Expression::Identifier(id) => unparse_identifier(id),
         Expression::ClassReference { name, package, .. } => {
-            if let Some(pkg) = package {
-                Document::String(format!("{}@{}", pkg.name, name.name))
-            } else {
-                Document::String(name.name.to_string())
-            }
+            leaf::class_ref(package.as_ref().map(|pkg| pkg.name.as_str()), &name.name)
         }
         Expression::Super(_) => Document::Str("super"),
         Expression::FieldAccess {
             receiver, field, ..
         } => {
-            docvec![
-                unparse_expression(receiver),
-                ".",
-                Document::String(field.name.to_string()),
-            ]
+            docvec![unparse_expression(receiver), ".", leaf::ident(&field.name),]
         }
         Expression::MessageSend {
             receiver,
@@ -899,9 +890,9 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
                 "@primitive"
             };
             if *is_quoted {
-                docvec![directive, " \"", Document::String(name.to_string()), "\""]
+                docvec![directive, " \"", leaf::string_content(name), "\""]
             } else {
-                docvec![directive, " ", Document::String(name.to_string())]
+                docvec![directive, " ", leaf::ident(name)]
             }
         }
         Expression::StringInterpolation { segments, .. } => unparse_string_interpolation(segments),
@@ -910,12 +901,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
         } => {
             let base = docvec!["@expect ", unparse_expect_category(*category)];
             if let Some(reason) = reason {
-                docvec![
-                    base,
-                    " \"",
-                    Document::String(escape_string_literal(reason)),
-                    "\""
-                ]
+                docvec![base, " \"", leaf::string_content(reason), "\""]
             } else {
                 base
             }
@@ -924,13 +910,13 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             // Emit a comment indicating the error rather than nothing.
             // Escape `*/` in the message to prevent breaking the block comment.
             let safe_msg = message.as_str().replace("*/", "* /");
-            docvec!["/* error: ", Document::String(safe_msg), " */"]
+            docvec!["/* error: ", leaf::raw_text(&safe_msg), " */"]
         }
         Expression::DestructureAssignment { pattern, value, .. } => {
             docvec![unparse_pattern(pattern), " := ", unparse_expression(value)]
         }
         Expression::Spread { name, .. } => {
-            docvec!["...", Document::String(name.name.to_string())]
+            docvec!["...", leaf::ident(&name.name)]
         }
     }
 }
@@ -939,19 +925,19 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
 
 fn unparse_literal(lit: &Literal) -> Document<'static> {
     match lit {
-        Literal::Integer(n) => Document::String(n.to_string()),
-        Literal::Float(f) => Document::String(format_float(*f)),
+        Literal::Integer(n) => leaf::int_lit(*n),
+        Literal::Float(f) => leaf::float_lit(*f),
         Literal::String(s) => {
             // The lexer unescapes doubled delimiters ("" → ") in the AST.
             // We re-escape any bare " using the Beamtalk convention: double it ("").
-            docvec!["\"", Document::String(escape_string_literal(s)), "\""]
+            docvec!["\"", leaf::string_content(s), "\""]
         }
         Literal::Symbol(s) => {
             // Symbols: #name or #'name with spaces'
             if needs_symbol_quoting(s) {
-                docvec!["#'", Document::String(s.to_string()), "'"]
+                docvec!["#'", leaf::symbol_content(s), "'"]
             } else {
-                docvec!["#", Document::String(s.to_string())]
+                docvec!["#", leaf::symbol_content(s)]
             }
         }
         Literal::List(items) => {
@@ -964,50 +950,9 @@ fn unparse_literal(lit: &Literal) -> Document<'static> {
                 docvec!["#(", joined, ")"]
             }
         }
-        Literal::Character(c) => {
-            // $a, $\n, $\t etc. — re-escape control characters
-            let repr = match c {
-                '\n' => "\\n".to_string(),
-                '\t' => "\\t".to_string(),
-                '\r' => "\\r".to_string(),
-                '\\' => "\\\\".to_string(),
-                _ => c.to_string(),
-            };
-            Document::String(format!("${repr}"))
-        }
+        // $a, $\n, $\t etc. — re-escape control characters (see `leaf::char_lit`)
+        Literal::Character(c) => leaf::char_lit(*c),
     }
-}
-
-/// Format a float, preserving a decimal point.
-fn format_float(f: f64) -> String {
-    let s = format!("{f}");
-    if s.contains('.') || s.contains('e') {
-        s
-    } else {
-        format!("{f}.0")
-    }
-}
-
-/// Escape string contents for output as a Beamtalk string literal.
-///
-/// - `"` is doubled (`""`) — the Beamtalk doubled-delimiter convention.
-/// - `{` is escaped as `\{` — otherwise it would start interpolation.
-fn escape_string_literal(s: &str) -> String {
-    let mut result = String::with_capacity(s.len() + 4);
-    for c in s.chars() {
-        match c {
-            '"' => {
-                result.push('"');
-                result.push('"');
-            }
-            '{' => {
-                result.push('\\');
-                result.push('{');
-            }
-            _ => result.push(c),
-        }
-    }
-    result
 }
 
 /// Returns true if a symbol name needs quoting.
@@ -1024,7 +969,7 @@ fn needs_symbol_quoting(s: &str) -> bool {
 // --- Identifier unparsing ---
 
 fn unparse_identifier(id: &Identifier) -> Document<'static> {
-    Document::String(id.name.to_string())
+    leaf::ident(&id.name)
 }
 
 // --- Message send unparsing ---
@@ -1077,11 +1022,11 @@ fn unparse_message_send(
 
     let msg = match selector {
         MessageSelector::Unary(name) => {
-            docvec![recv_doc, " ", Document::String(name.to_string())]
+            docvec![recv_doc, " ", leaf::ident(name)]
         }
         MessageSelector::Binary(op) => {
             let arg = unparse_expression(&arguments[0]);
-            docvec![recv_doc, " ", Document::String(op.to_string()), " ", arg]
+            docvec![recv_doc, " ", leaf::ident(op), " ", arg]
         }
         MessageSelector::Keyword(parts) => {
             // Break all keywords to their own indented lines when:
@@ -1277,17 +1222,17 @@ fn unparse_block(block: &Block) -> Document<'static> {
 }
 
 fn unparse_block_parameter(param: &BlockParameter) -> Document<'static> {
-    docvec![":", Document::String(param.name.to_string())]
+    docvec![":", leaf::ident(&param.name)]
 }
 
 // --- Cascade unparsing ---
 
 fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
     match &msg.selector {
-        MessageSelector::Unary(name) => Document::String(name.to_string()),
+        MessageSelector::Unary(name) => leaf::ident(name),
         MessageSelector::Binary(op) => {
             let arg = unparse_expression(&msg.arguments[0]);
-            docvec![Document::String(op.to_string()), " ", arg]
+            docvec![leaf::ident(op), " ", arg]
         }
         MessageSelector::Keyword(parts) => {
             let mut kw_docs: Vec<Document<'static>> = Vec::new();
@@ -1460,10 +1405,10 @@ fn unparse_pattern(pattern: &Pattern) -> Document<'static> {
         Pattern::Constructor {
             class, keywords, ..
         } => {
-            let mut parts: Vec<Document<'static>> = vec![Document::String(class.name.to_string())];
+            let mut parts: Vec<Document<'static>> = vec![leaf::ident(&class.name)];
             for (kw, binding) in keywords {
                 parts.push(Document::Str(" "));
-                parts.push(Document::String(kw.name.to_string()));
+                parts.push(leaf::ident(&kw.name));
                 parts.push(Document::Str(" "));
                 parts.push(unparse_pattern(binding));
             }
@@ -1507,7 +1452,7 @@ fn unparse_binary_segment(seg: &BinarySegment) -> Document<'static> {
     }
     if let Some(unit) = seg.unit {
         docs.push(Document::Str(":"));
-        docs.push(Document::String(unit.to_string()));
+        docs.push(leaf::nat_lit(unit));
     }
     concat(docs)
 }
@@ -1575,7 +1520,7 @@ fn unparse_string_interpolation(segments: &[StringSegment]) -> Document<'static>
         match seg {
             StringSegment::Literal(s) => {
                 // Literal segments may contain bare " from doubled-delimiter unescaping.
-                inner.push(Document::String(escape_string_literal(s)));
+                inner.push(leaf::string_content(s));
             }
             StringSegment::Interpolation(expr) => {
                 inner.push(Document::Str("{"));
@@ -1591,9 +1536,9 @@ fn unparse_string_interpolation(segments: &[StringSegment]) -> Document<'static>
 
 fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
     match ty {
-        TypeAnnotation::Simple(id) => Document::String(id.name.to_string()),
+        TypeAnnotation::Simple(id) => leaf::ident(&id.name),
         TypeAnnotation::Singleton { name, .. } => {
-            docvec!["#", Document::String(name.to_string())]
+            docvec!["#", leaf::ident(name)]
         }
         TypeAnnotation::Union { types, .. } => {
             let type_docs: Vec<Document<'static>> =
@@ -1606,7 +1551,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
             let param_docs: Vec<Document<'static>> =
                 parameters.iter().map(unparse_type_annotation).collect();
             let joined = join_docs(param_docs, ", ");
-            docvec![Document::String(base.name.to_string()), "(", joined, ")"]
+            docvec![leaf::ident(&base.name), "(", joined, ")"]
         }
         TypeAnnotation::FalseOr { inner, .. } => {
             docvec![unparse_type_annotation(inner), " | False"]
@@ -1614,7 +1559,7 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
         TypeAnnotation::SelfType { .. } => Document::Str("Self"),
         TypeAnnotation::SelfClass { .. } => Document::Str("Self class"),
         TypeAnnotation::ClassOf { class_name, .. } => {
-            docvec![Document::String(class_name.name.to_string()), " class"]
+            docvec![leaf::ident(&class_name.name), " class"]
         }
     }
 }
@@ -1644,11 +1589,11 @@ fn unparse_comment(comment: &Comment) -> Document<'static> {
             if comment.content.is_empty() {
                 Document::Str("//")
             } else {
-                docvec!["// ", Document::String(comment.content.to_string())]
+                docvec!["// ", leaf::raw_text(&comment.content)]
             }
         }
         CommentKind::Block => {
-            docvec!["/* ", Document::String(comment.content.to_string()), " */"]
+            docvec!["/* ", leaf::raw_text(&comment.content), " */"]
         }
     }
 }
@@ -3046,5 +2991,42 @@ mod tests {
             "  asString -> String\n",
         );
         assert_identity(source);
+    }
+
+    // --- escape_string_literal ---
+
+    #[test]
+    fn escape_string_literal_plain_string_unchanged() {
+        assert_eq!(escape_string_literal("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_string_literal_escapes_double_quote() {
+        assert_eq!(escape_string_literal("a\"b"), "a\\\"b");
+    }
+
+    #[test]
+    fn escape_string_literal_escapes_backslash() {
+        assert_eq!(escape_string_literal("a\\b"), "a\\\\b");
+    }
+
+    #[test]
+    fn escape_string_literal_escapes_open_brace() {
+        assert_eq!(escape_string_literal("a{b}"), "a\\{b}");
+    }
+
+    #[test]
+    fn escape_string_literal_backslash_before_brace_both_escaped() {
+        // Backslash must be escaped before brace so "\{x}" → "\\\{x}" (escaped
+        // backslash `\\` + escaped brace `\{`), not "\\{x}" (escaped backslash
+        // followed by an unescaped `{` that would start interpolation).
+        assert_eq!(escape_string_literal("\\{x}"), "\\\\\\{x}");
+    }
+
+    #[test]
+    fn escape_string_literal_mixed_backslash_quote_brace() {
+        // Verifies all three escape rules fire correctly in one input and that
+        // replacement order does not corrupt any of them.
+        assert_eq!(escape_string_literal("\\\"\\{"), "\\\\\\\"\\\\\\{");
     }
 }

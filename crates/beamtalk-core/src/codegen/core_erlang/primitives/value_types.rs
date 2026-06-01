@@ -8,6 +8,7 @@
 //! Contains BIF generators for immutable value types: `Tuple`, `Set`, `Object`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::param;
 use crate::docvec;
 
@@ -22,7 +23,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
             let p0 = params.first()?;
             Some(docvec![
                 "call 'beamtalk_tuple':'at'(Self, ",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ")"
             ])
         }
@@ -37,7 +38,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
             let p0 = params.first()?;
             Some(docvec![
                 "call 'beamtalk_tuple':'unwrap_or'(Self, ",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ")",
             ])
         }
@@ -45,7 +46,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
             let p0 = params.first()?;
             Some(docvec![
                 "call 'beamtalk_tuple':'unwrap_or_else'(Self, ",
-                p0.clone(),
+                leaf::var(p0.clone()),
                 ")",
             ])
         }
@@ -54,7 +55,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
             let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_tuple':'do'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -63,7 +64,7 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
             let p0 = param(params, 0, "_List");
             Some(docvec![
                 "call 'erlang':'list_to_tuple'(",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -91,7 +92,7 @@ pub(crate) fn generate_proto_object_bif(
                 "let <DnuClass0> = call 'beamtalk_primitive':'class_of'(Self) in\n",
                 "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass0) in\n",
                 "let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, ",
-                selector_var.to_string(),
+                leaf::var(selector_var.to_string()),
                 ") in\n",
                 "let <DnuHint> = ",
                 hint,
@@ -124,7 +125,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_List");
             Some(docvec![
                 "call 'beamtalk_set':'from_list'(",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -134,7 +135,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Element");
             Some(docvec![
                 "call 'beamtalk_set':'includes'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -142,7 +143,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Element");
             Some(docvec![
                 "call 'beamtalk_set':'add'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -150,7 +151,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Element");
             Some(docvec![
                 "call 'beamtalk_set':'remove'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -158,7 +159,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set':'union'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -166,7 +167,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set':'intersection'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")",
             ])
         }
@@ -174,7 +175,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set':'difference'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }
@@ -182,7 +183,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Other");
             Some(docvec![
                 "call 'beamtalk_set':'is_subset_of'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")",
             ])
         }
@@ -191,7 +192,7 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
             let p0 = param(params, 0, "_Block");
             Some(docvec![
                 "call 'beamtalk_set':'do'(Self, ",
-                p0.to_string(),
+                leaf::var(p0.to_string()),
                 ")"
             ])
         }

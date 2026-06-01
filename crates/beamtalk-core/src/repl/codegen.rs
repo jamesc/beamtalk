@@ -18,6 +18,8 @@
 
 use crate::ast::{Expression, Pattern};
 use crate::codegen::core_erlang::document::Document;
+use crate::codegen::core_erlang::document::leaf;
+use crate::codegen::core_erlang::document::leaf::{atom, var};
 use crate::codegen::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::docvec;
 
@@ -248,26 +250,21 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::DestructureAssignment { pattern, value, .. } = expression {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
             let final_state = self.generator.current_state_var();
-            let src_bin = CoreErlangGenerator::binary_string_literal(source_text);
             let module_name = self.generator.module_name.clone();
             let mut parts: Vec<Document<'static>> = vec![
-                docvec!["module '", module_name, "' ['eval'/1]\n"],
+                docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
                 Document::Str("  attributes []\n"),
                 Document::Str("\n"),
                 Document::Str("'eval'/1 = fun (Bindings) ->\n"),
                 Document::Str("    let State = Bindings in\n"),
             ];
             parts.extend(binding_docs);
-            parts.push(docvec![
-                "    let Result = ",
-                Document::String(rhs_var),
-                " in\n",
-            ]);
+            parts.push(docvec!["    let Result = ", var(rhs_var), " in\n",]);
             parts.push(docvec![
                 "    {[{",
-                src_bin,
+                leaf::binary_lit(source_text),
                 ", Result}], ",
-                Document::String(final_state),
+                var(final_state),
                 "}\n",
             ]);
             parts.push(Document::Str("end\n"));
@@ -278,26 +275,31 @@ impl<'a> ReplAssembler<'a> {
             .generator
             .expression_doc_with_repl_mutation_tracking(expression)?;
         let final_state = self.generator.current_state_var();
-        let src_bin = CoreErlangGenerator::binary_string_literal(source_text);
 
         let return_tuple: Document<'static> = if repl_mutated {
             docvec![
                 "let _LoopResult = call 'erlang':'element'(1, Result) in \
                  let _LoopState = call 'erlang':'element'(2, Result) in \
                  {[{",
-                src_bin,
+                leaf::binary_lit(source_text),
                 ", _LoopResult}], _LoopState}",
             ]
         } else if final_state != "State" {
-            docvec!["{[{", src_bin, ", Result}], ", final_state, "}"]
+            docvec![
+                "{[{",
+                leaf::binary_lit(source_text),
+                ", Result}], ",
+                leaf::var(final_state),
+                "}"
+            ]
         } else {
-            docvec!["{[{", src_bin, ", Result}], State}"]
+            docvec!["{[{", leaf::binary_lit(source_text), ", Result}], State}"]
         };
 
         let doc = docvec![
-            "module '",
-            self.generator.module_name.clone(),
-            "' ['eval'/1]\n",
+            "module ",
+            leaf::atom(self.generator.module_name.clone()),
+            " ['eval'/1]\n",
             "  attributes []\n",
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
@@ -344,9 +346,9 @@ impl<'a> ReplAssembler<'a> {
             let (part, repl_mutated) = self.generate_repl_intermediate_expr(expr, &result_var)?;
             body_parts.push(part);
             let step_val: Document<'static> = if repl_mutated {
-                docvec!["call 'erlang':'element'(1, ", result_var, ")",]
+                docvec!["call 'erlang':'element'(1, ", leaf::var(result_var), ")",]
             } else {
-                Document::String(result_var)
+                var(result_var)
             };
             step_pairs.push((source_texts[i].clone(), step_val));
         }
@@ -357,7 +359,7 @@ impl<'a> ReplAssembler<'a> {
 
         let module_name = self.generator.module_name.clone();
         let mut all_parts: Vec<Document<'static>> = vec![
-            docvec!["module '", module_name, "' ['eval'/1]\n"],
+            docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
             Document::Str("  attributes []\n"),
             Document::Str("\n"),
             Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -388,8 +390,8 @@ impl<'a> ReplAssembler<'a> {
             let mut all_steps = prev_steps;
             all_steps.push((source_text.to_string(), Document::Str("Result")));
             let steps_doc = Self::build_steps_list_doc(all_steps);
-            let trace_return = docvec!["{", steps_doc, ", ", Document::String(final_state), "}"];
-            return Ok((binding_docs, Document::String(rhs_var), trace_return));
+            let trace_return = docvec!["{", steps_doc, ", ", var(final_state), "}"];
+            return Ok((binding_docs, var(rhs_var), trace_return));
         }
 
         if let Expression::Assignment { target, value, .. } = expr {
@@ -403,15 +405,15 @@ impl<'a> ReplAssembler<'a> {
                 let steps_doc = Self::build_steps_list_doc(all_steps);
                 let trace_return = docvec![
                     "let ",
-                    new_state.clone(),
-                    " = call 'maps':'put'('",
-                    var_name,
-                    "', Result, ",
-                    current_state,
+                    leaf::var(new_state.clone()),
+                    " = call 'maps':'put'(",
+                    leaf::atom(var_name),
+                    ", Result, ",
+                    leaf::var(current_state),
                     ") in {",
                     steps_doc,
                     ", ",
-                    new_state,
+                    leaf::var(new_state),
                     "}",
                 ];
                 return Ok((Vec::new(), val_doc, trace_return));
@@ -431,18 +433,18 @@ impl<'a> ReplAssembler<'a> {
             docvec![
                 "let _LoopTraceResult = call 'erlang':'element'(1, Result) in \
                  let ",
-                new_state.clone(),
+                leaf::var(new_state.clone()),
                 " = call 'erlang':'element'(2, Result) in \
                  {",
                 steps_doc,
                 ", ",
-                new_state,
+                leaf::var(new_state),
                 "}",
             ]
         } else if final_state != "State" {
             all_steps.push((source_text.to_string(), Document::Str("Result")));
             let steps_doc = Self::build_steps_list_doc(all_steps);
-            docvec!["{", steps_doc, ", ", final_state, "}"]
+            docvec!["{", steps_doc, ", ", leaf::var(final_state), "}"]
         } else {
             all_steps.push((source_text.to_string(), Document::Str("Result")));
             let steps_doc = Self::build_steps_list_doc(all_steps);
@@ -458,8 +460,15 @@ impl<'a> ReplAssembler<'a> {
     fn build_steps_list_doc(step_pairs: Vec<(String, Document<'static>)>) -> Document<'static> {
         let mut result: Document<'static> = Document::Str("[]");
         for (src, val_doc) in step_pairs.into_iter().rev() {
-            let src_bin = CoreErlangGenerator::binary_string_literal(&src);
-            result = docvec!["[{", src_bin, ", ", val_doc, "} | ", result, "]"];
+            result = docvec![
+                "[{",
+                leaf::binary_lit(&src),
+                ", ",
+                val_doc,
+                "} | ",
+                result,
+                "]"
+            ];
         }
         result
     }
@@ -536,23 +545,15 @@ impl<'a> ReplAssembler<'a> {
             let final_state = self.generator.current_state_var();
             let module_name = self.generator.module_name.clone();
             let mut parts: Vec<Document<'static>> = vec![
-                docvec!["module '", module_name, "' ['eval'/1]\n"],
+                docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
                 Document::Str("  attributes []\n"),
                 Document::Str("\n"),
                 Document::Str("'eval'/1 = fun (Bindings) ->\n"),
                 Document::Str("    let State = Bindings in\n"),
             ];
             parts.extend(binding_docs);
-            parts.push(docvec![
-                "    let Result = ",
-                Document::String(rhs_var),
-                " in\n",
-            ]);
-            parts.push(docvec![
-                "    {Result, ",
-                Document::String(final_state),
-                "}\n",
-            ]);
+            parts.push(docvec!["    let Result = ", var(rhs_var), " in\n",]);
+            parts.push(docvec!["    {Result, ", var(final_state), "}\n",]);
             parts.push(Document::Str("end\n"));
             return Ok(Document::Vec(parts));
         }
@@ -577,16 +578,16 @@ impl<'a> ReplAssembler<'a> {
             )
         } else if final_state != "State" {
             // Direct state mutation (field assignment) — Result is the value, use updated state
-            docvec!["{Result, ", final_state, "}"]
+            docvec!["{Result, ", leaf::var(final_state), "}"]
         } else {
             // No mutation - Result is the value, State is unchanged bindings
             Document::Str("{Result, State}")
         };
 
         let doc = docvec![
-            "module '",
-            self.generator.module_name.clone(),
-            "' ['eval'/1]\n",
+            "module ",
+            leaf::atom(self.generator.module_name.clone()),
+            " ['eval'/1]\n",
             "  attributes []\n",
             "\n",
             "'eval'/1 = fun (Bindings) ->\n",
@@ -637,7 +638,7 @@ impl<'a> ReplAssembler<'a> {
 
         let module_name = self.generator.module_name.clone();
         let mut all_parts: Vec<Document<'static>> = vec![
-            docvec!["module '", module_name, "' ['eval'/1]\n"],
+            docvec!["module ", leaf::atom(module_name), " ['eval'/1]\n"],
             Document::Str("  attributes []\n"),
             Document::Str("\n"),
             Document::Str("'eval'/1 = fun (Bindings) ->\n"),
@@ -668,9 +669,9 @@ impl<'a> ReplAssembler<'a> {
             let mut result: Vec<Document<'static>> = binding_docs;
             result.push(docvec![
                 "    let ",
-                result_var.to_string(),
+                leaf::var(result_var.to_string()),
                 " = ",
-                Document::String(rhs_var),
+                var(rhs_var),
                 " in\n",
             ]);
             return Ok((Document::Vec(result), false));
@@ -685,17 +686,17 @@ impl<'a> ReplAssembler<'a> {
                 return Ok((
                     docvec![
                         "    let ",
-                        result_var.to_string(),
+                        leaf::var(result_var.to_string()),
                         " = ",
                         val_doc,
                         " in let ",
-                        new_state,
-                        " = call 'maps':'put'('",
-                        var_name,
-                        "', ",
-                        result_var.to_string(),
+                        leaf::var(new_state),
+                        " = call 'maps':'put'(",
+                        leaf::atom(var_name),
                         ", ",
-                        current_state,
+                        leaf::var(result_var.to_string()),
+                        ", ",
+                        leaf::var(current_state),
                         ") in\n",
                     ],
                     false,
@@ -713,20 +714,26 @@ impl<'a> ReplAssembler<'a> {
             Ok((
                 docvec![
                     "    let ",
-                    result_var.to_string(),
+                    leaf::var(result_var.to_string()),
                     " = ",
                     expr_doc,
                     " in let ",
-                    new_state,
+                    leaf::var(new_state),
                     " = call 'erlang':'element'(2, ",
-                    result_var.to_string(),
+                    leaf::var(result_var.to_string()),
                     ") in\n",
                 ],
                 true,
             ))
         } else {
             Ok((
-                docvec!["    let ", result_var.to_string(), " = ", expr_doc, " in\n",],
+                docvec![
+                    "    let ",
+                    leaf::var(result_var.to_string()),
+                    " = ",
+                    expr_doc,
+                    " in\n",
+                ],
                 false,
             ))
         }
@@ -743,8 +750,8 @@ impl<'a> ReplAssembler<'a> {
         if let Expression::DestructureAssignment { pattern, value, .. } = expr {
             let (binding_docs, rhs_var) = self.generate_repl_destructure(pattern, value)?;
             let final_state = self.generator.current_state_var();
-            let return_tuple = docvec!["{Result, ", Document::String(final_state), "}"];
-            return Ok((binding_docs, Document::String(rhs_var), return_tuple));
+            let return_tuple = docvec!["{Result, ", var(final_state), "}"];
+            return Ok((binding_docs, var(rhs_var), return_tuple));
         }
 
         if let Expression::Assignment { target, value, .. } = expr {
@@ -755,13 +762,13 @@ impl<'a> ReplAssembler<'a> {
                 let new_state = self.generator.next_state_var();
                 let return_tuple = docvec![
                     "let ",
-                    new_state.clone(),
-                    " = call 'maps':'put'('",
-                    var_name,
-                    "', Result, ",
-                    current_state,
+                    leaf::var(new_state.clone()),
+                    " = call 'maps':'put'(",
+                    leaf::atom(var_name),
+                    ", Result, ",
+                    leaf::var(current_state),
                     ") in {Result, ",
-                    new_state,
+                    leaf::var(new_state),
                     "}",
                 ];
                 return Ok((Vec::new(), val_doc, return_tuple));
@@ -779,7 +786,7 @@ impl<'a> ReplAssembler<'a> {
                  {_LoopResult, _LoopState}",
             )
         } else if final_state != "State" {
-            docvec!["{Result, ", final_state, "}"]
+            docvec!["{Result, ", leaf::var(final_state), "}"]
         } else {
             Document::Str("{Result, State}")
         };
@@ -807,7 +814,7 @@ impl<'a> ReplAssembler<'a> {
             .expression_doc_with_repl_mutation_tracking(value)?;
         docs.push(docvec![
             "    let ",
-            Document::String(raw_var.clone()),
+            var(raw_var.clone()),
             " = ",
             val_doc,
             " in\n",
@@ -820,16 +827,16 @@ impl<'a> ReplAssembler<'a> {
             let new_state = self.generator.next_state_var();
             docs.push(docvec![
                 "    let ",
-                Document::String(value_var.clone()),
+                var(value_var.clone()),
                 " = call 'erlang':'element'(1, ",
-                Document::String(raw_var.clone()),
+                var(raw_var.clone()),
                 ") in\n",
             ]);
             docs.push(docvec![
                 "    let ",
-                Document::String(new_state),
+                var(new_state),
                 " = call 'erlang':'element'(2, ",
-                Document::String(raw_var),
+                var(raw_var),
                 ") in\n",
             ]);
             value_var
@@ -856,13 +863,13 @@ impl<'a> ReplAssembler<'a> {
             let new_state = self.generator.next_state_var();
             docs.push(docvec![
                 "    let ",
-                Document::String(new_state),
-                " = call 'maps':'put'('",
-                Document::String(name),
-                "', ",
-                Document::String(core_var),
+                var(new_state),
+                " = call 'maps':'put'(",
+                atom(name),
                 ", ",
-                Document::String(current_state),
+                var(core_var),
+                ", ",
+                var(current_state),
                 ") in\n",
             ]);
         }

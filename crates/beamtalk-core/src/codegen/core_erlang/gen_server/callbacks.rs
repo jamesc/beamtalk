@@ -9,7 +9,7 @@
 //! `handle_cast/2`, `handle_call/3`, `handle_info/2`, `code_change/3`,
 //! and `terminate/2`.
 
-use super::super::document::{Document, INDENT, line, nest};
+use super::super::document::{Document, INDENT, leaf, line, nest};
 use super::super::{CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Module, TypeAnnotation};
 use crate::docvec;
@@ -188,9 +188,9 @@ impl CoreErlangGenerator {
                         "let _ParentArgs = call 'maps':'put'('__skip_initialize__', 'true', InitArgs) in",
                         line(),
                         docvec![
-                            "case call '",
-                            Document::String(parent_module.clone()),
-                            "':'init'(_ParentArgs) of"
+                            "case call ",
+                            leaf::atom(parent_module.clone()),
+                            ":'init'(_ParentArgs) of"
                         ],
                         nest(
                             INDENT,
@@ -209,9 +209,8 @@ impl CoreErlangGenerator {
                                             docvec![
                                                 line(),
                                                 docvec![
-                                                    "'__class_mod__' => '",
-                                                    Document::String(module_name.to_string()),
-                                                    "'"
+                                                    "'__class_mod__' => ",
+                                                    leaf::atom(module_name.to_string()),
                                                 ],
                                                 Document::Vec(own_state_fields),
                                             ]
@@ -271,11 +270,7 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                docvec![
-                                    "'__class_mod__' => '",
-                                    Document::String(module_name.to_string()),
-                                    "'"
-                                ],
+                                docvec!["'__class_mod__' => ", leaf::atom(module_name.to_string()),],
                                 Document::Vec(initial_state_fields),
                             ]
                         ),
@@ -319,9 +314,9 @@ impl CoreErlangGenerator {
                         docvec![
                             line(),
                             docvec![
-                                "call 'erlang':'put'('$beamtalk_actor', '",
-                                Document::String(class_name.to_owned()),
-                                "')",
+                                "call 'erlang':'put'('$beamtalk_actor', ",
+                                leaf::atom(class_name.to_owned()),
+                                ")",
                             ],
                         ]
                     ),
@@ -344,9 +339,9 @@ impl CoreErlangGenerator {
             line(),
             docvec![
                 "let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(",
-                "['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => '",
-                Document::String(class_name.to_owned()),
-                "'}~) in",
+                "['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => ",
+                leaf::atom(class_name.to_owned()),
+                "}~) in",
             ],
         ]
     }
@@ -503,17 +498,16 @@ impl CoreErlangGenerator {
             let hint_msg = format!(
                 "{owning_class} field '{field_name}' (:: {type_name}) was not initialized",
             );
-            let hint_binary = Self::binary_string_literal(&hint_msg);
 
             body = docvec![
                 "let ",
-                Document::String(check_var.clone()),
-                " = call 'maps':'get'('",
-                Document::String(field_name),
-                "', InitNewState) in",
+                leaf::var(check_var.clone()),
+                " = call 'maps':'get'(",
+                leaf::atom(field_name),
+                ", InitNewState) in",
                 line(),
                 "case ",
-                Document::String(check_var),
+                leaf::var(check_var),
                 " of",
                 nest(
                     INDENT,
@@ -525,47 +519,47 @@ impl CoreErlangGenerator {
                             docvec![
                                 line(),
                                 "let ",
-                                Document::String(err_var0.clone()),
-                                " = call 'beamtalk_error':'new'('uninitialized_state_error', '",
-                                Document::String(owning_class.to_string()),
-                                "') in",
+                                leaf::var(err_var0.clone()),
+                                " = call 'beamtalk_error':'new'('uninitialized_state_error', ",
+                                leaf::atom(owning_class.to_string()),
+                                ") in",
                                 line(),
                                 "let ",
-                                Document::String(err_var1.clone()),
+                                leaf::var(err_var1.clone()),
                                 " = call 'beamtalk_error':'with_hint'(",
-                                Document::String(err_var0),
+                                leaf::var(err_var0),
                                 ", ",
-                                Document::String(hint_binary),
+                                leaf::binary_lit(&hint_msg),
                                 ") in",
                                 line(),
                                 "let ",
-                                Document::String(err_msg_var.clone()),
+                                leaf::var(err_msg_var.clone()),
                                 " = call 'beamtalk_error':'format_safe'(",
-                                Document::String(err_var1.clone()),
+                                leaf::var(err_var1.clone()),
                                 ") in",
                                 line(),
                                 "let ",
-                                Document::String(class_name_var.clone()),
-                                " = call '",
-                                Document::Eco(self.module_name.clone()),
-                                "':'class_name'() in",
+                                leaf::var(class_name_var.clone()),
+                                " = call ",
+                                leaf::atom(self.module_name.clone()),
+                                ":'class_name'() in",
                                 line(),
                                 "let ",
-                                Document::String(fmt_var.clone()),
+                                leaf::var(fmt_var.clone()),
                                 " = call 'beamtalk_error':'format'(",
-                                Document::String(err_var1.clone()),
+                                leaf::var(err_var1.clone()),
                                 ") in",
                                 line(),
                                 "let _ = call 'logger':'error'(",
-                                Document::String(err_msg_var),
+                                leaf::var(err_msg_var),
                                 ", ~{'class' => ",
-                                Document::String(class_name_var),
+                                leaf::var(class_name_var),
                                 ", 'reason' => ",
-                                Document::String(err_var1),
+                                leaf::var(err_var1),
                                 ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                 line(),
                                 "{'stop', ",
-                                Document::String(fmt_var),
+                                leaf::var(fmt_var),
                                 ", InitNewState}",
                             ]
                         ),
@@ -926,33 +920,33 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "let ",
-                        Document::String(old_state_var.clone()),
+                        leaf::var(old_state_var.clone()),
                         " = call 'erlang':'get'('$bt_actor_state') in",
                     ],
                     line(),
                     docvec![
                         "let ",
-                        Document::String(put_ok_var),
+                        leaf::var(put_ok_var),
                         " = call 'erlang':'put'('$bt_actor_state', ",
-                        Document::String(in_state_var.clone()),
+                        leaf::var(in_state_var.clone()),
                         ") in",
                     ],
                     line(),
                     docvec![
                         "let ",
-                        Document::String(result_var.clone()),
-                        " = call '",
-                        Document::String(class.module_name.clone()),
-                        "':'safe_dispatch'('initialize', [], ",
-                        Document::String(in_state_var),
+                        leaf::var(result_var.clone()),
+                        " = call ",
+                        leaf::atom(class.module_name.clone()),
+                        ":'safe_dispatch'('initialize', [], ",
+                        leaf::var(in_state_var),
                         ") in",
                     ],
                     line(),
                     docvec![
                         "let ",
-                        Document::String(restore_ok_var.clone()),
+                        leaf::var(restore_ok_var.clone()),
                         " = case ",
-                        Document::String(old_state_var.clone()),
+                        leaf::var(old_state_var.clone()),
                         " of",
                     ],
                     nest(
@@ -977,12 +971,12 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "let ",
-                        Document::String(clear_stack_var),
+                        leaf::var(clear_stack_var),
                         " = call 'erlang':'erase'('$bt_call_stack') in",
                     ],
                     line(),
                     "case ",
-                    Document::String(result_var),
+                    leaf::var(result_var),
                     " of",
                     nest(
                         INDENT,
@@ -990,9 +984,9 @@ impl CoreErlangGenerator {
                             line(),
                             docvec![
                                 "<{'reply', ",
-                                Document::String(reply_ret_var),
+                                leaf::var(reply_ret_var),
                                 ", ",
-                                Document::String(next_state_var),
+                                leaf::var(next_state_var),
                                 "}> when 'true' ->",
                             ],
                             nest(INDENT, inner),
@@ -1000,13 +994,13 @@ impl CoreErlangGenerator {
                             // BT-1822: Destructure error triple to capture stacktrace
                             docvec![
                                 "<{'error', {",
-                                Document::String(err_triple_type.clone()),
+                                leaf::var(err_triple_type.clone()),
                                 ", ",
-                                Document::String(err_triple_reason.clone()),
+                                leaf::var(err_triple_reason.clone()),
                                 ", ",
-                                Document::String(err_triple_stack.clone()),
+                                leaf::var(err_triple_stack.clone()),
                                 "}, ",
-                                Document::String(err_state_var.clone()),
+                                leaf::var(err_state_var.clone()),
                                 "}> when 'true' ->",
                             ],
                             nest(
@@ -1015,47 +1009,47 @@ impl CoreErlangGenerator {
                                     line(),
                                     docvec![
                                         "let ",
-                                        Document::String(err_msg.clone()),
+                                        leaf::var(err_msg.clone()),
                                         " = call 'beamtalk_error':'format_safe'({",
-                                        Document::String(err_triple_type.clone()),
+                                        leaf::var(err_triple_type.clone()),
                                         ", ",
-                                        Document::String(err_triple_reason.clone()),
+                                        leaf::var(err_triple_reason.clone()),
                                         "}, ",
-                                        Document::String(err_triple_stack.clone()),
+                                        leaf::var(err_triple_stack.clone()),
                                         ") in",
                                     ],
                                     line(),
                                     docvec![
                                         "let ",
-                                        Document::String(err_class_name_var.clone()),
-                                        " = call '",
-                                        Document::String(class.module_name.clone()),
-                                        "':'class_name'() in",
+                                        leaf::var(err_class_name_var.clone()),
+                                        " = call ",
+                                        leaf::atom(class.module_name.clone()),
+                                        ":'class_name'() in",
                                     ],
                                     line(),
                                     docvec![
                                         "let _ = call 'logger':'error'(",
-                                        Document::String(err_msg),
+                                        leaf::var(err_msg),
                                         ", ~{'class' => ",
-                                        Document::String(err_class_name_var),
+                                        leaf::var(err_class_name_var),
                                         ", 'reason' => {",
-                                        Document::String(err_triple_type.clone()),
+                                        leaf::var(err_triple_type.clone()),
                                         ", ",
-                                        Document::String(err_triple_reason.clone()),
+                                        leaf::var(err_triple_reason.clone()),
                                         "}, 'stacktrace' => ",
-                                        Document::String(err_triple_stack.clone()),
+                                        leaf::var(err_triple_stack.clone()),
                                         ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                     ],
                                     line(),
                                     docvec![
                                         "{'stop', {",
-                                        Document::String(err_triple_type),
+                                        leaf::var(err_triple_type),
                                         ", ",
-                                        Document::String(err_triple_reason),
+                                        leaf::var(err_triple_reason),
                                         ", ",
-                                        Document::String(err_triple_stack),
+                                        leaf::var(err_triple_stack),
                                         "}, ",
-                                        Document::String(err_state_var),
+                                        leaf::var(err_state_var),
                                         "}",
                                     ],
                                 ]
@@ -1064,9 +1058,9 @@ impl CoreErlangGenerator {
                             // Fallback: plain {error, Error, State} from dispatch (DNU, #beamtalk_error{}, etc.)
                             docvec![
                                 "<{'error', ",
-                                Document::String(err_plain.clone()),
+                                leaf::var(err_plain.clone()),
                                 ", ",
-                                Document::String(err_state_var2.clone()),
+                                leaf::var(err_state_var2.clone()),
                                 "}> when 'true' ->",
                             ],
                             nest(
@@ -1075,35 +1069,35 @@ impl CoreErlangGenerator {
                                     line(),
                                     docvec![
                                         "let ",
-                                        Document::String(err_msg2.clone()),
+                                        leaf::var(err_msg2.clone()),
                                         " = call 'beamtalk_error':'format_safe'(",
-                                        Document::String(err_plain.clone()),
+                                        leaf::var(err_plain.clone()),
                                         ") in",
                                     ],
                                     line(),
                                     docvec![
                                         "let ",
-                                        Document::String(err_class_name_var2.clone()),
-                                        " = call '",
-                                        Document::String(class.module_name.clone()),
-                                        "':'class_name'() in",
+                                        leaf::var(err_class_name_var2.clone()),
+                                        " = call ",
+                                        leaf::atom(class.module_name.clone()),
+                                        ":'class_name'() in",
                                     ],
                                     line(),
                                     docvec![
                                         "let _ = call 'logger':'error'(",
-                                        Document::String(err_msg2),
+                                        leaf::var(err_msg2),
                                         ", ~{'class' => ",
-                                        Document::String(err_class_name_var2),
+                                        leaf::var(err_class_name_var2),
                                         ", 'reason' => ",
-                                        Document::String(err_plain.clone()),
+                                        leaf::var(err_plain.clone()),
                                         ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                     ],
                                     line(),
                                     docvec![
                                         "{'stop', ",
-                                        Document::String(err_plain),
+                                        leaf::var(err_plain),
                                         ", ",
-                                        Document::String(err_state_var2),
+                                        leaf::var(err_state_var2),
                                         "}",
                                     ],
                                 ]
@@ -1206,9 +1200,9 @@ impl CoreErlangGenerator {
             line(),
             // Use safe_dispatch for error isolation; discard result on error
             docvec![
-                "let _CastDispatchResult = call '",
-                Document::Eco(module_name.clone()),
-                "':'safe_dispatch'(CastSelector, CastArgs, State) in"
+                "let _CastDispatchResult = call ",
+                leaf::atom(module_name.clone()),
+                ":'safe_dispatch'(CastSelector, CastArgs, State) in"
             ],
             // BT-1325: Restore pdict
             Self::pdict_restore_epilogue(),
@@ -1363,9 +1357,9 @@ impl CoreErlangGenerator {
             line(),
             // Use safe_dispatch for error isolation per BT-29
             docvec![
-                "let _DispatchResult = call '",
-                Document::Eco(module_name.clone()),
-                "':'safe_dispatch'(Selector, Args, State) in"
+                "let _DispatchResult = call ",
+                leaf::atom(module_name.clone()),
+                ":'safe_dispatch'(Selector, Args, State) in"
             ],
             // BT-1325: Restore pdict
             Self::pdict_restore_epilogue(),
@@ -1438,9 +1432,9 @@ impl CoreErlangGenerator {
                         Self::pdict_stash_preamble(),
                         line(),
                         docvec![
-                            "let _InfoDispatchResult = call '",
-                            Document::Eco(module_name),
-                            "':'safe_dispatch'('handleInfo:', [Msg], State) in",
+                            "let _InfoDispatchResult = call ",
+                            leaf::atom(module_name),
+                            ":'safe_dispatch'('handleInfo:', [Msg], State) in",
                         ],
                         Self::pdict_restore_epilogue(),
                         line(),
@@ -1573,9 +1567,9 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(",
-                        "['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => '",
-                        Document::String(class_name.to_string()),
-                        "', 'reason' => Reason}~) in",
+                        "['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => ",
+                        leaf::atom(class_name.to_string()),
+                        ", 'reason' => Reason}~) in",
                     ],
                     line(),
                     "%% Call terminate: method if defined — exceptions must not prevent shutdown",
@@ -1583,9 +1577,9 @@ impl CoreErlangGenerator {
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
                     docvec![
-                        "let _TermDisp = try call '",
-                        Document::String(module_name.to_string()),
-                        "':'dispatch'('terminate:', [Reason], Self, State)"
+                        "let _TermDisp = try call ",
+                        leaf::atom(module_name.to_string()),
+                        ":'dispatch'('terminate:', [Reason], Self, State)"
                     ],
                     nest(
                         INDENT,

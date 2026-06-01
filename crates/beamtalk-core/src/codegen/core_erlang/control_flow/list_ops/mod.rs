@@ -27,6 +27,7 @@ mod transform_ops;
 mod tests;
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
@@ -105,7 +106,7 @@ impl CoreErlangGenerator {
             let (state_preamble, state_var): (Document<'static>, String) =
                 if matches!(self.context, CodeGenContext::ValueType) {
                     let sv = self.fresh_temp_var("EmptyState");
-                    let pre = docvec!["let ", Document::String(sv.clone()), " = ~{}~ in "];
+                    let pre = docvec!["let ", leaf::var(sv.clone()), " = ~{}~ in "];
                     (pre, sv)
                 } else {
                     (Document::Str(""), self.current_state_var())
@@ -114,63 +115,63 @@ impl CoreErlangGenerator {
             // Use is_function/2 instead of fun_info to avoid exception on non-functions
             docvec![
                 "let ",
-                Document::String(callable_var.clone()),
+                leaf::var(callable_var.clone()),
                 " = ",
                 raw_code,
                 " in case call 'erlang':'is_function'(",
-                Document::String(callable_var.clone()),
+                leaf::var(callable_var.clone()),
                 ", 1) of <'true'> when 'true' -> ",
-                Document::String(callable_var.clone()),
+                leaf::var(callable_var.clone()),
                 " <'false'> when 'true' -> ",
                 "case call 'erlang':'is_function'(",
-                Document::String(callable_var.clone()),
+                leaf::var(callable_var.clone()),
                 ", 2) of <'true'> when 'true' -> fun (",
-                Document::String(wrap_arg.clone()),
+                leaf::var(wrap_arg.clone()),
                 ") -> ",
                 state_preamble,
                 "let ",
-                Document::String(wrap_tuple.clone()),
+                leaf::var(wrap_tuple.clone()),
                 " = apply ",
-                Document::String(callable_var.clone()),
+                leaf::var(callable_var.clone()),
                 " (",
-                Document::String(wrap_arg),
+                leaf::var(wrap_arg),
                 ", ",
-                Document::String(state_var),
+                leaf::var(state_var),
                 ") in let ",
-                Document::String(wrap_res.clone()),
+                leaf::var(wrap_res.clone()),
                 " = call 'erlang':'element'(1, ",
-                Document::String(wrap_tuple),
+                leaf::var(wrap_tuple),
                 ") in ",
-                Document::String(wrap_res),
+                leaf::var(wrap_res),
                 " <'false'> when 'true' -> ",
-                Document::String(callable_var),
+                leaf::var(callable_var),
                 " end end",
             ]
         };
 
         Ok(docvec![
             "let ",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             " = ",
             recv_code,
             " in let ",
-            Document::String(body_var.clone()),
+            leaf::var(body_var.clone()),
             " = ",
             body_code,
             " in case call 'erlang':'is_list'(",
-            Document::String(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'lists':'",
-            Document::String(operation.to_string()),
-            "'(",
-            Document::String(body_var.clone()),
+            leaf::var(list_var.clone()),
+            ") of <'true'> when 'true' -> call 'lists':",
+            leaf::atom(operation.to_string()),
+            "(",
+            leaf::var(body_var.clone()),
             ", ",
-            Document::String(list_var.clone()),
+            leaf::var(list_var.clone()),
             ") <'false'> when 'true' -> call 'beamtalk_primitive':'send'(",
-            Document::String(list_var),
-            ", '",
-            Document::String(selector.to_string()),
-            "', [",
-            Document::String(body_var),
+            leaf::var(list_var),
+            ", ",
+            leaf::atom(selector.to_string()),
+            ", [",
+            leaf::var(body_var),
             "]) end",
         ])
     }
@@ -199,13 +200,13 @@ impl CoreErlangGenerator {
         let out_var = self.fresh_temp_var("StrAwareResult");
         let binding = docvec![
             "let ",
-            Document::String(out_var.clone()),
+            leaf::var(out_var.clone()),
             " = case call 'erlang':'is_binary'(",
-            Document::String(recv_var.to_string()),
+            leaf::var(recv_var.to_string()),
             ") of <'true'> when 'true' -> call 'erlang':'iolist_to_binary'(",
-            Document::String(list_var.to_string()),
+            leaf::var(list_var.to_string()),
             ") <'false'> when 'true' -> ",
-            Document::String(list_var.to_string()),
+            leaf::var(list_var.to_string()),
             " end"
         ];
         (binding, out_var)

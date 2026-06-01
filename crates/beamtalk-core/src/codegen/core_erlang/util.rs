@@ -12,6 +12,7 @@
 
 use std::fmt::Write as _;
 
+use super::document::leaf::{atom, string_lit};
 use super::document::{Document, join};
 use super::{CoreErlangGenerator, Result};
 use crate::ast::{ClassDefinition, Expression, ExpressionStatement};
@@ -80,11 +81,11 @@ pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<
     }
     let entries = classes.iter().map(|c| {
         docvec![
-            "{'",
-            Document::String(c.name.name.to_string()),
-            "', '",
-            Document::String(c.superclass_name().to_string()),
-            "'}"
+            "{",
+            atom(c.name.name.to_string()),
+            ", ",
+            atom(c.superclass_name().to_string()),
+            "}"
         ]
     });
     docvec![
@@ -115,8 +116,7 @@ impl CoreErlangGenerator {
     pub(super) fn file_attr(&self) -> Document<'static> {
         match &self.source_path {
             Some(path) => {
-                let escaped = escape_core_erlang_string(path);
-                docvec![", 'file' = [{\"", Document::String(escaped), "\", 1}]"]
+                docvec![", 'file' = [{", string_lit(path), ", 1}]"]
             }
             None => Document::Nil,
         }
@@ -172,16 +172,6 @@ impl ClassIdentity {
 }
 
 impl CoreErlangGenerator {
-    /// Captures the output of `generate_expression` as a `String`.
-    ///
-    /// ADR 0018: Renders the expression Document to a string. Used by code
-    /// that needs string interpolation or direct string manipulation
-    /// (e.g., cascade generation, value type default values).
-    pub(super) fn capture_expression(&mut self, expr: &Expression) -> Result<String> {
-        let doc = self.generate_expression(expr)?;
-        Ok(doc.to_pretty_string())
-    }
-
     /// Returns the expression as a `Document` for direct composition via `docvec!`.
     ///
     /// ADR 0018: Simple forwarding to `generate_expression`.
@@ -296,12 +286,7 @@ impl CoreErlangGenerator {
         }
         match &self.source_path {
             Some(path) => {
-                let escaped = escape_core_erlang_string(path);
-                docvec![
-                    ", 'beamtalk_source' = [\"",
-                    Document::String(escaped),
-                    "\"]"
-                ]
+                docvec![", 'beamtalk_source' = [", string_lit(path), "]"]
             }
             None => Document::Nil,
         }

@@ -6,6 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::document::Document;
+use super::document::leaf::var;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
@@ -174,24 +175,24 @@ impl CoreErlangGenerator {
             let right_var = self.fresh_temp_var("ConcatRight");
             docvec![
                 "let ",
-                Document::String(left_var.clone()),
+                var(left_var.clone()),
                 " = ",
                 left_code,
                 " in let ",
-                Document::String(right_var.clone()),
+                var(right_var.clone()),
                 " = ",
                 right_code,
                 " in case call 'erlang':'is_list'(",
-                Document::String(left_var.clone()),
+                var(left_var.clone()),
                 ") of <'true'> when 'true' -> call 'erlang':'++'(",
-                Document::String(left_var.clone()),
+                var(left_var.clone()),
                 ", ",
-                Document::String(right_var.clone()),
+                var(right_var.clone()),
                 ") <'false'> when 'true' -> \
                    call 'erlang':'iolist_to_binary'([call 'erlang':'binary_to_list'(",
-                Document::String(left_var),
+                var(left_var),
                 "), call 'erlang':'binary_to_list'(",
-                Document::String(right_var),
+                var(right_var),
                 ")]) end",
             ]
         };

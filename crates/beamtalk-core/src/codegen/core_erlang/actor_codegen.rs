@@ -9,7 +9,10 @@
 //! `gen_server`-based Erlang modules with async messaging, error isolation,
 //! and hot code reload support.
 
-use super::document::{Document, INDENT, line, nest};
+use super::document::leaf;
+use super::document::leaf::{atom, fname};
+use super::document::{Document, INDENT, join, line, nest};
+use super::selector_mangler::safe_class_method_fn_name;
 use super::spec_codegen;
 use super::util::ClassIdentity;
 use super::{CodeGenContext, CoreErlangGenerator, Result};
@@ -142,9 +145,9 @@ impl CoreErlangGenerator {
         // the module has classes OR protocols (protocol-only files need it too).
         let module_header = if needs_register_class {
             docvec![
-                "module '",
-                Document::Eco(self.module_name.clone()),
-                "' [",
+                "module ",
+                atom(self.module_name.to_string()),
+                " [",
                 base_exports,
                 sealed_export_doc,
                 class_method_export_doc,
@@ -161,9 +164,9 @@ impl CoreErlangGenerator {
             ]
         } else {
             docvec![
-                "module '",
-                Document::Eco(self.module_name.clone()),
-                "' [",
+                "module ",
+                atom(self.module_name.to_string()),
+                " [",
                 base_exports,
                 sealed_export_doc,
                 class_method_export_doc,
@@ -335,12 +338,7 @@ impl CoreErlangGenerator {
                     .map_or(0, |i| c.methods[i].selector.arity())
             });
             // Standalone function takes Args + Self + State params
-            parts.push(docvec![
-                ", '__sealed_",
-                Document::String(sel),
-                "'/",
-                Document::String((arity + 2).to_string()),
-            ]);
+            parts.push(docvec![", ", fname(format!("__sealed_{sel}"), arity + 2),]);
         }
         Document::Vec(parts)
     }
@@ -360,10 +358,11 @@ impl CoreErlangGenerator {
         {
             // BT-412: Class method takes ClassSelf + ClassVars + user params
             parts.push(docvec![
-                ", 'class_",
-                Document::Eco(m.selector.name()),
-                "'/",
-                Document::String((m.selector.arity() + 2).to_string()),
+                ", ",
+                fname(
+                    safe_class_method_fn_name(&m.selector.to_erlang_atom()),
+                    m.selector.arity() + 2
+                ),
             ]);
         }
         Document::Vec(parts)
@@ -403,9 +402,9 @@ impl CoreErlangGenerator {
                     "let Self = call 'beamtalk_actor':'make_self'(State) in",
                     line(),
                     docvec![
-                        "call '",
-                        Document::Eco(module_name.clone()),
-                        "':'dispatch'(Selector, Args, Self, State)",
+                        "call ",
+                        atom(module_name.to_string()),
+                        ":'dispatch'(Selector, Args, Self, State)",
                     ],
                 ]
             ),
@@ -498,9 +497,13 @@ impl CoreErlangGenerator {
             // BT-940: Annotate the `fun` expression (not just the body) with source line.
             // Annotating the body would create invalid `( ( e -| [...] ) -| [...] )` when the
             // body is itself a single annotated MessageSend expression.
+            let params_doc = join(
+                all_params.iter().cloned().map(leaf::var),
+                &Document::Str(", "),
+            );
             let fun_doc = docvec![
                 "fun (",
-                all_params.join(", "),
+                params_doc,
                 ") ->",
                 "\n",
                 nest(INDENT, docvec![line(), method_body_doc,]),
@@ -514,10 +517,7 @@ impl CoreErlangGenerator {
             // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
             let method_entry = docvec![
                 "\n",
-                "'__sealed_",
-                Document::String(selector_name.clone()),
-                "'/",
-                Document::String(arity.to_string()),
+                fname(format!("__sealed_{selector_name}"), arity),
                 "  = ",
                 fun_doc,
                 "\n",
@@ -593,37 +593,37 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let spec_mod = self.compiled_module_name("SupervisionSpec");
         let policy_mod: Document<'static> = if has_local_policy_override {
-            Document::Eco(self.module_name.clone())
+            atom(self.module_name.to_string())
         } else {
-            Document::String(self.compiled_module_name("Actor"))
+            atom(self.compiled_module_name("Actor"))
         };
         docvec![
             "'class_supervisionSpec'/2 = fun (ClassSelf, ClassVars) ->\n",
-            "    let CMR = call '",
+            "    let CMR = call ",
             policy_mod,
-            "':'class_supervisionPolicy'(ClassSelf, ClassVars) in\n",
+            ":'class_supervisionPolicy'(ClassSelf, ClassVars) in\n",
             "    case CMR of\n",
             "      <{'class_var_result', Policy, NewClassVars}> when 'true' ->\n",
-            "        let Spec0 = call '",
-            Document::String(spec_mod.clone()),
-            "':'new'() in\n",
-            "        let Spec1 = call '",
-            Document::String(spec_mod.clone()),
-            "':'withActorClass:'(Spec0, ClassSelf) in\n",
-            "        let Spec2 = call '",
-            Document::String(spec_mod.clone()),
-            "':'withRestart:'(Spec1, Policy) in\n",
+            "        let Spec0 = call ",
+            atom(spec_mod.clone()),
+            ":'new'() in\n",
+            "        let Spec1 = call ",
+            atom(spec_mod.clone()),
+            ":'withActorClass:'(Spec0, ClassSelf) in\n",
+            "        let Spec2 = call ",
+            atom(spec_mod.clone()),
+            ":'withRestart:'(Spec1, Policy) in\n",
             "        {'class_var_result', Spec2, NewClassVars}\n",
             "      <Policy> when 'true' ->\n",
-            "        let Spec0 = call '",
-            Document::String(spec_mod.clone()),
-            "':'new'() in\n",
-            "        let Spec1 = call '",
-            Document::String(spec_mod.clone()),
-            "':'withActorClass:'(Spec0, ClassSelf) in\n",
-            "        call '",
-            Document::String(spec_mod),
-            "':'withRestart:'(Spec1, Policy)\n",
+            "        let Spec0 = call ",
+            atom(spec_mod.clone()),
+            ":'new'() in\n",
+            "        let Spec1 = call ",
+            atom(spec_mod.clone()),
+            ":'withActorClass:'(Spec0, ClassSelf) in\n",
+            "        call ",
+            atom(spec_mod),
+            ":'withRestart:'(Spec1, Policy)\n",
             "    end\n",
         ]
     }

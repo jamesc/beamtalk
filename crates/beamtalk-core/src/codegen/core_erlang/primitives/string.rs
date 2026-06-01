@@ -6,6 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::{call_self_p0, generate_comparison_bif, param};
 use crate::docvec;
 
@@ -41,7 +42,7 @@ fn generate_string_transform_bif(selector: &str, params: &[String]) -> Option<Do
     match selector {
         "++" | "," => Some(docvec![
             "call 'erlang':'iolist_to_binary'([Self, ",
-            p0.to_string(),
+            leaf::var(p0),
             "])"
         ]),
         "length" => Some(Document::Str("call 'string':'length'(Self)")),
@@ -76,7 +77,7 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
         "indexOf:" => Some(call_self_p0("beamtalk_string", "index_of", p0)),
         "split:" => Some(docvec![
             "call 'binary':'split'(Self, ",
-            p0.to_string(),
+            leaf::var(p0),
             ", ['global'])"
         ]),
         "splitOn:" => Some(call_self_p0("beamtalk_string", "split_on", p0)),
@@ -87,9 +88,9 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'binary':'replace'(Self, ",
-                p0.to_string(),
+                leaf::var(p0),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1),
                 ", ['global'])",
             ])
         }
@@ -97,9 +98,9 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'binary':'replace'(Self, ",
-                p0.to_string(),
+                leaf::var(p0),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1),
                 ", [])"
             ])
         }
@@ -107,12 +108,12 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
         "drop:" => Some(call_self_p0("beamtalk_string", "drop", p0)),
         "padLeft:" => Some(docvec![
             "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
-            p0.to_string(),
+            leaf::var(p0),
             ", 'leading'))",
         ]),
         "padRight:" => Some(docvec![
             "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
-            p0.to_string(),
+            leaf::var(p0),
             ", 'trailing'))",
         ]),
         "padLeft:with:" | "padRight:with:" => {
@@ -124,11 +125,11 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
             };
             Some(docvec![
                 "call 'unicode':'characters_to_binary'(call 'string':'pad'(Self, ",
-                p0.to_string(),
+                leaf::var(p0),
                 ", ",
                 dir,
                 ", ",
-                p1.to_string(),
+                leaf::var(p1),
                 "))",
             ])
         }
@@ -156,25 +157,25 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
         // Class-side factory: String class withAll: list joins grapheme list into a String
         "withAll:" => Some(docvec![
             "call 'beamtalk_string':'join'(",
-            p0.to_string(),
+            leaf::var(p0),
             ")"
         ]),
         // Class-side factory: create a String from a single Unicode code point
         "fromCodePoint:" => Some(docvec![
             "call 'beamtalk_string':'from_code_point'(",
-            p0.to_string(),
+            leaf::var(p0),
             ")"
         ]),
         // Class-side factory: create a String from a list of Unicode code points
         "fromCodePoints:" => Some(docvec![
             "call 'beamtalk_string':'from_code_points'(",
-            p0.to_string(),
+            leaf::var(p0),
             ")"
         ]),
         // Class-side factory: coerce an Erlang iolist/charlist to a String binary
         "fromIolist:" => Some(docvec![
             "call 'beamtalk_string':'from_iolist'(",
-            p0.to_string(),
+            leaf::var(p0),
             ")"
         ]),
         _ => None,
@@ -193,9 +194,9 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_regex':'matches_regex_options'(Self, ",
-                p0.to_string(),
+                leaf::var(p0),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1),
                 ")",
             ])
         }
@@ -205,9 +206,9 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_regex':'replace_regex'(Self, ",
-                p0.to_string(),
+                leaf::var(p0),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1),
                 ")",
             ])
         }
@@ -215,9 +216,9 @@ fn generate_string_regex_bif(selector: &str, params: &[String]) -> Option<Docume
             let p1 = param(params, 1, "_Arg1");
             Some(docvec![
                 "call 'beamtalk_regex':'replace_all_regex'(Self, ",
-                p0.to_string(),
+                leaf::var(p0),
                 ", ",
-                p1.to_string(),
+                leaf::var(p1),
                 ")",
             ])
         }

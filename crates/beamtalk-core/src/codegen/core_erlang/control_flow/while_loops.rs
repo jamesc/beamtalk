@@ -8,7 +8,7 @@
 //! Generates code for `whileTrue:` and `whileFalse:` loop constructs
 //! with both pure and state-threading variants.
 
-use super::super::document::{Document, join};
+use super::super::document::{Document, join, leaf};
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result, block_analysis};
 use super::{BodyKind, ThreadingPlan};
@@ -78,25 +78,25 @@ impl CoreErlangGenerator {
         let body_code = self.expression_doc(body)?;
 
         let doc = docvec![
-            "letrec '",
-            Document::String(loop_fn.clone()),
-            "'/0 = fun () -> let ",
-            Document::String(cond_var.clone()),
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let ",
+            leaf::var(cond_var.clone()),
             " = ",
             cond_code,
             " in case apply ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " () of <'true'> when 'true' -> let ",
-            Document::String(body_var.clone()),
+            leaf::var(body_var.clone()),
             " = ",
             body_code,
             " in let _ = apply ",
-            Document::String(body_var),
-            " () in apply '",
-            Document::String(loop_fn.clone()),
-            "'/0 () <'false'> when 'true' -> 'nil' end in apply '",
-            Document::String(loop_fn),
-            "'/0 ()",
+            leaf::var(body_var),
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () <'false'> when 'true' -> 'nil' end in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
         ];
 
         Ok(doc)
@@ -154,25 +154,25 @@ impl CoreErlangGenerator {
         let body_code = self.expression_doc(body)?;
 
         let doc = docvec![
-            "letrec '",
-            Document::String(loop_fn.clone()),
-            "'/0 = fun () -> let ",
-            Document::String(cond_var.clone()),
+            "letrec ",
+            leaf::fname(loop_fn.clone(), 0),
+            " = fun () -> let ",
+            leaf::var(cond_var.clone()),
             " = ",
             cond_code,
             " in case apply ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " () of <'false'> when 'true' -> let ",
-            Document::String(body_var.clone()),
+            leaf::var(body_var.clone()),
             " = ",
             body_code,
             " in let _ = apply ",
-            Document::String(body_var),
-            " () in apply '",
-            Document::String(loop_fn.clone()),
-            "'/0 () <'true'> when 'true' -> 'nil' end in apply '",
-            Document::String(loop_fn),
-            "'/0 ()",
+            leaf::var(body_var),
+            " () in apply ",
+            leaf::fname(loop_fn.clone(), 0),
+            " () <'true'> when 'true' -> 'nil' end in apply ",
+            leaf::fname(loop_fn, 0),
+            " ()",
         ];
 
         Ok(doc)
@@ -225,7 +225,7 @@ impl CoreErlangGenerator {
 
         docs.push(docvec![
             "let ",
-            Document::String(cond_var.clone()),
+            leaf::var(cond_var.clone()),
             " = fun (StateAcc) -> ",
         ]);
 
@@ -247,7 +247,7 @@ impl CoreErlangGenerator {
         };
         docs.push(docvec![
             " in case apply ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " (StateAcc) of ",
             cond_apply_arm,
         ]);
@@ -268,7 +268,7 @@ impl CoreErlangGenerator {
         };
         docs.push(docvec![
             " apply 'while'/1 (",
-            Document::String(final_state_var),
+            leaf::var(final_state_var),
             ") ",
             exit_arm,
             "end ",
@@ -278,11 +278,7 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         // Initial call with packed state
-        docs.push(docvec![
-            "in apply 'while'/1 (",
-            Document::String(init_state),
-            ")"
-        ]);
+        docs.push(docvec!["in apply 'while'/1 (", leaf::var(init_state), ")"]);
 
         Ok(Document::Vec(docs))
     }
@@ -309,7 +305,7 @@ impl CoreErlangGenerator {
         let arity = param_names.len();
         let param_list_doc = || {
             join(
-                param_names.iter().map(|v| Document::String(v.clone())),
+                param_names.iter().map(|v| leaf::var(v.clone())),
                 &Document::Str(", "),
             )
         };
@@ -318,8 +314,8 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(docvec![
-            "letrec 'while'/",
-            Document::String(arity.to_string()),
+            "letrec ",
+            leaf::fname("while", arity),
             " = fun (",
             param_list_doc(),
             ") -> ",
@@ -334,7 +330,7 @@ impl CoreErlangGenerator {
         // We pass only the params (not StateAcc) since there is no StateAcc.
         docs.push(docvec![
             "let ",
-            Document::String(cond_var.clone()),
+            leaf::var(cond_var.clone()),
             " = fun (",
             param_list_doc(),
             ") -> ",
@@ -357,7 +353,7 @@ impl CoreErlangGenerator {
         };
         docs.push(docvec![
             " in case apply ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " (",
             param_list_doc(),
             ") of ",
@@ -373,18 +369,15 @@ impl CoreErlangGenerator {
         // Build exit StateAcc using the CURRENT iteration's param names.
         let exit_stateacc = plan.generate_exit_stateacc(&param_names, self);
 
-        let final_args_doc = join(
-            final_args.into_iter().map(Document::String),
-            &Document::Str(", "),
-        );
+        let final_args_doc = join(final_args.into_iter().map(leaf::var), &Document::Str(", "));
         let exit_arm = if negate {
             "<'true'> when 'true' -> "
         } else {
             "<'false'> when 'true' -> "
         };
         docs.push(docvec![
-            " apply 'while'/",
-            Document::String(arity.to_string()),
+            " apply ",
+            leaf::fname("while", arity),
             " (",
             final_args_doc,
             ") ",
@@ -396,12 +389,12 @@ impl CoreErlangGenerator {
         self.pop_scope();
 
         let initial_args_doc = join(
-            initial_direct_args.into_iter().map(Document::String),
+            initial_direct_args.into_iter().map(leaf::var),
             &Document::Str(", "),
         );
         docs.push(docvec![
-            "in apply 'while'/",
-            Document::String(arity.to_string()),
+            "in apply ",
+            leaf::fname("while", arity),
             " (",
             initial_args_doc,
             ")",
@@ -459,8 +452,8 @@ impl CoreErlangGenerator {
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.extend(pre_extract_docs);
         docs.push(docvec![
-            "letrec 'while'/",
-            Document::String(arity.to_string()),
+            "letrec ",
+            leaf::fname("while", arity),
             " = fun (",
             param_list_doc(),
             ") -> ",
@@ -475,7 +468,7 @@ impl CoreErlangGenerator {
 
         docs.push(docvec![
             "let ",
-            Document::String(cond_var.clone()),
+            leaf::var(cond_var.clone()),
             " = fun (",
             param_list_doc(),
             ") -> ",
@@ -491,7 +484,7 @@ impl CoreErlangGenerator {
         };
         docs.push(docvec![
             " in case apply ",
-            Document::String(cond_var),
+            leaf::var(cond_var),
             " (",
             param_list_doc(),
             ") of ",
@@ -556,11 +549,11 @@ impl CoreErlangGenerator {
                 docs.push(docvec![
                     prefix,
                     "let ",
-                    Document::String(var_name.clone()),
-                    " = call 'maps':'get'('",
-                    Document::String(field.to_string()),
-                    "', ",
-                    Document::String(initial_state.to_string()),
+                    leaf::var(var_name.clone()),
+                    " = call 'maps':'get'(",
+                    leaf::atom(field.to_string()),
+                    ", ",
+                    leaf::var(initial_state.to_string()),
                     ") in",
                     suffix,
                 ]);
@@ -610,17 +603,9 @@ impl CoreErlangGenerator {
         join(
             local_param_names
                 .iter()
-                .map(|v| Document::String(v.clone()))
-                .chain(
-                    readonly_param_names
-                        .iter()
-                        .map(|v| Document::String(v.clone())),
-                )
-                .chain(
-                    mutated_param_names
-                        .iter()
-                        .map(|v| Document::String(v.clone())),
-                ),
+                .map(|v| leaf::var(v.clone()))
+                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
+                .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
             &Document::Str(", "),
         )
     }
@@ -743,13 +728,9 @@ impl CoreErlangGenerator {
         let final_args_doc = join(
             final_local_args
                 .iter()
-                .map(|v| Document::String(v.clone()))
-                .chain(
-                    readonly_param_names
-                        .iter()
-                        .map(|v| Document::String(v.clone())),
-                )
-                .chain(final_mutated_field_args.into_iter().map(Document::String)),
+                .map(|v| leaf::var(v.clone()))
+                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
+                .chain(final_mutated_field_args.into_iter().map(leaf::var)),
             &Document::Str(", "),
         );
         let exit_arm = if negate {
@@ -758,8 +739,8 @@ impl CoreErlangGenerator {
             "<'false'> when 'true' -> "
         };
         docs.push(docvec![
-            " apply 'while'/",
-            Document::String(arity.to_string()),
+            " apply ",
+            leaf::fname("while", arity),
             " (",
             final_args_doc,
             ") ",
@@ -781,24 +762,14 @@ impl CoreErlangGenerator {
         let initial_args_doc = join(
             initial_local_args
                 .into_iter()
-                .map(Document::String)
-                .chain(
-                    readonly_param_names
-                        .iter()
-                        .map(|v| Document::String(v.clone())),
-                )
-                .chain(
-                    mutated_param_names
-                        .iter()
-                        .map(|v| Document::String(v.clone())),
-                ),
+                .map(leaf::var)
+                .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
+                .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
             &Document::Str(", "),
         );
         docs.push(docvec![
-            "in apply '",
-            Document::String(fn_name.to_string()),
-            "'/",
-            Document::String(arity.to_string()),
+            "in apply ",
+            leaf::fname(fn_name.to_string(), arity),
             " (",
             initial_args_doc,
             ")",
@@ -1098,6 +1069,19 @@ mod tests {
         assert!(
             code.contains("maps':'get'('__local__counter'"),
             "value-type whileFalse: should extract counter from state. Got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_value_type_while_last_expr_unwraps_nil() {
+        // BT-2308: a mutating whileTrue: as the method's LAST expression must return the
+        // loop's logical value (element 1 = nil), not the raw {nil, StateAcc} tuple.
+        let src =
+            "Object subclass: Calc\n\n  run =>\n    n := 0\n    [n < 3] whileTrue: [n := n + 1]\n";
+        let code = codegen(src);
+        assert!(
+            code.contains("element'(1,"),
+            "last-expr whileTrue: should unwrap element 1 (nil). Got:\n{code}"
         );
     }
 }
