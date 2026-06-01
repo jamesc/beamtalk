@@ -2560,6 +2560,10 @@ impl CoreErlangGenerator {
         &self,
         expr: &Expression,
     ) -> bool {
+        // BT-2355: see through parentheses so `_r := (1 to: 5 do: [...])` is still
+        // classified as control flow with mutations (and thus unpacked + threaded)
+        // rather than falling through to a plain pure local assignment.
+        let expr = Self::peel_parens(expr);
         let Expression::MessageSend {
             receiver,
             arguments,

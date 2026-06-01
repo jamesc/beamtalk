@@ -1,0 +1,74 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2355: Actor-context outer-local threading for conditionals, foldl-predicate
+// ops, and local-assignment of threading constructs.
+//
+// Sibling to vt_threading_constructs_test.bt (BT-2342, value-type context).
+// In an Actor method body these constructs thread outer locals through the
+// actor State map under `__local__` keys; the body sequencer must extract them
+// back after the construct. Previously the extraction was missing for
+// conditionals (ifTrue:/ifTrue:ifFalse:) and foldl predicates (count:/detect:),
+// dropped write-only outer locals, and mis-threaded loop local-assignment RHS.
+
+TestCase subclass: ActorThreadingConstructsTest
+
+  // ── write-only conditional threads in non-last position ────────────────────
+  testIfTrueNonLastWriteOnlyThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueNonLastWriteOnly: true) equals: 9
+
+  testIfTrueNonLastWriteOnlyFalseUnchanged =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueNonLastWriteOnly: false) equals: 0
+
+  // ── read+write conditional threads on EVERY invocation ─────────────────────
+  testIfTrueNonLastReadWriteThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
+
+  // Second freshly-spawned actor must also thread (was first-call-only).
+  testIfTrueNonLastReadWriteSecondInstanceThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
+    b := ActorThreadingCorpus spawn
+    self assert: (b ifTrueNonLastReadWrite: true) equals: 7
+
+  // Same actor, repeated calls must each thread independently.
+  testIfTrueNonLastReadWriteRepeatedCallsThread =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
+    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
+    self assert: (a ifTrueNonLastReadWrite: false) equals: 0
+
+  // ── ifTrue:ifFalse: threads in non-last position ───────────────────────────
+  testIfTrueIfFalseNonLastTrueBranch =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueIfFalseNonLastReadWrite: true) equals: 2
+
+  testIfTrueIfFalseNonLastFalseBranch =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueIfFalseNonLastReadWrite: false) equals: 101
+
+  // ── conditional as local-assignment RHS binds value and threads local ──────
+  testIfTrueIfFalseAssignRhsThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
+
+  testIfTrueIfFalseAssignRhsFalseUnchanged =>
+    a := ActorThreadingCorpus spawn
+    self assert: (a ifTrueIfFalseAssignRhsReadWrite: false) equals: 0
+
+  // ── count: / detect: thread outer-local mutations ──────────────────────────
+  testCountNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a countNonLastReadWrite equals: 3
+
+  testDetectNonLastThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a detectNonLastReadWrite equals: 3
+
+  // ── loop local-assignment RHS threads the accumulator ──────────────────────
+  testToDoAssignRhsThreads =>
+    a := ActorThreadingCorpus spawn
+    self assert: a toDoAssignRhsReadWrite equals: 15
