@@ -11,8 +11,9 @@
 // see. The two oracles are only jointly complete because they share one
 // fragment corpus:
 //
-//   stdlib/test/fixtures/mutation_corpus_value.bt   (Value subclass context)
-//   stdlib/test/fixtures/mutation_corpus_actor.bt   (Actor context)
+//   stdlib/test/fixtures/mutation_corpus_value.bt          (Value subclass context)
+//   stdlib/test/fixtures/mutation_corpus_actor.bt          (Actor context)
+//   stdlib/test/fixtures/mutation_corpus_class_method.bt   (class-method context, BT-2360)
 //
 // plus the TestCase-context fragments defined as `frag*` helpers in this file.
 // BT-2345, when it lands, consumes the same fragment names for its equality
@@ -28,6 +29,11 @@
 // remaining `skip`ped cells track still-open gaps: BT-2355 (Actor-context
 // outer-local threading) and BT-2359 (value-type count:/detect: predicates and
 // parenthesized assignment-RHS threading). Loop regression cells come from BT-2308.
+//
+// BT-2360 adds the class-method context (`*ClassMethod` cells, fragments in
+// mutation_corpus_class_method.bt). Class-method block threading was hardened by
+// BT-2349/BT-2350/BT-2358 (all landed), so these cells run their ground-truth
+// asserts un-gated.
 
 TestCase subclass: ValueTypeMutationMatrixTest
 
@@ -54,6 +60,15 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // value-type cells now run their ground-truth asserts. Kept as a switch for
   // documentation/bisection.
   bt2359Pending => false
+
+  // Pending switch for BT-2371: in class-method context, a conditional
+  // (ifTrue:ifFalse:) used as a *parenthesized assignment RHS* still drops the
+  // sibling outer-local mutation (returns 0 instead of 5). BT-2359 fixed this in
+  // value_type_codegen.rs, but class methods route through a separate
+  // class-method block-threading path (BT-2349/BT-2350/BT-2358) that covered the
+  // loop paren-assign-RHS shape and count:/detect: predicates but NOT the
+  // conditional paren-assign-RHS shape. Flip off when BT-2371 lands.
+  bt2360ClassMethodCondAssignRhsPending => true
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
@@ -119,6 +134,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testToDoNonLastWriteOnlyTestCase =>
     self assert: self fragToDoNonLastWriteOnly equals: 5
 
+  testToDoNonLastWriteOnlyClassMethod =>
+    self assert: MutationCorpusClassMethod toDoNonLastWriteOnly equals: 5
+
   // to:do: × non-last × read+write
   testToDoNonLastReadWriteValue =>
     self assert: self valueCorpus toDoNonLastReadWrite equals: 15
@@ -128,6 +146,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testToDoNonLastReadWriteTestCase =>
     self assert: self fragToDoNonLastReadWrite equals: 15
+
+  testToDoNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod toDoNonLastReadWrite equals: 15
 
   // to:do: × local-assignment RHS × read+write
   testToDoAssignRhsReadWriteValue =>
@@ -144,6 +165,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
       ]
     self assert: self actorCorpus toDoAssignRhsReadWrite equals: 15
 
+  testToDoAssignRhsReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod toDoAssignRhsReadWrite equals: 15
+
   // ════════════════════════════════════════════════════════════════════════
   //  to:by:do:  — BT-2308 regression cells
   // ════════════════════════════════════════════════════════════════════════
@@ -152,6 +176,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testToByDoNonLastWriteOnlyActor =>
     self assert: self actorCorpus toByDoNonLastWriteOnly equals: 9
+
+  testToByDoNonLastWriteOnlyClassMethod =>
+    self assert: MutationCorpusClassMethod toByDoNonLastWriteOnly equals: 9
 
   testToByDoNonLastReadWriteValue =>
     self assert: self valueCorpus toByDoNonLastReadWrite equals: 25
@@ -162,6 +189,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testToByDoNonLastReadWriteTestCase =>
     self assert: self fragToByDoNonLastReadWrite equals: 25
 
+  testToByDoNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod toByDoNonLastReadWrite equals: 25
+
   // ════════════════════════════════════════════════════════════════════════
   //  timesRepeat:  — BT-2308 regression cells
   // ════════════════════════════════════════════════════════════════════════
@@ -171,6 +201,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testTimesRepeatNonLastWriteOnlyActor =>
     self assert: self actorCorpus timesRepeatNonLastWriteOnly equals: 7
 
+  testTimesRepeatNonLastWriteOnlyClassMethod =>
+    self assert: MutationCorpusClassMethod timesRepeatNonLastWriteOnly equals: 7
+
   testTimesRepeatNonLastReadWriteValue =>
     self assert: self valueCorpus timesRepeatNonLastReadWrite equals: 5
 
@@ -179,6 +212,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testTimesRepeatNonLastReadWriteTestCase =>
     self assert: self fragTimesRepeatNonLastReadWrite equals: 5
+
+  testTimesRepeatNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod timesRepeatNonLastReadWrite equals: 5
 
   // ════════════════════════════════════════════════════════════════════════
   //  whileTrue: / whileFalse:
@@ -192,6 +228,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testWhileTrueNonLastReadWriteTestCase =>
     self assert: self fragWhileTrueNonLastReadWrite equals: 5
 
+  testWhileTrueNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod whileTrueNonLastReadWrite equals: 5
+
   testWhileFalseNonLastReadWriteValue =>
     self assert: self valueCorpus whileFalseNonLastReadWrite equals: 5
 
@@ -200,6 +239,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testWhileFalseNonLastReadWriteTestCase =>
     self assert: self fragWhileFalseNonLastReadWrite equals: 5
+
+  testWhileFalseNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod whileFalseNonLastReadWrite equals: 5
 
   // ════════════════════════════════════════════════════════════════════════
   //  (1 to: n) do:
@@ -213,6 +255,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testRangeDoNonLastReadWriteTestCase =>
     self assert: self fragRangeDoNonLastReadWrite equals: 15
 
+  testRangeDoNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod rangeDoNonLastReadWrite equals: 15
+
   // ════════════════════════════════════════════════════════════════════════
   //  collect:  — BT-2342 (failure mode A): value-type leaks value+state tuple
   // ════════════════════════════════════════════════════════════════════════
@@ -225,6 +270,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testCollectNonLastReadWriteActor =>
     self assert: self actorCorpus collectNonLastReadWrite equals: 3
 
+  testCollectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod collectNonLastReadWrite equals: 3
+
   testCollectAssignRhsReadWriteValue =>
     self bt2342Pending
       ifTrue: [
@@ -234,6 +282,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testCollectAssignRhsReadWriteActor =>
     self assert: self actorCorpus collectAssignRhsReadWrite equals: 3
+
+  testCollectAssignRhsReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod collectAssignRhsReadWrite equals: 3
 
   // ════════════════════════════════════════════════════════════════════════
   //  select: / reject:  — BT-2342 (failure mode A)
@@ -247,6 +298,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testSelectNonLastReadWriteActor =>
     self assert: self actorCorpus selectNonLastReadWrite equals: 4
 
+  testSelectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod selectNonLastReadWrite equals: 4
+
   testRejectNonLastReadWriteValue =>
     self bt2342Pending ifTrue: [
       ^self skip: "BT-2342: reject: leaks value+state tuple in value-type context"
@@ -255,6 +309,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testRejectNonLastReadWriteActor =>
     self assert: self actorCorpus rejectNonLastReadWrite equals: 4
+
+  testRejectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod rejectNonLastReadWrite equals: 4
 
   // ════════════════════════════════════════════════════════════════════════
   //  inject:into:  — BT-2342 (failure mode A)
@@ -269,6 +326,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testInjectNonLastReadWriteActor =>
     self assert: self actorCorpus injectNonLastReadWrite equals: 6
 
+  testInjectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod injectNonLastReadWrite equals: 6
+
   testInjectAssignRhsReadWriteValue =>
     self bt2342Pending
       ifTrue: [
@@ -278,6 +338,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testInjectAssignRhsReadWriteActor =>
     self assert: self actorCorpus injectAssignRhsReadWrite equals: 6
+
+  testInjectAssignRhsReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod injectAssignRhsReadWrite equals: 6
 
   // ════════════════════════════════════════════════════════════════════════
   //  detect: / count:  — BT-2342 (failure mode A, foldl predicate)
@@ -295,6 +358,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
     ]
     self assert: self actorCorpus detectNonLastReadWrite equals: 3
 
+  testDetectNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod detectNonLastReadWrite equals: 3
+
   testCountNonLastReadWriteValue =>
     self bt2359Pending
       ifTrue: [
@@ -307,6 +373,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
       ^self skip: "BT-2355: count: does not thread outer local in Actor context"
     ]
     self assert: self actorCorpus countNonLastReadWrite equals: 3
+
+  testCountNonLastReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod countNonLastReadWrite equals: 3
 
   // ════════════════════════════════════════════════════════════════════════
   //  ifTrue:  (conditionals)
@@ -323,6 +392,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
       ]
     self assert: (self actorCorpus ifTrueNonLastWriteOnly: true) equals: 9
 
+  testIfTrueNonLastWriteOnlyClassMethod =>
+    self assert: (MutationCorpusClassMethod ifTrueNonLastWriteOnly: true) equals: 9
+
   // read+write conditional, non-last
   testIfTrueNonLastReadWriteValue =>
     self assert: (self valueCorpus ifTrueNonLastReadWrite: true) equals: 7
@@ -337,6 +409,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testIfTrueNonLastReadWriteTestCase =>
     self assert: (self fragIfTrueNonLastReadWrite: true) equals: 7
 
+  testIfTrueNonLastReadWriteClassMethod =>
+    self assert: (MutationCorpusClassMethod ifTrueNonLastReadWrite: true) equals: 7
+
   // BT-2342 (failure mode B): read+write conditional as last expression
   testIfTrueLastReadWriteValue =>
     self bt2342Pending
@@ -347,6 +422,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
 
   testIfTrueLastReadWriteActor =>
     self assert: (self actorCorpus ifTrueLastReadWrite: true) equals: 7
+
+  testIfTrueLastReadWriteClassMethod =>
+    self assert: (MutationCorpusClassMethod ifTrueLastReadWrite: true) equals: 7
 
   // ════════════════════════════════════════════════════════════════════════
   //  ifTrue:ifFalse:
@@ -364,6 +442,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   testIfTrueIfFalseNonLastReadWriteTestCase =>
     self assert: (self fragIfTrueIfFalseNonLastReadWrite: true) equals: 2
 
+  testIfTrueIfFalseNonLastReadWriteClassMethod =>
+    self assert: (MutationCorpusClassMethod ifTrueIfFalseNonLastReadWrite: true) equals: 2
+
   testIfTrueIfFalseAssignRhsReadWriteValue =>
     self bt2359Pending
       ifTrue: [
@@ -377,3 +458,10 @@ TestCase subclass: ValueTypeMutationMatrixTest
         ^self skip: "BT-2355: conditional local-assignment drops threading in Actor method body"
       ]
     self assert: (self actorCorpus ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
+
+  testIfTrueIfFalseAssignRhsReadWriteClassMethod =>
+    self bt2360ClassMethodCondAssignRhsPending
+      ifTrue: [
+        ^self skip: "BT-2371: conditional as a parenthesized assignment RHS drops sibling-local threading in class-method context"
+      ]
+    self assert: (MutationCorpusClassMethod ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
