@@ -2545,6 +2545,19 @@ impl CoreErlangGenerator {
                     self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
                     return Ok(Document::Vec(parts));
                 }
+                // BT-2371: When the RHS is a read+write conditional (`ifTrue:`/`ifFalse:`/
+                // `ifTrue:ifFalse:` whose branches mutate sibling outer-locals), each branch
+                // emits `{LogicalValue, Mut1..MutN}`. Bind the target to element 1 and rebind
+                // the threaded siblings from elements 2.., so a later read of a sibling local
+                // sees the branch's mutation rather than its pre-conditional value. This is the
+                // class-method-context analogue of the value-type fix (BT-2359). See-through
+                // parentheses first (BT-2358), mirroring the loop/foldl assign-RHS path.
+                let rhs = Self::peel_parens(value);
+                if self.is_conditional_with_vt_local_threading(rhs) {
+                    let mut parts: Vec<Document<'static>> = Vec::new();
+                    self.emit_vt_conditional_assign_rhs(&id.name, rhs, &mut parts)?;
+                    return Ok(Document::Vec(parts));
+                }
                 let var_name = &id.name;
                 let core_var = self
                     .lookup_var(var_name)

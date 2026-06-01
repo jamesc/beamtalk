@@ -67,8 +67,9 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // value_type_codegen.rs, but class methods route through a separate
   // class-method block-threading path (BT-2349/BT-2350/BT-2358) that covered the
   // loop paren-assign-RHS shape and count:/detect: predicates but NOT the
-  // conditional paren-assign-RHS shape. Flip off when BT-2371 lands.
-  bt2360ClassMethodCondAssignRhsPending => true
+  // conditional paren-assign-RHS shape. Fixed by BT-2371 (class-method-context
+  // analogue of BT-2359, applied in gen_server/methods.rs).
+  bt2360ClassMethodCondAssignRhsPending => false
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.
