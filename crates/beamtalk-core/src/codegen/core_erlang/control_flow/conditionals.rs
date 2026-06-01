@@ -622,10 +622,9 @@ impl CoreErlangGenerator {
                         // the in-scope local binding stays stale.
                         if let Some(threaded_vars) = self.get_control_flow_threaded_vars(expr) {
                             for var in &threaded_vars {
-                                let tv_core = self.lookup_var(var).map_or_else(
-                                    || Self::to_core_erlang_var(var),
-                                    String::clone,
-                                );
+                                let tv_core = self
+                                    .lookup_var(var)
+                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
                                 doc_parts.push(docvec![
                                     "let ",
                                     leaf::var(tv_core.clone()),
