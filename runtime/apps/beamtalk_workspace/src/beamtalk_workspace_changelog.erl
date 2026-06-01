@@ -424,7 +424,11 @@ object can apply the active-vs-full filtering in Beamtalk. This is what
 `Workspace changes` returns. Called via
 `(Erlang beamtalk_workspace_changelog) changeLog`.
 """.
--spec changeLog() -> map().
+%% The `'$beamtalk_class' := 'ChangeLog'` tag lets the type checker (via
+%% beamtalk_spec_reader) infer this FFI result as the `ChangeLog` Beamtalk
+%% class rather than a bare `Dictionary`, matching `WorkspaceInterface>>changes`
+%% declared `-> ChangeLog` return type. Mirrors `beamtalk_ets:t()`.
+-spec changeLog() -> #{'$beamtalk_class' := 'ChangeLog', entries := [map()]}.
 changeLog() ->
     #{
         '$beamtalk_class' => 'ChangeLog',

@@ -107,9 +107,8 @@ sealed typed Value subclass: ChangeLog
   /// ```
   dirtyMethods -> Dictionary =>
     // FFI returns a Dictionary `#{ClassSymbol => Set(selectorSymbol)}`
-    // (beamtalk_workspace_changelog:dirtyMethods/0); suppress the untyped-FFI
-    // Dynamic warning since the shape is known.
-    @expect type
+    // (beamtalk_workspace_changelog:dirtyMethods/0), matching the declared
+    // return type.
     (Erlang beamtalk_workspace_changelog) dirtyMethods
 
   /// Re-install the prior body of `anEntry`'s method, undoing the patch

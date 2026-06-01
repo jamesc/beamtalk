@@ -115,8 +115,8 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   changes -> ChangeLog =>
     // FFI returns a `ChangeLog`-tagged map (beamtalk_workspace_changelog:changeLog/0);
-    // suppress the untyped-FFI Dynamic warning since the shape is known.
-    @expect type
+    // its `'$beamtalk_class' := 'ChangeLog'` spec lets the type checker infer the
+    // result as ChangeLog, matching the declared return type.
     (Erlang beamtalk_workspace_changelog) changeLog
 
   /// Compile and load a .bt file, registering the class.
