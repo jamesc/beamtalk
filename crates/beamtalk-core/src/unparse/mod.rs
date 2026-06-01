@@ -111,6 +111,24 @@ pub fn format_source(source: &str) -> Option<String> {
     Some(formatted)
 }
 
+/// Escapes an arbitrary string for embedding inside a Beamtalk double-quoted
+/// string literal.
+///
+/// Beamtalk strings share `\\` and `"` escaping with most languages, and also
+/// treat `{` as the start of an interpolation sequence (ADR 0023), so a
+/// literal `{` must be written as `\{`.
+///
+/// The escape order is significant: `\\` must be processed first so a caller-
+/// supplied `\{` is rendered as `\\\{` (escaped backslash `\\` then escaped
+/// brace `\{`) rather than `\\{` (escaped backslash followed by an unescaped
+/// `{` that would start interpolation).
+#[must_use]
+pub fn escape_string_literal(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('{', "\\{")
+}
+
 /// Builds a [`Document`] for a method display signature (no `sealed`, no ` =>`).
 fn unparse_method_display_signature_doc(method: &MethodDefinition) -> Document<'static> {
     let sig = match &method.selector {
@@ -2973,5 +2991,42 @@ mod tests {
             "  asString -> String\n",
         );
         assert_identity(source);
+    }
+
+    // --- escape_string_literal ---
+
+    #[test]
+    fn escape_string_literal_plain_string_unchanged() {
+        assert_eq!(escape_string_literal("hello"), "hello");
+    }
+
+    #[test]
+    fn escape_string_literal_escapes_double_quote() {
+        assert_eq!(escape_string_literal("a\"b"), "a\\\"b");
+    }
+
+    #[test]
+    fn escape_string_literal_escapes_backslash() {
+        assert_eq!(escape_string_literal("a\\b"), "a\\\\b");
+    }
+
+    #[test]
+    fn escape_string_literal_escapes_open_brace() {
+        assert_eq!(escape_string_literal("a{b}"), "a\\{b}");
+    }
+
+    #[test]
+    fn escape_string_literal_backslash_before_brace_both_escaped() {
+        // Backslash must be escaped before brace so "\{x}" → "\\\{x}" (escaped
+        // backslash `\\` + escaped brace `\{`), not "\\{x}" (escaped backslash
+        // followed by an unescaped `{` that would start interpolation).
+        assert_eq!(escape_string_literal("\\{x}"), "\\\\\\{x}");
+    }
+
+    #[test]
+    fn escape_string_literal_mixed_backslash_quote_brace() {
+        // Verifies all three escape rules fire correctly in one input and that
+        // replacement order does not corrupt any of them.
+        assert_eq!(escape_string_literal("\\\"\\{"), "\\\\\\\"\\\\\\{");
     }
 }
