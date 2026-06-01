@@ -726,9 +726,11 @@ pub(crate) enum CodeGenContext {
 
 /// Fresh temporary variable names shared by all three NLR try/catch wrappers.
 ///
-/// Allocated by [`CoreErlangGenerator::alloc_nlr_catch_vars`] and consumed by
-/// `wrap_actor_body_with_nlr_catch`, `wrap_class_method_body_with_nlr_catch`, and
-/// `wrap_value_type_body_with_nlr_catch`.
+/// Allocated by [`CoreErlangGenerator::alloc_nlr_catch_vars`] and consumed by the
+/// single boundary-parameterised wrapper [`CoreErlangGenerator::wrap_body_with_nlr_catch`]
+/// (via [`CoreErlangGenerator::wrap_actor_body_with_nlr_catch`] and
+/// [`CoreErlangGenerator::wrap_class_method_body_with_nlr_catch`]) and by
+/// [`CoreErlangGenerator::wrap_value_type_body_with_nlr_catch`].
 #[allow(clippy::struct_field_names)]
 struct NlrCatchVars {
     result_var: String,
@@ -740,6 +742,67 @@ struct NlrCatchVars {
     /// BT-854: State variable captured from the 4-tuple NLR throw.
     state_var: String,
     ot_pair_var: String,
+}
+
+/// BT-2361: The per-context NLR boundary — the *only* thing that differs between the
+/// Actor, class-method and value-type non-local-return catch wrappers once the catch
+/// vars are shared.
+///
+/// All three contexts catch the same 4-tuple throw `{'$bt_nlr', Token, Value, State}`
+/// (ADR 0041's state-carrying NLR convention); they disagree only about the Document
+/// the matching catch arm yields. This enum captures that single axis so the catch
+/// scaffolding can be written once (see [`nlr_arm_result`]) instead of being
+/// copy-evolved per context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NlrBoundary {
+    /// Actor (`gen_server`) methods: the catch arm yields `{'reply', Value, State}`.
+    ActorReply,
+    /// Class methods: the catch arm yields `Value` (no class vars) or
+    /// `{'class_var_result', Value, State}` when class vars were mutated.
+    ClassMethod { has_class_vars: bool },
+    /// Value-type methods: the catch arm yields `{Value, State}` so the normal and
+    /// NLR-catch paths produce the same `{Result, Self{N}}` shape.
+    ValueType,
+}
+
+/// BT-2361: Builds the Document the matching NLR catch arm yields for `boundary`.
+///
+/// This is the single place the per-context divergence between the three former
+/// `wrap_*_body_with_nlr_catch` wrappers lives. `val_var`/`state_var` are the
+/// catch-bound `Value`/`State` extracted from the 4-tuple throw. Shared by the
+/// gen-server wrapper ([`CoreErlangGenerator::wrap_body_with_nlr_catch`]) and the
+/// value-type suffix ([`NlrValueTypeCatchVars::format_catch_suffix`]).
+///
+/// BT-875: Use Document/docvec! — never format!() for Core Erlang fragments.
+fn nlr_arm_result(val_var: &str, state_var: &str, boundary: NlrBoundary) -> Document<'static> {
+    match boundary {
+        NlrBoundary::ActorReply => docvec![
+            "{'reply', ",
+            leaf::var(val_var.to_string()),
+            ", ",
+            leaf::var(state_var.to_string()),
+            "}",
+        ],
+        NlrBoundary::ClassMethod {
+            has_class_vars: true,
+        } => docvec![
+            "{'class_var_result', ",
+            leaf::var(val_var.to_string()),
+            ", ",
+            leaf::var(state_var.to_string()),
+            "}",
+        ],
+        NlrBoundary::ClassMethod {
+            has_class_vars: false,
+        } => leaf::var(val_var.to_string()),
+        NlrBoundary::ValueType => docvec![
+            "{",
+            leaf::var(val_var.to_string()),
+            ", ",
+            leaf::var(state_var.to_string()),
+            "}",
+        ],
+    }
 }
 
 /// BT-764: Variable names for value type NLR try/catch wrapping.
@@ -827,11 +890,9 @@ impl NlrValueTypeCatchVars {
             leaf::var(self.ctk_var.clone()),
             ", ",
             leaf::var(self.token_var.clone()),
-            ") -> {",
-            leaf::var(self.val_var.clone()),
-            ", ",
-            leaf::var(self.state_var.clone()),
-            "}",
+            ") -> ",
+            // BT-2361: shared catch-arm builder — value-type yields `{Value, State}`.
+            nlr_arm_result(&self.val_var, &self.state_var, NlrBoundary::ValueType),
             nest(INDENT + 4, line()),
             "<",
             leaf::var(self.ot_pair_var.clone()),
@@ -1982,70 +2043,7 @@ impl CoreErlangGenerator {
         token_var: &str,
         needs_letrec: bool,
     ) -> Document<'static> {
-        let NlrCatchVars {
-            result_var,
-            cls_var,
-            err_var,
-            stk_var,
-            ctk_var,
-            val_var,
-            state_var,
-            ot_pair_var,
-        } = self.alloc_nlr_catch_vars();
-
-        let try_catch = docvec![
-            "let ",
-            leaf::var(token_var.to_string()),
-            " = call 'erlang':'make_ref'() in\n",
-            "try\n",
-            body_doc,
-            "\n",
-            "of ",
-            leaf::var(result_var.clone()),
-            " -> ",
-            leaf::var(result_var),
-            "\n",
-            "catch <",
-            leaf::var(cls_var.clone()),
-            ", ",
-            leaf::var(err_var.clone()),
-            ", ",
-            leaf::var(stk_var.clone()),
-            "> ->\n",
-            "  case {",
-            leaf::var(cls_var.clone()),
-            ", ",
-            leaf::var(err_var.clone()),
-            "} of\n",
-            "    <{'throw', {'$bt_nlr', ",
-            leaf::var(ctk_var.clone()),
-            ", ",
-            leaf::var(val_var.clone()),
-            ", ",
-            leaf::var(state_var.clone()),
-            "}}> ",
-            "when call 'erlang':'=:='(",
-            leaf::var(ctk_var),
-            ", ",
-            leaf::var(token_var.to_string()),
-            ") -> ",
-            "{'reply', ",
-            leaf::var(val_var),
-            ", ",
-            leaf::var(state_var),
-            "}\n",
-            "    <",
-            leaf::var(ot_pair_var),
-            "> when 'true' -> ",
-            "primop 'raw_raise'(",
-            leaf::var(cls_var),
-            ", ",
-            leaf::var(err_var),
-            ", ",
-            leaf::var(stk_var),
-            ")\n",
-            "  end",
-        ];
+        let try_catch = self.wrap_body_with_nlr_catch(body_doc, token_var, NlrBoundary::ActorReply);
 
         if needs_letrec {
             docvec![
@@ -2070,6 +2068,31 @@ impl CoreErlangGenerator {
         token_var: &str,
         has_class_vars: bool,
     ) -> Document<'static> {
+        self.wrap_body_with_nlr_catch(
+            body_doc,
+            token_var,
+            NlrBoundary::ClassMethod { has_class_vars },
+        )
+    }
+
+    /// BT-2361: The single boundary-parameterised NLR try/catch wrapper.
+    ///
+    /// Collapses what used to be the structurally-identical Actor and class-method
+    /// `wrap_*_body_with_nlr_catch` wrappers (and shares its catch-arm builder with the
+    /// value-type wrapper). The try/catch scaffolding — make the NLR token, `try`/`of`
+    /// the body, `catch` the 4-tuple `{'$bt_nlr', Token, Value, State}` throw — is
+    /// identical across contexts; only the matching arm's result Document varies, which
+    /// `boundary` selects via [`nlr_arm_result`].
+    ///
+    /// BT-875: Use Document/docvec! — never format!() for Core Erlang fragments.
+    fn wrap_body_with_nlr_catch(
+        &mut self,
+        body_doc: Document<'static>,
+        token_var: &str,
+        boundary: NlrBoundary,
+    ) -> Document<'static> {
+        let vars = self.alloc_nlr_catch_vars();
+        let nlr_arm_result = nlr_arm_result(&vars.val_var, &vars.state_var, boundary);
         let NlrCatchVars {
             result_var,
             cls_var,
@@ -2079,20 +2102,7 @@ impl CoreErlangGenerator {
             val_var,
             state_var,
             ot_pair_var,
-        } = self.alloc_nlr_catch_vars();
-
-        // BT-875: Use Document/docvec! — never format!() for Core Erlang fragments.
-        let nlr_arm_result: Document<'static> = if has_class_vars {
-            docvec![
-                "{'class_var_result', ",
-                leaf::var(val_var.clone()),
-                ", ",
-                leaf::var(state_var.clone()),
-                "}",
-            ]
-        } else {
-            leaf::var(val_var.clone())
-        };
+        } = vars;
 
         docvec![
             "let ",
