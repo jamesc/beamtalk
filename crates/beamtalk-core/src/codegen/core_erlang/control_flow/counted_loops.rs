@@ -57,6 +57,9 @@ impl CoreErlangGenerator {
 
         let n_var = self.fresh_temp_var("temp");
         let receiver_code = self.expression_doc(receiver)?;
+        // BT-2354: gensym the loop counter so a user local named `i` (→ Core `I`)
+        // cannot collide with the loop fun parameter.
+        let counter = self.fresh_temp_var("loopidx");
 
         let frame = CountedLoopFrame {
             preamble: docvec![
@@ -68,15 +71,18 @@ impl CoreErlangGenerator {
             ],
             fn_name: "repeat".to_string(),
             continue_header: docvec![
-                "case call 'erlang':'=<'(I, ",
+                "case call 'erlang':'=<'(",
+                leaf::var(counter.clone()),
+                ", ",
                 leaf::var(n_var),
                 ") of ",
                 "<'true'> when 'true' -> ",
             ],
-            next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
+            next_counter: docvec!["call 'erlang':'+'(", leaf::var(counter.clone()), ", 1)"],
             initial_counter: leaf::int_lit(1),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param: None,
+            counter,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -95,6 +101,8 @@ impl CoreErlangGenerator {
         let receiver_code = self.expression_doc(receiver)?;
         let end_var = self.fresh_temp_var("temp");
         let limit_code = self.expression_doc(limit)?;
+        // BT-2354: gensym the loop counter (the block param is aliased to it).
+        let counter = self.fresh_temp_var("loopidx");
 
         // Bind the block parameter name (e.g. "i" in [:i | ...])
         let body_param = body.parameters.first().map(|p| p.name.to_string());
@@ -113,15 +121,18 @@ impl CoreErlangGenerator {
             ],
             fn_name: "loop".to_string(),
             continue_header: docvec![
-                "case call 'erlang':'=<'(I, ",
+                "case call 'erlang':'=<'(",
+                leaf::var(counter.clone()),
+                ", ",
                 leaf::var(end_var),
                 ") of ",
                 "<'true'> when 'true' -> ",
             ],
-            next_counter: Document::Str("call 'erlang':'+'(I, 1)"),
+            next_counter: docvec!["call 'erlang':'+'(", leaf::var(counter.clone()), ", 1)"],
             initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
+            counter,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -143,6 +154,8 @@ impl CoreErlangGenerator {
         let limit_code = self.expression_doc(limit)?;
         let step_var = self.fresh_temp_var("temp");
         let step_code = self.expression_doc(step)?;
+        // BT-2354: gensym the loop counter (the block param is aliased to it).
+        let counter = self.fresh_temp_var("loopidx");
 
         let body_param = body.parameters.first().map(|p| p.name.to_string());
 
@@ -167,14 +180,18 @@ impl CoreErlangGenerator {
                 "let Continue = case call 'erlang':'>'(",
                 leaf::var(step_var.clone()),
                 ", 0) of ",
-                "<'true'> when 'true' -> call 'erlang':'=<'(I, ",
+                "<'true'> when 'true' -> call 'erlang':'=<'(",
+                leaf::var(counter.clone()),
+                ", ",
                 leaf::var(end_var.clone()),
                 ") ",
                 "<'false'> when 'true' -> ",
                 "case call 'erlang':'<'(",
                 leaf::var(step_var.clone()),
                 ", 0) of ",
-                "<'true'> when 'true' -> call 'erlang':'>='(I, ",
+                "<'true'> when 'true' -> call 'erlang':'>='(",
+                leaf::var(counter.clone()),
+                ", ",
                 leaf::var(end_var),
                 ") ",
                 "<'false'> when 'true' -> 'false' ",
@@ -182,10 +199,17 @@ impl CoreErlangGenerator {
                 "end in case Continue of ",
                 "<'true'> when 'true' -> ",
             ],
-            next_counter: docvec!["call 'erlang':'+'(I, ", leaf::var(step_var), ")"],
+            next_counter: docvec![
+                "call 'erlang':'+'(",
+                leaf::var(counter.clone()),
+                ", ",
+                leaf::var(step_var),
+                ")"
+            ],
             initial_counter: leaf::var(start_var),
             false_arm: docvec!["<'false'> when 'true' -> {'nil', StateAcc} ", "end "],
             body_param,
+            counter,
         };
 
         self.generate_counted_stateful_loop(&frame, body, &plan)
@@ -261,13 +285,15 @@ mod tests {
             code.contains("letrec"),
             "to:do: with local mutation should generate a letrec. Got:\n{code}"
         );
-        // Fun signature must be (I, Sum), not (I, StateAcc).
+        // Fun signature must be (<gensym'd counter>, Sum), not (_, StateAcc).
+        // BT-2354: the counter is gensym'd (e.g. `_loopidx3`) so it can never
+        // collide with a user local named `i` (→ Core `I`).
         assert!(
-            code.contains("fun (I, Sum)"),
-            "direct-params: letrec fun should have Sum as a direct parameter. Got:\n{code}"
+            code.contains("= fun (_loopidx") && code.contains(", Sum) ->"),
+            "direct-params: letrec fun should have gensym'd counter + Sum params. Got:\n{code}"
         );
         assert!(
-            !code.contains("fun (I, StateAcc)"),
+            !code.contains(", StateAcc) ->"),
             "direct-params: letrec fun must not use StateAcc signature. Got:\n{code}"
         );
         // At most one maps:put for the local variable (the exit StateAcc rebuild).
@@ -289,11 +315,11 @@ mod tests {
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    3 timesRepeat: [sum := sum + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("fun (I, Sum)"),
-            "timesRepeat: direct-params: letrec fun should have Sum as param. Got:\n{code}"
+            code.contains("= fun (_loopidx") && code.contains(", Sum) ->"),
+            "timesRepeat: direct-params: letrec fun should have gensym'd counter + Sum. Got:\n{code}"
         );
         assert!(
-            !code.contains("fun (I, StateAcc)"),
+            !code.contains(", StateAcc) ->"),
             "timesRepeat: direct-params: must not use StateAcc signature. Got:\n{code}"
         );
         assert!(
@@ -308,11 +334,11 @@ mod tests {
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            code.contains("fun (I, Sum)"),
-            "to:by:do: direct-params: letrec fun should have Sum as param. Got:\n{code}"
+            code.contains("= fun (_loopidx") && code.contains(", Sum) ->"),
+            "to:by:do: direct-params: letrec fun should have gensym'd counter + Sum. Got:\n{code}"
         );
         assert!(
-            !code.contains("fun (I, StateAcc)"),
+            !code.contains(", StateAcc) ->"),
             "to:by:do: direct-params: must not use StateAcc signature. Got:\n{code}"
         );
         assert!(
@@ -335,11 +361,11 @@ mod tests {
         );
         // Fun signature must NOT have State — mutated field 'n' is a direct param.
         assert!(
-            !code.contains("fun (I, Sum, State)"),
+            !code.contains(", Sum, State) ->"),
             "full-extract: letrec fun must not have State as param. Got:\n{code}"
         );
         assert!(
-            !code.contains("fun (I, StateAcc)"),
+            !code.contains(", StateAcc) ->"),
             "full-extract: letrec fun must not use StateAcc signature. Got:\n{code}"
         );
         // Mutated field 'n' is pre-extracted before the letrec.
@@ -372,11 +398,11 @@ mod tests {
         let code = codegen(src);
         // No State in fun signature.
         assert!(
-            !code.contains("fun (I, Sum, State)"),
+            !code.contains(", Sum, State) ->"),
             "timesRepeat: full-extract: must not have State as param. Got:\n{code}"
         );
         assert!(
-            !code.contains("fun (I, StateAcc)"),
+            !code.contains(", StateAcc) ->"),
             "timesRepeat: full-extract: must not use StateAcc signature. Got:\n{code}"
         );
         // Mutated field 'n' is a direct param.
@@ -402,11 +428,11 @@ mod tests {
         let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run =>\n    sum := 0\n    1 to: 10 by: 2 do: [:i | sum := sum + i. self.n := self.n + 1]\n    self.n := sum\n";
         let code = codegen(src);
         assert!(
-            !code.contains("fun (I, Sum, State)"),
+            !code.contains(", Sum, State) ->"),
             "to:by:do: full-extract: must not have State as param. Got:\n{code}"
         );
         assert!(
-            !code.contains("fun (I, StateAcc)"),
+            !code.contains(", StateAcc) ->"),
             "to:by:do: full-extract: must not use StateAcc signature. Got:\n{code}"
         );
         assert!(
@@ -501,7 +527,7 @@ mod tests {
         let code = codegen(src);
         // Hybrid mode triggered (field write for n, local sum).
         assert!(
-            !code.contains("fun (I, StateAcc)"),
+            !code.contains(", StateAcc) ->"),
             "readonly field: must not use StateAcc signature. Got:\n{code}"
         );
         // Readonly field pre-extracted before the letrec with maps:get.

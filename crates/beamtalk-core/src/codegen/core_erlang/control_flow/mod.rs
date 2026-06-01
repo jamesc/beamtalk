@@ -1053,8 +1053,17 @@ pub(super) struct CountedLoopFrame {
     pub initial_counter: Document<'static>,
     /// The `false` arm and `end` (e.g. `"<'false'> when 'true' -> {'nil', StateAcc} end"`).
     pub false_arm: Document<'static>,
-    /// Optional Beamtalk block-parameter name to bind to `"I"`.
+    /// Optional Beamtalk block-parameter name to bind to the gensym'd counter.
     pub body_param: Option<String>,
+    /// BT-2354: gensym'd Core Erlang counter variable name (e.g. `_loopidx3`).
+    ///
+    /// Used as the loop fun's first parameter and threaded through
+    /// `continue_header`/`next_counter`. Produced by `fresh_temp_var` (leading
+    /// underscore + a monotonic counter), so it does not collide with the common
+    /// case of a user local named `i`, which maps to `I` via `to_core_var`. The
+    /// unique suffix also keeps it distinct from underscore-prefixed user
+    /// identifiers (which `to_core_var` passes through verbatim).
+    pub counter: String,
 }
 
 // ─── CoreErlangGenerator impls ────────────────────────────────────────────────
@@ -2272,14 +2281,16 @@ impl CoreErlangGenerator {
         docs.push(docvec![
             " letrec ",
             leaf::fname(frame.fn_name.clone(), 2),
-            " = fun (I, StateAcc) -> ",
+            " = fun (",
+            leaf::var(frame.counter.clone()),
+            ", StateAcc) -> ",
         ]);
 
         self.push_scope();
 
-        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → "I")
+        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
         if let Some(ref bt_name) = frame.body_param {
-            self.bind_var(bt_name, "I");
+            self.bind_var(bt_name, &frame.counter);
         }
 
         // Unpack threaded locals at the top of each iteration
@@ -2338,7 +2349,7 @@ impl CoreErlangGenerator {
         // Collect initial arg values from the outer scope (before push_scope overwrites them).
         let initial_direct_args = plan.initial_direct_args(self);
 
-        // Build the fun parameter list: (I, Var1, ..., VarN)
+        // Build the fun parameter list: (<counter>, Var1, ..., VarN)
         let param_names: Vec<String> = plan
             .threaded_locals
             .iter()
@@ -2346,7 +2357,7 @@ impl CoreErlangGenerator {
             .collect();
         let arity = 1 + param_names.len();
         let param_list_doc = join(
-            std::iter::once(Document::Str("I"))
+            std::iter::once(leaf::var(frame.counter.clone()))
                 .chain(param_names.iter().map(|v| leaf::var(v.clone()))),
             &Document::Str(", "),
         );
@@ -2363,9 +2374,9 @@ impl CoreErlangGenerator {
 
         self.push_scope();
 
-        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → "I")
+        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
         if let Some(ref bt_name) = frame.body_param {
-            self.bind_var(bt_name, "I");
+            self.bind_var(bt_name, &frame.counter);
         }
 
         // Register var → param bindings (no unpack docs emitted in direct-params mode).
@@ -2470,9 +2481,9 @@ impl CoreErlangGenerator {
         let arity =
             1 + local_param_names.len() + readonly_param_names.len() + mutated_param_names.len();
 
-        // Build param list doc: (I, Var1, ..., VarN, RField1, ..., MField1, ...)
+        // Build param list doc: (<counter>, Var1, ..., VarN, RField1, ..., MField1, ...)
         let param_list_doc = join(
-            std::iter::once(Document::Str("I"))
+            std::iter::once(leaf::var(frame.counter.clone()))
                 .chain(local_param_names.iter().map(|v| leaf::var(v.clone())))
                 .chain(readonly_param_names.iter().map(|v| leaf::var(v.clone())))
                 .chain(mutated_param_names.iter().map(|v| leaf::var(v.clone()))),
@@ -2492,9 +2503,9 @@ impl CoreErlangGenerator {
 
         self.push_scope();
 
-        // Bind block counter param if any (e.g. to:do: [:i | ...] → bind "i" → "I")
+        // Bind block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
         if let Some(ref bt_name) = frame.body_param {
-            self.bind_var(bt_name, "I");
+            self.bind_var(bt_name, &frame.counter);
         }
 
         // Register local var bindings (no unpack docs emitted in hybrid mode).
