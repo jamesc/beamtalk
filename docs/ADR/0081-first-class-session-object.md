@@ -558,6 +558,20 @@ The `:bindings` and `:clear` meta-commands (and the `get_bindings` MCP tool) are
 
 The meta-commands existed only on the REPL surface. Removing them is a small loss for muscle-memory CLI users (one `migrate_to` shell-side error message in the release notes is sufficient) and a strict gain for MCP and WebSocket clients, which now have a Beamtalk-native path to per-session state with both reads and write-through mutations.
 
+## Implementation Tracking
+
+**Epic:** [BT-2364](https://linear.app/beamtalk/issue/BT-2364) — First-Class Session Object (ADR 0081)
+**Status:** Planned
+
+| # | Issue | Scope | Blocked by |
+|---|-------|-------|------------|
+| 1 | BT-2365 | Binding-model foundation: locals-only storage + lazy global resolution | — |
+| 2 | BT-2366 | Session runtime primitives + pending-mutation plumbing | BT-2365 |
+| 3 | BT-2367 | Stdlib `Session` + `BindingsView`; upgrade `Workspace globals` | BT-2366 |
+| 4 | BT-2368 | `WorkspaceInterface`: `currentSession` + `sessions` | BT-2366 |
+| 5 | BT-2369 | Remove `:bindings` / `:clear` + `get_bindings` MCP tool | BT-2367, BT-2368 |
+| 6 | BT-2370 | E2E btscript + docs | BT-2369 |
+
 ## References
 
 - [BT-2092](https://linear.app/beamtalk/issue/BT-2092/first-class-session-object-walkable-binding-layers-smalltalk-style) — driving issue
