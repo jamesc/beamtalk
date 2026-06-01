@@ -1,0 +1,351 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2345: Metamorphic invariance harness for outer-local threading codegen.
+//
+// This is the *relative* (metamorphic) oracle that complements the *absolute*
+// oracle in value_type_mutation_matrix_test.bt (BT-2346). Where the matrix test
+// asserts a hand-written ground-truth value per cell, this harness asserts only
+// pairwise EQUALITY between runs of the SAME logical fragment in different
+// contexts / positions / constructs. There are NO hand-written expected values
+// here: every assertion is "these two runs of the same program must agree".
+//
+// It consumes the single shared fragment corpus — it does NOT fork a parallel
+// fragment list:
+//
+//   stdlib/test/fixtures/mutation_corpus_value.bt          (Value subclass context)
+//   stdlib/test/fixtures/mutation_corpus_actor.bt          (Actor context)
+//   stdlib/test/fixtures/mutation_corpus_class_method.bt   (class-method context)
+//
+// plus TestCase-context `frag*` helpers re-declared below (the test class is
+// itself a value-type). Adding a fragment to the corpora and a corresponding
+// pair/triple of assertions here automatically extends every applicable
+// relation.
+//
+// Three metamorphic relations are implemented:
+//
+//   1. Context invariance — a fragment's final threaded value is the same in the
+//      value-type, Actor, class-method, and TestCase contexts. Needs no expected
+//      value and no enumeration: it only needs >=1 correct reference context to
+//      disagree with a buggy one. This is the workhorse for "any block-taking
+//      method", not just loops.
+//   2. Position invariance — a threaded local's final value is the same whether
+//      the construct sits in non-last position or as the RHS of a local
+//      assignment (only fragments with identical block bodies in two positions
+//      are paired; fragments whose bodies differ by position are not).
+//   3. Construct equivalence — the four semantically equivalent loop forms
+//      (`1 to: n do:` == `n timesRepeat:` == `(1 to: n) do:` == a hand-rolled
+//      `whileTrue:` accumulator) yield equal results. This relation is a
+//      hand-frozen set of equivalent constructs and does NOT generalize beyond
+//      loops; the generalizing workhorse is relation 1.
+//
+// ────────────────────────────────────────────────────────────────────────────
+// KNOWN RESIDUAL GAP — do not over-trust this harness.
+//
+// Metamorphic relations are *relative* oracles. A method broken UNIFORMLY in
+// ALL contexts and ALL positions — and also absent from the construct-
+// equivalence set — produces a FALSE PASS here: every reference run agrees
+// because every reference run is wrong. Catching that case requires an
+// *absolute* oracle with a ground-truth value, i.e. the mutation matrix in
+// value_type_mutation_matrix_test.bt (BT-2346). The two harnesses are only
+// jointly complete because they share one fragment corpus. The truly arbitrary
+// user-method-shape case (uniform breakage in a method nobody enumerated) stays
+// out of scope and is deferred to the fuzzing item.
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Gating: the matrix test gates a small number of cells behind known-open bugs.
+// All value-type/Actor switches (bt2342/bt2355/bt2359) have landed and are off,
+// so cross-context equality holds for those. The one still-open gate is
+// bt2360ClassMethodCondAssignRhsPending (BT-2371): in class-method context a
+// conditional used as a parenthesized assignment RHS still drops the sibling
+// outer-local mutation. Where that single cell would break an equality relation,
+// the class-method context is excluded from exactly that relation (and only
+// that relation), with a BT-2371 reference — we do not assert equality across a
+// known-broken cell.
+
+TestCase subclass: MetamorphicThreadingTest
+
+  // Fresh corpus instance per cell so state cannot bleed between assertions.
+  valueCorpus => MutationCorpusValue new
+
+  actorCorpus => MutationCorpusActor spawn
+
+  // Class-method conditional-as-parenthesized-assignment-RHS still drops
+  // sibling-local threading (tracked as BT-2371). Same switch name as the
+  // matrix test (value_type_mutation_matrix_test.bt) for cross-file
+  // consistency. While true, the class-method context is excluded from the
+  // ifTrueIfFalseAssignRhs context-invariance relation. Flip off when BT-2371
+  // lands.
+  bt2360ClassMethodCondAssignRhsPending => true
+
+  // ── TestCase-context fragments (the test class is itself a value-type) ──────
+  // `frag` prefix keeps BUnit from treating them as test methods. These mirror
+  // the value/actor/class-method corpus fragment bodies so the TestCase context
+  // can join the context-invariance relations.
+  fragToDoNonLastWriteOnly =>
+    last := 0
+    1 to: 5 do: [:i | last := i]
+    last
+
+  fragToDoNonLastReadWrite =>
+    sum := 0
+    1 to: 5 do: [:i | sum := sum + i]
+    sum
+
+  fragTimesRepeatNonLastReadWrite =>
+    count := 0
+    5 timesRepeat: [count := count + 1]
+    count
+
+  fragRangeDoNonLastReadWrite =>
+    sum := 0
+    (1 to: 5) do: [:i | sum := sum + i]
+    sum
+
+  fragWhileTrueAccumulator =>
+    sum := 0
+    i := 1
+    [i <= 5]
+      whileTrue: [
+        sum := sum + i
+        i := i + 1
+      ]
+    sum
+
+  // timesRepeat form that SUMS 1..5 (the corpus timesRepeat fragment only
+  // counts iterations). Carries its own index so it is sum-equivalent to the
+  // to:do: / rangeDo / whileTrue accumulator forms.
+  fragTimesRepeatAccumulator =>
+    sum := 0
+    i := 1
+    5
+      timesRepeat: [
+        sum := sum + i
+        i := i + 1
+      ]
+    sum
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  RELATION 1 — Context invariance
+  //
+  //  For each shared fragment, the final threaded value must agree across the
+  //  value-type, Actor, class-method, and (where a frag exists) TestCase
+  //  contexts. No hand-written expected value: the value-type run is the
+  //  reference and every other context is asserted EQUAL to it.
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ── to:do: ──────────────────────────────────────────────────────────────
+  // BT-2308 reproducer: outer-local mutation in `1 to: 5 do:`. Caught here by
+  // cross-context equality with NO hand-written expected value.
+  testContextInvarianceToDoNonLastWriteOnly =>
+    ref := self valueCorpus toDoNonLastWriteOnly
+    self assert: self actorCorpus toDoNonLastWriteOnly equals: ref
+    self assert: MutationCorpusClassMethod toDoNonLastWriteOnly equals: ref
+    self assert: self fragToDoNonLastWriteOnly equals: ref
+
+  testContextInvarianceToDoNonLastReadWrite =>
+    ref := self valueCorpus toDoNonLastReadWrite
+    self assert: self actorCorpus toDoNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod toDoNonLastReadWrite equals: ref
+    self assert: self fragToDoNonLastReadWrite equals: ref
+
+  testContextInvarianceToDoAssignRhsReadWrite =>
+    ref := self valueCorpus toDoAssignRhsReadWrite
+    self assert: self actorCorpus toDoAssignRhsReadWrite equals: ref
+    self assert: MutationCorpusClassMethod toDoAssignRhsReadWrite equals: ref
+
+  // ── to:by:do: ─────────────────────────────────────────────────────────────
+  testContextInvarianceToByDoNonLastWriteOnly =>
+    ref := self valueCorpus toByDoNonLastWriteOnly
+    self assert: self actorCorpus toByDoNonLastWriteOnly equals: ref
+    self assert: MutationCorpusClassMethod toByDoNonLastWriteOnly equals: ref
+
+  testContextInvarianceToByDoNonLastReadWrite =>
+    ref := self valueCorpus toByDoNonLastReadWrite
+    self assert: self actorCorpus toByDoNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod toByDoNonLastReadWrite equals: ref
+
+  // ── timesRepeat: ──────────────────────────────────────────────────────────
+  testContextInvarianceTimesRepeatNonLastWriteOnly =>
+    ref := self valueCorpus timesRepeatNonLastWriteOnly
+    self assert: self actorCorpus timesRepeatNonLastWriteOnly equals: ref
+    self assert: MutationCorpusClassMethod timesRepeatNonLastWriteOnly equals: ref
+
+  testContextInvarianceTimesRepeatNonLastReadWrite =>
+    ref := self valueCorpus timesRepeatNonLastReadWrite
+    self assert: self actorCorpus timesRepeatNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod timesRepeatNonLastReadWrite equals: ref
+    self assert: self fragTimesRepeatNonLastReadWrite equals: ref
+
+  // ── whileTrue: / whileFalse: ────────────────────────────────────────────────
+  testContextInvarianceWhileTrueNonLastReadWrite =>
+    ref := self valueCorpus whileTrueNonLastReadWrite
+    self assert: self actorCorpus whileTrueNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod whileTrueNonLastReadWrite equals: ref
+
+  testContextInvarianceWhileFalseNonLastReadWrite =>
+    ref := self valueCorpus whileFalseNonLastReadWrite
+    self assert: self actorCorpus whileFalseNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod whileFalseNonLastReadWrite equals: ref
+
+  // ── (1 to: n) do: ───────────────────────────────────────────────────────────
+  testContextInvarianceRangeDoNonLastReadWrite =>
+    ref := self valueCorpus rangeDoNonLastReadWrite
+    self assert: self actorCorpus rangeDoNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod rangeDoNonLastReadWrite equals: ref
+    self assert: self fragRangeDoNonLastReadWrite equals: ref
+
+  // ── collect: ──────────────────────────────────────────────────────────────
+  testContextInvarianceCollectNonLastReadWrite =>
+    ref := self valueCorpus collectNonLastReadWrite
+    self assert: self actorCorpus collectNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod collectNonLastReadWrite equals: ref
+
+  testContextInvarianceCollectAssignRhsReadWrite =>
+    ref := self valueCorpus collectAssignRhsReadWrite
+    self assert: self actorCorpus collectAssignRhsReadWrite equals: ref
+    self assert: MutationCorpusClassMethod collectAssignRhsReadWrite equals: ref
+
+  // ── select: / reject: ───────────────────────────────────────────────────────
+  testContextInvarianceSelectNonLastReadWrite =>
+    ref := self valueCorpus selectNonLastReadWrite
+    self assert: self actorCorpus selectNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod selectNonLastReadWrite equals: ref
+
+  testContextInvarianceRejectNonLastReadWrite =>
+    ref := self valueCorpus rejectNonLastReadWrite
+    self assert: self actorCorpus rejectNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod rejectNonLastReadWrite equals: ref
+
+  // ── inject:into: ─────────────────────────────────────────────────────────────
+  testContextInvarianceInjectNonLastReadWrite =>
+    ref := self valueCorpus injectNonLastReadWrite
+    self assert: self actorCorpus injectNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod injectNonLastReadWrite equals: ref
+
+  testContextInvarianceInjectAssignRhsReadWrite =>
+    ref := self valueCorpus injectAssignRhsReadWrite
+    self assert: self actorCorpus injectAssignRhsReadWrite equals: ref
+    self assert: MutationCorpusClassMethod injectAssignRhsReadWrite equals: ref
+
+  // ── detect: / count: ────────────────────────────────────────────────────────
+  testContextInvarianceDetectNonLastReadWrite =>
+    ref := self valueCorpus detectNonLastReadWrite
+    self assert: self actorCorpus detectNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod detectNonLastReadWrite equals: ref
+
+  testContextInvarianceCountNonLastReadWrite =>
+    ref := self valueCorpus countNonLastReadWrite
+    self assert: self actorCorpus countNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod countNonLastReadWrite equals: ref
+
+  // ── ifTrue: (conditionals) ──────────────────────────────────────────────────
+  testContextInvarianceIfTrueNonLastWriteOnly =>
+    ref := self valueCorpus ifTrueNonLastWriteOnly: true
+    self assert: (self actorCorpus ifTrueNonLastWriteOnly: true) equals: ref
+    self assert: (MutationCorpusClassMethod ifTrueNonLastWriteOnly: true) equals: ref
+
+  testContextInvarianceIfTrueNonLastReadWrite =>
+    ref := self valueCorpus ifTrueNonLastReadWrite: true
+    self assert: (self actorCorpus ifTrueNonLastReadWrite: true) equals: ref
+    self assert: (MutationCorpusClassMethod ifTrueNonLastReadWrite: true) equals: ref
+
+  testContextInvarianceIfTrueLastReadWrite =>
+    ref := self valueCorpus ifTrueLastReadWrite: true
+    self assert: (self actorCorpus ifTrueLastReadWrite: true) equals: ref
+    self assert: (MutationCorpusClassMethod ifTrueLastReadWrite: true) equals: ref
+
+  // ── ifTrue:ifFalse: ──────────────────────────────────────────────────────────
+  testContextInvarianceIfTrueIfFalseNonLastReadWrite =>
+    ref := self valueCorpus ifTrueIfFalseNonLastReadWrite: true
+    self assert: (self actorCorpus ifTrueIfFalseNonLastReadWrite: true) equals: ref
+    self assert: (MutationCorpusClassMethod ifTrueIfFalseNonLastReadWrite: true) equals: ref
+
+  // Class-method context excluded while BT-2371 is open (the class-method
+  // conditional-as-paren-assign-RHS cell drops the sibling-local mutation, so
+  // asserting equality across it would assert across a known-broken cell).
+  testContextInvarianceIfTrueIfFalseAssignRhsReadWrite =>
+    ref := self valueCorpus ifTrueIfFalseAssignRhsReadWrite: true
+    self assert: (self actorCorpus ifTrueIfFalseAssignRhsReadWrite: true) equals: ref
+    self bt2360ClassMethodCondAssignRhsPending
+      ifFalse: [
+        self assert: (MutationCorpusClassMethod ifTrueIfFalseAssignRhsReadWrite: true) equals: ref
+      ]
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  RELATION 2 — Position invariance
+  //
+  //  A threaded local's final value is the same whether the construct sits in
+  //  non-last position or as the RHS of a local assignment. Only fragments with
+  //  IDENTICAL block bodies in both positions are paired (e.g. toDo/collect/
+  //  inject ReadWrite, whose NonLast and AssignRhs variants share a body).
+  //  Conditional fragments whose bodies differ by position are not paired here.
+  //  Each pairing is checked in every context that exposes both positions.
+  // ════════════════════════════════════════════════════════════════════════
+  testPositionInvarianceToDoReadWriteValue =>
+    self assert: self valueCorpus toDoAssignRhsReadWrite equals: self valueCorpus toDoNonLastReadWrite
+
+  testPositionInvarianceToDoReadWriteActor =>
+    self assert: self actorCorpus toDoAssignRhsReadWrite equals: self actorCorpus toDoNonLastReadWrite
+
+  testPositionInvarianceToDoReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod toDoAssignRhsReadWrite equals: MutationCorpusClassMethod toDoNonLastReadWrite
+
+  testPositionInvarianceCollectReadWriteValue =>
+    self assert: self valueCorpus collectAssignRhsReadWrite equals: self valueCorpus collectNonLastReadWrite
+
+  testPositionInvarianceCollectReadWriteActor =>
+    self assert: self actorCorpus collectAssignRhsReadWrite equals: self actorCorpus collectNonLastReadWrite
+
+  testPositionInvarianceCollectReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod collectAssignRhsReadWrite equals: MutationCorpusClassMethod collectNonLastReadWrite
+
+  testPositionInvarianceInjectReadWriteValue =>
+    self assert: self valueCorpus injectAssignRhsReadWrite equals: self valueCorpus injectNonLastReadWrite
+
+  testPositionInvarianceInjectReadWriteActor =>
+    self assert: self actorCorpus injectAssignRhsReadWrite equals: self actorCorpus injectNonLastReadWrite
+
+  testPositionInvarianceInjectReadWriteClassMethod =>
+    self assert: MutationCorpusClassMethod injectAssignRhsReadWrite equals: MutationCorpusClassMethod injectNonLastReadWrite
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  RELATION 3 — Construct equivalence
+  //
+  //  The four semantically equivalent loop forms summing 1..5 must all yield
+  //  the same total. Checked in every context using THAT context's own
+  //  fragments, so a context-specific regression in any single construct is
+  //  caught (the accumulators are not borrowed from a foreign context):
+  //    `1 to: 5 do:`     (toDoNonLastReadWrite, the reference)
+  //    `(1 to: 5) do:`   (rangeDoNonLastReadWrite)
+  //    `5 timesRepeat:`  (timesRepeatAccumulatorReadWrite — corpus timesRepeat
+  //                       only counts, so a summing variant is used)
+  //    `whileTrue:`      (whileTrueAccumulatorReadWrite — hand-rolled accumulator)
+  //  This relation is a hand-frozen equivalence class and does NOT generalize
+  //  beyond these loop forms.
+  // ════════════════════════════════════════════════════════════════════════
+  testConstructEquivalenceValue =>
+    ref := self valueCorpus toDoNonLastReadWrite
+    self assert: self valueCorpus rangeDoNonLastReadWrite equals: ref
+    self assert: self valueCorpus timesRepeatAccumulatorReadWrite equals: ref
+    self assert: self valueCorpus whileTrueAccumulatorReadWrite equals: ref
+
+  testConstructEquivalenceActor =>
+    ref := self actorCorpus toDoNonLastReadWrite
+    self assert: self actorCorpus rangeDoNonLastReadWrite equals: ref
+    self assert: self actorCorpus timesRepeatAccumulatorReadWrite equals: ref
+    self assert: self actorCorpus whileTrueAccumulatorReadWrite equals: ref
+
+  testConstructEquivalenceClassMethod =>
+    ref := MutationCorpusClassMethod toDoNonLastReadWrite
+    self assert: MutationCorpusClassMethod rangeDoNonLastReadWrite equals: ref
+    self assert: MutationCorpusClassMethod timesRepeatAccumulatorReadWrite equals: ref
+    self assert: MutationCorpusClassMethod whileTrueAccumulatorReadWrite equals: ref
+
+  // TestCase context (the test class is itself a value-type); uses the local
+  // frag* accumulators, which run in this TestCase context.
+  testConstructEquivalenceTestCase =>
+    ref := self fragToDoNonLastReadWrite
+    self assert: self fragRangeDoNonLastReadWrite equals: ref
+    self assert: self fragTimesRepeatAccumulator equals: ref
+    self assert: self fragWhileTrueAccumulator equals: ref
