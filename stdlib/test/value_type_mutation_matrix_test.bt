@@ -50,8 +50,10 @@ TestCase subclass: ValueTypeMutationMatrixTest
   // Pending switch for BT-2359 value-type outer-local threading gaps that
   // BT-2342 did NOT cover: count:/detect: foldl predicates, and a threading
   // construct (loop/conditional) used as a parenthesized assignment RHS that
-  // threads a *sibling* outer local. Flip to `false` once BT-2359 lands.
-  bt2359Pending => true
+  // threads a *sibling* outer local. BT-2359 has landed, so the affected
+  // value-type cells now run their ground-truth asserts. Kept as a switch for
+  // documentation/bisection.
+  bt2359Pending => false
 
   // ── TestCase-context fragments (the test class is itself a value-type) ──────
   // `frag` prefix keeps BUnit from treating them as test methods.

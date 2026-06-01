@@ -878,3 +878,73 @@ fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
         "Should extract second element into temp for equality check. Got:\n{code}"
     );
 }
+
+// BT-2359: value-type outer-local threading for count:/detect: predicates and
+// threading constructs used as a (parenthesized) assignment RHS.
+
+#[test]
+fn test_vt_count_predicate_threads_outer_local() {
+    // BT-2359: `count:` whose predicate read+writes a captured outer local must
+    // thread the mutation back so the post-`count:` read sees the final value.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    n := 0\n    #(1, 2, 3) count: [:i | n := n + 1. i > 0]\n    n\n";
+    let code = codegen(src);
+    eprintln!("Generated code for vt count: threading:\n{code}");
+    // The count: foldl packs the threaded local into the StateAcc; the open
+    // extraction must read it back via maps:get('__local__n', ...).
+    assert!(
+        code.contains("'__local__n'"),
+        "count: must thread the captured outer local 'n' via the StateAcc. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "count: with a mutating predicate must compile to a stateful lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_vt_detect_if_none_predicate_threads_outer_local() {
+    // BT-2359: `detect:ifNone:` whose predicate read+writes a captured outer
+    // local must thread the mutation back.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    n := 0\n    #(1, 2, 3) detect: [:i | n := n + 1. i > 10] ifNone: [-1]\n    n\n";
+    let code = codegen(src);
+    eprintln!("Generated code for vt detect:ifNone: threading:\n{code}");
+    assert!(
+        code.contains("'__local__n'"),
+        "detect:ifNone: must thread the captured outer local 'n' via the StateAcc. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_vt_loop_as_parenthesized_assign_rhs_threads_sibling_local() {
+    // BT-2359: a counted loop used as a parenthesized RHS — `_r := (1 to: 5 do:
+    // [...])` — must thread its sibling outer local (`sum`) into method scope.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    sum := 0\n    _r := (1 to: 5 do: [:i | sum := sum + i])\n    sum\n";
+    let code = codegen(src);
+    eprintln!("Generated code for vt parenthesized loop assign-RHS:\n{code}");
+    // The loop packs sum into the StateAcc; the assignment must extract it back
+    // (element 2 of the {value, StateAcc} tuple → maps:get('__local__sum', ...)).
+    assert!(
+        code.contains("'__local__sum'"),
+        "Parenthesized loop assign-RHS must thread sibling local 'sum'. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_vt_conditional_as_assign_rhs_threads_sibling_local() {
+    // BT-2359: a threading conditional as an assignment RHS — `_r := flag ifTrue:
+    // [x := 5. 42] ifFalse: [0]` — must bind the target to the branch's logical
+    // value AND thread the sibling local (`x`) into method scope.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: flag =>\n    x := 0\n    _r := flag ifTrue: [x := 5. 42] ifFalse: [0]\n    x\n";
+    let code = codegen(src);
+    eprintln!("Generated code for vt conditional assign-RHS:\n{code}");
+    // Each branch returns {LogicalValue, X}; the assignment binds the target to
+    // element 1 and rebinds x from element 2 of the case result.
+    assert!(
+        code.contains("'erlang':'element'(1,") && code.contains("'erlang':'element'(2,"),
+        "Conditional assign-RHS must extract logical value (element 1) and sibling local (element 2). Got:\n{code}"
+    );
+    assert!(
+        code.contains("case "),
+        "Conditional assign-RHS must compile to an inline case. Got:\n{code}"
+    );
+}
