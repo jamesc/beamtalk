@@ -268,7 +268,19 @@ bench:
 # ═══════════════════════════════════════════════════════════════════════════
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-beamtalk
+lint: lint-rust lint-erlang lint-js lint-beamtalk lint-workaround-comments
+
+# Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
+# reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders
+# (scripts/ci/workaround-comments-allowlist.txt) so CI is green on introduction;
+# only NEW unreferenced workaround comments fail.
+#
+# To clear a failure: file/find a tracking issue and add its `BT-NNNN` reference
+# to the offending comment line (or an adjacent line). To regenerate the
+# allowlist (e.g. for a genuine false positive), run with `--update`:
+#   scripts/ci/lint-workaround-comments.sh --update
+lint-workaround-comments:
+    @bash scripts/ci/lint-workaround-comments.sh
 
 # Lint Beamtalk: formatting check
 lint-beamtalk: fmt-check-beamtalk
