@@ -25,8 +25,8 @@
 //!   construct, [`CoreErlangGenerator::lower_threaded_last`] binds its logical value
 //!   (tuple element 1) to a fresh result var. The threaded locals do not escape in
 //!   last position, so element 2 is discarded. This subsumes the value-type
-//!   `emit_vt_last_expr` threading branch, `emit_vt_conditional_last`, and the
-//!   class-method `try_generate_class_method_threaded_last`.
+//!   `emit_vt_last_expr` threading branch (loops, foldl list-ops, and read+write
+//!   conditionals alike) and the class-method `try_generate_class_method_threaded_last`.
 //! * **Boundary (per-context adapter, the only thing that varies).** A
 //!   [`ThreadingBoundary`] captures how the bound result var is returned/stored:
 //!   the value-type `{Result, Self{N}}` / bare-`Result` shape, the class-method
@@ -229,8 +229,8 @@ impl CoreErlangGenerator {
     /// threading construct, so the caller falls back to its generic path.
     ///
     /// This is the single shared entry point that subsumes the value-type
-    /// `emit_vt_last_expr`/`emit_vt_conditional_last` threading branches and the
-    /// class-method `try_generate_class_method_threaded_last`.
+    /// `emit_vt_last_expr` threading branch (loops, foldl list-ops, and read+write
+    /// conditionals) and the class-method `try_generate_class_method_threaded_last`.
     pub(super) fn emit_threaded_last(
         &mut self,
         expr: &Expression,
