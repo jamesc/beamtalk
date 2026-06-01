@@ -370,7 +370,7 @@ fn test_filter_with_local_mutation_uses_tuple_acc() {
 }
 
 #[test]
-fn test_collect_with_mutation_has_string_aware_result() {
+fn test_collect_with_mutation_has_list_like_result() {
     // BT-1489/BT-2342: collect: with mutations reconstructs the result to match the
     // receiver via beamtalk_collection:from_list_like/2 (String → binary, Array → Array,
     // list → list), mirroring the pure collect: path.
@@ -383,7 +383,7 @@ fn test_collect_with_mutation_has_string_aware_result() {
 }
 
 #[test]
-fn test_select_with_mutation_has_string_aware_result() {
+fn test_select_with_mutation_has_list_like_result() {
     // BT-1489/BT-2342: select: with mutations reconstructs the result to match the
     // receiver via beamtalk_collection:from_list_like/2.
     let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items select: [:x | self.n := self.n + 1. x > 0]\n";

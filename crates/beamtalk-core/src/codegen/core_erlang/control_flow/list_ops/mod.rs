@@ -191,12 +191,12 @@ impl CoreErlangGenerator {
     /// - an `Array` when the receiver was an `Array` (BT-2342: the stateful foldl
     ///   path previously leaked a raw list where the pure path returns an Array),
     /// - the list unchanged otherwise (already-an-Erlang-list receivers).
-    pub(in crate::codegen::core_erlang) fn generate_string_aware_result_binding(
+    pub(in crate::codegen::core_erlang) fn generate_list_like_result_binding(
         &mut self,
         recv_var: &str,
         list_var: &str,
     ) -> (Document<'static>, String) {
-        let out_var = self.fresh_temp_var("StrAwareResult");
+        let out_var = self.fresh_temp_var("ListLikeResult");
         let binding = docvec![
             "let ",
             leaf::var(out_var.clone()),

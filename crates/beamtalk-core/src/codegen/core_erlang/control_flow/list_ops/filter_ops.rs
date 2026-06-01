@@ -176,7 +176,7 @@ impl CoreErlangGenerator {
 
             // BT-1489: String-aware result wrapping for filter ops.
             let (str_binding, str_result) =
-                self.generate_string_aware_result_binding(&recv_var_for_str_check, &final_list);
+                self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
             if self.in_direct_params_loop {
                 // BT-1329: Skip StateAcc repack. Emit open let-chain so variable rebindings
@@ -294,7 +294,7 @@ impl CoreErlangGenerator {
 
         // BT-1489: String-aware result wrapping for map-acc filter path.
         let (str_binding_doc, str_result) =
-            self.generate_string_aware_result_binding(&recv_var_for_str_check, &final_list);
+            self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
 
         let pre_doc = docvec![
             " in let ",
