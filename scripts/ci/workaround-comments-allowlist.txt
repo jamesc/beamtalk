@@ -1,0 +1,12 @@
+# Allowlist for lint-workaround-comments (BT-2347).
+# Snapshot of pre-existing workaround/limitation comments lacking a BT-NNNN ref.
+# Each line: <path><TAB><text-hash>. Regenerate with --update; do NOT hand-edit
+# unless adding a genuine false positive. New offenders must add a BT-NNNN ref.
+crates/beamtalk-core/src/codegen/core_erlang/intrinsics.rs	2986145653
+crates/beamtalk-core/src/semantic_analysis/type_checker/tests/dynamic_iterable.rs	1945273604
+crates/beamtalk-core/src/source_analysis/parser/tests/expression_tests.rs	1027809464
+fuzz/corpus/parse_arbitrary/011_class_reflection.bt	2213515280
+stdlib/test/class_builder_method_source_test.bt	4143809079
+stdlib/test/class_method_conditional_self_call_test.bt	2205655045
+stdlib/test/object_protocol_test.bt	2532884543
+test-package-compiler/cases/actor_state_mutation/main.bt	4258104962

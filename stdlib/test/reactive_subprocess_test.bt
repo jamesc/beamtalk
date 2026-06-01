@@ -179,7 +179,8 @@ TestCase subclass: ReactiveSubprocessTest
     self assert: proc stop equals: #ok
 
   // Helper: poll up to 50 times (10ms each) for delegate exitReceived.
-  // Uses timesRepeat: to avoid mutable local variables across block boundaries.
+  // Uses timesRepeat: to work around mutable locals not threading across block
+  // boundaries (BT-2308).
   waitForExit: delegate from: _proc =>
     50 timesRepeat: [delegate exitReceived ifFalse: [Timer sleep: 10]]
     delegate exitReceived ifFalse: [

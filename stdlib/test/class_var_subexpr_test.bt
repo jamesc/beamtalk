@@ -190,7 +190,7 @@ TestCase subclass: ClassVarSubExprTest
   // inside `let _Cond = ... in case`); the test runs the method to
   // confirm compilation + execution succeed. The class var mutation
   // observed by the enclosing method is a separate concern (class vars
-  // don't thread through `to:do:` loops — pre-existing limitation).
+  // don't thread through `to:do:` loops — pre-existing limitation, BT-2308).
   testTickInLoopConditionalCompilesAndRuns =>
     result := ClassVarSubExpr tickInLoopConditional
     self assert: result notNil
