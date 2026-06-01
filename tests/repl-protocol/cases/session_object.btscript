@@ -1,0 +1,114 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the first-class Session object and the BindingsView it returns
+// (ADR 0081 Phase 4 / BT-2367).
+//
+// These require E2E because Session current resolves the calling REPL session
+// from process context (seeded only on a real eval-worker spawn), and the
+// BindingsView reads/writes live session-local + workspace-global state.
+// Session-local writes are deferred to end of eval, so they are observed on the
+// NEXT line, not within the same expression.
+
+// ===========================================================================
+// SESSION CURRENT — factory returns a live Session in the REPL
+// ===========================================================================
+
+// Session current returns a Session value inside a REPL eval.
+Session current notNil
+// => true
+
+// Session current id is a stable String identifier.
+Session current id class
+// => String
+
+// ===========================================================================
+// SESSION BINDINGS — live view of session locals
+// ===========================================================================
+
+// Establish a session local.
+sx := 42
+// => 42
+
+// The local appears in the bindings view.
+Session current bindings includesKey: #sx
+// => true
+
+// Reading the local through the view.
+Session current bindings at: #sx
+// => 42
+
+// ===========================================================================
+// BINDINGSVIEW WRITE-THROUGH — at:put: returns the value put
+// ===========================================================================
+
+// at:put: returns the value put (Dictionary protocol), write is deferred.
+Session current bindings at: #sy put: 99
+// => 99
+
+// The deferred write is visible on the next line, as a resolvable name.
+sy
+// => 99
+
+// ...and through the view.
+Session current bindings at: #sy
+// => 99
+
+// removeKey: returns nil, removal is deferred.
+Session current bindings removeKey: #sy
+// => nil
+
+// The removed local is gone on the next line.
+Session current bindings includesKey: #sy
+// => false
+
+// ===========================================================================
+// SESSION RESOLVE: — shared resolver (locals -> globals -> classes)
+// ===========================================================================
+
+// A session local resolves to its value.
+Session current resolve: #sx
+// => 42
+
+// A singleton resolves through the workspace-globals layer.
+(Session current resolve: #Workspace) notNil
+// => true
+
+// ===========================================================================
+// SESSION CLEAR — clears session locals (deferred)
+// ===========================================================================
+
+// Clear empties the session locals.
+Session current clear
+// => nil
+
+// After clear, the previously-set local is gone.
+Session current bindings includesKey: #sx
+// => false
+
+// ===========================================================================
+// WORKSPACE GLOBALS — same live BindingsView type, synchronous writes
+// ===========================================================================
+
+// Workspace globals is a BindingsView (shares the Dictionary protocol).
+Workspace globals class
+// => BindingsView
+
+// Singletons are visible through the globals view.
+Workspace globals includesKey: #Transcript
+// => true
+
+// Workspace-global writes are SYNCHRONOUS (route through bind:as:), so the new
+// binding is observable immediately as a bare name on the next line.
+Workspace globals at: #gZ put: 7
+// => 7
+
+gZ
+// => 7
+
+// removeKey: routes through unbind: and returns nil.
+Workspace globals removeKey: #gZ
+// => nil
+
+Workspace globals includesKey: #gZ
+// => false

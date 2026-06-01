@@ -1,0 +1,63 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the BindingsView class (ADR 0081 Phase 4 / BT-2367).
+//
+// BUnit runs in compiled context with no live REPL session and no running
+// workspace meta process, so a workspace-scoped view reads empty here. Live
+// read + write-through against a real session and a real workspace are covered
+// by tests/repl-protocol/cases/session_object.btscript and
+// tests/repl-protocol/cases/workspace_globals_view.btscript. These tests verify
+// the Dictionary-protocol shape and the empty-view read behaviour.
+
+TestCase subclass: BindingsViewTest
+  field: view = nil
+
+  setUp =>
+    // A workspace-scoped view is just a tagged map (no liveness/PID needed),
+    // so it can be minted directly. Reads return empty in the BUnit context.
+    self.view := (Erlang beamtalk_session_primitives) globalsView
+
+  // ===== Dictionary-protocol selectors present =====
+  testIncludesSelectorAt => self assert: (BindingsView includesSelector: #at:)
+
+  testIncludesSelectorAtPut =>
+    self assert: (BindingsView includesSelector: #at:put:)
+
+  testIncludesSelectorRemoveKey =>
+    self assert: (BindingsView includesSelector: #removeKey:)
+
+  testIncludesSelectorIncludesKey =>
+    self assert: (BindingsView includesSelector: #includesKey:)
+
+  testIncludesSelectorKeys =>
+    self assert: (BindingsView includesSelector: #keys)
+
+  testIncludesSelectorValues =>
+    self assert: (BindingsView includesSelector: #values)
+
+  testIncludesSelectorSize =>
+    self assert: (BindingsView includesSelector: #size)
+
+  testIncludesSelectorDo => self assert: (BindingsView includesSelector: #do:)
+
+  testIncludesSelectorPrintString =>
+    self assert: (BindingsView includesSelector: #printString)
+
+  testInheritsFromObject => self assert: (BindingsView inheritsFrom: Object)
+
+  // ===== Empty-view reads (no workspace meta in BUnit) =====
+  testEmptyViewSizeIsZero => self assert: self.view size equals: 0
+
+  testEmptyViewKeysIsEmpty => self assert: (self.view keys isEmpty)
+
+  testEmptyViewValuesIsEmpty => self assert: (self.view values isEmpty)
+
+  testAbsentKeyReturnsNil => self assert: (self.view at: #noSuchBinding) isNil
+
+  testIncludesKeyFalseForAbsent =>
+    self deny: (self.view includesKey: #noSuchBinding)
+
+  // ===== printString renders like a Dictionary =====
+  testPrintStringRendersLikeDictionary =>
+    self assert: self.view printString equals: "#\{}"

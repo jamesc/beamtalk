@@ -151,7 +151,9 @@ rc increment
 // WORKSPACE GLOBALS — project namespace snapshot
 // ===========================================================================
 
-// Workspace globals includes Workspace, Beamtalk, Transcript
+// Workspace globals is a live BindingsView over the workspace singletons +
+// bind:as: layer (ADR 0081). It includes the singletons Workspace, Beamtalk,
+// Transcript, but NOT the class registry — classes live in Beamtalk globals.
 wsGlobals := Workspace globals
 // => _
 
@@ -161,8 +163,13 @@ wsGlobals includesKey: #Workspace
 wsGlobals includesKey: #Beamtalk
 // => true
 
-// Workspace globals also includes loaded user classes
+// Loaded user classes are NOT in Workspace globals (they are in Beamtalk
+// globals, the class registry — a separate layer per ADR 0081).
 wsGlobals includesKey: #Counter
+// => false
+
+// The class registry (Beamtalk globals) is where the Counter class lives.
+(Beamtalk globals) includesKey: #Counter
 // => true
 
 // ===========================================================================

@@ -67,17 +67,25 @@ sealed typed Object subclass: WorkspaceInterface
   testClasses -> List(Behaviour) =>
     self classes select: [:c | c inheritsFrom: TestCase]
 
-  /// Return an immutable Dictionary snapshot of the project namespace.
+  /// Return a live `BindingsView` over the project namespace (ADR 0081).
   ///
-  /// Includes workspace singletons (Transcript, Beamtalk, Workspace),
-  /// user-registered bindings (bind:as:), and all user-loaded classes.
+  /// Reads reflect the current workspace singletons (Transcript, Beamtalk,
+  /// Workspace) and user-registered bindings (`bind:as:`). It is the same
+  /// `BindingsView` type as `Session current bindings`, so both binding layers
+  /// share one Dictionary protocol (`at:`, `at:put:`, `removeKey:`,
+  /// `includesKey:`, `keys`, `values`, `size`, `do:`).
+  ///
+  /// Writes are synchronous: `at:put:` routes through `bind:as:` and
+  /// `removeKey:` through `unbind:`, inheriting their protected-name conflict
+  /// checks. (`Beamtalk globals` — the class registry — stays a `Dictionary`;
+  /// it is not a mutable binding layer.)
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace globals
+  /// Workspace globals at: #Transcript     // => the Transcript singleton
+  /// Workspace globals includesKey: #Beamtalk   // => true
   /// ```
-  globals -> Dictionary =>
-    (Erlang beamtalk_workspace_interface_primitives) globals
+  globals -> BindingsView => (Erlang beamtalk_session_primitives) globalsView
 
   /// Sync the project: incrementally compile all changed files.
   ///

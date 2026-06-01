@@ -827,7 +827,16 @@ handle_call(
         class_state = ClassVars
     } = State
 ) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
-    case
+    %% ADR 0081 (BT-2367): class-method dispatch hops from the eval worker to
+    %% this class gen_server, so the session context that `seed_session_context/2`
+    %% put on the *worker* is invisible here. Factory class methods like
+    %% `Session current` / `Workspace currentSession` read that context, so
+    %% mirror the caller's `beamtalk_session_pid`/`beamtalk_session_id` into this
+    %% process for the duration of the call, then restore. Reading the caller's
+    %% process dictionary via `process_info/2` avoids changing the (hot, widely
+    %% used) class_method_call message shape.
+    Restore = seed_caller_session_context(From),
+    try
         beamtalk_class_dispatch:handle_class_method_call(
             Selector, Args, ClassName, Module, ClassMethods, ClassVars
         )
@@ -841,6 +850,8 @@ handle_call(
             {noreply, State};
         {error, not_found} ->
             {reply, {error, not_found}, State}
+    after
+        Restore()
     end;
 handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
@@ -890,6 +901,49 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+-doc """
+Mirror the calling process's session context into this class gen_server for the
+duration of a class-method call, returning a zero-arity closure that restores
+the prior state.
+
+ADR 0081 (BT-2367): `seed_session_context/2` seeds the eval *worker*, but
+class-method dispatch (`Session current`, `Workspace currentSession`) hops to
+this gen_server, where those keys are absent. We read them from the caller via
+`process_info/2` (no message-shape change) and `put/2` them locally, restoring
+the previous values (or erasing) on the way out so concurrent calls from other
+sessions never see a stale context.
+""".
+-spec seed_caller_session_context({pid(), term()} | term()) -> fun(() -> ok).
+seed_caller_session_context({CallerPid, _Tag}) when is_pid(CallerPid) ->
+    case process_info(CallerPid, dictionary) of
+        {dictionary, Dict} ->
+            CallerPidCtx = proplists:get_value(beamtalk_session_pid, Dict),
+            CallerIdCtx = proplists:get_value(beamtalk_session_id, Dict),
+            PrevPid = put(beamtalk_session_pid, CallerPidCtx),
+            PrevId = put(beamtalk_session_id, CallerIdCtx),
+            fun() ->
+                restore_dict_key(beamtalk_session_pid, PrevPid),
+                restore_dict_key(beamtalk_session_id, PrevId),
+                ok
+            end;
+        undefined ->
+            %% Caller already gone (dead before we ran): nothing to mirror.
+            fun() -> ok end
+    end;
+seed_caller_session_context(_From) ->
+    fun() -> ok end.
+
+%% Restore a process-dictionary key to its previous value, or erase it if it had
+%% none. `put/2` returns `undefined` for a key that was unset, which is exactly
+%% the value we erase back to.
+-spec restore_dict_key(atom(), term()) -> ok.
+restore_dict_key(Key, undefined) ->
+    erase(Key),
+    ok;
+restore_dict_key(Key, Prev) ->
+    put(Key, Prev),
+    ok.
 
 -doc """
 Walk superclass chain to find an inherited class method.
