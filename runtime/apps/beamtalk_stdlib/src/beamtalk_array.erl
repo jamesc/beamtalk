@@ -95,6 +95,12 @@ The result is re-canonicalised via `from_list/1` so that its internal
 with the same elements. `array:set/3` alone leaves a stale copy-on-write cache
 node inside the `array` tuple, which makes `#[1,2,3] at: 2 put: 99` compare
 unequal to the literal `#[1,99,3]` even though both render the same (BT-2362).
+
+Complexity: the re-canonicalisation is `O(n)` in the array size (vs `array:set/3`'s
+`O(log n)`), so repeated `at:put:` over a large array in a loop is `O(n^2)`. This is
+deliberate — element-wise structural equality and hash consistency are required for
+arrays used as dict/set keys. A future option is to compare arrays structurally in
+`=`/`hash` instead, letting `at:put:` stay `O(log n)`.
 """.
 -spec at_put(map(), integer(), term()) -> map().
 at_put(#{'$beamtalk_class' := 'Array', 'data' := Arr}, Index, Value) when
