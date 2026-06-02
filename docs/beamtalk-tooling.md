@@ -365,7 +365,9 @@ lists:reverse
 
 Tab completion works for module names (`:h Erlang li<TAB>`) and function names (`:h Erlang lists re<TAB>`).
 
-**`:bindings`** shows all variables in the current session:
+**`:bindings`** lists the variable names bound in the current session
+(BT-2369 / ADR 0081 Phase 6: it evaluates `Session current bindings keys`, so
+it shows binding *names*; evaluate a name to see its value):
 
 ```beamtalk
 > x := 42
@@ -375,8 +377,8 @@ Tab completion works for module names (`:h Erlang li<TAB>`) and function names (
 hello
 
 > :bindings
-name = hello
-x = 42
+name
+x
 ```
 
 **`:show-codegen`** displays the Core Erlang output for any expression, useful for understanding what the compiler generates:

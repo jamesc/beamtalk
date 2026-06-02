@@ -22,7 +22,6 @@ Uses OTP `json` module (OTP 27+) for encoding/decoding.
     format_error/1,
     format_response_with_warnings/2,
     format_error_with_warnings/2,
-    format_bindings/1,
     format_loaded/1,
     format_actors/1,
     format_modules/1,
@@ -143,25 +142,6 @@ format_error_with_warnings(Reason, Warnings) ->
                 })
             )
     end.
-
--doc "Format bindings response as JSON.".
--spec format_bindings(map()) -> binary().
-format_bindings(Bindings) ->
-    JsonBindings = maps:fold(
-        fun(Name, Value, Acc) ->
-            NameBin =
-                if
-                    is_atom(Name) -> atom_to_binary(Name, utf8);
-                    is_list(Name) -> list_to_binary(Name);
-                    is_binary(Name) -> Name;
-                    true -> list_to_binary(io_lib:format("~p", [Name]))
-                end,
-            Acc#{NameBin => term_to_json(Value)}
-        end,
-        #{},
-        Bindings
-    ),
-    iolist_to_binary(json:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings})).
 
 -doc "Format a documentation response as JSON.".
 -spec format_docs(binary()) -> binary().

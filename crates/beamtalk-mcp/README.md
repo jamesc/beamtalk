@@ -61,9 +61,16 @@ The MCP server is automatically available when configured in your MCP settings.
 | `inspect` | Inspect a running actor's state by PID |
 | `list_actors` | List all running actors with class and PID |
 | `list_modules` | List all loaded modules with source and actor count |
-| `get_bindings` | Get current REPL session variable bindings |
 | `reload_module` | Hot-reload a module (recompile + migrate actors) |
 | `docs` | Get documentation for a class or method |
+
+> **Session state** (variable bindings) is read and reset through `evaluate`, not
+> a dedicated tool. The `get_bindings` and `clear` tools were removed in BT-2369
+> (ADR 0081 Phase 6). Use `evaluate "Session current bindings keys"` (session
+> locals) and `evaluate "Workspace globals keys"` (workspace globals) to read
+> binding names, `evaluate "Session current clear"` to reset session locals, and
+> `evaluate "(Session withId: id) bindings keys"` to read another session
+> (enumerate ids via `evaluate "Workspace sessions collect: [:s | s id]"`).
 
 ## Architecture
 

@@ -18,26 +18,12 @@ decode_new_format_eval_test() ->
     ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)),
     ?assertEqual(false, beamtalk_repl_protocol:is_legacy(Msg)).
 
-decode_new_format_clear_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"op\": \"clear\", \"id\": \"msg-002\"}">>
-    ),
-    ?assertEqual(<<"clear">>, element(2, Msg)),
-    ?assertEqual(<<"msg-002">>, element(3, Msg)),
-    ?assertEqual(false, beamtalk_repl_protocol:is_legacy(Msg)).
-
 decode_new_format_load_file_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(
         <<"{\"op\": \"load-file\", \"id\": \"msg-003\", \"path\": \"examples/counter.bt\"}">>
     ),
     ?assertEqual(<<"load-file">>, element(2, Msg)),
     ?assertEqual(#{<<"path">> => <<"examples/counter.bt">>}, element(5, Msg)).
-
-decode_new_format_bindings_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"op\": \"bindings\", \"id\": \"msg-004\"}">>
-    ),
-    ?assertEqual(<<"bindings">>, element(2, Msg)).
 
 decode_new_format_actors_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(
@@ -113,13 +99,6 @@ decode_legacy_eval_test() ->
     ?assertEqual(#{<<"code">> => <<"1 + 2">>}, element(5, Msg)),
     ?assertEqual(true, beamtalk_repl_protocol:is_legacy(Msg)).
 
-decode_legacy_clear_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"clear\"}">>
-    ),
-    ?assertEqual(<<"clear">>, element(2, Msg)),
-    ?assertEqual(true, beamtalk_repl_protocol:is_legacy(Msg)).
-
 decode_legacy_load_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(
         <<"{\"type\": \"load\", \"path\": \"examples/counter.bt\"}">>
@@ -127,12 +106,6 @@ decode_legacy_load_test() ->
     ?assertEqual(<<"load-file">>, element(2, Msg)),
     ?assertEqual(#{<<"path">> => <<"examples/counter.bt">>}, element(5, Msg)),
     ?assertEqual(true, beamtalk_repl_protocol:is_legacy(Msg)).
-
-decode_legacy_bindings_test() ->
-    {ok, Msg} = beamtalk_repl_protocol:decode(
-        <<"{\"type\": \"bindings\"}">>
-    ),
-    ?assertEqual(<<"bindings">>, element(2, Msg)).
 
 decode_legacy_actors_test() ->
     {ok, Msg} = beamtalk_repl_protocol:decode(
@@ -203,16 +176,6 @@ encode_status_new_format_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
     ?assertEqual(error, maps:find(<<"session">>, Decoded)).
 
-encode_bindings_new_format_test() ->
-    Msg = make_msg(<<"bindings">>, <<"msg-004">>, undefined, false),
-    Bindings = #{x => 42, y => <<"hello">>},
-    Result = beamtalk_repl_protocol:encode_bindings(Bindings, Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
-    BindingsMap = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(42, maps:get(<<"x">>, BindingsMap)),
-    ?assertEqual(<<"hello">>, maps:get(<<"y">>, BindingsMap)).
-
 encode_loaded_new_format_test() ->
     Msg = make_msg(<<"load-file">>, <<"msg-005">>, undefined, false),
     Classes = [#{name => "Counter"}, #{name => "Logger"}],
@@ -247,13 +210,6 @@ encode_error_legacy_format_test() ->
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     ?assert(is_binary(maps:get(<<"message">>, Decoded))),
     ?assertEqual(error, maps:find(<<"status">>, Decoded)).
-
-encode_bindings_legacy_format_test() ->
-    Msg = make_msg(<<"bindings">>, undefined, undefined, true),
-    Bindings = #{x => 42},
-    Result = beamtalk_repl_protocol:encode_bindings(Bindings, Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual(<<"bindings">>, maps:get(<<"type">>, Decoded)).
 
 encode_loaded_legacy_format_test() ->
     Msg = make_msg(<<"load-file">>, undefined, undefined, true),

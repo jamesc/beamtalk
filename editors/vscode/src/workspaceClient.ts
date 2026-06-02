@@ -199,15 +199,36 @@ export class WorkspaceClient {
   // ─── Op wrappers ─────────────────────────────────────────────────────────
 
   /**
-   * List variable bindings for this connection's session.
-   * The `sessionId` is sent as a correlation field in the request;
-   * the server always returns bindings for this WebSocket's own session.
+   * List variable bindings (session locals) for a session.
+   *
+   * BT-2369 (ADR 0081 Phase 6): the dedicated `bindings` protocol op was
+   * removed. We now read session state through the Beamtalk-native `Session`
+   * API via `eval`, mirroring how `reload` routes through `ClassName reload`.
+   * Session locals only — workspace globals are a separate `Workspace globals`
+   * layer. The `session` field carries the user's terminal session id so the
+   * server reads that session's locals rather than this WebSocket's own
+   * (empty) session.
+   *
+   * Reads binding *names* via `Session current bindings keys` (which evaluates
+   * to a JSON array — the runtime encodes a `List` element-wise). Values are
+   * intentionally not fetched here: the dedicated `bindings` op used to return
+   * a name→value JSON object, but a Beamtalk `Dictionary` is encoded as its
+   * `printString` (not a JSON object), and fetching keys+values as two evals
+   * would risk a torn read if locals mutate between requests. The sidebar
+   * fetches a binding's value on demand via the `inspectBinding` command.
    */
   async bindings(sessionId: string): Promise<BindingsMap> {
-    const resp = (await this._request({ op: "bindings", session: sessionId })) as {
-      bindings?: BindingsMap;
-    };
-    return resp.bindings ?? {};
+    const resp = (await this._request({
+      op: "eval",
+      code: "Session current bindings keys",
+      session: sessionId,
+    })) as { value?: unknown };
+    const names = Array.isArray(resp.value) ? resp.value : [];
+    const map: BindingsMap = {};
+    for (const name of names) {
+      map[String(name)] = "";
+    }
+    return map;
   }
 
   /** List all running actors in the workspace. */
