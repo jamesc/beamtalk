@@ -2428,3 +2428,216 @@ bt2195_class_method_source_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% ADR 0087 Phase 2 (BT-2298): method_xref forwarded to beamtalk_xref
+%% during class creation.
+%%====================================================================
+
+%% Ensure a clean beamtalk_xref is available and emptied for the duration of a
+%% test. Mirrors beamtalk_xref_tests:setup/0 — uses the supervised server when
+%% present, else stands one up; clears all rows so each test starts empty.
+xref_setup() ->
+    PgPid = setup(),
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    clear_xref_tables(),
+    PgPid.
+
+xref_teardown(PgPid) ->
+    clear_xref_tables(),
+    teardown(PgPid).
+
+clear_xref_tables() ->
+    try
+        sys:replace_state(beamtalk_xref, fun(S) ->
+            ets:delete_all_objects(beamtalk_xref_methods),
+            ets:delete_all_objects(beamtalk_xref_senders),
+            ets:delete_all_objects(beamtalk_xref_references),
+            ets:delete_all_objects(xref_class_gen),
+            S
+        end)
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+%% A class compiled with two instance methods, one class-side method, two sends
+%% across them, and one class reference — the fixture the AC calls for. This is
+%% the method_xref shape the Rust codegen bakes into register_class/0.
+xref_fixture() ->
+    [
+        #{
+            class_side => false,
+            selector => 'increment',
+            line => 4,
+            sends => [#{selector => '+', line => 5, recv_kind => self_recv}],
+            references => [#{class => 'Integer', line => 5}],
+            source_status => indexed,
+            provenance => class_body
+        },
+        #{
+            class_side => false,
+            selector => 'value',
+            line => 7,
+            sends => [#{selector => 'count', line => 8, recv_kind => self_recv}],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        },
+        #{
+            class_side => true,
+            selector => 'default',
+            line => 10,
+            sends => [#{selector => 'new', line => 11, recv_kind => other}],
+            references => [#{class => 'XrefCounter', line => 11}],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+method_xref_forwarded_on_class_creation_test_() ->
+    {setup, fun xref_setup/0, fun xref_teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'XrefCounter',
+                    module => xref_counter,
+                    superclass => 'Object',
+                    instance_methods => #{
+                        increment => #{arity => 0}, value => #{arity => 0}
+                    },
+                    class_methods => #{default => #{arity => 0}},
+                    method_xref => xref_fixture()
+                },
+                {ok, _Pid} = beamtalk_object_class:start_link('XrefCounter', ClassInfo),
+
+                %% After class creation the index already has the rows — the
+                %% forwarding is synchronous inside init/1.
+                PlusSenders = beamtalk_xref:senders_of('+'),
+                ?assertEqual(1, length(PlusSenders)),
+                [PlusSite] = PlusSenders,
+                ?assertEqual('XrefCounter', maps:get(owner, PlusSite)),
+                ?assertEqual('increment', maps:get(method, PlusSite)),
+                ?assertEqual(self_recv, maps:get(recv_kind, PlusSite)),
+
+                NewSenders = beamtalk_xref:senders_of('new'),
+                ?assertEqual(1, length(NewSenders)),
+                [NewSite] = NewSenders,
+                ?assertEqual('default', maps:get(method, NewSite)),
+                ?assertEqual(true, maps:get(class_side, NewSite)),
+
+                IntRefs = beamtalk_xref:references_to('Integer'),
+                ?assertEqual(1, length(IntRefs)),
+
+                CounterRefs = beamtalk_xref:references_to('XrefCounter'),
+                ?assertEqual(1, length(CounterRefs)),
+
+                %% implementors_of returns {Class, ClassSide} pairs.
+                ?assertEqual(
+                    [{'XrefCounter', false}], beamtalk_xref:implementors_of('increment')
+                ),
+                ?assertEqual(
+                    [{'XrefCounter', true}], beamtalk_xref:implementors_of('default')
+                ),
+
+                ?assertEqual(
+                    lists:sort([increment, value]),
+                    lists:sort(beamtalk_xref:defined_selectors('XrefCounter', false))
+                ),
+                ?assertEqual(
+                    [default], beamtalk_xref:defined_selectors('XrefCounter', true)
+                )
+            end),
+            %% Backward compatibility: a ClassInfo without a method_xref key (a
+            %% hand-coded stub class) registers no rows and does not crash.
+            ?_test(begin
+                ClassInfo = #{
+                    name => 'XrefNoIndexClass',
+                    module => xref_no_index,
+                    superclass => 'Object',
+                    instance_methods => #{noop => #{arity => 0}}
+                },
+                {ok, _Pid} = beamtalk_object_class:start_link(
+                    'XrefNoIndexClass', ClassInfo
+                ),
+                ?assertEqual(
+                    [], beamtalk_xref:defined_selectors('XrefNoIndexClass', false)
+                )
+            end),
+            %% BT-2298 (CodeRabbit review): update_class/2 must refresh the xref
+            %% index. The metaclass-tower stubs register with bootstrap rows, then
+            %% get update_class'd by their compiled module — the compiled rows must
+            %% replace the stub rows, not accumulate alongside them.
+            ?_test(begin
+                %% Initial registration: one stub method, no real xref.
+                StubInfo = #{
+                    name => 'XrefRedefClass',
+                    module => xref_redef,
+                    superclass => 'Object',
+                    instance_methods => #{stubMethod => #{arity => 0}},
+                    method_xref => [
+                        #{
+                            class_side => false,
+                            selector => stubMethod,
+                            line => 1,
+                            sends => [],
+                            references => [],
+                            source_status => unindexed_runtime_fun,
+                            provenance => class_body
+                        }
+                    ]
+                },
+                {ok, _Pid} = beamtalk_object_class:start_link(
+                    'XrefRedefClass', StubInfo
+                ),
+                ?assertEqual(
+                    [stubMethod],
+                    beamtalk_xref:defined_selectors('XrefRedefClass', false)
+                ),
+
+                %% Redefinition via update_class/2 with the compiled xref. The
+                %% old stub row must be gone and the new indexed rows present.
+                NewInfo = #{
+                    name => 'XrefRedefClass',
+                    module => xref_redef,
+                    superclass => 'Object',
+                    instance_methods => #{realMethod => #{arity => 0}},
+                    method_xref => [
+                        #{
+                            class_side => false,
+                            selector => realMethod,
+                            line => 2,
+                            sends => [
+                                %% Distinct selector so this assertion is
+                                %% independent of other tests under the shared
+                                %% fixture (no clear between ?_test generators).
+                                #{
+                                    selector => redefRealSend,
+                                    line => 3,
+                                    recv_kind => self_recv
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]
+                },
+                {ok, _} = beamtalk_object_class:update_class(
+                    'XrefRedefClass', NewInfo
+                ),
+                ?assertEqual(
+                    [realMethod],
+                    beamtalk_xref:defined_selectors('XrefRedefClass', false)
+                ),
+                ?assertEqual(
+                    1, length(beamtalk_xref:senders_of(redefRealSend))
+                ),
+                Info = beamtalk_xref:method_info('XrefRedefClass', false, realMethod),
+                ?assertEqual(indexed, maps:get(source_status, Info))
+            end)
+        ]
+    end}.

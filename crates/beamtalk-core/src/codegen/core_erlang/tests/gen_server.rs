@@ -3764,6 +3764,10 @@ fn test_bt_1944_typed_param_does_not_change_actor_codegen() {
                 !line.contains("'param_types'")
                     && !line.contains("'methodSource'")
                     && !line.contains("'methodSignatures'")
+                    // ADR 0087 Phase 2 (BT-2298): the typed param adds a class
+                    // reference in its type annotation, which methodXref records.
+                    // That is metadata, not dispatch/body, so strip it too.
+                    && !line.contains("'methodXref'")
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -3782,5 +3786,109 @@ fn test_bt_1944_typed_param_does_not_change_actor_codegen() {
     assert!(
         !code_t.contains("'spec' ="),
         "BT-1944: Actor instance method should NOT generate spec attribute"
+    );
+}
+
+/// ADR 0087 Phase 2 (BT-2298): `register_class/0` bakes a `methodXref` field
+/// into the `BuilderState` map. Each entry records the method's defining line,
+/// the selectors it sends (with receiver kind), and class references — all with
+/// `source_status => indexed`.
+#[test]
+fn test_method_xref_baked_into_register_class() {
+    let src = concat!(
+        "Actor subclass: Counter\n",
+        "  state: count = 0\n\n",
+        "  increment =>\n",
+        "    self.count := self.count + 1\n\n",
+        "  class default -> Counter =>\n",
+        "    Counter new\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+
+    // The methodXref field is present and a list (not a `~{ }~` map).
+    assert!(
+        code.contains("'methodXref' => ["),
+        "Should bake a methodXref list. Got:\n{code}"
+    );
+    // The instance method `increment` is recorded, instance-side, indexed.
+    assert!(
+        code.contains("'selector' => 'increment'"),
+        "increment entry missing. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class_side' => 'false'"),
+        "instance-side entry should carry 'class_side' => 'false'. Got:\n{code}"
+    );
+    // The `+` send inside `increment` is recorded with a self receiver kind
+    // (it is sent to `self.count`, an `other` receiver — the field access).
+    assert!(
+        code.contains("'selector' => '+'"),
+        "the `+` send should be recorded. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'recv_kind' =>"),
+        "sends should carry a recv_kind. Got:\n{code}"
+    );
+    // The class-side method `default` references `Counter` (return type + body).
+    assert!(
+        code.contains("'class_side' => 'true'"),
+        "class-side entry should carry 'class_side' => 'true'. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'class' => 'Counter'"),
+        "the Counter reference should be recorded. Got:\n{code}"
+    );
+    // All baked rows are `indexed` in Phase 2 (synthetic emission is Phase 6).
+    assert!(
+        code.contains("'source_status' => 'indexed'"),
+        "rows should be tagged indexed. Got:\n{code}"
+    );
+    // The optional synthetic_origin key is omitted for indexed rows.
+    assert!(
+        !code.contains("synthetic_origin"),
+        "synthetic_origin must be omitted for indexed rows. Got:\n{code}"
+    );
+}
+
+/// ADR 0087 Phase 2 (BT-2298): a send to a selector longer than the 255-byte
+/// Erlang atom limit (e.g. a 20-keyword auto-constructor) must be dropped from
+/// the xref `sends` list — emitting it as an atom would fail `core_scan` at
+/// BEAM-compile time. The generated Core Erlang must still be well-formed.
+#[test]
+fn test_method_xref_drops_oversized_selectors() {
+    // Build a keyword send whose concatenated selector exceeds 255 bytes.
+    use std::fmt::Write as _;
+    let mut send_parts = String::new();
+    for i in 0..40 {
+        write!(send_parts, " longKeywordPartNumber{i}: x{i}").unwrap();
+    }
+    let src = format!(
+        concat!(
+            "Actor subclass: BigSend\n",
+            "  state: count = 0\n\n",
+            "  run: target =>\n    target{}\n"
+        ),
+        send_parts
+    );
+    let tokens = crate::source_analysis::lex_with_eof(&src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("big_send")).expect("codegen should succeed");
+
+    // The methodXref field is still emitted, and the oversized selector is
+    // dropped from it: the single method's `sends` list is empty.
+    let mx_start = code.find("'methodXref' => [").expect("methodXref present");
+    let mx_tail = &code[mx_start..];
+    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+    assert!(
+        !mx_seg.contains("longKeywordPartNumber"),
+        "oversized selector must be dropped from methodXref. Got:\n{mx_seg}"
+    );
+    assert!(
+        mx_seg.contains("'sends' => []"),
+        "the only send was oversized, so sends should be empty. Got:\n{mx_seg}"
     );
 }

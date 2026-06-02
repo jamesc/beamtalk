@@ -90,6 +90,7 @@ let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' :=
             'classMethodSource' => ~{}~,
             'methodSignatures' => ~{'run:' => #{#<114>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<66>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classMethodSignatures' => ~{}~,
+            'methodXref' => [~{'class_side' => 'false', 'selector' => 'run:', 'line' => 1, 'sends' => [~{'selector' => '+', 'line' => 1, 'recv_kind' => 'other'}~], 'references' => [~{'class' => 'Block', 'line' => 1}~, ~{'class' => 'Result', 'line' => 1}~], 'source_status' => 'indexed'}~],
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,

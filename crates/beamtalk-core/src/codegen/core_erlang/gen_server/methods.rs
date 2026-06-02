@@ -1302,6 +1302,12 @@ impl CoreErlangGenerator {
                 leaf::binary_lit(&source_str)
             });
 
+            // ADR 0087 Phase 2 (BT-2298): Per-method cross-reference index baked
+            // into register_class/0. Forwarded to beamtalk_xref synchronously at
+            // class-load time by beamtalk_object_class:init/1.
+            let method_xref_doc =
+                self.build_method_xref_list(&instance_methods, &class_methods_primary);
+
             // BT-412: Class variable initial values
             let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
 
@@ -1354,6 +1360,7 @@ impl CoreErlangGenerator {
                 class_method_source_doc,
                 method_sigs_doc,
                 class_method_sigs_doc,
+                method_xref_doc,
                 class_vars_doc,
                 class_doc_value,
                 method_docs_doc,
@@ -1474,6 +1481,168 @@ impl CoreErlangGenerator {
         Document::Vec(parts)
     }
 
+    /// ADR 0087 Phase 2 (BT-2298): Builds the `method_xref` list document baked
+    /// into `register_class/0`'s `ClassInfo` (via `BuilderState.methodXref`).
+    ///
+    /// One entry per primary method (instance- and class-side). Each entry
+    /// records the method's defining line, the selectors it sends (with
+    /// receiver kind), and the classes it references — the per-method rows
+    /// `beamtalk_xref:register_class/2` fans out into the senders / references /
+    /// methods ETS tables at class-load time.
+    ///
+    /// The send / reference data comes from the existing AST walkers
+    /// ([`crate::queries::all_sends_query::find_all_sends_in_source`] and
+    /// [`crate::queries::references_to_query::find_all_references_in_source`]).
+    /// Those operate on the unparsed bare-method source produced by
+    /// [`Self::extract_method_source`] — the *same* source channel and walkers
+    /// the `SystemNavigation` miss-policy fallback uses (ADR 0087 §Read path), so
+    /// the baked line numbers are method-relative and byte-for-byte consistent
+    /// with the fallback. No port round-trip; one in-process walk per method.
+    ///
+    /// All emitted rows carry `source_status => indexed`. Synthetic-accessor
+    /// rows (`source_status => synthetic`) and the `synthetic_origin` key are
+    /// out of scope here — they land in Phase 6 (BT-2304). Per the AC, the
+    /// optional `synthetic_origin` key is *omitted*, never emitted as a `null`
+    /// sentinel, for `indexed` rows.
+    fn build_method_xref_list(
+        &self,
+        instance_methods: &[&MethodDefinition],
+        class_methods: &[&MethodDefinition],
+    ) -> Document<'static> {
+        let mut entries: Vec<Document<'static>> = Vec::new();
+        for method in instance_methods {
+            entries.push(self.build_method_xref_entry(method, false));
+        }
+        for method in class_methods {
+            entries.push(self.build_method_xref_entry(method, true));
+        }
+        docvec!["[", join(entries, &Document::Str(", ")), "]"]
+    }
+
+    /// Builds one `method_xref` entry map for a single method (ADR 0087 Phase 2).
+    fn build_method_xref_entry(
+        &self,
+        method: &MethodDefinition,
+        class_side: bool,
+    ) -> Document<'static> {
+        use crate::queries::all_sends_query::{ReceiverKind, find_all_sends_in_source};
+        use crate::queries::references_to_query::find_all_references_in_source;
+
+        // Erlang atoms cap at 255 bytes. A selector / class name longer than
+        // that (e.g. a 20-keyword auto-constructor selector) can never exist as
+        // a runtime dispatch atom, so a send / reference to it would never match
+        // an xref query. Drop such entries rather than emitting an illegal atom
+        // that fails `core_scan` at BEAM-compile time.
+        const MAX_ATOM_BYTES: usize = 255;
+
+        let source = self.extract_method_source(method);
+
+        // The method definition's line within its own (bare) source is line 1:
+        // `extract_method_source` emits the signature first (after any doc
+        // comment / @expect lines the unparser prepends). The xref `line` field
+        // is the method-relative definition line, so the first send/ref lines
+        // are already in the same coordinate space.
+        let def_line = Self::method_def_line(&source);
+
+        let sends = find_all_sends_in_source(&source);
+        let sends_doc = {
+            let send_docs: Vec<Document<'static>> = sends
+                .iter()
+                .filter(|hit| hit.selector.len() <= MAX_ATOM_BYTES)
+                .map(|hit| {
+                    let recv_kind = match hit.receiver {
+                        ReceiverKind::SelfReceiver => "self_recv",
+                        ReceiverKind::SuperReceiver => "super_recv",
+                        ReceiverKind::ErlangFfi => "erlang_ffi",
+                        ReceiverKind::Other => "other",
+                    };
+                    docvec![
+                        "~{'selector' => ",
+                        leaf::atom(hit.selector.clone()),
+                        ", 'line' => ",
+                        leaf::int_lit(i64::from(hit.line)),
+                        ", 'recv_kind' => ",
+                        leaf::atom(recv_kind),
+                        "}~",
+                    ]
+                })
+                .collect();
+            docvec!["[", join(send_docs, &Document::Str(", ")), "]"]
+        };
+
+        let references = find_all_references_in_source(&source);
+        let refs_doc = {
+            let ref_docs: Vec<Document<'static>> = references
+                .iter()
+                .filter(|hit| hit.class.len() <= MAX_ATOM_BYTES)
+                .map(|hit| {
+                    docvec![
+                        "~{'class' => ",
+                        leaf::atom(hit.class.clone()),
+                        ", 'line' => ",
+                        leaf::int_lit(i64::from(hit.line)),
+                        "}~",
+                    ]
+                })
+                .collect();
+            docvec!["[", join(ref_docs, &Document::Str(", ")), "]"]
+        };
+
+        docvec![
+            "~{'class_side' => ",
+            if class_side { "'true'" } else { "'false'" },
+            ", 'selector' => ",
+            leaf::atom(method.selector.name().to_string()),
+            ", 'line' => ",
+            leaf::int_lit(i64::from(def_line)),
+            ", 'sends' => ",
+            sends_doc,
+            ", 'references' => ",
+            refs_doc,
+            ", 'source_status' => 'indexed'}~",
+        ]
+    }
+
+    /// Determine the method-relative definition line for an unparsed bare-method
+    /// source: the first non-blank line that is not a leading doc comment
+    /// (`///`), block/line comment, or `@expect`/`@`-directive line the unparser
+    /// may prepend before the signature. Returns 1 if none is found.
+    ///
+    /// Multi-line block comments are tracked across lines so a continuation line
+    /// (e.g. `   still inside the comment */`) is not mistaken for the signature.
+    /// In practice the unparser emits `///`/`//` doc and line comments rather than
+    /// `/* */` blocks before a signature, so this is defensive (per BT-2298 review).
+    fn method_def_line(source: &str) -> u32 {
+        let mut in_block_comment = false;
+        for (idx, raw) in source.lines().enumerate() {
+            let trimmed = raw.trim_start();
+            if in_block_comment {
+                if trimmed.contains("*/") {
+                    in_block_comment = false;
+                }
+                continue;
+            }
+            if trimmed.starts_with("/*") {
+                // A single-line `/* ... */` is fully consumed here; an unterminated
+                // opener enters block-comment mode for subsequent lines.
+                if !trimmed.contains("*/") {
+                    in_block_comment = true;
+                }
+                continue;
+            }
+            if trimmed.is_empty()
+                || trimmed.starts_with("///")
+                || trimmed.starts_with("//")
+                || trimmed.starts_with('@')
+            {
+                continue;
+            }
+            #[allow(clippy::cast_possible_truncation)]
+            return (idx as u32) + 1;
+        }
+        1
+    }
+
     /// Builds a Core Erlang map document for class variable initial values.
     ///
     /// Each variable maps `'name' => expression`, defaulting to `'nil'` when
@@ -1522,6 +1691,7 @@ impl CoreErlangGenerator {
         class_method_source_doc: Document<'static>,
         method_sigs_doc: Document<'static>,
         class_method_sigs_doc: Document<'static>,
+        method_xref_doc: Document<'static>,
         class_vars_doc: Document<'static>,
         class_doc_value: Document<'static>,
         method_docs_doc: Document<'static>,
@@ -1564,6 +1734,12 @@ impl CoreErlangGenerator {
                     "'classMethodSignatures' => ~{",
                     class_method_sigs_doc,
                     "}~,",
+                    line(),
+                    // ADR 0087 Phase 2 (BT-2298): per-method xref index. A list of
+                    // maps, not a `~{ }~` map, so it is wrapped only by build_method_xref_list.
+                    "'methodXref' => ",
+                    method_xref_doc,
+                    ",",
                     line(),
                     "'classState' => ~{",
                     class_vars_doc,

@@ -84,8 +84,68 @@ init(Parent) ->
     %% before any user module loads so that on_load hooks can call ClassBuilder.
     beamtalk_class_builder_bt:register_class(),
 
+    %% ADR 0087 Phase 2 (BT-2298): The Erlang stub classes above do not compile
+    %% through codegen, so their `register_class/0` carries no baked method_xref
+    %% (it defaults to []). Their methods are genuine sourceless runtime funs —
+    %% record them explicitly with `source_status => unindexed_runtime_fun` so
+    %% navigation queries report "defined here, sends not analysable" rather than
+    %% treating the selectors as absent. xref is the first non-pg supervisor child
+    %% (ahead of bootstrap), so it is alive by the time this runs.
+    register_stub_class_xref(),
+
     proc_lib:init_ack(Parent, {ok, self()}),
     bootstrap_loop().
+
+-doc """
+Register `unindexed_runtime_fun` xref rows for the Erlang stub classes
+(ADR 0087 Phase 2, BT-2298).
+
+The metaclass-tower scaffolding (`Behaviour`, `Class`, `Metaclass`,
+`ClassBuilder`) is hand-coded in Erlang, not compiled from `.bt` source, so
+its methods have no analysable Beamtalk body. Each is registered with empty
+`sends` / `references` and `source_status => unindexed_runtime_fun`, the
+genuine narrow sourceless category. `Behaviour` and `ClassBuilder` expose no
+stub methods, so they contribute no rows.
+
+Skipped silently if `beamtalk_xref` is not running (e.g. a minimal embedded
+runtime without the index).
+""".
+-spec register_stub_class_xref() -> ok.
+register_stub_class_xref() ->
+    case whereis(beamtalk_xref) of
+        undefined ->
+            ok;
+        _Pid ->
+            %% 'Class': instance-side classBuilder (via has_method/1), class-side superclass.
+            ok = beamtalk_xref:register_class('Class', [
+                stub_method_entry(false, 'classBuilder'),
+                stub_method_entry(true, 'superclass')
+            ]),
+            %% 'Metaclass': instance-side isMeta / isClass / isMetaclass (via has_method/1).
+            ok = beamtalk_xref:register_class('Metaclass', [
+                stub_method_entry(false, 'isMeta'),
+                stub_method_entry(false, 'isClass'),
+                stub_method_entry(false, 'isMetaclass')
+            ]),
+            ok
+    end.
+
+-doc """
+Build a single `unindexed_runtime_fun` method_xref entry for a stub-class
+method. The `line` is a placeholder (`1`): these methods have no source, but
+`beamtalk_xref` requires a `pos_integer()`.
+""".
+-spec stub_method_entry(boolean(), atom()) -> map().
+stub_method_entry(ClassSide, Selector) ->
+    #{
+        class_side => ClassSide,
+        selector => Selector,
+        line => 1,
+        sends => [],
+        references => [],
+        source_status => unindexed_runtime_fun,
+        provenance => class_body
+    }.
 
 -doc "Bootstrap process loop - stays alive as part of the supervision tree".
 bootstrap_loop() ->
