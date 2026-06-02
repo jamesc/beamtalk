@@ -28,7 +28,7 @@ beamtalk-workspace = { path = "crates/beamtalk-workspace" }
 clap = { version = "4", features = ["derive"] }
 
 # Strings and paths
-ecow = "0.2"
+ecow = "0.3"
 camino = "1"
 
 # Error handling
