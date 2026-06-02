@@ -1,0 +1,102 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Session — a first-class handle to a REPL session (ADR 0081).
+///
+/// A `Session` value names a single REPL connection's evaluation state: its
+/// local bindings (the `x := 42` layer) and its protocol id. It is *not* an
+/// Actor — its methods delegate to `beamtalk_session_primitives`, which reads
+/// the calling process's session context or looks a session up by id.
+///
+/// `Session` follows the `FileHandle` / `Port` representation pattern: a
+/// `sealed typed Object subclass` with no declared fields, whose per-instance
+/// identity (the session's PID and protocol id) lives in the runtime
+/// representation minted by the factory primitives. Instance methods pass
+/// `self` to a `*For:` primitive that extracts that identity.
+///
+/// There is **no** class-side operation mirror (no `Session bindings`, no
+/// `Session clear`) and **no** `globals` accessor — globals are workspace
+/// state, reached via `Workspace globals`. You write `Session current bindings`
+/// or `(Session withId: anId) bindings`.
+///
+/// Cross-session access (via `withId:`) is **read-only**: reads work against any
+/// live session, but mutating another session's `bindings` or calling `clear`
+/// on it raises `cross_session_mutation_unsupported`.
+///
+/// ## Examples
+/// ```beamtalk
+/// Session current bindings keys                 // => #(#x #y)
+/// Session current bindings at: #x put: 99       // => 99
+/// Session current resolve: #Transcript          // => the Transcript singleton
+/// Session current id                            // => "user-repl-abc-123"
+/// Session current clear                         // => nil
+/// ```
+sealed typed Object subclass: Session
+
+  // ===== Class-side: factory methods only =====
+
+  /// The calling process's session as a value. Returns `nil` outside a
+  /// REPL eval context (compiled program code has no session). A later
+  /// ADR 0081 phase adds `Workspace currentSession` as a navigation alias
+  /// returning the same value.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current                               // => a Session (in REPL)
+  /// ```
+  class current -> Session | Nil => (Erlang beamtalk_session_primitives) current
+
+  /// Look up a session by its protocol session id. Returns `nil` if no
+  /// such session exists or it is no longer alive. Used for cross-session
+  /// access from tooling (LSP, VS Code).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session withId: "user-repl-abc-123"           // => a Session | nil
+  /// ```
+  class withId: aSessionId :: String -> Session | Nil =>
+    (Erlang beamtalk_session_primitives) withId: aSessionId
+
+  // ===== Instance-side: all operations live here =====
+
+  /// Live view of this session's local bindings (the `x := 42` layer).
+  /// Reads return current values; `at:put:` and `removeKey:` mutate
+  /// session state (write-through, for the calling session only).
+  ///
+  /// There is no `globals` here — globals are workspace-owned; use
+  /// `Workspace globals`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings keys                 // => #(#x)
+  /// ```
+  bindings -> BindingsView =>
+    (Erlang beamtalk_session_primitives) bindingsViewFor: self
+
+  /// Resolve a name exactly the way bare-name lookup does, returning the
+  /// first match or nil. Order: session locals → workspace globals
+  /// (bind:as: + singletons) → class registry. Primarily a REPL debugging
+  /// tool: answers "where does this name resolve from?" interactively.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current resolve: #Transcript          // => the Transcript singleton
+  /// ```
+  resolve: aName :: Symbol -> Object =>
+    (Erlang beamtalk_session_primitives) resolveFor: self name: aName
+
+  /// Clear this session's local bindings. Workspace globals remain.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current clear                         // => nil
+  /// ```
+  clear -> Nil => (Erlang beamtalk_session_primitives) clearFor: self
+
+  /// Stable session identifier (matches the protocol session id).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current id                            // => "user-repl-abc-123"
+  /// ```
+  id -> String => (Erlang beamtalk_session_primitives) idOf: self

@@ -342,6 +342,35 @@ session_id_type_error_test_() ->
     end}.
 
 %%====================================================================
+%% Class-method dispatch propagates the caller's session context
+%% (ADR 0081 / BT-2367): `Session current` is a class method, so dispatch
+%% hops from the eval worker to the Session class gen_server. The worker's
+%% seeded session context must be mirrored there for the duration of the call.
+%%====================================================================
+
+class_current_sees_caller_session_context_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-class-current">>),
+                ClassPid = wait_for_class('Session'),
+                %% A caller with seeded context, dispatching `current` through the
+                %% real class gen_server, gets a Session value back.
+                Session = dispatch_class_method_with_context(
+                    ClassPid, current, [], Pid, <<"prim-class-current">>
+                ),
+                ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
+                ?assertEqual(<<"prim-class-current">>, maps:get(id, Session)),
+                %% The class process dict must NOT leak the mirrored context to a
+                %% subsequent unseeded caller — it returns nil, not the prior id.
+                NilSession = dispatch_class_method_no_context(ClassPid, current, []),
+                ?assertEqual(nil, NilSession),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -349,6 +378,53 @@ set_locals(Pid, Locals) ->
     sys:replace_state(Pid, fun({SId, State, Worker}) ->
         {SId, beamtalk_repl_state:set_bindings(Locals, State), Worker}
     end).
+
+%% Wait for a class gen_server to be registered (the stdlib classes start
+%% asynchronously when beamtalk_runtime boots).
+wait_for_class(ClassName) ->
+    wait_for_class(ClassName, 50).
+
+wait_for_class(ClassName, 0) ->
+    erlang:error({class_not_registered, ClassName});
+wait_for_class(ClassName, N) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined ->
+            timer:sleep(20),
+            wait_for_class(ClassName, N - 1);
+        Pid when is_pid(Pid) ->
+            Pid
+    end.
+
+%% Dispatch a class method through the real class gen_server FROM a worker
+%% process that has the session context seeded — exactly the eval-worker path.
+%% Runs in a spawned process so the gen_server `From` carries that process's
+%% (seeded) dictionary.
+dispatch_class_method_with_context(ClassPid, Selector, Args, SessionPid, SessionId) ->
+    run_in_worker(fun() ->
+        seed_context(SessionPid, SessionId),
+        unwrap_class_reply(gen_server:call(ClassPid, {class_method_call, Selector, Args}))
+    end).
+
+%% Same dispatch but from a worker with NO seeded session context.
+dispatch_class_method_no_context(ClassPid, Selector, Args) ->
+    run_in_worker(fun() ->
+        unwrap_class_reply(gen_server:call(ClassPid, {class_method_call, Selector, Args}))
+    end).
+
+unwrap_class_reply({ok, Result}) -> Result;
+unwrap_class_reply(Other) -> Other.
+
+%% Run Fun in a fresh process and return its result (so the gen_server `From`
+%% is that process, carrying its own process dictionary).
+run_in_worker(Fun) ->
+    Parent = self(),
+    Ref = make_ref(),
+    spawn(fun() -> Parent ! {Ref, Fun()} end),
+    receive
+        {Ref, Result} -> Result
+    after 5000 ->
+        erlang:error(worker_timeout)
+    end.
 
 %% Register/unregister this process as the workspace-meta sentinel, but only if
 %% no real meta process is already registered (so we don't clobber it).

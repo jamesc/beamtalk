@@ -1,0 +1,140 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BindingsView — a live, Dictionary-protocol view over session or workspace
+/// bindings (ADR 0081).
+///
+/// Returned by `Session current bindings` (the session-locals layer) and by
+/// `Workspace globals` (the workspace singletons + `bind:as:` layer). Both
+/// share this one type so the two binding layers expose a single, familiar
+/// Dictionary protocol.
+///
+/// A `BindingsView` is a *live* handle: reads reflect current state and
+/// `at:put:` / `removeKey:` write through to the backing layer. It follows the
+/// `FileHandle` / `Port` representation pattern — a `sealed typed Object
+/// subclass` with no declared fields, minted by a primitive as a tagged map
+/// carrying per-instance scope and identity. Instance methods pass `self` to a
+/// `view_*` primitive.
+///
+/// Unlike `Dictionary`, mutation is in-place (write-through), not copy-on-write:
+/// `at:put:` returns the *value put* and `removeKey:` returns `nil`, rather than
+/// a new collection.
+///
+/// One documented asymmetry between the two layers (ADR 0081): session-local
+/// writes are deferred to end of eval (not read back within the same
+/// expression), while workspace-global writes hit shared state synchronously.
+///
+/// ## Examples
+/// ```beamtalk
+/// view := Session current bindings
+/// view at: #x put: 99          // => 99  (session-local write, deferred)
+/// view at: #x                  // => the current value, or nil if absent
+/// view includesKey: #x         // => true
+/// view keys                    // => #(#x)
+/// view removeKey: #x           // => nil
+/// Workspace globals at: #Transcript   // => the Transcript singleton
+/// ```
+sealed typed Object subclass: BindingsView
+
+  /// Return the value bound to `key`, or `nil` if absent.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings at: #x              // => 42
+  /// ```
+  at: key :: Symbol -> Object =>
+    (Erlang beamtalk_session_primitives) view_at: self key: key
+
+  /// Write `value` under `key` (write-through) and return the value put.
+  ///
+  /// For a session view, the write is enqueued and applied at end of eval, so
+  /// it is not read back within the same expression. For the workspace view,
+  /// the write routes through `bind:as:` (synchronous, conflict-checked).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings at: #y put: 99      // => 99
+  /// ```
+  at: key :: Symbol put: value :: Object -> Object =>
+    (Erlang beamtalk_session_primitives)
+      view_at_put: self
+      key: key
+      value: value
+
+  /// Remove the binding for `key` (write-through) and return `nil`.
+  ///
+  /// Idempotent: removing an absent key is a no-op. Session removals are
+  /// deferred to end of eval.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings removeKey: #x       // => nil
+  /// ```
+  removeKey: key :: Symbol -> Nil =>
+    (Erlang beamtalk_session_primitives) view_remove: self key: key
+
+  /// Whether `key` (a Symbol) is currently bound in this view.
+  ///
+  /// Membership is tested against `keys` (atoms), matching the declared
+  /// `Symbol` key type. Unlike the lenient `at:` primitive — which also accepts
+  /// String/binary keys — `includesKey:` expects a Symbol. A dedicated
+  /// O(1) `view_includes_key` primitive (and String-key parity with `at:`) is
+  /// tracked as a follow-up.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings includesKey: #x     // => true
+  /// ```
+  includesKey: key :: Symbol -> Boolean => self keys includes: key
+
+  /// Return a list of all bound names (Symbols).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings keys                // => #(#x #y)
+  /// ```
+  keys -> List(Symbol) => (Erlang beamtalk_session_primitives) view_keys: self
+
+  /// Return a list of all bound values.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings values              // => #(42 99)
+  /// ```
+  values -> List => (Erlang beamtalk_session_primitives) view_values: self
+
+  /// Return the number of bindings in this view.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings size                // => 2
+  /// ```
+  size -> Integer => (Erlang beamtalk_session_primitives) view_size: self
+
+  /// Iterate over each value, evaluating `block` with each one (matches
+  /// `Dictionary do:`, which iterates values).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings do: [:v | Transcript show: v printString]
+  /// ```
+  do: block :: Block(Object, Object) -> Nil => self values do: block
+
+  /// Return a string representation rendered like a `Dictionary`, so REPL
+  /// output stays familiar.
+  ///
+  /// Builds a snapshot `Dictionary` from the live bindings and delegates to
+  /// its `printString`, producing the same `#{#k => v}` syntax.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current bindings printString         // => "#{#x => 42}"
+  /// ```
+  printString -> String =>
+    snapshot := self keys inject: #{} into: [:acc :k |
+      acc at: k put: (self at: k)
+    ]
+    snapshot printString
+
+  /// Override inspect to use printString rather than the field-based format.
+  inspect -> String => self printString

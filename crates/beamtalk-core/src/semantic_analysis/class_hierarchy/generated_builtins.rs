@@ -26,6 +26,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "BeamtalkInterface"
             | "Behaviour"
             | "Binary"
+            | "BindingsView"
             | "Block"
             | "Boolean"
             | "ChangeEntry"
@@ -71,6 +72,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Result"
             | "RuntimeError"
             | "Server"
+            | "Session"
             | "Set"
             | "StackFrame"
             | "Stream"
@@ -428,6 +430,41 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "fromBytes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Binary".into()), param_types: vec![Some("List".into())], doc: Some("Create a binary from a list of byte integers (0-255).\n\n## Examples\n```beamtalk\nBinary fromBytes: #(104, 101, 108, 108, 111)   // => _\n```".into()) },
                 MethodInfo { selector: "deserializeWithUsed:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Binary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Binary".into())], doc: Some("Deserialize a binary and return both the value and bytes consumed.\n\nReturns a tuple of (value, bytesConsumed). Useful for parsing\nconcatenated ETF values from a binary stream.\n\n## Examples\n```beamtalk\nbin := Binary serialize: 42\nresult := Binary deserializeWithUsed: bin\nresult first    // => 42\nresult second   // => bytes consumed\n```".into()) },
             ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "BindingsView".into(),
+        ClassInfo {
+            name: "BindingsView".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into())], doc: Some("Return the value bound to `key`, or `nil` if absent.\n\n## Examples\n```beamtalk\nSession current bindings at: #x              // => 42\n```".into()) },
+                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into()), Some("Object".into())], doc: Some("Write `value` under `key` (write-through) and return the value put.\n\nFor a session view, the write is enqueued and applied at end of eval, so\nit is not read back within the same expression. For the workspace view,\nthe write routes through `bind:as:` (synchronous, conflict-checked).\n\n## Examples\n```beamtalk\nSession current bindings at: #y put: 99      // => 99\n```".into()) },
+                MethodInfo { selector: "removeKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Symbol".into())], doc: Some("Remove the binding for `key` (write-through) and return `nil`.\n\nIdempotent: removing an absent key is a no-op. Session removals are\ndeferred to end of eval.\n\n## Examples\n```beamtalk\nSession current bindings removeKey: #x       // => nil\n```".into()) },
+                MethodInfo { selector: "includesKey:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())], doc: Some("Whether `key` (a Symbol) is currently bound in this view.\n\nMembership is tested against `keys` (atoms), matching the declared\n`Symbol` key type. Unlike the lenient `at:` primitive — which also accepts\nString/binary keys — `includesKey:` expects a Symbol. A dedicated\nO(1) `view_includes_key` primitive (and String-key parity with `at:`) is\ntracked as a follow-up.\n\n## Examples\n```beamtalk\nSession current bindings includesKey: #x     // => true\n```".into()) },
+                MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Symbol)".into()), param_types: vec![], doc: Some("Return a list of all bound names (Symbols).\n\n## Examples\n```beamtalk\nSession current bindings keys                // => #(#x #y)\n```".into()) },
+                MethodInfo { selector: "values".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("Return a list of all bound values.\n\n## Examples\n```beamtalk\nSession current bindings values              // => #(42 99)\n```".into()) },
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the number of bindings in this view.\n\n## Examples\n```beamtalk\nSession current bindings size                // => 2\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Block(Object, Object)".into())], doc: Some("Iterate over each value, evaluating `block` with each one (matches\n`Dictionary do:`, which iterates values).\n\n## Examples\n```beamtalk\nSession current bindings do: [:v | Transcript show: v printString]\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return a string representation rendered like a `Dictionary`, so REPL\noutput stays familiar.\n\nBuilds a snapshot `Dictionary` from the live bindings and delegates to\nits `printString`, producing the same `#{#k => v}` syntax.\n\n## Examples\n```beamtalk\nSession current bindings printString         // => \"#{#x => 42}\"\n```".into()) },
+                MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "BindingsView".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Override inspect to use printString rather than the field-based format.".into()) },
+            ],
+            class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],
@@ -2129,6 +2166,38 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Session".into(),
+        ClassInfo {
+            name: "Session".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "bindings".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("BindingsView".into()), param_types: vec![], doc: Some("Live view of this session's local bindings (the `x := 42` layer).\nReads return current values; `at:put:` and `removeKey:` mutate\nsession state (write-through, for the calling session only).\n\nThere is no `globals` here — globals are workspace-owned; use\n`Workspace globals`.\n\n## Examples\n```beamtalk\nSession current bindings keys                 // => #(#x)\n```".into()) },
+                MethodInfo { selector: "resolve:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Symbol".into())], doc: Some("Resolve a name exactly the way bare-name lookup does, returning the\nfirst match or nil. Order: session locals → workspace globals\n(bind:as: + singletons) → class registry. Primarily a REPL debugging\ntool: answers \"where does this name resolve from?\" interactively.\n\n## Examples\n```beamtalk\nSession current resolve: #Transcript          // => the Transcript singleton\n```".into()) },
+                MethodInfo { selector: "clear".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Clear this session's local bindings. Workspace globals remain.\n\n## Examples\n```beamtalk\nSession current clear                         // => nil\n```".into()) },
+                MethodInfo { selector: "id".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Stable session identifier (matches the protocol session id).\n\n## Examples\n```beamtalk\nSession current id                            // => \"user-repl-abc-123\"\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Session | Nil".into()), param_types: vec![], doc: Some("The calling process's session as a value. Returns `nil` outside a\nREPL eval context (compiled program code has no session). A later\nADR 0081 phase adds `Workspace currentSession` as a navigation alias\nreturning the same value.\n\n## Examples\n```beamtalk\nSession current                               // => a Session (in REPL)\n```".into()) },
+                MethodInfo { selector: "withId:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Session".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Session | Nil".into()), param_types: vec![Some("String".into())], doc: Some("Look up a session by its protocol session id. Returns `nil` if no\nsuch session exists or it is no longer alive. Used for cross-session\naccess from tooling (LSP, VS Code).\n\n## Examples\n```beamtalk\nSession withId: \"user-repl-abc-123\"           // => a Session | nil\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "Set".into(),
         ClassInfo {
             name: "Set".into(),
@@ -3090,7 +3159,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "actorsOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Actor)".into()), param_types: vec![Some("Class".into())], doc: Some("Return all actors of a given class.\n\n## Examples\n```beamtalk\nWorkspace actorsOf: Counter\n```".into()) },
                 MethodInfo { selector: "classes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Behaviour)".into()), param_types: vec![], doc: Some("Return a list of loaded user classes with source file info.\n\n## Examples\n```beamtalk\nWorkspace classes\n```".into()) },
                 MethodInfo { selector: "testClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Behaviour)".into()), param_types: vec![], doc: Some("Return classes that are TestCase subclasses.\n\n## Examples\n```beamtalk\nWorkspace testClasses\n```".into()) },
-                MethodInfo { selector: "globals".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Return an immutable Dictionary snapshot of the project namespace.\n\nIncludes workspace singletons (Transcript, Beamtalk, Workspace),\nuser-registered bindings (bind:as:), and all user-loaded classes.\n\n## Examples\n```beamtalk\nWorkspace globals\n```".into()) },
+                MethodInfo { selector: "globals".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("BindingsView".into()), param_types: vec![], doc: Some("Return a live `BindingsView` over the project namespace (ADR 0081).\n\nReads reflect the current workspace singletons (Transcript, Beamtalk,\nWorkspace) and user-registered bindings (`bind:as:`). It is the same\n`BindingsView` type as `Session current bindings`, so both binding layers\nshare one Dictionary protocol (`at:`, `at:put:`, `removeKey:`,\n`includesKey:`, `keys`, `values`, `size`, `do:`).\n\nWrites are synchronous: `at:put:` routes through `bind:as:` and\n`removeKey:` through `unbind:`, inheriting their protected-name conflict\nchecks. (`Beamtalk globals` — the class registry — stays a `Dictionary`;\nit is not a mutable binding layer.)\n\n## Examples\n```beamtalk\nWorkspace globals at: #Transcript     // => the Transcript singleton\nWorkspace globals includesKey: #Beamtalk   // => true\n```".into()) },
                 MethodInfo { selector: "sync".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Dictionary".into()), param_types: vec![], doc: Some("Sync the project: incrementally compile all changed files.\n\nScans the current working directory for a `beamtalk.toml` project\nmanifest, then finds `.bt` and `.erl` files, compiles changed files\nin dependency order, and returns a result Dictionary.\n\nThe result Dictionary contains:\n  - `#summary` — human-readable summary String\n  - `#classes` — List of loaded class name Strings\n  - `#errors` — List of error Dictionaries (empty on success)\n  - `#changedCount` — number of files reloaded\n  - `#unchangedCount` — number of unchanged files\n  - `#deletedCount` — number of deleted files\n\n## Examples\n```beamtalk\nWorkspace sync           // => #{#summary => \"Reloaded 2 of 5 files (3 unchanged)\", ...}\n(Workspace sync) at: #summary  // => \"Reloaded 2 of 5 files (3 unchanged)\"\n```".into()) },
                 MethodInfo { selector: "changes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ChangeLog".into()), param_types: vec![], doc: Some("Return the workspace ChangeLog — the navigable view of pending in-memory\nchanges (ADR 0082).\n\nAll pending-state queries live on the returned ChangeLog object, following\nPharo's `Smalltalk changes` idiom: \"is anything dirty?\" is\n`Workspace changes notEmpty`; \"what's dirty?\" is\n`Workspace changes dirtyMethods`.\n\n## Examples\n```beamtalk\nWorkspace changes notEmpty       // => false\nWorkspace changes dirtyMethods   // => #{}\n```".into()) },
                 MethodInfo { selector: "load:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Behaviour)".into()), param_types: vec![Some("String".into())], doc: Some("Compile and load a .bt file, registering the class.\nReturns a List of loaded class objects (empty if none resolved).\nReturns a structured error if path is not a String or the file cannot be loaded.\n\n## Examples\n```beamtalk\nWorkspace load: \"examples/counter.bt\"  // => [Counter]\n```".into()) },

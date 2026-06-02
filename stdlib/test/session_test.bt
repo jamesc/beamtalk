@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Session class (ADR 0081 Phase 4 / BT-2367).
+//
+// BUnit runs in compiled context (workspace_mode: false) with no live REPL
+// session, so `Session current` returns nil here. Live reads/writes against a
+// real session are covered by tests/repl-protocol/cases/session_object.btscript.
+// These tests verify the class shape: factory class methods, instance methods,
+// no class-side operation mirror, and the documented nil-outside-eval behaviour.
+
+TestCase subclass: SessionTest
+
+  // ===== Factory class methods present =====
+  testIncludesClassSelectorCurrent =>
+    self assert: (Session class includesSelector: #current)
+
+  testIncludesClassSelectorWithId =>
+    self assert: (Session class includesSelector: #withId:)
+
+  // ===== Instance methods present =====
+  testIncludesSelectorBindings =>
+    self assert: (Session includesSelector: #bindings)
+
+  testIncludesSelectorResolve =>
+    self assert: (Session includesSelector: #resolve:)
+
+  testIncludesSelectorClear => self assert: (Session includesSelector: #clear)
+
+  testIncludesSelectorId => self assert: (Session includesSelector: #id)
+
+  // ===== No class-side operation mirror, no globals (ADR 0081) =====
+  testNoGlobalsMethod => self deny: (Session includesSelector: #globals)
+
+  // ===== Inheritance =====
+  testInheritsFromObject => self assert: (Session inheritsFrom: Object)
+
+  // ===== Compiled context: current returns nil (no live session) =====
+  testCurrentIsNilOutsideEval => self assert: (Session current isNil)
