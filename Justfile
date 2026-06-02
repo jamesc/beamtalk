@@ -139,7 +139,7 @@ build-erlang:
 # Build standard library (stdlib/src/*.bt → BEAM, incremental — skips if up to date)
 build-stdlib: build-rust build-erlang
     @echo "🔨 Building standard library..."
-    @cargo run --bin beamtalk --quiet -- build-stdlib --quiet
+    @cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
     @echo "✅ Stdlib build complete"
 
 # Build all example programs (examples/**/*.bt → BEAM)

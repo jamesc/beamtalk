@@ -67,6 +67,10 @@ enum Command {
         /// Suppress per-file compilation output
         #[arg(long, short)]
         quiet: bool,
+
+        /// Treat compiler warnings as errors (fail the build on any warning)
+        #[arg(long)]
+        warnings_as_errors: bool,
     },
 
     /// Compile and run a Beamtalk program
@@ -448,7 +452,10 @@ fn run() -> Result<()> {
             };
             commands::build::build(&path, &options, force)
         }
-        Command::BuildStdlib { quiet } => commands::build_stdlib::build_stdlib(quiet),
+        Command::BuildStdlib {
+            quiet,
+            warnings_as_errors,
+        } => commands::build_stdlib::build_stdlib(quiet, warnings_as_errors),
         Command::Run {
             class_or_dot,
             selector,

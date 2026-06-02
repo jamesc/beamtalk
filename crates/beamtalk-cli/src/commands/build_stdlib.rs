@@ -34,7 +34,7 @@ const STDLIB_EBIN_DIR: &str = "runtime/apps/beamtalk_stdlib/ebin";
 /// and writes `.beam` files to `runtime/apps/beamtalk_stdlib/ebin/`.
 /// Skips the build if all outputs are newer than all inputs (incremental).
 #[instrument(skip_all)]
-pub fn build_stdlib(quiet: bool) -> Result<()> {
+pub fn build_stdlib(quiet: bool, warnings_as_errors: bool) -> Result<()> {
     info!("Starting stdlib build");
 
     let lib_dir = Utf8PathBuf::from(STDLIB_SOURCE_DIR);
@@ -84,6 +84,7 @@ pub fn build_stdlib(quiet: bool) -> Result<()> {
         stdlib_mode: true,
         allow_primitives: false,
         workspace_mode: false,
+        warnings_as_errors,
         ..Default::default()
     };
 
