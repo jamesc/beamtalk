@@ -395,6 +395,342 @@ ensure_loaded_or_warn_nonexistent_module_test() ->
     ?assertEqual(ok, beamtalk_test_runner:ensure_loaded_or_warn(nonexistent_module_bt2230)).
 
 %%% ============================================================================
+%%% TestResult instance FFI shim tests
+%%%
+%%% The lowercase shims (passed/1, failed/1, ...) are the selectors dispatched
+%%% from compiled Beamtalk for `aResult passed` etc. They delegate to the
+%%% result_* accessors. Cover them directly.
+%%% ============================================================================
+
+shim_passed_test() ->
+    Result = make_result(3, 2, 1, 0, 1.0, []),
+    ?assertEqual(2, beamtalk_test_runner:passed(Result)).
+
+shim_failed_test() ->
+    Result = make_result(3, 2, 1, 0, 1.0, []),
+    ?assertEqual(1, beamtalk_test_runner:failed(Result)).
+
+shim_skipped_test() ->
+    Result = make_result(4, 2, 1, 1, 1.0, []),
+    ?assertEqual(1, beamtalk_test_runner:skipped(Result)).
+
+shim_total_test() ->
+    Result = make_result(4, 2, 1, 1, 1.0, []),
+    ?assertEqual(4, beamtalk_test_runner:total(Result)).
+
+shim_duration_test() ->
+    Result = make_result(1, 1, 0, 0, 2.5, []),
+    ?assertEqual(2.5, beamtalk_test_runner:duration(Result)).
+
+shim_failures_test() ->
+    Result = make_result(2, 1, 1, 0, 1.0, [
+        #{name => testA, class => 'T', status => pass},
+        #{name => testB, class => 'T', status => fail, error => <<"boom">>}
+    ]),
+    Failures = beamtalk_test_runner:failures(Result),
+    ?assertEqual(1, length(Failures)),
+    ?assertEqual(testB, maps:get(name, hd(Failures))).
+
+shim_has_passed_true_test() ->
+    Result = make_result(2, 2, 0, 0, 1.0, []),
+    ?assert(beamtalk_test_runner:hasPassed(Result)).
+
+shim_has_passed_false_test() ->
+    Result = make_result(2, 1, 1, 0, 1.0, []),
+    ?assertNot(beamtalk_test_runner:hasPassed(Result)).
+
+shim_summary_test() ->
+    Result = make_result(3, 3, 0, 0, 1.5, []),
+    ?assertEqual(<<"3 tests, 3 passed (1.5s)">>, beamtalk_test_runner:summary(Result)).
+
+shim_print_string_test() ->
+    Result = make_result(2, 2, 0, 0, 1.0, [
+        #{name => testA, class => 'T', status => pass},
+        #{name => testB, class => 'T', status => pass}
+    ]),
+    ?assertEqual(
+        <<"TestResult(2 tests, 2 passed (1.0s))">>, beamtalk_test_runner:printString(Result)
+    ).
+
+%%% ============================================================================
+%%% Non-binary error formatting (BT-2384)
+%%%
+%%% format_single_failure / serialize_test_result both have a branch for an
+%%% error term that is not a binary (it is printed via beamtalk_primitive),
+%%% plus a fallback for a fail entry that carries no error key at all.
+%%% ============================================================================
+
+print_string_non_binary_error_test() ->
+    %% error is an atom, not a binary — exercises print_string conversion.
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testX, class => 'T', status => fail, error => some_atom_error}
+    ]),
+    Str = beamtalk_test_runner:result_print_string(Result),
+    ?assertNotEqual(nomatch, binary:match(Str, <<"T>>testX">>)),
+    ?assertNotEqual(nomatch, binary:match(Str, <<"some_atom_error">>)).
+
+print_string_fail_without_error_key_test() ->
+    %% fail entry with no error key — exercises the fallback format clause.
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testY, class => 'T', status => fail}
+    ]),
+    Str = beamtalk_test_runner:result_print_string(Result),
+    ?assertNotEqual(nomatch, binary:match(Str, <<"T>>testY">>)).
+
+to_json_non_binary_error_test() ->
+    Result = make_result(1, 0, 1, 0, 0.5, [
+        #{name => testZ, class => 'T', status => fail, error => {tuple, error}}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    %% error key present, printed from the non-binary term.
+    ?assert(is_binary(maps:get(<<"error">>, Test))).
+
+to_json_test_without_class_key_test() ->
+    %% A test entry with no class key — serialize_test_result omits "class".
+    Result = make_result(1, 1, 0, 0, 0.1, [
+        #{name => testW, status => pass}
+    ]),
+    Json = beamtalk_test_runner:result_to_json(Result),
+    Decoded = json:decode(Json),
+    [Test] = maps:get(<<"tests">>, Decoded),
+    ?assertNot(maps:is_key(<<"class">>, Test)),
+    ?assertEqual(<<"testW">>, maps:get(<<"name">>, Test)).
+
+%%% ============================================================================
+%%% Live execution tests (BT-2384)
+%%%
+%%% These tests drive the real test-execution paths (run_class_by_name,
+%%% discover_methods_via_registry, run_all, concurrent execution, run_file,
+%%% run_class/run_method on a real class tuple) by loading the stdlib and
+%%% registering a synthetic TestCase subclass whose backing module implements
+%%% new/0 + dispatch/3 for setUp/tearDown/test methods. A passing test
+%%% (testAlpha), a failing test (testBravo), and a skipped test (testCharlie)
+%%% exercise the pass/fail/skip aggregation branches.
+%%% ============================================================================
+
+-define(SYNTH_CLASS, 'BtTestRunnerSynthTest').
+-define(SYNTH_MODULE, bt_test_runner_synth_mod).
+
+live_setup() ->
+    case whereis(pg) of
+        undefined -> pg:start_link();
+        _ -> ok
+    end,
+    beamtalk_extensions:init(),
+    case whereis(beamtalk_bootstrap) of
+        undefined -> {ok, _} = beamtalk_bootstrap:start_link();
+        _ -> ok
+    end,
+    beamtalk_stdlib:init(),
+    load_synth_module(),
+    register_synth_class(),
+    %% Two extra concurrent classes so run_all(2) exceeds MaxJobs and exercises
+    %% the feed-and-collect loop (spawn-next-on-result) in run_classes_concurrent.
+    register_extra_class('BtTestRunnerSynthTest2'),
+    register_extra_class('BtTestRunnerSynthTest3'),
+    ok.
+
+live_teardown(_) ->
+    %% Inverse of live_setup/0: stop the synthetic class gen_servers (their
+    %% terminate/2 leaves the pg group and clears the registry ETS tables) and
+    %% unload the synthetic module, so fixture state doesn't leak into later
+    %% EUnit modules sharing this VM and make find_test_classes/0 + run_all/*
+    %% order-dependent across the suite.
+    stop_synth_class(?SYNTH_CLASS),
+    stop_synth_class('BtTestRunnerSynthTest2'),
+    stop_synth_class('BtTestRunnerSynthTest3'),
+    code:purge(?SYNTH_MODULE),
+    code:delete(?SYNTH_MODULE),
+    ok.
+
+%% Stop a synthetic class gen_server if still registered. Its terminate/2
+%% removes the class from pg + the registry tables.
+stop_synth_class(Name) ->
+    case whereis(beamtalk_class_registry:registry_name(Name)) of
+        undefined ->
+            ok;
+        Pid ->
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end
+    end.
+
+%% Compile and load a tiny Erlang module that backs the synthetic TestCase.
+load_synth_module() ->
+    Src =
+        "-module(bt_test_runner_synth_mod).\n"
+        "-beamtalk_source([\"test/bt_test_runner_synth_test.bt\"]).\n"
+        "-export([new/0, dispatch/3, module_info/0, module_info/1]).\n"
+        "new() -> #{'$beamtalk_class' => 'BtTestRunnerSynthTest'}.\n"
+        "dispatch(setUp, _, Self) -> Self;\n"
+        "dispatch(tearDown, _, Self) -> Self;\n"
+        "dispatch(testAlpha, _, Self) -> Self;\n"
+        "dispatch(testBravo, _, _Self) -> beamtalk_test_case:fail(<<\"intentional failure\">>);\n"
+        "dispatch(testCharlie, _, _Self) -> beamtalk_test_case:skip(<<\"intentional skip\">>).\n",
+    {ok, Tokens, _} = erl_scan:string(Src),
+    Forms = [
+        begin
+            {ok, Form} = erl_parse:parse_form(Ts),
+            Form
+        end
+     || Ts <- split_token_forms(Tokens)
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, "bt_test_runner_synth_mod.erl", Bin),
+    ok.
+
+register_synth_class() ->
+    Info = #{
+        name => ?SYNTH_CLASS,
+        module => ?SYNTH_MODULE,
+        superclass => 'TestCase',
+        instance_methods => #{
+            setUp => #{arity => 0},
+            tearDown => #{arity => 0},
+            testAlpha => #{arity => 0},
+            testBravo => #{arity => 0},
+            testCharlie => #{arity => 0}
+        },
+        instance_variables => []
+    },
+    case beamtalk_object_class:start_link(?SYNTH_CLASS, Info) of
+        {ok, _Pid} -> ok;
+        {error, {already_started, _Pid}} -> ok
+    end.
+
+%% Register an additional TestCase subclass backed by the same synthetic
+%% module so multiple classes run concurrently in run_all(N>1).
+register_extra_class(Name) ->
+    Info = #{
+        name => Name,
+        module => ?SYNTH_MODULE,
+        superclass => 'TestCase',
+        instance_methods => #{
+            setUp => #{arity => 0},
+            tearDown => #{arity => 0},
+            testAlpha => #{arity => 0},
+            testBravo => #{arity => 0},
+            testCharlie => #{arity => 0}
+        },
+        instance_variables => []
+    },
+    case beamtalk_object_class:start_link(Name, Info) of
+        {ok, _Pid} -> ok;
+        {error, {already_started, _Pid}} -> ok
+    end.
+
+%% Split a flat token list into per-form token lists at each `dot`.
+split_token_forms(Tokens) -> split_token_forms(Tokens, [], []).
+split_token_forms([], _Cur, Acc) ->
+    lists:reverse(Acc);
+split_token_forms([{dot, _} = Dot | Rest], Cur, Acc) ->
+    split_token_forms(Rest, [], [lists:reverse([Dot | Cur]) | Acc]);
+split_token_forms([Tok | Rest], Cur, Acc) ->
+    split_token_forms(Rest, [Tok | Cur], Acc).
+
+%% A class-reference tuple for the synthetic class (element 2 = 'Name class').
+synth_class_ref() ->
+    {beamtalk_object, 'BtTestRunnerSynthTest class', ?SYNTH_MODULE, self()}.
+
+live_execution_test_() ->
+    {setup, fun live_setup/0, fun live_teardown/1, fun(_) ->
+        [
+            {"find_test_classes includes the synthetic class", fun() ->
+                Classes = beamtalk_test_case:find_test_classes(),
+                ?assert(lists:member(?SYNTH_CLASS, Classes))
+            end},
+            {"run_class_by_name returns a TestResult with pass/fail/skip counts", fun() ->
+                R = beamtalk_test_runner:run_class_by_name(?SYNTH_CLASS),
+                ?assertEqual('TestResult', maps:get('$beamtalk_class', R)),
+                ?assertEqual(3, maps:get(total, R)),
+                ?assertEqual(1, maps:get(passed, R)),
+                ?assertEqual(1, maps:get(failed, R)),
+                ?assertEqual(1, maps:get(skipped, R))
+            end},
+            {"run_class on a class tuple delegates to run_class_by_name", fun() ->
+                R = beamtalk_test_runner:run_class(synth_class_ref()),
+                ?assertEqual(3, maps:get(total, R)),
+                ?assertEqual(1, maps:get(failed, R))
+            end},
+            {"run_method runs a single passing test method", fun() ->
+                R = beamtalk_test_runner:run_method(synth_class_ref(), testAlpha),
+                ?assertEqual(1, maps:get(total, R)),
+                ?assertEqual(1, maps:get(passed, R)),
+                ?assertEqual(0, maps:get(failed, R))
+            end},
+            {"run_method runs a single failing test method", fun() ->
+                R = beamtalk_test_runner:run_method(synth_class_ref(), testBravo),
+                ?assertEqual(1, maps:get(total, R)),
+                ?assertEqual(1, maps:get(failed, R))
+            end},
+            {"run_all (sequential) includes the synthetic class results", fun() ->
+                R = beamtalk_test_runner:run_all(1),
+                ?assertEqual('TestResult', maps:get('$beamtalk_class', R)),
+                %% At least our 3 synthetic tests are present.
+                ?assert(maps:get(total, R) >= 3),
+                ?assert(maps:get(failed, R) >= 1),
+                ?assert(maps:get(skipped, R) >= 1)
+            end},
+            {"run_all (concurrent) aggregates with wall-clock duration", fun() ->
+                R = beamtalk_test_runner:run_all(2),
+                ?assertEqual('TestResult', maps:get('$beamtalk_class', R)),
+                ?assert(maps:get(total, R) >= 3),
+                ?assert(is_float(maps:get(duration, R)))
+            end},
+            {"run_all (auto / 0 jobs) resolves to scheduler count", fun() ->
+                R = beamtalk_test_runner:run_all(0),
+                ?assertEqual('TestResult', maps:get('$beamtalk_class', R)),
+                ?assert(maps:get(total, R) >= 3)
+            end},
+            {"runAll/0 shim runs the full suite", fun() ->
+                R = beamtalk_test_runner:runAll(),
+                ?assertEqual('TestResult', maps:get('$beamtalk_class', R)),
+                ?assert(maps:get(total, R) >= 3)
+            end},
+            {"run/1 shim delegates to run_class", fun() ->
+                R = beamtalk_test_runner:run(synth_class_ref()),
+                ?assertEqual(3, maps:get(total, R))
+            end},
+            {"run/2 shim delegates to run_method", fun() ->
+                R = beamtalk_test_runner:run(synth_class_ref(), testAlpha),
+                ?assertEqual(1, maps:get(passed, R))
+            end},
+            {"run_class_by_name on an unknown class raises class_not_found", fun() ->
+                ?assertError(
+                    #{
+                        error := #beamtalk_error{
+                            kind = class_not_found, class = 'TestRunner'
+                        }
+                    },
+                    beamtalk_test_runner:run_class_by_name('ZzzNoSuchClass')
+                )
+            end},
+            {"run_file with a non-matching path yields an empty TestResult", fun() ->
+                R = beamtalk_test_runner:run_file(<<"no/such/path_zzz_test.bt">>),
+                ?assertEqual(0, maps:get(total, R)),
+                ?assertEqual([], maps:get(tests, R))
+            end},
+            {"run_file matching the synthetic class source runs its tests", fun() ->
+                %% All three synthetic classes share the same backing module
+                %% (and thus the same beamtalk_source attribute), so matching
+                %% by path suffix drives class_source_matches/2 + the run_file
+                %% match branch for each: 3 classes x 3 tests = 9 total.
+                R = beamtalk_test_runner:run_file(
+                    <<"test/bt_test_runner_synth_test.bt">>
+                ),
+                ?assertEqual(9, maps:get(total, R)),
+                ?assertEqual(3, maps:get(passed, R)),
+                ?assertEqual(3, maps:get(failed, R)),
+                ?assertEqual(3, maps:get(skipped, R))
+            end}
+        ]
+    end}.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 

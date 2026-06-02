@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
--module(beamtalk_interface_tests).
+-module(beamtalk_interface_registry_tests).
 
 %%% **DDD Context:** Object System Context
 
