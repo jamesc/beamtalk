@@ -199,8 +199,10 @@ export class InspectorPanel {
       if (!client || !sessionId) {
         return renderValue(this._target.value);
       }
-      const bindings = await client.bindings(sessionId);
-      const value = (bindings as Record<string, unknown>)[this._target.name];
+      // BT-2369 (ADR 0081 Phase 6): read the single binding's value directly
+      // via the cross-session Session API (the `bindings()` list returns names
+      // with placeholder values, so we must fetch the value on demand here).
+      const value = await client.bindingValue(sessionId, this._target.name);
       return renderValue(value);
     }
 

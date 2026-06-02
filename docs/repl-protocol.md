@@ -311,9 +311,13 @@ Clear the current session's locals:
 ```
 
 List the current session's local binding names:
+
+**Request:**
 ```json
 {"op": "eval", "id": "msg-011", "code": "Session current bindings keys"}
 ```
+
+**Response:**
 ```json
 {"id": "msg-011", "value": ["x", "counter"], "status": ["done"]}
 ```

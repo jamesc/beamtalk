@@ -201,18 +201,20 @@ describe("WorkspaceClient.actors()", () => {
 // ─── Op: bindings() ────────────────────────────────────────────────────────────
 
 describe("WorkspaceClient.bindings()", () => {
-  // BT-2369 (ADR 0081 Phase 6): the `bindings` op was removed. bindings() now
-  // evaluates `Session current bindings keys` against the user's session and
-  // returns a name-keyed map (values fetched on demand via inspectBinding).
-  it("evaluates Session current bindings keys with the session id", async () => {
+  // BT-2369 (ADR 0081 Phase 6): the `bindings` op was removed. bindings() reads
+  // the target session's local binding *names* through the cross-session
+  // `Session withId:` API (eval runs in this WS's own session, so the protocol
+  // `session` field cannot redirect it). Values are placeholders.
+  it("evaluates the binding keys for the target session via Session withId:", async () => {
     const { client, ws } = makeConnectedClient();
 
     const promise = client.bindings("sess-xyz");
 
     const req = ws.sent[ws.sent.length - 1];
     expect(req.op).toBe("eval");
-    expect(req.code).toBe("Session current bindings keys");
-    expect(req.session).toBe("sess-xyz");
+    expect(req.code).toBe(
+      '(Session withId: "sess-xyz") ifNil: [#()] ifNotNil: [:s | s bindings keys]'
+    );
 
     respondTo(ws, { value: ["x", "y"] });
 
@@ -221,12 +223,60 @@ describe("WorkspaceClient.bindings()", () => {
     client.dispose();
   });
 
-  it("returns an empty map when the session has no locals", async () => {
+  it("returns an empty map when the session has no locals or is unknown", async () => {
     const { client, ws } = makeConnectedClient();
     const promise = client.bindings("sess-empty");
     respondTo(ws, { value: [] });
     const result = await promise;
     expect(result).toEqual({});
+    client.dispose();
+  });
+
+  it("escapes the session id when building the eval expression", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindings('a"b\\c');
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.code).toBe(
+      '(Session withId: "a\\"b\\\\c") ifNil: [#()] ifNotNil: [:s | s bindings keys]'
+    );
+    respondTo(ws, { value: [] });
+    await promise;
+    client.dispose();
+  });
+});
+
+describe("WorkspaceClient.bindingValue()", () => {
+  // BT-2369: reads a single binding's value via the cross-session Session API.
+  it("evaluates `s bindings at: #name` for the target session", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindingValue("sess-xyz", "counter");
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("eval");
+    expect(req.code).toBe(
+      '(Session withId: "sess-xyz") ifNil: [nil] ifNotNil: [:s | s bindings at: #counter]'
+    );
+    respondTo(ws, { value: 42 });
+    expect(await promise).toBe(42);
+    client.dispose();
+  });
+
+  it("quotes binding names that are not plain identifiers", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindingValue("sess-xyz", "has space");
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.code).toBe(
+      '(Session withId: "sess-xyz") ifNil: [nil] ifNotNil: [:s | s bindings at: #"has space"]'
+    );
+    respondTo(ws, { value: null });
+    await promise;
+    client.dispose();
+  });
+
+  it("returns null when the value is absent", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindingValue("sess-xyz", "missing");
+    respondTo(ws, {});
+    expect(await promise).toBeNull();
     client.dispose();
   });
 });
