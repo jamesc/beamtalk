@@ -89,6 +89,7 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
             'classMethodSource' => ~{}~,
             'methodSignatures' => ~{'compute:' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<95>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<113>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classMethodSignatures' => ~{}~,
+            'methodXref' => [~{'class_side' => 'false', 'selector' => 'compute:', 'line' => 5, 'sends' => [~{'selector' => '+', 'line' => 6, 'recv_kind' => 'other'}~, ~{'selector' => '*', 'line' => 7, 'recv_kind' => 'other'}~], 'references' => [], 'source_status' => 'indexed'}~],
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,

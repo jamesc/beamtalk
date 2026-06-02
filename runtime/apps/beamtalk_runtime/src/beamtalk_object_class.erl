@@ -531,7 +531,45 @@ init({ClassName, ClassInfo}) ->
         class_method_docs = maps:get(class_method_docs, ClassInfo, #{}),
         is_internal = IsInternal
     },
+
+    %% ADR 0087 Phase 2 (BT-2298): Forward the per-method cross-reference index
+    %% to beamtalk_xref synchronously, before init returns. Running inside init/1
+    %% means the rows are registered before start/2 yields {ok, Pid}, so the
+    %% class is never observable as "loaded" without its xref rows. The codegen
+    %% bakes `method_xref` into the ClassInfo map (via BuilderState.methodXref);
+    %% hand-coded stub classes that omit it default to [] for backward
+    %% compatibility. A failure here propagates as a class-creation failure.
+    MethodXref = maps:get(method_xref, ClassInfo, []),
+    register_xref(ClassName, MethodXref),
+
     {ok, State}.
+
+-doc """
+Forward a class's per-method xref rows to `beamtalk_xref` (ADR 0087 Phase 2).
+
+A no-op when `MethodXref` is empty (hand-coded stub classes, or classes
+compiled before the codegen baked the field). The call is synchronous so the
+index is populated before the class process finishes starting. `beamtalk_xref`
+may legitimately be absent (e.g. minimal embedded runtimes, or during its own
+supervisor restart), in which case we log at debug level and continue — the
+miss-policy fallback (Phase 3) covers reads against an unpopulated index.
+""".
+-spec register_xref(class_name(), [map()]) -> ok.
+register_xref(_ClassName, []) ->
+    ok;
+register_xref(ClassName, MethodXref) ->
+    case erlang:whereis(beamtalk_xref) of
+        undefined ->
+            ?LOG_DEBUG(#{
+                event => xref_not_running,
+                class => ClassName,
+                reason => "beamtalk_xref not registered; skipping index population",
+                domain => [beamtalk, runtime]
+            }),
+            ok;
+        _Pid ->
+            ok = beamtalk_xref:register_class(ClassName, MethodXref)
+    end.
 
 handle_call(
     {spawn, Args},

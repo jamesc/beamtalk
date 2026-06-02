@@ -112,6 +112,263 @@ pub fn find_references_to_in_source(method_source: &str, class_name: &str) -> Ve
         .collect()
 }
 
+/// A single class reference discovered while walking a method's AST.
+///
+/// Mirrors [`crate::queries::all_sends_query::SendHit`] for the references
+/// channel: where [`find_references_to_in_source`] filters by one known class
+/// name, this collects EVERY [`Expression::ClassReference`] and type-annotation
+/// class mention in a single pass. Used by the xref codegen (ADR 0087 Phase 2,
+/// BT-2298) to bake per-method `references` rows into `register_class/0`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceHit {
+    /// The referenced class name (as written in source).
+    pub class: String,
+    /// 1-based line number within the input source where the reference appears.
+    pub line: u32,
+}
+
+/// Find every class reference within `method_source`.
+///
+/// Walks the parsed AST for [`Expression::ClassReference`] nodes and the
+/// class names mentioned in parameter / return / state type annotations,
+/// emitting one [`ReferenceHit`] per mention. A class referenced multiple
+/// times produces one entry per occurrence.
+///
+/// Shares the parsing strategy and coordinate translation of
+/// [`find_references_to_in_source`] — the input is wrapped in a synthetic
+/// class header, walked, and line numbers are translated back to input-source
+/// space (dropping any match inside the wrapper header).
+///
+/// Returns an empty vector if the source contains no references or cannot be
+/// parsed at all.
+#[must_use]
+pub fn find_all_references_in_source(method_source: &str) -> Vec<ReferenceHit> {
+    let wrapped = format!("{SYNTHETIC_PREFIX}{method_source}");
+    let tokens = lex_with_eof(&wrapped);
+    let (module, _diags) = parse(tokens);
+
+    let mut hits: Vec<(String, u32)> = Vec::new();
+
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            for param in &method.parameters {
+                if let Some(ann) = &param.type_annotation {
+                    collect_all_type_refs(ann, &wrapped, &mut hits);
+                }
+            }
+            if let Some(ret) = &method.return_type {
+                collect_all_type_refs(ret, &wrapped, &mut hits);
+            }
+            for stmt in &method.body {
+                collect_all_references(&stmt.expression, &wrapped, &mut hits);
+            }
+        }
+    }
+
+    for stmt in &module.expressions {
+        collect_all_references(&stmt.expression, &wrapped, &mut hits);
+    }
+    for smd in &module.method_definitions {
+        for param in &smd.method.parameters {
+            if let Some(ann) = &param.type_annotation {
+                collect_all_type_refs(ann, &wrapped, &mut hits);
+            }
+        }
+        if let Some(ret) = &smd.method.return_type {
+            collect_all_type_refs(ret, &wrapped, &mut hits);
+        }
+        for stmt in &smd.method.body {
+            collect_all_references(&stmt.expression, &wrapped, &mut hits);
+        }
+    }
+
+    // Translate from wrapped-source line numbers back to input-source space.
+    // Drop any reference whose line falls inside the synthetic wrapper header
+    // (the `Object subclass: __SyntheticReferencesScope` line) — that mention
+    // of `Object` / `__SyntheticReferencesScope` is the wrapper, not the user's.
+    hits.into_iter()
+        .filter(|&(_, line)| line > PREFIX_LINES)
+        .map(|(class, line)| ReferenceHit {
+            class,
+            line: line - PREFIX_LINES,
+        })
+        .collect()
+}
+
+/// Recursively collect every class reference (name + wrapped-source line) into
+/// `hits`. Unfiltered analogue of [`collect_reference_lines`].
+fn collect_all_references(expr: &Expression, source: &str, hits: &mut Vec<(String, u32)>) {
+    match expr {
+        Expression::ClassReference { name, span, .. } => {
+            hits.push((name.name.to_string(), span.line_number(source)));
+        }
+        Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } => {
+            collect_all_references(receiver, source, hits);
+            for arg in arguments {
+                collect_all_references(arg, source, hits);
+            }
+        }
+        Expression::Cascade {
+            receiver, messages, ..
+        } => {
+            collect_all_references(receiver, source, hits);
+            for msg in messages {
+                for arg in &msg.arguments {
+                    collect_all_references(arg, source, hits);
+                }
+            }
+        }
+        Expression::Assignment { target, value, .. } => {
+            collect_all_references(target, source, hits);
+            collect_all_references(value, source, hits);
+        }
+        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
+            collect_all_references(value, source, hits);
+        }
+        Expression::Block(block) => {
+            for stmt in &block.body {
+                collect_all_references(&stmt.expression, source, hits);
+            }
+        }
+        Expression::Parenthesized { expression, .. } => {
+            collect_all_references(expression, source, hits);
+        }
+        Expression::FieldAccess { receiver, .. } => {
+            collect_all_references(receiver, source, hits);
+        }
+        Expression::Match { value, arms, .. } => {
+            collect_all_references(value, source, hits);
+            for arm in arms {
+                collect_all_pattern_refs(&arm.pattern, source, hits);
+                if let Some(guard) = &arm.guard {
+                    collect_all_references(guard, source, hits);
+                }
+                collect_all_references(&arm.body, source, hits);
+            }
+        }
+        Expression::StringInterpolation { segments, .. } => {
+            for segment in segments {
+                if let StringSegment::Interpolation(inner) = segment {
+                    collect_all_references(inner, source, hits);
+                }
+            }
+        }
+        Expression::ListLiteral { elements, tail, .. } => {
+            for element in elements {
+                collect_all_references(element, source, hits);
+            }
+            if let Some(tail_expr) = tail {
+                collect_all_references(tail_expr, source, hits);
+            }
+        }
+        Expression::ArrayLiteral { elements, .. } => {
+            for element in elements {
+                collect_all_references(element, source, hits);
+            }
+        }
+        Expression::MapLiteral { pairs, .. } => {
+            for pair in pairs {
+                collect_all_references(&pair.key, source, hits);
+                collect_all_references(&pair.value, source, hits);
+            }
+        }
+        Expression::Literal(..)
+        | Expression::Identifier(..)
+        | Expression::Super(..)
+        | Expression::Primitive { .. }
+        | Expression::ExpectDirective { .. }
+        | Expression::Spread { .. }
+        | Expression::Error { .. } => {}
+    }
+}
+
+/// Unfiltered analogue of [`collect_pattern_reference_lines`].
+fn collect_all_pattern_refs(pattern: &Pattern, source: &str, hits: &mut Vec<(String, u32)>) {
+    match pattern {
+        Pattern::Constructor {
+            class, keywords, ..
+        } => {
+            hits.push((class.name.to_string(), class.span.line_number(source)));
+            for (_selector, inner) in keywords {
+                collect_all_pattern_refs(inner, source, hits);
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                collect_all_pattern_refs(element, source, hits);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                collect_all_pattern_refs(element, source, hits);
+            }
+            if let Some(rest_pattern) = rest {
+                collect_all_pattern_refs(rest_pattern, source, hits);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                collect_all_pattern_refs(element, source, hits);
+            }
+            if let Some(tail_pattern) = tail {
+                collect_all_pattern_refs(tail_pattern, source, hits);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                collect_all_pattern_refs(&pair.value, source, hits);
+            }
+        }
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                collect_all_pattern_refs(&segment.value, source, hits);
+                if let Some(size) = &segment.size {
+                    collect_all_references(size, source, hits);
+                }
+            }
+        }
+        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) => {}
+    }
+}
+
+/// Unfiltered analogue of [`collect_type_lines`].
+fn collect_all_type_refs(annotation: &TypeAnnotation, source: &str, hits: &mut Vec<(String, u32)>) {
+    match annotation {
+        TypeAnnotation::Simple(id) => {
+            hits.push((id.name.to_string(), id.span.line_number(source)));
+        }
+        TypeAnnotation::Generic {
+            base, parameters, ..
+        } => {
+            hits.push((base.name.to_string(), base.span.line_number(source)));
+            for param in parameters {
+                collect_all_type_refs(param, source, hits);
+            }
+        }
+        TypeAnnotation::Union { types, .. } => {
+            for ty in types {
+                collect_all_type_refs(ty, source, hits);
+            }
+        }
+        TypeAnnotation::FalseOr { inner, .. } => {
+            collect_all_type_refs(inner, source, hits);
+        }
+        TypeAnnotation::ClassOf {
+            class_name: class_id,
+            ..
+        } => {
+            hits.push((class_id.name.to_string(), class_id.span.line_number(source)));
+        }
+        TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. } => {}
+    }
+}
+
 /// Recursively collect line numbers of class references matching `class_name`.
 fn collect_reference_lines(
     expr: &Expression,
@@ -475,5 +732,66 @@ mod tests {
             !lines.is_empty(),
             "expected at least one reference, got {lines:?}"
         );
+    }
+
+    // BT-2298 / ADR 0087 Phase 2: find_all_references_in_source collects every
+    // class reference in one pass for the xref codegen.
+
+    #[test]
+    fn all_refs_collects_multiple_distinct_classes() {
+        let src = "build =>\n  a := Counter new\n  b := Integer new";
+        let hits = find_all_references_in_source(src);
+        let names: Vec<&str> = hits.iter().map(|h| h.class.as_str()).collect();
+        assert!(names.contains(&"Counter"), "got {hits:?}");
+        assert!(names.contains(&"Integer"), "got {hits:?}");
+        let counter = hits.iter().find(|h| h.class == "Counter").unwrap();
+        assert_eq!(counter.line, 2);
+        let integer = hits.iter().find(|h| h.class == "Integer").unwrap();
+        assert_eq!(integer.line, 3);
+    }
+
+    #[test]
+    fn all_refs_collects_type_annotation_references() {
+        let src = "use: x :: Counter -> Integer =>\n  x value";
+        let hits = find_all_references_in_source(src);
+        let names: Vec<&str> = hits.iter().map(|h| h.class.as_str()).collect();
+        assert!(names.contains(&"Counter"), "got {hits:?}");
+        assert!(names.contains(&"Integer"), "got {hits:?}");
+    }
+
+    #[test]
+    fn all_refs_does_not_leak_synthetic_wrapper() {
+        // The wrapper header `Object subclass: __SyntheticReferencesScope` must
+        // never appear in the all-references output.
+        let hits = find_all_references_in_source("noop => self");
+        let names: Vec<&str> = hits.iter().map(|h| h.class.as_str()).collect();
+        assert!(
+            !names.contains(&"Object"),
+            "wrapper Object leaked: {hits:?}"
+        );
+        assert!(
+            !names.contains(&"__SyntheticReferencesScope"),
+            "wrapper class leaked: {hits:?}"
+        );
+    }
+
+    #[test]
+    fn all_refs_parity_with_filtered_query() {
+        // For any class queried via the filtered API, the all-references walker
+        // must report the same line numbers (one ReferenceHit per occurrence).
+        let src = "buildPair =>\n  a := Counter new\n  b := Counter new\n  Counter reset";
+        let filtered = find_references_to_in_source(src, "Counter");
+        let all: Vec<u32> = find_all_references_in_source(src)
+            .into_iter()
+            .filter(|h| h.class == "Counter")
+            .map(|h| h.line)
+            .collect();
+        assert_eq!(filtered, all, "filtered vs all-references line mismatch");
+    }
+
+    #[test]
+    fn all_refs_empty_when_no_references() {
+        let hits = find_all_references_in_source("greet => self name");
+        assert!(hits.is_empty(), "got {hits:?}");
     }
 }

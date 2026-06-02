@@ -735,8 +735,18 @@ mod tests {
         // The conditional must compile to an inline case, NOT a runtime dispatch.
         // A runtime `send(_, 'ifTrue:', [Fun])` returns `nil` on the false branch, so
         // the sequencer's `element(2, _)` unpack crashes with badarg (BT-2356 regression).
+        //
+        // ADR 0087 Phase 2 (BT-2298): `register_class/0` now bakes a methodXref
+        // index that lists `ifTrue:` as a sent selector (metadata, not dispatch).
+        // Exclude that line so the assertion still checks only for a real runtime
+        // dispatch of the selector.
+        let code_no_xref: String = code
+            .lines()
+            .filter(|line| !line.contains("'methodXref'"))
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(
-            !code.contains("'ifTrue:'"),
+            !code_no_xref.contains("'ifTrue:'"),
             "nested-op-in-branch must inline ifTrue: (no runtime 'ifTrue:' dispatch). Got:\n{code}"
         );
         // The outer local 'sum' is seeded into the StateAcc before the branch.

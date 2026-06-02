@@ -318,6 +318,7 @@ module 'workspace_binding_send' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             'classMethodSource' => ~{}~,
             'methodSignatures' => ~{'greet' => #{#<103>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#}~,
             'classMethodSignatures' => ~{}~,
+            'methodXref' => [~{'class_side' => 'false', 'selector' => 'greet', 'line' => 1, 'sends' => [~{'selector' => 'show:', 'line' => 1, 'recv_kind' => 'other'}~], 'references' => [~{'class' => 'Transcript', 'line' => 1}~], 'source_status' => 'indexed'}~],
             'classState' => ~{}~,
             'classDoc' => 'none',
             'methodDocs' => ~{}~,

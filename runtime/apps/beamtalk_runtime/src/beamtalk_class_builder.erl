@@ -411,7 +411,18 @@ build_compiled_class_info(
                                                 maybe_put(
                                                     meta,
                                                     maps:get(meta, BuilderState, undefined),
-                                                    Base
+                                                    %% ADR 0087 Phase 2 (BT-2298):
+                                                    %% per-method xref index baked by
+                                                    %% codegen. Defaults to [] (not
+                                                    %% undefined) so init/1 always gets
+                                                    %% a list; maybe_put inserts [] as-is.
+                                                    maybe_put(
+                                                        method_xref,
+                                                        maps:get(
+                                                            methodXref, BuilderState, []
+                                                        ),
+                                                        Base
+                                                    )
                                                 )
                                             )
                                         )
