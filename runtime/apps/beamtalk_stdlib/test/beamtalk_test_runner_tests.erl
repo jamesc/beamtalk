@@ -533,7 +533,31 @@ live_setup() ->
     ok.
 
 live_teardown(_) ->
+    %% Inverse of live_setup/0: stop the synthetic class gen_servers (their
+    %% terminate/2 leaves the pg group and clears the registry ETS tables) and
+    %% unload the synthetic module, so fixture state doesn't leak into later
+    %% EUnit modules sharing this VM and make find_test_classes/0 + run_all/*
+    %% order-dependent across the suite.
+    stop_synth_class(?SYNTH_CLASS),
+    stop_synth_class('BtTestRunnerSynthTest2'),
+    stop_synth_class('BtTestRunnerSynthTest3'),
+    code:purge(?SYNTH_MODULE),
+    code:delete(?SYNTH_MODULE),
     ok.
+
+%% Stop a synthetic class gen_server if still registered. Its terminate/2
+%% removes the class from pg + the registry tables.
+stop_synth_class(Name) ->
+    case whereis(beamtalk_class_registry:registry_name(Name)) of
+        undefined ->
+            ok;
+        Pid ->
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end
+    end.
 
 %% Compile and load a tiny Erlang module that backs the synthetic TestCase.
 load_synth_module() ->
