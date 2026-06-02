@@ -751,11 +751,32 @@ coverage-stdlib: build-stdlib
         exit 1
     fi
 
-# Unix-only: depends on Unix-only coverage recipes
-# Runs eunit with --cover, then E2E with cover, then stdlib with cover, then merges all into one report.
-# Generate combined Erlang coverage (eunit + E2E + stdlib)
+# Collect BUnit test coverage (runs the .bt TestCase suite with Erlang cover
+# instrumentation). The BUnit suite drives beamtalk_test_case, beamtalk_test_runner,
+# and the full dispatch/object/class machinery via real TestCase classes — code that
+# eunit/E2E/bootstrap barely touch. [working-directory: 'stdlib'] so `beamtalk test`
+# discovers the default `test/` dir (matching the test-bunit recipe).
 [unix]
-coverage-all: coverage-runtime coverage-e2e coverage-stdlib
+[working-directory: 'stdlib']
+coverage-bunit: build-stdlib
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "📊 Running BUnit tests with Erlang cover instrumentation..."
+    echo "   (This is slower than normal BUnit tests due to cover overhead)"
+    BUNIT_COVER=1 cargo run --bin beamtalk --quiet -- test --warnings-as-errors || true
+    if [ -f ../runtime/_build/test/cover/bunit.coverdata ]; then
+        SIZE=$(wc -c < ../runtime/_build/test/cover/bunit.coverdata)
+        echo "  📁 Coverdata: runtime/_build/test/cover/bunit.coverdata (${SIZE} bytes)"
+    else
+        echo "⚠️  No BUnit coverdata produced"
+        exit 1
+    fi
+
+# Unix-only: depends on Unix-only coverage recipes
+# Runs eunit with --cover, then E2E with cover, then stdlib + BUnit with cover, then merges all into one report.
+# Generate combined Erlang coverage (eunit + E2E + stdlib + BUnit)
+[unix]
+coverage-all: coverage-runtime coverage-e2e coverage-stdlib coverage-bunit
     #!/usr/bin/env bash
     set -euo pipefail
     cd runtime

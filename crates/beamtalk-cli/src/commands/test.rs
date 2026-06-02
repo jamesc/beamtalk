@@ -1701,6 +1701,48 @@ fn parse_bunit_result_json(stdout: &str, stderr: &str) -> Result<BunitResult> {
 /// Calls the `BUnit` runner directly, bypassing `EUnit` wrappers. The runner
 /// discovers test classes, executes them with the specified concurrency level,
 /// and returns aggregated results as JSON.
+/// Build cover instrumentation preamble/epilogue for the BUnit eval command.
+///
+/// Gated on the `BUNIT_COVER` env var (mirrors `STDLIB_COVER` in
+/// `test_stdlib.rs`). Instruments all four Beamtalk app ebins that carry
+/// Erlang abstract code; the compiled `bt@*` stdlib modules have no abstract
+/// code and are silently skipped by `cover:compile_beam_directory/1`. The
+/// result is exported to `_build/test/cover/bunit.coverdata` so the
+/// `coverage-all` wildcard merge folds it into the badge.
+fn bunit_cover_fragments(
+    beam_paths: &beamtalk_cli::repl_startup::BeamPaths,
+    runtime_dir: &std::path::Path,
+) -> (String, String) {
+    if std::env::var("BUNIT_COVER").is_err() {
+        return (String::new(), String::new());
+    }
+
+    let cover_dir = runtime_dir.join("_build/test/cover");
+    let _ = std::fs::create_dir_all(&cover_dir);
+    let cover_export_path = cover_dir.join("bunit.coverdata");
+    info!(
+        "BUnit cover mode enabled, will export to {}",
+        cover_export_path.display()
+    );
+
+    let preamble = format!(
+        "cover:start(), \
+         cover:compile_beam_directory(\"{runtime_ebin}\"), \
+         cover:compile_beam_directory(\"{workspace_ebin}\"), \
+         cover:compile_beam_directory(\"{compiler_ebin}\"), \
+         cover:compile_beam_directory(\"{stdlib_ebin}\"), ",
+        runtime_ebin = beam_paths.runtime_ebin.display(),
+        workspace_ebin = beam_paths.workspace_ebin.display(),
+        compiler_ebin = beam_paths.compiler_ebin.display(),
+        stdlib_ebin = beam_paths.stdlib_erlang_ebin.display(),
+    );
+    let epilogue = format!(
+        "cover:export(\"{export}\"), cover:stop(), ",
+        export = cover_export_path.display(),
+    );
+    (preamble, epilogue)
+}
+
 fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     debug!("Running BUnit tests with jobs={}", pipeline.jobs);
 
@@ -1715,9 +1757,18 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let hex_deps_start_cmd =
         beamtalk_cli::repl_startup::hex_deps_start_fragment(&pipeline.hex_dep_names);
 
+    // BUNIT_COVER: instrument the runtime under Erlang `cover` so the BUnit
+    // suite (which drives beamtalk_test_case, beamtalk_test_runner, and the
+    // full dispatch/object/class machinery via real .bt TestCase classes)
+    // contributes to the Erlang coverage badge — mirroring the existing
+    // STDLIB_COVER / E2E_COVER passes. The exported bunit.coverdata is picked
+    // up by `just coverage-all`'s wildcard merge.
+    let (cover_preamble, cover_epilogue) = bunit_cover_fragments(&beam_paths, &runtime_dir);
+
     // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
     let eval_cmd = format!(
-        "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+        "{cover_preamble}\
+         {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          {hex_deps_start_cmd}\
          {package_load_cmd}\
          {fixture_load_cmd}\
@@ -1725,6 +1776,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
          Result = beamtalk_test_runner:run_all({jobs}), \
          JSON = beamtalk_test_runner:result_to_json(Result), \
          io:format(\"~s~n\", [JSON]), \
+         {cover_epilogue}\
          init:stop(case beamtalk_test_runner:result_has_passed(Result) of true -> 0; _ -> 1 end).",
         jobs = pipeline.jobs
     );

@@ -190,3 +190,104 @@ dependencies_returns_binaries_test() ->
         fun(Name) -> ?assert(is_binary(Name)) end,
         Result
     ).
+
+%%% ============================================================================
+%%% Synthetic-app tests — exercise package metadata branches that need OTP
+%%% application env shapes the stdlib package does not provide (BT coverage push).
+%%% ============================================================================
+
+%% Load a throwaway OTP application from an in-memory spec so we control its
+%% `classes`/`applications`/`vsn` env. Unloads any prior copy first.
+load_fake_app(Name, ExtraProps) ->
+    _ = application:unload(Name),
+    Props = [{description, "fake"}, {vsn, "1.0.0"} | ExtraProps],
+    ok = application:load({application, Name, Props}).
+
+%% all/0 must drop an app whose classes carry no package key
+%% (package_name_from_classes/1 -> undefined -> filtered out).
+all_excludes_app_with_unpackaged_classes_test() ->
+    setup(),
+    App = bt_fake_nopkg_app,
+    load_fake_app(App, [{env, [{classes, [#{name => 'FooNoPkg'}]}]}]),
+    try
+        Result = beamtalk_package:all(),
+        ?assert(is_list(Result)),
+        %% A classes list without a `package` key never surfaces as a package.
+        ?assertNot(lists:member(undefined, Result))
+    after
+        _ = application:unload(App)
+    end.
+
+%% all/0 surfaces a package declared with a binary `package` value
+%% (package_name_from_classes/1 binary clause).
+all_includes_binary_package_test() ->
+    setup(),
+    App = bt_fake_binpkg_app,
+    load_fake_app(App, [{env, [{classes, [#{package => <<"binpkg">>, name => 'FooBin'}]}]}]),
+    try
+        ?assert(lists:member(<<"binpkg">>, beamtalk_package:all()))
+    after
+        _ = application:unload(App)
+    end.
+
+%% dependencies/1 includes deps that are themselves Beamtalk packages.
+dependencies_includes_beamtalk_package_deps_test() ->
+    setup(),
+    Dep = bt_fake_dep_pkg,
+    Main = bt_fake_main_pkg,
+    load_fake_app(Dep, [{env, [{classes, [#{package => depp, name => 'D'}]}]}]),
+    load_fake_app(
+        Main,
+        [{applications, [Dep]}, {env, [{classes, [#{package => mainp, name => 'M'}]}]}]
+    ),
+    try
+        Deps = beamtalk_package:dependencies(<<"mainp">>),
+        ?assert(lists:member(<<"depp">>, Deps))
+    after
+        _ = application:unload(Main),
+        _ = application:unload(Dep)
+    end.
+
+%% dependencies/1 drops a dep app whose classes carry no package key.
+dependencies_excludes_unpackaged_dep_test() ->
+    setup(),
+    Dep = bt_fake_dep_nopkg,
+    Main = bt_fake_main2_pkg,
+    load_fake_app(Dep, [{env, [{classes, [#{name => 'XNoPkg'}]}]}]),
+    load_fake_app(
+        Main,
+        [{applications, [Dep]}, {env, [{classes, [#{package => main2p, name => 'M2'}]}]}]
+    ),
+    try
+        Deps = beamtalk_package:dependencies(<<"main2p">>),
+        ?assert(is_list(Deps)),
+        ?assertNot(lists:member(undefined, Deps))
+    after
+        _ = application:unload(Main),
+        _ = application:unload(Dep)
+    end.
+
+%% classes/1 accepts the legacy `{Mod, Name, Super}` tuple entry shape alongside
+%% the map shape (class_entry_name/1 tuple clause).
+classes_handles_legacy_tuple_entries_test() ->
+    setup(),
+    App = bt_fake_legacy_pkg,
+    load_fake_app(
+        App,
+        [{env, [{classes, [#{package => legacyp, name => 'LegacyA'}, {some_mod, 'LegacyB', 'Object'}]}]}]
+    ),
+    try
+        Classes = beamtalk_package:classes(<<"legacyp">>),
+        ?assert(lists:member('LegacyA', Classes)),
+        ?assert(lists:member('LegacyB', Classes))
+    after
+        _ = application:unload(App)
+    end.
+
+%% packageNameFor/1 is the Beamtalk FFI shim and must mirror package_name/1.
+package_name_for_delegates_to_package_name_test() ->
+    setup(),
+    ?assertEqual(
+        beamtalk_package:package_name('Object'),
+        beamtalk_package:packageNameFor('Object')
+    ).
