@@ -601,10 +601,7 @@ fn handle_repl_command(line: &str, client: &mut ReplClient) -> CommandResult {
             return CommandResult::Handled;
         }
         ":clear" => {
-            match client.clear_bindings() {
-                Ok(_) => println!("Bindings cleared."),
-                Err(e) => eprintln!("Error: {e}"),
-            }
+            handle_clear(client);
             return CommandResult::Handled;
         }
         ":bindings" | ":b" => {
@@ -783,18 +780,48 @@ fn handle_erlang_help(tokens: &[&str], client: &mut ReplClient) {
     }
 }
 
-/// Handle `:bindings` -- display current REPL variable bindings.
+/// Handle `:clear` -- clear the current session's local bindings.
+///
+/// BT-2369 (ADR 0081 Phase 6): the `clear` op was removed; this evaluates
+/// `Session current clear`.
+fn handle_clear(client: &mut ReplClient) {
+    match client.clear_bindings() {
+        Ok(response) if response.is_error() => {
+            if let Some(msg) = response.error_message() {
+                eprintln!("{}", display::format_error(msg));
+            }
+        }
+        Ok(_) => println!("Bindings cleared."),
+        Err(e) => eprintln!("Error: {e}"),
+    }
+}
+
+/// Handle `:bindings` -- display the current session's local binding names.
+///
+/// BT-2369 (ADR 0081 Phase 6): the `bindings` op was removed; this evaluates
+/// `Session current bindings keys`, whose result `value` is a list of
+/// binding-name symbols. Workspace globals are a separate layer
+/// (`Workspace globals keys`).
 fn handle_bindings(client: &mut ReplClient) {
     match client.get_bindings() {
         Ok(response) => {
-            if let Some(serde_json::Value::Object(map)) = response.bindings {
-                if map.is_empty() {
+            if response.is_error() {
+                if let Some(msg) = response.error_message() {
+                    eprintln!("{}", display::format_error(msg));
+                }
+                return;
+            }
+            match response.value {
+                Some(serde_json::Value::Array(names)) if names.is_empty() => {
                     println!("No bindings.");
-                } else {
-                    for (name, value) in map {
-                        println!("  {name} = {}", format_value(&value));
+                }
+                Some(serde_json::Value::Array(names)) => {
+                    for name in names {
+                        println!("  {}", format_value(&name));
                     }
                 }
+                Some(other) => println!("{}", format_value(&other)),
+                None => println!("No bindings."),
             }
         }
         Err(e) => eprintln!("Error: {e}"),

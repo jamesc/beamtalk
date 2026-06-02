@@ -1018,30 +1018,6 @@ impl BeamtalkMcp {
         Ok(CallToolResult::success(vec![Content::text(text)]))
     }
 
-    /// Get current variable bindings in the REPL session.
-    #[tool(
-        description = "Get current variable bindings in the REPL session. Shows all variables and their values."
-    )]
-    async fn get_bindings(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("get_bindings");
-        tracing::debug!(tool = "get_bindings", "tool invoked");
-        let response = self
-            .client
-            .bindings()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-
-        check_response!(response, "Failed to get bindings");
-
-        let text = match response.bindings {
-            Some(bindings) => pretty_json(&bindings),
-            None => "No bindings".to_string(),
-        };
-
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
-    }
-
     /// Hot-reload a class, migrating running actors to the new code.
     #[tool(
         description = "Hot-reload a class. Recompiles and reloads the class, migrating any running actors to the new code."
@@ -1143,27 +1119,6 @@ impl BeamtalkMcp {
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))
-    }
-
-    /// Clear all variable bindings in the REPL session.
-    #[tool(
-        description = "Clear all variable bindings in the REPL session. Resets the workspace to a clean state."
-    )]
-    async fn clear(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("clear");
-        tracing::debug!(tool = "clear", "tool invoked");
-        let response = self
-            .client
-            .clear()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
-
-        check_response!(response, "Failed to clear bindings");
-
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(
-            "Bindings cleared",
-        )]))
     }
 
     /// Unload a class from the workspace.
@@ -3325,6 +3280,24 @@ mod tests {
         assert!(
             !tool_names.contains(&"list_modules"),
             "list_modules should not be in tool list (removed in this PR)"
+        );
+    }
+
+    // BT-2369 (ADR 0081 Phase 6): the get_bindings / clear tools were removed —
+    // session state is read and reset via `evaluate` (`Session current bindings
+    // keys`, `Session current clear`).
+    #[test]
+    fn session_state_tools_not_registered() {
+        let router = BeamtalkMcp::tool_router();
+        let tools = router.list_all();
+        let tool_names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
+        assert!(
+            !tool_names.contains(&"get_bindings"),
+            "get_bindings should not be in tool list (removed; use evaluate)"
+        );
+        assert!(
+            !tool_names.contains(&"clear"),
+            "clear should not be in tool list (removed; use evaluate)"
         );
     }
 

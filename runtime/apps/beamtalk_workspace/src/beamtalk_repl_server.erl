@@ -389,16 +389,13 @@ Dispatch protocol ops to domain-specific handler modules (BT-705).
 
 The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed
 in BT-2091 (protocol 2.0); sending them now returns `unknown_op`. The
-`bindings` and `clear` ops remain — they surface the session-locals layer
-which has no Beamtalk-native equivalent today (see BT-2099 for the
-first-class session object follow-up).
+`bindings` and `clear` ops were removed in BT-2369 (ADR 0081 Phase 6) —
+session state is now read and mutated through the Beamtalk-native `Session`
+API (`Session current bindings`, `Session current clear`) via `eval`, so
+sending `bindings`/`clear` now returns `unknown_op`.
 """.
 handle_op(<<"eval">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_eval:handle(<<"eval">>, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"clear">>; Op =:= <<"bindings">> ->
-    %% Session-local: no Beamtalk-native message-send equivalent yet (BT-2099
-    %% considers a first-class session object). Kept as protocol ops.
-    beamtalk_repl_ops_eval:handle(Op, Params, Msg, SessionPid);
 handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_load:handle(<<"load-source">>, Params, Msg, SessionPid);
 handle_op(<<"load-project">>, Params, Msg, SessionPid) ->
@@ -470,8 +467,6 @@ Implementation lives in beamtalk_repl_protocol (extracted BT-865).
 """.
 -spec parse_request(binary()) ->
     {eval, string()}
-    | {clear_bindings}
-    | {get_bindings}
     | {load_source, binary()}
     | {list_actors}
     | {kill_actor, string()}

@@ -199,15 +199,50 @@ export class WorkspaceClient {
   // ─── Op wrappers ─────────────────────────────────────────────────────────
 
   /**
-   * List variable bindings for this connection's session.
-   * The `sessionId` is sent as a correlation field in the request;
-   * the server always returns bindings for this WebSocket's own session.
+   * List variable binding *names* (session locals) for a session.
+   *
+   * BT-2369 (ADR 0081 Phase 6): the dedicated `bindings` protocol op was
+   * removed. We now read session state through the Beamtalk-native `Session`
+   * API via `eval`, mirroring how `reload` routes through `ClassName reload`.
+   * Session locals only — workspace globals are a separate `Workspace globals`
+   * layer.
+   *
+   * Cross-session note: the runtime's `eval` always runs in *this* WebSocket's
+   * own session pid — the protocol `session` field does not redirect eval
+   * dispatch. To read the user's REPL terminal session we therefore go through
+   * the explicit cross-session API `Session withId: <id>` (read-only), guarding
+   * the `nil` (unknown id) case. The map's values are placeholders (`""`): a
+   * Beamtalk `Dictionary` is encoded as its `printString`, not a JSON object,
+   * so per-binding values are fetched on demand via {@link bindingValue}
+   * (e.g. from the inspector), which also avoids a torn keys/values read.
    */
   async bindings(sessionId: string): Promise<BindingsMap> {
-    const resp = (await this._request({ op: "bindings", session: sessionId })) as {
-      bindings?: BindingsMap;
+    const code = `(Session withId: ${btString(sessionId)}) ifNil: [#()] ifNotNil: [:s | s bindings keys]`;
+    const resp = (await this._request({ op: "eval", code })) as {
+      value?: unknown;
     };
-    return resp.bindings ?? {};
+    const names = Array.isArray(resp.value) ? resp.value : [];
+    const map: BindingsMap = {};
+    for (const name of names) {
+      map[String(name)] = "";
+    }
+    return map;
+  }
+
+  /**
+   * Read a single binding's value (session local) from a session, by name.
+   *
+   * BT-2369 (ADR 0081 Phase 6): reads via the cross-session `Session withId:`
+   * API (`eval` runs in this WebSocket's own session, so the protocol `session`
+   * field cannot redirect it). Returns `null` when the session id is unknown or
+   * the binding is absent. A single eval, so the value is a consistent snapshot.
+   */
+  async bindingValue(sessionId: string, name: string): Promise<unknown> {
+    const code = `(Session withId: ${btString(sessionId)}) ifNil: [nil] ifNotNil: [:s | s bindings at: ${btSymbol(name)}]`;
+    const resp = (await this._request({ op: "eval", code })) as {
+      value?: unknown;
+    };
+    return resp.value ?? null;
   }
 
   /** List all running actors in the workspace. */
@@ -599,6 +634,25 @@ export class WorkspaceClient {
       }
     }
   }
+}
+
+// ─── Beamtalk source-literal helpers ────────────────────────────────────────
+
+/**
+ * Render a JS string as a Beamtalk double-quoted string literal, escaping
+ * backslashes and double quotes. Used when interpolating ids into `eval` code.
+ */
+function btString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * Render a binding name as a Beamtalk symbol literal (`#name`). Falls back to a
+ * quoted symbol (`#"..."`) when the name is not a plain identifier, so names
+ * with unusual characters cannot break out of the literal.
+ */
+function btSymbol(name: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? `#${name}` : `#${btString(name)}`;
 }
 
 // ─── Default WebSocket factory (production) ──────────────────────────────────

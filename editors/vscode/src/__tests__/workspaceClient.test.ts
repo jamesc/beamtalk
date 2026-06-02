@@ -63,7 +63,11 @@ function makeClient(): { client: WorkspaceClient; ws: MockWebSocket } {
  * Build a client that has completed the auth handshake and is fully connected.
  * Returns the client, the mock WS, and the assigned session ID.
  */
-function makeConnectedClient(): { client: WorkspaceClient; ws: MockWebSocket; sessionId: string } {
+function makeConnectedClient(): {
+  client: WorkspaceClient;
+  ws: MockWebSocket;
+  sessionId: string;
+} {
   const { client, ws } = makeClient();
 
   // Server drives the auth flow
@@ -177,7 +181,11 @@ describe("WorkspaceClient.actors()", () => {
     });
     const result = await promise;
     expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ pid: "<0.1.0>", class: "Counter", spawned_at: 1000 });
+    expect(result[0]).toEqual({
+      pid: "<0.1.0>",
+      class: "Counter",
+      spawned_at: 1000,
+    });
     client.dispose();
   });
 
@@ -186,6 +194,89 @@ describe("WorkspaceClient.actors()", () => {
     const promise = client.actors();
     respondTo(ws, {});
     expect(await promise).toEqual([]);
+    client.dispose();
+  });
+});
+
+// ─── Op: bindings() ────────────────────────────────────────────────────────────
+
+describe("WorkspaceClient.bindings()", () => {
+  // BT-2369 (ADR 0081 Phase 6): the `bindings` op was removed. bindings() reads
+  // the target session's local binding *names* through the cross-session
+  // `Session withId:` API (eval runs in this WS's own session, so the protocol
+  // `session` field cannot redirect it). Values are placeholders.
+  it("evaluates the binding keys for the target session via Session withId:", async () => {
+    const { client, ws } = makeConnectedClient();
+
+    const promise = client.bindings("sess-xyz");
+
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("eval");
+    expect(req.code).toBe(
+      '(Session withId: "sess-xyz") ifNil: [#()] ifNotNil: [:s | s bindings keys]'
+    );
+
+    respondTo(ws, { value: ["x", "y"] });
+
+    const result = await promise;
+    expect(Object.keys(result).sort()).toEqual(["x", "y"]);
+    client.dispose();
+  });
+
+  it("returns an empty map when the session has no locals or is unknown", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindings("sess-empty");
+    respondTo(ws, { value: [] });
+    const result = await promise;
+    expect(result).toEqual({});
+    client.dispose();
+  });
+
+  it("escapes the session id when building the eval expression", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindings('a"b\\c');
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.code).toBe(
+      '(Session withId: "a\\"b\\\\c") ifNil: [#()] ifNotNil: [:s | s bindings keys]'
+    );
+    respondTo(ws, { value: [] });
+    await promise;
+    client.dispose();
+  });
+});
+
+describe("WorkspaceClient.bindingValue()", () => {
+  // BT-2369: reads a single binding's value via the cross-session Session API.
+  it("evaluates `s bindings at: #name` for the target session", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindingValue("sess-xyz", "counter");
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.op).toBe("eval");
+    expect(req.code).toBe(
+      '(Session withId: "sess-xyz") ifNil: [nil] ifNotNil: [:s | s bindings at: #counter]'
+    );
+    respondTo(ws, { value: 42 });
+    expect(await promise).toBe(42);
+    client.dispose();
+  });
+
+  it("quotes binding names that are not plain identifiers", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindingValue("sess-xyz", "has space");
+    const req = ws.sent[ws.sent.length - 1];
+    expect(req.code).toBe(
+      '(Session withId: "sess-xyz") ifNil: [nil] ifNotNil: [:s | s bindings at: #"has space"]'
+    );
+    respondTo(ws, { value: null });
+    await promise;
+    client.dispose();
+  });
+
+  it("returns null when the value is absent", async () => {
+    const { client, ws } = makeConnectedClient();
+    const promise = client.bindingValue("sess-xyz", "missing");
+    respondTo(ws, {});
+    expect(await promise).toBeNull();
     client.dispose();
   });
 });

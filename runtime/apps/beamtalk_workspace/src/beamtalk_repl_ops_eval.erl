@@ -6,14 +6,17 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Op handlers for eval, clear, and bindings operations.
+Op handler for the `eval` operation.
 
-Extracted from beamtalk_repl_server (BT-705).
+Extracted from beamtalk_repl_server (BT-705). The `clear` and `bindings`
+ops were removed in BT-2369 (ADR 0081 Phase 6) — session state is now read
+and mutated through the Beamtalk-native `Session` API
+(`Session current bindings`, `Session current clear`) via `eval`.
 """.
 
 -export([handle/4]).
 
--doc "Handle eval/clear/bindings ops.".
+-doc "Handle the eval op.".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
 handle(<<"eval">>, Params, Msg, SessionPid) ->
     Code = binary_to_list(maps:get(<<"code">>, Params, <<>>)),
@@ -44,27 +47,4 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
                     beamtalk_repl_json:encode_error(WrappedReason, Msg, Output, Warnings)
             end
-    end;
-handle(<<"clear">>, _Params, Msg, SessionPid) ->
-    ok = beamtalk_repl_shell:clear_bindings(SessionPid),
-    beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1);
-handle(<<"bindings">>, _Params, Msg, SessionPid) ->
-    %% BT-1045: session is stripped from Params by the protocol decoder — use get_session(Msg).
-    %% This allows the VS Code extension (which has its own empty WS session) to request
-    %% bindings for the user's REPL terminal session instead.
-    TargetPid = beamtalk_session_table:resolve_pid(
-        beamtalk_repl_protocol:get_session(Msg), SessionPid
-    ),
-    {ok, SessionLocals} = beamtalk_repl_shell:get_bindings(TargetPid),
-    %% BT-2365 (ADR 0081 Phase 1): a session's binding map now holds only locals —
-    %% bind:as: entries live in the shared workspace registry and are resolved
-    %% lazily rather than copied into the session. Merge them back in here so the
-    %% :bindings display keeps showing user-registered bind:as: names (locals win
-    %% on key collision, matching shadowing semantics).
-    WorkspaceUserBindings = beamtalk_workspace_interface_primitives:get_user_bindings(),
-    Bindings = maps:merge(WorkspaceUserBindings, SessionLocals),
-    %% ADR 0019 Phase 3: Filter out workspace convenience bindings from display.
-    UserBindings = maps:without(beamtalk_workspace_config:binding_names(), Bindings),
-    beamtalk_repl_protocol:encode_bindings(
-        UserBindings, Msg, fun beamtalk_repl_json:term_to_json/1
-    ).
+    end.

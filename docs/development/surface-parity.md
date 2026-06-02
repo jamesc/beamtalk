@@ -52,8 +52,8 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `clear` | -- | `:clear` ≡ `Session current clear` | `clear` | -- | Clear session locals. ADR 0081 / BT-2367 added the first-class `Session` object: `Session current clear` is the object-side accessor, reachable via `eval`/`evaluate` on every surface. The `:clear` meta-command and MCP `clear` tool are retained shortcuts (removal of the meta-commands is deferred to a later ADR 0081 phase). |
-| `bindings` | -- | `:bindings` / `:b` ≡ `Session current bindings` | `get_bindings` | -- | View session locals. ADR 0081 / BT-2367 added `Session current bindings`, returning a live `BindingsView` (Dictionary protocol: `at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, `do:`). Reachable via `eval`/`evaluate` on every surface; the `:bindings` meta-command and MCP `get_bindings` tool are retained shortcuts (removal of the meta-commands is deferred to a later ADR 0081 phase). Note the object accessor returns session-locals only — workspace globals are a separate layer reached via `Workspace globals` (also a `BindingsView`). |
+| *(via `eval`: `Session current clear`)* | -- | `:clear` (via `Session current clear`) | *(via `evaluate`)* | -- | Clear session locals. ADR 0081 / BT-2367 added the first-class `Session` object; **BT-2369 (ADR 0081 Phase 6) removed the `clear` protocol op and the MCP `clear` tool** — `Session current clear` is the object-side accessor, reachable via `eval`/`evaluate` on every surface. The `:clear` CLI meta-command is retained as a shortcut that now evaluates `Session current clear`. |
+| *(via `eval`: `Session current bindings`)* | -- | `:bindings` / `:b` (via `Session current bindings keys`) | *(via `evaluate`)* | -- | View session locals. ADR 0081 / BT-2367 added `Session current bindings`, returning a live `BindingsView` (Dictionary protocol: `at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, `do:`). **BT-2369 (ADR 0081 Phase 6) removed the `bindings` protocol op and the MCP `get_bindings` tool** — read via `eval`/`evaluate` (`Session current bindings keys`) on every surface. The `:bindings` / `:b` CLI meta-command is retained as a shortcut that now evaluates `Session current bindings keys` (it lists binding *names*; the old op also showed values). Note the object accessor returns session-locals only — workspace globals are a separate layer reached via `Workspace globals` (also a `BindingsView`). |
 | `sessions` | -- | `surface-specific: transport handshake` | -- | -- | List active REPL sessions |
 | `clone` | -- | `surface-specific: transport handshake` | -- | -- | Create a new session |
 | `close` | -- | `:exit` / `:quit` / `:q` | -- | -- | Close session; `:exit` exits the CLI REPL |
@@ -233,8 +233,8 @@ For completeness, the full list of REPL meta-commands and their corresponding RE
 |-------------|---------|---------|
 | `:exit` | `:quit`, `:q` | `close` |
 | `:help` | `:h`, `:?` | -- (client-side) |
-| `:clear` | -- | `clear` |
-| `:bindings` | `:b` | `bindings` |
+| `:clear` | -- | -- (evaluates `Session current clear`; BT-2369 removed the `clear` op) |
+| `:bindings` | `:b` | -- (evaluates `Session current bindings keys`; BT-2369 removed the `bindings` op) |
 | `:sync` | `:s` | `load-project` |
 | `:unload <class>` | -- | `unload` |
 | `:test` | `:t` | `test` / `test-all` |

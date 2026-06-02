@@ -1764,8 +1764,6 @@ base_ops() ->
             <<"params">> => [],
             <<"optional">> => [<<"path">>, <<"include_tests">>, <<"force">>]
         },
-        <<"clear">> => #{<<"params">> => []},
-        <<"bindings">> => #{<<"params">> => []},
         <<"sessions">> => #{<<"params">> => []},
         <<"clone">> => #{<<"params">> => []},
         <<"close">> => #{<<"params">> => []},
