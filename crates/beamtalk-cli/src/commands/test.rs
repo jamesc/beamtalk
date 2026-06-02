@@ -1701,7 +1701,7 @@ fn parse_bunit_result_json(stdout: &str, stderr: &str) -> Result<BunitResult> {
 /// Calls the `BUnit` runner directly, bypassing `EUnit` wrappers. The runner
 /// discovers test classes, executes them with the specified concurrency level,
 /// and returns aggregated results as JSON.
-/// Build cover instrumentation preamble/epilogue for the BUnit eval command.
+/// Build cover instrumentation preamble/epilogue for the `BUnit` eval command.
 ///
 /// Gated on the `BUNIT_COVER` env var (mirrors `STDLIB_COVER` in
 /// `test_stdlib.rs`). Instruments all four Beamtalk app ebins that carry

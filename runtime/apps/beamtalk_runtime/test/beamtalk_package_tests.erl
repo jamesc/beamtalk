@@ -274,7 +274,13 @@ classes_handles_legacy_tuple_entries_test() ->
     App = bt_fake_legacy_pkg,
     load_fake_app(
         App,
-        [{env, [{classes, [#{package => legacyp, name => 'LegacyA'}, {some_mod, 'LegacyB', 'Object'}]}]}]
+        [
+            {env, [
+                {classes, [
+                    #{package => legacyp, name => 'LegacyA'}, {some_mod, 'LegacyB', 'Object'}
+                ]}
+            ]}
+        ]
     ),
     try
         Classes = beamtalk_package:classes(<<"legacyp">>),
