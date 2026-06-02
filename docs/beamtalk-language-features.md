@@ -3087,8 +3087,12 @@ to read the user's session from a separate completion session. Cross-session
 **reads** are allowed; **writes** raise `cross_session_mutation_unsupported`:
 
 ```beamtalk
-ids := Workspace sessions collect: [:s | s id]
-other := Session withId: (ids first)
+// Pick a session that is NOT this one — session ordering is not guaranteed, so
+// `sessions first` could be the current session, where a write would succeed
+// (self-session) rather than raise. Tooling normally already knows the target id.
+myId    := Session current id
+otherId := (Workspace sessions collect: [:s | s id]) detect: [:each | each /= myId]
+other   := Session withId: otherId
 
 other bindings keys          // => cross-session READ, allowed
 other bindings at: #x put: 9 // => Error: Cannot mutate another session's bindings
