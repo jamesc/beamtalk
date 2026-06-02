@@ -348,8 +348,361 @@ extract_source_path_no_attribute_test() ->
     ?assertEqual(undefined, beamtalk_module_activation:extract_source_path(lists)).
 
 %%% ============================================================================
+%%% is_valid_module_name/1 — digit characters
+%%% ============================================================================
+
+valid_module_name_with_digits_test() ->
+    %% Exercises the digit clause of is_valid_module_char/1.
+    ?assert(beamtalk_module_activation:is_valid_module_name("bt@pkg2@Class9")).
+
+%%% ============================================================================
+%%% sort_modules_by_dependency/2 — real beam attribute scan
+%%% ============================================================================
+
+%% Compiling beam files with `beamtalk_class` attributes and sorting them
+%% exercises extract_class_info_from_beam/2 (beam_lib scan) and the
+%% topo-sort-by-superclass path of sort_modules_by_dependency/2.
+sort_modules_orders_subclass_after_superclass_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        ParentMod = write_class_beam(TmpDir, "bt@srt@Parent", 'SrtParent', 'Object'),
+        ChildMod = write_class_beam(TmpDir, "bt@srt@Child", 'SrtChild', 'SrtParent'),
+        %% Pass child before parent — sort must reorder so parent precedes child.
+        Sorted = beamtalk_module_activation:sort_modules_by_dependency(
+            TmpDir, [ChildMod, ParentMod]
+        ),
+        ?assertEqual([ParentMod, ChildMod], Sorted)
+    after
+        remove_temp_dir(TmpDir)
+    end.
+
+%% A beam file with no beamtalk_class attribute is placed first (WithoutClass
+%% branch of sort_modules_by_dependency/2 + the error branch of
+%% extract_class_info_from_beam/2).
+sort_modules_no_attribute_placed_first_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        PlainMod = write_plain_beam(TmpDir, "bt@srt@Plain"),
+        ClassMod = write_class_beam(TmpDir, "bt@srt@Klass", 'SrtKlass', 'Object'),
+        Sorted = beamtalk_module_activation:sort_modules_by_dependency(
+            TmpDir, [ClassMod, PlainMod]
+        ),
+        %% Modules without a class attribute come first.
+        ?assertEqual([PlainMod, ClassMod], Sorted)
+    after
+        remove_temp_dir(TmpDir)
+    end.
+
+%%% ============================================================================
+%%% activate_ebin/2 — directory with real beam modules
+%%% ============================================================================
+
+%% A populated ebin dir drives the full activate_ebin/2 pipeline: code path,
+%% load_app_from_ebin, find_bt_modules_in_dir, sort, and activate_module per
+%% module (covering the filtermap success branch where activate_module -> ok).
+activate_ebin_with_modules_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        %% Module with register_class/0 returning ok — activates cleanly.
+        Mod = write_registering_beam(TmpDir, "bt@aeb@Ok"),
+        {ok, Errors} = beamtalk_module_activation:activate_ebin(TmpDir),
+        ?assertEqual([], Errors),
+        ?assert(erlang:function_exported(Mod, register_class, 0))
+    after
+        _ = code:del_path(TmpDir),
+        purge_mod('bt@aeb@Ok'),
+        remove_temp_dir(TmpDir)
+    end.
+
+%% A module whose register_class/0 crashes surfaces as an error pair in the
+%% activate_ebin/2 result (covers the {error, Reason} -> {true, ...} branch
+%% of the filtermap in activate_ebin/2).
+activate_ebin_collects_module_errors_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        Mod = write_crashing_register_beam(TmpDir, "bt@aeb@Crash"),
+        {ok, Errors} = beamtalk_module_activation:activate_ebin(TmpDir),
+        ?assertMatch([{Mod, {error, _}}], Errors)
+    after
+        _ = code:del_path(TmpDir),
+        purge_mod('bt@aeb@Crash'),
+        remove_temp_dir(TmpDir)
+    end.
+
+%%% ============================================================================
+%%% activate_dependencies/1,2
+%%% ============================================================================
+
+%% No _build/deps directory and no native ebin — returns [] without crashing.
+activate_dependencies_no_deps_dir_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        ?assertEqual([], beamtalk_module_activation:activate_dependencies(TmpDir))
+    after
+        remove_temp_dir(TmpDir)
+    end.
+
+%% A project layout with a dependency ebin containing a registering module
+%% drives the deps-scan + activate_ebin loop, plus the native/hex ebin path
+%% additions. Returns [] errors.
+activate_dependencies_with_dep_test() ->
+    ProjectDir = create_temp_dir(),
+    try
+        DepEbin = filename:join([ProjectDir, "_build", "deps", "mydep", "ebin"]),
+        ok = filelib:ensure_dir(filename:join(DepEbin, "dummy")),
+        _ = write_registering_beam(DepEbin, "bt@dep@Thing"),
+        %% Also create the native + hex lib dirs to exercise those code-path
+        %% branches (empty hex lib so the inner loop runs over no deps).
+        NativeEbin = filename:join([ProjectDir, "_build", "dev", "native", "ebin"]),
+        ok = filelib:ensure_dir(filename:join(NativeEbin, "dummy")),
+        HexLib = filename:join([ProjectDir, "_build", "dev", "native", "default", "lib"]),
+        ok = filelib:ensure_dir(filename:join(HexLib, "dummy")),
+        Errors = beamtalk_module_activation:activate_dependencies(ProjectDir, #{}),
+        ?assertEqual([], Errors)
+    after
+        _ = code:del_path(filename:join([ProjectDir, "_build", "deps", "mydep", "ebin"])),
+        _ = code:del_path(filename:join([ProjectDir, "_build", "dev", "native", "ebin"])),
+        purge_mod('bt@dep@Thing'),
+        remove_temp_dir_recursive(ProjectDir)
+    end.
+
+%% A dependency ebin holding a hex lib dir with its own nested ebin exercises
+%% the inner add_pathz branch of the rebar3 hex-dep loop.
+activate_dependencies_hex_lib_ebin_test() ->
+    ProjectDir = create_temp_dir(),
+    try
+        HexEbin = filename:join([
+            ProjectDir, "_build", "dev", "native", "default", "lib", "cowboy", "ebin"
+        ]),
+        ok = filelib:ensure_dir(filename:join(HexEbin, "dummy")),
+        Errors = beamtalk_module_activation:activate_dependencies(ProjectDir, #{}),
+        ?assertEqual([], Errors),
+        %% The hex ebin should have been added to the code path.
+        ?assert(lists:member(HexEbin, code:get_path()))
+    after
+        _ = code:del_path(
+            filename:join([
+                ProjectDir, "_build", "dev", "native", "default", "lib", "cowboy", "ebin"
+            ])
+        ),
+        remove_temp_dir_recursive(ProjectDir)
+    end.
+
+%%% ============================================================================
+%%% load_app_from_ebin/1 — invalid .app basename
+%%% ============================================================================
+
+%% A .app file whose basename is not a valid module name is skipped (the
+%% `false -> false` branch of load_app_from_ebin/1's filtermap).
+load_app_invalid_basename_skipped_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        %% Basename "bad name" contains a space — invalid module name.
+        BadApp = filename:join(TmpDir, "bad name.app"),
+        ok = file:write_file(BadApp, <<"{application, ignored, []}.">>),
+        ?assertEqual({ok, []}, beamtalk_module_activation:load_app_from_ebin(TmpDir))
+    after
+        remove_temp_dir(TmpDir)
+    end.
+
+%%% ============================================================================
+%%% extract_source_path/1 — module with a beamtalk_source attribute
+%%% ============================================================================
+
+%% A loaded module carrying `beamtalk_source = ["path.bt"]` returns the path
+%% (covers the `[Path] when is_list(Path)` clause of extract_source_path/1).
+extract_source_path_with_attribute_test() ->
+    Mod = bt_test_source_attr_mod,
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, beamtalk_source, ["src/Foo.bt"]},
+        {attribute, 3, export, []}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, "bt_test_source_attr_mod.beam", Bin),
+    try
+        ?assertEqual("src/Foo.bt", beamtalk_module_activation:extract_source_path(Mod))
+    after
+        purge_mod(Mod)
+    end.
+
+%%% ============================================================================
+%%% extract_class_names/1 — module with a beamtalk_class attribute
+%%% ============================================================================
+
+%% A loaded module with `beamtalk_class = [{Name, Super}]` yields the class
+%% name list.
+extract_class_names_with_attribute_test() ->
+    Mod = bt_test_class_attr_mod,
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, beamtalk_class, [{'MyClass', 'Object'}]},
+        {attribute, 3, export, []}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, "bt_test_class_attr_mod.beam", Bin),
+    try
+        ?assertEqual(['MyClass'], beamtalk_module_activation:extract_class_names(Mod))
+    after
+        purge_mod(Mod)
+    end.
+
+%%% ============================================================================
+%%% sort_modules_by_dependency/2 — beam with multiple class entries
+%%% ============================================================================
+
+%% A beam whose beamtalk_class attribute lists more than one class exercises
+%% the `[{ClassName, Superclass} | _]` multi-entry clause of
+%% extract_class_info_from_beam/2 (only the first pair is used for sorting).
+sort_modules_multi_class_attribute_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        ModName = "bt@srt@Multi",
+        Mod = list_to_atom(ModName),
+        Forms = [
+            {attribute, 1, module, Mod},
+            {attribute, 2, beamtalk_class, [{'SrtFirst', 'Object'}, {'SrtSecond', 'SrtFirst'}]},
+            {attribute, 3, export, []}
+        ],
+        {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+        ok = file:write_file(filename:join(TmpDir, ModName ++ ".beam"), Bin),
+        Sorted = beamtalk_module_activation:sort_modules_by_dependency(TmpDir, [Mod]),
+        ?assertEqual([Mod], Sorted)
+    after
+        remove_temp_dir(TmpDir)
+    end.
+
+%%% ============================================================================
+%%% activate_module/2 — register_class/0 unexpected return
+%%% ============================================================================
+
+%% register_class/0 returning a non-ok value is logged but still treated as
+%% success (covers the `Other ->` branch of try_register_class/2).
+activate_module_register_class_unexpected_return_test() ->
+    Mod = bt_test_unexpected_register,
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, export, [{register_class, 0}]},
+        {function, 3, register_class, 0, [
+            {clause, 3, [], [], [{atom, 3, surprise}]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Mod} = code:load_binary(Mod, "bt_test_unexpected_register.beam", Bin),
+    try
+        ?assertEqual(ok, beamtalk_module_activation:activate_module(Mod))
+    after
+        purge_mod(Mod)
+    end.
+
+%%% ============================================================================
+%%% load_app_from_ebin/1 — malformed .app surfaces an error
+%%% ============================================================================
+
+%% A syntactically valid but unloadable .app (wrong term shape) makes
+%% application:load/1 fail, surfacing a {AppName, Reason} error pair (covers
+%% the {error, Reason} branch of load_single_app/1).
+load_app_malformed_surfaces_error_test() ->
+    TmpDir = create_temp_dir(),
+    try
+        %% Valid module-name basename, but the file content is not a proper
+        %% {application, Name, Props} term — application:load/1 returns error.
+        AppName = "beamtalk_bad_app_xyz",
+        AppFile = filename:join(TmpDir, AppName ++ ".app"),
+        ok = file:write_file(AppFile, <<"{not_an_application, oops}.">>),
+        _ = code:add_pathz(TmpDir),
+        _ = application:unload(list_to_atom(AppName)),
+        {ok, Errors} = beamtalk_module_activation:load_app_from_ebin(TmpDir),
+        ?assertMatch([{_, _}], Errors)
+    after
+        _ = code:del_path(TmpDir),
+        remove_temp_dir(TmpDir)
+    end.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
+
+%% Compile and write a beam carrying a beamtalk_class attribute into Dir.
+%% Returns the module atom.
+write_class_beam(Dir, ModName, ClassName, Superclass) ->
+    Mod = list_to_atom(ModName),
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, beamtalk_class, [{ClassName, Superclass}]},
+        {attribute, 3, export, []}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod.
+
+%% Compile and write a plain beam (no beamtalk_class attribute) into Dir.
+write_plain_beam(Dir, ModName) ->
+    Mod = list_to_atom(ModName),
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, export, []}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod.
+
+%% Compile and write a beam exporting register_class/0 -> ok into Dir.
+write_registering_beam(Dir, ModName) ->
+    Mod = list_to_atom(ModName),
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, export, [{register_class, 0}]},
+        {function, 3, register_class, 0, [{clause, 3, [], [], [{atom, 3, ok}]}]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod.
+
+%% Compile and write a beam whose register_class/0 crashes into Dir.
+write_crashing_register_beam(Dir, ModName) ->
+    Mod = list_to_atom(ModName),
+    Forms = [
+        {attribute, 1, module, Mod},
+        {attribute, 2, export, [{register_class, 0}]},
+        {function, 3, register_class, 0, [
+            {clause, 3, [], [], [
+                {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}}, [
+                    {atom, 3, boom}
+                ]}
+            ]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+    ok = file:write_file(filename:join(Dir, ModName ++ ".beam"), Bin),
+    Mod.
+
+purge_mod(ModName) when is_list(ModName) ->
+    purge_mod(list_to_atom(ModName));
+purge_mod(Mod) when is_atom(Mod) ->
+    _ = code:purge(Mod),
+    _ = code:delete(Mod),
+    _ = code:purge(Mod),
+    ok.
+
+%% Recursively remove a temp directory tree (for nested _build layouts).
+remove_temp_dir_recursive(Dir) ->
+    case file:list_dir(Dir) of
+        {ok, Entries} ->
+            lists:foreach(
+                fun(E) ->
+                    Path = filename:join(Dir, E),
+                    case filelib:is_dir(Path) of
+                        true -> remove_temp_dir_recursive(Path);
+                        false -> file:delete(Path)
+                    end
+                end,
+                Entries
+            ),
+            file:del_dir(Dir);
+        _ ->
+            ok
+    end.
 
 index_of(Elem, List) ->
     index_of(Elem, List, 1).

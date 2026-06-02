@@ -2152,3 +2152,374 @@ bt1982_metaclass_all_methods_returns_list_test_() ->
             end)
         ]
     end}.
+
+%%% ============================================================================
+%%% Live method patch primitives — compile:source: / tryCompile:source:
+%%% ============================================================================
+
+%% ensure_source_binary/4 raises a type_error when the body is not a String
+%% (binary). compile:source: form (durable) names compile:source: in the
+%% message — covers the durable intent_selector/1 clause.
+compile_source_non_binary_raises_type_error_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BTCompileSrcBadType', #{}, #{}),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = type_error}
+                        },
+                        %% Pass an atom (not a binary) as the source body.
+                        beamtalk_behaviour_intrinsics:classCompileSource(
+                            ClassObj, 'foo', not_a_binary
+                        )
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%% tryCompile:source: (ephemeral) with a non-binary body also raises a
+%% type_error — covers the ephemeral intent_selector/1 clause and the
+%% classTryCompileSource/3 entry point.
+try_compile_source_non_binary_raises_type_error_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BTTryCompileSrcBadType', #{}, #{}),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = type_error}
+                        },
+                        beamtalk_behaviour_intrinsics:classTryCompileSource(
+                            ClassObj, 'foo', 12345
+                        )
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%% A binary body that cannot be compiled (syntactic garbage) drives the full
+%% do_compile_source/4 path: current_author_context/0 (default repl/human),
+%% the erlang:apply into beamtalk_repl_eval:compile_method/6, and the
+%% {error, Reason} -> compile_failed branch.
+compile_source_invalid_body_raises_compile_failed_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BTCompileSrcInvalid', #{}, #{}),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = compile_failed}
+                        },
+                        beamtalk_behaviour_intrinsics:classCompileSource(
+                            ClassObj, 'foo', <<"@@@ not valid beamtalk @@@">>
+                        )
+                    )
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%% The agent author branch of current_author_context/0: stamp the process
+%% dictionary with $beamtalk_author_kind = agent and a custom author binary,
+%% then drive a (failing) compile. The compile still fails (invalid body) but
+%% the agent author-context branch is exercised on the way.
+compile_source_agent_author_context_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BTCompileSrcAgent', #{}, #{}),
+                erlang:put('$beamtalk_author_kind', agent),
+                erlang:put('$beamtalk_author', <<"copilot">>),
+                try
+                    ?assertError(
+                        #{
+                            '$beamtalk_class' := _,
+                            error := #beamtalk_error{kind = compile_failed}
+                        },
+                        beamtalk_behaviour_intrinsics:classCompileSource(
+                            ClassObj, 'foo', <<"@@@ still invalid @@@">>
+                        )
+                    )
+                after
+                    erlang:erase('$beamtalk_author_kind'),
+                    erlang:erase('$beamtalk_author'),
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% meta_for_module/1 — modules exporting __beamtalk_meta/0
+%%% ============================================================================
+
+%% A class backed by a module exporting __beamtalk_meta/0 takes the meta fast
+%% path in classFieldNames/1, classLocalMethods/1, classClassVarNames/1 and
+%% classIncludesSelector/2 instead of the gen_server fallback.
+meta_fast_path_reflection_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MetaMod = load_meta_module(bt_meta_fixture_a, #{
+                    superclass => nil,
+                    fields => [alpha, beta],
+                    method_info => #{'doThing' => #{}, 'doOther' => #{}},
+                    class_method_info => #{'factory' => #{}},
+                    class_fields => [counter]
+                }),
+                ClassName = 'BTMetaFixtureA',
+                ClassInfo = #{
+                    name => ClassName,
+                    module => MetaMod,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+                ClassObj = #beamtalk_object{
+                    class = 'BTMetaFixtureA class', class_mod = MetaMod, pid = Pid
+                },
+                try
+                    %% classFieldNames -> maps:get(fields, Meta)
+                    ?assertEqual(
+                        [alpha, beta],
+                        beamtalk_behaviour_intrinsics:classFieldNames(ClassObj)
+                    ),
+                    %% classLocalMethods -> maps:keys(method_info)
+                    LocalMethods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
+                    ?assert(lists:member('doThing', LocalMethods)),
+                    ?assert(lists:member('doOther', LocalMethods)),
+                    %% classClassVarNames -> maps:get(class_fields, Meta)
+                    ?assertEqual(
+                        [counter],
+                        beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj)
+                    ),
+                    %% classIncludesSelector -> maps:is_key(_, method_info)
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'doThing')
+                    ),
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nope')
+                    )
+                after
+                    (try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    purge_meta_module(MetaMod)
+                end
+            end)
+        ]
+    end}.
+
+%% classIncludesSelector/2 on a metaclass-tagged object backed by a meta module
+%% uses the class_method_info fast path (maps:is_key over class_method_info).
+meta_fast_path_metaclass_includes_selector_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                MetaMod = load_meta_module(bt_meta_fixture_b, #{
+                    superclass => nil,
+                    fields => [],
+                    method_info => #{},
+                    class_method_info => #{'build' => #{}},
+                    class_fields => []
+                }),
+                ClassName = 'BTMetaFixtureB',
+                ClassInfo = #{
+                    name => ClassName,
+                    module => MetaMod,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+                MetaObj = #beamtalk_object{
+                    class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid
+                },
+                try
+                    ?assert(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(MetaObj, 'build')
+                    ),
+                    ?assertNot(
+                        beamtalk_behaviour_intrinsics:classIncludesSelector(MetaObj, 'missing')
+                    )
+                after
+                    (try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end),
+                    purge_meta_module(MetaMod)
+                end
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% stop_class_actors/1 — via removeFromSystem with a live actor registry
+%%% ============================================================================
+
+%% classRemoveFromSystemByName/1 calls stop_class_actors/1 in its success
+%% branch. With a stub registry process registered under beamtalk_actor_registry
+%% that answers list_actors, the actor-collection + kill loop is exercised.
+stop_class_actors_with_registry_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% A removable module so code:delete succeeds on the happy path.
+                ModAtom = bt_stopactors_removable_mod,
+                Forms = [
+                    {attribute, 1, module, ModAtom},
+                    {attribute, 2, export, []}
+                ],
+                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+                {module, ModAtom} = code:load_binary(
+                    ModAtom, "bt_stopactors_removable_mod.erl", Bin
+                ),
+                ClassName = 'BTStopActorsClass',
+                ClassInfo = #{
+                    name => ClassName,
+                    module => ModAtom,
+                    superclass => none,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, _ClassPid} = beamtalk_object_class:start(ClassName, ClassInfo),
+
+                %% A fake actor belonging to this class.
+                ActorPid = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    after 10000 -> ok
+                    end
+                end),
+                %% Stub registry: answers list_actors with one matching actor and
+                %% {kill, Pid} by stopping it.
+                Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
+                register(beamtalk_actor_registry, Registry),
+                try
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                    ),
+                    %% The class is gone from the registry.
+                    ?assertEqual(
+                        undefined, beamtalk_class_registry:whereis_class(ClassName)
+                    )
+                after
+                    catch unregister(beamtalk_actor_registry),
+                    catch exit(Registry, kill),
+                    catch exit(ActorPid, kill)
+                end
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% walk_hierarchy/3 — max depth cycle guard
+%%% ============================================================================
+
+%% A self-referential class (its own superclass) makes walk_hierarchy/3 loop;
+%% the ?MAX_HIERARCHY_DEPTH guard halts it and returns the accumulator. We drive
+%% it via classAllSuperclasses/1, which folds class objects up the chain.
+walk_hierarchy_cycle_guard_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassName = 'BTCycleSelf',
+                ClassInfo = #{
+                    name => ClassName,
+                    module => test_class,
+                    %% Superclass points back at itself — an artificial cycle.
+                    superclass => ClassName,
+                    instance_methods => #{},
+                    class_methods => #{}
+                },
+                {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+                ClassObj = #beamtalk_object{
+                    class = 'BTCycleSelf class', class_mod = test_class, pid = Pid
+                },
+                try
+                    %% Must terminate (depth guard) and return a bounded list.
+                    Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ClassObj),
+                    ?assert(is_list(Supers))
+                after
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
+%%% ============================================================================
+%%% Helpers for coverage additions
+%%% ============================================================================
+
+%% Compile and load a module exporting __beamtalk_meta/0 returning MetaMap.
+%% Returns the module atom.
+load_meta_module(ModAtom, MetaMap) ->
+    MetaAbstract = erl_parse:abstract(MetaMap, [{line, 3}]),
+    Forms = [
+        {attribute, 1, module, ModAtom},
+        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
+        {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
+    ],
+    {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+    {module, ModAtom} = code:load_binary(ModAtom, atom_to_list(ModAtom) ++ ".erl", Bin),
+    ModAtom.
+
+purge_meta_module(ModAtom) ->
+    _ = code:purge(ModAtom),
+    _ = code:delete(ModAtom),
+    _ = code:purge(ModAtom),
+    ok.
+
+%% Minimal stub for beamtalk_actor_registry used by stop_class_actors_with_registry.
+stub_registry_loop(ClassName, ActorPid) ->
+    receive
+        {'$gen_call', From, list_actors} ->
+            gen_server:reply(From, [#{pid => ActorPid, class => ClassName}]),
+            stub_registry_loop(ClassName, ActorPid);
+        {'$gen_call', From, {kill, Pid}} ->
+            catch exit(Pid, kill),
+            gen_server:reply(From, ok),
+            stub_registry_loop(ClassName, ActorPid);
+        _ ->
+            stub_registry_loop(ClassName, ActorPid)
+    end.
