@@ -195,6 +195,97 @@ bindings_view_read_unknown_name_is_safe_test_() ->
     end}.
 
 %%====================================================================
+%% view_includes_key/2 — O(1) membership, atom + String key parity (BT-2380)
+%%====================================================================
+
+%% Session scope: present/absent for both atom and String keys. The String key
+%% must match the same binding `at:` resolves (parity with the lenient read).
+bindings_view_includes_key_session_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-bv-inc-session">>),
+                set_locals(Pid, #{x => 1}),
+                seed_context(Pid, <<"prim-bv-inc-session">>),
+                Session = beamtalk_session_primitives:current(),
+                View = beamtalk_session_primitives:bindingsViewFor(Session),
+                %% Atom key: present / absent.
+                ?assertEqual(true, beamtalk_session_primitives:view_includes_key(View, x)),
+                ?assertEqual(false, beamtalk_session_primitives:view_includes_key(View, y)),
+                %% String key: parity with view_at/2.
+                ?assertEqual(1, beamtalk_session_primitives:view_at(View, "x")),
+                ?assertEqual(true, beamtalk_session_primitives:view_includes_key(View, "x")),
+                %% Binary key parity too.
+                ?assertEqual(true, beamtalk_session_primitives:view_includes_key(View, <<"x">>)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Workspace scope: present/absent against the bind:as: ETS.
+bindings_view_includes_key_workspace_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_workspace_interface_primitives:create_bindings_table(),
+                maybe_register_meta(),
+                try
+                    View = beamtalk_session_primitives:globalsView(),
+                    ?assertMatch(
+                        #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
+                    ),
+                    ?assertEqual(
+                        false, beamtalk_session_primitives:view_includes_key(View, inc_ws_name)
+                    ),
+                    ?assertEqual(
+                        7, beamtalk_session_primitives:view_at_put(View, inc_ws_name, 7)
+                    ),
+                    %% Atom key present.
+                    ?assertEqual(
+                        true, beamtalk_session_primitives:view_includes_key(View, inc_ws_name)
+                    ),
+                    %% String key parity.
+                    ?assertEqual(
+                        true, beamtalk_session_primitives:view_includes_key(View, "inc_ws_name")
+                    )
+                after
+                    maybe_unregister_meta()
+                end
+            end)
+        ]
+    end}.
+
+%% A never-interned String must return false without minting a fresh atom
+%% (atom-exhaustion safety, matching the view_at/2 read-path guard).
+bindings_view_includes_key_unknown_name_is_safe_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-bv-inc-unknown">>),
+                seed_context(Pid, <<"prim-bv-inc-unknown">>),
+                Session = beamtalk_session_primitives:current(),
+                View = beamtalk_session_primitives:bindingsViewFor(Session),
+                Before = erlang:system_info(atom_count),
+                ?assertEqual(
+                    false,
+                    beamtalk_session_primitives:view_includes_key(
+                        View, "definitely_not_an_atom_bt2380_xyz"
+                    )
+                ),
+                ?assertEqual(
+                    false,
+                    beamtalk_session_primitives:view_includes_key(
+                        View, <<"another_unknown_bt2380_abc">>
+                    )
+                ),
+                After = erlang:system_info(atom_count),
+                ?assertEqual(Before, After),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Cross-session write rejection
 %%====================================================================
 
@@ -366,6 +457,59 @@ class_current_sees_caller_session_context_test_() ->
                 NilSession = dispatch_class_method_no_context(ClassPid, current, []),
                 ?assertEqual(nil, NilSession),
                 beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% BT-2379: the explicit 4-tuple message shape carries the caller's session
+%% context in the message itself (no `process_info` dictionary copy). The class
+%% gen_server must seed from the tuple, resolve `current` correctly, and still
+%% not leak the mirrored context to a later call that carries no context.
+class_current_explicit_context_no_leak_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-explicit-ctx">>),
+                ClassPid = wait_for_class('Session'),
+                %% Explicit context tuple in the message → resolves to that session.
+                Session = unwrap_class_reply(
+                    gen_server:call(
+                        ClassPid,
+                        {class_method_call, current, [], {Pid, <<"prim-explicit-ctx">>}}
+                    )
+                ),
+                ?assertMatch(#{'$beamtalk_class' := 'Session'}, Session),
+                ?assertEqual(<<"prim-explicit-ctx">>, maps:get(id, Session)),
+                %% A subsequent call carrying an empty explicit context must see
+                %% nil — the prior call's context must not have leaked.
+                NilSession = unwrap_class_reply(
+                    gen_server:call(
+                        ClassPid, {class_method_call, current, [], {undefined, undefined}}
+                    )
+                ),
+                ?assertEqual(nil, NilSession),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% BT-2379: a malformed explicit context (a non-pair 4th element) must degrade
+%% to "no context" (nil), not crash the class gen_server. The 4-tuple clause has
+%% no `is_tuple` guard; `seed_session_context_from/1` no-ops on unrecognised
+%% shapes. We assert the gen_server survives and still serves a later call.
+class_current_malformed_context_degrades_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                ClassPid = wait_for_class('Session'),
+                %% A bare atom (not a {Pid, Id} pair) as the context: no crash,
+                %% resolves to nil because no session context is seeded.
+                NilSession = unwrap_class_reply(
+                    gen_server:call(ClassPid, {class_method_call, current, [], not_a_pair})
+                ),
+                ?assertEqual(nil, NilSession),
+                %% The gen_server is still alive and serving after the malformed call.
+                ?assert(is_process_alive(ClassPid))
             end)
         ]
     end}.

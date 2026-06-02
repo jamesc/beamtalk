@@ -69,18 +69,23 @@ cargo llvm-cov --all-targets --workspace --cobertura --output-path coverage.cobe
 
 **Erlang coverage:**
 ```bash
-cd runtime
-rebar3 eunit --app=beamtalk_runtime,beamtalk_workspace --cover
-rebar3 cover --verbose
-# Generate Cobertura XML for CI
-rebar3 covertool generate
+# Runs unit + E2E + stdlib suites under cover, merges, and generates XMLs
+just coverage-all
 ```
+
+The Erlang coverage badge blends all four runtime apps —
+`beamtalk_runtime`, `beamtalk_workspace`, `beamtalk_stdlib`, and
+`beamtalk_compiler`. The `beamtalk_stdlib` figure reflects only the
+hand-written FFI `.erl` modules: the `bt@*` compiled-Beamtalk modules
+carry no Erlang abstract code (`erlc +from_core` emits empty abstract
+forms), so `cover` cannot instrument them and they are auto-excluded
+(BT-1672). They are exercised instead by the `.bt` BUnit suite.
 
 Coverage reports are saved to:
 - Rust HTML: `target/llvm-cov/html/index.html`
 - Erlang HTML: `runtime/_build/test/cover/index.html`
 - Rust Cobertura XML: `coverage.cobertura.xml`
-- Erlang Cobertura XML: `runtime/_build/test/covertool/beamtalk_runtime.covertool.xml`
+- Erlang Cobertura XML: one per app under `runtime/_build/test/covertool/` (`beamtalk_runtime`, `beamtalk_workspace`, `beamtalk_stdlib`, `beamtalk_compiler`)
 
 **CI Integration:**
 

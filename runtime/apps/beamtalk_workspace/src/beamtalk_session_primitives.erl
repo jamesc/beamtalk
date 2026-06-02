@@ -52,7 +52,15 @@ that would block to timeout against a dead PID.
 %% Workspace-globals view (not a Session method)
 -export([globalsView/0]).
 %% BindingsView read/write primitives
--export([view_at/2, view_at_put/3, view_remove/2, view_keys/1, view_values/1, view_size/1]).
+-export([
+    view_at/2,
+    view_at_put/3,
+    view_includes_key/2,
+    view_remove/2,
+    view_keys/1,
+    view_values/1,
+    view_size/1
+]).
 
 -type session() :: #{
     '$beamtalk_class' := 'Session',
@@ -228,6 +236,27 @@ view_at(View, Key) ->
         {ok, KeyAtom} -> maps:get(KeyAtom, Map, nil);
         %% A never-interned name cannot be a binding key → absent.
         error -> nil
+    end.
+
+-doc """
+Test whether a `BindingsView` contains a key, returning a boolean.
+
+The membership test is O(1) (`maps:is_key/2`) on the resolved bindings map;
+constructing that map is the same cost as any other read here (session scope
+reads the locals map directly, workspace scope snapshots the bind:as: ETS via
+`view_read_map/2`, which is O(n)).  Accepts atom/binary/String keys with the
+same semantics as `view_at/2`: a never-interned name (via
+`to_existing_name_atom/1`) cannot be a binding key, so it returns `false`
+without minting an atom.
+""".
+-spec view_includes_key(bindings_view() | term(), atom() | binary() | string() | term()) ->
+    boolean().
+view_includes_key(View, Key) ->
+    Map = view_read_map(View, 'includesKey:'),
+    case to_existing_name_atom(Key) of
+        {ok, KeyAtom} -> maps:is_key(KeyAtom, Map);
+        %% A never-interned name cannot be a binding key → absent.
+        error -> false
     end.
 
 -doc """

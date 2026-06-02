@@ -253,7 +253,15 @@ class_send_dispatch(ClassPid, Selector, Args) ->
             % 60 seconds — class methods may do network I/O
             false -> 60000
         end,
-    case gen_server:call(ClassPid, {class_method_call, Selector, Args}, Timeout) of
+    %% ADR 0081 / BT-2379: pass the caller's session context explicitly in the
+    %% message instead of having the class gen_server copy our whole process
+    %% dictionary via `process_info/2`. We read our own two keys cheaply with
+    %% `get/1` here and the receiving clause seeds from the tuple.
+    case
+        gen_server:call(
+            ClassPid, {class_method_call, Selector, Args, local_session_context()}, Timeout
+        )
+    of
         {ok, Result} ->
             %% BT-1542 + BT-1994 (ADR 0080 Phase 0a, option 2): run the
             %% initialize: lifecycle hook in the caller's process after a
@@ -335,9 +343,10 @@ class_send_dispatch(ClassPid, Selector, Args) ->
 Send a message to a metaclass object (ADR 0036, BT-823).
 
 Routes messages on metaclass objects (tagged `class='Metaclass'`) through:
-  1. `{metaclass_method_call, Selector, Args}` to the class gen_server via
-     `gen_server:call/2` — resolves user-defined class methods (e.g. `withAll:`)
-     via the superclass chain (ADR-0036 Phase 2).
+  1. `{metaclass_method_call, Selector, Args, SessionCtx}` to the class
+     gen_server via `gen_server:call/2` — resolves user-defined class methods
+     (e.g. `withAll:`) via the superclass chain (ADR-0036 Phase 2). `SessionCtx`
+     carries the caller's session context explicitly (BT-2379).
   2. Fallthrough to `beamtalk_dispatch:lookup/5` starting at 'Metaclass', which
      walks the Metaclass → Class → Behaviour → Object → ProtoObject chain for
      built-in messages (`new`, `class`, etc.).
@@ -367,7 +376,13 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
     %% `self species withAll: x` and similar dynamic class-side sends find
     %% user-defined class methods (e.g. `withAll:`) via the proper handler.
     %% Falls through to the Metaclass chain for built-in messages (`new`, `class`, etc.).
-    case gen_server:call(Pid, {metaclass_method_call, Selector, Args}, 60000) of
+    %% BT-2379: carry the caller's session context explicitly (see
+    %% class_send_dispatch/3) so the class gen_server need not copy our dictionary.
+    case
+        gen_server:call(
+            Pid, {metaclass_method_call, Selector, Args, local_session_context()}, 60000
+        )
+    of
         {ok, Result} ->
             Result;
         {error, not_found} ->
@@ -395,6 +410,22 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
         Other ->
             unwrap_class_call(Other)
     end.
+
+-doc """
+Read this process's session context (`beamtalk_session_pid` /
+`beamtalk_session_id`) for explicit propagation into a class-method call.
+
+ADR 0081 / BT-2379: the eval worker seeds these keys
+(`beamtalk_repl_shell:seed_session_context/2`). Class-method dispatch hops to
+the class gen_server, so factory methods like `Session current` need the
+caller's context there. We read our own two keys cheaply with `get/1` and pass
+them in the message tuple, avoiding a `process_info(CallerPid, dictionary)`
+full-dictionary copy on the receiving side. Returns `{undefined, undefined}`
+when this process has no seeded context (the common non-REPL case).
+""".
+-spec local_session_context() -> {pid() | undefined, binary() | undefined}.
+local_session_context() ->
+    {get(beamtalk_session_pid), get(beamtalk_session_id)}.
 
 -doc """
 Unwrap a class gen_server call result for use in class_send.

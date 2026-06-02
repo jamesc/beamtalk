@@ -75,17 +75,19 @@ sealed typed Object subclass: BindingsView
 
   /// Whether `key` (a Symbol) is currently bound in this view.
   ///
-  /// Membership is tested against `keys` (atoms), matching the declared
-  /// `Symbol` key type. Unlike the lenient `at:` primitive — which also accepts
-  /// String/binary keys — `includesKey:` expects a Symbol. A dedicated
-  /// O(1) `view_includes_key` primitive (and String-key parity with `at:`) is
-  /// tracked as a follow-up.
+  /// The membership test itself is O(1) on the resolved bindings map (session
+  /// scope reads the locals map directly; workspace scope still snapshots the
+  /// bind:as: table, like every other read here). At runtime the primitive is
+  /// lenient about key representation just like `at:` — an atom, binary, or
+  /// String naming the same binding all match — so `includesKey:` agrees with
+  /// `at:` for any key the latter accepts.
   ///
   /// ## Examples
   /// ```beamtalk
   /// Session current bindings includesKey: #x     // => true
   /// ```
-  includesKey: key :: Symbol -> Boolean => self keys includes: key
+  includesKey: key :: Symbol -> Boolean =>
+    (Erlang beamtalk_session_primitives) view_includes_key: self key: key
 
   /// Return a list of all bound names (Symbols).
   ///
