@@ -330,7 +330,7 @@ a ChangeLog entry tagged with `Intent' and the author metadata. Returns
 ) ->
     {ok, binary()} | {error, term()}.
 compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
-    SelectorBin = to_binary(Selector),
+    SelectorBin = beamtalk_repl_protocol:to_binary(Selector),
     SourceStr = unicode:characters_to_list(normalize_method_source(SelectorBin, Source)),
     Expression =
         unicode:characters_to_list(<<ClassNameBin/binary, " >> ">>) ++ SourceStr,
@@ -439,10 +439,6 @@ first_token(SelectorBin) ->
         [Head | _] when byte_size(Head) > 0 -> Head;
         _ -> SelectorBin
     end.
-
--spec to_binary(atom() | binary()) -> binary().
-to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
-to_binary(B) when is_binary(B) -> B.
 
 %%% Internal functions
 

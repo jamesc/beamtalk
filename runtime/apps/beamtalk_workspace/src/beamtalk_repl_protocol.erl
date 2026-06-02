@@ -44,7 +44,8 @@ Legacy format (backward compatible):
     get_id/1,
     get_session/1,
     get_params/1,
-    base_response/1
+    base_response/1,
+    to_binary/1
 ]).
 
 %% Protocol request record
