@@ -632,3 +632,274 @@ class_removed_cast_unregisters_module_test() ->
     ?assertNot(lists:keymember(ModuleName, 1, Modules2)),
 
     gen_server:stop(Pid).
+
+%%% BT-1685: file mtime tracking (set/get/clear/remove)
+
+set_get_file_mtimes_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    %% Initially empty.
+    ?assertEqual({ok, #{}}, beamtalk_workspace_meta:get_file_mtimes()),
+
+    Mtime1 = {{2026, 1, 1}, {12, 0, 0}},
+    Mtime2 = {{2026, 2, 2}, {9, 30, 15}},
+    ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/a.bt", Mtime1),
+    ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/b.bt", Mtime2),
+    timer:sleep(50),
+
+    {ok, Mtimes} = beamtalk_workspace_meta:get_file_mtimes(),
+    ?assertEqual(Mtime1, maps:get("/bt_test/a.bt", Mtimes)),
+    ?assertEqual(Mtime2, maps:get("/bt_test/b.bt", Mtimes)),
+    ?assertEqual(2, map_size(Mtimes)),
+
+    gen_server:stop(Pid).
+
+remove_file_mtime_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    Mtime = {{2026, 1, 1}, {12, 0, 0}},
+    ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/a.bt", Mtime),
+    ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/b.bt", Mtime),
+    timer:sleep(50),
+
+    ok = beamtalk_workspace_meta:remove_file_mtime("/bt_test/a.bt"),
+    timer:sleep(50),
+    {ok, Mtimes} = beamtalk_workspace_meta:get_file_mtimes(),
+    ?assertEqual(false, maps:is_key("/bt_test/a.bt", Mtimes)),
+    ?assert(maps:is_key("/bt_test/b.bt", Mtimes)),
+
+    gen_server:stop(Pid).
+
+clear_file_mtimes_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    Mtime = {{2026, 1, 1}, {12, 0, 0}},
+    ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/a.bt", Mtime),
+    ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/b.bt", Mtime),
+    timer:sleep(50),
+    {ok, Before} = beamtalk_workspace_meta:get_file_mtimes(),
+    ?assertEqual(2, map_size(Before)),
+
+    ok = beamtalk_workspace_meta:clear_file_mtimes(),
+    timer:sleep(50),
+    ?assertEqual({ok, #{}}, beamtalk_workspace_meta:get_file_mtimes()),
+
+    gen_server:stop(Pid).
+
+set_file_mtime_when_not_started_test() ->
+    stop_if_running(),
+    %% No server: cast helpers must return ok without crashing.
+    ?assertEqual(ok, beamtalk_workspace_meta:set_file_mtime("/x.bt", {{2026, 1, 1}, {0, 0, 0}})).
+
+clear_file_mtimes_when_not_started_test() ->
+    stop_if_running(),
+    ?assertEqual(ok, beamtalk_workspace_meta:clear_file_mtimes()).
+
+remove_file_mtime_when_not_started_test() ->
+    stop_if_running(),
+    ?assertEqual(ok, beamtalk_workspace_meta:remove_file_mtime("/x.bt")).
+
+get_file_mtimes_when_not_started_test() ->
+    stop_if_running(),
+    ?assertEqual({error, not_started}, beamtalk_workspace_meta:get_file_mtimes()).
+
+%%% BT-775: package name detection
+
+get_package_name_when_not_started_test() ->
+    stop_if_running(),
+    %% No server: must return undefined gracefully.
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_package_name()).
+
+get_package_name_undefined_without_manifest_test() ->
+    %% project_path points at a dir with no beamtalk.toml ⇒ package name undefined.
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_package_name()),
+    gen_server:stop(Pid).
+
+get_package_name_undefined_when_project_path_undefined_test() ->
+    %% No project_path at all ⇒ detect_package_name(undefined) ⇒ undefined.
+    stop_if_running(),
+    WsId = <<"no_proj_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WsId,
+        created_at => erlang:system_time(second)
+    }),
+    ?assertEqual(undefined, beamtalk_workspace_meta:get_package_name()),
+    {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+    ?assertEqual(undefined, maps:get(project_path, Meta)),
+    ?assertEqual(undefined, maps:get(package_name, Meta)),
+    gen_server:stop(Pid).
+
+get_package_name_detected_from_manifest_test() ->
+    %% A beamtalk.toml with a [package] name section is parsed at init time.
+    stop_if_running(),
+    Tmp = filename:join(
+        temp_dir_meta(), "bt-meta-pkg-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_path(Tmp),
+    try
+        Manifest = filename:join(Tmp, "beamtalk.toml"),
+        ok = file:write_file(
+            Manifest, <<"[package]\nname = \"my_package\"\nversion = \"0.1.0\"\n">>
+        ),
+        WsId = <<"pkg_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+        {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+            workspace_id => WsId,
+            project_path => list_to_binary(Tmp),
+            created_at => erlang:system_time(second),
+            repl => false
+        }),
+        ?assertEqual(<<"my_package">>, beamtalk_workspace_meta:get_package_name()),
+        {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
+        ?assertEqual(<<"my_package">>, maps:get(package_name, Meta)),
+        gen_server:stop(Pid)
+    after
+        _ = file:del_dir_r(Tmp)
+    end.
+
+get_package_name_undefined_when_no_package_section_test() ->
+    %% A beamtalk.toml without a [package] section ⇒ extract_package_name ⇒ undefined.
+    stop_if_running(),
+    Tmp = filename:join(
+        temp_dir_meta(), "bt-meta-nopkg-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_path(Tmp),
+    try
+        Manifest = filename:join(Tmp, "beamtalk.toml"),
+        ok = file:write_file(Manifest, <<"[dependencies]\nfoo = \"1.0\"\n">>),
+        WsId = <<"nopkg_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+        {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+            workspace_id => WsId,
+            project_path => list_to_binary(Tmp),
+            created_at => erlang:system_time(second),
+            repl => false
+        }),
+        ?assertEqual(undefined, beamtalk_workspace_meta:get_package_name()),
+        gen_server:stop(Pid)
+    after
+        _ = file:del_dir_r(Tmp)
+    end.
+
+get_package_name_undefined_when_name_missing_in_section_test() ->
+    %% [package] present but no name field ⇒ undefined.
+    stop_if_running(),
+    Tmp = filename:join(
+        temp_dir_meta(), "bt-meta-noname-" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = filelib:ensure_path(Tmp),
+    try
+        Manifest = filename:join(Tmp, "beamtalk.toml"),
+        ok = file:write_file(Manifest, <<"[package]\nversion = \"0.1.0\"\n">>),
+        WsId = <<"noname_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+        {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+            workspace_id => WsId,
+            project_path => list_to_binary(Tmp),
+            created_at => erlang:system_time(second),
+            repl => false
+        }),
+        ?assertEqual(undefined, beamtalk_workspace_meta:get_package_name()),
+        gen_server:stop(Pid)
+    after
+        _ = file:del_dir_r(Tmp)
+    end.
+
+%%% Unknown request + code_change coverage
+
+unknown_call_returns_error_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    ?assertEqual(
+        {error, unknown_request},
+        gen_server:call(beamtalk_workspace_meta, some_bogus_request)
+    ),
+    gen_server:stop(Pid).
+
+unknown_cast_is_ignored_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    %% An unknown cast must not crash the server.
+    gen_server:cast(beamtalk_workspace_meta, some_bogus_cast),
+    timer:sleep(20),
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
+
+unknown_info_is_ignored_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    %% An unknown info message must not crash the server.
+    Pid ! some_bogus_info,
+    timer:sleep(20),
+    ?assert(is_process_alive(Pid)),
+    gen_server:stop(Pid).
+
+code_change_returns_state_test() ->
+    stop_if_running(),
+    {ok, State} = beamtalk_workspace_meta:init(test_metadata()),
+    ?assertEqual({ok, State}, beamtalk_workspace_meta:code_change(old_vsn, State, extra)).
+
+%%% Settings persistence of integer and binary values (whitelist coverage)
+
+settings_int_and_binary_survive_restart_test() ->
+    %% persistable_setting_value/1 whitelists boolean, integer, binary. Exercise
+    %% the integer and binary branches via a persist/restore round-trip.
+    stop_if_running(),
+    WsId = <<"settings_int_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/settings_int">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        ok = beamtalk_workspace_meta:set_setting(max_depth, 42),
+        ok = beamtalk_workspace_meta:set_setting(label, <<"hello">>),
+        %% A non-whitelisted value (list) must be dropped from persistence but
+        %% still readable in-memory before restart.
+        ok = beamtalk_workspace_meta:set_setting(weird, [1, 2, 3]),
+        ?assertEqual([1, 2, 3], beamtalk_workspace_meta:get_setting(weird, none)),
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(42, beamtalk_workspace_meta:get_setting(max_depth, none)),
+        ?assertEqual(<<"hello">>, beamtalk_workspace_meta:get_setting(label, none)),
+        %% The non-whitelisted list value was not persisted ⇒ default returned.
+        ?assertEqual(none, beamtalk_workspace_meta:get_setting(weird, none)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile)
+    end.
+
+%%% Class source persistence round-trip (covers class_sources restore branch)
+
+class_source_survives_restart_test() ->
+    stop_if_running(),
+    WsId = <<"clssrc_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/clssrc">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        Source = "Object subclass: Foo [\n  bar => 1\n]\n",
+        ok = beamtalk_workspace_meta:set_class_source(<<"Foo">>, Source),
+        gen_server:stop(Pid1),
+        timer:sleep(50),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Foo">>)),
+        gen_server:stop(Pid2)
+    after
+        _ = file:delete(MetaFile)
+    end.
+
+%% Cross-platform absolute temp dir (CLAUDE.md: never hardcode /tmp in tests).
+temp_dir_meta() ->
+    unicode:characters_to_list(beamtalk_file:'tempDirectory'()).
