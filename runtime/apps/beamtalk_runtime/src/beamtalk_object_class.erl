@@ -825,10 +825,11 @@ handle_call(
     {MethodCallType, Selector, Args, SessionCtx},
     From,
     #class_state{} = State
-) when
-    (MethodCallType =:= class_method_call orelse MethodCallType =:= metaclass_method_call),
-    is_tuple(SessionCtx)
-->
+) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
+    %% No guard on SessionCtx: `seed_session_context_from/1` accepts any term and
+    %% safely no-ops on unrecognised shapes, so a malformed/empty context
+    %% degrades to "no context" rather than crashing the class gen_server with a
+    %% function_clause (it would otherwise miss both this and the 3-tuple clause).
     Restore = seed_session_context_from(SessionCtx),
     dispatch_class_method(Selector, Args, From, State, Restore);
 %% BT-2379: backward-compatible fallback for the legacy 3-tuple message shape
