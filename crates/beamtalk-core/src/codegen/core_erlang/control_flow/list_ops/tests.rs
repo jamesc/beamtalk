@@ -780,3 +780,124 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
         "detect:ifNone: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
     );
 }
+
+// ── BT-1486: count: ───────────────────────────────────────────────────
+
+#[test]
+fn test_count_pure_generates_filter_then_length() {
+    // Pure count: (no mutations) uses lists:filter + erlang:length on the filtered result.
+    // Falls back to beamtalk_primitive:send for non-list receivers.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items count: [:item | item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'filter'"),
+        "Pure count: should filter with lists:filter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'length'"),
+        "Pure count: should compute length with erlang:length. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure count: should NOT use lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_count_with_field_mutation_uses_foldl() {
+    // count: with a field mutation cannot short-circuit via filter/length; it must
+    // process every element for state threading, using lists:foldl with a count accumulator.
+    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items count: [:item | self.n := self.n + 1. item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "count: with field mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'filter'"),
+        "count: with field mutation should NOT use lists:filter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'put'('n'"),
+        "count: body should update 'n' field via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_count_with_local_mutation_uses_tuple_acc() {
+    // BT-1276: count: with only a local variable mutation uses the tuple-accumulator
+    // path: {CountAcc, N, ...}. The local is unpacked inside the lambda via
+    // element(2, AccSt) — not via maps:get.
+    // `n` is both read inside the predicate (n := n + 1) and used after the loop, so
+    // the threading plan must carry it — guarding against a future optimization that
+    // drops unreferenced locals.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    n := 0\n",
+        "    items count: [:item | n := n + 1. item > 0]\n",
+        "    n\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "count: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    // CountAcc is at position 1; 'n' is the first threaded local at position 2.
+    assert!(
+        code.contains("let N = call 'erlang':'element'(2, "),
+        "count: tuple-acc should extract 'n' via element(2, AccSt) inside the lambda. Got:\n{code}"
+    );
+    // BT-2356 pattern: pack 'n' into StateAcc at fold exit and thread it back via maps:get.
+    assert!(
+        code.contains("maps':'put'('__local__n'"),
+        "count: with local mutation should pack '__local__n' into StateAcc at fold exit. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'get'('__local__n'"),
+        "count: with local mutation should thread '__local__n' back via maps:get after the fold. Got:\n{code}"
+    );
+}
+
+// ── flatMap: ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_flat_map_pure_generates_lists_flatmap() {
+    // Pure flatMap: (no mutations) delegates to lists:flatmap with an is_list guard.
+    // Non-list receivers fall back to beamtalk_primitive:send.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items flatMap: [:item | #(item, item)]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'flatmap'"),
+        "Pure flatMap: should generate lists:flatmap. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure flatMap: should NOT use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'("),
+        "Pure flatMap: should fall back to beamtalk_primitive:send for non-lists. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_flat_map_with_field_mutation_uses_foldl() {
+    // flatMap: with a field mutation must process every element for state threading;
+    // it uses lists:foldl with a result-list accumulator instead of lists:flatmap.
+    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items flatMap: [:item | self.n := self.n + 1. #(item, item)]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "flatMap: with field mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'flatmap'"),
+        "flatMap: with field mutation should NOT use lists:flatmap. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'put'('n'"),
+        "flatMap: body should update 'n' field via maps:put. Got:\n{code}"
+    );
+}
