@@ -173,18 +173,10 @@ impl RequestBuilder {
     }
 
     // --- Session operations ---
-
-    /// Build a `clear` request.
-    #[must_use]
-    pub fn clear() -> serde_json::Value {
-        Self::no_param("clear")
-    }
-
-    /// Build a `bindings` request.
-    #[must_use]
-    pub fn bindings() -> serde_json::Value {
-        Self::no_param("bindings")
-    }
+    //
+    // BT-2369 (ADR 0081 Phase 6): the `clear` and `bindings` ops were removed.
+    // Session state is read and reset via the `Session` API
+    // (`Session current bindings keys`, `Session current clear`) over `eval`.
 
     /// Build a `sessions` request.
     #[must_use]
@@ -657,19 +649,6 @@ mod tests {
         assert_eq!(req["path"], ".");
         assert_eq!(req["include_tests"], true);
         assert_eq!(req["force"], true);
-    }
-
-    #[test]
-    fn clear_request_has_correct_op() {
-        let req = RequestBuilder::clear();
-        assert_eq!(req["op"], "clear");
-        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
-    }
-
-    #[test]
-    fn bindings_request_has_correct_op() {
-        let req = RequestBuilder::bindings();
-        assert_eq!(req["op"], "bindings");
     }
 
     #[test]

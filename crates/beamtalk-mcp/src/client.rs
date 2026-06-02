@@ -524,19 +524,6 @@ impl ReplClient {
         self.send(&RequestBuilder::actors()).await
     }
 
-    /// Send a bindings operation.
-    pub async fn bindings(&self) -> Result<ReplResponse, String> {
-        self.send(&RequestBuilder::bindings()).await
-    }
-
-    /// Send a clear operation to reset REPL bindings.
-    ///
-    /// Uses [`send_once`] (no retry) — clearing bindings is a mutating operation
-    /// that could interleave badly with other operations on reconnect.
-    pub async fn clear(&self) -> Result<ReplResponse, String> {
-        self.send_once(&RequestBuilder::clear()).await
-    }
-
     /// Send an unload operation to remove a class from the workspace.
     ///
     /// Uses [`send_once`] (no retry) — a retry after the class was already
@@ -1276,9 +1263,13 @@ mod tests {
         Ok(())
     }
 
+    // BT-2369 (ADR 0081 Phase 6): the `bindings` / `clear` ops were removed.
+    // Session state is read and reset via the `Session` API
+    // (`Session current bindings keys`, `Session current clear`) over the
+    // REPL evaluate path.
     #[tokio::test]
     #[ignore = "integration test"]
-    async fn test_bindings() -> Result<(), Box<dyn std::error::Error>> {
+    async fn test_session_bindings_via_evaluate() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie, None).await?;
 
@@ -1286,13 +1277,35 @@ mod tests {
         let resp = client.eval("testVar := 99").await.unwrap();
         assert!(!resp.is_error());
 
-        // Read bindings
-        let resp = client.bindings().await.unwrap();
+        // Read session-local binding names via the Session API
+        let resp = client.eval("Session current bindings keys").await.unwrap();
         assert!(!resp.is_error());
-        let bindings = resp.bindings.unwrap();
+        let keys = resp.value_string();
         assert!(
-            bindings.get("testVar").is_some(),
-            "testVar should be in bindings: {bindings}"
+            keys.contains("testVar"),
+            "testVar should be in session bindings keys: {keys}"
+        );
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
+    async fn test_session_clear_via_evaluate() -> Result<(), Box<dyn std::error::Error>> {
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        // Set a binding, then clear via the Session API
+        let _ = client.eval("clearTestVar := 42").await.unwrap();
+        let resp = client.eval("Session current clear").await.unwrap();
+        assert!(!resp.is_error(), "Session current clear should succeed");
+
+        // Verify the binding is gone from the session-local keys
+        let resp = client.eval("Session current bindings keys").await.unwrap();
+        let keys = resp.value_string();
+        assert!(
+            !keys.contains("clearTestVar"),
+            "clearTestVar should be cleared: {keys}"
         );
         client.close().await;
         Ok(())
@@ -1444,30 +1457,6 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "integration test"]
-    async fn test_clear_bindings() -> Result<(), Box<dyn std::error::Error>> {
-        let (port, cookie) = test_port_and_cookie()?;
-        let client = ReplClient::connect(port, &cookie, None).await?;
-
-        // Set a binding, then clear
-        let _ = client.eval("clearTestVar := 42").await.unwrap();
-        let resp = client.clear().await.unwrap();
-        assert!(!resp.is_error(), "clear should succeed");
-
-        // Verify binding is gone
-        let resp = client.bindings().await.unwrap();
-        let bindings = resp
-            .bindings
-            .unwrap_or(serde_json::Value::Object(serde_json::Map::default()));
-        assert!(
-            bindings.get("clearTestVar").is_none(),
-            "clearTestVar should be cleared"
-        );
-        client.close().await;
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "integration test"]
     async fn test_show_codegen() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie, None).await?;
@@ -1615,17 +1604,15 @@ mod tests {
             }
 
             // Now perform an operation which should trigger reconnect and resume
-            let resp = client.bindings().await?;
+            let resp = client.eval("Session current bindings keys").await?;
             assert!(
                 !resp.is_error(),
                 "bindings should be returned after reconnect"
             );
-            let bindings = resp
-                .bindings
-                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            let keys = resp.value_string();
             assert!(
-                bindings.get("reconnectTest").is_some(),
-                "reconnectTest binding should persist after reconnect: {bindings:?}"
+                keys.contains("reconnectTest"),
+                "reconnectTest binding should persist after reconnect: {keys}"
             );
             Ok(())
         }
@@ -1677,14 +1664,12 @@ mod tests {
             );
 
             // Confirm the session was resumed and the earlier binding is still visible.
-            let resp = client.bindings().await?;
+            let resp = client.eval("Session current bindings keys").await?;
             assert!(!resp.is_error(), "bindings should work after reconnect");
-            let bindings = resp
-                .bindings
-                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            let keys = resp.value_string();
             assert!(
-                bindings.get("staleOnce").is_some(),
-                "staleOnce binding should persist across send_once reconnect: {bindings:?}"
+                keys.contains("staleOnce"),
+                "staleOnce binding should persist across send_once reconnect: {keys}"
             );
             Ok(())
         }

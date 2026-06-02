@@ -29,7 +29,6 @@ Legacy format (backward compatible):
     encode_status/3,
     encode_out/3,
     encode_need_input/2,
-    encode_bindings/3,
     encode_loaded/3, encode_loaded/4,
     encode_actors/3,
     encode_modules/3,
@@ -73,8 +72,6 @@ New code should use beamtalk_repl_protocol:decode/1 instead.
 """.
 -spec parse_request(binary()) ->
     {eval, string()}
-    | {clear_bindings}
-    | {get_bindings}
     | {load_source, binary()}
     | {list_actors}
     | {kill_actor, string()}
@@ -93,10 +90,6 @@ parse_request(Data) when is_binary(Data) ->
                 op_to_request(Op, Map);
             {ok, #{<<"type">> := <<"eval">>, <<"expression">> := Expr}} ->
                 {eval, binary_to_list(Expr)};
-            {ok, #{<<"type">> := <<"clear">>}} ->
-                {clear_bindings};
-            {ok, #{<<"type">> := <<"bindings">>}} ->
-                {get_bindings};
             {ok, #{<<"type">> := <<"actors">>}} ->
                 {list_actors};
             {ok, #{<<"type">> := <<"unload">>} = Map} ->
@@ -121,8 +114,6 @@ parse_request(Data) when is_binary(Data) ->
 -doc "Translate a protocol operation name to an internal request tuple.".
 -spec op_to_request(binary(), map()) ->
     {eval, string()}
-    | {clear_bindings}
-    | {get_bindings}
     | {load_source, binary()}
     | {list_actors}
     | {unload, binary()}
@@ -133,10 +124,6 @@ parse_request(Data) when is_binary(Data) ->
 op_to_request(<<"eval">>, Map) ->
     Code = maps:get(<<"code">>, Map, <<>>),
     {eval, binary_to_list(Code)};
-op_to_request(<<"clear">>, _Map) ->
-    {clear_bindings};
-op_to_request(<<"bindings">>, _Map) ->
-    {get_bindings};
 op_to_request(<<"load-source">>, Map) ->
     Source = maps:get(<<"source">>, Map, <<>>),
     {load_source, Source};
@@ -317,29 +304,6 @@ encode_need_input(Prompt, Msg) ->
     iolist_to_binary(
         json:encode(Base#{<<"status">> => [<<"need-input">>], <<"prompt">> => Prompt})
     ).
-
--doc "Encode a bindings response.".
--spec encode_bindings(map(), protocol_msg(), fun((term()) -> term())) -> binary().
-encode_bindings(Bindings, Msg, TermToJson) ->
-    JsonBindings = maps:fold(
-        fun(Name, Value, Acc) ->
-            NameBin = to_binary(Name),
-            Acc#{NameBin => TermToJson(Value)}
-        end,
-        #{},
-        Bindings
-    ),
-    case Msg#protocol_msg.legacy of
-        true ->
-            iolist_to_binary(
-                json:encode(#{<<"type">> => <<"bindings">>, <<"bindings">> => JsonBindings})
-            );
-        false ->
-            Base = base_response(Msg),
-            iolist_to_binary(
-                json:encode(Base#{<<"bindings">> => JsonBindings, <<"status">> => [<<"done">>]})
-            )
-    end.
 
 -doc "Encode a loaded file response.".
 -spec encode_loaded([map()], protocol_msg(), fun((term()) -> term())) -> binary().
@@ -656,10 +620,6 @@ decode_map(_) ->
 legacy_to_op(<<"eval">>, Map) ->
     Code = maps:get(<<"expression">>, Map, <<>>),
     {<<"eval">>, #{<<"code">> => Code}};
-legacy_to_op(<<"clear">>, _Map) ->
-    {<<"clear">>, #{}};
-legacy_to_op(<<"bindings">>, _Map) ->
-    {<<"bindings">>, #{}};
 legacy_to_op(<<"load">>, Map) ->
     Path = maps:get(<<"path">>, Map, <<>>),
     {<<"load-file">>, #{<<"path">> => Path}};

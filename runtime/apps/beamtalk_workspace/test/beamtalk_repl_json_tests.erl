@@ -8,7 +8,7 @@
 EUnit tests for beamtalk_repl_json (BT-708).
 
 Tests JSON formatting for REPL protocol responses: format_response,
-format_error, format_bindings, format_actors, format_modules,
+format_error, format_actors, format_modules,
 format_docs, term_to_json, format_error_message, parse_json.
 """.
 -include_lib("eunit/include/eunit.hrl").
@@ -161,28 +161,6 @@ format_error_with_warnings_test() ->
     {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
     ?assertEqual(<<"Request timed out">>, maps:get(<<"message">>, Decoded)),
     ?assertEqual([<<"w1">>], maps:get(<<"warnings">>, Decoded)).
-
-%%% ============================================================================
-%%% format_bindings tests
-%%% ============================================================================
-
-format_bindings_empty_test() ->
-    Result = beamtalk_repl_json:format_bindings(#{}),
-    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
-    ?assertEqual(<<"bindings">>, maps:get(<<"type">>, Decoded)),
-    ?assertEqual(#{}, maps:get(<<"bindings">>, Decoded)).
-
-format_bindings_atom_key_test() ->
-    Result = beamtalk_repl_json:format_bindings(#{x => 42}),
-    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(42, maps:get(<<"x">>, Bindings)).
-
-format_bindings_binary_key_test() ->
-    Result = beamtalk_repl_json:format_bindings(#{<<"y">> => <<"hello">>}),
-    {ok, Decoded} = beamtalk_repl_json:parse_json(Result),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(<<"hello">>, maps:get(<<"y">>, Bindings)).
 
 %%% ============================================================================
 %%% format_docs tests
@@ -651,42 +629,6 @@ format_rejection_reason_fallback_test() ->
     ?assert(binary:match(Value, <<"#Future<rejected:">>) =/= nomatch),
     ?assert(is_binary(Value)).
 
-%%% format_bindings additional tests
-
-format_bindings_single_test() ->
-    Response = beamtalk_repl_json:format_bindings(#{x => 42}),
-    Decoded = json:decode(Response),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(42, maps:get(<<"x">>, Bindings)).
-
-format_bindings_multiple_test() ->
-    Response = beamtalk_repl_json:format_bindings(#{x => 1, y => 2, z => 3}),
-    Decoded = json:decode(Response),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(1, maps:get(<<"x">>, Bindings)),
-    ?assertEqual(2, maps:get(<<"y">>, Bindings)),
-    ?assertEqual(3, maps:get(<<"z">>, Bindings)).
-
-format_bindings_complex_values_test() ->
-    Response = beamtalk_repl_json:format_bindings(#{
-        atom => ok,
-        str => "hello",
-        list => [1, 2, 3]
-    }),
-    Decoded = json:decode(Response),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(<<"ok">>, maps:get(<<"atom">>, Bindings)),
-    ?assertEqual(<<"hello">>, maps:get(<<"str">>, Bindings)),
-    ?assertEqual([1, 2, 3], maps:get(<<"list">>, Bindings)).
-
-format_bindings_with_special_characters_test() ->
-    %% Test bindings with special characters in keys
-    Response = beamtalk_repl_json:format_bindings(#{'_privateVar' => 42, 'CamelCase' => "test"}),
-    Decoded = json:decode(Response),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(42, maps:get(<<"_privateVar">>, Bindings)),
-    ?assertEqual(<<"test">>, maps:get(<<"CamelCase">>, Bindings)).
-
 %%% format_loaded additional tests
 
 format_loaded_single_test() ->
@@ -1122,20 +1064,6 @@ format_docs_multiline_test() ->
     Response = beamtalk_repl_json:format_docs(Doc),
     Decoded = json:decode(Response),
     ?assertEqual(Doc, maps:get(<<"docs">>, Decoded)).
-
-%%% format_bindings with non-atom key types
-
-format_bindings_list_key_test() ->
-    Response = beamtalk_repl_json:format_bindings(#{"myVar" => 42}),
-    Decoded = json:decode(Response),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(42, maps:get(<<"myVar">>, Bindings)).
-
-format_bindings_integer_key_test() ->
-    Response = beamtalk_repl_json:format_bindings(#{99 => true}),
-    Decoded = json:decode(Response),
-    Bindings = maps:get(<<"bindings">>, Decoded),
-    ?assertEqual(true, maps:get(<<"99">>, Bindings)).
 
 %%% term_to_json unicode error paths
 

@@ -24,13 +24,23 @@ parse_request_eval_test() ->
     Request = <<"{\"type\": \"eval\", \"expression\": \"1 + 2\"}">>,
     ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_clear_test() ->
+%% BT-2369 (ADR 0081 Phase 6): the legacy `clear` / `bindings` types were
+%% removed; the parser now reports them as invalid types. Session state is read
+%% and mutated via the `Session` API (`Session current bindings` /
+%% `Session current clear`) over `eval`.
+parse_request_clear_removed_test() ->
     Request = <<"{\"type\": \"clear\"}">>,
-    ?assertEqual({clear_bindings}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {invalid_request, unknown_type}},
+        beamtalk_repl_server:parse_request(Request)
+    ).
 
-parse_request_bindings_test() ->
+parse_request_bindings_removed_test() ->
     Request = <<"{\"type\": \"bindings\"}">>,
-    ?assertEqual({get_bindings}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {invalid_request, unknown_type}},
+        beamtalk_repl_server:parse_request(Request)
+    ).
 
 %% BT-2091: legacy "load" type maps to the removed `load-file` op; the parser
 %% reports it as an invalid type rather than dispatching it.
@@ -79,13 +89,19 @@ parse_request_op_eval_test() ->
     Request = <<"{\"op\": \"eval\", \"id\": \"msg-001\", \"code\": \"1 + 2\"}">>,
     ?assertEqual({eval, "1 + 2"}, beamtalk_repl_server:parse_request(Request)).
 
-parse_request_op_clear_test() ->
+%% BT-2369 (ADR 0081 Phase 6): the `clear` / `bindings` ops were removed;
+%% parse_request now reports them as unknown ops.
+parse_request_op_clear_removed_test() ->
     Request = <<"{\"op\": \"clear\", \"id\": \"msg-002\"}">>,
-    ?assertEqual({clear_bindings}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {unknown_op, <<"clear">>}}, beamtalk_repl_server:parse_request(Request)
+    ).
 
-parse_request_op_bindings_test() ->
+parse_request_op_bindings_removed_test() ->
     Request = <<"{\"op\": \"bindings\"}">>,
-    ?assertEqual({get_bindings}, beamtalk_repl_server:parse_request(Request)).
+    ?assertMatch(
+        {error, {unknown_op, <<"bindings">>}}, beamtalk_repl_server:parse_request(Request)
+    ).
 
 %% BT-2091: load-file and modules ops were removed; parse_request returns
 %% unknown_op for them. Their successors are `Workspace load:` and
@@ -636,19 +652,33 @@ ws_mask(<<B, Rest/binary>>, Key = <<K1, K2, K3, K4>>, I, Acc) ->
         end,
     ws_mask(Rest, Key, I + 1, <<Acc/binary, M>>).
 
-%% Test: clear op returns ok status
+%% Test: `Session current clear` evaluates and returns a done status.
+%% BT-2369 (ADR 0081 Phase 6): the `clear` op was replaced by the Session API.
 tcp_clear_test(Port) ->
-    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"t1">>})),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"t1">>,
+            <<"code">> => <<"Session current clear">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t1">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
 
-%% Test: bindings op returns bindings list
+%% Test: `Session current bindings keys` evaluates to a value.
+%% BT-2369 (ADR 0081 Phase 6): the `bindings` op was replaced by the Session API.
 tcp_bindings_empty_test(Port) ->
-    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"t2">>})),
+    Msg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"t2">>,
+            <<"code">> => <<"Session current bindings keys">>
+        })
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t2">>}, Resp),
-    ?assert(maps:is_key(<<"bindings">>, Resp)).
+    ?assert(maps:is_key(<<"value">>, Resp)).
 
 %% Test: actors op returns empty actor list
 tcp_actors_empty_test(Port) ->
@@ -888,21 +918,33 @@ tcp_raw_expression_test(Port) ->
 %% Test: multiple sequential connections to the same port
 tcp_multiple_connects_test(Port) ->
     %% First connection
-    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc1">>})),
+    Msg1 = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"mc1">>, <<"code">> => <<"1 + 1">>})
+    ),
     Resp1 = tcp_send_op(Port, Msg1),
     ?assertMatch(#{<<"id">> := <<"mc1">>}, Resp1),
     %% Second connection after first is closed
-    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc2">>})),
+    Msg2 = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"mc2">>, <<"code">> => <<"1 + 1">>})
+    ),
     Resp2 = tcp_send_op(Port, Msg2),
     ?assertMatch(#{<<"id">> := <<"mc2">>}, Resp2),
     %% Third connection
-    Msg3 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mc3">>})),
+    Msg3 = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"mc3">>, <<"code">> => <<"1 + 1">>})
+    ),
     Resp3 = tcp_send_op(Port, Msg3),
     ?assertMatch(#{<<"id">> := <<"mc3">>}, Resp3).
 
 %% Test: multiple concurrent WebSocket connections
 tcp_concurrent_clients_test(Port) ->
-    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"cc1">>})),
+    Msg1 = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"cc1">>,
+            <<"code">> => <<"Session current bindings keys">>
+        })
+    ),
     Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"cc2">>})),
     {Ws1, _W1} = ws_connect(Port),
     {Ws2, _W2} = ws_connect(Port),
@@ -924,7 +966,9 @@ tcp_client_disconnect_test(Port) ->
     gen_tcp:close(Sock),
     timer:sleep(100),
     %% Server should still be responsive
-    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"dc1">>})),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"dc1">>, <<"code">> => <<"1 + 1">>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"dc1">>}, Resp).
 
@@ -932,13 +976,21 @@ tcp_client_disconnect_test(Port) ->
 tcp_multi_request_same_conn_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     %% Send first request
-    Msg1 = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"mr1">>})),
+    Msg1 = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"mr1">>, <<"code">> => <<"1 + 1">>})
+    ),
     ws_send(Ws, Msg1),
     {ok, Data1} = ws_recv_response(Ws),
     Resp1 = json:decode(Data1),
     ?assertMatch(#{<<"id">> := <<"mr1">>}, Resp1),
     %% Send second request on same connection
-    Msg2 = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"mr2">>})),
+    Msg2 = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"mr2">>,
+            <<"code">> => <<"Session current bindings keys">>
+        })
+    ),
     ws_send(Ws, Msg2),
     {ok, Data2} = ws_recv_response(Ws),
     Resp2 = json:decode(Data2),
@@ -947,8 +999,10 @@ tcp_multi_request_same_conn_test(Port) ->
 
 %%% bind:as: / unbind: session refresh tests
 
-%% Test: Workspace bind:as: during eval makes binding appear in bindings query immediately.
-%% Regression test: before the fix, the binding only appeared after reconnect.
+%% Test: Workspace bind:as: during eval makes the name appear in `Workspace globals`
+%% immediately. Regression test: before the fix, it only appeared after reconnect.
+%% BT-2369 (ADR 0081 Phase 6): bind:as: entries are globals — observed via
+%% `Workspace globals keys` (eval), not the removed `bindings` op.
 tcp_bind_as_updates_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     EvalMsg = iolist_to_binary(
@@ -960,13 +1014,19 @@ tcp_bind_as_updates_bindings_test(Port) ->
     ),
     ws_send(Ws, EvalMsg),
     {ok, _} = ws_recv_response(Ws),
-    %% bindings op on the same connection — btBindUpdate must appear without reconnect
-    BindMsg = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"bau2">>})),
+    %% Query globals on the same connection — btBindUpdate must appear without reconnect
+    BindMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"bau2">>,
+            <<"code">> => <<"Workspace globals keys">>
+        })
+    ),
     ws_send(Ws, BindMsg),
     {ok, BindData} = ws_recv_response(Ws),
     BindResp = json:decode(BindData),
-    Bindings = maps:get(<<"bindings">>, BindResp, #{}),
-    ?assert(maps:is_key(<<"btBindUpdate">>, Bindings)),
+    Keys = maps:get(<<"value">>, BindResp, []),
+    ?assert(lists:member(<<"btBindUpdate">>, Keys)),
     %% Cleanup
     CleanMsg = iolist_to_binary(
         json:encode(#{
@@ -979,8 +1039,9 @@ tcp_bind_as_updates_bindings_test(Port) ->
     {ok, _} = ws_recv_response(Ws),
     ws_close(Ws).
 
-%% Test: Workspace unbind: during eval removes binding from bindings query immediately.
-%% Regression test: before the fix, the binding persisted in :bindings until reconnect.
+%% Test: Workspace unbind: during eval removes the name from `Workspace globals`
+%% immediately. Regression test: before the fix, it persisted until reconnect.
+%% BT-2369 (ADR 0081 Phase 6): observed via `Workspace globals keys` (eval).
 tcp_unbind_removes_from_bindings_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     BindMsg = iolist_to_binary(
@@ -1001,13 +1062,19 @@ tcp_unbind_removes_from_bindings_test(Port) ->
     ),
     ws_send(Ws, UnbindMsg),
     {ok, _} = ws_recv_response(Ws),
-    %% bindings op — btUnbindRemove must be gone without reconnect
-    QueryMsg = iolist_to_binary(json:encode(#{<<"op">> => <<"bindings">>, <<"id">> => <<"urb3">>})),
+    %% Query globals — btUnbindRemove must be gone without reconnect
+    QueryMsg = iolist_to_binary(
+        json:encode(#{
+            <<"op">> => <<"eval">>,
+            <<"id">> => <<"urb3">>,
+            <<"code">> => <<"Workspace globals keys">>
+        })
+    ),
     ws_send(Ws, QueryMsg),
     {ok, QueryData} = ws_recv_response(Ws),
     QueryResp = json:decode(QueryData),
-    Bindings = maps:get(<<"bindings">>, QueryResp, #{}),
-    ?assertNot(maps:is_key(<<"btUnbindRemove">>, Bindings)),
+    Keys = maps:get(<<"value">>, QueryResp, []),
+    ?assertNot(lists:member(<<"btUnbindRemove">>, Keys)),
     ws_close(Ws).
 
 %% Test: value registered via bind:as: is usable in the next eval on the same session.
@@ -1109,7 +1176,9 @@ tcp_binary_garbage_test(Port) ->
     %% Should get some response without crashing the server
     ?assert(is_binary(Data)),
     %% Server still works after garbage
-    Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"clear">>, <<"id">> => <<"bg1">>})),
+    Msg = iolist_to_binary(
+        json:encode(#{<<"op">> => <<"eval">>, <<"id">> => <<"bg1">>, <<"code">> => <<"1 + 1">>})
+    ),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"bg1">>}, Resp).
 
@@ -1720,16 +1789,6 @@ get_session_bindings_dead_pid_returns_empty_test() ->
 %%% This test simulates the full handle/4 code path for a "complete" op:
 %%%   create session → insert into ETS → verify resolve_pid → get_session_bindings
 
-%% BT-1045: The protocol decoder strips "session" from params (into Msg.session).
-%% Verify that a bindings op with session field has session in Msg, not in Params.
-bindings_op_session_field_is_in_msg_not_params_test() ->
-    Json = <<"{\"op\":\"bindings\",\"id\":\"t1\",\"session\":\"sid-abc\"}">>,
-    {ok, Msg} = beamtalk_repl_protocol:decode(Json),
-    Params = beamtalk_repl_protocol:get_params(Msg),
-    %% session must be in Msg, not in Params
-    ?assertEqual(<<"sid-abc">>, beamtalk_repl_protocol:get_session(Msg)),
-    ?assertNot(maps:is_key(<<"session">>, Params)).
-
 %% Verify that a complete op with session field has session in Msg, not in Params.
 complete_op_session_field_is_in_msg_not_params_test() ->
     Json =
@@ -1765,42 +1824,11 @@ session_binding_lookup_pipeline_test() ->
         beamtalk_repl_shell:stop(ShellPid)
     end.
 
-%% handle_op bindings with session field returns bindings from target session, not WS session.
-%% Regression test for BT-1063: the bindings op must read session from Msg (via get_session/1),
-%% not from Params — the protocol decoder strips the top-level "session" key into Msg.
-handle_op_bindings_with_session_returns_target_bindings_test() ->
-    application:ensure_all_started(beamtalk_runtime),
-    SessionId = <<"test-bindings-op-bt1063">>,
-    {ok, ShellPid} = beamtalk_repl_shell:start_link(SessionId),
-    beamtalk_session_table:new(),
-    beamtalk_session_table:insert(SessionId, ShellPid),
-    %% eval a binding into the target session
-    {ok, _, _, _} = beamtalk_repl_shell:eval(ShellPid, "x := 42"),
-    try
-        %% Construct a bindings request with session field at the top level.
-        %% The protocol decoder puts it in Msg, not Params.
-        Json = iolist_to_binary(
-            json:encode(#{
-                <<"op">> => <<"bindings">>,
-                <<"id">> => <<"b1">>,
-                <<"session">> => SessionId
-            })
-        ),
-        {ok, Msg} = beamtalk_repl_protocol:decode(Json),
-        Params = beamtalk_repl_protocol:get_params(Msg),
-        %% Use a dummy WS session pid (no bindings) as the default
-        WsPid = spawn(fun() -> timer:sleep(10000) end),
-        Result = beamtalk_repl_server:handle_op(<<"bindings">>, Params, Msg, WsPid),
-        exit(WsPid, kill),
-        Decoded = json:decode(Result),
-        ?assertMatch(#{<<"id">> := <<"b1">>}, Decoded),
-        %% Must return bindings from ShellPid (the target session), not the empty WS session
-        Bindings = maps:get(<<"bindings">>, Decoded),
-        ?assert(maps:is_key(<<"x">>, Bindings))
-    after
-        beamtalk_session_table:delete(SessionId),
-        beamtalk_repl_shell:stop(ShellPid)
-    end.
+%% Note (BT-2369, ADR 0081 Phase 6): the cross-session bindings read that the
+%% removed `bindings` op provided (read target session via the top-level
+%% `session` field) is now expressed as `(Session withId: id) bindings keys`
+%% over `eval`; that path is covered by the Session API tests in
+%% beamtalk_session_tests.
 
 %%% tokenise_send_chain/1 tests (BT-1006)
 

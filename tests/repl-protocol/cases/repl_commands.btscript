@@ -9,8 +9,10 @@
 // persistence across turns is also needed to verify that bindings survive
 // between expressions.
 //
-// Tests :bindings, :clear, and :reload commands routed through their
-// proper protocol operations.
+// BT-2369 (ADR 0081 Phase 6): the `bindings` / `clear` protocol ops were
+// removed. :bindings now evaluates `Session current bindings keys` (listing
+// session-local binding *names*) and :clear evaluates `Session current clear`.
+// Tests :bindings, :clear, and :reload commands.
 
 // @load tests/repl-protocol/fixtures/counter.bt
 
@@ -30,9 +32,10 @@
 x := 42
 // => 42
 
-// Bindings should show the variable
+// Bindings should show the variable name (BT-2369: :bindings now lists
+// session-local binding names via `Session current bindings keys`)
 :bindings
-// => x = 42
+// => x
 
 // ===========================================================================
 // :clear — REMOVES BINDINGS

@@ -298,33 +298,39 @@ Incrementally compile and load all `.bt` and native `.erl` files in a Beamtalk p
 
 ### Session Operations
 
-#### `clear` — Clear Bindings
+#### Session bindings — read and clear via `eval`
 
-Clear all variable bindings in the current session.
+> **Removed (BT-2369, ADR 0081 Phase 6):** the dedicated `clear` and `bindings`
+> protocol ops were removed. Session state is read and reset through the
+> Beamtalk-native `Session` API over `eval`. Sending `clear` or `bindings` now
+> returns `unknown_op`.
+
+Clear the current session's locals:
+```json
+{"op": "eval", "id": "msg-010", "code": "Session current clear"}
+```
+
+List the current session's local binding names:
 
 **Request:**
 ```json
-{"op": "clear", "id": "msg-010"}
+{"op": "eval", "id": "msg-011", "code": "Session current bindings keys"}
 ```
 
 **Response:**
 ```json
-{"id": "msg-010", "value": "ok", "status": ["done"]}
+{"id": "msg-011", "value": ["x", "counter"], "status": ["done"]}
 ```
 
-#### `bindings` — Get Bindings
-
-List current variable bindings.
-
-**Request:**
+Read workspace globals, or another session's locals:
 ```json
-{"op": "bindings", "id": "msg-011"}
+{"op": "eval", "id": "msg-012", "code": "Workspace globals keys"}
+{"op": "eval", "id": "msg-013", "code": "(Session withId: id) bindings keys"}
 ```
 
-**Response:**
-```json
-{"id": "msg-011", "bindings": {"x": 42, "counter": "#Actor<Counter,0.123.0>"}, "status": ["done"]}
-```
+The `{bindings_changed, SessionId}` push notification (WebSocket `push` /
+`channel: "bindings"`) is unchanged — clients still use it to know *when* to
+re-fetch; only the fetch moved to `eval`.
 
 #### `sessions` — List Sessions
 
@@ -753,7 +759,7 @@ Returns the list of supported operations with their parameters, protocol version
 }
 ```
 
-The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `clear`, `bindings`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version.
+The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version. (The `clear` and `bindings` ops were removed in BT-2369 / ADR 0081 Phase 6 — read and reset session state via `eval` of the `Session` API.)
 
 > **BT-2091 (protocol 2.0):** The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed. Use `Beamtalk help: ClassName`, `Workspace load: "path"`, `ClassName reload`, and `Workspace classes` via the `eval` op instead.
 
@@ -863,8 +869,6 @@ Legacy format is auto-detected by the presence of a `type` field instead of `op`
 | Legacy Type | New Op | Notes |
 |-------------|--------|-------|
 | `eval` | `eval` | `expression` → `code` |
-| `clear` | `clear` | |
-| `bindings` | `bindings` | |
 | `actors` | `actors` | |
 | `kill` | `kill` | `pid` → `actor` |
 | `unload` | `unload` | |

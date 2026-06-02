@@ -276,14 +276,27 @@ impl ReplClient {
         }
     }
 
-    /// Send a clear bindings request.
+    /// Clear the current session's local bindings.
+    ///
+    /// BT-2369 (ADR 0081 Phase 6): the `clear` protocol op was removed; this
+    /// now evaluates `Session current clear` against the connected session.
     pub(crate) fn clear_bindings(&mut self) -> Result<ReplResponse> {
-        self.send_request(&RequestBuilder::clear())
+        self.send_request(&RequestBuilder::eval_with_trace(
+            "Session current clear",
+            false,
+        ))
     }
 
-    /// Get current bindings.
+    /// Get the current session's local binding names.
+    ///
+    /// BT-2369 (ADR 0081 Phase 6): the `bindings` protocol op was removed; this
+    /// now evaluates `Session current bindings keys` against the connected
+    /// session. The result is the eval `value` (a list of binding-name symbols).
     pub(crate) fn get_bindings(&mut self) -> Result<ReplResponse> {
-        self.send_request(&RequestBuilder::bindings())
+        self.send_request(&RequestBuilder::eval_with_trace(
+            "Session current bindings keys",
+            false,
+        ))
     }
 
     /// List running actors.

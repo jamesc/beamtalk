@@ -807,36 +807,56 @@ impl ReplClient {
         Ok(response)
     }
 
-    /// Clear bindings and return "ok" (for use as a testable expression).
+    /// Clear the session's local bindings and return "ok".
+    ///
+    /// BT-2369 (ADR 0081 Phase 6): the `clear` op was removed; this evaluates
+    /// `Session current clear` (mirrors the `:clear` CLI command).
     fn clear_and_report(&mut self) -> Result<String, String> {
-        let response = self.send_op(&RequestBuilder::clear())?;
+        let response = self.send_op(&RequestBuilder::eval_with_trace(
+            "Session current clear",
+            false,
+        ))?;
+        if response.is_error() {
+            return Err(response
+                .error_message()
+                .unwrap_or("clear failed")
+                .to_string());
+        }
+        // `Session current clear` evaluates to nil; report a stable "ok" so the
+        // command reads the same as the old `clear` op (which had no value).
         let value = response.value_string();
-        Ok(if value.is_empty() {
+        Ok(if value.is_empty() || value == "nil" {
             "ok".to_string()
         } else {
             value
         })
     }
 
-    /// Get current bindings formatted as a readable string.
+    /// Get the session's local binding names as a sorted, newline-joined string.
+    ///
+    /// BT-2369 (ADR 0081 Phase 6): the `bindings` op was removed; this evaluates
+    /// `Session current bindings keys` (mirrors the `:bindings` CLI command),
+    /// whose result `value` is a list of binding-name symbols.
     fn get_bindings(&mut self) -> Result<String, String> {
-        let response = self.send_op(&RequestBuilder::bindings())?;
-        let bindings = response
-            .bindings
-            .and_then(|b| b.as_object().cloned())
+        let response = self.send_op(&RequestBuilder::eval_with_trace(
+            "Session current bindings keys",
+            false,
+        ))?;
+        let names = response
+            .value
+            .and_then(|v| v.as_array().cloned())
             .unwrap_or_default();
-        if bindings.is_empty() {
+        if names.is_empty() {
             return Ok("No bindings".to_string());
         }
-        let mut entries: Vec<String> = bindings
+        let mut entries: Vec<String> = names
             .iter()
-            .map(|(k, v)| {
-                let val = if v.is_string() {
-                    v.as_str().unwrap().to_string()
+            .map(|n| {
+                if n.is_string() {
+                    n.as_str().unwrap().to_string()
                 } else {
-                    v.to_string()
-                };
-                format!("{k} = {val}")
+                    n.to_string()
+                }
             })
             .collect();
         entries.sort();
