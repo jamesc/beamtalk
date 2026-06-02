@@ -315,13 +315,15 @@ term_to_json(Value) when is_map(Value) ->
         undefined ->
             beamtalk_runtime_api:print_string(Value);
         ClassName ->
-            case
-                (catch beamtalk_runtime_api:dispatch_lookup(
+            try
+                beamtalk_runtime_api:dispatch_lookup(
                     'printString', [], Value, Value, ClassName
-                ))
+                )
             of
                 {reply, Result, _} when is_binary(Result) -> Result;
                 _ -> beamtalk_runtime_api:print_string(Value)
+            catch
+                _:_ -> beamtalk_runtime_api:print_string(Value)
             end
     end;
 term_to_json(#beamtalk_error{} = Error) ->
@@ -335,9 +337,11 @@ term_to_json(Value) when is_tuple(Value) ->
             PidStr = pid_to_list(Pid),
             Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
             Prefix =
-                case (catch beamtalk_runtime_api:inherits_from(Class, 'DynamicSupervisor')) of
+                try beamtalk_runtime_api:inherits_from(Class, 'DynamicSupervisor') of
                     true -> <<"#DynamicSupervisor<">>;
                     _ -> <<"#Supervisor<">>
+                catch
+                    _:_ -> <<"#Supervisor<">>
                 end,
             iolist_to_binary([Prefix, ClassBin, <<",">>, Inner, <<">">>]);
         #beamtalk_object{class = 'Metaclass', pid = Pid} ->

@@ -875,11 +875,26 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     %% ensuring the class is fully removed from the runtime registries.
     %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
     %% BT-2222: Single metadata row → single delete (was a three-table fan-out).
-    _ = (catch beamtalk_class_metadata:delete(ClassName)),
+    _ =
+        (try
+            beamtalk_class_metadata:delete(ClassName)
+        catch
+            _:_ -> ok
+        end),
     %% BT-1768: Clean up pid reverse index. Only cleaned on graceful shutdown —
     %% on crash, the entry intentionally survives for auto-restart recovery.
-    _ = (catch ets:delete(beamtalk_class_pids, self())),
-    _ = (catch pg:leave(beamtalk_classes, self())),
+    _ =
+        (try
+            ets:delete(beamtalk_class_pids, self())
+        catch
+            _:_ -> ok
+        end),
+    _ =
+        (try
+            pg:leave(beamtalk_classes, self())
+        catch
+            _:_ -> ok
+        end),
     ok.
 
 %% ADR 0032 Phase 1: No flattened tables to rebuild after hot reload.

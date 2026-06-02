@@ -117,7 +117,7 @@ collect_port_output(Port, Acc) ->
         {Port, {exit_status, Code}} ->
             {error, {exit_status, Code}, iolist_to_binary(Acc)}
     after 60000 ->
-        catch port_close(Port),
+        (try port_close(Port) catch _:_ -> ok end),
         {error, timeout, iolist_to_binary(Acc)}
     end.
 
