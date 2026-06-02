@@ -301,13 +301,27 @@ precisely why the representation has to change.
 ### Sub-alternatives within Option 1 (to settle at implementation time)
 - **Map-backed (index → value):** canonical and O(log n), simplest to implement,
   but higher memory and slower full-iteration (`do:`/`collect:`). Good fallback
-  if the trie proves too costly to build well.
+  if the trie proves too costly to build well. **Canonicality here is a BEAM VM
+  guarantee, not a discipline we maintain:** two Erlang maps are `=:=` iff they
+  hold the same key→value associations, *independent of insertion order or
+  internal HAMT layout*, and `erlang:phash2` hashes maps by content the same way.
+  So `from_list([1,99,3])` and `(from_list([1,2,3]))#{1 => 99}` are genuinely
+  `=:=` with zero extra work — which is what makes this the low-risk fallback.
+- **`gb_trees` (rejected):** technically canonical *only* under a fragile
+  discipline — always build via `from_orddict` (deterministic balanced shape over
+  keys `0..n-1`) and only ever `update/3` (which replaces a value in place without
+  rebalancing; safe because bounds-checked `at:put:` never inserts a new key). But
+  general balanced trees are otherwise insertion-order-dependent, it stores the
+  integer keys *and* two child pointers per element (heaviest memory of the
+  candidates), and it offers no advantage over a map (which gets the same
+  canonicality from the VM with no invariant to maintain). Dominated by the
+  map-backed option for simplicity and by the persistent vector for performance.
 - **Chunked tuples:** flat tuple split into fixed-size chunks; O(√n) or O(log n)
   depending on nesting. Simpler than a full trie but with worse asymptotics.
 - **Persistent vector / RRB trie (preferred):** best asymptotics and canonical,
-  highest implementation effort. The implementation issue should benchmark at
-  least the map-backed and trie options against the acceptance criteria before
-  committing.
+  stores *only* values (no keys → lowest memory), highest implementation effort.
+  The implementation issue should benchmark at least the map-backed and trie
+  options against the acceptance criteria before committing.
 
 ## Consequences
 
