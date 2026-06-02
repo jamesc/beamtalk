@@ -626,6 +626,19 @@ encode_trace_result(Steps, Msg, TermToJson, Output, Warnings) ->
             )
     end.
 
+%%% Utilities
+
+-doc "Normalise an atom, binary, list, or arbitrary term to a binary.".
+-spec to_binary(term()) -> binary().
+to_binary(Name) when is_atom(Name) ->
+    atom_to_binary(Name, utf8);
+to_binary(Name) when is_binary(Name) ->
+    Name;
+to_binary(Name) when is_list(Name) ->
+    list_to_binary(Name);
+to_binary(Name) ->
+    list_to_binary(io_lib:format("~p", [Name])).
+
 %%% Internal functions
 
 -doc "Decode a parsed JSON map into a protocol message.".
@@ -700,17 +713,6 @@ parse_json(Data) ->
     catch
         _:_ -> {error, not_json}
     end.
-
--doc "Convert a term to binary for use as a JSON key.".
--spec to_binary(term()) -> binary().
-to_binary(Name) when is_atom(Name) ->
-    atom_to_binary(Name, utf8);
-to_binary(Name) when is_binary(Name) ->
-    Name;
-to_binary(Name) when is_list(Name) ->
-    list_to_binary(Name);
-to_binary(Name) ->
-    list_to_binary(io_lib:format("~p", [Name])).
 
 -doc "Add output field to response map only when non-empty.".
 -spec maybe_add_output(map(), binary()) -> map().
