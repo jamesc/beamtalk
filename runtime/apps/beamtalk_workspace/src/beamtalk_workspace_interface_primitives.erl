@@ -68,6 +68,8 @@ into REPL session state. Workspace readiness is detected via
 -export([create_bindings_table/0]).
 %% Direct exports for Erlang FFI calls from sealed Object WorkspaceInterface
 -export([actors/0, actorAt/1, classes/0, load/1, globals/0, bind/2, unbind/1, rootSupervisor/0]).
+
+-export([currentSession/0, sessions/0]).
 %% Supervisor lifecycle management (BT-1341)
 -export([startSupervisor/1, stopSupervisor/1, supervisors/0]).
 %% Package reflection (ADR 0070 Phase 5)
@@ -115,6 +117,10 @@ dispatch('unbind:', [Name], _Self) ->
     unbind(Name);
 dispatch(rootSupervisor, [], _Self) ->
     rootSupervisor();
+dispatch(currentSession, [], _Self) ->
+    currentSession();
+dispatch(sessions, [], _Self) ->
+    sessions();
 dispatch('startSupervisor:', [ClassArg], _Self) ->
     startSupervisor(ClassArg);
 dispatch('stopSupervisor:', [ClassArg], _Self) ->
@@ -623,6 +629,38 @@ OTP application with `[application] supervisor` has started, or the atom
 -spec rootSupervisor() -> tuple() | nil.
 rootSupervisor() ->
     beamtalk_supervisor:get_root().
+
+%%% ============================================================================
+%%% Session navigation (ADR 0081 Phases 5 & 7, BT-2368)
+%%% ============================================================================
+
+-doc """
+Return the calling session as a `Session` value, or `nil` outside a REPL eval.
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) currentSession`,
+backing `Workspace currentSession`. Delegates to `beamtalk_session_primitives:current/0`
+so it returns the *identical* value to `Session current` (the same minted
+`Session` carrying the calling session's id and shell PID, or `nil` when no
+session context is seeded — e.g. compiled program code). There is no `hasSession`
+predicate: callers guard with `Workspace currentSession isNil` /
+`Session current ifNotNil: [:s | ...]`.
+""".
+-spec currentSession() -> beamtalk_session_primitives:session() | nil.
+currentSession() ->
+    beamtalk_session_primitives:current().
+
+-doc """
+Return a `List` of `Session` values, one per live shell, backing
+`Workspace sessions`.
+
+Called via `(Erlang beamtalk_workspace_interface_primitives) sessions`. Delegates
+to `beamtalk_session_primitives:liveSessions/0`, which enumerates live shells and
+mints each `Session` value the same way `withId/1` does, so the values work with
+the instance reads (`s id`, `s bindings keys`) and reject cross-session writes.
+""".
+-spec sessions() -> [beamtalk_session_primitives:session()].
+sessions() ->
+    beamtalk_session_primitives:liveSessions().
 
 %%% ============================================================================
 %%% Supervisor lifecycle management (BT-1341)

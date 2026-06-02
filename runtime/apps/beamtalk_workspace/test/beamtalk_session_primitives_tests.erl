@@ -371,8 +371,128 @@ class_current_sees_caller_session_context_test_() ->
     end}.
 
 %%====================================================================
+%% liveSessions/0 (Workspace sessions, ADR 0081 Phase 7 / BT-2368)
+%%====================================================================
+
+%% No session supervisor running → empty list, never a crash.
+live_sessions_no_supervisor_returns_empty_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                undefined = whereis(beamtalk_session_sup),
+                ?assertEqual([], beamtalk_session_primitives:liveSessions())
+            end)
+        ]
+    end}.
+
+%% One Session value per live supervised shell; ids and pids match the shells,
+%% and the values are usable with the instance reads (idOf/1, bindingsViewFor/1).
+live_sessions_lists_live_shells_test_() ->
+    {setup, fun setup_with_sup/0, fun teardown_with_sup/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid1} = beamtalk_session_sup:start_session(<<"live-a">>),
+                {ok, Pid2} = beamtalk_session_sup:start_session(<<"live-b">>),
+                Sessions = beamtalk_session_primitives:liveSessions(),
+                ?assertEqual(2, length(Sessions)),
+                lists:foreach(
+                    fun(S) -> ?assertMatch(#{'$beamtalk_class' := 'Session'}, S) end, Sessions
+                ),
+                Ids = lists:sort([beamtalk_session_primitives:idOf(S) || S <- Sessions]),
+                ?assertEqual([<<"live-a">>, <<"live-b">>], Ids),
+                %% PIDs carried by the minted values match the live shells.
+                Pids = lists:sort([maps:get(pid, S) || S <- Sessions]),
+                ?assertEqual(lists:sort([Pid1, Pid2]), Pids),
+                %% A minted value works with the bindings read (cross-session read).
+                [S1 | _] = Sessions,
+                View = beamtalk_session_primitives:bindingsViewFor(S1),
+                ?assertMatch(#{'$beamtalk_class' := 'BindingsView'}, View),
+                ?assertEqual([], beamtalk_session_primitives:view_keys(View))
+            end)
+        ]
+    end}.
+
+%% A minted value rejects cross-session writes when the caller is a different
+%% session (the cross-session-mutation guard, same as withId/1 values).
+live_sessions_value_rejects_cross_session_write_test_() ->
+    {setup, fun setup_with_sup/0, fun teardown_with_sup/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, _Pid} = beamtalk_session_sup:start_session(<<"live-target">>),
+                [Session | _] = beamtalk_session_primitives:liveSessions(),
+                View = beamtalk_session_primitives:bindingsViewFor(Session),
+                %% Caller is a *different* session than the target → rejected.
+                seed_context(self(), <<"live-caller">>),
+                ?assertError(
+                    #{error := #beamtalk_error{kind = cross_session_mutation_unsupported}},
+                    beamtalk_session_primitives:view_at_put(View, x, 1)
+                )
+            end)
+        ]
+    end}.
+
+%% A shell that dies between which_children/1 and the id query is skipped, not
+%% minted into a Session value carrying a dead PID.
+live_sessions_skips_dead_shell_test_() ->
+    {setup, fun setup_with_sup/0, fun teardown_with_sup/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, AlivePid} = beamtalk_session_sup:start_session(<<"live-alive">>),
+                {ok, DeadPid} = beamtalk_session_sup:start_session(<<"live-dead">>),
+                exit(DeadPid, kill),
+                wait_dead(DeadPid),
+                Sessions = beamtalk_session_primitives:liveSessions(),
+                Pids = [maps:get(pid, S) || S <- Sessions],
+                ?assert(lists:member(AlivePid, Pids)),
+                ?assertNot(lists:member(DeadPid, Pids))
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
+
+%% Setup variant that also starts the session supervisor so supervised shells
+%% (beamtalk_session_sup:start_session/1) appear in which_children/1.
+%% Defensively stops any sup left registered by a prior fixture, and unlinks the
+%% fresh one so teardown's shutdown does not propagate an exit to the test runner.
+setup_with_sup() ->
+    setup(),
+    stop_session_sup(),
+    {ok, SupPid} = beamtalk_session_sup:start_link(),
+    unlink(SupPid),
+    SupPid.
+
+teardown_with_sup(_SupPid) ->
+    stop_session_sup(),
+    teardown(undefined).
+
+%% Stop the locally-registered session supervisor (and all supervised shells)
+%% if one is running, guaranteeing the registered name is clear before returning
+%% so a later fixture's start_link/0 never hits {already_started, _}.
+stop_session_sup() ->
+    case whereis(beamtalk_session_sup) of
+        undefined ->
+            ok;
+        SupPid ->
+            Ref = erlang:monitor(process, SupPid),
+            exit(SupPid, shutdown),
+            receive
+                {'DOWN', Ref, process, SupPid, _} -> ok
+            after 5000 ->
+                %% Graceful shutdown stalled — force-kill so the name actually
+                %% clears (otherwise the next fixture's start_link/0 fails) and
+                %% block until the DOWN confirms it is gone.
+                erlang:demonitor(Ref, [flush]),
+                Ref2 = erlang:monitor(process, SupPid),
+                exit(SupPid, kill),
+                receive
+                    {'DOWN', Ref2, process, SupPid, _} -> ok
+                after 5000 -> erlang:demonitor(Ref2, [flush])
+                end
+            end
+    end.
 
 set_locals(Pid, Locals) ->
     sys:replace_state(Pid, fun({SId, State, Worker}) ->

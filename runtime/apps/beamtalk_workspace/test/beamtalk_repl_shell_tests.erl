@@ -60,6 +60,21 @@ bindings_initially_empty_test_() ->
         ]
     end}.
 
+%% BT-2368 (ADR 0081 Phase 7): the shell answers its own protocol session id so
+%% liveSessions/0 can mint Session values with the id withId/1 would resolve.
+get_session_id_returns_started_id_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-session-id-1">>),
+                ?assertEqual(
+                    {ok, <<"test-session-id-1">>}, beamtalk_repl_shell:get_session_id(Pid)
+                ),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
 clear_bindings_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [

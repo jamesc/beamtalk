@@ -46,7 +46,7 @@ that would block to timeout against a dead PID.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Factory (class-side)
--export([current/0, withId/1, idOf/1]).
+-export([current/0, withId/1, idOf/1, liveSessions/0]).
 %% Session operations (instance-side, take a Session value)
 -export([bindingsViewFor/1, resolveFor/2, clearFor/1]).
 %% Workspace-globals view (not a Session method)
@@ -120,6 +120,32 @@ idOf(Session) ->
     {Id, Pid} = session_id_pid(Session, 'idOf:'),
     ensure_alive(Pid, Id),
     Id.
+
+-doc """
+Return a `Session` value for every live shell, backing `Workspace sessions`
+(ADR 0081 Phase 7, BT-2368).
+
+Enumerates live shells from `beamtalk_session_sup` (the same live-shell source as
+the `sessions` protocol op, covering CLI, WebSocket, and MCP) and mints one
+`Session` value per shell the same way `withId/1` does — `{id, pid}` carrying the
+shell's protocol session id (queried via `beamtalk_repl_shell:get_session_id/1`)
+and its PID. The minted values therefore work with the instance reads (`id`,
+`bindings`) and reject cross-session writes.
+
+Returns `[]` when the session supervisor is not running (e.g. a bare runtime
+node with no REPL server). A shell that dies or stops answering between
+`which_children/1` and the per-shell id query is skipped rather than minting a
+value carrying a dead PID or blocking the whole enumeration.
+""".
+-spec liveSessions() -> [session()].
+liveSessions() ->
+    case whereis(beamtalk_session_sup) of
+        undefined ->
+            [];
+        _Sup ->
+            Children = supervisor:which_children(beamtalk_session_sup),
+            lists:filtermap(fun mint_live_session/1, Children)
+    end.
 
 %%% ============================================================================
 %%% Session operations (instance-side)
@@ -278,6 +304,30 @@ view_size(View) ->
 -spec make_session(binary(), pid()) -> session().
 make_session(Id, Pid) ->
     #{'$beamtalk_class' => 'Session', id => Id, pid => Pid}.
+
+%% Bounded per-shell id lookup so one wedged shell cannot stall the whole
+%% enumeration on the default 5s gen_server:call timeout. A live, idle shell
+%% answers get_session_id in microseconds (it reads the state tuple, in any
+%% worker state), so 1s is generous slack for a busy-but-responsive shell while
+%% still skipping a genuinely wedged one promptly.
+-define(SESSION_ID_LOOKUP_TIMEOUT, 1000).
+
+%% Mint a Session value for one live shell child of beamtalk_session_sup.
+%% `{false}` (filtermap drop) for non-pid children and for shells that have died
+%% or stopped answering between which_children/1 and the id query, so a dead PID
+%% is never minted into a Session value (mirrors withId/1's liveness discipline).
+-spec mint_live_session(tuple()) -> {true, session()} | false.
+mint_live_session({_ChildId, Pid, _Type, _Modules}) when is_pid(Pid) ->
+    try beamtalk_repl_shell:get_session_id(Pid, ?SESSION_ID_LOOKUP_TIMEOUT) of
+        {ok, Id} -> {true, make_session(Id, Pid)}
+    catch
+        %% Shell exited (noproc), or did not reply within the bounded timeout
+        %% (wedged in another call) — skip rather than mint a dead PID or stall
+        %% the user-facing enumeration.
+        exit:_ -> false
+    end;
+mint_live_session(_Other) ->
+    false.
 
 %% Extract {Id, Pid} from a Session value, raising a type error if the shape is
 %% wrong.  Selector names the Session method for the error message.
