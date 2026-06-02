@@ -1,7 +1,7 @@
 # ADR 0090: Canonical Array Representation for O(log n) `at:put:`
 
 ## Status
-Proposed (2026-06-02)
+Accepted (2026-06-02)
 
 ## Context
 
@@ -96,13 +96,25 @@ naturally `=:=`-canonical** — i.e. any array holding a given element sequence 
 `=:=` to any other array holding the same sequence, regardless of edit history —
 while preserving O(log n) random access and update.
 
-The leading candidate is a **canonical persistent vector** (a wide,
-fixed-branching nested-tuple trie, in the Clojure/RRB family), built so that the
-in-memory term is a pure deterministic function of `(length, elements)`. Because
-Erlang `=:=` is purely structural over the term and the trie carries **no
-mutable cache slot** (the exact thing that makes BEAM `array` non-canonical),
-two such vectors with identical contents are `=:=` and `erlang:phash2`-equal by
-construction.
+This ADR commits to the *property* (canonical term ⇒ `=:=`/`phash2`-equal by
+contents), not to one concrete structure — the structure is settled by benchmark
+in implementation (see Implementation, Phase 1). Two shapes are viable, and both
+share the invariant that the in-memory term is a pure deterministic function of
+`(length, elements)` with **no mutable cache slot** (the exact thing that makes
+BEAM `array` non-canonical):
+
+- **Map-backed (`#{0 => V0, 1 => V1, …}`) — the low-risk default.** Canonicality
+  is a BEAM VM *guarantee*: two maps are `=:=` iff they hold the same
+  associations, regardless of insertion order or HAMT layout. Zero dependencies,
+  pure Erlang, O(log n) update; costs extra memory (stores the index keys) and
+  slower full iteration.
+- **A bespoke *strict* radix-balanced persistent vector — the performance
+  upgrade.** Stores only values (lowest memory), best iteration. Must be the
+  *strict* (non-relaxed) variant so each `(length, elements)` has exactly one term
+  shape; a *relaxed* RRB-vector is **not** canonical (it relaxes node fill for
+  fast concat) and is therefore disqualified. No off-the-shelf BEAM library
+  provides a canonical vector, so this path means writing one in-tree — taken only
+  if the benchmark justifies it over the map.
 
 The public protocol, the tagged-map wrapper, and the `'$beamtalk_class' =>
 'Array'` tag are unchanged. Only `beamtalk_array.erl`'s internals and its
@@ -341,12 +353,15 @@ precisely why the representation has to change.
 - Removes the BT-2362 footgun class entirely (no mutable cache slot to leak).
 
 ### Negative
-- A new data structure to implement, test, and maintain (vs leaning on stdlib
-  `array`). Highest-effort option.
+- Some implementation cost vs leaning on stdlib `array`. Bounded for the
+  map-backed default (reuses native maps, no new data structure); higher for the
+  strict-vector path (a structure to implement, test, and maintain) — which is why
+  that path is taken only if the benchmark justifies it.
+- Memory overhead vs BEAM `array`: the map-backed default stores the integer
+  index keys (heavier); the strict vector stores only values. Either way the
+  change must be bounded by the acceptance criteria.
 - `phash2` of a large array key remains O(n) (unchanged from today, but now a
   documented, intended cost rather than incidental).
-- Possible memory-overhead change vs BEAM `array`; must be bounded by the
-  acceptance criteria.
 
 ### Neutral
 - Public Array protocol, the tagged-map wrapper, and the `'$beamtalk_class'` tag
