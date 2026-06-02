@@ -72,6 +72,7 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     init/0,
     register/4,
     register/5,
+    unregister/2,
     lookup/2,
     list/1,
     extenders_of/1,
@@ -188,13 +189,11 @@ register(Class, Selector, Fun, Owner, Source) when
         [] ->
             %% New registration
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source),
-            ok;
+            maybe_store_source(Key, Source);
         [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
             %% Same owner updating - no conflict
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source),
-            ok;
+            maybe_store_source(Key, Source);
         [{Key, _OldFun, OldOwner}] ->
             %% Conflict: different owner
             ?LOG_WARNING(
@@ -210,9 +209,39 @@ register(Class, Selector, Fun, Owner, Source) when
 
             %% Overwrite (last-writer-wins)
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source),
-            ok
-    end.
+            maybe_store_source(Key, Source)
+    end,
+
+    %% ADR 0087 Phase 4 (BT-2301): maintain the xref index for extension methods
+    %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
+    %% `Source`) is re-parsed and indexed; a sourceless one (`register/4`, or
+    %% `register/5` with `Source = undefined`) is recorded as a marker row tagged
+    %% `unindexed_runtime_fun` (empty sends + references) so navigation knows the
+    %% method exists but cannot be scanned. Extension methods are instance-side,
+    %% so ClassSide = false.
+    index_extension_xref(Class, Selector, Source),
+    ok.
+
+-doc """
+Unregister an extension method from a class (ADR 0066 open classes).
+
+Removes the dispatch entry, any stored source body, and the method's xref
+index rows. Idempotent — unregistering an unknown extension is a no-op.
+
+ADR 0087 Phase 4 (BT-2301): the matching `beamtalk_xref:purge_method/3` call
+drops just this `{Class, false, Selector}` row set (extension methods are
+instance-side); sibling extensions on the same class are untouched.
+""".
+-spec unregister(atom(), atom()) -> ok.
+unregister(Class, Selector) when is_atom(Class), is_atom(Selector) ->
+    Key = {Class, Selector},
+    ets:delete(?EXTENSIONS_TABLE, Key),
+    ets:delete(?SOURCES_TABLE, Key),
+    case erlang:whereis(beamtalk_xref) of
+        undefined -> ok;
+        _Pid -> ok = beamtalk_xref:purge_method(Class, false, Selector)
+    end,
+    ok.
 
 -doc """
 Lookup an extension method.
@@ -436,3 +465,34 @@ maybe_store_source(Key, undefined) ->
 maybe_store_source(Key, Source) when is_binary(Source) ->
     ets:insert(?SOURCES_TABLE, {Key, Source}),
     ok.
+
+-doc """
+Update the xref index for a (re)registered extension method (BT-2301).
+
+A sourced extension (`Source` is a binary) is re-parsed via
+`beamtalk_xref:build_method_entry/5` and indexed as `source_status = indexed`,
+so its sends become visible to `SystemNavigation sendersOf:` etc. A sourceless
+extension (`Source = undefined`) is recorded as an `unindexed_runtime_fun`
+marker row (empty sends + references) — the method is known to exist but cannot
+be scanned. Provenance is `extension` for both. Extension methods are
+instance-side, so `ClassSide = false`.
+
+A no-op when `beamtalk_xref` is not running (e.g. early bootstrap, or a minimal
+embedded runtime).
+""".
+-spec index_extension_xref(atom(), atom(), binary() | undefined) -> ok.
+index_extension_xref(Class, Selector, Source) ->
+    case erlang:whereis(beamtalk_xref) of
+        undefined ->
+            ok;
+        _Pid ->
+            {SourceStatus, SourceBin} =
+                case Source of
+                    undefined -> {unindexed_runtime_fun, <<>>};
+                    Bin when is_binary(Bin) -> {indexed, Bin}
+                end,
+            Entry = beamtalk_xref:build_method_entry(
+                false, Selector, SourceBin, SourceStatus, extension
+            ),
+            ok = beamtalk_xref:put_method(Class, false, Selector, Entry)
+    end.

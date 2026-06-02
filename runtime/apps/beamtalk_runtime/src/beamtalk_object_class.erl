@@ -591,6 +591,32 @@ refresh_xref(ClassName, MethodXref) ->
             register_xref(ClassName, MethodXref)
     end.
 
+-doc """
+Re-index a single hot-patched method in `beamtalk_xref` (ADR 0087 Phase 4,
+BT-2301).
+
+Called from the `{put_method, ...}` / `{put_class_method, ...}` handlers after
+a live `>>` edit (ADR 0082). Re-parses the one method's `Source` via the
+compiler AST FFI (`beamtalk_xref:build_method_entry/5`) and replaces just that
+`{Class, ClassSide, Selector}` row set via `beamtalk_xref:put_method/4`;
+sibling methods on the same class are untouched.
+
+A no-op when `beamtalk_xref` is not running. Hot-patched methods are tagged
+`source_status = indexed` (they carry source like any compiled method) with
+`provenance = put_method`.
+""".
+-spec put_method_xref(class_name(), boolean(), selector(), binary()) -> ok.
+put_method_xref(ClassName, ClassSide, Selector, Source) ->
+    case erlang:whereis(beamtalk_xref) of
+        undefined ->
+            ok;
+        _Pid ->
+            Entry = beamtalk_xref:build_method_entry(
+                ClassSide, Selector, Source, indexed, put_method
+            ),
+            ok = beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry)
+    end.
+
 handle_call(
     {spawn, Args},
     _From,
@@ -744,7 +770,9 @@ handle_call(
                 find_inherited_class_method(Selector, Superclass)
         end,
     {reply, Result, State};
-handle_call({put_method, Selector, Fun, Source}, _From, State) ->
+handle_call(
+    {put_method, Selector, Fun, Source}, _From, #class_state{name = ClassName} = State
+) ->
     {arity, Arity} = erlang:fun_info(Fun, arity),
     MethodInfo = #{block => Fun, arity => Arity},
     %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
@@ -763,6 +791,10 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
         method_signatures = maps:remove(Selector, State#class_state.method_signatures),
         method_return_types = maps:remove(Selector, State#class_state.method_return_types)
     },
+    %% ADR 0087 Phase 4 (BT-2301): re-index the patched method from its Source so
+    %% the xref index reflects the live `>>` edit (ADR 0082). Instance-side, so
+    %% ClassSide = false. A no-op when xref / the compiler app is unavailable.
+    put_method_xref(ClassName, false, Selector, Source),
     %% ADR 0050 Phase 3: Notify compiler server of hot-patch.
     %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
     %% from the live class_state record instead.  Return types are cleared for
@@ -797,6 +829,10 @@ handle_call(
     %% is not yet present.
     beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
     beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
+    %% ADR 0087 Phase 4 (BT-2301): re-index the patched class-side method
+    %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
+    %% is unavailable.
+    put_method_xref(ClassName, true, Selector, Source),
     notify_hot_patch(NewState),
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).

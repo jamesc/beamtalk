@@ -535,6 +535,101 @@ check_counter_view() ->
     end.
 
 %%====================================================================
+%% purge_method isolation (BT-2301)
+%%====================================================================
+
+purge_method_removes_one_method_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+
+                %% Sanity: increment is present and sends '+'; sibling 'value' present.
+                ?assert(
+                    lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
+                ),
+                ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
+                ?assertEqual(1, length(beamtalk_xref:references_to('Integer'))),
+
+                %% Purge just `increment`.
+                ok = beamtalk_xref:purge_method('Counter', false, 'increment'),
+
+                %% `increment` gone — method row, its '+' send, and its Integer ref.
+                ?assertEqual([], beamtalk_xref:implementors_of('increment')),
+                ?assertNot(
+                    lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
+                ),
+                ?assertEqual([], beamtalk_xref:senders_of('+')),
+                ?assertEqual([], beamtalk_xref:references_to('Integer')),
+
+                %% Siblings untouched: instance `value`, class-side `new` + its
+                %% `basicNew` send all survive.
+                ?assert(
+                    lists:member('value', beamtalk_xref:defined_selectors('Counter', false))
+                ),
+                ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true)),
+                ?assertEqual(1, length(beamtalk_xref:senders_of('basicNew')))
+            end)
+        ]
+    end}.
+
+purge_method_unknown_is_noop_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+                %% Purging an unknown method / class is a harmless no-op.
+                ?assertEqual(ok, beamtalk_xref:purge_method('Counter', false, 'no_such_method')),
+                ?assertEqual(ok, beamtalk_xref:purge_method('NoSuchClass', false, 'increment')),
+                %% Existing rows intact.
+                ?assert(
+                    lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
+                )
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% build_method_entry/5 — runtime xref-entry construction (BT-2301)
+%%====================================================================
+
+build_method_entry_sourceless_test_() ->
+    [
+        ?_test(begin
+            %% A sourceless (`unindexed_runtime_fun`) entry carries empty sends
+            %% and references, regardless of whether the compiler app is loaded.
+            Entry = beamtalk_xref:build_method_entry(
+                false, 'doubled', <<>>, unindexed_runtime_fun, extension
+            ),
+            ?assertEqual(false, maps:get(class_side, Entry)),
+            ?assertEqual('doubled', maps:get(selector, Entry)),
+            ?assertEqual([], maps:get(sends, Entry)),
+            ?assertEqual([], maps:get(references, Entry)),
+            ?assertEqual(unindexed_runtime_fun, maps:get(source_status, Entry)),
+            ?assertEqual(extension, maps:get(provenance, Entry))
+        end)
+    ].
+
+build_method_entry_indexed_shape_test_() ->
+    [
+        ?_test(begin
+            %% An `indexed` entry always has the canonical shape. When the
+            %% compiler app is present the sends are parsed from source; when it
+            %% is absent the call degrades to empty sends rather than failing.
+            Entry = beamtalk_xref:build_method_entry(
+                true, 'increment', <<"increment => self count + 1">>, indexed, put_method
+            ),
+            ?assertEqual(true, maps:get(class_side, Entry)),
+            ?assertEqual('increment', maps:get(selector, Entry)),
+            ?assertEqual(1, maps:get(line, Entry)),
+            ?assertEqual(indexed, maps:get(source_status, Entry)),
+            ?assertEqual(put_method, maps:get(provenance, Entry)),
+            ?assert(is_list(maps:get(sends, Entry))),
+            ?assertEqual([], maps:get(references, Entry))
+        end)
+    ].
+
+%%====================================================================
 %% Internal helpers
 %%====================================================================
 

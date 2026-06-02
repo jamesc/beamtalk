@@ -416,11 +416,16 @@ build_compiled_class_info(
                                                     %% codegen. Defaults to [] (not
                                                     %% undefined) so init/1 always gets
                                                     %% a list; maybe_put inserts [] as-is.
+                                                    %% ADR 0087 Phase 4 (BT-2301): when
+                                                    %% codegen did not bake methodXref
+                                                    %% (runtime-built ClassBuilder with
+                                                    %% only methodSource: populated),
+                                                    %% derive the index from the method
+                                                    %% sources so built methods are still
+                                                    %% discoverable in beamtalk_xref.
                                                     maybe_put(
                                                         method_xref,
-                                                        maps:get(
-                                                            methodXref, BuilderState, []
-                                                        ),
+                                                        builder_method_xref(BuilderState),
                                                         Base
                                                     )
                                                 )
@@ -453,6 +458,47 @@ maybe_put(_Key, nil, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-doc """
+Compute the per-method xref index for a ClassBuilder-built class (BT-2301).
+
+Prefers a codegen-baked `methodXref` list when present (the compiled path,
+ADR 0087 Phase 2). When absent — a runtime-constructed ClassBuilder that only
+populated `methodSource:` — derives the index by re-parsing each method's source
+via `beamtalk_xref:build_method_entry/5`, so the built methods still appear in
+`beamtalk_xref:implementors_of/1` / `senders_of/1`. ClassBuilder methods are
+instance-side (`ClassSide = false`) and tagged `provenance = class_builder`,
+`source_status = indexed`.
+
+Returns the list (possibly empty) that `beamtalk_object_class:init/1` forwards
+to `beamtalk_xref:register_class/2`.
+""".
+-spec builder_method_xref(map()) -> [map()].
+builder_method_xref(BuilderState) ->
+    case maps:get(methodXref, BuilderState, undefined) of
+        Baked when is_list(Baked), Baked =/= [] ->
+            Baked;
+        _ ->
+            MethodSource = maps:get(methodSource, BuilderState, #{}),
+            case is_map(MethodSource) of
+                false ->
+                    [];
+                true ->
+                    maps:fold(
+                        fun
+                            (Selector, Source, Acc) when is_atom(Selector), is_binary(Source) ->
+                                Entry = beamtalk_xref:build_method_entry(
+                                    false, Selector, Source, indexed, class_builder
+                                ),
+                                [Entry | Acc];
+                            (_Selector, _Source, Acc) ->
+                                Acc
+                        end,
+                        [],
+                        MethodSource
+                    )
+            end
+    end.
 
 -doc """
 Validate the arity of every class-method fun in a classMethods: spec (BT-2276).
