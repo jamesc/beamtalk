@@ -222,8 +222,13 @@ load-bearing invariant of the whole decision.
 - 🧑‍💻 **Newcomer:** "`a =:= b` would still work for arrays" — but only if they
   never put arrays in a dict/set, where it silently breaks.
 - 🎩 **Smalltalk purist:** "Runtime equality dispatch is *more* Smalltalk-like —
-  `=` is a real message you can override." (Genuine strength, but collides with
-  ADR 0002's BEAM-first inlining.)
+  `=` is a real message you can override." (Weaker than it sounds: `=` is not a
+  capability Beamtalk is declining to wire up — it is one of an entire family of
+  binary operators (`+ - * / % ** == =:= /= =/= < > <= >=`) that *all* codegen to
+  inline `erlang:'<op>'(L, R)` with no dispatch and no override hook
+  (`operators.rs:54–101`). Making `=` dispatched would make it the *lone*
+  overridable binary operator in a language that inlines every other one for BEAM
+  efficiency — an inconsistency, not a return to Smalltalk faithfulness.)
 - ⚙️ **BEAM veteran:** "I'd rather not pay a dispatch call on every `=`; and this
   still can't fix map keys, since BEAM `=:=` is hard-wired." (Weak for this
   cohort.)
@@ -246,10 +251,14 @@ load-bearing invariant of the whole decision.
   intended design."
 
 ### Tension points
-- Only the **Smalltalk purist** has a real pull toward Option 2 (equality as an
-  overridable message). Every other cohort favours Option 1, and Option 2 cannot
-  fix dict/set keys regardless — so the purist's argument is about language
-  philosophy, not about solving this problem.
+- Only the **Smalltalk purist** has any pull toward Option 2 (equality as an
+  overridable message) — and even that pull is weak, because overridable `=`
+  would be a lone exception in a language that inlines its *entire* binary-operator
+  family to Erlang BIFs with no dispatch (see the Option 2 steelman). Every other
+  cohort favours Option 1, and Option 2 cannot fix dict/set keys regardless — so
+  the purist's argument is not just "about language philosophy rather than solving
+  the problem," it argues for a one-off inconsistency the language has
+  deliberately avoided everywhere else.
 - **Newcomer** and **operator** disagree on Option 3: it looks correct in casual
   use but is the production hazard. That gap (correct-looking but quadratic) is
   the strongest reason not to leave it as the long-term answer.
