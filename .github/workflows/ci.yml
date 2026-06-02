@@ -406,7 +406,10 @@ jobs:
         continue-on-error: true
         uses: irongut/CodeCoverageSummary@v1.3.0
         with:
-          filename: 'runtime/_build/test/covertool/beamtalk_runtime.covertool.xml,runtime/_build/test/covertool/beamtalk_workspace.covertool.xml'
+          # All four runtime apps. bt@* compiled-Beamtalk modules carry no
+          # Erlang abstract code and are auto-excluded from cover (BT-1672), so
+          # the stdlib XML reports only its hand-written FFI .erl modules.
+          filename: 'runtime/_build/test/covertool/beamtalk_runtime.covertool.xml,runtime/_build/test/covertool/beamtalk_workspace.covertool.xml,runtime/_build/test/covertool/beamtalk_stdlib.covertool.xml,runtime/_build/test/covertool/beamtalk_compiler.covertool.xml'
           badge: true
           format: markdown
           output: both
