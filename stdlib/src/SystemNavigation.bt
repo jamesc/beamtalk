@@ -353,21 +353,30 @@ sealed typed Object subclass: SystemNavigation
   ///   the send appears
   ///
   /// A method that sends `aSelector` multiple times produces one record per
-  /// occurrence. Iterates the navigation scope and walks both instance-side
-  /// and class-side method dictionaries (BT-2195), so stdlib and user
-  /// classes are both covered on both sides. Matches Pharo's
-  /// `SystemNavigation >> #allSendersOf:`.
+  /// occurrence. Matches Pharo's `SystemNavigation >> #allSendersOf:`.
   ///
-  /// Naive implementation: parses every method's source on every call. Fine
-  /// for an on-demand IDE pane (a few seconds on a 200-class workspace) but
-  /// not for hot live-highlight paths. A maintained `selector -> [sites]`
-  /// index is a follow-up optimization.
+  /// ## Maintained index (ADR 0087, BT-2299)
+  ///
+  /// The class-body call sites are read from the runtime-maintained xref index
+  /// (`beamtalk_xref`), populated at class-load time by codegen's baked
+  /// `register_class/0` payload. This is a sub-millisecond ETS read in place of
+  /// the former per-call walk over every method source — see
+  /// `docs/development/benchmarks.md`.
+  ///
+  /// **Miss policy.** The index is authoritative for loaded classes, but a miss
+  /// must never become a wrong answer:
+  /// - Rows whose owning class is no longer loaded are dropped silently (stale).
+  /// - A class the registry reports as loaded but that is absent from the index
+  ///   falls back to the legacy source-scan (`collectSendersFor:in:into:`) for
+  ///   that class only, and the runtime logs one `xref_miss` warning. The
+  ///   partition is computed runtime-side by `beamtalk_xref:senders_of_bt/1`.
   ///
   /// Extension methods (ADR 0066) are scanned when registered with source via
-  /// `beamtalk_extensions:register/5` (BT-2196). The `#class` for an
-  /// extension hit is the extended target class (or the metaclass atom for
-  /// `Target class` extensions); `register/4` registrations without source
-  /// remain invisible to the source-text scan.
+  /// `beamtalk_extensions:register/5` (BT-2196), unchanged by the migration —
+  /// extensions are not yet part of the index (lands in a later phase). The
+  /// `#class` for an extension hit is the extended target class (or the
+  /// metaclass atom for `Target class` extensions); `register/4` registrations
+  /// without source remain invisible to the source-text scan.
   ///
   /// Raises an error if the argument is not a Symbol. Returns an empty
   /// collection if no senders are found (not an error).
@@ -381,14 +390,22 @@ sealed typed Object subclass: SystemNavigation
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "SystemNavigation sendersOf: requires a Symbol argument"
     ]
-    classScan := self allClasses
-      inject: List new
+    // ADR 0087: the runtime applies the miss policy and hands back the indexed
+    // call sites (stale rows already dropped) plus the loaded-but-unindexed
+    // classes that still need a source scan.
+    partition := (Erlang beamtalk_xref) senders_of_bt: aSelector
+    indexedRows := partition at: #indexed
+    fallbackClasses := partition at: #fallback_classes
+    indexScan := self indexedSenderRecordsFrom: indexedRows into: List new
+    // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
+    // walking both instance and class side as the legacy scan did (BT-2195).
+    // Filter `allClasses` (typed List(Behaviour)) by the fallback name set
+    // rather than resolving each tag, which keeps the scope strongly typed.
+    fallbackScan := (self allClasses select: [:cls |
+      fallbackClasses includes: cls name
+    ])
+      inject: indexScan
       into: [:acc :cls |
-        // BT-2195: Walk both instance side (`cls`) and class side
-        // (`cls class`, the metaclass) so class-method bodies are
-        // searched too. `collectSendersFor:in:into:` skips scopes for
-        // which `>>` is not yet supported, so the metaclass walk is
-        // safe even on registry entries that don't carry source.
         withInstance := self
           collectSendersFor: aSelector
           in: cls
@@ -399,7 +416,41 @@ sealed typed Object subclass: SystemNavigation
           into: withInstance
       ]
     // BT-2196: walk source-bearing extensions registered via `register/5`.
-    self collectExtensionSendersFor: aSelector into: classScan
+    // Extensions are not in the index yet, so this scan is unconditional.
+    self collectExtensionSendersFor: aSelector into: fallbackScan
+
+  /// Resolve an xref sender row's owning class (a class-name Symbol) and side
+  /// flag to the class object the result record exposes as `#class`.
+  ///
+  /// Instance-side hits report the class object; class-side hits report the
+  /// metaclass object (`<class> class`), matching the legacy scan's `cls` /
+  /// `cls class` convention (BT-2195). Falls back to the raw tag if the name
+  /// resolves to nil (a registry entry with no live class behind it — should
+  /// not happen, but the scan must not crash).
+  senderClassFor: ownerTag :: Symbol classSide: isClassSide :: Boolean -> Object =>
+    cls := self resolveExtensionClass: ownerTag
+    isClassSide ifTrue: [cls class] ifFalse: [cls]
+
+  /// Map the xref index rows returned by `beamtalk_xref:senders_of_bt/1` onto
+  /// `#{#class, #selector, #line}` result records, appending to `result`.
+  ///
+  /// Each `row` is a Dictionary with atom keys `#owner` (class-name Symbol),
+  /// `#class_side` (Boolean), `#method` (Symbol), and `#line` (positive
+  /// Integer). `#class` is resolved via `senderClassFor:classSide:` so the
+  /// record shape is byte-for-byte identical to the legacy source-scan path.
+  /// The explicit `-> List(Dictionary)` return anchors element-type inference
+  /// for the `sendersOf:` accumulator.
+  indexedSenderRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
+    indexedRows
+      inject: result
+      into: [:acc :row |
+        acc
+          add: #{
+            #class => (self senderClassFor: (row at: #owner) classSide: (row at: #class_side)),
+            #selector => (row at: #method),
+            #line => (row at: #line)
+          }
+      ]
 
   /// Append senders of `aSelector` found in any instance method of `aScope`
   /// (a class) to `result`. Returns the (possibly extended) result list.

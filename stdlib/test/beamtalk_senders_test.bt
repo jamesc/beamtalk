@@ -80,3 +80,26 @@ TestCase subclass: SystemNavigationSendersTest
   // The class-tag resolver helper is present.
   testHelperResolveExtensionClassIsDefined =>
     self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+
+  // --- BT-2299: xref-backed read path + miss-policy fallback ---
+  //
+  // `sendersOf:` now reads class-body call sites from the runtime-maintained
+  // xref index (`beamtalk_xref:senders_of_bt/1`) instead of walking every
+  // method source on each call, falling back to the source scan only for
+  // loaded-but-unindexed classes. The behavioural coverage — that a
+  // registry-loaded class artificially purged from the index still resolves
+  // via fallback and emits exactly one `xref_miss` warning — lives in the
+  // runtime EUnit suite (`beamtalk_xref_tests:miss_policy_fallback_test_`),
+  // because the live class registry + xref server are required and the BUnit
+  // harness does not start the compiler port. The checks below cover the parts
+  // that do not require those: that the migration's helper methods are present.
+
+  // The index-row -> result-record mapper is present (the `sendersOf:` body
+  // delegates to it for the indexed call sites).
+  testHelperIndexedSenderRecordsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #indexedSenderRecordsFrom:into:)
+
+  // The owner-tag/class-side -> `#class` resolver is present (instance-side
+  // hits report the class object, class-side hits the metaclass object).
+  testHelperSenderClassForIsDefined =>
+    self assert: (SystemNavigation includesSelector: #senderClassFor:classSide:)

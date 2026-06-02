@@ -13,6 +13,9 @@ isolation, and concurrent reader during a write.
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% Logger handler callback used by the miss-policy test to capture warnings.
+-export([log/2]).
+
 %%====================================================================
 %% Setup / teardown
 %%====================================================================
@@ -533,6 +536,176 @@ check_counter_view() ->
                 int_refs_count => length(IntRefs)
             }}
     end.
+
+%%====================================================================
+%% Miss-policy fallback (ADR 0087 Phase 3, BT-2299)
+%%====================================================================
+
+%% A registry-loaded class that is artificially purged from the index must
+%% (1) surface in the `fallback_classes` partition of `senders_of_bt/1` so the
+%% BT layer source-scans it, and (2) emit exactly one `xref_miss` warning for
+%% that class. Runs against the live runtime app so `beamtalk_class_registry`
+%% reports the bootstrap stub classes as loaded.
+miss_policy_fallback_test_() ->
+    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+        {timeout, 30,
+            ?_test(begin
+                %% Pick a loaded class that actually defines methods — the miss
+                %% policy only flags such classes (empty base/protocol classes have
+                %% nothing to scan). At least one method-bearing class must be
+                %% loaded to exercise the policy.
+                Class = first_method_bearing_class(),
+                ?assertNotEqual(undefined, Class),
+
+                %% Ensure the chosen class is indexed (re-register a stub row so the
+                %% test does not depend on cross-fixture table state). While indexed
+                %% it must *not* appear as a fallback class.
+                ok = beamtalk_xref:register_class(Class, [
+                    #{
+                        class_side => false,
+                        selector => 'isMeta',
+                        line => 1,
+                        sends => [],
+                        references => [],
+                        source_status => unindexed_runtime_fun,
+                        provenance => class_body
+                    }
+                ]),
+                #{fallback_classes := Fallback0} = beamtalk_xref:senders_of_bt('isMeta'),
+                ?assertNot(lists:member(Class, Fallback0)),
+
+                %% Artificially purge the chosen class from the index — it is now
+                %% loaded but unindexed, the exact miss the policy must catch.
+                ok = beamtalk_xref:purge_class(Class),
+
+                HandlerId = install_capture_handler(),
+                try
+                    #{fallback_classes := Fallback1} = beamtalk_xref:senders_of_bt('isMeta'),
+                    %% (1) The purged-but-loaded class is reported for source-scan.
+                    ?assert(lists:member(Class, Fallback1)),
+
+                    %% (2) Exactly one matching xref_miss warning for that class.
+                    Misses = collect_xref_misses(Class),
+                    ?assertEqual(1, length(Misses)),
+                    [Meta] = Misses,
+                    ?assertEqual(xref_miss, maps:get(reason, Meta)),
+                    ?assertEqual(sendersOf, maps:get(query, Meta)),
+                    ?assertEqual([beamtalk, runtime], maps:get(domain, Meta))
+                after
+                    remove_capture_handler(HandlerId)
+                end
+            end)}
+    end}.
+
+setup_app() ->
+    %% The miss policy needs both a live class registry (to report a class as
+    %% loaded) and a running xref server. Bring up the full runtime app when we
+    %% can; an earlier fixture in the same VM may have started xref bare, which
+    %% makes the supervised app start fail with `already_started` and skips
+    %% bootstrap's class registration. In every case, end by guaranteeing the
+    %% bootstrap stub classes are registered so at least one class is loaded.
+    _ = application:ensure_all_started(beamtalk_runtime),
+    ensure_xref_running(),
+    ensure_pg_running(),
+    register_stub_classes(),
+    %% Give registration a beat to land in pg.
+    timer:sleep(200),
+    ok.
+
+ensure_xref_running() ->
+    case whereis(beamtalk_xref) of
+        undefined ->
+            {ok, _} = beamtalk_xref:start_link(),
+            ok;
+        _ ->
+            ok
+    end.
+
+ensure_pg_running() ->
+    case whereis(pg) of
+        undefined ->
+            {ok, _} = pg:start_link(),
+            ok;
+        _ ->
+            ok
+    end.
+
+%% Register the hand-coded bootstrap stub classes (the same calls
+%% `beamtalk_bootstrap:init/1` makes). Idempotent — re-registering a live class
+%% is a no-op at the registry level.
+register_stub_classes() ->
+    catch beamtalk_class_bt:register_class(),
+    catch beamtalk_metaclass_bt:register_class(),
+    ok.
+
+cleanup_app(_) ->
+    ok.
+
+%% First loaded class that defines at least one method, or `undefined`.
+first_method_bearing_class() ->
+    Entries = beamtalk_class_registry:live_class_entries(),
+    case [N || {N, _Mod, Pid} <- Entries, defines_methods(Pid)] of
+        [] -> undefined;
+        [First | _] -> First
+    end.
+
+defines_methods(Pid) ->
+    try
+        beamtalk_object_class:methods(Pid) =/= [] orelse
+            beamtalk_object_class:local_class_methods(Pid) =/= []
+    catch
+        _:_ -> false
+    end.
+
+%% Drain the capture mailbox and return the metadata maps of every xref_miss
+%% warning whose `class` field matches `Class`.
+collect_xref_misses(Class) ->
+    receive
+        {captured_log, #{level := warning, msg := {report, Report}}} ->
+            case Report of
+                #{event := xref_miss, class := Class} ->
+                    [Report | collect_xref_misses(Class)];
+                _ ->
+                    collect_xref_misses(Class)
+            end;
+        {captured_log, _Other} ->
+            collect_xref_misses(Class)
+    after 200 ->
+        []
+    end.
+
+install_capture_handler() ->
+    HandlerId = beamtalk_xref_test_capture,
+    Self = self(),
+    %% Ensure the handler module's callback is exported and loaded before the
+    %% logger validates it at add time.
+    _ = code:ensure_loaded(?MODULE),
+    %% The test sys.config pins the primary logger level to `error` for clean
+    %% output, which drops warnings before any handler sees them. Open the gate
+    %% to `all` for the duration of the capture, remembering the old level so it
+    %% can be restored.
+    #{level := OldLevel} = logger:get_primary_config(),
+    put(saved_primary_level, OldLevel),
+    ok = logger:set_primary_config(level, all),
+    ok = logger:add_handler(HandlerId, ?MODULE, #{
+        level => all,
+        filter_default => log,
+        capture_pid => Self
+    }),
+    HandlerId.
+
+remove_capture_handler(HandlerId) ->
+    logger:remove_handler(HandlerId),
+    case get(saved_primary_level) of
+        undefined -> ok;
+        OldLevel -> logger:set_primary_config(level, OldLevel)
+    end,
+    ok.
+
+%% Logger handler callback — forwards log events to the capture pid.
+log(LogEvent, #{capture_pid := Pid}) ->
+    Pid ! {captured_log, LogEvent},
+    ok.
 
 %%====================================================================
 %% Internal helpers

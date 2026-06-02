@@ -43,6 +43,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 %% API — read path
 -export([
     senders_of/1,
+    senders_of_bt/1,
     references_to/1,
     implementors_of/1,
     defined_selectors/2,
@@ -116,10 +117,20 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     gen := gen()
 }.
 
+%% A site reduced to the fields `SystemNavigation` consumes — the internal
+%% `gen` / `recv_kind` bookkeeping is dropped at the BT boundary (BT-2299).
+-type bt_row() :: #{
+    owner := class_name(),
+    class_side := class_side(),
+    method := selector(),
+    line := pos_integer()
+}.
+
 -export_type([
     method_xref_entry/0,
     method_info/0,
     site/0,
+    bt_row/0,
     source_status/0,
     provenance/0,
     recv_kind/0
@@ -192,6 +203,63 @@ senders_of(Selector) when is_atom(Selector) ->
         undefined -> [];
         _ -> [Site || {_Sel, Site} <- ets:lookup(?SENDERS_TABLE, Selector)]
     end.
+
+-doc """
+Resolve the senders of `Selector` with the ADR 0087 miss-policy applied,
+returning the partition `SystemNavigation sendersOf:` needs to assemble a
+correct result without re-parsing every method (BT-2299, Phase 3).
+
+The return map has two keys:
+
+- `indexed` — the sender sites drawn straight from the ETS index, but with
+  **stale rows dropped**: a site whose `owner` class is no longer reported as
+  loaded by `beamtalk_class_registry` is silently discarded. Each surviving
+  row is shaped `#{owner := atom(), class_side := boolean(), method := atom(),
+  line := pos_integer()}` for the BT side to map onto `#{#class, #selector,
+  #line}` records.
+
+- `fallback_classes` — the class names that the registry reports as loaded,
+  that have **no rows in the index at all** (an index miss, per ADR 0087
+  §Authoritativeness: "the class is not considered loaded until xref has the
+  rows"), *and that actually define methods*. The method gate matters: an empty
+  base/protocol class (e.g. `Error`, `Printable`'s sub-hierarchy) genuinely has
+  nothing to index and nothing to scan, so flagging it would be pure noise — a
+  real miss is a class with methods the index should have but does not. The BT
+  side source-scans exactly these classes. One miss-policy `?LOG_WARNING`
+  (`domain => [beamtalk, runtime]`, `reason => xref_miss`) is emitted here per
+  class so the gap surfaces from the runtime context rather than the stdlib
+  one. A loaded, *indexed* class that simply has zero senders of `Selector` is
+  correct and never appears here.
+
+The loaded set is taken from `beamtalk_class_registry:live_class_entries/0`;
+the indexed set is the distinct owners present in the methods table. The stale
+drop and miss partition are pure ETS / set work; only the (typically empty)
+miss candidate set incurs the per-class method-count `gen_server:call`, so the
+cost is bounded by the miss count rather than the workspace size.
+""".
+-spec senders_of_bt(selector()) ->
+    #{indexed := [bt_row()], fallback_classes := [class_name()]}.
+senders_of_bt(Selector) when is_atom(Selector) ->
+    Entries = beamtalk_class_registry:live_class_entries(),
+    Loaded = sets:from_list([Name || {Name, _Mod, _Pid} <- Entries]),
+    Indexed = indexed_class_set(),
+    Sites = senders_of(Selector),
+    %% Stale-drop: keep only sites whose owner is still loaded.
+    IndexedRows = [
+        site_to_bt_row(Site)
+     || Site <- Sites, sets:is_element(maps:get(owner, Site), Loaded)
+    ],
+    %% Index miss: loaded, absent from the index, and actually defines methods.
+    %% The method gate (per-pid gen_server call) only runs for the loaded set
+    %% minus the indexed set, which is empty in steady state.
+    FallbackClasses = [
+        Name
+     || {Name, _Mod, Pid} <- Entries,
+        not sets:is_element(Name, Indexed),
+        class_defines_methods(Pid)
+    ],
+    lists:foreach(fun(Class) -> log_xref_miss(Class, sendersOf) end, FallbackClasses),
+    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
 
 -doc """
 Return all sites that reference `Class` (type annotations, class
@@ -273,6 +341,73 @@ method_info(Class, ClassSide, Selector) when
                     )
             end
     end.
+
+%%====================================================================
+%% Internal: read helpers (miss-policy)
+%%====================================================================
+
+-doc """
+Whether the class behind `Pid` defines at least one method (instance- or
+class-side). Used to gate the miss-policy fallback so empty base/protocol
+classes are not flagged as index misses (they have nothing to scan).
+
+A dead or unresponsive class process counts as "no methods" — a class we cannot
+interrogate is not a useful source-scan target.
+""".
+-spec class_defines_methods(pid()) -> boolean().
+class_defines_methods(Pid) ->
+    try
+        beamtalk_object_class:methods(Pid) =/= [] orelse
+            beamtalk_object_class:local_class_methods(Pid) =/= []
+    catch
+        _:_ -> false
+    end.
+
+-doc """
+The set of class names that currently have at least one row in the methods
+table — i.e. classes that have been through `register_class/2`. A class in this
+set is "indexed" for miss-policy purposes even if all its rows are
+`unindexed_runtime_fun` (a sourceless stub still counts as present).
+""".
+-spec indexed_class_set() -> sets:set(class_name()).
+indexed_class_set() ->
+    case ets:whereis(?CLASS_GEN_TABLE) of
+        undefined ->
+            sets:new([{version, 2}]);
+        _ ->
+            %% `xref_class_gen` holds exactly one `{Class, Gen}` row per
+            %% registered class — the authoritative "has this class been
+            %% indexed" set.
+            Classes = [Class || {Class, _Gen} <- ets:tab2list(?CLASS_GEN_TABLE)],
+            sets:from_list(Classes)
+    end.
+
+-doc "Project a full `site()` down to the `bt_row()` fields the BT layer needs.".
+-spec site_to_bt_row(site()) -> bt_row().
+site_to_bt_row(Site) ->
+    #{
+        owner => maps:get(owner, Site),
+        class_side => maps:get(class_side, Site),
+        method => maps:get(method, Site),
+        line => maps:get(line, Site)
+    }.
+
+-doc """
+Emit the ADR 0087 miss-policy warning for an index miss on `Class` under the
+navigation query `Query`. A class loaded by the registry but absent from the
+index is a defect (the index should grow atomically with the class registry);
+the warning surfaces the gap so it self-heals at read time rather than hiding.
+""".
+-spec log_xref_miss(class_name(), atom()) -> ok.
+log_xref_miss(Class, Query) ->
+    ?LOG_WARNING(#{
+        event => xref_miss,
+        class => Class,
+        query => Query,
+        reason => xref_miss,
+        domain => [beamtalk, runtime]
+    }),
+    ok.
 
 %%====================================================================
 %% gen_server callbacks
