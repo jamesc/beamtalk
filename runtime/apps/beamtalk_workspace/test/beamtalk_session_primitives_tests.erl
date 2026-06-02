@@ -469,7 +469,8 @@ teardown_with_sup(_SupPid) ->
     teardown(undefined).
 
 %% Stop the locally-registered session supervisor (and all supervised shells)
-%% if one is running, waiting for the name to clear before returning.
+%% if one is running, guaranteeing the registered name is clear before returning
+%% so a later fixture's start_link/0 never hits {already_started, _}.
 stop_session_sup() ->
     case whereis(beamtalk_session_sup) of
         undefined ->
@@ -479,7 +480,17 @@ stop_session_sup() ->
             exit(SupPid, shutdown),
             receive
                 {'DOWN', Ref, process, SupPid, _} -> ok
-            after 5000 -> erlang:demonitor(Ref, [flush])
+            after 5000 ->
+                %% Graceful shutdown stalled — force-kill so the name actually
+                %% clears (otherwise the next fixture's start_link/0 fails) and
+                %% block until the DOWN confirms it is gone.
+                erlang:demonitor(Ref, [flush]),
+                Ref2 = erlang:monitor(process, SupPid),
+                exit(SupPid, kill),
+                receive
+                    {'DOWN', Ref2, process, SupPid, _} -> ok
+                after 5000 -> erlang:demonitor(Ref2, [flush])
+                end
             end
     end.
 

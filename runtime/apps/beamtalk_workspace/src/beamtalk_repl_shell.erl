@@ -32,6 +32,7 @@ bindings while sharing access to actors and loaded modules.
     interrupt/1,
     get_bindings/1,
     get_session_id/1,
+    get_session_id/2,
     clear_bindings/1,
     enqueue_mutation/2,
     load_file/2,
@@ -118,10 +119,19 @@ Used by `beamtalk_session_primitives:liveSessions/0` to mint a `Session` value
 per live shell with the same id `withId/1` would resolve.  Like `get_bindings/1`
 it is answered in any worker state, so enumeration does not block on a
 mid-eval shell.
+
+`get_session_id/2` takes an explicit `Timeout` so a callers enumerating many
+shells can bound the wait per shell (a `gen_server:call` timeout raises `exit`,
+which the enumeration catches to skip an unresponsive shell rather than stalling
+the whole list on the default 5s).
 """.
 -spec get_session_id(pid()) -> {ok, binary()}.
 get_session_id(SessionPid) ->
     gen_server:call(SessionPid, get_session_id).
+
+-spec get_session_id(pid(), timeout()) -> {ok, binary()}.
+get_session_id(SessionPid, Timeout) ->
+    gen_server:call(SessionPid, get_session_id, Timeout).
 
 -doc "Clear all variable bindings for this session.".
 -spec clear_bindings(pid()) -> ok.
