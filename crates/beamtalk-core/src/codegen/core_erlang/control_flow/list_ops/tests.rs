@@ -828,19 +828,35 @@ fn test_count_with_local_mutation_uses_tuple_acc() {
     // BT-1276: count: with only a local variable mutation uses the tuple-accumulator
     // path: {CountAcc, N, ...}. The local is unpacked inside the lambda via
     // element(2, AccSt) — not via maps:get.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    n := 0\n    items count: [:item | n := n + 1. item > 0]\n";
+    // `n` is both read inside the predicate (n := n + 1) and used after the loop, so
+    // the threading plan must carry it — guarding against a future optimization that
+    // drops unreferenced locals.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    n := 0\n",
+        "    items count: [:item | n := n + 1. item > 0]\n",
+        "    n\n",
+    );
     let code = codegen(src);
     assert!(
         code.contains("'lists':'foldl'"),
         "count: with local mutation should use lists:foldl. Got:\n{code}"
     );
+    // CountAcc is at position 1; 'n' is the first threaded local at position 2.
     assert!(
-        !code.contains("maps':'get'('__local__n'"),
-        "count: with local mutation should NOT use maps:get for '__local__n' inside lambda. Got:\n{code}"
+        code.contains("let N = call 'erlang':'element'(2, "),
+        "count: tuple-acc should extract 'n' via element(2, AccSt) inside the lambda. Got:\n{code}"
+    );
+    // BT-2356 pattern: pack 'n' into StateAcc at fold exit and thread it back via maps:get.
+    assert!(
+        code.contains("maps':'put'('__local__n'"),
+        "count: with local mutation should pack '__local__n' into StateAcc at fold exit. Got:\n{code}"
     );
     assert!(
-        code.contains("'erlang':'element'(2,"),
-        "count: tuple-acc should unpack the local via element(2, ...). Got:\n{code}"
+        code.contains("maps':'get'('__local__n'"),
+        "count: with local mutation should thread '__local__n' back via maps:get after the fold. Got:\n{code}"
     );
 }
 
