@@ -253,8 +253,16 @@ A no-op (empty list) when the source is not a binary, is empty, the compiler
 app is not loaded, or the walker reports an error. Maps the FFI's `recv`
 receiver tag (`self | super | erlang_ffi | other`) onto the xref `recv_kind`
 (`self_recv | super_recv | erlang_ffi | other`) and converts the binary
-selector to an atom, dropping any selector that exceeds the 255-byte Erlang
-atom limit (it could never match a runtime dispatch atom anyway).
+selector to an atom.
+
+Security: `Source` is attacker-influenceable (live `>>` patches and extension
+registration both flow user text here), so the selector is converted with
+`binary_to_existing_atom` — never `binary_to_atom` — to avoid growing the
+global atom table from untrusted input (mirrors `beamtalk_repl_ops_nav`). A
+selector that has no existing atom (e.g. a send to a never-yet-seen message)
+is dropped from the index; it will be picked up once the atom exists. The
+255-byte guard is redundant with `existing_atom` but kept as a cheap fast-path
+reject for over-long inputs.
 """.
 -spec sends_from_source(term()) -> [send_entry()].
 sends_from_source(Source) when is_binary(Source), Source =/= <<>> ->
@@ -276,11 +284,19 @@ sends_from_source(_Source) ->
 send_hit_to_entry(#{selector := SelBin, line := Line} = Hit) when
     is_binary(SelBin), byte_size(SelBin) =< ?MAX_ATOM_BYTES
 ->
-    {true, #{
-        selector => binary_to_atom(SelBin, utf8),
-        line => Line,
-        recv_kind => recv_to_recv_kind(maps:get(recv, Hit, other))
-    }};
+    %% binary_to_existing_atom (not binary_to_atom): the source is untrusted, so
+    %% we must not let it mint new atoms. A send whose selector is not yet an
+    %% atom anywhere is simply not indexed (dropped via the badarg catch).
+    try binary_to_existing_atom(SelBin, utf8) of
+        Selector ->
+            {true, #{
+                selector => Selector,
+                line => Line,
+                recv_kind => recv_to_recv_kind(maps:get(recv, Hit, other))
+            }}
+    catch
+        error:badarg -> false
+    end;
 send_hit_to_entry(_Hit) ->
     false.
 

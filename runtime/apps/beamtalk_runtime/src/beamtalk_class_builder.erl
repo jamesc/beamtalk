@@ -464,10 +464,11 @@ Compute the per-method xref index for a ClassBuilder-built class (BT-2301).
 
 Prefers a codegen-baked `methodXref` list when present (the compiled path,
 ADR 0087 Phase 2). When absent — a runtime-constructed ClassBuilder that only
-populated `methodSource:` — derives the index by re-parsing each method's source
-via `beamtalk_xref:build_method_entry/5`, so the built methods still appear in
-`beamtalk_xref:implementors_of/1` / `senders_of/1`. ClassBuilder methods are
-instance-side (`ClassSide = false`) and tagged `provenance = class_builder`,
+populated `methodSource:` / `classMethodSource:` — derives the index by
+re-parsing each method's source via `beamtalk_xref:build_method_entry/5`, so the
+built methods still appear in `beamtalk_xref:implementors_of/1` / `senders_of/1`.
+Instance methods are indexed with `ClassSide = false`, class-side methods with
+`ClassSide = true`; both are tagged `provenance = class_builder`,
 `source_status = indexed`.
 
 Returns the list (possibly empty) that `beamtalk_object_class:init/1` forwards
@@ -479,26 +480,37 @@ builder_method_xref(BuilderState) ->
         Baked when is_list(Baked), Baked =/= [] ->
             Baked;
         _ ->
-            MethodSource = maps:get(methodSource, BuilderState, #{}),
-            case is_map(MethodSource) of
-                false ->
-                    [];
-                true ->
-                    maps:fold(
-                        fun
-                            (Selector, Source, Acc) when is_atom(Selector), is_binary(Source) ->
-                                Entry = beamtalk_xref:build_method_entry(
-                                    false, Selector, Source, indexed, class_builder
-                                ),
-                                [Entry | Acc];
-                            (_Selector, _Source, Acc) ->
-                                Acc
-                        end,
-                        [],
-                        MethodSource
-                    )
-            end
+            InstanceEntries = source_map_to_xref(
+                maps:get(methodSource, BuilderState, #{}), false
+            ),
+            ClassEntries = source_map_to_xref(
+                maps:get(classMethodSource, BuilderState, #{}), true
+            ),
+            InstanceEntries ++ ClassEntries
     end.
+
+-doc """
+Derive xref entries from a `selector => Source` map for one method side
+(BT-2301). `ClassSide` is `false` for instance methods, `true` for class-side.
+Non-map inputs (or non-atom/non-binary pairs) are skipped.
+""".
+-spec source_map_to_xref(term(), boolean()) -> [map()].
+source_map_to_xref(SourceMap, ClassSide) when is_map(SourceMap) ->
+    maps:fold(
+        fun
+            (Selector, Source, Acc) when is_atom(Selector), is_binary(Source) ->
+                Entry = beamtalk_xref:build_method_entry(
+                    ClassSide, Selector, Source, indexed, class_builder
+                ),
+                [Entry | Acc];
+            (_Selector, _Source, Acc) ->
+                Acc
+        end,
+        [],
+        SourceMap
+    );
+source_map_to_xref(_NotMap, _ClassSide) ->
+    [].
 
 -doc """
 Validate the arity of every class-method fun in a classMethods: spec (BT-2276).
