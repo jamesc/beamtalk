@@ -112,3 +112,37 @@ Workspace globals removeKey: #gZ
 
 Workspace globals includesKey: #gZ
 // => false
+
+// ===========================================================================
+// WORKSPACE CURRENTSESSION — navigation alias for Session current (Phase 5)
+// ===========================================================================
+
+// currentSession returns a live Session inside a REPL eval (not nil).
+Workspace currentSession isNil
+// => false
+
+// It is the IDENTICAL value to Session current: same id (proves the .bt
+// dispatch path preserves the seeded session context).
+(Workspace currentSession id) =:= (Session current id)
+// => true
+
+// ===========================================================================
+// WORKSPACE SESSIONS — enumerate live shells as Session values (Phase 7)
+// ===========================================================================
+
+// sessions returns a List.
+Workspace sessions class
+// => List
+
+// At least this REPL's own shell is present.
+Workspace sessions isEmpty not
+// => true
+
+// Every enumerated value is a Session.
+Workspace sessions allSatisfy: [:s | s class =:= Session]
+// => true
+
+// The current session's id appears among the enumerated ids (discovery: a
+// client finds its own session id without knowing it out-of-band).
+(Workspace sessions collect: [:s | s id]) includes: (Session current id)
+// => true

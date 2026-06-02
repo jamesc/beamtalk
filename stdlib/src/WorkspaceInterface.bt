@@ -87,6 +87,39 @@ sealed typed Object subclass: WorkspaceInterface
   /// ```
   globals -> BindingsView => (Erlang beamtalk_session_primitives) globalsView
 
+  /// Return the calling session as a `Session`, or `nil` outside a REPL eval
+  /// (ADR 0081 Phase 5).
+  ///
+  /// A navigation alias for `Session current`: it returns the *identical* value
+  /// (the same `Session` carrying this session's id and bindings, or `nil` when
+  /// there is no session — e.g. compiled program code). There is no `hasSession`
+  /// predicate; guard with `Workspace currentSession isNil` or
+  /// `Session current ifNotNil: [:s | ...]`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace currentSession                  // => a Session (in REPL) | nil
+  /// Workspace currentSession isNil            // => false (in REPL)
+  /// ```
+  currentSession -> Session | Nil =>
+    (Erlang beamtalk_workspace_interface_primitives) currentSession
+
+  /// Return a `List` of `Session` values, one per live shell (ADR 0081 Phase 7).
+  ///
+  /// Each value is minted the same way `Session withId:` does, so it works with
+  /// the instance reads (`s id`, `s bindings keys`) and rejects cross-session
+  /// writes. This closes the gap left by `Session withId:` (which assumes you
+  /// already know the id): tooling discovers live session ids with
+  /// `Workspace sessions collect: [:s | s id]`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace sessions                        // => #(a Session)
+  /// Workspace sessions collect: [:s | s id]   // => #("user-repl-abc-123")
+  /// ```
+  sessions -> List(Session) =>
+    (Erlang beamtalk_workspace_interface_primitives) sessions
+
   /// Sync the project: incrementally compile all changed files.
   ///
   /// Scans the current working directory for a `beamtalk.toml` project

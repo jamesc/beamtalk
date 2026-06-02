@@ -31,6 +31,7 @@ bindings while sharing access to actors and loaded modules.
     eval_trace/2,
     interrupt/1,
     get_bindings/1,
+    get_session_id/1,
     clear_bindings/1,
     enqueue_mutation/2,
     load_file/2,
@@ -108,6 +109,19 @@ interrupt(SessionPid) ->
 -spec get_bindings(pid()) -> {ok, map()}.
 get_bindings(SessionPid) ->
     gen_server:call(SessionPid, get_bindings).
+
+-doc """
+Get the protocol session id this shell was started with (BT-2368, ADR 0081
+Phase 7).
+
+Used by `beamtalk_session_primitives:liveSessions/0` to mint a `Session` value
+per live shell with the same id `withId/1` would resolve.  Like `get_bindings/1`
+it is answered in any worker state, so enumeration does not block on a
+mid-eval shell.
+""".
+-spec get_session_id(pid()) -> {ok, binary()}.
+get_session_id(SessionPid) ->
+    gen_server:call(SessionPid, get_session_id).
 
 -doc "Clear all variable bindings for this session.".
 -spec clear_bindings(pid()) -> ok.
@@ -265,6 +279,10 @@ handle_call({enqueue_mutation, Mutation}, _From, {SessionId, State, Worker}) ->
 handle_call(get_bindings, _From, {SessionId, State, Worker}) ->
     Bindings = beamtalk_repl_state:get_bindings(State),
     {reply, {ok, Bindings}, {SessionId, State, Worker}};
+handle_call(get_session_id, _From, {SessionId, State, Worker}) ->
+    %% BT-2368 (ADR 0081 Phase 7): answered in any worker state so
+    %% liveSessions/0 enumeration never blocks on a mid-eval shell.
+    {reply, {ok, SessionId}, {SessionId, State, Worker}};
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% BT-2365 (ADR 0081 Phase 1): clear only the session locals. Workspace globals
     %% (singletons + bind:as: names) are no longer copied into the session map, so

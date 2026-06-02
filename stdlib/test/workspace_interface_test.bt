@@ -63,5 +63,16 @@ TestCase subclass: WorkspaceInterfaceTest
   testIncludesSelectorUnbind =>
     self assert: (WorkspaceInterface includesSelector: #unbind:)
 
+  // ADR 0081 Phases 5 & 7 (BT-2368): session navigation. Live behaviour
+  // (currentSession value inside an eval, sessions enumeration, cross-session
+  // reads/writes) is covered by the beamtalk_session_primitives /
+  // beamtalk_workspace_interface_primitives EUnit suites and the e2e btscript;
+  // BUnit verifies the selectors exist and the nil-outside-eval contract.
+  testIncludesSelectorCurrentSession =>
+    self assert: (WorkspaceInterface includesSelector: #currentSession)
+
+  testIncludesSelectorSessions =>
+    self assert: (WorkspaceInterface includesSelector: #sessions)
+
   testInheritsFromObject =>
     self assert: (WorkspaceInterface inheritsFrom: Object)

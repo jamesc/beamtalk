@@ -937,3 +937,47 @@ resolve_class_reference_unknown_raises_class_not_found_test() ->
             ?assertEqual(class_not_found, Err#beamtalk_error.kind),
             ?assertEqual('NoSuchClassXyz', Err#beamtalk_error.class)
     end.
+
+%%====================================================================
+%% currentSession / sessions Tests (ADR 0081 Phases 5 & 7, BT-2368)
+%%====================================================================
+
+%% Outside an eval (no seeded session context) currentSession returns nil,
+%% identical to Session current. Routes through dispatch and the direct call.
+current_session_returns_nil_outside_eval_test() ->
+    erase(beamtalk_session_pid),
+    erase(beamtalk_session_id),
+    ?assertEqual(nil, beamtalk_workspace_interface_primitives:currentSession()),
+    ?assertEqual(
+        nil,
+        beamtalk_workspace_interface_primitives:dispatch(currentSession, [], fake_self(self()))
+    ).
+
+%% currentSession delegates to beamtalk_session_primitives:current/0, so a
+%% seeded context yields the *same* Session value (same id and pid).
+current_session_matches_session_current_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    beamtalk_session_table:new(),
+    {ok, ShellPid} = beamtalk_repl_shell:start_link(<<"ws-cur-1">>),
+    put(beamtalk_session_pid, ShellPid),
+    put(beamtalk_session_id, <<"ws-cur-1">>),
+    try
+        FromPrim = beamtalk_session_primitives:current(),
+        FromWs = beamtalk_workspace_interface_primitives:currentSession(),
+        ?assertEqual(FromPrim, FromWs),
+        ?assertMatch(#{'$beamtalk_class' := 'Session', id := <<"ws-cur-1">>}, FromWs)
+    after
+        erase(beamtalk_session_pid),
+        erase(beamtalk_session_id),
+        beamtalk_repl_shell:stop(ShellPid)
+    end.
+
+%% No session supervisor running → sessions returns an empty list, via both the
+%% direct call and dispatch.
+sessions_returns_empty_when_no_supervisor_test() ->
+    undefined = whereis(beamtalk_session_sup),
+    ?assertEqual([], beamtalk_workspace_interface_primitives:sessions()),
+    ?assertEqual(
+        [],
+        beamtalk_workspace_interface_primitives:dispatch(sessions, [], fake_self(self()))
+    ).
