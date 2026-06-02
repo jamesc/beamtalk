@@ -1607,13 +1607,32 @@ impl CoreErlangGenerator {
     /// source: the first non-blank line that is not a leading doc comment
     /// (`///`), block/line comment, or `@expect`/`@`-directive line the unparser
     /// may prepend before the signature. Returns 1 if none is found.
+    ///
+    /// Multi-line block comments are tracked across lines so a continuation line
+    /// (e.g. `   still inside the comment */`) is not mistaken for the signature.
+    /// In practice the unparser emits `///`/`//` doc and line comments rather than
+    /// `/* */` blocks before a signature, so this is defensive (per BT-2298 review).
     fn method_def_line(source: &str) -> u32 {
+        let mut in_block_comment = false;
         for (idx, raw) in source.lines().enumerate() {
             let trimmed = raw.trim_start();
+            if in_block_comment {
+                if trimmed.contains("*/") {
+                    in_block_comment = false;
+                }
+                continue;
+            }
+            if trimmed.starts_with("/*") {
+                // A single-line `/* ... */` is fully consumed here; an unterminated
+                // opener enters block-comment mode for subsequent lines.
+                if !trimmed.contains("*/") {
+                    in_block_comment = true;
+                }
+                continue;
+            }
             if trimmed.is_empty()
                 || trimmed.starts_with("///")
                 || trimmed.starts_with("//")
-                || trimmed.starts_with("/*")
                 || trimmed.starts_with('@')
             {
                 continue;

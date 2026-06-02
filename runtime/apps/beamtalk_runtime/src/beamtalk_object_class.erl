@@ -571,6 +571,26 @@ register_xref(ClassName, MethodXref) ->
             ok = beamtalk_xref:register_class(ClassName, MethodXref)
     end.
 
+-doc """
+Refresh a class's xref rows on redefinition (ADR 0087 Phase 2, BT-2298).
+
+Purges the class's existing rows before re-registering, because Phase 1's
+`register_class/2` only inserts (the multi-generation sweep of stale rows lands
+in Phase 4 / BT-2300). Purging first keeps the index consistent with the new
+class definition — e.g. when a bootstrap stub's `unindexed_runtime_fun` rows are
+replaced by the compiled class's `indexed` rows. A no-op when `beamtalk_xref`
+is not running.
+""".
+-spec refresh_xref(class_name(), [map()]) -> ok.
+refresh_xref(ClassName, MethodXref) ->
+    case erlang:whereis(beamtalk_xref) of
+        undefined ->
+            ok;
+        _Pid ->
+            ok = beamtalk_xref:purge_class(ClassName),
+            register_xref(ClassName, MethodXref)
+    end.
+
 handle_call(
     {spawn, Args},
     _From,
@@ -811,6 +831,17 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                 false ->
                     ok
             end,
+            %% ADR 0087 Phase 2 (BT-2298): Refresh the xref index on class
+            %% redefinition. This path is hit both by interactive/hot redefinition
+            %% (Phase 4 territory) and, more importantly for Phase 2, by the normal
+            %% stdlib bootstrap: the metaclass-tower stubs (Class, Metaclass, …) are
+            %% registered by beamtalk_bootstrap, then `update_class`'d when their
+            %% compiled .bt modules load. Without this refresh those classes would
+            %% keep only their bootstrap `unindexed_runtime_fun` rows and never gain
+            %% the compiled `indexed` rows. We purge first because Phase 1's
+            %% register_class/2 only inserts (the old-generation sweep is Phase 4),
+            %% so a plain re-register would leave stale rows behind.
+            refresh_xref(ClassName, maps:get(method_xref, ClassInfo, [])),
             {reply, {ok, NewState#class_state.fields}, NewState}
     end;
 handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->

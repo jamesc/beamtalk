@@ -2566,6 +2566,78 @@ method_xref_forwarded_on_class_creation_test_() ->
                 ?assertEqual(
                     [], beamtalk_xref:defined_selectors('XrefNoIndexClass', false)
                 )
+            end),
+            %% BT-2298 (CodeRabbit review): update_class/2 must refresh the xref
+            %% index. The metaclass-tower stubs register with bootstrap rows, then
+            %% get update_class'd by their compiled module — the compiled rows must
+            %% replace the stub rows, not accumulate alongside them.
+            ?_test(begin
+                %% Initial registration: one stub method, no real xref.
+                StubInfo = #{
+                    name => 'XrefRedefClass',
+                    module => xref_redef,
+                    superclass => 'Object',
+                    instance_methods => #{stubMethod => #{arity => 0}},
+                    method_xref => [
+                        #{
+                            class_side => false,
+                            selector => stubMethod,
+                            line => 1,
+                            sends => [],
+                            references => [],
+                            source_status => unindexed_runtime_fun,
+                            provenance => class_body
+                        }
+                    ]
+                },
+                {ok, _Pid} = beamtalk_object_class:start_link(
+                    'XrefRedefClass', StubInfo
+                ),
+                ?assertEqual(
+                    [stubMethod],
+                    beamtalk_xref:defined_selectors('XrefRedefClass', false)
+                ),
+
+                %% Redefinition via update_class/2 with the compiled xref. The
+                %% old stub row must be gone and the new indexed rows present.
+                NewInfo = #{
+                    name => 'XrefRedefClass',
+                    module => xref_redef,
+                    superclass => 'Object',
+                    instance_methods => #{realMethod => #{arity => 0}},
+                    method_xref => [
+                        #{
+                            class_side => false,
+                            selector => realMethod,
+                            line => 2,
+                            sends => [
+                                %% Distinct selector so this assertion is
+                                %% independent of other tests under the shared
+                                %% fixture (no clear between ?_test generators).
+                                #{
+                                    selector => redefRealSend,
+                                    line => 3,
+                                    recv_kind => self_recv
+                                }
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]
+                },
+                {ok, _} = beamtalk_object_class:update_class(
+                    'XrefRedefClass', NewInfo
+                ),
+                ?assertEqual(
+                    [realMethod],
+                    beamtalk_xref:defined_selectors('XrefRedefClass', false)
+                ),
+                ?assertEqual(
+                    1, length(beamtalk_xref:senders_of(redefRealSend))
+                ),
+                Info = beamtalk_xref:method_info('XrefRedefClass', false, realMethod),
+                ?assertEqual(indexed, maps:get(source_status, Info))
             end)
         ]
     end}.
