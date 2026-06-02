@@ -78,8 +78,8 @@ time_avg(Fun, Iters) ->
     ),
     {TotalUs / Iters, LastCount}.
 
-%% Legacy pre-migration path: walk every class, both sides, parse each method
-%% source via the compiler, count matching send lines.
+%% Legacy pre-migration path: walk every class (instance-side methods only),
+%% parse each method source via the compiler, count matching send lines.
 legacy_senders(Selector, Classes) ->
     SelBin = atom_to_binary(Selector, utf8),
     lists:foldl(

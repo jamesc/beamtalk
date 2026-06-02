@@ -560,7 +560,7 @@ miss_policy_fallback_test_() ->
                 %% Ensure the chosen class is indexed (re-register a stub row so the
                 %% test does not depend on cross-fixture table state). While indexed
                 %% it must *not* appear as a fallback class.
-                ok = beamtalk_xref:register_class(Class, [
+                StubRows = [
                     #{
                         class_side => false,
                         selector => 'isMeta',
@@ -570,7 +570,8 @@ miss_policy_fallback_test_() ->
                         source_status => unindexed_runtime_fun,
                         provenance => class_body
                     }
-                ]),
+                ],
+                ok = beamtalk_xref:register_class(Class, StubRows),
                 #{fallback_classes := Fallback0} = beamtalk_xref:senders_of_bt('isMeta'),
                 ?assertNot(lists:member(Class, Fallback0)),
 
@@ -592,7 +593,11 @@ miss_policy_fallback_test_() ->
                     ?assertEqual(sendersOf, maps:get(query, Meta)),
                     ?assertEqual([beamtalk, runtime], maps:get(domain, Meta))
                 after
-                    remove_capture_handler(HandlerId)
+                    remove_capture_handler(HandlerId),
+                    %% Restore the purged class so later tests sharing this VM do
+                    %% not inherit the artificially broken (loaded-but-unindexed)
+                    %% state and start seeing fallback scans / xref_miss warnings.
+                    ok = beamtalk_xref:register_class(Class, StubRows)
                 end
             end)}
     end}.

@@ -375,8 +375,9 @@ sealed typed Object subclass: SystemNavigation
   /// `beamtalk_extensions:register/5` (BT-2196), unchanged by the migration —
   /// extensions are not yet part of the index (lands in a later phase). The
   /// `#class` for an extension hit is the extended target class (or the
-  /// metaclass atom for `Target class` extensions); `register/4` registrations
-  /// without source remain invisible to the source-text scan.
+  /// metaclass object resolved from the `#'Target class'` marker for
+  /// `Target class` extensions); `register/4` registrations without source
+  /// remain invisible to the source-text scan.
   ///
   /// Raises an error if the argument is not a Symbol. Returns an empty
   /// collection if no senders are found (not an error).
@@ -426,10 +427,15 @@ sealed typed Object subclass: SystemNavigation
   /// metaclass object (`<class> class`), matching the legacy scan's `cls` /
   /// `cls class` convention (BT-2195). Falls back to the raw tag if the name
   /// resolves to nil (a registry entry with no live class behind it — should
-  /// not happen, but the scan must not crash).
+  /// not happen, but the scan must not crash). On that defensive path
+  /// `resolveExtensionClass:` returns the raw `ownerTag` Symbol; it is
+  /// preserved as-is even for class-side hits rather than coerced into
+  /// `Symbol class`.
   senderClassFor: ownerTag :: Symbol classSide: isClassSide :: Boolean -> Object =>
     cls := self resolveExtensionClass: ownerTag
-    isClassSide ifTrue: [cls class] ifFalse: [cls]
+    (isClassSide and: [
+      (cls isKindOf: Symbol) not
+    ]) ifTrue: [cls class] ifFalse: [cls]
 
   /// Map the xref index rows returned by `beamtalk_xref:senders_of_bt/1` onto
   /// `#{#class, #selector, #line}` result records, appending to `result`.
