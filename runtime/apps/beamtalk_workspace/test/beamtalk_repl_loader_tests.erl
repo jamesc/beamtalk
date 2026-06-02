@@ -286,6 +286,44 @@ handle_load_compile_error_test() ->
     ?assertMatch({error, {compile_error, _}, _}, Result).
 
 %%====================================================================
+%% handle_load/3 — error paths (no compiler/runtime needed)
+%%====================================================================
+
+handle_load_3_not_found_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    ?assertMatch(
+        {error, {file_not_found, _}, _},
+        beamtalk_repl_loader:handle_load("/nonexistent/y.bt", State, #{})
+    ).
+
+handle_load_3_directory_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    ?assertMatch(
+        {error, {read_error, _}, _},
+        beamtalk_repl_loader:handle_load(temp_dir(), State, #{})
+    ).
+
+handle_load_3_compile_error_test() ->
+    UniqueId = erlang:unique_integer([positive]),
+    TempFile = filename:join(temp_dir(), io_lib:format("loader_h3_~p.bt", [UniqueId])),
+    ok = file:write_file(TempFile, <<"invalid syntax @@@">>),
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_loader:handle_load(TempFile, State, #{}),
+    file:delete(TempFile),
+    ?assertMatch({error, _, _}, Result).
+
+%%====================================================================
+%% handle_load_source/3 — error path
+%%====================================================================
+
+handle_load_source_compile_error_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_loader:handle_load_source(
+        <<"invalid @@@ syntax">>, "inline-bad", State
+    ),
+    ?assertMatch({error, _, _}, Result).
+
+%%====================================================================
 %% reload_class_file/1,2 — error paths
 %%====================================================================
 
@@ -612,4 +650,469 @@ validate_target_path_existing_directory_is_target_exists_test() ->
         ?assertEqual('newClass:at:', Err#beamtalk_error.selector)
     after
         file:del_dir(Dir)
+    end.
+
+%%====================================================================
+%% new_class/2 type-error guard (pure — no runtime needed)
+%%====================================================================
+
+new_class_non_string_args_type_error_test() ->
+    %% Neither argument is a String/list, so the catch-all clause raises a
+    %% type_error #beamtalk_error{} without touching the filesystem or compiler.
+    {error, Err} = beamtalk_repl_loader:new_class(42, 99),
+    ?assertEqual(type_error, Err#beamtalk_error.kind),
+    ?assertEqual('newClass:at:', Err#beamtalk_error.selector).
+
+%%====================================================================
+%% method_source_binary/1 — list expression fallback (pure)
+%%====================================================================
+
+method_source_binary_falls_back_to_list_expression_test() ->
+    %% No method_source key; expression is a string (list) — converted to binary.
+    Info = #{expression => "Counter >> tick => self"},
+    ?assertEqual(<<"Counter >> tick => self">>, beamtalk_repl_loader:method_source_binary(Info)).
+
+%%====================================================================
+%% Integration fixture: real compile + load + activate
+%%
+%% Starts the beamtalk_compiler port backend and the beamtalk_runtime
+%% application (class registry) so the full success paths of handle_load,
+%% handle_load_source, load_class_module, reload_class_file,
+%% reload_method_definition and new_class can be exercised end-to-end.
+%%====================================================================
+
+loader_setup() ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    application:ensure_all_started(beamtalk_runtime),
+    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Proj = Tmp ++ "/bt_loader_proj_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ok = file:make_dir(Proj),
+    %% A beamtalk.toml lets workspace_meta auto-detect a package name, which in
+    %% turn exercises compute_package_module_name/1's package-qualified branch.
+    ok = file:write_file(
+        filename:join(Proj, "beamtalk.toml"),
+        <<"[package]\nname = \"loaderpkg\"\n">>
+    ),
+    %% A workspace_meta with a real project_path makes classify_source_file/1
+    %% treat files under Proj as flushable (in-project).
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    {ok, _} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"loader_test_ws">>,
+        project_path => list_to_binary(Proj),
+        created_at => erlang:system_time(second)
+    }),
+    %% A live ChangeLog server lets do_emit_change_entry / emit_new_class_entry
+    %% append successfully instead of taking only their best-effort catch path.
+    case whereis(beamtalk_workspace_changelog) of
+        undefined ->
+            {ok, _} = beamtalk_workspace_changelog:start_link(#{
+                workspace_id => <<"loader_test_ws">>
+            });
+        _ ->
+            ok
+    end,
+    Proj.
+
+loader_teardown(Proj) ->
+    %% Stop the singleton servers this fixture started so later test modules
+    %% (e.g. beamtalk_workspace_changelog_tests, which start_link their own
+    %% registered server with a {ok, Pid} match) see a clean slate.
+    case whereis(beamtalk_workspace_changelog) of
+        undefined -> ok;
+        ClPid -> gen_server:stop(ClPid)
+    end,
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    %% Best-effort recursive cleanup of the temp project directory.
+    rm_rf(Proj),
+    ok.
+
+rm_rf(Path) ->
+    case filelib:is_dir(Path) of
+        true ->
+            case file:list_dir(Path) of
+                {ok, Entries} ->
+                    lists:foreach(fun(E) -> rm_rf(filename:join(Path, E)) end, Entries),
+                    file:del_dir(Path);
+                {error, _} ->
+                    ok
+            end;
+        false ->
+            file:delete(Path)
+    end.
+
+%% Write a .bt file inside the project src dir and return its absolute path.
+write_bt(Proj, Name, Source) ->
+    Path = filename:join(Proj, Name),
+    ok = file:write_file(Path, Source),
+    Path.
+
+loader_integration_test_() ->
+    {setup, fun loader_setup/0, fun loader_teardown/1, fun(Proj) ->
+        [
+            {"handle_load/2 success", fun() -> t_handle_load_success(Proj) end},
+            {"handle_load/3 prebuilt indexes success", fun() ->
+                t_handle_load_prebuilt_success(Proj)
+            end},
+            {"handle_load_source/3 success", fun() -> t_handle_load_source_success() end},
+            {"load_class_module/3 success", fun() -> t_load_class_module_success(Proj) end},
+            {"reload_class_file/1 success", fun() -> t_reload_class_file_success(Proj) end},
+            {"reload_class_file/2 matching class", fun() ->
+                t_reload_class_file_2_match(Proj)
+            end},
+            {"reload_class_file/2 class mismatch", fun() ->
+                t_reload_class_file_2_mismatch(Proj)
+            end},
+            {"reload_method_definition success", fun() ->
+                t_reload_method_definition_success(Proj)
+            end},
+            {"reload_method_definition no source", fun() ->
+                t_reload_method_definition_no_source()
+            end},
+            {"reload_method_definition compile error", fun() ->
+                t_reload_method_definition_compile_error(Proj)
+            end},
+            {"new_class/2 success", fun() -> t_new_class_success(Proj) end},
+            {"new_class/2 target exists", fun() -> t_new_class_target_exists(Proj) end},
+            {"new_class/2 outside project", fun() -> t_new_class_outside_project() end},
+            {"new_class/2 name mismatch", fun() -> t_new_class_name_mismatch(Proj) end},
+            {"new_class/2 already loaded", fun() -> t_new_class_already_loaded(Proj) end},
+            {"new_class/2 compile error", fun() -> t_new_class_compile_error(Proj) end},
+            {"compute_package_module_name with metadata", fun() ->
+                t_compute_package_module_name(Proj)
+            end},
+            {"compute_package_module_name test dir", fun() ->
+                t_compute_package_module_name_test_dir(Proj)
+            end},
+            {"compute_package_module_name outside subdirs", fun() ->
+                t_compute_package_module_name_outside_subdirs(Proj)
+            end},
+            {"new_class/2 multiple classes", fun() -> t_new_class_multiple_classes(Proj) end},
+            {"new_class/2 agent author", fun() -> t_new_class_agent_author(Proj) end},
+            {"handle_load/2 protocol", fun() -> t_handle_load_protocol(Proj) end},
+            {"handle_load/3 protocol", fun() -> t_handle_load_3_protocol(Proj) end},
+            {"new_class/2 author_kind only", fun() -> t_new_class_author_kind_only(Proj) end},
+            {"handle_load_source/3 protocol", fun() -> t_handle_load_source_protocol() end},
+            {"reload_class_file/1 protocol", fun() -> t_reload_class_file_protocol(Proj) end},
+            {"reload_method_definition existing method span", fun() ->
+                t_reload_method_definition_existing(Proj)
+            end},
+            {"reload_method_definition autoflush", fun() ->
+                t_reload_method_definition_autoflush(Proj)
+            end}
+        ]
+    end}.
+
+t_handle_load_success(Proj) ->
+    Path = write_bt(Proj, "LoaderOne.bt", <<"Object subclass: LoaderOne\n  value => 42\n">>),
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, ClassNames, NewState} = beamtalk_repl_loader:handle_load(Path, State),
+    ?assertEqual([#{name => "LoaderOne", superclass => "Object"}], ClassNames),
+    %% The compiled module is recorded in the loaded-modules list.
+    ?assert(length(beamtalk_repl_state:get_loaded_modules(NewState)) >= 1).
+
+t_handle_load_prebuilt_success(Proj) ->
+    Path = write_bt(Proj, "LoaderTwo.bt", <<"Object subclass: LoaderTwo\n  v => 1\n">>),
+    State = beamtalk_repl_state:new(undefined, 0),
+    %% Empty prebuilt indexes still exercise the /3 arity path.
+    {ok, ClassNames, _NewState} = beamtalk_repl_loader:handle_load(Path, State, #{}),
+    ?assertEqual([#{name => "LoaderTwo", superclass => "Object"}], ClassNames).
+
+t_handle_load_source_success() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, ClassNames, _NewState} = beamtalk_repl_loader:handle_load_source(
+        <<"Object subclass: LoaderInline\n  v => 9\n">>, "inline", State
+    ),
+    ?assertEqual([#{name => "LoaderInline", superclass => "Object"}], ClassNames).
+
+t_load_class_module_success(Proj) ->
+    %% Compile a class to obtain a real binary + module name, then drive
+    %% load_class_module/3 directly with a ClassInfo map.
+    Path = write_bt(Proj, "LoaderThree.bt", <<"Object subclass: LoaderThree\n  v => 3\n">>),
+    {ok, Source} = file:read_file(Path),
+    {ok, Binary, ClassNames, ModuleName} = beamtalk_repl_compiler:compile_file(
+        binary_to_list(Source), Path, false, undefined
+    ),
+    ClassInfo = #{binary => Binary, module_name => ModuleName, classes => ClassNames},
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, ClassName, Trailing, _NewState} = beamtalk_repl_loader:load_class_module(
+        ClassInfo, "Object subclass: LoaderThree", State
+    ),
+    ?assertEqual(<<"LoaderThree">>, ClassName),
+    ?assertEqual(no_trailing, Trailing).
+
+t_reload_class_file_success(Proj) ->
+    Path = write_bt(Proj, "LoaderReload.bt", <<"Object subclass: LoaderReload\n  v => 7\n">>),
+    Result = beamtalk_repl_loader:reload_class_file(Path),
+    ?assertMatch({ok, [#{name := "LoaderReload"}]}, Result).
+
+t_reload_class_file_2_match(Proj) ->
+    Path = write_bt(Proj, "LoaderRl2.bt", <<"Object subclass: LoaderRl2\n  v => 1\n">>),
+    Result = beamtalk_repl_loader:reload_class_file(Path, 'LoaderRl2'),
+    ?assertMatch({ok, [#{name := "LoaderRl2"}]}, Result).
+
+t_reload_class_file_2_mismatch(Proj) ->
+    Path = write_bt(Proj, "LoaderRl3.bt", <<"Object subclass: LoaderRl3\n  v => 1\n">>),
+    %% Expected class name does not appear in the compiled class list → error.
+    Result = beamtalk_repl_loader:reload_class_file(Path, 'NotThere'),
+    ?assertMatch({error, {class_not_found, 'NotThere', _, ["LoaderRl3"]}}, Result).
+
+t_reload_method_definition_success(Proj) ->
+    %% Load the class first so its source is recorded in workspace_meta, then
+    %% patch a new method. This exercises recompile_with_method,
+    %% load_recompiled_method, emit_change_entry and the flushability helpers.
+    Path = write_bt(Proj, "LoaderMethod.bt", <<"Object subclass: LoaderMethod\n  v => 1\n">>),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    MethodInfo = #{class_name => <<"LoaderMethod">>, selector => <<"doubled">>},
+    Result = beamtalk_repl_loader:reload_method_definition(
+        MethodInfo, [], "LoaderMethod >> doubled => self.v * 2", State1
+    ),
+    {ok, Display, EmptyBin, _Warnings, _NewState} = Result,
+    ?assertEqual(<<"LoaderMethod>>doubled">>, Display),
+    ?assertEqual(<<>>, EmptyBin).
+
+t_reload_method_definition_no_source() ->
+    %% No class source recorded for this name → compile_error, empty binary.
+    MethodInfo = #{class_name => <<"NoSuchClassForReload9999">>, selector => <<"foo">>},
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_loader:reload_method_definition(
+        MethodInfo, [<<"w">>], "foo => 1", State
+    ),
+    ?assertMatch({error, {compile_error, _}, <<>>, [<<"w">>], _}, Result).
+
+t_reload_method_definition_compile_error(Proj) ->
+    %% A class with recorded source, but a method body that fails to recompile,
+    %% takes the {error, Reason} branch of recompile_with_method.
+    Path = write_bt(Proj, "LoaderBadM.bt", <<"Object subclass: LoaderBadM\n  v => 1\n">>),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    MethodInfo = #{class_name => <<"LoaderBadM">>, selector => <<"broken">>},
+    Result = beamtalk_repl_loader:reload_method_definition(
+        MethodInfo, [], "LoaderBadM >> broken => @@@ invalid @@@", State1
+    ),
+    ?assertMatch({error, _, <<>>, [], _}, Result).
+
+%% Read the live workspace project_path so new-class targets land inside the
+%% project tree that classify_source_file/1 actually checks (robust against any
+%% workspace_meta restart between setup and test execution).
+live_project_dir() ->
+    {ok, #{project_path := PP}} = beamtalk_workspace_meta:get_metadata(),
+    binary_to_list(PP).
+
+t_new_class_success(_Proj) ->
+    Proj = live_project_dir(),
+    Name = "NewClassOk" ++ integer_to_list(erlang:unique_integer([positive])),
+    Path = filename:join(Proj, Name ++ ".bt"),
+    file:delete(Path),
+    Src = "Object subclass: " ++ Name ++ "\n  greet => 1\n",
+    Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+    ?assertMatch({ok, [_ | _]}, Result).
+
+t_new_class_target_exists(_Proj) ->
+    Proj = live_project_dir(),
+    Path = filename:join(Proj, "NewClassExists.bt"),
+    ok = file:write_file(Path, <<"placeholder">>),
+    {error, Err} = beamtalk_repl_loader:new_class(
+        <<"Object subclass: NewClassExists">>, list_to_binary(Path)
+    ),
+    ?assertEqual(target_exists, Err#beamtalk_error.kind).
+
+t_new_class_outside_project() ->
+    %% A path outside the workspace project_path is rejected before compiling.
+    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Path =
+        Tmp ++ "/bt_outside_" ++ integer_to_list(erlang:unique_integer([positive])) ++
+            "/Outsider.bt",
+    {error, Err} = beamtalk_repl_loader:new_class(
+        <<"Object subclass: Outsider">>, list_to_binary(Path)
+    ),
+    ?assertEqual(target_outside_project, Err#beamtalk_error.kind).
+
+t_new_class_name_mismatch(_Proj) ->
+    Proj = live_project_dir(),
+    %% Declared class name does not match the file basename.
+    Path = filename:join(Proj, "MismatchFile.bt"),
+    file:delete(Path),
+    {error, Err} = beamtalk_repl_loader:new_class(
+        <<"Object subclass: SomethingElse\n  v => 1\n">>, list_to_binary(Path)
+    ),
+    ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind).
+
+t_new_class_already_loaded(_Proj) ->
+    Proj = live_project_dir(),
+    %% Create a class, then attempt to create it again at a fresh path → the
+    %% name is already loaded in the registry.
+    Name = "NewClassDup" ++ integer_to_list(erlang:unique_integer([positive])),
+    Path1 = filename:join(Proj, Name ++ ".bt"),
+    file:delete(Path1),
+    Src = "Object subclass: " ++ Name ++ "\n  v => 1\n",
+    {ok, _} = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path1)),
+    %% Second attempt at a different in-project path whose basename equals the
+    %% class name (so the name check passes) reaches the already-loaded branch.
+    Path3 = filename:join(filename:join(Proj, "sub"), Name ++ ".bt"),
+    ok = filelib:ensure_dir(Path3),
+    file:delete(Path3),
+    {error, Err} = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path3)),
+    ?assertEqual(class_already_loaded, Err#beamtalk_error.kind).
+
+t_new_class_compile_error(_Proj) ->
+    Proj = live_project_dir(),
+    Path = filename:join(Proj, "BadNewClass.bt"),
+    file:delete(Path),
+    {error, Err} = beamtalk_repl_loader:new_class(
+        <<"@@@ not valid beamtalk @@@">>, list_to_binary(Path)
+    ),
+    %% Compile failure is surfaced as a structured #beamtalk_error{}.
+    ?assert(is_record(Err, beamtalk_error)).
+
+t_compute_package_module_name(_Proj) ->
+    %% With workspace_meta carrying a project_path AND a package name (from the
+    %% beamtalk.toml written in setup), a file under src/ resolves to a
+    %% package-qualified module name bt@loaderpkg@widget.
+    Proj = live_project_dir(),
+    Path = filename:join([Proj, "src", "Widget.bt"]),
+    Result = beamtalk_repl_loader:compute_package_module_name(Path),
+    ?assertEqual(<<"bt@loaderpkg@widget">>, Result).
+
+t_compute_package_module_name_test_dir(_Proj) ->
+    %% A file under test/ resolves to bt@loaderpkg@test@<module>.
+    Proj = live_project_dir(),
+    Path = filename:join([Proj, "test", "WidgetTest.bt"]),
+    Result = beamtalk_repl_loader:compute_package_module_name(Path),
+    ?assertEqual(<<"bt@loaderpkg@test@widget_test">>, Result).
+
+t_compute_package_module_name_outside_subdirs(_Proj) ->
+    %% A file in the project root but outside src/ and test/ falls back to the
+    %% bt@<stem> form via stem_module_name/1.
+    Proj = live_project_dir(),
+    Path = filename:join([Proj, "Widget.bt"]),
+    Result = beamtalk_repl_loader:compute_package_module_name(Path),
+    ?assertEqual(<<"bt@widget">>, Result).
+
+t_new_class_agent_author(_Proj) ->
+    %% When the submission boundary stamps $beamtalk_author / $beamtalk_author_kind
+    %% into the process dictionary, emit_new_class_entry records them. This drives
+    %% new_class_author/0 and new_class_author_kind/0's agent branches.
+    Proj = live_project_dir(),
+    Name = "AgentClass" ++ integer_to_list(erlang:unique_integer([positive])),
+    Path = filename:join(Proj, Name ++ ".bt"),
+    file:delete(Path),
+    erlang:put('$beamtalk_author', <<"agent">>),
+    erlang:put('$beamtalk_author_kind', agent),
+    try
+        Src = "Object subclass: " ++ Name ++ "\n  v => 1\n",
+        Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+        ?assertMatch({ok, [_ | _]}, Result)
+    after
+        erlang:erase('$beamtalk_author'),
+        erlang:erase('$beamtalk_author_kind')
+    end.
+
+t_handle_load_protocol(Proj) ->
+    %% A protocol definition file routes through load_protocol_module/3 instead
+    %% of the class path (the {ok, protocol_definition, ...} compile result).
+    Path = write_bt(
+        Proj, "GreetableProto.bt", <<"Protocol define: GreetableProto\n  greet -> String\n">>
+    ),
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, ClassNames, NewState} = beamtalk_repl_loader:handle_load(Path, State),
+    ?assertEqual([#{name => "GreetableProto", superclass => "Object"}], ClassNames),
+    ?assert(length(beamtalk_repl_state:get_loaded_modules(NewState)) >= 1).
+
+t_handle_load_3_protocol(Proj) ->
+    %% Protocol routing through the /3 (prebuilt-indexes) arity.
+    Path = write_bt(
+        Proj, "Greetable3Proto.bt", <<"Protocol define: Greetable3Proto\n  hi -> String\n">>
+    ),
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, ClassNames, _NewState} = beamtalk_repl_loader:handle_load(Path, State, #{}),
+    ?assertEqual([#{name => "Greetable3Proto", superclass => "Object"}], ClassNames).
+
+t_new_class_author_kind_only(_Proj) ->
+    %% Only $beamtalk_author_kind is set (no explicit $beamtalk_author): the
+    %% default-author path maps the agent kind to <<"agent">> (line in
+    %% new_class_default_author/0).
+    Proj = live_project_dir(),
+    Name = "KindOnly" ++ integer_to_list(erlang:unique_integer([positive])),
+    Path = filename:join(Proj, Name ++ ".bt"),
+    file:delete(Path),
+    erlang:put('$beamtalk_author_kind', agent),
+    try
+        Src = "Object subclass: " ++ Name ++ "\n  v => 1\n",
+        Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+        ?assertMatch({ok, [_ | _]}, Result)
+    after
+        erlang:erase('$beamtalk_author_kind')
+    end.
+
+t_handle_load_source_protocol() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, ClassNames, _NewState} = beamtalk_repl_loader:handle_load_source(
+        <<"Protocol define: InlineProto\n  tick -> Integer\n">>, "inline-proto", State
+    ),
+    ?assertEqual([#{name => "InlineProto", superclass => "Object"}], ClassNames).
+
+t_reload_class_file_protocol(Proj) ->
+    %% Stateless reload of a protocol file → load_protocol_module_stateless/2.
+    Path = write_bt(
+        Proj, "ReloadProto.bt", <<"Protocol define: ReloadProto\n  ping -> Boolean\n">>
+    ),
+    Result = beamtalk_repl_loader:reload_class_file(Path),
+    ?assertMatch({ok, [#{name := "ReloadProto"}]}, Result).
+
+t_new_class_multiple_classes(_Proj) ->
+    %% A source declaring two classes is rejected by declared_class_name/1,
+    %% surfacing through new_class_validate_and_install's NameErr passthrough.
+    Proj = live_project_dir(),
+    Path = filename:join(Proj, "MultiClass.bt"),
+    file:delete(Path),
+    Src = "Object subclass: MultiClass\n  v => 1\nObject subclass: SecondClass\n  w => 2\n",
+    Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+    ?assertMatch({error, _}, Result).
+
+t_reload_method_definition_existing(_Proj) ->
+    Proj = live_project_dir(),
+    %% Patch a method that already exists on disk. The flushability path then
+    %% reads the disk source and resolves the method span (prev_source + span),
+    %% exercising resolve_span_entry's success branch.
+    Path = write_bt(
+        Proj,
+        "LoaderExisting.bt",
+        <<"Object subclass: LoaderExisting\n  value => 1\n  doubled => self.value * 2\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    MethodInfo = #{class_name => <<"LoaderExisting">>, selector => <<"doubled">>},
+    Result = beamtalk_repl_loader:reload_method_definition(
+        MethodInfo, [], "LoaderExisting >> doubled => self.value * 3", State1
+    ),
+    ?assertMatch({ok, <<"LoaderExisting>>doubled">>, <<>>, _, _}, Result).
+
+t_reload_method_definition_autoflush(Proj) ->
+    %% With autoflush enabled, a durable method patch triggers do_autoflush/0.
+    %% The flush is best-effort; we only assert the patch itself succeeds.
+    ok = beamtalk_workspace_meta:set_setting(autoflush, true),
+    try
+        Path = write_bt(
+            Proj, "LoaderFlush.bt", <<"Object subclass: LoaderFlush\n  value => 1\n">>
+        ),
+        State0 = beamtalk_repl_state:new(undefined, 0),
+        {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+        MethodInfo = #{class_name => <<"LoaderFlush">>, selector => <<"tripled">>},
+        Result = beamtalk_repl_loader:reload_method_definition(
+            MethodInfo, [], "LoaderFlush >> tripled => self.value * 3", State1
+        ),
+        ?assertMatch({ok, <<"LoaderFlush>>tripled">>, <<>>, _, _}, Result)
+    after
+        beamtalk_workspace_meta:set_setting(autoflush, false)
     end.
