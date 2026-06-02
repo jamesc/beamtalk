@@ -1905,7 +1905,7 @@ camel_to_snake([H | T], _PrevWasLower, Acc) ->
 
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->
-    NameBin = to_binary(ClassName),
+    NameBin = beamtalk_repl_protocol:to_binary(ClassName),
     Err0 = beamtalk_error:new(class_not_found, 'REPL'),
     Err1 = beamtalk_error:with_message(
         Err0,
@@ -1915,10 +1915,6 @@ make_class_not_found_error(ClassName) ->
         Err1,
         <<"Use Workspace classes to see loaded classes.">>
     ).
-
--spec to_binary(atom() | binary()) -> binary().
-to_binary(A) when is_atom(A) -> atom_to_binary(A, utf8);
-to_binary(B) when is_binary(B) -> B.
 
 -doc """
 Extract the first line of a binary string (up to the first newline).
