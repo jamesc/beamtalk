@@ -116,6 +116,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Accepted | 2026-05-26 |
 | [0088](0088-direct-cerl-emission.md) | Direct Core Erlang AST Emission via ETF | Phases 1–4 Rejected; Wire Deferred | 2026-05-26 |
 | [0089](0089-typed-document-leaves.md) | Typed Document Leaves for Core Erlang Codegen | Accepted | 2026-05-28 |
+| [0090](0090-array-canonical-representation.md) | Canonical Array Representation for O(log n) `at:put:` | Accepted | 2026-06-02 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

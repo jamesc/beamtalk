@@ -1,0 +1,177 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the first-class Session API (ADR 0081, Phase 6 / BT-2370).
+//
+// This case complements `session_object.btscript` (which exercises the basic
+// read/write-through view) by covering the surface the ADR singles out as
+// integration-critical: `bindings keys`, `resolve:` for undefined names, the
+// `Workspace globals` protected-name conflict, and `Session withId:` (re-acquire
+// by id, instance reads, unknown-id nil). The cross-session WRITE-rejection path
+// needs a second live session and is covered by EUnit (see the note below).
+//
+// These require E2E because `Session current` resolves the calling REPL session
+// from process context (seeded only on a real eval-worker spawn), and the
+// BindingsView reads/writes live session-local + workspace-global state.
+// Session-local writes are deferred to end of eval, so they are observed on the
+// NEXT line, not within the same expression.
+
+// ===========================================================================
+// SESSION CURRENT BINDINGS — keys / at: / at:put: / removeKey:
+// ===========================================================================
+
+// Establish two session locals.
+a := 1
+// => 1
+
+b := 2
+// => 2
+
+// keys lists the session-local names (locals only, no globals/singletons).
+Session current bindings keys includes: #a
+// => true
+
+(Session current bindings keys includes: #b)
+// => true
+
+// Globals/singletons do NOT leak into the session-locals layer.
+Session current bindings keys includes: #Transcript
+// => false
+
+// Reading a local through the view.
+Session current bindings at: #a
+// => 1
+
+// at:put: returns the value put (Dictionary protocol); write is deferred.
+Session current bindings at: #c put: 3
+// => 3
+
+// The deferred write is visible on the next line, both as a bare name...
+c
+// => 3
+
+// ...and through the view.
+Session current bindings at: #c
+// => 3
+
+// removeKey: returns nil; removal is deferred.
+Session current bindings removeKey: #c
+// => nil
+
+// The removed local is gone on the next line.
+Session current bindings includesKey: #c
+// => false
+
+// ===========================================================================
+// SESSION RESOLVE: — local / singleton / undefined
+// ===========================================================================
+
+// A session local resolves to its value.
+Session current resolve: #a
+// => 1
+
+// A singleton resolves through the workspace-globals layer (non-nil).
+(Session current resolve: #Transcript) notNil
+// => true
+
+// An undefined name resolves like bare-name lookup: it raises undefined_variable
+// (resolve: shares the one resolver, so it cannot disagree with how the name
+// actually resolves).
+Session current resolve: #notDefinedAnywhere
+// => ERROR: Undefined variable
+
+// ===========================================================================
+// WORKSPACE GLOBALS — live view: write-through + protected-name conflict
+// ===========================================================================
+
+// Workspace globals is the same live BindingsView type.
+Workspace globals class
+// => BindingsView
+
+// Workspace-global writes are SYNCHRONOUS (route through bind:as:): the new
+// binding is observable immediately as a bare name on the next line.
+Workspace globals at: #gTool put: 7
+// => 7
+
+gTool
+// => 7
+
+// removeKey: routes through unbind: and returns nil.
+Workspace globals removeKey: #gTool
+// => nil
+
+Workspace globals includesKey: #gTool
+// => false
+
+// Writing a protected system name through the globals view raises a conflict
+// (same check as Workspace bind:as:).
+Workspace globals at: #Workspace put: nil
+// => ERROR: is a system name and cannot be shadowed
+
+// ===========================================================================
+// WORKSPACE CURRENTSESSION / SESSIONS — discover this session's id
+// ===========================================================================
+
+// currentSession is the SAME value as Session current (same id).
+(Workspace currentSession id) =:= (Session current id)
+// => true
+
+// The current session's id is discoverable via the live session list, without
+// knowing it out-of-band — this is how cross-session tooling finds an id.
+myId := Session current id
+// => _
+
+(Workspace sessions collect: [:s | s id]) includes: myId
+// => true
+
+// ===========================================================================
+// WITHID: — re-acquire a live session by id; instance reads work
+// ===========================================================================
+//
+// This E2E harness drives a SINGLE REPL connection, so the only live session id
+// is this connection's own. `Session withId: myId` therefore returns the *same*
+// session (same PID), against which reads — and writes — are the self-session
+// path (not cross-session). The cross-session WRITE-rejection path
+// (`cross_session_mutation_unsupported`), which needs a genuinely *different*
+// live session, is covered by EUnit in
+// `runtime/apps/beamtalk_workspace/test/beamtalk_session_primitives_tests.erl`.
+
+// Re-acquire this session by its id.
+other := Session withId: myId
+// => _
+
+// The re-acquired handle is a Session.
+other class
+// => Session
+
+// Reads through the withId: handle see this session's locals.
+other bindings keys includes: #a
+// => true
+
+// withId: against our own id is the SAME session as Session current.
+(other id) =:= (Session current id)
+// => true
+
+// ===========================================================================
+// UNKNOWN / DEAD SESSION — withId: returns nil
+// ===========================================================================
+
+// An unknown session id returns nil (liveness check, no dead-PID call).
+Session withId: "nonexistent"
+// => nil
+
+// nil is messageable with ifNil: — the documented guard pattern.
+(Session withId: "nonexistent") ifNil: ["gone"]
+// => gone
+
+// ===========================================================================
+// SESSION CLEAR — empties this session's locals (deferred)
+// ===========================================================================
+
+// Clear empties the calling session's locals (returns nil).
+Session current clear
+// => nil
+
+// After clear, a previously-set local is gone on the next line.
+Session current bindings includesKey: #a
+// => false
