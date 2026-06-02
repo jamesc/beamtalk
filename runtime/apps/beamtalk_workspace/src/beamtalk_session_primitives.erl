@@ -241,9 +241,13 @@ view_at(View, Key) ->
 -doc """
 Test whether a `BindingsView` contains a key, returning a boolean.
 
-O(1) map membership.  Accepts atom/binary/String keys with the same semantics as
-`view_at/2`: a never-interned name (via `to_existing_name_atom/1`) cannot be a
-binding key, so it returns `false` without minting an atom.
+The membership test is O(1) (`maps:is_key/2`) on the resolved bindings map;
+constructing that map is the same cost as any other read here (session scope
+reads the locals map directly, workspace scope snapshots the bind:as: ETS via
+`view_read_map/2`, which is O(n)).  Accepts atom/binary/String keys with the
+same semantics as `view_at/2`: a never-interned name (via
+`to_existing_name_atom/1`) cannot be a binding key, so it returns `false`
+without minting an atom.
 """.
 -spec view_includes_key(bindings_view() | term(), atom() | binary() | string() | term()) ->
     boolean().

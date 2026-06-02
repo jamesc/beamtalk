@@ -75,9 +75,12 @@ sealed typed Object subclass: BindingsView
 
   /// Whether `key` (a Symbol) is currently bound in this view.
   ///
-  /// O(1) map membership. The declared key type is `Symbol`, but the primitive
-  /// accepts atom/binary/String keys with the same semantics as `at:`, so
-  /// `includesKey: "x"` matches the value returned by `at: "x"`.
+  /// The membership test itself is O(1) on the resolved bindings map (session
+  /// scope reads the locals map directly; workspace scope still snapshots the
+  /// bind:as: table, like every other read here). At runtime the primitive is
+  /// lenient about key representation just like `at:` — an atom, binary, or
+  /// String naming the same binding all match — so `includesKey:` agrees with
+  /// `at:` for any key the latter accepts.
   ///
   /// ## Examples
   /// ```beamtalk
