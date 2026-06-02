@@ -1252,9 +1252,12 @@ impl CoreErlangGenerator {
                 // local), so the normal dispatch (`True>>ifTrue:`) would call the block with
                 // 0 args and crash. Inline the conditional as a `case` returning the branch's
                 // logical value instead — the threaded locals don't need to escape in last
-                // position.
+                // position. BT-2375: route through the shared `emit_vt_last_expr` like the loop
+                // / foldl-list-op last branches — it dispatches the conditional through the same
+                // unified `emit_threaded_last` emitter, so the dedicated `emit_vt_conditional_last`
+                // wrapper is redundant.
                 if is_last {
-                    self.emit_vt_conditional_last(expr, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
                 } else {
                     let doc = self.generate_vt_conditional_open(expr)?;
                     body_parts.push(doc);
@@ -2203,36 +2206,6 @@ impl CoreErlangGenerator {
         result
     }
 
-    /// BT-2342: Emits a last-position `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` whose block
-    /// reads+writes an outer local, as an inline `case` returning the branch's logical
-    /// value.
-    ///
-    /// The normal last-expression path dispatches `True>>ifTrue:` (etc.), which invokes the
-    /// block with 0 args — but a block that captures and mutates an outer local is compiled
-    /// to a stateful arity-1 `fun (StateAcc) -> {value, StateAcc1}`, so the 0-arg dispatch
-    /// crashes (BT-2342 failure mode B). Inlining the block into a `case` avoids the dispatch
-    /// entirely. The threaded locals don't need to escape in last position, so the case just
-    /// yields each branch's logical value (the block's last expression, or `'nil'` for the
-    /// missing branch of `ifTrue:`/`ifFalse:`).
-    pub(in crate::codegen::core_erlang) fn emit_vt_conditional_last(
-        &mut self,
-        expr: &Expression,
-        has_nlr: bool,
-        body_parts: &mut Vec<Document<'static>>,
-    ) -> Result<()> {
-        if self.emit_threaded_last(
-            expr,
-            super::threaded_expr::ThreadingPosition::Last,
-            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
-            body_parts,
-        )? {
-            Ok(())
-        } else {
-            // Not a recognized read+write conditional — fall back to the generic path.
-            self.emit_vt_last_expr(expr, 0, has_nlr, body_parts)
-        }
-    }
-
     /// BT-2342/BT-2349: Emits a read+write conditional (`ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
     /// whose branch blocks read+write an outer local) as an inline `case` binding its logical
     /// value to a fresh result var, pushed onto `body_parts` as an open let chain
@@ -2242,9 +2215,10 @@ impl CoreErlangGenerator {
     /// can fall back to the generic last-expression path. The threaded locals don't escape in
     /// last position, so each branch yields only its logical value (its last expression).
     ///
-    /// Used both by [`Self::emit_vt_conditional_last`] (value-type bodies, which wrap the result
-    /// in `{Result, Self{N}}` when NLR is active) and by the class-method body generator (which
-    /// wraps it in `{class_var_result, Result, ClassVarsN}` when class vars were mutated).
+    /// Reached via the shared [`Self::lower_threaded_last`] transform for both the value-type
+    /// boundary (which wraps the result in `{Result, Self{N}}` when NLR is active) and the
+    /// class-method boundary (which wraps it in `{class_var_result, Result, ClassVarsN}` when
+    /// class vars were mutated).
     pub(in crate::codegen::core_erlang) fn emit_vt_conditional_case_to_var(
         &mut self,
         expr: &Expression,
