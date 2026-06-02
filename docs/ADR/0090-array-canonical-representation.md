@@ -318,10 +318,16 @@ precisely why the representation has to change.
   map-backed option for simplicity and by the persistent vector for performance.
 - **Chunked tuples:** flat tuple split into fixed-size chunks; O(√n) or O(log n)
   depending on nesting. Simpler than a full trie but with worse asymptotics.
-- **Persistent vector / RRB trie (preferred):** best asymptotics and canonical,
-  stores *only* values (no keys → lowest memory), highest implementation effort.
-  The implementation issue should benchmark at least the map-backed and trie
-  options against the acceptance criteria before committing.
+- **Strict radix-balanced persistent vector (preferred *if* the benchmark
+  justifies it):** best asymptotics, stores *only* values (no keys → lowest
+  memory), highest implementation effort. **Must be the *strict*, non-relaxed
+  variant** (Clojure's original `PersistentVector` discipline, with a normalised
+  or absent tail) so that a given element sequence has exactly one term shape.
+  **Note: a *relaxed* RRB-vector is explicitly NOT canonical** — RRB relaxes node
+  fill precisely to make `concat`/`split` O(log n), which permits multiple shapes
+  per content and breaks `=:=`. The implementation issue should benchmark at least
+  the map-backed and strict-vector options against the acceptance criteria before
+  committing.
 
 ## Consequences
 
@@ -353,9 +359,22 @@ precisely why the representation has to change.
 Confined to the Runtime context:
 
 1. **Choose the representation.** Prototype and benchmark the map-backed and
-   persistent-vector candidates against the five acceptance criteria
+   strict-persistent-vector candidates against the five acceptance criteria
    (canonicality, O(log n) ops, equality/hash cost, memory, no cache slot).
    Document the choice and benchmark numbers.
+
+   **No off-the-shelf BEAM library satisfies the canonicality criterion**, so do
+   not plan to depend on one: the available persistent-vector libraries are all
+   *relaxed* RRB-vectors optimised for concat (`iv` — pure-BEAM via Gleam;
+   `arrays_rrb_vector` — an Elixir NIF over Rust's `im::Vector`), and relaxed
+   RRB is non-canonical by design (multiple shapes per content → not `=:=`). The
+   NIF option is doubly unusable: its value is an opaque resource term that is
+   never `=:=` by content and cannot serve as a dict/set key. Consequently the
+   two realistic paths are **(a) map-backed (`#{0 => V0, ...}`), canonical for
+   free via the BEAM map-equality guarantee, zero dependencies — the low-risk
+   default**, and **(b) a bespoke strict radix-balanced vector** written in-tree,
+   chosen only if the benchmark shows its memory/iteration win over maps is worth
+   the hand-rolled code. Both are pure Erlang, no NIF.
 2. **Reimplement `beamtalk_array.erl`** internals over the chosen structure:
    `from_list`, `at`, `at_put` (now O(log n), no `from_list` round-trip),
    `size`, `is_empty`, `do`, `collect`, `select`, `inject_into`, `includes`,
@@ -398,3 +417,8 @@ contract.
   `runtime/apps/beamtalk_stdlib/src/beamtalk_set.erl`
 - Prior art: Clojure persistent vectors; Scala RRB-Vector; Erlang `array` module
   internals (copy-on-write cache)
+- Surveyed BEAM persistent-vector libraries (all *relaxed* RRB, non-canonical, so
+  unusable for the `=:=` criterion): `iv` (pure-BEAM, Gleam —
+  https://iv.hexdocs.pm), `arrays_rrb_vector` (Elixir NIF over Rust `im::Vector` —
+  https://github.com/Qqwy/elixir-arrays_rrb_vector); RRB-vector background:
+  Bagwell & Rompf, "RRB-Trees: Efficient Immutable Vectors"
