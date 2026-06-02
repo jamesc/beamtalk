@@ -2902,3 +2902,77 @@ http_ws_no_upgrade_test(Port) ->
     Response = http_get(Port, <<"/ws">>),
     %% Without Upgrade: websocket header, cowboy should not return 101
     ?assert(binary:match(Response, <<"101">>) =:= nomatch).
+
+%%====================================================================
+%% write_port_file/3 (BT-611) — direct unit tests (no TCP listener)
+%%
+%% Exercises the port-file writer's three top-level branches: undefined
+%% workspace (no-op), and the full atomic tmp+rename success path including
+%% directory creation and PORT\nNONCE content formatting.
+%%====================================================================
+
+%% Cross-platform temp directory as a list path.
+wpf_temp_dir() ->
+    application:ensure_all_started(beamtalk_stdlib),
+    binary_to_list(beamtalk_file:'tempDirectory'()).
+
+write_port_file_undefined_workspace_test() ->
+    %% An undefined workspace id is a no-op (no HOME lookup, no file write).
+    ?assertEqual(ok, beamtalk_repl_server:write_port_file(undefined, 1234, <<"abcdef0123456789">>)).
+
+write_port_file_writes_port_and_nonce_test() ->
+    %% Point HOME at a throwaway directory so the writer creates
+    %% $HOME/.beamtalk/workspaces/<id>/port and writes PORT\nNONCE.
+    Unique = integer_to_list(erlang:unique_integer([positive])),
+    FakeHome = filename:join(wpf_temp_dir(), "bt_wpf_test_" ++ Unique),
+    ok = filelib:ensure_dir(filename:join(FakeHome, "placeholder")),
+    OrigHome = os:getenv("HOME"),
+    OrigUserprofile = os:getenv("USERPROFILE"),
+    try
+        os:putenv("HOME", FakeHome),
+        os:putenv("USERPROFILE", FakeHome),
+        WorkspaceId = list_to_binary("ws-" ++ Unique),
+        Nonce = <<"noncehex01234567">>,
+        ?assertEqual(ok, beamtalk_repl_server:write_port_file(WorkspaceId, 54321, Nonce)),
+        PortFile = filename:join([
+            FakeHome, ".beamtalk", "workspaces", binary_to_list(WorkspaceId), "port"
+        ]),
+        ?assert(filelib:is_regular(PortFile)),
+        {ok, Content} = file:read_file(PortFile),
+        %% Format is PORT, newline, NONCE (two lines for stale detection).
+        ?assertEqual(<<"54321\nnoncehex01234567">>, Content)
+    after
+        restore_env("HOME", OrigHome),
+        restore_env("USERPROFILE", OrigUserprofile),
+        %% Best-effort cleanup of the throwaway home tree.
+        _ = file:del_dir_r(FakeHome)
+    end.
+
+restore_env(Var, false) -> os:unsetenv(Var);
+restore_env(Var, Value) -> os:putenv(Var, Value).
+
+write_port_file_no_home_test() ->
+    %% When neither HOME nor USERPROFILE is set, home_dir/0 returns false and
+    %% the writer logs a warning and returns ok without writing a file.
+    OrigHome = os:getenv("HOME"),
+    OrigUserprofile = os:getenv("USERPROFILE"),
+    try
+        os:unsetenv("HOME"),
+        os:unsetenv("USERPROFILE"),
+        ?assertEqual(
+            ok,
+            beamtalk_repl_server:write_port_file(<<"ws-no-home">>, 9999, <<"noncehex89abcdef">>)
+        )
+    after
+        restore_env("HOME", OrigHome),
+        restore_env("USERPROFILE", OrigUserprofile)
+    end.
+
+%%====================================================================
+%% code_change/3 — gen_server callback (no TCP listener)
+%%====================================================================
+
+code_change_returns_state_test() ->
+    %% code_change/3 is an identity passthrough returning {ok, State}.
+    State = some_opaque_state,
+    ?assertEqual({ok, State}, beamtalk_repl_server:code_change(old_vsn, State, extra)).

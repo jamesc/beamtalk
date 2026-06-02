@@ -732,6 +732,10 @@ loader_teardown(Proj) ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
+    %% Stop the compiler app so later test modules in the shared EUnit node see
+    %% the baseline "compiler not running" state (noproc error-path tests in
+    %% beamtalk_repl_eval_tests depend on it).
+    _ = application:stop(beamtalk_compiler),
     %% Best-effort recursive cleanup of the temp project directory.
     rm_rf(Proj),
     ok.

@@ -1254,7 +1254,10 @@ setup_dev_runtime() ->
     %% A class named "Integer" so a binding holding an integer (whose
     %% primitive_class_of is 'Integer') classifies as an instance receiver,
     %% and "String" for string-literal classification.
-    {ok, IntPid} = beamtalk_object_class:start('Integer', #{
+    %% 'Integer'/'String' may already be registered by the runtime bootstrap (or
+    %% by another test module in the shared EUnit node), so tolerate
+    %% already_started and only kill the ones this fixture actually owns.
+    {IntPid, IntOwned} = start_dev_class('Integer', #{
         name => 'Integer',
         module => 'bt@test@integer_dev',
         superclass => none,
@@ -1262,12 +1265,15 @@ setup_dev_runtime() ->
             'abs' => #{block => fun(_, _) -> 0 end, arity => 0}
         }
     }),
-    {ok, StrPid} = beamtalk_object_class:start('String', #{
+    %% Use the real String method name 'uppercase' so the string-literal
+    %% completion test passes whether this fixture's String is used (isolated
+    %% run) or the bootstrap String is reused (combined run).
+    {StrPid, StrOwned} = start_dev_class('String', #{
         name => 'String',
         module => 'bt@test@string_dev',
         superclass => none,
         instance_methods => #{
-            'asUppercase' => #{block => fun(_, _) -> ok end, arity => 0}
+            'uppercase' => #{block => fun(_, _) -> ok end, arity => 0}
         }
     }),
     %% ADR 0071 Phase 5: an internal class in a *named* package (test) — the REPL
@@ -1290,7 +1296,17 @@ setup_dev_runtime() ->
         doc => <<"Single line doc no newline">>,
         instance_methods => #{}
     }),
-    [BasePid, WidgetPid, IntPid, StrPid, HiddenPid, OneLinePid].
+    [BasePid, WidgetPid, HiddenPid, OneLinePid] ++
+        [IntPid || IntOwned] ++ [StrPid || StrOwned].
+
+%% Start a class for the dev-runtime fixture, tolerating a class already
+%% registered by the runtime bootstrap or another module. Returns {Pid, Owned}
+%% where Owned is false for a reused registration (teardown must not kill it).
+start_dev_class(Name, Spec) ->
+    case beamtalk_object_class:start(Name, Spec) of
+        {ok, Pid} -> {Pid, true};
+        {error, {already_started, Pid}} -> {Pid, false}
+    end.
 
 teardown_dev_runtime(Pids) ->
     lists:foreach(
@@ -1349,9 +1365,9 @@ context_completion_integer_literal() ->
     ?assert(lists:member(<<"abs">>, Result)).
 
 context_completion_string_literal() ->
-    %% String literal receiver -> String instance methods ("asUppercase").
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"\"hi\" asU">>),
-    ?assert(lists:member(<<"asUppercase">>, Result)).
+    %% String literal receiver -> String instance methods ("uppercase").
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"\"hi\" up">>),
+    ?assert(lists:member(<<"uppercase">>, Result)).
 
 context_completion_binding_receiver() ->
     %% A lowercase binding holding an integer classifies as Integer instance.
@@ -1564,19 +1580,17 @@ teardown_session(Pid) ->
 
 session_show_codegen_code_path(Pid) ->
     %% A non-empty `code` param with a live session routes handle/4 through the
-    %% code branch and into beamtalk_repl_shell:show_codegen/2. In the isolated
-    %% EUnit harness the Rust compiler port is unavailable, so show_codegen
-    %% returns {error, Reason, Warnings} which is wrapped into a structured
-    %% error response. (The success/encode_codegen_response path requires the
-    %% compiler port and is covered by the full integration suite.)
+    %% code branch and into beamtalk_repl_shell:show_codegen/2. Compiler-port
+    %% availability is environment-dependent in the shared EUnit node: with the
+    %% port up show_codegen returns a codegen result, without it a structured
+    %% error. Either way the response is a well-formed, non-crashing map whose
+    %% status list ends with the done marker.
     Msg = make_msg(<<"show-codegen">>, <<"scd-1">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>, #{<<"code">> => <<"1 + 2">>}, Msg, Pid
     ),
     Decoded = json:decode(Result),
-    %% The response is a well-formed structured error (not a crash); the status
-    %% list always ends with the done marker.
-    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ?assert(is_map(Decoded)),
     Status = maps:get(<<"status">>, Decoded),
     ?assert(lists:member(<<"done">>, Status)).
 
