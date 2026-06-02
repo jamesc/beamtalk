@@ -195,6 +195,97 @@ bindings_view_read_unknown_name_is_safe_test_() ->
     end}.
 
 %%====================================================================
+%% view_includes_key/2 — O(1) membership, atom + String key parity (BT-2380)
+%%====================================================================
+
+%% Session scope: present/absent for both atom and String keys. The String key
+%% must match the same binding `at:` resolves (parity with the lenient read).
+bindings_view_includes_key_session_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-bv-inc-session">>),
+                set_locals(Pid, #{x => 1}),
+                seed_context(Pid, <<"prim-bv-inc-session">>),
+                Session = beamtalk_session_primitives:current(),
+                View = beamtalk_session_primitives:bindingsViewFor(Session),
+                %% Atom key: present / absent.
+                ?assertEqual(true, beamtalk_session_primitives:view_includes_key(View, x)),
+                ?assertEqual(false, beamtalk_session_primitives:view_includes_key(View, y)),
+                %% String key: parity with view_at/2.
+                ?assertEqual(1, beamtalk_session_primitives:view_at(View, "x")),
+                ?assertEqual(true, beamtalk_session_primitives:view_includes_key(View, "x")),
+                %% Binary key parity too.
+                ?assertEqual(true, beamtalk_session_primitives:view_includes_key(View, <<"x">>)),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%% Workspace scope: present/absent against the bind:as: ETS.
+bindings_view_includes_key_workspace_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                beamtalk_workspace_interface_primitives:create_bindings_table(),
+                maybe_register_meta(),
+                try
+                    View = beamtalk_session_primitives:globalsView(),
+                    ?assertMatch(
+                        #{'$beamtalk_class' := 'BindingsView', scope := workspace}, View
+                    ),
+                    ?assertEqual(
+                        false, beamtalk_session_primitives:view_includes_key(View, inc_ws_name)
+                    ),
+                    ?assertEqual(
+                        7, beamtalk_session_primitives:view_at_put(View, inc_ws_name, 7)
+                    ),
+                    %% Atom key present.
+                    ?assertEqual(
+                        true, beamtalk_session_primitives:view_includes_key(View, inc_ws_name)
+                    ),
+                    %% String key parity.
+                    ?assertEqual(
+                        true, beamtalk_session_primitives:view_includes_key(View, "inc_ws_name")
+                    )
+                after
+                    maybe_unregister_meta()
+                end
+            end)
+        ]
+    end}.
+
+%% A never-interned String must return false without minting a fresh atom
+%% (atom-exhaustion safety, matching the view_at/2 read-path guard).
+bindings_view_includes_key_unknown_name_is_safe_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                Pid = start_session(<<"prim-bv-inc-unknown">>),
+                seed_context(Pid, <<"prim-bv-inc-unknown">>),
+                Session = beamtalk_session_primitives:current(),
+                View = beamtalk_session_primitives:bindingsViewFor(Session),
+                Before = erlang:system_info(atom_count),
+                ?assertEqual(
+                    false,
+                    beamtalk_session_primitives:view_includes_key(
+                        View, "definitely_not_an_atom_bt2380_xyz"
+                    )
+                ),
+                ?assertEqual(
+                    false,
+                    beamtalk_session_primitives:view_includes_key(
+                        View, <<"another_unknown_bt2380_abc">>
+                    )
+                ),
+                After = erlang:system_info(atom_count),
+                ?assertEqual(Before, After),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Cross-session write rejection
 %%====================================================================
 
