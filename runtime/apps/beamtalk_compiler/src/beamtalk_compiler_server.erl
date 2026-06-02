@@ -563,7 +563,7 @@ recover_from_beam_modules() ->
                 false ->
                     Acc;
                 true ->
-                    case (catch Module:'__beamtalk_meta'()) of
+                    try Module:'__beamtalk_meta'() of
                         Meta when is_map(Meta) ->
                             ClassName = maps:get(class, Meta, undefined),
                             case
@@ -575,6 +575,9 @@ recover_from_beam_modules() ->
                                 false -> Acc
                             end;
                         _ ->
+                            Acc
+                    catch
+                        _:_ ->
                             Acc
                     end
             end

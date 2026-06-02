@@ -782,7 +782,12 @@ restart_class(ClassName) ->
             %% Clean up stale pid entries for this class before restarting.
             %% On crash, terminate doesn't run, so old {DeadPid, ClassName} entries
             %% linger. Remove them so they don't accumulate on repeated crashes.
-            _ = (catch ets:match_delete(beamtalk_class_pids, {'_', ClassName})),
+            _ =
+                (try
+                    ets:match_delete(beamtalk_class_pids, {'_', ClassName})
+                catch
+                    _:_ -> ok
+                end),
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->
                     ?LOG_WARNING(
