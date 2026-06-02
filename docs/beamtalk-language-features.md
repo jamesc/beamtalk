@@ -2836,7 +2836,9 @@ workspace. Analogous to Pharo's `Smalltalk` project facade.
 | `newClass: source at: path` | `List(Behaviour)` | Create a brand-new class from source at `path`; logs a `kind: #'new-class'` ChangeEntry (ADR 0082) |
 | `classes` | `List` | All loaded user classes (those with a recorded source file) |
 | `testClasses` | `List` | Loaded classes that inherit from `TestCase` |
-| `globals` | `Dictionary` | Project namespace: singletons + loaded user classes |
+| `globals` | `BindingsView` | Live, write-through view of the workspace-globals layer: singletons + `bind:as:` entries (see [Sessions and binding layers](#sessions-and-binding-layers-adr-0081)) |
+| `currentSession` | `Session` or `nil` | The calling process's REPL session (same value as `Session current`); `nil` outside a REPL eval |
+| `sessions` | `List(Session)` | All live REPL sessions as `Session` values |
 | `test` | `TestResult` | Run all loaded test classes |
 | `test: AClass` | `TestResult` | Run a specific test class |
 | `actors` | `List` | All live actors as object references |
@@ -2982,6 +2984,114 @@ nav fieldWritersOf: #value in: Counter
 
 nav ffiSitesFor: "lists:reverse"
 // => [#{#class => MyList, #selector => #reversed, #line => 7}, ...]
+```
+
+### Sessions and binding layers (ADR 0081)
+
+The REPL resolves a bare name (`x`, `Transcript`, `Counter`) against **two
+binding layers**, each owned by a different object:
+
+| Layer | Owner | Source | Accessor |
+|-------|-------|--------|----------|
+| **Session locals** | the session (per connection) | `x := 42` typed in the shell | `Session current bindings` |
+| **Workspace globals** | the workspace (shared) | singletons (`Transcript`, `Beamtalk`, `Workspace`) + `bind:as:` entries | `Workspace globals` |
+
+Locals are checked first, so a local **shadows** a global of the same name.
+Names not found in either layer fall through to the class registry (`Counter`,
+`Integer`), then raise `undefined_variable`.
+
+#### `Session` — a first-class session value
+
+`Session` is a factory, mirroring `Date today` / `Smalltalk current`: two
+class-side methods return a session *value* you then message. There is **no**
+class-side operation mirror (no `Session bindings`) and **no** `globals`
+accessor on `Session` — globals are workspace state, reached via `Workspace
+globals`.
+
+| Class method | Returns | Description |
+|--------------|---------|-------------|
+| `Session current` | `Session` or `nil` | The calling process's session; `nil` outside a REPL eval (compiled code has no session) |
+| `Session withId: anId` | `Session` or `nil` | Look up a session by its protocol id; `nil` if unknown or no longer alive |
+
+| Instance method | Returns | Description |
+|-----------------|---------|-------------|
+| `bindings` | `BindingsView` | Live view of this session's locals (the `x := 42` layer) |
+| `resolve: #name` | `Object` | Resolve a name the way bare-name lookup does (locals → globals → classes). Shares the one resolver with bare-name lookup, so it raises `undefined_variable` for a name that resolves nowhere — exactly as typing the bare name would |
+| `clear` | `nil` | Clear this session's locals (globals remain) |
+| `id` | `String` | Stable session identifier (matches the protocol session id) |
+
+```beamtalk
+x := 42
+// => 42
+
+Session current bindings keys
+// => #(#x)
+
+Session current bindings at: #x
+// => 42
+
+Session current resolve: #Transcript
+// => the Transcript singleton
+
+Session current resolve: #notDefinedAnywhere
+// => Error: Undefined variable: notDefinedAnywhere
+
+Session current clear
+// => nil
+```
+
+Outside a REPL eval (e.g. in a `.bt` file run via `beamtalk run`), `Session
+current` returns `nil`. Guard with `ifNotNil:` rather than a predicate:
+
+```beamtalk
+Session current ifNotNil: [:s | s clear]
+```
+
+#### `BindingsView` — a live, write-through Dictionary view
+
+Both `Session current bindings` and `Workspace globals` return a `BindingsView`:
+a small Dictionary-protocol value (`at:`, `at:put:`, `removeKey:`,
+`includesKey:`, `keys`, `values`, `size`, `do:`) backed by live state. `at:put:`
+returns the value put; `removeKey:` returns `nil`.
+
+```beamtalk
+// Session-local write — DEFERRED to end of eval, visible on the NEXT line:
+Session current bindings at: #y put: 99
+// => 99
+y
+// => 99
+
+// Workspace-global write — SYNCHRONOUS (routes through bind:as:),
+// visible immediately on the next line:
+Workspace globals at: #answer put: 42
+// => 42
+answer
+// => 42
+```
+
+**One documented asymmetry under the shared type:** session-local writes are
+deferred to the end of the current eval (the eval worker holds a state
+snapshot), so a same-expression read-back sees the *old* value; workspace-global
+writes hit shared ETS immediately. Writing a protected system name through the
+globals view raises the same conflict as `Workspace bind:as:`:
+
+```beamtalk
+Workspace globals at: #Workspace put: nil
+// => Error: Workspace is a system name and cannot be shadowed
+```
+
+#### Cross-session access (read-only)
+
+`Session withId:` returns another session by id — used by tooling (LSP, VS Code)
+to read the user's session from a separate completion session. Cross-session
+**reads** are allowed; **writes** raise `cross_session_mutation_unsupported`:
+
+```beamtalk
+ids := Workspace sessions collect: [:s | s id]
+other := Session withId: (ids first)
+
+other bindings keys          // => cross-session READ, allowed
+other bindings at: #x put: 9 // => Error: Cannot mutate another session's bindings
 ```
 
 ### REPL shortcuts (`:` commands) are thin wrappers
