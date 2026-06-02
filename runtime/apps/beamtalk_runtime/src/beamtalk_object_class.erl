@@ -607,14 +607,34 @@ A no-op when `beamtalk_xref` is not running. Hot-patched methods are tagged
 """.
 -spec put_method_xref(class_name(), boolean(), selector(), binary()) -> ok.
 put_method_xref(ClassName, ClassSide, Selector, Source) ->
-    case erlang:whereis(beamtalk_xref) of
-        undefined ->
-            ok;
-        _Pid ->
-            Entry = beamtalk_xref:build_method_entry(
-                ClassSide, Selector, Source, indexed, put_method
-            ),
-            ok = beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry)
+    %% build_method_entry/5 is pure; only the put_method/4 gen_server call must
+    %% be best-effort. A bare whereis/1 guard is racy: beamtalk_xref can die or
+    %% restart between the check and the call, which would crash this class
+    %% gen_server mid hot-patch. Degrade to a no-op on xref unavailability
+    %% instead, matching the documented behaviour (BT-2301).
+    Entry = beamtalk_xref:build_method_entry(
+        ClassSide, Selector, Source, indexed, put_method
+    ),
+    safe_xref(fun() -> beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry) end).
+
+-doc """
+Run a `beamtalk_xref` gen_server call best-effort (BT-2301).
+
+The xref index is advisory tooling state; a hot patch must not crash the class
+gen_server if it is unavailable. Catches the `noproc`/`{noproc, _}` /
+`{normal, _}` / `{{nodedown, _}, _}` exits raised by `gen_server:call/2`
+against a missing or restarting `beamtalk_xref`, degrading to a no-op. Other
+exits/errors propagate.
+""".
+-spec safe_xref(fun(() -> ok)) -> ok.
+safe_xref(Fun) ->
+    try Fun() of
+        ok -> ok
+    catch
+        exit:{noproc, _} -> ok;
+        exit:noproc -> ok;
+        exit:{normal, _} -> ok;
+        exit:{{nodedown, _}, _} -> ok
     end.
 
 handle_call(

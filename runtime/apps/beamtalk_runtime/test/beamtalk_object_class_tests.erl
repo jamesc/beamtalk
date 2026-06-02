@@ -2470,6 +2470,10 @@ clear_xref_tables() ->
 %% degrades to empty sends — tests that assert *parsed* send rows must gate on
 %% this rather than fail spuriously.
 compiler_walker_available() ->
+    %% function_exported/3 reports false for a not-yet-loaded module; ensure the
+    %% compiler module is loaded first so we don't get a false negative when the
+    %% beam exists but hasn't been demand-loaded yet.
+    _ = code:ensure_loaded(beamtalk_compiler),
     erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) andalso
         case catch beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>) of
             {ok, [_ | _]} -> true;
@@ -2694,11 +2698,13 @@ put_method_reindexes_xref_test_() ->
                     )
                 ),
 
-                %% Live-patch `greet` with a body that adds an `asUppercase` send
-                %% (#asString → #asString asUppercase). The real send parsed from
-                %% the patched source must show up in the xref index.
+                %% Live-patch `greet` with a body whose sends are DISJOINT from
+                %% the pre-patch body (#asString → #asUppercase only). Keeping the
+                %% selectors disjoint lets us assert the old `asString` send row is
+                %% gone *and* the new `asUppercase` row appears, without the result
+                %% depending on whether the walker happens to re-parse `asString`.
                 NewFun = fun(_Args, Self, State) -> {Self, State} end,
-                PatchedSource = <<"greet => self asString asUppercase">>,
+                PatchedSource = <<"greet => self asUppercase">>,
                 ok = beamtalk_object_class:put_method(Pid, greet, NewFun, PatchedSource),
 
                 %% `greet` still an implementor (one row, replaced not duplicated

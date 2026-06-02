@@ -480,36 +480,60 @@ builder_method_xref(BuilderState) ->
         Baked when is_list(Baked), Baked =/= [] ->
             Baked;
         _ ->
+            %% Only advertise xref rows for selectors the class can actually
+            %% dispatch: intersect the source maps with the installed
+            %% methodSpecs:/classMethods: selectors. Otherwise a stray
+            %% methodSource:/classMethodSource: entry with no matching install
+            %% would leak a phantom implementor/sender into xref.
+            InstanceSelectors = installed_selectors(maps:get(methodSpecs, BuilderState, #{})),
+            ClassSelectors = installed_selectors(maps:get(classMethods, BuilderState, #{})),
             InstanceEntries = source_map_to_xref(
-                maps:get(methodSource, BuilderState, #{}), false
+                maps:get(methodSource, BuilderState, #{}), false, InstanceSelectors
             ),
             ClassEntries = source_map_to_xref(
-                maps:get(classMethodSource, BuilderState, #{}), true
+                maps:get(classMethodSource, BuilderState, #{}), true, ClassSelectors
             ),
             InstanceEntries ++ ClassEntries
     end.
 
 -doc """
+Return the set of selectors installed by a `methodSpecs:`/`classMethods:` map
+(BT-2301). Non-map inputs yield the empty set.
+""".
+-spec installed_selectors(term()) -> sets:set(atom()).
+installed_selectors(SpecMap) when is_map(SpecMap) ->
+    sets:from_list(maps:keys(SpecMap));
+installed_selectors(_Other) ->
+    sets:new().
+
+-doc """
 Derive xref entries from a `selector => Source` map for one method side
 (BT-2301). `ClassSide` is `false` for instance methods, `true` for class-side.
-Non-map inputs (or non-atom/non-binary pairs) are skipped.
+Only selectors present in `Installed` (the selectors actually installed on the
+class) are emitted, so xref never advertises a method the class cannot
+dispatch. Non-map inputs (or non-atom/non-binary pairs) are skipped.
 """.
--spec source_map_to_xref(term(), boolean()) -> [map()].
-source_map_to_xref(SourceMap, ClassSide) when is_map(SourceMap) ->
+-spec source_map_to_xref(term(), boolean(), sets:set(atom())) -> [map()].
+source_map_to_xref(SourceMap, ClassSide, Installed) when is_map(SourceMap) ->
     maps:fold(
         fun
             (Selector, Source, Acc) when is_atom(Selector), is_binary(Source) ->
-                Entry = beamtalk_xref:build_method_entry(
-                    ClassSide, Selector, Source, indexed, class_builder
-                ),
-                [Entry | Acc];
+                case sets:is_element(Selector, Installed) of
+                    true ->
+                        Entry = beamtalk_xref:build_method_entry(
+                            ClassSide, Selector, Source, indexed, class_builder
+                        ),
+                        [Entry | Acc];
+                    false ->
+                        Acc
+                end;
             (_Selector, _Source, Acc) ->
                 Acc
         end,
         [],
         SourceMap
     );
-source_map_to_xref(_NotMap, _ClassSide) ->
+source_map_to_xref(_NotMap, _ClassSide, _Installed) ->
     [].
 
 -doc """

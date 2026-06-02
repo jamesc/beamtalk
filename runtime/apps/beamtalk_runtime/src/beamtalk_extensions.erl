@@ -237,10 +237,10 @@ unregister(Class, Selector) when is_atom(Class), is_atom(Selector) ->
     Key = {Class, Selector},
     ets:delete(?EXTENSIONS_TABLE, Key),
     ets:delete(?SOURCES_TABLE, Key),
-    case erlang:whereis(beamtalk_xref) of
-        undefined -> ok;
-        _Pid -> ok = beamtalk_xref:purge_method(Class, false, Selector)
-    end,
+    %% Best-effort: the extension ETS rows are already mutated, so a
+    %% dead/restarting beamtalk_xref must not crash unregister. Degrade to a
+    %% no-op if the xref gen_server is unavailable (BT-2301).
+    safe_xref(fun() -> beamtalk_xref:purge_method(Class, false, Selector) end),
     ok.
 
 -doc """
@@ -482,17 +482,35 @@ embedded runtime).
 """.
 -spec index_extension_xref(atom(), atom(), binary() | undefined) -> ok.
 index_extension_xref(Class, Selector, Source) ->
-    case erlang:whereis(beamtalk_xref) of
-        undefined ->
-            ok;
-        _Pid ->
-            {SourceStatus, SourceBin} =
-                case Source of
-                    undefined -> {unindexed_runtime_fun, <<>>};
-                    Bin when is_binary(Bin) -> {indexed, Bin}
-                end,
-            Entry = beamtalk_xref:build_method_entry(
-                false, Selector, SourceBin, SourceStatus, extension
-            ),
-            ok = beamtalk_xref:put_method(Class, false, Selector, Entry)
+    {SourceStatus, SourceBin} =
+        case Source of
+            undefined -> {unindexed_runtime_fun, <<>>};
+            Bin when is_binary(Bin) -> {indexed, Bin}
+        end,
+    %% build_method_entry/5 is pure; only the put_method/4 gen_server call needs
+    %% to be best-effort so a dead/restarting beamtalk_xref cannot crash
+    %% register after the extension ETS rows are already mutated (BT-2301).
+    Entry = beamtalk_xref:build_method_entry(
+        false, Selector, SourceBin, SourceStatus, extension
+    ),
+    safe_xref(fun() -> beamtalk_xref:put_method(Class, false, Selector, Entry) end).
+
+-doc """
+Run a `beamtalk_xref` gen_server call best-effort (BT-2301).
+
+The xref index is advisory tooling state; extension register/unregister must
+not crash if it is unavailable. Catches the `noproc`/`{noproc, _}` /
+`{normal, _}` exits raised by `gen_server:call/2` against a missing or
+restarting `beamtalk_xref`, and the `undefined` returned for a name with no
+registered pid, degrading to a no-op. Other exits/errors propagate.
+""".
+-spec safe_xref(fun(() -> ok)) -> ok.
+safe_xref(Fun) ->
+    try Fun() of
+        ok -> ok
+    catch
+        exit:{noproc, _} -> ok;
+        exit:noproc -> ok;
+        exit:{normal, _} -> ok;
+        exit:{{nodedown, _}, _} -> ok
     end.
