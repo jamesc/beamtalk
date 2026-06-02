@@ -499,11 +499,15 @@ restart_keeps_prior_when_disk_matches() ->
 %%====================================================================
 
 rotation_test_() ->
+    %% These tests drive 1000+ synchronous appends, each triggering source-body
+    %% file writes and (past the ring bound) transactional tar/gzip rotations.
+    %% That comfortably fits eunit's default 5s per-test timeout on Linux/macOS,
+    %% but slow Windows CI disk I/O can exceed it, so allow 60s per test.
     {setup, fun() -> ok end, fun(_) -> ok end, [
-        fun rotation_archives_overflow/0,
-        fun rotation_keeps_state_when_archive_fails/0,
-        fun archive_filenames_unique_within_same_second/0,
-        fun load_enforces_ring_bound_when_disk_exceeds_max/0
+        {timeout, 60, fun rotation_archives_overflow/0},
+        {timeout, 60, fun rotation_keeps_state_when_archive_fails/0},
+        {timeout, 60, fun archive_filenames_unique_within_same_second/0},
+        {timeout, 60, fun load_enforces_ring_bound_when_disk_exceeds_max/0}
     ]}.
 
 rotation_archives_overflow() ->

@@ -139,7 +139,7 @@ build-erlang:
 # Build standard library (stdlib/src/*.bt → BEAM, incremental — skips if up to date)
 build-stdlib: build-rust build-erlang
     @echo "🔨 Building standard library..."
-    @cargo run --bin beamtalk --quiet -- build-stdlib --quiet
+    @cargo run --bin beamtalk --quiet -- build-stdlib --quiet --warnings-as-errors
     @echo "✅ Stdlib build complete"
 
 # Build all example programs (examples/**/*.bt → BEAM)
@@ -639,11 +639,25 @@ coverage: coverage-rust coverage-runtime
     @echo "  Rust:    target/llvm-cov/html/index.html"
     @echo "  Runtime: runtime/_build/test/cover/index.html"
 
+# Files excluded from Rust coverage: test harnesses and build-time tooling
+# that cannot be meaningfully unit-tested, so counting them only deflates the
+# product-code coverage number.
+#   - beamtalk-parity-tests : cross-surface test harness (publish = false)
+#   - beamtalk-build        : build-script helpers, run during build.rs
+#   - build-corpus/main.rs  : one-shot corpus-generation tool (its sibling
+#                             beamtalk-examples lib stays measured, ~99%)
+llvm_cov_ignore := '(beamtalk-parity-tests/|beamtalk-build/|build-corpus/src/main\.rs)'
+
 # Generate Rust coverage (requires cargo-llvm-cov)
 coverage-rust:
     @echo "📊 Generating Rust coverage..."
-    cargo llvm-cov --all-targets --workspace --html
+    cargo llvm-cov --all-targets --workspace --ignore-filename-regex '{{llvm_cov_ignore}}' --html
     @echo "  📁 HTML report: target/llvm-cov/html/index.html"
+
+# Generate Rust coverage as Cobertura XML for the CI coverage badge.
+coverage-rust-cobertura:
+    @echo "📊 Generating Rust coverage (Cobertura)..."
+    cargo llvm-cov --all-targets --workspace --ignore-filename-regex '{{llvm_cov_ignore}}' --cobertura --output-path coverage.cobertura.xml
 
 # Unix-only: uses bash process substitution and piping
 # Note: Auto-discovers all *_tests modules. New test files are included automatically.

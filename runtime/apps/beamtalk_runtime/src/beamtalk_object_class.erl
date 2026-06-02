@@ -816,44 +816,32 @@ handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
 %% BT-411/BT-412/BT-440: Class method dispatch (BT-704).
 %% ADR 0036 Phase 2 (BT-823): Also handles metaclass_method_call with identical logic.
 %% ADR 0032 Phase 1: Passes local class_methods; dispatch walks superclass chain.
+%%
+%% BT-2379: the 4-tuple message carries the caller's session context explicitly
+%% (`{Selector, Args, {SessionPid, SessionId}}`). We seed from the tuple, which
+%% avoids the `process_info(CallerPid, dictionary)` full-dictionary copy the
+%% legacy 3-tuple clause below must use.
+handle_call(
+    {MethodCallType, Selector, Args, SessionCtx},
+    From,
+    #class_state{} = State
+) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
+    %% No guard on SessionCtx: `seed_session_context_from/1` accepts any term and
+    %% safely no-ops on unrecognised shapes, so a malformed/empty context
+    %% degrades to "no context" rather than crashing the class gen_server with a
+    %% function_clause (it would otherwise miss both this and the 3-tuple clause).
+    Restore = seed_session_context_from(SessionCtx),
+    dispatch_class_method(Selector, Args, From, State, Restore);
+%% BT-2379: backward-compatible fallback for the legacy 3-tuple message shape
+%% (in-flight messages across a hot-code reload). Mirrors the caller's session
+%% context by reading its process dictionary via `process_info/2`.
 handle_call(
     {MethodCallType, Selector, Args},
     From,
-    #class_state{
-        class_methods = ClassMethods,
-        instance_methods = InstanceMethods,
-        name = ClassName,
-        module = Module,
-        class_state = ClassVars
-    } = State
+    #class_state{} = State
 ) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
-    %% ADR 0081 (BT-2367): class-method dispatch hops from the eval worker to
-    %% this class gen_server, so the session context that `seed_session_context/2`
-    %% put on the *worker* is invisible here. Factory class methods like
-    %% `Session current` (and the future `Workspace currentSession` navigation
-    %% alias, a later ADR 0081 phase) read that context, so mirror the caller's
-    %% `beamtalk_session_pid`/`beamtalk_session_id` into this process for the
-    %% duration of the call, then restore. Reading the caller's process
-    %% dictionary via `process_info/2` avoids changing the (hot, widely used)
-    %% class_method_call message shape.
     Restore = seed_caller_session_context(From),
-    try
-        beamtalk_class_dispatch:handle_class_method_call(
-            Selector, Args, ClassName, Module, ClassMethods, ClassVars
-        )
-    of
-        {reply, Result, NewClassVars} ->
-            {reply, Result, State#class_state{class_state = NewClassVars}};
-        test_spawn ->
-            beamtalk_test_case:spawn_test_execution(
-                Selector, Args, ClassName, Module, InstanceMethods, From
-            ),
-            {noreply, State};
-        {error, not_found} ->
-            {reply, {error, not_found}, State}
-    after
-        Restore()
-    end;
+    dispatch_class_method(Selector, Args, From, State, Restore);
 handle_call({initialize, _Args}, _From, #class_state{} = State) ->
     {reply, {ok, nil}, State};
 handle_call(get_module, _From, #class_state{module = Module} = State) ->
@@ -917,6 +905,70 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
+
+-doc """
+Run a class-method (or metaclass-method) call against this class gen_server's
+state, restoring the previously-seeded session context afterwards.
+
+`Restore` is the zero-arity closure returned by `seed_session_context_from/1`
+(explicit-context path, BT-2379) or `seed_caller_session_context/1` (legacy
+3-tuple fallback). It is always run, even on a method-body crash, so a
+concurrent call from another session never observes a stale mirrored context.
+""".
+-spec dispatch_class_method(
+    atom(), list(), {pid(), term()} | term(), #class_state{}, fun(() -> ok)
+) -> {reply, term(), #class_state{}} | {noreply, #class_state{}}.
+dispatch_class_method(Selector, Args, From, State, Restore) ->
+    #class_state{
+        class_methods = ClassMethods,
+        instance_methods = InstanceMethods,
+        name = ClassName,
+        module = Module,
+        class_state = ClassVars
+    } = State,
+    try
+        beamtalk_class_dispatch:handle_class_method_call(
+            Selector, Args, ClassName, Module, ClassMethods, ClassVars
+        )
+    of
+        {reply, Result, NewClassVars} ->
+            {reply, Result, State#class_state{class_state = NewClassVars}};
+        test_spawn ->
+            beamtalk_test_case:spawn_test_execution(
+                Selector, Args, ClassName, Module, InstanceMethods, From
+            ),
+            {noreply, State};
+        {error, not_found} ->
+            {reply, {error, not_found}, State}
+    after
+        Restore()
+    end.
+
+-doc """
+Seed this class gen_server with a session context passed explicitly in the
+class-method-call message (BT-2379), returning a zero-arity restore closure.
+
+ADR 0081: factory class methods like `Session current` /
+`Workspace currentSession` read `beamtalk_session_pid` / `beamtalk_session_id`
+from the process dictionary. Class-method dispatch hops from the eval worker to
+this gen_server, so the worker now sends its two context keys in the message
+tuple (`beamtalk_class_dispatch:local_session_context/0`) rather than having us
+copy its entire dictionary via `process_info/2`. We `put/2` them locally and
+restore the previous values (or erase) on the way out.
+""".
+-spec seed_session_context_from({pid() | undefined, binary() | undefined} | term()) ->
+    fun(() -> ok).
+seed_session_context_from({SessionPid, SessionId}) ->
+    PrevPid = put(beamtalk_session_pid, SessionPid),
+    PrevId = put(beamtalk_session_id, SessionId),
+    fun() ->
+        restore_dict_key(beamtalk_session_pid, PrevPid),
+        restore_dict_key(beamtalk_session_id, PrevId),
+        ok
+    end;
+seed_session_context_from(_Other) ->
+    %% Unrecognised context shape: seed nothing rather than crash the call.
+    fun() -> ok end.
 
 -doc """
 Mirror the calling process's session context into this class gen_server for the
