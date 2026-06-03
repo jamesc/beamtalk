@@ -62,7 +62,12 @@ Extracted from `beamtalk_object_class` (BT-576) for single-responsibility.
     ensure_pid_table/0,
     ensure_pending_errors_table/0,
     record_class_pid/2,
-    class_name_for_pid/1
+    class_name_for_pid/1,
+    ensure_loaded_classes_table/0,
+    record_loaded_class/2,
+    forget_loaded_class/2,
+    loaded_class_names/0,
+    loaded_class_entries/0
 ]).
 
 -export_type([
@@ -726,6 +731,129 @@ class_name_for_pid(Pid) ->
                 [{_, ClassName}] -> {ok, ClassName};
                 [] -> not_found
             end
+    end.
+
+%%====================================================================
+%% Loaded-Class Name Index (BT-2384)
+%%====================================================================
+
+-doc """
+Ensure the loaded-class name index table exists (idempotent).
+
+BT-2384: This `set` table holds one `{ClassName, Pid}` row per loaded class,
+maintained by the class lifecycle: a row is inserted in
+`beamtalk_object_class:init/1` (via `record_loaded_class/2`) and removed in its
+`terminate/1` (via `forget_loaded_class/2`). It exists so that the ADR 0087
+xref miss-policy can compute the loaded-class *set* with a single ETS read
+instead of one `gen_server:call` per loaded class (`live_class_entries/0` asks
+each class process for its name + module). The full triple is unnecessary for
+the miss partition — it only needs names (for stale-drop) and pids (to gate the
+typically-empty fallback set), both of which this row carries.
+
+The table is `public` so the class process (any pid) can write its own row, and
+heir-protected (BT-1888) so it survives the owner's death. A row keyed by name
+keeps the membership idempotent across reload: a re-registering class simply
+overwrites its own row with the new pid.
+""".
+-spec ensure_loaded_classes_table() -> ok.
+ensure_loaded_classes_table() ->
+    case ets:info(beamtalk_loaded_classes) of
+        undefined ->
+            try
+                ets:new(
+                    beamtalk_loaded_classes,
+                    [
+                        set,
+                        public,
+                        named_table,
+                        {read_concurrency, true},
+                        {write_concurrency, true}
+                        | heir_option()
+                    ]
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _ ->
+            maybe_set_heir(beamtalk_loaded_classes),
+            ok
+    end.
+
+-doc """
+Record a class as loaded in the fast loaded-class name index.
+
+Called from `beamtalk_object_class:init/1`. Keyed by class name, so a reload
+(new pid for the same name) overwrites the prior row rather than accumulating
+duplicates — mirroring how the registry treats one name as one live class.
+""".
+-spec record_loaded_class(class_name(), pid()) -> ok.
+record_loaded_class(ClassName, Pid) when is_atom(ClassName), is_pid(Pid) ->
+    ensure_loaded_classes_table(),
+    ets:insert(beamtalk_loaded_classes, {ClassName, Pid}),
+    ok.
+
+-doc """
+Remove a class from the fast loaded-class name index.
+
+Called from `beamtalk_object_class:terminate/1` on graceful shutdown. The
+delete is guarded on the *pid* so that a stale row left by a crashed-then-
+restarted class (whose new init already re-recorded a different pid) is not
+clobbered by the dying old process: only a row still pointing at `Pid` is
+removed. On a hard crash `terminate/1` does not run, so a dead row can linger;
+`loaded_class_names/0` / `loaded_class_entries/0` filter those out with a cheap
+local `is_process_alive/1` (no messaging), exactly as `live_class_entries/0`
+drops dead pg members.
+""".
+-spec forget_loaded_class(class_name(), pid()) -> ok.
+forget_loaded_class(ClassName, Pid) when is_atom(ClassName), is_pid(Pid) ->
+    case ets:info(beamtalk_loaded_classes) of
+        undefined ->
+            ok;
+        _ ->
+            %% Only delete the row if it still names this pid — a reload may have
+            %% already overwritten it with the replacement process's pid.
+            _ = ets:select_delete(
+                beamtalk_loaded_classes,
+                [{{ClassName, Pid}, [], [true]}]
+            ),
+            ok
+    end.
+
+-doc """
+Return the set of currently-loaded class names (BT-2384).
+
+Reads the loaded-class index table and drops any row whose pid is no longer
+alive (a crash that skipped `terminate/1`), so the result matches the live set
+`live_class_entries/0` would report — but with a single ETS scan plus cheap
+local `is_process_alive/1` checks rather than O(classes) `gen_server:call`s.
+Returns an empty set if the table has not been created yet (early bootstrap).
+""".
+-spec loaded_class_names() -> sets:set(class_name()).
+loaded_class_names() ->
+    sets:from_list(
+        [Name || {Name, _Pid} <- loaded_class_entries()], [{version, 2}]
+    ).
+
+-doc """
+Return the live `{ClassName, Pid}` rows from the loaded-class index (BT-2384).
+
+The pid-carrying counterpart to `loaded_class_names/0`: dead-pid rows are
+filtered out with a local `is_process_alive/1` (no gen_server hop). The xref
+miss-policy uses the names for stale-drop and the pids to interrogate only the
+(typically empty) loaded-but-unindexed set.
+""".
+-spec loaded_class_entries() -> [{class_name(), pid()}].
+loaded_class_entries() ->
+    case ets:info(beamtalk_loaded_classes) of
+        undefined ->
+            [];
+        _ ->
+            [
+                {Name, Pid}
+             || {Name, Pid} <- ets:tab2list(beamtalk_loaded_classes),
+                is_process_alive(Pid)
+            ]
     end.
 
 %%====================================================================

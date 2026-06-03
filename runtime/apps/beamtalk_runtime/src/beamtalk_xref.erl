@@ -439,11 +439,13 @@ The return map has two keys:
   one. A loaded, *indexed* class that simply has zero senders of `Selector` is
   correct and never appears here.
 
-The loaded set is taken from `beamtalk_class_registry:live_class_entries/0`;
-the indexed set is the distinct owners present in the methods table. The stale
-drop and miss partition are pure ETS / set work; only the (typically empty)
-miss candidate set incurs the per-class method-count `gen_server:call`, so the
-cost is bounded by the miss count rather than the workspace size.
+The loaded set is read from the fast loaded-class ETS index
+(`beamtalk_class_registry:loaded_class_entries/0`, BT-2384) — a single ETS scan,
+not the O(loaded-classes) `gen_server:call` walk `live_class_entries/0` used to
+do. The indexed set is the distinct owners present in the methods table. The
+stale drop and miss partition are pure ETS / set work; only the (typically
+empty) miss candidate set incurs the per-class method-count `gen_server:call`,
+so the cost is bounded by the miss count rather than the workspace size.
 """.
 -spec senders_of_bt(selector()) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
@@ -772,13 +774,23 @@ bounded by the miss count, not the workspace size, exactly as the original
 """.
 -spec miss_partition(atom()) -> {sets:set(class_name()), [class_name()]}.
 miss_partition(Query) ->
-    Entries = beamtalk_class_registry:live_class_entries(),
-    Loaded = sets:from_list([Name || {Name, _Mod, _Pid} <- Entries]),
+    %% BT-2384: The loaded-class set comes from the fast ETS loaded-class index
+    %% (`beamtalk_class_registry:loaded_class_entries/0`) — a single ETS scan
+    %% plus cheap local `is_process_alive/1` filtering — NOT the old
+    %% `live_class_entries/0` walk that issued one `gen_server:call` per loaded
+    %% class to fetch its name + module. This keeps the shared miss partition
+    %% O(loaded-classes) *pure-ETS*, with no per-class messaging.
+    Entries = beamtalk_class_registry:loaded_class_entries(),
+    Loaded = sets:from_list([Name || {Name, _Pid} <- Entries], [{version, 2}]),
     Indexed = indexed_class_set(),
     %% Index miss: loaded, absent from the index, and actually defines methods.
+    %% The `class_defines_methods/1` gate is the only remaining `gen_server:call`,
+    %% and it runs ONLY for the loaded-minus-indexed set, which is empty in
+    %% steady state — so the cost is bounded by the miss count, not the
+    %% workspace size.
     FallbackClasses = [
         Name
-     || {Name, _Mod, Pid} <- Entries,
+     || {Name, Pid} <- Entries,
         not sets:is_element(Name, Indexed),
         class_defines_methods(Pid)
     ],
