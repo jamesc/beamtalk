@@ -46,8 +46,11 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     senders_of/1,
     senders_of_bt/1,
     references_to/1,
+    references_to_bt/1,
     implementors_of/1,
+    implementors_of_bt/1,
     defined_selectors/2,
+    defined_selectors_bt/0,
     method_info/3
 ]).
 
@@ -132,11 +135,31 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     line := pos_integer()
 }.
 
+%% An implementor reduced to the fields `SystemNavigation implementorsOf:`
+%% consumes: the defining class and whether the definition is class-side. The
+%% BT layer maps this onto the class object (instance-side) or the metaclass
+%% object (class-side) — there is no line or sent-selector channel (BT-2302).
+-type impl_row() :: #{
+    owner := class_name(),
+    class_side := class_side()
+}.
+
+%% A defined-selector row reduced to the fields `SystemNavigation
+%% selectorsMatching:` consumes: the defining class, the side, and the selector
+%% name. The pattern filter runs BT-side over `selector` (BT-2302).
+-type selector_row() :: #{
+    owner := class_name(),
+    class_side := class_side(),
+    selector := selector()
+}.
+
 -export_type([
     method_xref_entry/0,
     method_info/0,
     site/0,
     bt_row/0,
+    impl_row/0,
+    selector_row/0,
     source_status/0,
     provenance/0,
     recv_kind/0
@@ -372,25 +395,13 @@ cost is bounded by the miss count rather than the workspace size.
 -spec senders_of_bt(selector()) ->
     #{indexed := [bt_row()], fallback_classes := [class_name()]}.
 senders_of_bt(Selector) when is_atom(Selector) ->
-    Entries = beamtalk_class_registry:live_class_entries(),
-    Loaded = sets:from_list([Name || {Name, _Mod, _Pid} <- Entries]),
-    Indexed = indexed_class_set(),
+    {Loaded, FallbackClasses} = miss_partition(sendersOf),
     Sites = senders_of(Selector),
     %% Stale-drop: keep only sites whose owner is still loaded.
     IndexedRows = [
         site_to_bt_row(Site)
      || Site <- Sites, sets:is_element(maps:get(owner, Site), Loaded)
     ],
-    %% Index miss: loaded, absent from the index, and actually defines methods.
-    %% The method gate (per-pid gen_server call) only runs for the loaded set
-    %% minus the indexed set, which is empty in steady state.
-    FallbackClasses = [
-        Name
-     || {Name, _Mod, Pid} <- Entries,
-        not sets:is_element(Name, Indexed),
-        class_defines_methods(Pid)
-    ],
-    lists:foreach(fun(Class) -> log_xref_miss(Class, sendersOf) end, FallbackClasses),
     #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
 
 -doc """
@@ -403,6 +414,35 @@ references_to(Class) when is_atom(Class) ->
         undefined -> [];
         _ -> [Site || {_Cls, Site} <- ets:lookup(?REFERENCES_TABLE, Class)]
     end.
+
+-doc """
+Resolve the references to `Class` with the ADR 0087 miss-policy applied,
+returning the partition `SystemNavigation referencesTo:` needs (BT-2302).
+
+Identical in shape and semantics to `senders_of_bt/1` — the references channel
+is baked into the index by codegen alongside senders (one `references` row per
+class mention, including type annotations such as `List(Counter)`). The return
+map has the same two keys:
+
+- `indexed` — reference sites drawn straight from the ETS index, with **stale
+  rows dropped** (a site whose `owner` class is no longer loaded is silently
+  discarded). Each surviving row is a `bt_row()` the BT side maps onto the
+  `#{#class, #selector, #line}` record shape, byte-for-byte identical to the
+  legacy source-scan path.
+- `fallback_classes` — the loaded-but-unindexed, method-bearing classes the BT
+  side must source-scan. One `xref_miss` `?LOG_WARNING` is emitted here per
+  class. See `senders_of_bt/1` for the full miss-policy rationale.
+""".
+-spec references_to_bt(class_name()) ->
+    #{indexed := [bt_row()], fallback_classes := [class_name()]}.
+references_to_bt(Class) when is_atom(Class) ->
+    {Loaded, FallbackClasses} = miss_partition(referencesTo),
+    Sites = references_to(Class),
+    IndexedRows = [
+        site_to_bt_row(Site)
+     || Site <- Sites, sets:is_element(maps:get(owner, Site), Loaded)
+    ],
+    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
 
 -doc """
 Return all `{Class, ClassSide}` pairs that implement `Selector`.
@@ -421,6 +461,34 @@ implementors_of(Selector) when is_atom(Selector) ->
     end.
 
 -doc """
+Resolve the implementors of `Selector` with the ADR 0087 miss-policy applied,
+returning the partition `SystemNavigation implementorsOf:` needs (BT-2302).
+
+`implementorsOf:` does not parse source — it asks each class which selectors it
+*defines*, which is exactly the methods-table channel. The return map mirrors
+`senders_of_bt/1` but the indexed rows carry no line / sent-selector data:
+
+- `indexed` — one `impl_row()` (`#{owner, class_side}`) per loaded class that
+  defines `Selector` (instance- or class-side), with **stale rows dropped**
+  (an implementor whose class is no longer loaded is discarded). The BT side
+  maps each row to the class object (instance-side) or the metaclass object
+  (class-side), de-duplicated against the source-scan results.
+- `fallback_classes` — the loaded-but-unindexed, method-bearing classes the BT
+  side must check directly via `includesSelector:`. One `xref_miss`
+  `?LOG_WARNING` is emitted per class. See `senders_of_bt/1` for rationale.
+""".
+-spec implementors_of_bt(selector()) ->
+    #{indexed := [impl_row()], fallback_classes := [class_name()]}.
+implementors_of_bt(Selector) when is_atom(Selector) ->
+    {Loaded, FallbackClasses} = miss_partition(implementorsOf),
+    %% Stale-drop: keep only implementors whose class is still loaded.
+    IndexedRows = [
+        #{owner => Cls, class_side => CS}
+     || {Cls, CS} <- implementors_of(Selector), sets:is_element(Cls, Loaded)
+    ],
+    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
+
+-doc """
 Return the selectors defined on `Class` for the given side
 (`ClassSide = true` for class-side methods, `false` for instance-side).
 """.
@@ -433,6 +501,45 @@ defined_selectors(Class, ClassSide) when is_atom(Class), is_boolean(ClassSide) -
             Matches = ets:match(?METHODS_TABLE, {{Class, ClassSide, '$1'}, '_'}),
             lists:usort([Sel || [Sel] <- Matches])
     end.
+
+-doc """
+Return every defined-selector row across the whole index with the ADR 0087
+miss-policy applied, the partition `SystemNavigation selectorsMatching:` needs
+(BT-2302).
+
+Unlike the per-key queries, `selectorsMatching:` walks the *universe* of defined
+selectors and filters by a substring pattern BT-side, so this returns all
+method-table rows rather than a single key's lookup. The return map mirrors the
+other `_bt` reads:
+
+- `indexed` — one `selector_row()` (`#{owner, class_side, selector}`) per
+  method-table row whose owner class is still loaded (**stale rows dropped**).
+  The BT side keeps the selector atoms and applies the lowercase substring
+  filter; the owner / side are carried so de-duplication against the source /
+  extension selectors stays correct.
+- `fallback_classes` — the loaded-but-unindexed, method-bearing classes whose
+  selectors the BT side must gather directly from `methods` / `class methods`.
+  One `xref_miss` `?LOG_WARNING` is emitted per class. See `senders_of_bt/1`.
+""".
+-spec defined_selectors_bt() ->
+    #{indexed := [selector_row()], fallback_classes := [class_name()]}.
+defined_selectors_bt() ->
+    {Loaded, FallbackClasses} = miss_partition(selectorsMatching),
+    IndexedRows =
+        case ets:whereis(?METHODS_TABLE) of
+            undefined ->
+                [];
+            _ ->
+                %% Each methods-table row is keyed {Class, ClassSide, Selector}.
+                %% Project to the selector_row() the BT layer consumes, dropping
+                %% rows whose owner is no longer loaded (stale).
+                Matches = ets:match(?METHODS_TABLE, {{'$1', '$2', '$3'}, '_'}),
+                [
+                    #{owner => Cls, class_side => CS, selector => Sel}
+                 || [Cls, CS, Sel] <- Matches, sets:is_element(Cls, Loaded)
+                ]
+        end,
+    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
 
 -doc """
 Return the `method_info()` record for a method, or `undefined` if the
@@ -477,6 +584,35 @@ method_info(Class, ClassSide, Selector) when
 %%====================================================================
 %% Internal: read helpers (miss-policy)
 %%====================================================================
+
+-doc """
+Compute the ADR 0087 miss partition shared by every `_bt` read API (BT-2302):
+the set of loaded class names (for stale-dropping indexed rows) and the list of
+loaded-but-unindexed, method-bearing classes the BT side must fall back to
+source-scanning.
+
+`Query` names the navigation query for the per-class `xref_miss` warning so the
+gap surfaces with the right context (`sendersOf` / `referencesTo` /
+`implementorsOf` / `selectorsMatching`). One warning is emitted per fallback
+class. The method gate (a per-pid `gen_server:call`) runs only for the loaded
+set minus the indexed set, which is empty in steady state — so the cost is
+bounded by the miss count, not the workspace size, exactly as the original
+`senders_of_bt/1` partition was.
+""".
+-spec miss_partition(atom()) -> {sets:set(class_name()), [class_name()]}.
+miss_partition(Query) ->
+    Entries = beamtalk_class_registry:live_class_entries(),
+    Loaded = sets:from_list([Name || {Name, _Mod, _Pid} <- Entries]),
+    Indexed = indexed_class_set(),
+    %% Index miss: loaded, absent from the index, and actually defines methods.
+    FallbackClasses = [
+        Name
+     || {Name, _Mod, Pid} <- Entries,
+        not sets:is_element(Name, Indexed),
+        class_defines_methods(Pid)
+    ],
+    lists:foreach(fun(Class) -> log_xref_miss(Class, Query) end, FallbackClasses),
+    {Loaded, FallbackClasses}.
 
 -doc """
 Whether the class behind `Pid` defines at least one method (instance- or
