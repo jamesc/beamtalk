@@ -121,6 +121,44 @@ point_xref() ->
         }
     ].
 
+%% ADR 0087 Phase 6 (BT-2304): a value class's `method_xref` payload as codegen
+%% now emits it — the hand-written method plus the compiler-generated
+%% auto-accessors for the `value` slot. The synthetic getter / setter carry
+%% `source_status => synthetic` and a `synthetic_origin` line pointing at the
+%% generating slot declaration, and ride the same write path as the indexed row.
+value_class_with_synthetic_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => 'doubled',
+            line => 5,
+            sends => [#{selector => '+', line => 6, recv_kind => self_recv}],
+            references => [],
+            source_status => indexed,
+            provenance => class_body
+        },
+        #{
+            class_side => false,
+            selector => 'value',
+            line => 2,
+            sends => [],
+            references => [#{class => 'Integer', line => 2}],
+            source_status => synthetic,
+            synthetic_origin => 2,
+            provenance => class_body
+        },
+        #{
+            class_side => false,
+            selector => 'withValue:',
+            line => 2,
+            sends => [],
+            references => [#{class => 'Integer', line => 2}],
+            source_status => synthetic,
+            synthetic_origin => 2,
+            provenance => class_body
+        }
+    ].
+
 %%====================================================================
 %% register_class / read APIs
 %%====================================================================
@@ -189,6 +227,60 @@ multi_class_test_() ->
 
                 %% implementors_of is class-specific.
                 ?assertEqual([{'Point', false}], beamtalk_xref:implementors_of('distanceTo:'))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% ADR 0087 Phase 6 (BT-2304): synthetic auto-accessor parity
+%%====================================================================
+
+synthetic_accessor_visibility_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                ok = beamtalk_xref:register_class(
+                    'Boxed', value_class_with_synthetic_xref()
+                ),
+
+                %% Parity exception: the synthetic `value` getter IS an
+                %% implementor of `#value` — non-empty where a source-scan query
+                %% returned empty pre-index (the auto-accessor has no source).
+                ?assertEqual([{'Boxed', false}], beamtalk_xref:implementors_of('value')),
+                ?assertEqual(
+                    [{'Boxed', false}], beamtalk_xref:implementors_of('withValue:')
+                ),
+
+                %% Synthetic accessors are defined selectors like any other.
+                Defined = lists:sort(beamtalk_xref:defined_selectors('Boxed', false)),
+                ?assertEqual(['doubled', 'value', 'withValue:'], Defined),
+
+                %% The synthetic rows are tagged `synthetic` (the filterable
+                %% parity marker), distinct from the hand-written `indexed` row.
+                ValueInfo = beamtalk_xref:method_info('Boxed', false, 'value'),
+                ?assertEqual(synthetic, maps:get(source_status, ValueInfo)),
+                SetterInfo = beamtalk_xref:method_info('Boxed', false, 'withValue:'),
+                ?assertEqual(synthetic, maps:get(source_status, SetterInfo)),
+                DoubledInfo = beamtalk_xref:method_info('Boxed', false, 'doubled'),
+                ?assertEqual(indexed, maps:get(source_status, DoubledInfo)),
+
+                %% The synthetic getter's `line` is the derived origin (the slot
+                %% declaration line) so LSP / System Browser can navigate to it.
+                ?assertEqual(2, maps:get(line, ValueInfo)),
+
+                %% The slot type reference (`Integer`) rides along: the synthetic
+                %% accessor contributes a reference exactly like a hand-written
+                %% typed accessor would.
+                IntRefs = beamtalk_xref:references_to('Integer'),
+                IntMethods = lists:sort([maps:get(method, R) || R <- IntRefs]),
+                ?assertEqual(['value', 'withValue:'], IntMethods),
+
+                %% Synthetic accessors delegate to runtime map primitives, so they
+                %% contribute no senders — `value` / `withValue:` send nothing.
+                %% Assert both the getter and the setter to catch a regression
+                %% where synthetic setters start recording sends.
+                ?assertEqual([], beamtalk_xref:senders_of('value')),
+                ?assertEqual([], beamtalk_xref:senders_of('withValue:'))
             end)
         ]
     end}.

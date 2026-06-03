@@ -1,24 +1,26 @@
 # ADR 0087: Maintained Selector→Sites Cross-Reference Index for SystemNavigation
 
 ## Status
-Accepted (2026-05-26)
+Implemented (2026-06-03)
 
 ## Implementation Tracking
 
 **Epic:** [BT-2228](https://linear.app/beamtalk/issue/BT-2228) — Runtime: maintained selector→sites xref index for SystemNavigation queries
 
+All eight child issues are merged to `main`. The epic is complete; this ADR is `Implemented`.
+
 **Phases / child issues:**
 
-| Phase | Issue | Title | Size | Blocked by |
-|---|---|---|---|---|
-| 1 | [BT-2297](https://linear.app/beamtalk/issue/BT-2297) | Runtime: `beamtalk_xref` gen_server + supervisor wiring | M | – |
-| 2 | [BT-2298](https://linear.app/beamtalk/issue/BT-2298) | Codegen + runtime: bake `method_xref` into `register_class/0`; sync-forward in `start/2` | M | BT-2297 |
-| 3 | [BT-2299](https://linear.app/beamtalk/issue/BT-2299) | Stdlib: migrate `sendersOf:` to xref + miss-policy fallback + benchmark (napkin wire-check) | M | BT-2298 |
-| 4a | [BT-2300](https://linear.app/beamtalk/issue/BT-2300) | Runtime: hot-reload purge + new-gen install with atomicity | M | BT-2299 |
-| 4b | [BT-2301](https://linear.app/beamtalk/issue/BT-2301) | Runtime: `put_method/4`, extension, and ClassBuilder lifecycle hooks | M | BT-2298 |
-| 5a | [BT-2302](https://linear.app/beamtalk/issue/BT-2302) | Stdlib: migrate `referencesTo:` + `implementorsOf:` + `selectorsMatching:` to xref | M | BT-2299 |
-| 5b | [BT-2303](https://linear.app/beamtalk/issue/BT-2303) | Stdlib: migrate `unimplementedSelectors` + `unusedSelectors` to xref | M | BT-2299 |
-| 6 | [BT-2304](https://linear.app/beamtalk/issue/BT-2304) | Codegen: synthetic-method xref emission + parity tests + ADR Accepted→Implemented | M | BT-2298 |
+| Phase | Issue | Title | Size | Blocked by | PR | Merged commit |
+|---|---|---|---|---|---|---|
+| 1 | [BT-2297](https://linear.app/beamtalk/issue/BT-2297) | Runtime: `beamtalk_xref` gen_server + supervisor wiring | M | – | #2329 | `0e8b84f4` |
+| 2 | [BT-2298](https://linear.app/beamtalk/issue/BT-2298) | Codegen + runtime: bake `method_xref` into `register_class/0`; sync-forward in `start/2` | M | BT-2297 | #2432 | `22245a09` |
+| 3 | [BT-2299](https://linear.app/beamtalk/issue/BT-2299) | Stdlib: migrate `sendersOf:` to xref + miss-policy fallback + benchmark (napkin wire-check) | M | BT-2298 | #2433 | `aabdd326` |
+| 4a | [BT-2300](https://linear.app/beamtalk/issue/BT-2300) | Runtime: hot-reload purge + new-gen install with atomicity | M | BT-2299 | #2440 | `94ff90c9` |
+| 4b | [BT-2301](https://linear.app/beamtalk/issue/BT-2301) | Runtime: `put_method/4`, extension, and ClassBuilder lifecycle hooks | M | BT-2298 | #2434 | `0c681057` |
+| 5a | [BT-2302](https://linear.app/beamtalk/issue/BT-2302) | Stdlib: migrate `referencesTo:` + `implementorsOf:` + `selectorsMatching:` to xref | M | BT-2299 | #2439 | `8778ea83` |
+| 5b | [BT-2303](https://linear.app/beamtalk/issue/BT-2303) | Stdlib: migrate `unimplementedSelectors` + `unusedSelectors` to xref | M | BT-2299 | #2441 | `393fa9dc` |
+| 6 | [BT-2304](https://linear.app/beamtalk/issue/BT-2304) | Codegen: synthetic-method xref emission + parity tests + ADR Accepted→Implemented | M | BT-2298 | #2442 | this commit |
 
 Phases 4 and 5 each split into two sibling issues (4a/4b, 5a/5b) — they touch overlapping files and serialize across waves, but conceptually live in the same phase of the migration.
 
@@ -36,7 +38,11 @@ File-overlap constraints:
 - BT-2302 and BT-2303 both touch `stdlib/src/SystemNavigation.bt` — serialized across waves 4 and 5.
 - BT-2300 and BT-2301 both touch `runtime/apps/beamtalk_runtime/src/beamtalk_xref.erl` API surface — serialized across waves 4 and 5.
 
-**Status will move to `Implemented` when BT-2304 (Phase 6) merges** — that issue's acceptance criteria include updating this header.
+**Status moved to `Implemented` with BT-2304 (Phase 6).** Phase 6 lit up the
+synthetic-accessor parity exception (compiler-generated `field/1` getters and
+`withField:/2` setters for `Value subclass:` classes now emit
+`source_status => synthetic` xref rows with a derived `synthetic_origin`) and
+closed out the epic.
 
 ## Context
 

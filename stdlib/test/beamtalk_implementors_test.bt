@@ -49,3 +49,25 @@ TestCase subclass: SystemNavigationImplementorsTest
   // owner-tag/class-side -> class-object resolver that maps the indexed rows.
   testHelperSenderClassForIsDefined =>
     self assert: (SystemNavigation includesSelector: #senderClassFor:classSide:)
+
+  // --- BT-2304 / ADR 0087 Phase 6: synthetic auto-accessor parity exception ---
+  //
+  // Compiler-generated auto-accessors for `Value subclass:` classes (the
+  // `field/1` getters and `withField:/2` setters from value_type_codegen.rs)
+  // have no user source text, so the pre-index source-scan queries could not
+  // see them. Under the xref index they ride the same write path with
+  // `source_status => synthetic` and a derived `synthetic_origin`, so
+  // `implementorsOf:` on an auto-accessor is now NON-empty. This is a documented
+  // parity exception — more complete than before, not a regression.
+  //
+  // The index-level behavioural assertions (the synthetic row appears in
+  // `implementors_of`, carries `source_status => synthetic`, contributes the
+  // slot-type reference, and sends nothing) live in the runtime EUnit suite
+  // `beamtalk_xref_tests:synthetic_accessor_visibility_test_` — the live xref
+  // server is required and the BUnit harness does not start it. The structural
+  // check below confirms the auto-accessor really is a dispatchable method on a
+  // stdlib value class (the registry is populated under BUnit): `ChangeEntry` is
+  // a `Value subclass:` whose `seq` slot's `withSeq:` setter is compiler-emitted
+  // (the class hand-defines the `seq` getter but no setter).
+  testSyntheticAutoSetterIsADispatchableMethod =>
+    self assert: (ChangeEntry includesSelector: #withSeq:)
