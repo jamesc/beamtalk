@@ -406,6 +406,7 @@ init({ClassName, ClassInfo}) ->
     beamtalk_class_registry:ensure_module_table(),
     beamtalk_class_registry:ensure_methods_table(),
     beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_class_registry:ensure_loaded_classes_table(),
     ok = pg:join(beamtalk_classes, self()),
 
     Superclass = maps:get(superclass, ClassInfo, none),
@@ -474,6 +475,12 @@ init({ClassName, ClassInfo}) ->
     %% This entry survives process death, allowing class_send to identify
     %% which class a dead pid belonged to and attempt auto-restart.
     beamtalk_class_registry:record_class_pid(self(), ClassName),
+
+    %% BT-2384: Record this class in the fast loaded-class name index so the
+    %% ADR 0087 xref miss-policy can compute the loaded-class set with one ETS
+    %% read instead of an O(loaded-classes) gen_server walk. Mirrors the
+    %% pg:join above and the forget_loaded_class in terminate/1.
+    beamtalk_class_registry:record_loaded_class(ClassName, self()),
 
     %% ADR 0050 Phase 3: Notify compiler server of this class registration.
     %% Cast is fire-and-forget — silently dropped if the compiler server is not running.
@@ -1017,6 +1024,16 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     _ =
         (try
             pg:leave(beamtalk_classes, self())
+        catch
+            _:_ -> ok
+        end),
+    %% BT-2384: Drop this class from the fast loaded-class name index. Guarded
+    %% on self() inside forget_loaded_class/2 so a reload that already recorded
+    %% a replacement pid is not clobbered. On a hard crash this does not run;
+    %% the reader's is_process_alive/1 filter drops the dead row instead.
+    _ =
+        (try
+            beamtalk_class_registry:forget_loaded_class(ClassName, self())
         catch
             _:_ -> ok
         end),

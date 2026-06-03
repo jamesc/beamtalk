@@ -26,10 +26,22 @@
 
 main(_) ->
     code:add_pathsa(filelib:wildcard("_build/default/lib/*/ebin")),
+    code:add_pathsa(filelib:wildcard("apps/*/ebin")),
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
     {ok, _} = application:ensure_all_started(beamtalk_compiler),
+    timer:sleep(500),
+    %% Force-load the compiled stdlib modules so their on_load hooks register
+    %% the full 81-class workspace (the app start alone only brings up the
+    %% bootstrap stubs). Mirrors what `just build` + a REPL session would load.
+    lists:foreach(
+        fun(Beam) ->
+            Mod = list_to_atom(filename:basename(Beam, ".beam")),
+            code:ensure_loaded(Mod)
+        end,
+        filelib:wildcard("apps/beamtalk_stdlib/ebin/bt@stdlib@*.beam")
+    ),
     %% Let stdlib classes finish loading + indexing.
-    timer:sleep(800),
+    timer:sleep(1500),
 
     Selector = 'asString',
     Classes = beamtalk_class_registry:live_class_entries(),
@@ -64,6 +76,24 @@ main(_) ->
         true -> io:format("speedup: ~.1fx~n", [BeforeUs / AfterUs]);
         false -> io:format("speedup: (after too fast to measure)~n")
     end,
+
+    %% BT-2384: isolate the loaded-class-set computation that the miss-policy
+    %% partition depends on. The old path (`live_class_entries/0`) issues one
+    %% gen_server:call per loaded class; the new path (`loaded_class_entries/0`)
+    %% is a single ETS scan plus local is_process_alive/1 filtering.
+    {RegWalkUs, _} = time_avg(
+        fun() -> length(beamtalk_class_registry:live_class_entries()) end, 200
+    ),
+    {EtsReadUs, _} = time_avg(
+        fun() -> length(beamtalk_class_registry:loaded_class_entries()) end, 1000
+    ),
+    io:format("~n=== loaded-class set (miss-partition input) ===~n", []),
+    io:format("registry walk  (live_class_entries/0,   200 iters): ~.3f ms/op~n", [
+        RegWalkUs / 1000
+    ]),
+    io:format("ETS read       (loaded_class_entries/0, 1000 iters): ~.3f ms/op~n", [
+        EtsReadUs / 1000
+    ]),
     ok.
 
 %% Average microseconds per iteration, plus the last result's count.

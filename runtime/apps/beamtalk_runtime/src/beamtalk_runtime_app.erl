@@ -38,6 +38,12 @@ start(_StartType, _StartArgs) ->
     %% by the application master (survives individual class process crashes).
     beamtalk_class_registry:ensure_pid_table(),
 
+    %% BT-2384: Create the fast loaded-class name index at app startup so the
+    %% ADR 0087 xref miss-policy can read the loaded-class set from ETS rather
+    %% than walking the registry with one gen_server:call per class. Owned by
+    %% the application master so it survives class process crashes.
+    beamtalk_class_registry:ensure_loaded_classes_table(),
+
     %% BT-737: Create collision warnings ETS table at app startup.
     beamtalk_class_registry:ensure_class_warnings_table(),
 
@@ -53,6 +59,7 @@ start(_StartType, _StartArgs) ->
             %% This ensures the tables survive even if the application controller
             %% process is replaced.
             beamtalk_class_registry:ensure_pid_table(),
+            beamtalk_class_registry:ensure_loaded_classes_table(),
             beamtalk_class_registry:ensure_class_warnings_table(),
             beamtalk_class_registry:ensure_pending_errors_table(),
             %% BT-2222: Same retroactive heir set for the unified class metadata

@@ -338,6 +338,79 @@ live_class_entries_test_() ->
         ]}.
 
 %%% ============================================================================
+%%% loaded-class name index tests (BT-2384)
+%%% ============================================================================
+
+%% A class started through the normal lifecycle records itself in the fast
+%% loaded-class index (init hook); stopping it removes the row (terminate hook).
+%% This is the cache-coherence contract the xref miss-policy depends on.
+loaded_class_index_lifecycle_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_class_registry:ensure_loaded_classes_table()
+        end,
+        fun(_) -> ok end, [
+            {"started class appears, stopped class disappears", fun() ->
+                Class = 'LoadedIndexLifecycle2384',
+                ?assertNot(sets:is_element(Class, beamtalk_class_registry:loaded_class_names())),
+                ClassInfo = #{superclass => none, methods => #{}, class_methods => #{}},
+                {ok, Pid} = beamtalk_object_class:start_link(Class, ClassInfo),
+                ?assert(sets:is_element(Class, beamtalk_class_registry:loaded_class_names())),
+                ok = gen_server:stop(Pid),
+                ?assertNot(sets:is_element(Class, beamtalk_class_registry:loaded_class_names()))
+            end},
+            {"loaded_class_entries carries the live pid", fun() ->
+                Class = 'LoadedIndexEntries2384',
+                ClassInfo = #{superclass => none, methods => #{}, class_methods => #{}},
+                {ok, Pid} = beamtalk_object_class:start_link(Class, ClassInfo),
+                try
+                    Entries = beamtalk_class_registry:loaded_class_entries(),
+                    ?assert(lists:member({Class, Pid}, Entries))
+                after
+                    gen_server:stop(Pid)
+                end
+            end}
+        ]}.
+
+%% A class that crashes (its terminate/1 never runs) leaves a stale {Name, Pid}
+%% row, but the reader filters dead pids out via is_process_alive/1 — so the
+%% loaded set stays coherent without a gen_server round-trip. BT-2384.
+loaded_class_index_drops_dead_pid_test() ->
+    beamtalk_class_registry:ensure_loaded_classes_table(),
+    Class = 'LoadedIndexDeadPid2384',
+    %% Forge a row pointing at a pid that is already dead (mimics a crash that
+    %% skipped terminate/1). We can write directly because the table is public.
+    DeadPid = spawn(fun() -> ok end),
+    %% Wait for the spawned process to exit so the pid is reliably dead.
+    Ref = monitor(process, DeadPid),
+    receive
+        {'DOWN', Ref, process, DeadPid, _} -> ok
+    after 1000 -> ok
+    end,
+    ets:insert(beamtalk_loaded_classes, {Class, DeadPid}),
+    ?assertNot(sets:is_element(Class, beamtalk_class_registry:loaded_class_names())),
+    ?assertNot(lists:keymember(Class, 1, beamtalk_class_registry:loaded_class_entries())),
+    ets:delete(beamtalk_loaded_classes, Class).
+
+%% A reload (same name, new pid) overwrites the row; the dying old process must
+%% not clobber the replacement — forget_loaded_class/2 is guarded on the pid.
+%% BT-2384.
+loaded_class_index_reload_keeps_new_pid_test() ->
+    beamtalk_class_registry:ensure_loaded_classes_table(),
+    Class = 'LoadedIndexReload2384',
+    OldPid = list_to_pid("<0.9991.0>"),
+    NewPid = list_to_pid("<0.9992.0>"),
+    %% Record the "new" generation's pid, then have the "old" generation try to
+    %% forget itself. The guard must leave the new pid's row intact.
+    ets:insert(beamtalk_loaded_classes, {Class, NewPid}),
+    ok = beamtalk_class_registry:forget_loaded_class(Class, OldPid),
+    ?assertEqual([{Class, NewPid}], ets:lookup(beamtalk_loaded_classes, Class)),
+    %% Forgetting with the matching pid removes it.
+    ok = beamtalk_class_registry:forget_loaded_class(Class, NewPid),
+    ?assertEqual([], ets:lookup(beamtalk_loaded_classes, Class)).
+
+%%% ============================================================================
 %%% get_method_return_type / get_class_method_return_type tests (BT-1002)
 %%% ============================================================================
 
