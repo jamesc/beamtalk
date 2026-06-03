@@ -1545,7 +1545,7 @@ impl CoreErlangGenerator {
     /// line pointing at the generating slot declaration (or the class header).
     /// Included by default so `implementorsOf: #value` on an auto-accessor is
     /// non-empty — a documented parity exception, not a regression.
-    fn build_method_xref_list(
+    pub(in crate::codegen::core_erlang::gen_server) fn build_method_xref_list(
         &self,
         class: &ClassDefinition,
         instance_methods: &[&MethodDefinition],

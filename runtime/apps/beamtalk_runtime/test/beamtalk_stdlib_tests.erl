@@ -23,6 +23,20 @@ stdlib_setup() ->
     end,
     %% Initialize extensions ETS table
     beamtalk_extensions:init(),
+    %% BT-2385: Initialize the protocol registry ETS table so protocol-only
+    %% modules (e.g. Printable) can register during stdlib load. Without this
+    %% their on_load `register_protocol/1` crashes on a missing ETS table and
+    %% the protocol class object (with its xref rows) is never created.
+    beamtalk_protocol_registry:init(),
+    %% BT-2385: Start beamtalk_xref before loading stdlib so that class on_load
+    %% (`register_class/0`) and protocol registration forward their baked
+    %% method_xref rows into the index. In the real runtime xref is the first
+    %% supervisor child, ahead of bootstrap; mirror that ordering here so the
+    %% xref-indexing regression test sees a populated index.
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
     %% Start bootstrap (starts pg) then load stdlib classes
     {ok, _} = beamtalk_bootstrap:start_link(),
     beamtalk_stdlib:init(),
@@ -45,6 +59,8 @@ stdlib_test_() ->
         {"Tuple class is registered", fun tuple_class_registered_test/0},
         {"BeamtalkInterface class is registered", fun system_dictionary_class_registered_test/0},
         {"TranscriptStream class is registered", fun transcript_stream_class_registered_test/0},
+        {"method-bearing stdlib classes carry baked method_xref (BT-2385)",
+            fun method_bearing_classes_indexed_test/0},
         {"Integer class has correct superclass", fun integer_superclass_test/0},
         {"Integer class has expected methods", fun integer_methods_test/0},
         %% Beamtalk class method tests
@@ -146,6 +162,23 @@ transcript_stream_class_registered_test() ->
     Pid = beamtalk_class_registry:whereis_class('TranscriptStream'),
     ?assertNotEqual(undefined, Pid),
     ?assertEqual('TranscriptStream', beamtalk_object_class:class_name(Pid)).
+
+%% BT-2385: Regression — these method-bearing stdlib classes previously loaded
+%% with NO baked method_xref, so they were absent from `xref_class_gen` and every
+%% navigation query source-scanned them via the miss-policy fallback (one
+%% `xref_miss` warning per query). The gaps were three distinct class shapes:
+%%   * `Printable` — a `Protocol define:`; its class object's two class-side
+%%     methods (`requiredMethods`/`conformingClasses`) are runtime funs created
+%%     in beamtalk_protocol_registry, which now bakes their method_xref.
+%%   * `TranscriptStream` / `Subprocess` — `native:` actors whose facade
+%%     `register_class/0` (native_facade.rs) now bakes method_xref like the
+%%     standard path.
+%% Asserts each appears in the `xref_class_gen` index after a normal stdlib load.
+method_bearing_classes_indexed_test() ->
+    Indexed = fun(Class) -> ets:lookup(xref_class_gen, Class) =/= [] end,
+    ?assert(Indexed('Printable')),
+    ?assert(Indexed('TranscriptStream')),
+    ?assert(Indexed('Subprocess')).
 
 integer_superclass_test() ->
     Pid = beamtalk_class_registry:whereis_class('Integer'),
