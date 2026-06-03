@@ -312,3 +312,243 @@ compile_file_core_class_extraction_test() ->
     ]),
     %% Core erlang compile will fail, but we're just verifying it handles the error
     ?assertMatch({error, _}, Result).
+
+%%====================================================================
+%% Success-path tests (require the beamtalk_compiler OTP app + port)
+%%
+%% These exercise the compile pipeline end-to-end: Beamtalk source ->
+%% Core Erlang (Rust port) -> BEAM bytecode. They cover the cold success
+%% branches of compile_expression/compile_file/compile_for_codegen/etc.
+%% that the noproc error-path tests above cannot reach.
+%%====================================================================
+
+setup_compiler() ->
+    application:ensure_all_started(compiler),
+    %% Start the runtime so the class-hierarchy ETS table is populated; this
+    %% lets build_class_superclass_index/0 and build_class_module_index/0
+    %% return non-empty maps and add_class_indexes/1 take its populated branches.
+    application:ensure_all_started(beamtalk_runtime),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    %% Give the runtime a moment to register its bootstrap classes.
+    timer:sleep(300),
+    ok.
+
+teardown_compiler(_) ->
+    %% Stop the compiler app so later test modules in the shared EUnit node see
+    %% the baseline "compiler not running" state (noproc error-path tests in
+    %% beamtalk_repl_eval_tests depend on it).
+    _ = application:stop(beamtalk_compiler),
+    ok.
+
+compiler_success_test_() ->
+    {setup, fun setup_compiler/0, fun teardown_compiler/1, [
+        {"compile_expression standard expr succeeds", fun compile_expression_standard_ok/0},
+        {"compile_expression with known vars succeeds", fun compile_expression_known_vars_ok/0},
+        {"compile_expression class definition succeeds", fun compile_expression_class_def_ok/0},
+        {"compile_expression method definition succeeds", fun compile_expression_method_def_ok/0},
+        {"compile_expression invalid returns diagnostics", fun compile_expression_invalid/0},
+        {"compile_expression_via_port standard succeeds", fun compile_via_port_standard_ok/0},
+        {"compile_expression_trace standard succeeds", fun compile_trace_standard_ok/0},
+        {"compile_expression_trace invalid returns error", fun compile_trace_invalid/0},
+        {"compile_file class succeeds", fun compile_file_ok/0},
+        {"compile_file invalid returns compile_error", fun compile_file_invalid/0},
+        {"compile_file/5 with prebuilt indexes succeeds", fun compile_file_prebuilt_ok/0},
+        {"compile_for_codegen standard succeeds", fun compile_for_codegen_ok/0},
+        {"compile_for_codegen class succeeds", fun compile_for_codegen_class_ok/0},
+        {"compile_for_codegen method def rejected", fun compile_for_codegen_method_rejected/0},
+        {"compile_for_codegen invalid returns error", fun compile_for_codegen_invalid/0},
+        {"compile_file_for_codegen succeeds", fun compile_file_for_codegen_ok/0},
+        {"compile_file_for_codegen invalid returns error", fun compile_file_for_codegen_invalid/0},
+        {"compile_for_method_reload succeeds", fun compile_for_method_reload_ok/0},
+        {"compile_for_method_reload invalid returns error",
+            fun compile_for_method_reload_invalid/0},
+        {"compile_standard_expression valid core succeeds", fun compile_standard_expression_ok/0},
+        {"compile_file_core valid core succeeds", fun compile_file_core_ok/0},
+        {"build_class_indexes returns map", fun build_class_indexes_ok/0},
+        {"build_class_module_index returns map", fun build_class_module_index_ok/0},
+        {"compile_expression protocol definition succeeds", fun compile_expression_protocol_ok/0},
+        {"compile_for_codegen protocol rejected", fun compile_for_codegen_protocol_rejected/0},
+        {"compile_expression_trace with known vars succeeds", fun compile_trace_known_vars_ok/0}
+    ]}.
+
+compile_expression_standard_ok() ->
+    Result = beamtalk_repl_compiler:compile_expression("1 + 2", expr_std_mod, #{}),
+    {ok, Binary, _ResultExpr, Warnings} = Result,
+    ?assert(is_binary(Binary)),
+    ?assert(byte_size(Binary) > 0),
+    ?assert(is_list(Warnings)).
+
+compile_expression_known_vars_ok() ->
+    %% Bindings keys are forwarded as known vars (internal keys filtered out).
+    Result = beamtalk_repl_compiler:compile_expression(
+        "x + 1", expr_kv_mod, #{x => 41, '__internal__' => skip}
+    ),
+    ?assertMatch({ok, _Binary, _ResultExpr, _Warnings}, Result).
+
+compile_expression_class_def_ok() ->
+    Source = "Actor subclass: ReplCompClassDef\n  value => 42",
+    Result = beamtalk_repl_compiler:compile_expression(Source, expr_classdef_mod, #{}),
+    {ok, class_definition, ClassInfo, _Warnings} = Result,
+    ?assert(is_binary(maps:get(binary, ClassInfo))),
+    ?assert(is_atom(maps:get(module_name, ClassInfo))),
+    ?assert(is_list(maps:get(classes, ClassInfo))).
+
+compile_expression_method_def_ok() ->
+    %% `ClassName >> selector => body` is a standalone method definition.
+    Source = "Object >> doubled => self * 2",
+    Result = beamtalk_repl_compiler:compile_expression(Source, expr_methoddef_mod, #{}),
+    {ok, method_definition, MethodInfo, _Warnings} = Result,
+    ?assert(is_map(MethodInfo)),
+    ?assert(maps:is_key(selector, MethodInfo)).
+
+compile_expression_invalid() ->
+    Result = beamtalk_repl_compiler:compile_expression("+++", expr_bad_mod, #{}),
+    %% Invalid expression returns structured diagnostics (a list of maps/binaries).
+    ?assertMatch({error, _}, Result),
+    {error, Diagnostics} = Result,
+    ?assert(is_list(Diagnostics)).
+
+compile_via_port_standard_ok() ->
+    Result = beamtalk_repl_compiler:compile_expression_via_port("3 * 4", via_port_ok_mod, #{}),
+    ?assertMatch({ok, _Binary, _ResultExpr, _Warnings}, Result).
+
+compile_trace_standard_ok() ->
+    Result = beamtalk_repl_compiler:compile_expression_trace("1. 2. 3", trace_ok_mod, #{}),
+    {ok, Binary, _ResultExpr, Warnings} = Result,
+    ?assert(is_binary(Binary)),
+    ?assert(is_list(Warnings)).
+
+compile_trace_invalid() ->
+    Result = beamtalk_repl_compiler:compile_expression_trace("+++", trace_bad_mod, #{}),
+    ?assertMatch({error, _}, Result).
+
+compile_file_ok() ->
+    Source = "Actor subclass: ReplCompFile\n  value => 7",
+    Result = beamtalk_repl_compiler:compile_file(Source, "/src/ReplCompFile.bt", false, undefined),
+    {ok, Binary, Classes, ModuleName} = Result,
+    ?assert(is_binary(Binary)),
+    ?assert(is_list(Classes)),
+    ?assert(is_atom(ModuleName)),
+    %% Class metadata is transformed into #{name, superclass} string maps.
+    [#{name := Name, superclass := Super} | _] = Classes,
+    ?assert(is_list(Name)),
+    ?assert(is_list(Super)).
+
+compile_file_invalid() ->
+    Result = beamtalk_repl_compiler:compile_file("+++ not valid", "/src/Bad.bt", false, undefined),
+    ?assertMatch({error, {compile_error, _}}, Result).
+
+compile_file_prebuilt_ok() ->
+    Source = "Actor subclass: ReplCompPrebuilt\n  value => 9",
+    %% Empty prebuilt index map (not use_runtime_indexes) exercises the merge branch.
+    Result = beamtalk_repl_compiler:compile_file(
+        Source, "/src/ReplCompPrebuilt.bt", false, undefined, #{}
+    ),
+    ?assertMatch({ok, _Binary, _Classes, _ModuleName}, Result).
+
+compile_for_codegen_ok() ->
+    Result = beamtalk_repl_compiler:compile_for_codegen(<<"1 + 2">>, <<"codegen_ok_mod">>, []),
+    {ok, CoreErlang, Warnings} = Result,
+    ?assert(is_binary(CoreErlang)),
+    ?assert(byte_size(CoreErlang) > 0),
+    ?assert(is_list(Warnings)).
+
+compile_for_codegen_class_ok() ->
+    Source = <<"Actor subclass: ReplCodegenClass\n  value => 1">>,
+    Result = beamtalk_repl_compiler:compile_for_codegen(Source, <<"codegen_class_mod">>, []),
+    {ok, CoreErlang, _Warnings} = Result,
+    ?assert(is_binary(CoreErlang)).
+
+compile_for_codegen_method_rejected() ->
+    %% Standalone method definitions are not supported by show-codegen.
+    Source = <<"Object >> tripled => self * 3">>,
+    Result = beamtalk_repl_compiler:compile_for_codegen(Source, <<"codegen_method_mod">>, []),
+    ?assertMatch({error, {compile_error, _}}, Result).
+
+compile_for_codegen_invalid() ->
+    Result = beamtalk_repl_compiler:compile_for_codegen(<<"+++">>, <<"codegen_bad_mod">>, []),
+    ?assertMatch({error, {compile_error, _}}, Result).
+
+compile_file_for_codegen_ok() ->
+    Source = <<"Actor subclass: ReplFileCodegen\n  value => 2">>,
+    Result = beamtalk_repl_compiler:compile_file_for_codegen(Source, "/src/ReplFileCodegen.bt"),
+    {ok, CoreErlang, Warnings} = Result,
+    ?assert(is_binary(CoreErlang)),
+    ?assert(is_list(Warnings)).
+
+compile_file_for_codegen_invalid() ->
+    Result = beamtalk_repl_compiler:compile_file_for_codegen(<<"+++ bad">>, "/src/Bad.bt"),
+    ?assertMatch({error, {compile_error, _}}, Result).
+
+compile_for_method_reload_ok() ->
+    Source = <<"Actor subclass: ReplMethodReload\n  value => 5">>,
+    Result = beamtalk_repl_compiler:compile_for_method_reload(Source, #{}),
+    {ok, Binary, ModName, Classes, Warnings} = Result,
+    ?assert(is_binary(Binary)),
+    ?assert(is_atom(ModName)),
+    ?assert(is_list(Classes)),
+    ?assert(is_list(Warnings)).
+
+compile_for_method_reload_invalid() ->
+    Result = beamtalk_repl_compiler:compile_for_method_reload(<<"+++ bad">>, #{}),
+    ?assertMatch({error, {compile_error, _}}, Result).
+
+compile_standard_expression_ok() ->
+    %% Generate real Core Erlang from the compiler, then feed it back to
+    %% compile_standard_expression/2 to exercise the success branch.
+    {ok, CoreErlang, _} =
+        beamtalk_compiler:compile_expression(<<"40 + 2">>, <<"std_expr_core">>, []),
+    Result = beamtalk_repl_compiler:compile_standard_expression(CoreErlang, [<<"w">>]),
+    {ok, Binary, {port_compiled}, Warnings} = Result,
+    ?assert(is_binary(Binary)),
+    ?assertEqual([<<"w">>], Warnings).
+
+compile_file_core_ok() ->
+    {ok, CoreErlang, _} =
+        beamtalk_compiler:compile_expression(<<"1 + 1">>, <<"file_core_ok">>, []),
+    %% binary_to_atom of the module name in the Core Erlang would mismatch, but
+    %% compile_file_core only needs a valid atom + the class metadata transform.
+    Result = beamtalk_repl_compiler:compile_file_core(CoreErlang, file_core_ok_mod, [
+        #{name => <<"Foo">>, superclass => <<"Object">>}
+    ]),
+    {ok, Binary, ClassNames, ModuleName} = Result,
+    ?assert(is_binary(Binary)),
+    ?assertEqual(file_core_ok_mod, ModuleName),
+    ?assertEqual([#{name => "Foo", superclass => "Object"}], ClassNames).
+
+build_class_indexes_ok() ->
+    Result = beamtalk_repl_compiler:build_class_indexes(),
+    ?assert(is_map(Result)).
+
+build_class_module_index_ok() ->
+    Result = beamtalk_repl_compiler:build_class_module_index(),
+    ?assert(is_map(Result)).
+
+compile_expression_protocol_ok() ->
+    %% `Protocol define: Name` compiles to a protocol_definition result, exercising
+    %% compile_protocol_definition_result/1 (Core Erlang -> BEAM for the protocol module).
+    Result = beamtalk_repl_compiler:compile_expression(
+        "Protocol define: ReplCompProto", proto_ok_mod, #{}
+    ),
+    {ok, protocol_definition, ProtocolInfo, _Warnings} = Result,
+    ?assert(is_binary(maps:get(binary, ProtocolInfo))),
+    ?assert(is_atom(maps:get(module_name, ProtocolInfo))),
+    ?assert(is_list(maps:get(protocols, ProtocolInfo))).
+
+compile_for_codegen_protocol_rejected() ->
+    %% show-codegen does not support protocol definitions.
+    Result = beamtalk_repl_compiler:compile_for_codegen(
+        <<"Protocol define: ReplCodegenProto">>, <<"codegen_proto_mod">>, []
+    ),
+    ?assertMatch({error, {compile_error, _}}, Result).
+
+compile_trace_known_vars_ok() ->
+    %% Non-internal atom binding keys are forwarded as known vars to the trace
+    %% compiler; internal `__`-prefixed keys are filtered out.
+    Result = beamtalk_repl_compiler:compile_expression_trace(
+        "x + 1", trace_kv_mod, #{x => 10, '__skip__' => true}
+    ),
+    ?assertMatch({ok, _Binary, _ResultExpr, _Warnings}, Result).

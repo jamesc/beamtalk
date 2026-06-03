@@ -46,7 +46,27 @@ flush_test_() ->
         fun flush_kinds_by_author_kind/1,
         fun flush_kinds_combined_dimensions_intersect/1,
         fun flush_kinds_empty_set_is_rejected/1,
-        fun flush_kinds_unknown_kind_is_rejected/1
+        fun flush_kinds_unknown_kind_is_rejected/1,
+        %% Additional coverage (BT runtime coverage push)
+        fun selector_not_found_appends_method/1,
+        fun selector_not_found_appends_to_file_without_trailing_newline/1,
+        fun source_file_unreadable_is_conflict/1,
+        fun filter_by_class_object/1,
+        fun filter_by_class_object_non_class_is_error/1,
+        fun filter_by_selector_symbol/1,
+        fun flush_kinds_by_class_entry_kind/1,
+        fun flush_kinds_by_human_author_kind/1,
+        fun filter_dict_with_list_file/1,
+        fun filter_dict_missing_file_key_is_error/1,
+        fun filter_non_class_object_atom_lowercase_is_selector/1,
+        fun bad_filter_type_is_error/1,
+        fun flush_kinds_non_list_is_error/1,
+        fun flush_kinds_non_symbol_element_is_error/1,
+        fun filter_by_binary_class_name/1,
+        fun append_into_empty_file/1,
+        fun mixed_span_and_appended_method_in_one_file/1,
+        fun missing_source_body_is_hard_error/1,
+        fun missing_prev_source_body_is_hard_error/1
     ]}.
 
 unit_test_() ->
@@ -833,6 +853,380 @@ flush_kinds_unknown_kind_is_rejected(_Ctx) ->
     ].
 
 %%====================================================================
+%% Additional coverage: selector_not_found append path + filter shapes
+%%====================================================================
+
+%% A splice entry with span = undefined (the install hook recorded
+%% `selector_not_found` — a brand-new method added live). flush must append the
+%% new body after a blank-line separator rather than overwrite a span.
+selector_not_found_appends_method(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    %% File already ends in a single trailing newline.
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(File, Original),
+    %% No span, no prev_source ⇒ append path.
+    {ok, _} = beamtalk_workspace_changelog:append(
+        append_method_input(
+            <<"Counter">>, <<"step">>, <<"step => 1\n">>, list_to_binary(File)
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(File),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        %% Trailing newlines collapse to one, then a blank line, then the body.
+        ?_assertEqual(
+            <<"Object subclass: Counter\n  value => 0\nend\n\nstep => 1\n">>, Final
+        )
+    ].
+
+%% Same append path, but the on-disk file has NO trailing newline — exercises
+%% the strip/ensure-trailing-newline branches differently.
+selector_not_found_appends_to_file_without_trailing_newline(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend">>,
+    ok = file:write_file(File, Original),
+    %% New body also has no trailing newline ⇒ ensure_trailing_newline adds one.
+    {ok, _} = beamtalk_workspace_changelog:append(
+        append_method_input(
+            <<"Counter">>, <<"step">>, <<"step => 1">>, list_to_binary(File)
+        )
+    ),
+    {ok, _Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(File),
+    [
+        ?_assertEqual(
+            <<"Object subclass: Counter\n  value => 0\nend\n\nstep => 1\n">>, Final
+        )
+    ].
+
+%% prepare_splice on a file that does not exist on disk ⇒ source_file_unreadable
+%% conflict (the read fails with enoent).
+source_file_unreadable_is_conflict(#{proj_dir := ProjDir}) ->
+    %% Reference a file that was never written to disk.
+    File = filename:join([ProjDir, "src", "missing.bt"]),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>,
+            <<"value">>,
+            <<"value => 1\n">>,
+            <<"value => 0\n">>,
+            list_to_binary(File),
+            0,
+            11
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    Conflicts = maps:get(conflicts, Summary),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual(1, length(Conflicts)),
+        ?_assertEqual(<<"source_file_unreadable">>, maps:get(reason, hd(Conflicts)))
+    ].
+
+%% Filter by a class *object* (`#beamtalk_object{class = 'Counter class'}`):
+%% normalise_filter strips the " class" suffix and matches the entry's class.
+filter_by_class_object(#{proj_dir := ProjDir}) ->
+    File1 = filename:join([ProjDir, "src", "counter.bt"]),
+    File2 = filename:join([ProjDir, "src", "widget.bt"]),
+    Original1 = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    Original2 = <<"Object subclass: Widget\n  render => nil\nend\n">>,
+    ok = file:write_file(File1, Original1),
+    ok = file:write_file(File2, Original2),
+    {S1, E1, B1} = locate(Original1, <<"value => 0\n">>),
+    {S2, E2, B2} = locate(Original2, <<"render => nil\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"value">>, <<"value => 1\n">>, B1, list_to_binary(File1), S1, E1
+        )
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Widget">>, <<"render">>, <<"render => 'x'\n">>, B2, list_to_binary(File2), S2, E2
+        )
+    ),
+    %% The 'Counter class' atom must exist for class_display_name to resolve.
+    ClassObj = #beamtalk_object{
+        class = binary_to_atom(<<"Counter class">>, utf8),
+        class_mod = counter,
+        pid = self()
+    },
+    {ok, Summary} = beamtalk_workspace_flush:flush(ClassObj),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Counter\n  value => 1\nend\n">>}, file:read_file(File1)
+        ),
+        ?_assertEqual({ok, Original2}, file:read_file(File2))
+    ].
+
+%% A `#beamtalk_object{}` whose class atom is NOT a class-object name (no
+%% " class" suffix) is rejected with a structured error.
+filter_by_class_object_non_class_is_error(_Ctx) ->
+    NonClass = #beamtalk_object{class = plain_atom, class_mod = m, pid = self()},
+    Result = beamtalk_workspace_flush:flush(NonClass),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
+
+%% Filter by a selector Symbol (a lowercase atom): selects entries whose
+%% selector matches, regardless of class.
+filter_by_selector_symbol(#{proj_dir := ProjDir}) ->
+    File1 = filename:join([ProjDir, "src", "counter.bt"]),
+    File2 = filename:join([ProjDir, "src", "widget.bt"]),
+    Original1 = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    Original2 = <<"Object subclass: Widget\n  render => nil\nend\n">>,
+    ok = file:write_file(File1, Original1),
+    ok = file:write_file(File2, Original2),
+    {S1, E1, B1} = locate(Original1, <<"value => 0\n">>),
+    {S2, E2, B2} = locate(Original2, <<"render => nil\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"value">>, <<"value => 1\n">>, B1, list_to_binary(File1), S1, E1
+        )
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Widget">>, <<"render">>, <<"render => 'x'\n">>, B2, list_to_binary(File2), S2, E2
+        )
+    ),
+    %% `render` is a lowercase atom ⇒ treated as a selector filter.
+    {ok, Summary} = beamtalk_workspace_flush:flush(render),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual({ok, Original1}, file:read_file(File1)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Widget\n  render => 'x'\nend\n">>}, file:read_file(File2)
+        )
+    ].
+
+%% classify_kind(class) -> entry: exercise the `#class` entry-kind branch.
+flush_kinds_by_class_entry_kind(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(File, Original),
+    {S, E, Old} = locate(Original, <<"value => 0\n">>),
+    %% A class-side method patch (kind => class).
+    ClassEntry = (method_input(
+        <<"Counter">>, <<"value">>, <<"value => 1\n">>, Old, list_to_binary(File), S, E
+    ))#{
+        kind => class
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(ClassEntry),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds([class]),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Counter\n  value => 1\nend\n">>}, file:read_file(File)
+        )
+    ].
+
+%% classify_kind(human) -> author: exercise the `#human` author-kind branch.
+flush_kinds_by_human_author_kind(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(File, Original),
+    {S, E, Old} = locate(Original, <<"value => 0\n">>),
+    %% method_input defaults author_kind => human.
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"value">>, <<"value => 1\n">>, Old, list_to_binary(File), S, E
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush_kinds([human]),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Counter\n  value => 1\nend\n">>}, file:read_file(File)
+        )
+    ].
+
+%% Dictionary filter where the file value is a *list* (string), not a binary.
+filter_dict_with_list_file(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(File, Original),
+    {S, E, Old} = locate(Original, <<"value => 0\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"value">>, <<"value => 1\n">>, Old, list_to_binary(File), S, E
+        )
+    ),
+    %% file => File as a *string* (list of chars), not a binary.
+    {ok, Summary} = beamtalk_workspace_flush:flush(#{file => File}),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Counter\n  value => 1\nend\n">>}, file:read_file(File)
+        )
+    ].
+
+%% Dictionary filter missing the `file` key is rejected.
+filter_dict_missing_file_key_is_error(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush(#{not_file => <<"x">>}),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
+
+%% A lowercase atom that is not a class name is treated as a selector — with no
+%% matching entries the flush is an empty (but successful) no-op.
+filter_non_class_object_atom_lowercase_is_selector(_Ctx) ->
+    {ok, Summary} = beamtalk_workspace_flush:flush(someselector),
+    [
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary))
+    ].
+
+%% A filter that is neither class/symbol/binary/map/object is rejected.
+bad_filter_type_is_error(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush(12345),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
+
+%% flush_kinds/1 with a non-list argument is rejected.
+flush_kinds_non_list_is_error(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush_kinds(not_a_list),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
+
+%% flush_kinds/1 with a non-Symbol element (e.g. a binary) is rejected.
+flush_kinds_non_symbol_element_is_error(_Ctx) ->
+    Result = beamtalk_workspace_flush:flush_kinds([<<"instance">>]),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
+    ].
+
+%% Filter by a binary class name (the `normalise_filter(Bin)` clause).
+filter_by_binary_class_name(#{proj_dir := ProjDir}) ->
+    File1 = filename:join([ProjDir, "src", "counter.bt"]),
+    File2 = filename:join([ProjDir, "src", "widget.bt"]),
+    Original1 = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    Original2 = <<"Object subclass: Widget\n  render => nil\nend\n">>,
+    ok = file:write_file(File1, Original1),
+    ok = file:write_file(File2, Original2),
+    {S1, E1, B1} = locate(Original1, <<"value => 0\n">>),
+    {S2, E2, B2} = locate(Original2, <<"render => nil\n">>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"value">>, <<"value => 1\n">>, B1, list_to_binary(File1), S1, E1
+        )
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Widget">>, <<"render">>, <<"render => 'x'\n">>, B2, list_to_binary(File2), S2, E2
+        )
+    ),
+    %% Pass the class name as a binary directly.
+    {ok, Summary} = beamtalk_workspace_flush:flush(<<"Counter">>),
+    [
+        ?_assertEqual(1, maps:get(flushed, Summary)),
+        ?_assertEqual(
+            {ok, <<"Object subclass: Counter\n  value => 1\nend\n">>}, file:read_file(File1)
+        ),
+        ?_assertEqual({ok, Original2}, file:read_file(File2))
+    ].
+
+%% Appending a method to an empty (zero-byte) file exercises the empty-binary
+%% branches of strip_trailing_newlines/1 and ensure_trailing_newline/1.
+append_into_empty_file(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "empty.bt"]),
+    ok = file:write_file(File, <<>>),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        append_method_input(
+            <<"Empty">>, <<"go">>, <<"go => 1\n">>, list_to_binary(File)
+        )
+    ),
+    {ok, _Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(File),
+    [
+        %% Empty body trimmed to <<>>, then "\n\n" separator, then the appended body.
+        ?_assertEqual(<<"\n\ngo => 1\n">>, Final)
+    ].
+
+%% One file with both a span-based splice entry AND a span=undefined appended
+%% method entry. apply_splices sorts the two, exercising span_start/1 for the
+%% undefined case (returns -1) so it sorts before the real span.
+mixed_span_and_appended_method_in_one_file(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(File, Original),
+    {S, E, Old} = locate(Original, <<"value => 0\n">>),
+    %% Splice entry (has a span).
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"value">>, <<"value => 9\n">>, Old, list_to_binary(File), S, E
+        )
+    ),
+    %% Appended-method entry against the same file (no span).
+    {ok, _} = beamtalk_workspace_changelog:append(
+        append_method_input(
+            <<"Counter">>, <<"step">>, <<"step => 1\n">>, list_to_binary(File)
+        )
+    ),
+    {ok, Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(File),
+    [
+        ?_assertEqual(2, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary)),
+        %% The span splice replaced `value => 0`, and the appended method lands
+        %% after a blank-line separator at the end.
+        ?_assertEqual(
+            <<"Object subclass: Counter\n  value => 9\nend\n\nstep => 1\n">>, Final
+        )
+    ].
+
+%% When the recorded patch body in sources/ is unreadable (deleted out from
+%% under us), flush surfaces a hard {error, #beamtalk_error{}} via
+%% source_body_error/2 + wrap_io_error/2. Exercise the append (span=undefined)
+%% path so read_source_body is the first read that fails.
+missing_source_body_is_hard_error(#{workspace_id := WsId, proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    ok = file:write_file(File, <<"Object subclass: Counter\nend\n">>),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        append_method_input(
+            <<"Counter">>, <<"step">>, <<"step => 1\n">>, list_to_binary(File)
+        )
+    ),
+    %% Delete the recorded source body so read_source_body/1 fails with enoent.
+    ChangesDir = beamtalk_workspace_changelog:changes_dir(WsId),
+    SourceBody = filename:join([ChangesDir, "sources", source_ref_name(Seq, "-source.bt")]),
+    ok = file:delete(SourceBody),
+    Result = beamtalk_workspace_flush:flush(),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = source_body_unreadable}}, Result)
+    ].
+
+%% When the recorded *prior* body in sources/ is unreadable, a span splice
+%% surfaces a hard {error, #beamtalk_error{}} via prev_source_error/2.
+missing_prev_source_body_is_hard_error(#{workspace_id := WsId, proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+    ok = file:write_file(File, Original),
+    {Start, End, OldBody} = locate(Original, <<"value => 0\n">>),
+    {ok, Seq} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>,
+            <<"value">>,
+            <<"value => 1\n">>,
+            OldBody,
+            list_to_binary(File),
+            Start,
+            End
+        )
+    ),
+    %% Delete the recorded prev body so read_prev_source_body/1 fails.
+    ChangesDir = beamtalk_workspace_changelog:changes_dir(WsId),
+    PrevBody = filename:join([ChangesDir, "sources", source_ref_name(Seq, "-prev.bt")]),
+    ok = file:delete(PrevBody),
+    Result = beamtalk_workspace_flush:flush(),
+    [
+        ?_assertMatch({error, #beamtalk_error{kind = prev_source_unreadable}}, Result)
+    ].
+
+%%====================================================================
 %% Pure helpers
 %%====================================================================
 
@@ -906,6 +1300,22 @@ method_input(Class, Selector, NewBody, OldBody, File, Start, End) ->
         span => #{start => Start, 'end' => End}
     }.
 
+%% A method entry recorded by the install hook as `selector_not_found`: a
+%% brand-new method added live, with no span and no prev_source. flush appends
+%% it to the file rather than splicing over an existing definition.
+append_method_input(Class, Selector, NewBody, File) ->
+    #{
+        class => Class,
+        selector => Selector,
+        kind => instance,
+        source => NewBody,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-test">>,
+        author_kind => human,
+        source_file => File
+    }.
+
 new_class_input(ClassName, Source, File) ->
     #{
         class => ClassName,
@@ -917,6 +1327,11 @@ new_class_input(ClassName, Source, File) ->
         author_kind => agent,
         source_file => File
     }.
+
+%% Build the sources/ filename for a seq (mirrors the changelog's zero-padded
+%% naming): "000042-source.bt" / "000042-prev.bt".
+source_ref_name(Seq, Suffix) ->
+    lists:flatten(io_lib:format("~6..0b~s", [Seq, Suffix])).
 
 %% Find Needle in Haystack; return {Start, End, ActualBytes}. Crashes if not
 %% found so the test fails loudly rather than silently miscomputing offsets.

@@ -47,7 +47,19 @@ changelog_test_() ->
         fun find_revert_target_no_entry_when_unknown/1,
         fun find_revert_target_picks_most_recent_entry/1,
         fun find_revert_target_skips_flushed_entries/1,
-        fun find_revert_target_rejects_new_class/1
+        fun find_revert_target_rejects_new_class/1,
+        %% Additional coverage (BT runtime coverage push)
+        fun find_revert_target_accepts_binary_selector/1,
+        fun find_revert_target_no_prev_source_when_ref_absent/1,
+        fun entry_accessors_expose_all_fields/1,
+        fun read_prev_source_body_none_for_new_class/1,
+        fun mark_flushed_empty_is_noop/1,
+        fun mark_flushed_unknown_seqs_is_noop/1,
+        fun unknown_call_returns_error/1,
+        fun unknown_cast_is_ignored/1,
+        fun unknown_info_is_ignored/1,
+        fun code_change_returns_state/1,
+        fun new_class_value_has_nil_source_file/1
     ]}.
 
 %% FFI surface with no gen_server started: must degrade to empty, not crash.
@@ -403,6 +415,140 @@ find_revert_target_rejects_new_class(_Ctx) ->
         ?_assertEqual({error, no_entry}, NoEntry)
     ].
 
+%% revert_selector_binary/1 accepts a binary selector (not just an atom).
+find_revert_target_accepts_binary_selector(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(
+        durable_input(<<"Counter">>, <<"inc">>)
+    ),
+    %% Pass the selector as a binary rather than an atom.
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, <<"inc">>),
+    [
+        ?_assertMatch({ok, <<"^ self value">>, _Entry}, Result)
+    ].
+
+%% A method entry with no prev_source ⇒ prev_source_ref = undefined ⇒
+%% find_revert_target returns {error, no_prev_source} (line 392 branch).
+find_revert_target_no_prev_source_when_ref_absent(_Ctx) ->
+    Input = #{
+        class => <<"Counter">>,
+        selector => <<"inc">>,
+        kind => instance,
+        source => <<"^ 1">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/counter.bt">>,
+        span => #{start => 0, 'end' => 3}
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(Input),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, inc),
+    [
+        ?_assertEqual({error, no_prev_source}, Result)
+    ].
+
+%% Exercise the remaining entry accessors that other tests do not touch.
+entry_accessors_expose_all_fields(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(
+        durable_input(<<"Counter">>, <<"inc">>)
+    ),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    [
+        ?_assertEqual(durable, beamtalk_workspace_changelog:entry_intent(Entry)),
+        ?_assertEqual(true, beamtalk_workspace_changelog:entry_flushable(Entry)),
+        ?_assertEqual(false, beamtalk_workspace_changelog:entry_is_prior_epoch(Entry)),
+        ?_assertEqual(human, beamtalk_workspace_changelog:entry_author_kind(Entry)),
+        ?_assertEqual(<<"000000-source.bt">>, beamtalk_workspace_changelog:entry_source_ref(Entry)),
+        ?_assertEqual(
+            <<"000000-prev.bt">>, beamtalk_workspace_changelog:entry_prev_source_ref(Entry)
+        ),
+        ?_assertEqual(
+            #{start => 0, 'end' => 10}, beamtalk_workspace_changelog:entry_span(Entry)
+        )
+    ].
+
+%% read_prev_source_body/1 returns {error, no_prev_source} for a new-class entry
+%% (which has prev_source_ref = undefined).
+read_prev_source_body_none_for_new_class(_Ctx) ->
+    NewClassInput = #{
+        class => <<"NewThing">>,
+        kind => 'new-class',
+        source => <<"Object subclass: NewThing\nend\n">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/new_thing.bt">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    [Entry] = beamtalk_workspace_changelog:entries(),
+    [
+        ?_assertEqual(
+            {error, no_prev_source}, beamtalk_workspace_changelog:read_prev_source_body(Entry)
+        )
+    ].
+
+%% mark_flushed([]) is a successful no-op handled before the gen_server call.
+mark_flushed_empty_is_noop(_Ctx) ->
+    [
+        ?_assertEqual(ok, beamtalk_workspace_changelog:mark_flushed([]))
+    ].
+
+%% mark_flushed with seqs not in the log is a successful no-op (idempotent).
+mark_flushed_unknown_seqs_is_noop(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(
+        durable_input(<<"Counter">>, <<"inc">>)
+    ),
+    [
+        ?_assertEqual(ok, beamtalk_workspace_changelog:mark_flushed([999, 1000]))
+    ].
+
+%% An unknown gen_server call returns {error, unknown_request}.
+unknown_call_returns_error(#{pid := Pid}) ->
+    [
+        ?_assertEqual(
+            {error, unknown_request}, gen_server:call(Pid, some_bogus_request)
+        )
+    ].
+
+%% An unknown cast must not crash the server.
+unknown_cast_is_ignored(#{pid := Pid}) ->
+    gen_server:cast(Pid, some_bogus_cast),
+    timer:sleep(20),
+    [?_assert(is_process_alive(Pid))].
+
+%% An unknown info message must not crash the server.
+unknown_info_is_ignored(#{pid := Pid}) ->
+    Pid ! some_bogus_info,
+    timer:sleep(20),
+    [?_assert(is_process_alive(Pid))].
+
+%% code_change/3 returns the state unchanged.
+code_change_returns_state(#{pid := Pid}) ->
+    Result = sys:replace_state(Pid, fun(S) -> S end),
+    %% Drive code_change directly via the module export with a synthetic state.
+    {ok, _} = beamtalk_workspace_changelog:code_change(old_vsn, Result, extra),
+    [?_assert(is_process_alive(Pid))].
+
+%% source_file_value(undefined) -> nil: a new-class entry with no source_file
+%% surfaces sourceFile => nil in the value-object map.
+new_class_value_has_nil_source_file(_Ctx) ->
+    NewClassInput = #{
+        class => <<"NewThing">>,
+        kind => 'new-class',
+        source => <<"Object subclass: NewThing\nend\n">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human
+        %% No source_file key ⇒ source_file = undefined.
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [
+        ?_assertEqual(nil, maps:get(sourceFile, Entry))
+    ].
+
 %%====================================================================
 %% Restart semantics (separate fixture: stop + restart same workspace)
 %%====================================================================
@@ -658,8 +804,42 @@ load_enforces_ring_bound_when_disk_exceeds_max() ->
 forward_compat_test_() ->
     [
         fun unknown_kind_preserved_not_dropped/0,
-        fun known_kinds_decode_to_atoms/0
+        fun known_kinds_decode_to_atoms/0,
+        fun unknown_intent_preserved_as_unknown/0,
+        fun unknown_author_kind_preserved_as_unknown/0,
+        fun known_intents_decode_to_atoms/0,
+        fun known_author_kinds_decode_to_atoms/0
     ].
+
+known_intents_decode_to_atoms() ->
+    Durable = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"intent">> => <<"durable">>})
+    ),
+    Ephemeral = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"intent">> => <<"ephemeral">>})
+    ),
+    ?assertEqual(durable, beamtalk_workspace_changelog:entry_intent(Durable)),
+    ?assertEqual(ephemeral, beamtalk_workspace_changelog:entry_intent(Ephemeral)).
+
+known_author_kinds_decode_to_atoms() ->
+    Human = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"author_kind">> => <<"human">>})
+    ),
+    Agent = beamtalk_workspace_changelog:entry_from_json(
+        line_json_with(#{<<"author_kind">> => <<"agent">>})
+    ),
+    ?assertEqual(human, beamtalk_workspace_changelog:entry_author_kind(Human)),
+    ?assertEqual(agent, beamtalk_workspace_changelog:entry_author_kind(Agent)).
+
+unknown_intent_preserved_as_unknown() ->
+    Json = line_json_with(#{<<"intent">> => <<"future-intent">>}),
+    Entry = beamtalk_workspace_changelog:entry_from_json(Json),
+    ?assertEqual(unknown, beamtalk_workspace_changelog:entry_intent(Entry)).
+
+unknown_author_kind_preserved_as_unknown() ->
+    Json = line_json_with(#{<<"author_kind">> => <<"future-author">>}),
+    Entry = beamtalk_workspace_changelog:entry_from_json(Json),
+    ?assertEqual(unknown, beamtalk_workspace_changelog:entry_author_kind(Entry)).
 
 unknown_kind_preserved_not_dropped() ->
     %% A newer writer may emit a kind this beam doesn't know. Decoding must keep
@@ -700,8 +880,23 @@ size_returns_zero_when_table_absent() ->
 
 run_mode_test_() ->
     {setup, fun() -> ok end, fun(_) -> ok end, [
-        fun run_mode_is_memory_only/0
+        fun run_mode_is_memory_only/0,
+        fun run_mode_read_source_body_no_workspace/0
     ]}.
+
+%% In run mode (no workspace_id) there is no changes/ dir, so reading a recorded
+%% body returns {error, no_workspace} (the get_sources_dir undefined branch).
+run_mode_read_source_body_no_workspace() ->
+    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => undefined}),
+    try
+        {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
+        [Entry] = beamtalk_workspace_changelog:entries(),
+        ?assertEqual(
+            {error, no_workspace}, beamtalk_workspace_changelog:read_source_body(Entry)
+        )
+    after
+        stop(Pid)
+    end.
 
 run_mode_is_memory_only() ->
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => undefined}),

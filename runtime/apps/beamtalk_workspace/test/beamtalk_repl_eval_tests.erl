@@ -1529,3 +1529,210 @@ normalize_method_source_leading_whitespace_test() ->
         Source,
         beamtalk_repl_eval:normalize_method_source(<<"increment">>, Source)
     ).
+
+%%====================================================================
+%% Success-path tests (require the beamtalk_compiler + beamtalk_runtime apps)
+%%
+%% The tests above exercise pure helpers and the compile-error path that
+%% occurs when no compiler is running. These tests start the compiler port
+%% and the runtime so do_eval/do_eval_trace/do_show_codegen and the
+%% class/protocol/method definition handlers reach their success branches:
+%% compile -> load_binary -> eval_loaded_module -> execute_and_process.
+%%====================================================================
+
+eval_setup() ->
+    application:ensure_all_started(compiler),
+    application:ensure_all_started(beamtalk_runtime),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    %% Allow the runtime to register its bootstrap classes before compiling.
+    timer:sleep(300),
+    ok.
+
+eval_teardown(_) ->
+    %% Stop the compiler app so this module's no-compiler / noproc error-path
+    %% tests (and later test modules in the shared EUnit node) see the baseline
+    %% "compiler not running" state this fixture started from.
+    _ = application:stop(beamtalk_compiler),
+    ok.
+
+eval_success_test_() ->
+    {setup, fun eval_setup/0, fun eval_teardown/1, [
+        {"do_eval arithmetic returns value", fun do_eval_arithmetic_value/0},
+        {"do_eval captures empty output", fun do_eval_output_is_binary/0},
+        {"do_eval assignment binds variable", fun do_eval_assignment_binds/0},
+        {"do_eval reads existing binding", fun do_eval_reads_binding/0},
+        {"do_eval multi-statement returns last", fun do_eval_multi_statement/0},
+        {"do_eval runtime error wraps in _error", fun do_eval_runtime_error/0},
+        {"do_eval inline class definition", fun do_eval_class_definition/0},
+        {"do_eval protocol definition", fun do_eval_protocol_definition/0},
+        {"do_eval/3 with undefined subscriber", fun do_eval_with_undefined_subscriber/0},
+        {"do_show_codegen returns core erlang", fun do_show_codegen_success/0},
+        {"do_show_codegen invalid returns error", fun do_show_codegen_error/0},
+        {"do_eval_trace single statement", fun do_eval_trace_single/0},
+        {"do_eval_trace multi statement", fun do_eval_trace_multi/0},
+        {"do_eval_trace assignment rebuilds binding", fun do_eval_trace_assignment/0},
+        {"do_eval_trace runtime error wraps", fun do_eval_trace_runtime_error/0},
+        {"compile_method on unrecorded class returns error", fun compile_method_unrecorded/0},
+        {"compile_method invalid body returns error", fun compile_method_invalid_body/0},
+        {"compile_method non-method expression rejected", fun compile_method_not_a_method/0},
+        {"do_show_codegen with binding known var", fun do_show_codegen_with_binding/0},
+        {"reload_class_file/1 missing file", fun reload_class_file_arity1/0},
+        {"handle_load/3 missing file delegates", fun handle_load3_missing/0},
+        {"handle_load_source/3 invalid delegates", fun handle_load_source3_invalid/0},
+        {"new_class/2 invalid delegates", fun new_class_invalid/0}
+    ]}.
+
+state0() ->
+    beamtalk_repl_state:new(undefined, 0).
+
+do_eval_arithmetic_value() ->
+    {ok, Value, Output, Warnings, _State} = beamtalk_repl_eval:do_eval("1 + 1", state0()),
+    ?assertEqual(2, Value),
+    ?assert(is_binary(Output)),
+    ?assert(is_list(Warnings)).
+
+do_eval_output_is_binary() ->
+    %% A non-printing expression yields an empty captured output binary.
+    {ok, _Value, Output, _Warnings, _State} = beamtalk_repl_eval:do_eval("3 * 7", state0()),
+    ?assertEqual(<<>>, Output).
+
+do_eval_assignment_binds() ->
+    {ok, Value, _Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval("answer := 40 + 2", state0()),
+    ?assertEqual(42, Value),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(42, maps:get(answer, Bindings)).
+
+do_eval_reads_binding() ->
+    %% A previously-bound variable is visible to a subsequent eval.
+    S0 = beamtalk_repl_state:set_bindings(#{base => 100}, state0()),
+    {ok, Value, _Output, _Warnings, _State} = beamtalk_repl_eval:do_eval("base + 1", S0),
+    ?assertEqual(101, Value).
+
+do_eval_multi_statement() ->
+    %% Multiple statements separated by `.` — result is the final expression.
+    {ok, Value, _Output, _Warnings, _State} =
+        beamtalk_repl_eval:do_eval("1 + 1. 2 + 2. 10 * 5", state0()),
+    ?assertEqual(50, Value).
+
+do_eval_runtime_error() ->
+    %% Sending an unknown message raises a does_not_understand; do_eval catches
+    %% it, wraps it, and stores it under '_error' in the returned bindings.
+    {error, _Reason, _Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval("1 frobnicate: 2", state0()),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assert(maps:is_key('_error', Bindings)).
+
+do_eval_class_definition() ->
+    %% An inline class definition loads the class module and returns its name.
+    Source = "Actor subclass: EvalSuccessCls\n  value => 5",
+    {ok, ClassName, Output, _Warnings, _State} = beamtalk_repl_eval:do_eval(Source, state0()),
+    ?assertEqual(<<"EvalSuccessCls">>, ClassName),
+    ?assertEqual(<<>>, Output).
+
+do_eval_protocol_definition() ->
+    Source = "Protocol define: EvalSuccessProto",
+    {ok, Display, _Output, _Warnings, _State} = beamtalk_repl_eval:do_eval(Source, state0()),
+    ?assert(is_binary(Display)),
+    ?assert(binary:match(Display, <<"EvalSuccessProto">>) =/= nomatch).
+
+do_eval_with_undefined_subscriber() ->
+    %% do_eval/3 with an explicit undefined subscriber exercises the streaming arg.
+    {ok, Value, _Output, _Warnings, _State} =
+        beamtalk_repl_eval:do_eval("6 * 7", state0(), undefined),
+    ?assertEqual(42, Value).
+
+do_show_codegen_success() ->
+    {ok, CoreErlang, Warnings, _State} = beamtalk_repl_eval:do_show_codegen("1 + 2", state0()),
+    ?assert(is_binary(CoreErlang)),
+    ?assert(byte_size(CoreErlang) > 0),
+    ?assert(is_list(Warnings)).
+
+do_show_codegen_error() ->
+    {error, _Reason, Warnings, _State} = beamtalk_repl_eval:do_show_codegen("+++", state0()),
+    ?assertEqual([], Warnings).
+
+do_eval_trace_single() ->
+    {ok, Steps, Output, _Warnings, _State} = beamtalk_repl_eval:do_eval_trace("21 * 2", state0()),
+    ?assertMatch([{_Src, 42}], Steps),
+    ?assert(is_binary(Output)).
+
+do_eval_trace_multi() ->
+    {ok, Steps, _Output, _Warnings, _State} =
+        beamtalk_repl_eval:do_eval_trace("1 + 1. 2 + 3", state0()),
+    %% One step per top-level statement.
+    ?assertEqual(2, length(Steps)),
+    [{_, FirstVal}, {_, SecondVal}] = Steps,
+    ?assertEqual(2, FirstVal),
+    ?assertEqual(5, SecondVal).
+
+do_eval_trace_assignment() ->
+    {ok, _Steps, _Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval_trace("total := 30 + 12", state0()),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(42, maps:get(total, Bindings)).
+
+do_eval_trace_runtime_error() ->
+    %% A runtime error (does_not_understand) during trace execution is caught,
+    %% wrapped, and stored under '_error', returning a structured error tuple.
+    {error, _Reason, Output, _Warnings, State} =
+        beamtalk_repl_eval:do_eval_trace("1 frobnicate: 2", state0()),
+    ?assert(is_binary(Output)),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assert(maps:is_key('_error', Bindings)).
+
+compile_method_unrecorded() ->
+    %% Compiling a method onto a class whose source is not recorded compiles the
+    %% standalone definition (method_definition path) then fails to install
+    %% because there is no recorded source — returns {error, _}.
+    Result = beamtalk_repl_eval:compile_method(<<"Object">>, <<"doubled">>, <<"self">>, ephemeral),
+    ?assertMatch({error, _}, Result).
+
+compile_method_invalid_body() ->
+    Result = beamtalk_repl_eval:compile_method(
+        <<"Object">>, <<"bad">>, <<"+++ garbage">>, ephemeral
+    ),
+    ?assertMatch({error, _}, Result).
+
+compile_method_not_a_method() ->
+    %% A plain expression body for a class that exists but whose source is not a
+    %% method definition still routes through compile_expression; a bare unary
+    %% body is wrapped as `bad => <body>` and may fail to install. Assert error.
+    Result = beamtalk_repl_eval:compile_method(
+        <<"Object">>, <<"plainExpr">>, <<"1 + 1">>, ephemeral
+    ),
+    ?assertMatch({error, _}, Result).
+
+do_show_codegen_with_binding() ->
+    %% A non-internal binding key is forwarded as a known var to the codegen
+    %% compiler (exercises the KnownVars comprehension in do_show_codegen).
+    S = beamtalk_repl_state:set_bindings(#{myvar => 5}, state0()),
+    {ok, CoreErlang, _Warnings, _State} = beamtalk_repl_eval:do_show_codegen("myvar + 1", S),
+    ?assert(is_binary(CoreErlang)),
+    %% The known var name appears in the generated Core Erlang lookup.
+    ?assert(binary:match(CoreErlang, <<"myvar">>) =/= nomatch).
+
+reload_class_file_arity1() ->
+    %% reload_class_file/1 (no expected class name) delegates to the loader.
+    Result = beamtalk_repl_eval:reload_class_file("/nonexistent/reload1.bt"),
+    ?assertEqual({error, {file_not_found, "/nonexistent/reload1.bt"}}, Result).
+
+handle_load3_missing() ->
+    %% handle_load/3 with prebuilt indexes delegates to beamtalk_repl_loader.
+    Result = beamtalk_repl_eval:handle_load("/nonexistent/load3.bt", state0(), #{}),
+    ?assertMatch({error, {file_not_found, _}, _}, Result).
+
+handle_load_source3_invalid() ->
+    %% handle_load_source/3 delegates to the loader; invalid source fails to compile.
+    Result = beamtalk_repl_eval:handle_load_source(<<"+++ not valid">>, "inline-label", state0()),
+    ?assertMatch({error, _, _}, Result).
+
+new_class_invalid() ->
+    %% new_class/2 delegates to the loader; an invalid target path is rejected.
+    Result = beamtalk_repl_eval:new_class(
+        <<"Actor subclass: NewClsInvalid\n  v => 1">>, <<"/nonexistent/dir/x.bt">>
+    ),
+    ?assertMatch({error, _}, Result).

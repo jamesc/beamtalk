@@ -22,6 +22,11 @@ Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% supervisor behaviour callback used by start_bare_workspace_sup/0 in the
+%% supervisors/0 tests (a minimal childless workspace_sup stand-in).
+-behaviour(supervisor).
+-export([init/1]).
+
 %%====================================================================
 %% Fixtures
 %%====================================================================
@@ -981,3 +986,421 @@ sessions_returns_empty_when_no_supervisor_test() ->
         [],
         beamtalk_workspace_interface_primitives:dispatch(sessions, [], fake_self(self()))
     ).
+
+%%====================================================================
+%% dispatch/3 routing coverage for the newer selectors
+%%
+%% The earlier dispatch tests cover actors/load/bind/etc. These hit the
+%% dispatch/3 clauses for the supervisor/newClass/flush/autoflush selectors
+%% so the routing arms (and not just the direct functions) are exercised.
+%% Each lands on a deterministic validation/error path that needs no live
+%% workspace tree.
+%%====================================================================
+
+%% dispatch('newClass:at:', ...) routes to newClass/2; a non-String argument
+%% raises a type_error at the FFI boundary.
+dispatch_new_class_type_error_test() ->
+    try
+        beamtalk_workspace_interface_primitives:dispatch(
+            'newClass:at:', [42, <<"src/Foo.bt">>], fake_self(self())
+        ),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertEqual('WorkspaceInterface', Err#beamtalk_error.class),
+            ?assertEqual('newClass:at:', Err#beamtalk_error.selector)
+    end.
+
+%% dispatch('startSupervisor:', ...) routes to startSupervisor/1; a non-class
+%% argument raises a type_error.
+dispatch_start_supervisor_type_error_test() ->
+    try
+        beamtalk_workspace_interface_primitives:dispatch(
+            'startSupervisor:', [42], fake_self(self())
+        ),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertEqual('startSupervisor:', Err#beamtalk_error.selector)
+    end.
+
+%% dispatch('stopSupervisor:', ...) routes to stopSupervisor/1; a non-class
+%% argument raises a type_error.
+dispatch_stop_supervisor_type_error_test() ->
+    try
+        beamtalk_workspace_interface_primitives:dispatch(
+            'stopSupervisor:', [notAClass], fake_self(self())
+        ),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertEqual('stopSupervisor:', Err#beamtalk_error.selector)
+    end.
+
+%%====================================================================
+%% newClass/2 validation coverage (ADR 0082 Phase 1, BT-2285)
+%%
+%% validate_new_class_args/2 rejects non-String source/path before the
+%% loader is reached. These exercise both error clauses and the
+%% new_class_arg_type_error/2 message builder (which names the offending arg).
+%%====================================================================
+
+%% Non-String source → type_error naming the "source" argument.
+new_class_non_string_source_test() ->
+    try
+        beamtalk_workspace_interface_primitives:newClass(42, <<"src/Foo.bt">>),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"source">>)),
+            %% value_type_name/1 reports the Integer type in the message.
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Integer">>))
+    end.
+
+%% String source but non-String path → type_error naming the "path" argument.
+new_class_non_string_path_test() ->
+    try
+        beamtalk_workspace_interface_primitives:newClass(
+            <<"Object subclass: Foo">>, myatom
+        ),
+        ?assert(false)
+    catch
+        error:#{error := Err} ->
+            ?assertEqual(type_error, Err#beamtalk_error.kind),
+            ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"path">>)),
+            ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Symbol">>))
+    end.
+
+%%====================================================================
+%% changeLogClear / autoflush / setAutoflush / flush / changeLogRevert /
+%% changeLogFlushKinds with a live changelog + workspace_meta gen_server.
+%%
+%% These boot a fresh, isolated workspace (temp HOME) and the changelog
+%% gen_server so the *real* delegation paths run, not just the validation
+%% guards. The log starts empty, so flush/revert exercise the empty-log and
+%% no-entry branches deterministically.
+%%====================================================================
+
+changelog_live_test_() ->
+    {foreach, fun setup_changelog_ws/0, fun cleanup_changelog_ws/1, [
+        fun changelog_clear_returns_nil/1,
+        fun autoflush_roundtrips_through_meta/1,
+        fun set_autoflush_via_dispatch/1,
+        fun autoflush_via_dispatch/1,
+        fun flush_empty_log_returns_summary/1,
+        fun flush_via_dispatch_returns_summary/1,
+        fun flush_filter_via_dispatch/1,
+        fun flush_kinds_valid_list_with_empty_log/1,
+        fun revert_no_active_entry_raises_state_error/1,
+        fun revert_via_object_keyed_map/1
+    ]}.
+
+%% changeLogClear/0 returns nil and is idempotent on an empty log.
+changelog_clear_returns_nil(_Ctx) ->
+    [
+        ?_assertEqual(nil, beamtalk_workspace_interface_primitives:changeLogClear()),
+        ?_assertEqual(nil, beamtalk_workspace_interface_primitives:changeLogClear())
+    ].
+
+%% setAutoflush/1 persists through workspace_meta and autoflush/0 reads it back.
+autoflush_roundtrips_through_meta(_Ctx) ->
+    True = beamtalk_workspace_interface_primitives:setAutoflush(true),
+    AfterTrue = beamtalk_workspace_interface_primitives:autoflush(),
+    False = beamtalk_workspace_interface_primitives:setAutoflush(false),
+    AfterFalse = beamtalk_workspace_interface_primitives:autoflush(),
+    [
+        ?_assertEqual(true, True),
+        ?_assertEqual(true, AfterTrue),
+        ?_assertEqual(false, False),
+        ?_assertEqual(false, AfterFalse)
+    ].
+
+%% dispatch('autoflush:', [Bool]) routes to setAutoflush/1 and returns the value.
+set_autoflush_via_dispatch(_Ctx) ->
+    Result = beamtalk_workspace_interface_primitives:dispatch(
+        'autoflush:', [true], fake_self(self())
+    ),
+    [?_assertEqual(true, Result)].
+
+%% dispatch(autoflush, []) routes to autoflush/0; with the default cleared it
+%% reports the most recently set value.
+autoflush_via_dispatch(_Ctx) ->
+    ok = beamtalk_workspace_meta:set_setting(autoflush, false),
+    Result = beamtalk_workspace_interface_primitives:dispatch(
+        autoflush, [], fake_self(self())
+    ),
+    [?_assertEqual(false, Result)].
+
+%% flush/0 over an empty changelog returns a FlushResult summary map with the
+%% zero/empty fields.
+flush_empty_log_returns_summary(_Ctx) ->
+    Summary = beamtalk_workspace_interface_primitives:flush(),
+    [
+        ?_assert(is_map(Summary)),
+        ?_assertEqual(0, maps:get(flushed, Summary)),
+        ?_assertEqual([], maps:get(files, Summary)),
+        ?_assertEqual([], maps:get(conflicts, Summary))
+    ].
+
+%% dispatch(flush, []) routes to flush/0 and returns the same summary map.
+flush_via_dispatch_returns_summary(_Ctx) ->
+    Summary = beamtalk_workspace_interface_primitives:dispatch(
+        flush, [], fake_self(self())
+    ),
+    [
+        ?_assert(is_map(Summary)),
+        ?_assertEqual(0, maps:get(flushed, Summary))
+    ].
+
+%% dispatch('flush:', [Filter]) routes to flush/1. A Symbol filter over an
+%% empty log returns an empty FlushResult summary.
+flush_filter_via_dispatch(_Ctx) ->
+    Summary = beamtalk_workspace_interface_primitives:dispatch(
+        'flush:', ['new-class'], fake_self(self())
+    ),
+    [
+        ?_assert(is_map(Summary)),
+        ?_assertEqual(0, maps:get(flushed, Summary))
+    ].
+
+%% changeLogFlushKinds/1 with a valid List of kind Symbols flows through to
+%% flush_kinds/1; over an empty log it returns an empty summary (a non-empty
+%% list is accepted, unlike the empty-list rejection).
+flush_kinds_valid_list_with_empty_log(_Ctx) ->
+    Summary = beamtalk_workspace_interface_primitives:changeLogFlushKinds([instance, human]),
+    [
+        ?_assert(is_map(Summary)),
+        ?_assertEqual(0, maps:get(flushed, Summary))
+    ].
+
+%% changeLogRevert/1 with a well-formed (class, selector) target but no matching
+%% active entry raises a revert_not_possible state error (exercises
+%% extract_revert_target_from_map ok-branch + do_revert no_entry branch).
+revert_no_active_entry_raises_state_error(_Ctx) ->
+    Entry = #{
+        '$beamtalk_class' => 'ChangeEntry',
+        className => 'NoSuchClass',
+        selector => 'noSuchSelector'
+    },
+    [
+        ?_assertException(
+            error,
+            #{error := #beamtalk_error{kind = revert_not_possible, class = 'ChangeLog'}},
+            beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+        )
+    ].
+
+%% A map keyed by className (without the $beamtalk_class tag) is also accepted
+%% by extract_revert_target/1 — same no-entry outcome.
+revert_via_object_keyed_map(_Ctx) ->
+    Entry = #{className => 'AlsoMissing', selector => 'gone'},
+    [
+        ?_assertException(
+            error,
+            #{error := #beamtalk_error{kind = revert_not_possible}},
+            beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+        )
+    ].
+
+%%====================================================================
+%% Changelog/workspace fixture helpers
+%%====================================================================
+
+%% Boot an isolated workspace: a temp HOME plus the changelog and meta
+%% gen_servers so the delegation paths run for real. Returns a context map.
+setup_changelog_ws() ->
+    Unique = integer_to_list(erlang:unique_integer([positive])),
+    WorkspaceId = list_to_binary("test-ws-wip-" ++ Unique),
+    Tmp = filename:join(ws_temp_dir(), "bt-wip-" ++ Unique),
+    ok = filelib:ensure_path(Tmp),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", Tmp),
+    {ok, ClogPid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    %% workspace_meta is registered under its module name; setAutoflush/autoflush
+    %% and the workspace-up sentinel both depend on it.
+    MetaPid =
+        case
+            beamtalk_workspace_meta:start_link(#{
+                workspace_id => WorkspaceId,
+                project_path => list_to_binary(Tmp),
+                created_at => erlang:system_time(second),
+                last_activity => erlang:system_time(second)
+            })
+        of
+            {ok, P} -> P;
+            {error, {already_started, P}} -> P
+        end,
+    #{
+        clog_pid => ClogPid,
+        meta_pid => MetaPid,
+        workspace_id => WorkspaceId,
+        tmp_home => Tmp,
+        old_home => OldHome
+    }.
+
+cleanup_changelog_ws(#{
+    clog_pid := ClogPid, meta_pid := MetaPid, tmp_home := Tmp, old_home := OldHome
+}) ->
+    stop_proc(MetaPid),
+    stop_proc(ClogPid),
+    case OldHome of
+        false -> os:unsetenv("HOME");
+        _ -> os:putenv("HOME", OldHome)
+    end,
+    _ = file:del_dir_r(Tmp),
+    ok.
+
+ws_temp_dir() ->
+    unicode:characters_to_list(beamtalk_file:'tempDirectory'()).
+
+stop_proc(Pid) when is_pid(Pid) ->
+    case is_process_alive(Pid) of
+        true ->
+            Ref = monitor(process, Pid),
+            unlink(Pid),
+            exit(Pid, shutdown),
+            receive
+                {'DOWN', Ref, process, Pid, _} -> ok
+            after 5000 -> ok
+            end;
+        false ->
+            ok
+    end;
+stop_proc(_) ->
+    ok.
+
+%%====================================================================
+%% dependencies/0 with a package name set (ADR 0070 Phase 5)
+%%
+%% When workspace_meta resolves a package name (from beamtalk.toml at the
+%% project path) dependencies/0 takes the `PkgName ->` branch and builds a
+%% map from the package's dependency list. With a synthetic package that has
+%% no registered OTP application, the dependency list is empty and the result
+%% is an empty map — but via the populated branch, not the `undefined` guard.
+%%====================================================================
+
+dependencies_with_package_name_returns_map_test() ->
+    Unique = integer_to_list(erlang:unique_integer([positive])),
+    WorkspaceId = list_to_binary("test-ws-deps-" ++ Unique),
+    Tmp = filename:join(ws_temp_dir(), "bt-deps-" ++ Unique),
+    ok = filelib:ensure_path(Tmp),
+    %% A beamtalk.toml at the project path makes get_package_name/0 resolve a
+    %% real name, so dependencies/0 leaves the `undefined` short-circuit.
+    ok = file:write_file(
+        filename:join(Tmp, "beamtalk.toml"),
+        <<"[package]\nname = \"bt_deps_probe_pkg\"\n">>
+    ),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", Tmp),
+    MetaPid =
+        case
+            beamtalk_workspace_meta:start_link(#{
+                workspace_id => WorkspaceId,
+                project_path => list_to_binary(Tmp),
+                created_at => erlang:system_time(second),
+                last_activity => erlang:system_time(second)
+            })
+        of
+            {ok, P} -> P;
+            {error, {already_started, P}} -> P
+        end,
+    try
+        ?assertEqual(<<"bt_deps_probe_pkg">>, beamtalk_workspace_meta:get_package_name()),
+        Result = beamtalk_workspace_interface_primitives:dependencies(),
+        ?assert(is_map(Result)),
+        %% The synthetic package has no registered OTP app → no resolvable
+        %% dependencies → empty map (but via the populated branch).
+        ?assertEqual(#{}, Result)
+    after
+        stop_proc(MetaPid),
+        case OldHome of
+            false -> os:unsetenv("HOME");
+            _ -> os:putenv("HOME", OldHome)
+        end,
+        _ = file:del_dir_r(Tmp)
+    end.
+
+%%====================================================================
+%% supervisors/0 against a bare, locally-registered beamtalk_workspace_sup
+%%
+%% supervisors/0 reads the (possibly empty) root supervisor plus the user
+%% supervisors attached under beamtalk_workspace_sup. We start a minimal
+%% standalone supervisor registered under that name with no children, so the
+%% which_children scan runs for real and the user-supervisor list is empty.
+%% Combined with a registered root, this exercises both the Root branch and
+%% the filtermap over which_children.
+%%====================================================================
+
+supervisors_lists_root_with_empty_user_tree_test() ->
+    %% Only run when no real workspace_sup is already up (suite-ordering safe).
+    case whereis(beamtalk_workspace_sup) of
+        undefined ->
+            {ok, SupPid} = start_bare_workspace_sup(),
+            (try
+                ets:delete(beamtalk_root_supervisor)
+            catch
+                _:_ -> ok
+            end),
+            RootTuple = {beamtalk_supervisor, 'AppRoot', 'bt@app@root', self()},
+            beamtalk_supervisor:register_root(RootTuple),
+            try
+                Result = beamtalk_workspace_interface_primitives:supervisors(),
+                ?assert(is_list(Result)),
+                %% Root is present; no user supervisors attached.
+                ?assert(lists:member(RootTuple, Result)),
+                ?assertEqual([RootTuple], Result)
+            after
+                (try
+                    ets:delete(beamtalk_root_supervisor)
+                catch
+                    _:_ -> ok
+                end),
+                stop_proc(SupPid)
+            end;
+        _ ->
+            %% A workspace_sup is already running (integration suite); just
+            %% assert the call returns a list.
+            ?assert(is_list(beamtalk_workspace_interface_primitives:supervisors()))
+    end.
+
+supervisors_empty_without_root_test() ->
+    case whereis(beamtalk_workspace_sup) of
+        undefined ->
+            {ok, SupPid} = start_bare_workspace_sup(),
+            (try
+                ets:delete(beamtalk_root_supervisor)
+            catch
+                _:_ -> ok
+            end),
+            try
+                ?assertEqual([], beamtalk_workspace_interface_primitives:supervisors())
+            after
+                stop_proc(SupPid)
+            end;
+        _ ->
+            ?assert(is_list(beamtalk_workspace_interface_primitives:supervisors()))
+    end.
+
+%% Start a minimal one_for_one supervisor with no children registered under
+%% the beamtalk_workspace_sup name. supervisor:start_link with the eunit test
+%% module as callback uses init/1 below.
+start_bare_workspace_sup() ->
+    supervisor:start_link({local, beamtalk_workspace_sup}, ?MODULE, bare_sup).
+
+%% supervisor init/1 callback used only by start_bare_workspace_sup/0.
+init(bare_sup) ->
+    {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.
+
+%%====================================================================
+%% safe_existing_atom/1 + class_object_for/1 via changeLogRevert
+%%
+%% (covered indirectly above through the no-entry path; the install/lookup
+%% path requires a real compiled class and is exercised by the repl-protocol
+%% e2e suite — see the report notes on integration-only branches.)
+%%====================================================================

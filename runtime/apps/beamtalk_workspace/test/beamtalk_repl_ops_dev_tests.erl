@@ -840,3 +840,846 @@ parse_bare_qualified_name_test() ->
 
 %% dedupe_keyword_aliases and format_beamtalk_signature tests moved to
 %% beamtalk_erlang_help_tests.erl (these functions were extracted in BT-1903).
+
+%%====================================================================
+%% handle/4 -- erlang-help op (BT-1852)
+%%====================================================================
+
+erlang_help_missing_module_returns_error_test() ->
+    %% Empty module binary -> "Module name required" error.
+    Msg = make_msg(<<"erlang-help">>, <<"eh-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-help">>, #{<<"module">> => <<>>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Module name required">>)).
+
+erlang_help_unknown_module_returns_not_found_test() ->
+    %% A module name that is not an existing atom -> badarg -> not-found error.
+    Msg = make_msg(<<"erlang-help">>, <<"eh-2">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-help">>,
+        #{<<"module">> => <<"no_such_erlang_module_xyz99999">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"not found">>)).
+
+erlang_help_known_module_returns_docs_test() ->
+    %% `lists` is always loaded; format_module_help should succeed and return docs.
+    Msg = make_msg(<<"erlang-help">>, <<"eh-3">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-help">>, #{<<"module">> => <<"lists">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    %% Success path encodes docs (no error key).
+    ?assertEqual(false, maps:is_key(<<"error">>, Decoded)).
+
+erlang_help_known_module_unknown_function_returns_error_test() ->
+    %% Known module, function that does not exist -> function not-found error.
+    Msg = make_msg(<<"erlang-help">>, <<"eh-4">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-help">>,
+        #{<<"module">> => <<"lists">>, <<"function">> => <<"no_such_fn_xyz99999">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    %% Hint mentions using :help Erlang <module> to list functions.
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"not found">>)).
+
+erlang_help_known_module_known_function_returns_docs_test() ->
+    %% `lists:map/2` exists -> function help succeeds.
+    Msg = make_msg(<<"erlang-help">>, <<"eh-5">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-help">>,
+        #{<<"module">> => <<"lists">>, <<"function">> => <<"map">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual(false, maps:is_key(<<"error">>, Decoded)).
+
+%%====================================================================
+%% handle/4 -- erlang-complete op (BT-1903)
+%%====================================================================
+
+erlang_complete_module_prefix_test() ->
+    %% No module param -> complete module names by prefix. "list" should match "lists".
+    Msg = make_msg(<<"erlang-complete">>, <<"ec-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-complete">>, #{<<"prefix">> => <<"list">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    Completions = maps:get(<<"completions">>, Decoded),
+    ?assert(is_list(Completions)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    %% Every completion must start with the requested prefix.
+    lists:foreach(
+        fun(C) -> ?assertEqual({0, 4}, binary:match(C, <<"list">>)) end,
+        Completions
+    ).
+
+erlang_complete_function_prefix_loaded_module_test() ->
+    %% Module given + already loaded -> complete its exported function names.
+    %% `lists` is loaded; functions like `map`, `member` start with "m".
+    Msg = make_msg(<<"erlang-complete">>, <<"ec-2">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-complete">>,
+        #{<<"prefix">> => <<"m">>, <<"module">> => <<"lists">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    Completions = maps:get(<<"completions">>, Decoded),
+    ?assert(is_list(Completions)),
+    %% module_info must be filtered out, and all results start with "m".
+    ?assertEqual(false, lists:member(<<"module_info">>, Completions)),
+    lists:foreach(
+        fun(C) -> ?assertEqual({0, 1}, binary:match(C, <<"m">>)) end,
+        Completions
+    ),
+    %% `map` is a well-known lists export.
+    ?assert(lists:member(<<"map">>, Completions)).
+
+erlang_complete_unknown_module_returns_empty_test() ->
+    %% Module name that is not an existing atom -> badarg -> empty completions.
+    Msg = make_msg(<<"erlang-complete">>, <<"ec-3">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-complete">>,
+        #{<<"prefix">> => <<"x">>, <<"module">> => <<"no_such_mod_xyz99999">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([], maps:get(<<"completions">>, Decoded)).
+
+erlang_complete_legacy_format_test() ->
+    %% Legacy protocol returns a top-level "completions" type response.
+    Msg = make_msg(<<"erlang-complete">>, undefined, undefined, true),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"erlang-complete">>, #{<<"prefix">> => <<"list">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"completions">>, maps:get(<<"type">>, Decoded)),
+    ?assert(is_list(maps:get(<<"completions">>, Decoded))).
+
+%%====================================================================
+%% handle/4 -- test / test-all op validation (BT no runtime)
+%%====================================================================
+
+handle_test_class_and_file_mutually_exclusive_test() ->
+    %% Both class and file given -> mutually-exclusive error.
+    Msg = make_msg(<<"test">>, <<"t-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"test">>,
+        #{<<"class">> => <<"FooTest">>, <<"file">> => <<"foo.bt">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"mutually exclusive">>)).
+
+handle_test_file_not_binary_test() ->
+    %% file param that is not a binary -> "'file' must be a binary path" error.
+    Msg = make_msg(<<"test">>, <<"t-2">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"test">>, #{<<"file">> => 12345}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"binary path">>)).
+
+handle_test_unknown_class_returns_class_not_found_test() ->
+    %% A class name that has never been loaded as an atom -> class-not-found error.
+    Msg = make_msg(<<"test">>, <<"t-3">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"test">>, #{<<"class">> => <<"NoSuchTestClassXyz99999">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown class">>)).
+
+%%====================================================================
+%% handle/4 -- list-classes filter validation (BT-1404)
+%%====================================================================
+
+handle_list_classes_unknown_filter_returns_error_test() ->
+    %% A filter that is not stdlib/user and not an existing atom -> argument error.
+    Msg = make_msg(<<"list-classes">>, <<"lc-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"list-classes">>,
+        #{<<"filter">> => <<"NoSuchFilterClassXyz99999">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown filter">>)).
+
+%%====================================================================
+%% encode helpers: encode_codegen_response via show-codegen success path
+%%====================================================================
+
+%% validate_list_classes_filter/1 is internal; its observable behaviour is
+%% exercised through handle(<<"list-classes">>, ...). The success branch with
+%% an empty registry is covered by the fixture-based list-classes tests below.
+
+%%====================================================================
+%% Fixture: a live class registry with real classes (exercises the
+%% completion + reflection + show-codegen-class paths).
+%%====================================================================
+
+dev_runtime_test_() ->
+    {setup, fun setup_dev_runtime/0, fun teardown_dev_runtime/1, fun(_) ->
+        [
+            {"complete legacy with class prefix", fun complete_legacy_class_prefix_returns_class/0},
+            {"get_completions matches registered class", fun get_completions_matches_class/0},
+            {"get_completions includes builtin keyword", fun get_completions_includes_keyword/0},
+            {"context completion: class receiver -> class methods",
+                fun context_completion_class_receiver/0},
+            {"context completion: class receiver empty prefix",
+                fun context_completion_class_empty_prefix/0},
+            {"context completion: integer literal receiver",
+                fun context_completion_integer_literal/0},
+            {"context completion: string literal receiver",
+                fun context_completion_string_literal/0},
+            {"context completion: binding receiver", fun context_completion_binding_receiver/0},
+            {"context completion: unknown lowercase receiver -> empty",
+                fun context_completion_unknown_lowercase/0},
+            {"methods op returns instance + class methods", fun methods_op_returns_methods/0},
+            {"methods op returns state vars", fun methods_op_returns_state_vars/0},
+            {"list_class_methods_for_ws includes inherited side tags",
+                fun list_class_methods_known_class/0},
+            {"list-classes op returns the registered class", fun list_classes_op_returns_class/0},
+            {"list-classes filter stdlib excludes non-stdlib class",
+                fun list_classes_filter_stdlib/0},
+            {"list-classes superclass filter", fun list_classes_superclass_filter/0},
+            {"show-codegen class: selector not found error",
+                fun show_codegen_class_selector_not_found/0},
+            {"validate_selector_if_present known selector -> ok", fun validate_selector_known/0},
+            {"validate_selector_if_present unknown selector -> error",
+                fun validate_selector_unknown/0},
+            {"classify class receiver via get_methods_for_receiver",
+                fun get_methods_for_receiver_class/0},
+            {"resolve_chain_type class side via registry", fun resolve_chain_type_class_side/0},
+            {"show-codegen class without selector compiles source",
+                fun show_codegen_class_compiles_source/0},
+            {"cross-package internal class excluded from completions",
+                fun completions_exclude_cross_package_internal/0},
+            {"expression completion: class chain -> instance methods",
+                fun context_completion_expression_instance_methods/0},
+            {"expression completion: class-side chain -> class methods",
+                fun context_completion_expression_class_methods/0},
+            {"expression completion: unresolvable chain -> empty",
+                fun context_completion_expression_unresolvable/0},
+            {"methods op via package-qualified class name",
+                fun list_class_methods_qualified_name/0},
+            {"test op for a known (non-TestCase) class returns a response",
+                fun test_op_known_class_returns_response/0},
+            {"walk_chain follows instance return type", fun walk_chain_follows_return_type/0},
+            {"walk_chain instance-then-class transition", fun walk_chain_instance_then_class/0},
+            {"walk_chain_class first hop transitions to instance",
+                fun walk_chain_class_first_hop_instance/0},
+            {"walk_mixed_chain unary class transition",
+                fun walk_mixed_chain_unary_class_transition/0},
+            {"walk_mixed_chain_class first hop transitions to instance",
+                fun walk_mixed_chain_class_first_hop_instance/0},
+            {"resolve_chain_type instance chain via registry",
+                fun resolve_chain_type_instance_chain/0},
+            {"expression completion empty prefix lists all instance methods",
+                fun context_completion_expression_empty_prefix/0},
+            {"uppercase binding (non-class) classifies via binding",
+                fun classify_uppercase_binding/0},
+            {"qualified @ receiver classifies as class",
+                fun context_completion_qualified_receiver/0},
+            {"list-classes user filter includes user class",
+                fun list_classes_user_filter_includes/0},
+            {"single-line doc surfaces verbatim in list-classes",
+                fun list_classes_single_line_doc/0}
+        ]
+    end}.
+
+context_completion_expression_empty_prefix() ->
+    %% "WidgetDev create " — resolved instance receiver with empty prefix returns
+    %% all instance methods (filter_by_prefix empty-prefix usort branch).
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev create ">>),
+    ?assert(lists:member(<<"render">>, Result)),
+    ?assert(lists:member(<<"resize">>, Result)),
+    ?assert(lists:member(<<"next">>, Result)).
+
+classify_uppercase_binding() ->
+    %% `Transcript` is an existing atom but not a registered class here, so the
+    %% uppercase branch of classify_receiver falls back to the binding lookup.
+    %% The binding holds an integer (primitive_class_of → 'Integer'), and the
+    %% Integer fixture class is registered, so completion offers Integer methods.
+    Bindings = #{'Transcript' => 99},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"Transcript ab">>, Bindings),
+    ?assert(lists:member(<<"abs">>, Result)).
+
+context_completion_qualified_receiver() ->
+    %% "test@WidgetDev re" — the @-qualified receiver resolves to WidgetDev (a
+    %% class object), so class-side completions are offered. Exercises the
+    %% resolve_qualified_class_name branch inside classify_receiver/2.
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"test@WidgetDev cr">>),
+    ?assert(lists:member(<<"create">>, Result)).
+
+list_classes_user_filter_includes() ->
+    %% With WidgetDev registered under a non-stdlib module, the "user" filter
+    %% must include it (exercises should_include_class/4 not-stdlib branch).
+    Msg = make_msg(<<"list-classes">>, <<"lcui-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"list-classes">>, #{<<"filter">> => <<"user">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ClassList = maps:get(<<"class_list">>, Decoded),
+    Names = [maps:get(<<"name">>, C) || C <- ClassList],
+    ?assert(lists:member(<<"WidgetDev">>, Names)).
+
+list_classes_single_line_doc() ->
+    %% OneLineDocDev's doc has no newline; first_line/1 returns it verbatim.
+    Msg = make_msg(<<"list-classes">>, <<"lcd-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"list-classes">>, #{}, Msg, self()),
+    Decoded = json:decode(Result),
+    ClassList = maps:get(<<"class_list">>, Decoded),
+    [Row] = [C || C <- ClassList, maps:get(<<"name">>, C) =:= <<"OneLineDocDev">>],
+    ?assertEqual(<<"Single line doc no newline">>, maps:get(<<"doc">>, Row)).
+
+walk_chain_follows_return_type() ->
+    %% next returns a WidgetDev instance, so walk_chain follows the hop.
+    ?assertEqual(
+        {ok, 'WidgetDev', instance},
+        beamtalk_repl_ops_dev:walk_chain('WidgetDev', [next])
+    ).
+
+walk_chain_instance_then_class() ->
+    %% "next class" — follow next (→ WidgetDev instance) then transition to class.
+    ?assertEqual(
+        {ok, 'WidgetDev', class},
+        beamtalk_repl_ops_dev:walk_chain('WidgetDev', [next, class])
+    ).
+
+walk_chain_class_first_hop_instance() ->
+    %% Class-side create returns a WidgetDev instance, so the chain switches
+    %% to the instance side for the remaining (empty) hops.
+    ?assertEqual(
+        {ok, 'WidgetDev', instance},
+        beamtalk_repl_ops_dev:walk_chain_class('WidgetDev', [create])
+    ).
+
+walk_mixed_chain_unary_class_transition() ->
+    %% {unary, class} after a resolvable hop transitions instance → class.
+    ?assertEqual(
+        {ok, 'WidgetDev', class},
+        beamtalk_repl_ops_dev:walk_mixed_chain('WidgetDev', [{unary, next}, {unary, class}])
+    ).
+
+walk_mixed_chain_class_first_hop_instance() ->
+    %% Class-side create returns an instance; mixed-chain-class switches sides.
+    ?assertEqual(
+        {ok, 'WidgetDev', instance},
+        beamtalk_repl_ops_dev:walk_mixed_chain_class('WidgetDev', [{unary, create}])
+    ).
+
+resolve_chain_type_instance_chain() ->
+    %% "WidgetDev create next" — class create → instance, then next → instance.
+    ?assertEqual(
+        {ok, 'WidgetDev', instance},
+        beamtalk_repl_ops_dev:resolve_chain_type(<<"WidgetDev create next">>, #{})
+    ).
+
+test_op_known_class_returns_response() ->
+    %% WidgetDev is a real registered class atom (so safe_to_existing_atom
+    %% succeeds), but it is not a TestCase subclass. run_test_op/2 therefore
+    %% runs the runner branch: it either returns test results or a structured
+    %% error — both are well-formed JSON with a status field. This exercises
+    %% the run_class_by_name path rather than the early class-not-found return.
+    Msg = make_msg(<<"test">>, <<"tk-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"test">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(is_map(Decoded)),
+    ?assert(maps:is_key(<<"status">>, Decoded)).
+
+setup_dev_runtime() ->
+    case whereis(pg) of
+        undefined -> {ok, _} = pg:start_link();
+        _ -> ok
+    end,
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    %% Base class (superclass) so the hierarchy walk has > 1 level.
+    {ok, BasePid} = beamtalk_object_class:start('WidgetDevBase', #{
+        name => 'WidgetDevBase',
+        module => 'bt@test@widget_dev_base',
+        superclass => none,
+        instance_methods => #{
+            'inheritedGreet' => #{block => fun(_, _) -> ok end, arity => 0}
+        }
+    }),
+    %% Concrete class with instance + class methods, fields, and a doc string.
+    {ok, WidgetPid} = beamtalk_object_class:start('WidgetDev', #{
+        name => 'WidgetDev',
+        module => 'bt@test@widget_dev',
+        superclass => 'WidgetDevBase',
+        doc => <<"A widget for dev tests.\nSecond line ignored.">>,
+        fields => [width, height],
+        instance_methods => #{
+            'render' => #{block => fun(_, _) -> ok end, arity => 0},
+            'resize' => #{block => fun(_, _, _) -> ok end, arity => 2},
+            'next' => #{block => fun(_, _) -> ok end, arity => 0}
+        },
+        method_return_types => #{
+            'next' => 'WidgetDev'
+        },
+        class_methods => #{
+            'create' => #{block => fun(_, _) -> ok end, arity => 0}
+        },
+        class_method_return_types => #{
+            'create' => 'WidgetDev'
+        }
+    }),
+    %% A class named "Integer" so a binding holding an integer (whose
+    %% primitive_class_of is 'Integer') classifies as an instance receiver,
+    %% and "String" for string-literal classification.
+    %% 'Integer'/'String' may already be registered by the runtime bootstrap (or
+    %% by another test module in the shared EUnit node), so tolerate
+    %% already_started and only kill the ones this fixture actually owns.
+    {IntPid, IntOwned} = start_dev_class('Integer', #{
+        name => 'Integer',
+        module => 'bt@test@integer_dev',
+        superclass => none,
+        instance_methods => #{
+            'abs' => #{block => fun(_, _) -> 0 end, arity => 0}
+        }
+    }),
+    %% Use the real String method name 'uppercase' so the string-literal
+    %% completion test passes whether this fixture's String is used (isolated
+    %% run) or the bootstrap String is reused (combined run).
+    {StrPid, StrOwned} = start_dev_class('String', #{
+        name => 'String',
+        module => 'bt@test@string_dev',
+        superclass => none,
+        instance_methods => #{
+            'uppercase' => #{block => fun(_, _) -> ok end, arity => 0}
+        }
+    }),
+    %% ADR 0071 Phase 5: an internal class in a *named* package (test) — the REPL
+    %% runs in the implicit nil package, so this class must be filtered out of
+    %% cross-package completions (exercises is_cross_package_internal/1 true path).
+    {ok, HiddenPid} = beamtalk_object_class:start('HiddenDevWidget', #{
+        name => 'HiddenDevWidget',
+        module => 'bt@test@hidden_dev_widget',
+        superclass => none,
+        is_internal => true,
+        instance_methods => #{
+            'secret' => #{block => fun(_, _) -> ok end, arity => 0}
+        }
+    }),
+    %% A class whose doc has no newline, exercising first_line/1's no-split branch.
+    {ok, OneLinePid} = beamtalk_object_class:start('OneLineDocDev', #{
+        name => 'OneLineDocDev',
+        module => 'bt@test@one_line_doc_dev',
+        superclass => none,
+        doc => <<"Single line doc no newline">>,
+        instance_methods => #{}
+    }),
+    [BasePid, WidgetPid, HiddenPid, OneLinePid] ++
+        [IntPid || IntOwned] ++ [StrPid || StrOwned].
+
+%% Start a class for the dev-runtime fixture, tolerating a class already
+%% registered by the runtime bootstrap or another module. Returns {Pid, Owned}
+%% where Owned is false for a reused registration (teardown must not kill it).
+start_dev_class(Name, Spec) ->
+    case beamtalk_object_class:start(Name, Spec) of
+        {ok, Pid} -> {Pid, true};
+        {error, {already_started, Pid}} -> {Pid, false}
+    end.
+
+teardown_dev_runtime(Pids) ->
+    lists:foreach(
+        fun(Pid) ->
+            case is_process_alive(Pid) of
+                true ->
+                    MRef = monitor(process, Pid),
+                    exit(Pid, kill),
+                    receive
+                        {'DOWN', MRef, process, Pid, _} -> ok
+                    after 1000 -> ok
+                    end;
+                false ->
+                    ok
+            end
+        end,
+        Pids
+    ).
+
+complete_legacy_class_prefix_returns_class() ->
+    %% Old protocol (no cursor): get_completions matches the class by prefix.
+    Msg = make_msg(<<"complete">>, undefined, undefined, true),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"complete">>, #{<<"code">> => <<"WidgetD">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    Completions = maps:get(<<"completions">>, Decoded),
+    ?assert(lists:member(<<"WidgetDev">>, Completions)).
+
+get_completions_matches_class() ->
+    Result = beamtalk_repl_ops_dev:get_completions(<<"WidgetD">>),
+    ?assert(lists:member(<<"WidgetDev">>, Result)),
+    %% A non-matching prefix yields no class names.
+    ?assertEqual(
+        false, lists:member(<<"WidgetDev">>, beamtalk_repl_ops_dev:get_completions(<<"Zzz">>))
+    ).
+
+get_completions_includes_keyword() ->
+    %% "sel" should match the builtin keyword "self".
+    Result = beamtalk_repl_ops_dev:get_completions(<<"sel">>),
+    ?assert(lists:member(<<"self">>, Result)).
+
+context_completion_class_receiver() ->
+    %% "WidgetDev cr" -> class-side method "create" plus ProtoObject methods.
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev cr">>),
+    ?assert(lists:member(<<"create">>, Result)).
+
+context_completion_class_empty_prefix() ->
+    %% "WidgetDev " (empty prefix) -> all class-side methods.
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev ">>),
+    ?assert(lists:member(<<"create">>, Result)).
+
+context_completion_integer_literal() ->
+    %% Integer literal receiver -> instance methods of Integer ("abs").
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"42 ab">>),
+    ?assert(lists:member(<<"abs">>, Result)).
+
+context_completion_string_literal() ->
+    %% String literal receiver -> String instance methods ("uppercase").
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"\"hi\" up">>),
+    ?assert(lists:member(<<"uppercase">>, Result)).
+
+context_completion_binding_receiver() ->
+    %% A lowercase binding holding an integer classifies as Integer instance.
+    Bindings = #{n => 7},
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"n ab">>, Bindings),
+    ?assert(lists:member(<<"abs">>, Result)).
+
+context_completion_unknown_lowercase() ->
+    %% A lowercase identifier with no binding -> no receiver classification -> [].
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"undefinedvar re">>, #{}),
+    ?assertEqual([], Result).
+
+methods_op_returns_methods() ->
+    Msg = make_msg(<<"methods">>, <<"mm-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    Methods = maps:get(<<"methods">>, Decoded),
+    Names = [maps:get(<<"name">>, M) || M <- Methods],
+    ?assert(lists:member(<<"render">>, Names)),
+    ?assert(lists:member(<<"create">>, Names)),
+    %% Side tags must distinguish instance from class methods.
+    Sides = [maps:get(<<"side">>, M) || M <- Methods, maps:get(<<"name">>, M) =:= <<"create">>],
+    ?assertEqual([<<"class">>], Sides).
+
+methods_op_returns_state_vars() ->
+    Msg = make_msg(<<"methods">>, <<"mm-2">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    StateVars = maps:get(<<"state_vars">>, Decoded),
+    ?assertEqual([<<"height">>, <<"width">>], StateVars).
+
+list_class_methods_known_class() ->
+    Result = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"WidgetDev">>),
+    Names = [maps:get(<<"name">>, M) || M <- Result],
+    ?assert(lists:member(<<"render">>, Names)),
+    ?assert(lists:member(<<"resize">>, Names)),
+    ?assert(lists:member(<<"create">>, Names)).
+
+list_classes_op_returns_class() ->
+    Msg = make_msg(<<"list-classes">>, <<"lc-2">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"list-classes">>, #{}, Msg, self()),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    ClassList = maps:get(<<"class_list">>, Decoded),
+    Names = [maps:get(<<"name">>, C) || C <- ClassList],
+    ?assert(lists:member(<<"WidgetDev">>, Names)),
+    %% The WidgetDev row must carry the first line of its doc and its superclass.
+    [Row] = [C || C <- ClassList, maps:get(<<"name">>, C) =:= <<"WidgetDev">>],
+    ?assertEqual(<<"A widget for dev tests.">>, maps:get(<<"doc">>, Row)),
+    ?assertEqual(<<"WidgetDevBase">>, maps:get(<<"superclass">>, Row)),
+    ?assertEqual(0, maps:get(<<"actor_count">>, Row)).
+
+list_classes_filter_stdlib() ->
+    %% WidgetDev is registered with a non-stdlib module, so the stdlib filter
+    %% must exclude it.
+    Msg = make_msg(<<"list-classes">>, <<"lc-3">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"list-classes">>, #{<<"filter">> => <<"stdlib">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ClassList = maps:get(<<"class_list">>, Decoded),
+    Names = [maps:get(<<"name">>, C) || C <- ClassList],
+    ?assertEqual(false, lists:member(<<"WidgetDev">>, Names)).
+
+list_classes_superclass_filter() ->
+    %% Filtering by superclass WidgetDevBase should include WidgetDev (which
+    %% inherits from it) and exclude unrelated classes.
+    Msg = make_msg(<<"list-classes">>, <<"lc-4">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"list-classes">>, #{<<"filter">> => <<"WidgetDevBase">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    %% Success (not an error) — the filter resolves to an existing atom.
+    ?assertEqual(false, maps:is_key(<<"error">>, Decoded)),
+    ClassList = maps:get(<<"class_list">>, Decoded),
+    Names = [maps:get(<<"name">>, C) || C <- ClassList],
+    ?assert(lists:member(<<"WidgetDev">>, Names)),
+    ?assertEqual(false, lists:member(<<"Integer">>, Names)).
+
+show_codegen_class_selector_not_found() ->
+    %% Class exists, selector does not -> "Selector ... not found" error
+    %% (exercises validate_selector_if_present failure branch).
+    Msg = make_msg(<<"show-codegen">>, <<"scc-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>,
+        #{<<"class">> => <<"WidgetDev">>, <<"selector">> => <<"noSuchSelectorXyz">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"not found">>)).
+
+validate_selector_known() ->
+    Pid = beamtalk_runtime_api:whereis_class('WidgetDev'),
+    Msg = make_msg(<<"show-codegen">>, <<"vs-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:validate_selector_if_present(
+        <<"WidgetDev">>, 'WidgetDev', Pid, <<"render">>, Msg
+    ),
+    ?assertEqual(ok, Result).
+
+validate_selector_unknown() ->
+    Pid = beamtalk_runtime_api:whereis_class('WidgetDev'),
+    Msg = make_msg(<<"show-codegen">>, <<"vs-2">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:validate_selector_if_present(
+        <<"WidgetDev">>, 'WidgetDev', Pid, <<"noSuchSelectorXyz">>, Msg
+    ),
+    ?assertMatch({error, _}, Result),
+    {error, Encoded} = Result,
+    Decoded = json:decode(Encoded),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+get_methods_for_receiver_class() ->
+    %% A class-name receiver with empty prefix returns class-side methods plus
+    %% ProtoObject instance methods, via get_context_completions.
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev ">>),
+    ?assert(lists:member(<<"create">>, Result)),
+    %% Instance-only methods (render) must NOT appear for a class-object receiver.
+    ?assertEqual(false, lists:member(<<"render">>, Result)).
+
+resolve_chain_type_class_side() ->
+    %% "WidgetDev create" — class-side send returning WidgetDev (instance).
+    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"WidgetDev create">>, #{}),
+    ?assertEqual({ok, 'WidgetDev', instance}, Result).
+
+completions_exclude_cross_package_internal() ->
+    %% HiddenDevWidget is internal and lives in the named package "test"; the
+    %% REPL's implicit nil package means it must be filtered from completions.
+    %% WidgetDev (public, package "test") is still offered.
+    Result = beamtalk_repl_ops_dev:get_completions(<<"">>),
+    %% Empty prefix short-circuits to []; use a matching prefix instead.
+    ?assertEqual([], Result),
+    Hidden = beamtalk_repl_ops_dev:get_completions(<<"HiddenDev">>),
+    ?assertEqual(false, lists:member(<<"HiddenDevWidget">>, Hidden)),
+    %% Sanity: the public class with the same package prefix IS offered.
+    Public = beamtalk_repl_ops_dev:get_completions(<<"WidgetD">>),
+    ?assert(lists:member(<<"WidgetDev">>, Public)).
+
+context_completion_expression_instance_methods() ->
+    %% Multi-token receiver "WidgetDev create" resolves (class-side create returns
+    %% a WidgetDev instance) → complete_instance_methods filters by "re".
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev create re">>),
+    ?assert(lists:member(<<"render">>, Result)),
+    ?assert(lists:member(<<"resize">>, Result)).
+
+context_completion_expression_class_methods() ->
+    %% "WidgetDev class cr" — `class` keeps the chain on the class side, so
+    %% complete_class_methods offers the class-side selector "create".
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev class cr">>),
+    ?assert(lists:member(<<"create">>, Result)).
+
+context_completion_expression_unresolvable() ->
+    %% A multi-token receiver whose type cannot be resolved (unknown selector,
+    %% no compiler) yields []. `WidgetDev render` — render has no return-type
+    %% annotation, so the chain breaks → undefined → [].
+    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev render xy">>),
+    ?assertEqual([], Result).
+
+list_class_methods_qualified_name() ->
+    %% Package-qualified name "test@WidgetDev" resolves to the WidgetDev class
+    %% (its module atom bt@test@widget_dev exists), exercising the qualified
+    %% branch of list_class_methods_for_ws/1.
+    Result = beamtalk_repl_ops_dev:list_class_methods_for_ws(<<"test@WidgetDev">>),
+    Names = [maps:get(<<"name">>, M) || M <- Result],
+    ?assert(lists:member(<<"render">>, Names)).
+
+show_codegen_class_compiles_source() ->
+    %% Class exists, no selector → compile_class_source/4 runs. The fixture
+    %% class has a synthetic module not on disk and no workspace_meta source,
+    %% so resolve_source_path returns "unknown" and we hit the no_source branch
+    %% producing a "No source" runtime error (rather than a class-not-found).
+    Msg = make_msg(<<"show-codegen">>, <<"scs-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"No source">>)).
+
+%%====================================================================
+%% Live REPL session: show-codegen `code` path + encode_codegen_response
+%%====================================================================
+
+session_codegen_test_() ->
+    {setup, fun setup_session/0, fun teardown_session/1, fun(Pid) ->
+        [
+            {"show-codegen code routes through the session code path", fun() ->
+                session_show_codegen_code_path(Pid)
+            end},
+            {"show-codegen code compile error returns structured error", fun() ->
+                session_show_codegen_code_error(Pid)
+            end}
+        ]
+    end}.
+
+setup_session() ->
+    application:ensure_all_started(beamtalk_runtime),
+    {ok, Pid} = beamtalk_repl_shell:start_link(<<"ops-dev-codegen-session">>),
+    Pid.
+
+teardown_session(Pid) ->
+    catch beamtalk_repl_shell:stop(Pid),
+    ok.
+
+session_show_codegen_code_path(Pid) ->
+    %% A non-empty `code` param with a live session routes handle/4 through the
+    %% code branch and into beamtalk_repl_shell:show_codegen/2. Compiler-port
+    %% availability is environment-dependent in the shared EUnit node: with the
+    %% port up show_codegen returns a codegen result, without it a structured
+    %% error. Either way the response is a well-formed, non-crashing map whose
+    %% status list ends with the done marker.
+    Msg = make_msg(<<"show-codegen">>, <<"scd-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>, #{<<"code">> => <<"1 + 2">>}, Msg, Pid
+    ),
+    Decoded = json:decode(Result),
+    ?assert(is_map(Decoded)),
+    Status = maps:get(<<"status">>, Decoded),
+    ?assert(lists:member(<<"done">>, Status)).
+
+session_show_codegen_code_error(Pid) ->
+    %% A syntactically invalid expression also flows through the code path's
+    %% error branch and returns a structured error.
+    Msg = make_msg(<<"show-codegen">>, <<"scd-2">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"show-codegen">>, #{<<"code">> => <<"@@@ invalid syntax @@@">>}, Msg, Pid
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)).
+
+%%====================================================================
+%% Additional coverage: cheap pure helpers + remaining handle branches
+%%====================================================================
+
+handle_complete_with_cursor_no_session_bindings_test() ->
+    %% New protocol with a "cursor" field exercises the binding-merge branch.
+    %% self() is not a real session, so get_session_bindings catches and returns
+    %% #{}; the merge still produces context completions (here: bare prefix → []).
+    Msg = make_msg(<<"complete">>, <<"cc-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"complete">>,
+        #{<<"code">> => <<>>, <<"cursor">> => 0},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual([], maps:get(<<"completions">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+get_session_bindings_dead_pid_returns_empty_test() ->
+    %% A non-session pid (self) makes beamtalk_repl_shell:get_bindings throw,
+    %% which the helper catches, returning an empty map.
+    ?assertEqual(#{}, beamtalk_repl_ops_dev:get_session_bindings(self())).
+
+handle_test_all_returns_response_test() ->
+    %% test-all runs the (possibly empty) TestCase suite. With no TestCase
+    %% subclasses loaded it returns a structured test-results response; if the
+    %% runner raises, a structured error is returned. Either way it is a
+    %% well-formed JSON object — never a crash.
+    Msg = make_msg(<<"test-all">>, <<"ta-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"test-all">>, #{}, Msg, self()),
+    Decoded = json:decode(Result),
+    ?assert(is_map(Decoded)),
+    ?assert(maps:is_key(<<"status">>, Decoded)).
+
+handle_test_file_returns_response_test() ->
+    %% A file path with no matching TestCase subclasses returns a well-formed
+    %% response (empty results or structured error), exercising run_test_op_file/2.
+    Msg = make_msg(<<"test">>, <<"tf-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"test">>, #{<<"file">> => <<"no_such_file_xyz99999.bt">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(is_map(Decoded)),
+    ?assert(maps:is_key(<<"status">>, Decoded)).
+
+validate_list_classes_filter_user_test() ->
+    %% list-classes with the "user" filter takes the not-stdlib branch and must
+    %% include the (non-stdlib) WidgetDev fixture-free path: here we only assert
+    %% the op succeeds and returns a class_list (the user filter resolves cheaply).
+    Msg = make_msg(<<"list-classes">>, <<"lcu-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"list-classes">>, #{<<"filter">> => <<"user">>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual(false, maps:is_key(<<"error">>, Decoded)),
+    ?assert(is_list(maps:get(<<"class_list">>, Decoded))).
+
+resolve_qualified_consecutive_uppercase_test() ->
+    %% Class name with consecutive uppercase letters exercises the
+    %% camel_to_snake conversion (PrevWasLower=false branch). The module atom
+    %% bt@stdlib@a_b_c_widget does not exist, so the result is {error, badarg},
+    %% but the conversion path is still walked.
+    ?assertEqual(
+        {error, badarg},
+        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"stdlib@ABCWidget">>)
+    ).
+
+handle_list_classes_non_binary_filter_test() ->
+    %% A filter that is neither undefined nor a binary hits the catch-all clause
+    %% of validate_list_classes_filter/1 → {error, FilterStr} → argument error.
+    Msg = make_msg(<<"list-classes">>, <<"lcn-1">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"list-classes">>, #{<<"filter">> => 12345}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assert(maps:is_key(<<"error">>, Decoded)),
+    ErrMsg = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown filter">>)).
