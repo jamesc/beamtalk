@@ -32,6 +32,17 @@
 // so the structural assertions on them still hold. End-to-end correctness (an
 // unused method surfaces; the runtime-called / TestCase / primitive / FFI
 // exclusions hold) is covered by the E2E suite against the live index.
+//
+// BT-2304 / ADR 0087 Phase 6 (synthetic auto-accessors): compiler-generated
+// `field/1` getters and `withField:/2` setters for `Value subclass:` classes
+// now carry `source_status => synthetic` rows in the xref index. This does NOT
+// change `unusedSelectors`: the *defined* candidate side reads each class's live
+// method dictionary (`cls methods`), where auto-accessors have always appeared
+// as real dispatchable methods — independent of the xref index — and the *sent*
+// side reads `all_sent_selectors_bt/0`, which the synthetic rows (empty `sends`)
+// do not extend. So the Phase 6 emission adds no new false `unused` positives.
+// Synthetic accessors that nothing sends to are framework-provided, not
+// user-written deletion candidates; their handling is unchanged by this phase.
 
 TestCase subclass: SystemNavigationUnusedTest
 

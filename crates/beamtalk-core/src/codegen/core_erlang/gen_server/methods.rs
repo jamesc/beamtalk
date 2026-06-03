@@ -14,11 +14,46 @@ use super::super::selector_mangler::safe_class_method_fn_name;
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use crate::ast::{
     Block, ClassDefinition, ClassKind, Expression, Identifier, Literal, MapPair, MessageSelector,
-    MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration, TypeParamDecl,
-    WellKnownSelector,
+    MethodDefinition, MethodKind, Module, ParameterDefinition, StateDeclaration, TypeAnnotation,
+    TypeParamDecl, WellKnownSelector,
 };
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
+
+/// Collects the class names referenced by a type annotation into `out`
+/// (ADR 0087 Phase 6, BT-2304).
+///
+/// Mirrors `collect_all_type_refs` in
+/// [`crate::queries::references_to_query`] — the walker hand-written-method
+/// `references` rows use — so a synthetic accessor on a typed slot reports the
+/// same referenced class names a hand-written accessor with the same type
+/// signature would. `Singleton` / `Self` / `Self class` annotations carry no
+/// class reference and are skipped.
+fn collect_type_annotation_class_names(annotation: &TypeAnnotation, out: &mut Vec<String>) {
+    match annotation {
+        TypeAnnotation::Simple(id) => out.push(id.name.to_string()),
+        TypeAnnotation::Generic {
+            base, parameters, ..
+        } => {
+            out.push(base.name.to_string());
+            for param in parameters {
+                collect_type_annotation_class_names(param, out);
+            }
+        }
+        TypeAnnotation::Union { types, .. } => {
+            for ty in types {
+                collect_type_annotation_class_names(ty, out);
+            }
+        }
+        TypeAnnotation::FalseOr { inner, .. } => {
+            collect_type_annotation_class_names(inner, out);
+        }
+        TypeAnnotation::ClassOf { class_name, .. } => out.push(class_name.name.to_string()),
+        TypeAnnotation::Singleton { .. }
+        | TypeAnnotation::SelfType { .. }
+        | TypeAnnotation::SelfClass { .. } => {}
+    }
+}
 
 /// Extracts the package name from a BEAM module name following the
 /// `bt@{package}@{class}` convention (ADR 0016/0070).
@@ -1306,7 +1341,7 @@ impl CoreErlangGenerator {
             // into register_class/0. Forwarded to beamtalk_xref synchronously at
             // class-load time by beamtalk_object_class:init/1.
             let method_xref_doc =
-                self.build_method_xref_list(&instance_methods, &class_methods_primary);
+                self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
 
             // BT-412: Class variable initial values
             let class_vars_doc = self.build_class_var_map(&class.class_variables)?;
@@ -1499,13 +1534,20 @@ impl CoreErlangGenerator {
     /// the baked line numbers are method-relative and byte-for-byte consistent
     /// with the fallback. No port round-trip; one in-process walk per method.
     ///
-    /// All emitted rows carry `source_status => indexed`. Synthetic-accessor
-    /// rows (`source_status => synthetic`) and the `synthetic_origin` key are
-    /// out of scope here — they land in Phase 6 (BT-2304). Per the AC, the
-    /// optional `synthetic_origin` key is *omitted*, never emitted as a `null`
-    /// sentinel, for `indexed` rows.
+    /// Hand-written rows carry `source_status => indexed` and *omit* the
+    /// optional `synthetic_origin` key (never emitted as a `null` sentinel).
+    ///
+    /// ADR 0087 Phase 6 (BT-2304): compiler-generated auto-accessors for
+    /// `Value subclass:` classes (the `field/1` getters and `withField:/2`
+    /// setters emitted by `value_type_codegen.rs`) have no user source text but
+    /// are fully known to the compiler. They ride this same write path: their
+    /// rows carry `source_status => synthetic` and a derived `synthetic_origin`
+    /// line pointing at the generating slot declaration (or the class header).
+    /// Included by default so `implementorsOf: #value` on an auto-accessor is
+    /// non-empty — a documented parity exception, not a regression.
     fn build_method_xref_list(
         &self,
+        class: &ClassDefinition,
         instance_methods: &[&MethodDefinition],
         class_methods: &[&MethodDefinition],
     ) -> Document<'static> {
@@ -1516,7 +1558,117 @@ impl CoreErlangGenerator {
         for method in class_methods {
             entries.push(self.build_method_xref_entry(method, true));
         }
+        // ADR 0087 Phase 6 (BT-2304): synthetic auto-accessor rows.
+        entries.extend(self.build_synthetic_accessor_xref_entries(class));
         docvec!["[", join(entries, &Document::Str(", ")), "]"]
+    }
+
+    /// ADR 0087 Phase 6 (BT-2304): Builds `method_xref` rows for the
+    /// compiler-generated auto-accessors of a `Value subclass:` class.
+    ///
+    /// For each auto-generated slot getter (`field/1`) and `with*:` setter
+    /// (`withField:/2`) — i.e. those the user did *not* hand-define — one row is
+    /// emitted with:
+    /// - `source_status => synthetic` (the parity-exception marker),
+    /// - `synthetic_origin => N`, the 1-based source line of the generating
+    ///   `field:` / `state:` slot declaration (falling back to the class header
+    ///   line when the slot span cannot be resolved),
+    /// - `line => N` mirroring the origin so LSP / System Browser navigation has
+    ///   a target,
+    /// - an empty `sends` list — accessors delegate to runtime map primitives
+    ///   (`maps:get` / `maps:put`), not Beamtalk sends — and
+    /// - a `references` list carrying the slot's declared type (e.g. a slot
+    ///   `state: count :: Integer` yields a reference to `Integer` on both its
+    ///   getter and its `withCount:` setter).
+    ///
+    /// Returns an empty vector for non-`Value` classes (only value types get
+    /// auto-accessors) and for classes with no auto-generated accessors.
+    fn build_synthetic_accessor_xref_entries(
+        &self,
+        class: &ClassDefinition,
+    ) -> Vec<Document<'static>> {
+        use super::super::value_type_codegen::{AutoSlotMethods, compute_auto_slot_methods};
+
+        let Some(auto) = compute_auto_slot_methods(class) else {
+            return Vec::new();
+        };
+
+        // Map field name -> its slot declaration so each accessor can derive its
+        // origin line and type references from the generating declaration.
+        let mut entries: Vec<Document<'static>> = Vec::new();
+
+        for field in &auto.getters {
+            if let Some(slot) = class.state.iter().find(|s| s.name.name.as_str() == field) {
+                entries.push(self.build_synthetic_accessor_entry(field, slot, class));
+            }
+        }
+        for field in &auto.setters {
+            if let Some(slot) = class.state.iter().find(|s| s.name.name.as_str() == field) {
+                let with_sel = AutoSlotMethods::with_star_selector(field);
+                entries.push(self.build_synthetic_accessor_entry(&with_sel, slot, class));
+            }
+        }
+
+        entries
+    }
+
+    /// Builds a single synthetic auto-accessor `method_xref` row
+    /// (ADR 0087 Phase 6, BT-2304).
+    ///
+    /// `selector` is the accessor selector (`field` or `withField:`), `slot` the
+    /// generating slot declaration that supplies the derived origin line and the
+    /// referenced type.
+    fn build_synthetic_accessor_entry(
+        &self,
+        selector: &str,
+        slot: &StateDeclaration,
+        class: &ClassDefinition,
+    ) -> Document<'static> {
+        const MAX_ATOM_BYTES: usize = 255;
+
+        // Derived location: the 1-based line of the generating slot declaration,
+        // falling back to the class-header line when the slot span cannot be
+        // resolved to a source line.
+        let origin_line = self
+            .span_to_line(slot.span)
+            .or_else(|| self.span_to_line(class.span))
+            .unwrap_or(1);
+
+        // References: the slot's declared type names (e.g. `Integer`). Accessors
+        // have no Beamtalk sends, but their type signature mentions the slot type
+        // exactly like a hand-written `field :: Integer` accessor would.
+        let mut ref_class_names: Vec<String> = Vec::new();
+        if let Some(ref ann) = slot.type_annotation {
+            collect_type_annotation_class_names(ann, &mut ref_class_names);
+        }
+        let refs_doc = {
+            let ref_docs: Vec<Document<'static>> = ref_class_names
+                .iter()
+                .filter(|name| name.len() <= MAX_ATOM_BYTES)
+                .map(|name| {
+                    docvec![
+                        "~{'class' => ",
+                        leaf::atom(name.clone()),
+                        ", 'line' => ",
+                        leaf::int_lit(i64::from(origin_line)),
+                        "}~",
+                    ]
+                })
+                .collect();
+            docvec!["[", join(ref_docs, &Document::Str(", ")), "]"]
+        };
+
+        docvec![
+            "~{'class_side' => 'false', 'selector' => ",
+            leaf::atom(selector.to_string()),
+            ", 'line' => ",
+            leaf::int_lit(i64::from(origin_line)),
+            ", 'sends' => [], 'references' => ",
+            refs_doc,
+            ", 'source_status' => 'synthetic', 'synthetic_origin' => ",
+            leaf::int_lit(i64::from(origin_line)),
+            "}~",
+        ]
     }
 
     /// Builds one `method_xref` entry map for a single method (ADR 0087 Phase 2).

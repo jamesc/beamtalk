@@ -28,6 +28,17 @@
 // index-backed result (the typo surfaces with sites; DNU / perform: / FFI do
 // not pollute) is covered by the E2E suite, which loads the fixtures into the
 // live index.
+//
+// BT-2304 / ADR 0087 Phase 6 (synthetic auto-accessors): compiler-generated
+// `field/1` getters and `withField:/2` setters for `Value subclass:` classes
+// now carry `source_status => synthetic` rows in the index. They satisfy sends
+// to their own selectors — a `point value`/`point withValue:` send resolves to
+// a defined synthetic accessor, so it is NOT a false typo — because the defined
+// set (`defined_selectors_bt/0`) includes the synthetic rows. Their `sends`
+// lists are empty (they delegate to runtime map primitives), so they introduce
+// no new sent selectors and therefore no new unimplemented false positives. The
+// index-level behavioural assertions live in the runtime EUnit suite
+// `beamtalk_xref_tests:synthetic_accessor_visibility_test_`.
 
 TestCase subclass: SystemNavigationUnimplementedTest
 

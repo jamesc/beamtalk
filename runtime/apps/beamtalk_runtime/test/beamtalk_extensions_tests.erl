@@ -891,7 +891,19 @@ register4_marks_unindexed_runtime_fun_test_() ->
                 ),
                 Info = beamtalk_xref:method_info('Integer', false, 'doubled'),
                 ?assertEqual(unindexed_runtime_fun, maps:get(source_status, Info)),
-                ?assertEqual(extension, maps:get(provenance, Info))
+                ?assertEqual(extension, maps:get(provenance, Info)),
+
+                %% ADR 0087 Phase 6 (BT-2304): the unindexed_runtime_fun row is
+                %% DEFINED-here — distinct from an absent row, which reports
+                %% `undefined`. A query can tell "defined, sends not analysable"
+                %% apart from "no such method".
+                ?assertNotEqual(
+                    undefined, beamtalk_xref:method_info('Integer', false, 'doubled')
+                ),
+                ?assertEqual(
+                    undefined, beamtalk_xref:method_info('Integer', false, 'noSuchSelector')
+                ),
+                ?assertEqual([], beamtalk_xref:implementors_of('noSuchSelector'))
             end)
         ]
     end}.

@@ -3853,6 +3853,106 @@ fn test_method_xref_baked_into_register_class() {
     );
 }
 
+/// ADR 0087 Phase 6 (BT-2304): compiler-generated auto-accessors for a
+/// `Value subclass:` class ride the `method_xref` write path with
+/// `source_status => synthetic` and a derived `synthetic_origin` line pointing
+/// at the generating slot declaration. They are included by default — the
+/// documented parity exception that makes `implementorsOf:` on an auto-accessor
+/// non-empty.
+#[test]
+fn test_method_xref_emits_synthetic_accessors_for_value_class() {
+    let src = concat!(
+        "Value subclass: Point\n",
+        "  state: x :: Integer = 0\n",
+        "  state: y :: Integer = 0\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("point")).expect("codegen should succeed");
+
+    // Synthetic getter rows for both slots, tagged synthetic.
+    assert!(
+        code.contains("'source_status' => 'synthetic'"),
+        "auto-accessors should be tagged synthetic. Got:\n{code}"
+    );
+    // Getter selectors `x` and `y` are present as synthetic rows.
+    assert!(
+        code.contains("'selector' => 'x'"),
+        "getter `x` synthetic row missing. Got:\n{code}"
+    );
+    // The `with*:` setter selectors are emitted.
+    assert!(
+        code.contains("'selector' => 'withX:'") && code.contains("'selector' => 'withY:'"),
+        "setter rows `withX:` / `withY:` missing. Got:\n{code}"
+    );
+    // Every synthetic row carries a derived synthetic_origin line.
+    assert!(
+        code.contains("'synthetic_origin' =>"),
+        "synthetic rows must carry synthetic_origin. Got:\n{code}"
+    );
+    // Accessors delegate to runtime map primitives — no Beamtalk sends.
+    assert!(
+        code.contains("'sends' => []"),
+        "synthetic accessors should have empty sends. Got:\n{code}"
+    );
+    // The slot's declared type `Integer` is recorded as a reference on the
+    // accessor (return/param type), like a hand-written typed accessor.
+    assert!(
+        code.contains("'class' => 'Integer'"),
+        "slot type `Integer` should be a reference on the accessor. Got:\n{code}"
+    );
+}
+
+/// ADR 0087 Phase 6 (BT-2304): an `Object subclass:` (not a value class) gets no
+/// auto-accessors, so no synthetic rows are emitted.
+#[test]
+fn test_method_xref_no_synthetic_rows_for_object_class() {
+    let src = concat!(
+        "Object subclass: Plain\n",
+        "  state: count = 0\n\n",
+        "  bump =>\n    count := count + 1\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("plain")).expect("codegen should succeed");
+
+    assert!(
+        !code.contains("'source_status' => 'synthetic'"),
+        "non-value classes must not emit synthetic accessor rows. Got:\n{code}"
+    );
+}
+
+/// ADR 0087 Phase 6 (BT-2304): a user-defined accessor suppresses the synthetic
+/// one for that slot — `compute_auto_slot_methods` already excludes hand-defined
+/// selectors, so the synthetic emission must not double-emit. The hand-written
+/// `x` getter is `indexed`, and there is no synthetic `x` row.
+#[test]
+fn test_method_xref_user_accessor_suppresses_synthetic() {
+    let src = concat!(
+        "Value subclass: Point\n",
+        "  state: x :: Integer = 0\n\n",
+        "  x =>\n    self.x\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("point")).expect("codegen should succeed");
+
+    // The hand-written `x` getter is an indexed row; the synthetic getter for
+    // `x` is suppressed. The `withX:` setter is still synthetic.
+    let synthetic_count = code.matches("'source_status' => 'synthetic'").count();
+    assert_eq!(
+        synthetic_count, 1,
+        "only the `withX:` setter should be synthetic (user defined `x`). Got:\n{code}"
+    );
+    assert!(
+        code.contains("'selector' => 'withX:'"),
+        "synthetic setter `withX:` should still be emitted. Got:\n{code}"
+    );
+}
+
 /// ADR 0087 Phase 2 (BT-2298): a send to a selector longer than the 255-byte
 /// Erlang atom limit (e.g. a 20-keyword auto-constructor) must be dropped from
 /// the xref `sends` list — emitting it as an atom would fail `core_scan` at
