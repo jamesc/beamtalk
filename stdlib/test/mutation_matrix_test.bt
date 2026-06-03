@@ -11,186 +11,166 @@
 // for remaining block-accepting selectors (detect:, count:, flatMap:, etc.).
 
 TestCase subclass: MutationMatrixTest
+  field: a = nil
+
+  setUp => self.a := MutationMatrixActor spawn
 
   // ── P0: Known bug patterns (verify fixes) ──────────────────────────
 
   // P0-1: collect: + ifTrue: + mutation (BT-1477)
   testCollectIfTrueMutation =>
-    a := MutationMatrixActor spawn
-    count := a collectIfTrueMutation: #(1, -2, 3)
+    count := self.a collectIfTrueMutation: #(1, -2, 3)
     self assert: count equals: 2
-    self assert: a getLog equals: #(2, -4, 6)
+    self assert: self.a getLog equals: #(2, -4, 6)
 
   // P0-2: select: + ifTrue: + mutation (BT-1477)
   testSelectIfTrueMutation =>
-    a := MutationMatrixActor spawn
-    count := a selectIfTrueMutation: #(1, -2, 3, -4)
+    count := self.a selectIfTrueMutation: #(1, -2, 3, -4)
     self assert: count equals: 4
-    self assert: a getLog equals: #(1, 3)
+    self assert: self.a getLog equals: #(1, 3)
 
   // P0-3: Sequential mutations across multiple statements
   testSequentialMutations =>
-    a := MutationMatrixActor spawn
-    count := a sequentialMutations
+    count := self.a sequentialMutations
     self assert: count equals: 22
-    self assert: a getLog equals: #(11)
+    self assert: self.a getLog equals: #(11)
 
   // P0-4: Mutation inside nested conditional blocks
   testNestedConditionalMutation =>
-    a := MutationMatrixActor spawn
     // Both true: inner mutation (100) + outer mutation (10) = 110
-    count := a nestedConditionalMutation: true and: true
+    count := self.a nestedConditionalMutation: true and: true
     self assert: count equals: 110
-    a reset
+    self.a reset
     // Outer true, inner false: only outer mutation (10)
-    count := a nestedConditionalMutation: true and: false
+    count := self.a nestedConditionalMutation: true and: false
     self assert: count equals: 10
-    a reset
+    self.a reset
     // Outer false: no mutation
-    count := a nestedConditionalMutation: false and: true
+    count := self.a nestedConditionalMutation: false and: true
     self assert: count equals: 0
 
   // ── P1: High risk unexplored patterns ──────────────────────────────
 
   // P1-5: collect: inside collect: + mutation
   testNestedCollectMutation =>
-    a := MutationMatrixActor spawn
-    count := a nestedCollectMutation: #(#(1, 2), #(3, 4))
+    count := self.a nestedCollectMutation: #(#(1, 2), #(3, 4))
     self assert: count equals: 4
-    self assert: a getLog equals: #(#(2, 4), #(6, 8))
+    self assert: self.a getLog equals: #(#(2, 4), #(6, 8))
 
   // P1-6: do: inside collect: + mutation
   testDoInsideCollectMutation =>
-    a := MutationMatrixActor spawn
-    count := a doInsideCollectMutation: #(#(1, 2), #(3, 4))
+    count := self.a doInsideCollectMutation: #(#(1, 2), #(3, 4))
     self assert: count equals: 10
-    self assert: a getLog equals: #(2, 2)
+    self assert: self.a getLog equals: #(2, 2)
 
   // P1-7: inject:into: + ifTrue: + mutation
   testInjectIfTrueMutation =>
-    a := MutationMatrixActor spawn
-    count := a injectIfTrueMutation: #(1, -2, 3, -4, 5)
+    count := self.a injectIfTrueMutation: #(1, -2, 3, -4, 5)
     self assert: count equals: 3
-    self assert: a getLog equals: #(9)
+    self assert: self.a getLog equals: #(9)
 
   // P1-8: detect:ifNone: + mutation before match (no match)
   testDetectIfNoneMutationNoMatch =>
-    a := MutationMatrixActor spawn
-    count := a detectIfNoneMutation: #(1, 2, 3)
+    count := self.a detectIfNoneMutation: #(1, 2, 3)
     self assert: count equals: 99
-    self assert: a getLog equals: #(0)
+    self assert: self.a getLog equals: #(0)
 
   // P1-8b: detect:ifNone: + mutation before match (with match)
   testDetectIfNoneMutationWithMatch =>
-    a := MutationMatrixActor spawn
-    count := a detectIfNoneMutation: #(1, 20, 3)
+    count := self.a detectIfNoneMutation: #(1, 20, 3)
     self assert: count equals: 99
-    self assert: a getLog equals: #(20)
+    self assert: self.a getLog equals: #(20)
 
   // P1-9: on:do: exception handler + mutation
   testExceptionMutation =>
-    a := MutationMatrixActor spawn
-    count := a exceptionMutation
+    count := self.a exceptionMutation
     self assert: count equals: 0
 
   // P1-10: Non-local return from inside collect: after mutation
   testNonLocalReturnFromCollect =>
-    a := MutationMatrixActor spawn
-    result := a nonLocalReturnFromCollect: #(10, 20, 30, 40, 50)
+    result := self.a nonLocalReturnFromCollect: #(10, 20, 30, 40, 50)
     self assert: result equals: 3
-    self assert: a getCounter equals: 3
+    self assert: self.a getCounter equals: 3
 
   // P1-11: Multiple field mutations in single collect: block
   testMultiFieldMutation =>
-    a := MutationMatrixActor spawn
-    result := a multiFieldMutation: #(1, -2, 3)
+    result := self.a multiFieldMutation: #(1, -2, 3)
     self assert: result equals: #(2, -4, 6)
-    self assert: a getCounter equals: 3
-    self assert: a getLog equals: #(1, -2, 3)
-    self assert: a getFlag equals: true
+    self assert: self.a getCounter equals: 3
+    self assert: self.a getLog equals: #(1, -2, 3)
+    self assert: self.a getFlag equals: true
 
   // P1-12: ifTrue:ifFalse: inside do: with mutation
   testIfTrueIfFalseInsideDo =>
-    a := MutationMatrixActor spawn
-    count := a ifTrueIfFalseInsideDo: #(3, -1, 5, -2)
+    count := self.a ifTrueIfFalseInsideDo: #(3, -1, 5, -2)
     self assert: count equals: 11
 
   // ── P2: Edge cases ─────────────────────────────────────────────────
 
   // P2-13: collect: + ifTrue: + mutation + non-local return
   testCollectIfTrueNlr =>
-    a := MutationMatrixActor spawn
-    result := a collectIfTrueNlr: #(1, 2, 3, 4, 5)
+    result := self.a collectIfTrueNlr: #(1, 2, 3, 4, 5)
     self assert: result equals: 4
-    self assert: a getCounter equals: 4
+    self assert: self.a getCounter equals: 4
 
   // P2-14: 3-deep nesting: do: > collect: > ifTrue: + mutation
   testThreeDeepNesting =>
-    a := MutationMatrixActor spawn
-    count := a threeDeepNesting: #(#(1, -2, 3), #(-4, 5))
+    count := self.a threeDeepNesting: #(#(1, -2, 3), #(-4, 5))
     self assert: count equals: 3
 
   // P2-17: reject: + mutation in filter block
   testRejectMutation =>
-    a := MutationMatrixActor spawn
-    count := a rejectMutation: #(1, -2, 3, -4)
+    count := self.a rejectMutation: #(1, -2, 3, -4)
     self assert: count equals: 4
-    self assert: a getLog equals: #(1, 3)
+    self assert: self.a getLog equals: #(1, 3)
 
   // P2-18: Empty collection + mutation in iteration block
   testEmptyCollectionMutation =>
-    a := MutationMatrixActor spawn
-    count := a emptyCollectionMutation
+    count := self.a emptyCollectionMutation
     self assert: count equals: 42
 
   // ── BT-1479: Control flow RHS patterns ─────────────────────────────
 
   // P2-19: Field assign from conditional with mutation in RHS
   testFieldAssignFromConditionalRhs =>
-    a := MutationMatrixActor spawn
-    count := a fieldAssignFromConditionalRhs: true
+    count := self.a fieldAssignFromConditionalRhs: true
     self assert: count equals: 42
-    self assert: a getFlag equals: true
-    a reset
-    count := a fieldAssignFromConditionalRhs: false
+    self assert: self.a getFlag equals: true
+    self.a reset
+    count := self.a fieldAssignFromConditionalRhs: false
     self assert: count equals: 0
 
   // P2-20: Field assign from collect: with mutation in RHS
   testFieldAssignFromCollectRhs =>
-    a := MutationMatrixActor spawn
-    count := a fieldAssignFromCollectRhs: #(1, 2, 3)
+    count := self.a fieldAssignFromCollectRhs: #(1, 2, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(2, 4, 6)
+    self assert: self.a getLog equals: #(2, 4, 6)
 
   // P2-21: fieldAt:put: inside conditional branch
   testFieldAtPutInConditional =>
-    a := MutationMatrixActor spawn
-    a fieldAtPutInConditional: true
-    self assert: a getCounter equals: 99
-    a reset
-    a fieldAtPutInConditional: false
-    self assert: a getCounter equals: 0
+    self.a fieldAtPutInConditional: true
+    self assert: self.a getCounter equals: 99
+    self.a reset
+    self.a fieldAtPutInConditional: false
+    self assert: self.a getCounter equals: 0
 
   // ── BT-1481: anySatisfy:/allSatisfy: state threading ──────────────
 
   // P2-16: anySatisfy: block with mutation
   testAnySatisfyMutation =>
-    a := MutationMatrixActor spawn
-    count := a anySatisfyMutation: #(1, 2, 3)
-    self assert: a getFlag equals: false
+    count := self.a anySatisfyMutation: #(1, 2, 3)
+    self assert: self.a getFlag equals: false
     self assert: count equals: 3
 
   // P2-16b: allSatisfy: with a match
   testAllSatisfyMutation =>
-    a := MutationMatrixActor spawn
-    count := a allSatisfyMutation: #(1, 2, 3)
-    self assert: a getFlag equals: true
+    count := self.a allSatisfyMutation: #(1, 2, 3)
+    self assert: self.a getFlag equals: true
     self assert: count equals: 3
 
   // P2-22: Block value with mutation (BT-1481)
   testBlockValueMutation =>
-    a := MutationMatrixActor spawn
-    count := a blockValueMutation
+    count := self.a blockValueMutation
     self assert: count equals: 42
 
   // ── BT-1485: Remaining block-accepting selectors ─────────────────────
@@ -206,47 +186,41 @@ TestCase subclass: MutationMatrixTest
   // P3-1: detect: with field mutation in predicate block (BT-1486)
   // Mutation in the predicate block should persist after detect: returns.
   testDetectMutation =>
-    a := MutationMatrixActor spawn
-    count := a detectMutation: #(1, 20, 3)
+    count := self.a detectMutation: #(1, 20, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(20)
+    self assert: self.a getLog equals: #(20)
 
   // P3-1b: detect: with no match (returns nil) + mutation (BT-1486)
   testDetectMutationNoMatch =>
-    a := MutationMatrixActor spawn
-    count := a detectMutation: #(1, 2, 3)
+    count := self.a detectMutation: #(1, 2, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(nil)
+    self assert: self.a getLog equals: #(nil)
 
   // P3-2: detect:ifNone: with field mutation in predicate block (BT-1486)
   // Unlike P1-8 which mutates *before* detect:ifNone:, this mutates *inside* the predicate.
   // All elements are processed (no short-circuit) to ensure mutations are applied.
   testDetectIfNonePredicateMutation =>
-    a := MutationMatrixActor spawn
-    count := a detectIfNonePredicateMutation: #(1, 20, 3)
+    count := self.a detectIfNonePredicateMutation: #(1, 20, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(20)
+    self assert: self.a getLog equals: #(20)
 
   // P3-2b: detect:ifNone: with mutation in predicate, no match (BT-1486)
   testDetectIfNonePredicateMutationNoMatch =>
-    a := MutationMatrixActor spawn
-    count := a detectIfNonePredicateMutation: #(1, 2, 3)
+    count := self.a detectIfNonePredicateMutation: #(1, 2, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(-1)
+    self assert: self.a getLog equals: #(-1)
 
   // P3-3: count: with field mutation in predicate block (BT-1486)
   testCountMutation =>
-    a := MutationMatrixActor spawn
-    count := a countMutation: #(1, -2, 3)
+    count := self.a countMutation: #(1, -2, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(2)
+    self assert: self.a getLog equals: #(2)
 
   // P3-4: flatMap: with field mutation in mapping block (BT-1486)
   testFlatMapMutation =>
-    a := MutationMatrixActor spawn
-    count := a flatMapMutation: #(1, 2, 3)
+    count := self.a flatMapMutation: #(1, 2, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(1, 10, 2, 20, 3, 30)
+    self assert: self.a getLog equals: #(1, 10, 2, 20, 3, 30)
 
   // ── List (medium risk) ────────────────────────────────────────────────
 
@@ -254,81 +228,70 @@ TestCase subclass: MutationMatrixTest
   // With foldl-based approach, ALL elements are processed (counter = 4),
   // but only elements before first predicate failure are included.
   testTakeWhileMutation =>
-    a := MutationMatrixActor spawn
-    count := a takeWhileMutation: #(1, 2, 30, 4)
+    count := self.a takeWhileMutation: #(1, 2, 30, 4)
     self assert: count equals: 4
-    self assert: a getLog equals: #(1, 2)
+    self assert: self.a getLog equals: #(1, 2)
 
   // P3-6: dropWhile: with field mutation in predicate block (BT-1487)
   // With foldl-based approach, ALL elements are processed (counter = 4).
   testDropWhileMutation =>
-    a := MutationMatrixActor spawn
-    count := a dropWhileMutation: #(1, 2, 30, 4)
+    count := self.a dropWhileMutation: #(1, 2, 30, 4)
     self assert: count equals: 4
-    self assert: a getLog equals: #(30, 4)
+    self assert: self.a getLog equals: #(30, 4)
 
   // P3-7: groupBy: with field mutation in key block (BT-1487)
   testGroupByMutation =>
-    a := MutationMatrixActor spawn
-    count := a groupByMutation: #(1, -2, 3, -4)
+    count := self.a groupByMutation: #(1, -2, 3, -4)
     self assert: count equals: 4
 
   // P3-8: partition: with field mutation in predicate block (BT-1487)
   testPartitionMutation =>
-    a := MutationMatrixActor spawn
-    count := a partitionMutation: #(1, -2, 3)
+    count := self.a partitionMutation: #(1, -2, 3)
     self assert: count equals: 3
-    self assert: a getLog equals: #(#(1, 3), #(-2))
+    self assert: self.a getLog equals: #(#(1, 3), #(-2))
 
   // P3-9: sort: with field mutation in comparator block (BT-1487)
   testSortMutation =>
-    a := MutationMatrixActor spawn
-    count := a sortMutation: #(3, 1, 2)
+    count := self.a sortMutation: #(3, 1, 2)
     // count depends on sort algorithm's comparison count, assert > 0
     self assert: count > 0 equals: true
-    self assert: a getLog equals: #(1, 2, 3)
+    self assert: self.a getLog equals: #(1, 2, 3)
 
   // ── Dictionary ────────────────────────────────────────────────────────
 
   // P3-10: Dictionary do: with field mutation in iteration block (BT-1488)
   testDictDoMutation =>
-    a := MutationMatrixActor spawn
-    count := a dictDoMutation: #{#a => 10, #b => 20}
+    count := self.a dictDoMutation: #{#a => 10, #b => 20}
     self assert: count equals: 30
 
   // P3-11: Dictionary doWithKey: with field mutation (BT-1488)
   // Verifies both counter and log mutations are threaded through doWithKey:
   testDictDoWithKeyMutation =>
-    a := MutationMatrixActor spawn
-    count := a dictDoWithKeyMutation: #{#a => 10, #b => 20}
+    count := self.a dictDoWithKeyMutation: #{#a => 10, #b => 20}
     self assert: count equals: 30
-    self assert: (a getLog size) equals: 2
+    self assert: (self.a getLog size) equals: 2
 
   // ── String ────────────────────────────────────────────────────────────
 
   // P3-12: String do: with field mutation in iteration block (BT-1489)
   testStringDoMutation =>
-    a := MutationMatrixActor spawn
-    count := a stringDoMutation: "abc"
+    count := self.a stringDoMutation: "abc"
     self assert: count equals: 3
 
   // P3-13: String collect: with field mutation in mapping block (BT-1489)
   testStringCollectMutation =>
-    a := MutationMatrixActor spawn
-    count := a stringCollectMutation: "abc"
+    count := self.a stringCollectMutation: "abc"
     self assert: count equals: 3
-    self assert: a getLog equals: #("abc")
+    self assert: self.a getLog equals: #("abc")
 
   // P3-14: String select: with field mutation in predicate block (BT-1489)
   testStringSelectMutation =>
-    a := MutationMatrixActor spawn
-    count := a stringSelectMutation: "abc"
+    count := self.a stringSelectMutation: "abc"
     self assert: count equals: 3
-    self assert: a getLog equals: #("ac")
+    self assert: self.a getLog equals: #("ac")
 
   // P3-15: String reject: with field mutation in predicate block (BT-1489)
   testStringRejectMutation =>
-    a := MutationMatrixActor spawn
-    count := a stringRejectMutation: "abc"
+    count := self.a stringRejectMutation: "abc"
     self assert: count equals: 3
-    self assert: a getLog equals: #("ac")
+    self assert: self.a getLog equals: #("ac")
