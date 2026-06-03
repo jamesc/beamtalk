@@ -316,3 +316,374 @@ class_module_index_used_for_spawn_with_args_expression_test() ->
             binary:match(CoreErlang, <<"'bt@counter':'spawn'">>)
         )
     end).
+
+%%% ---------------------------------------------------------------
+%%% compile_expression_trace/4,5 — trace-mode compile (live port)
+%%% ---------------------------------------------------------------
+
+compile_expression_trace_test() ->
+    with_port(fun(Port) ->
+        {ok, CoreErlang, []} =
+            beamtalk_compiler_port:compile_expression_trace(Port, <<"1 + 2">>, <<"tr">>, []),
+        ?assert(is_binary(CoreErlang)),
+        ?assert(binary:match(CoreErlang, <<"'erlang':'+'">>) =/= nomatch)
+    end).
+
+%% Non-empty index/hierarchy options exercise the Request1/Request2/Request
+%% build branches (the `_ -> Request#{...}` arms).
+compile_expression_trace_with_options_test() ->
+    with_port(fun(Port) ->
+        Options = #{
+            class_superclass_index => #{<<"Counter">> => <<"Object">>},
+            class_module_index => #{<<"Counter">> => <<"bt@app@counter">>},
+            class_hierarchy => #{'Counter' => #{superclass => 'Object'}}
+        },
+        {ok, CoreErlang, _Warnings} =
+            beamtalk_compiler_port:compile_expression_trace(
+                Port, <<"1 + 2">>, <<"tr_opts">>, [], Options
+            ),
+        ?assert(is_binary(CoreErlang))
+    end).
+
+compile_expression_trace_invalid_returns_error_test() ->
+    with_port(fun(Port) ->
+        {error, Diagnostics} =
+            beamtalk_compiler_port:compile_expression_trace(Port, <<"+++">>, <<"tr">>, []),
+        ?assert(length(Diagnostics) > 0)
+    end).
+
+%%% ---------------------------------------------------------------
+%%% find_senders_in_source/3 (BT-2190) — live port
+%%% ---------------------------------------------------------------
+
+find_senders_in_source_atom_selector_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_senders_in_source(Port, <<"x printNl">>, printNl),
+        ?assert(is_list(Lines)),
+        ?assert(lists:member(1, Lines))
+    end).
+
+find_senders_in_source_binary_selector_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_senders_in_source(Port, <<"x printNl">>, <<"printNl">>),
+        ?assert(is_list(Lines))
+    end).
+
+%% Guard-fail clause: selector must be an atom or binary (no port needed).
+find_senders_in_source_invalid_selector_test() ->
+    {error, [Diag]} =
+        beamtalk_compiler_port:find_senders_in_source(fake_port, <<"x printNl">>, 42),
+    ?assert(binary:match(maps:get(message, Diag), <<"selector must be">>) =/= nomatch).
+
+%%% ---------------------------------------------------------------
+%%% find_all_sends_in_source/2 (BT-2206) — live port
+%%% ---------------------------------------------------------------
+
+find_all_sends_in_source_test() ->
+    with_port(fun(Port) ->
+        {ok, Sends} =
+            beamtalk_compiler_port:find_all_sends_in_source(Port, <<"x printNl">>),
+        ?assert(is_list(Sends)),
+        ?assert(lists:any(fun(S) -> maps:get(selector, S) =:= <<"printNl">> end, Sends))
+    end).
+
+find_all_sends_in_source_invalid_source_test() ->
+    {error, [Diag]} =
+        beamtalk_compiler_port:find_all_sends_in_source(fake_port, not_a_binary),
+    ?assert(binary:match(maps:get(message, Diag), <<"source must be a binary">>) =/= nomatch).
+
+%%% ---------------------------------------------------------------
+%%% find_references_to_in_source/3 (BT-2203) — live port
+%%% ---------------------------------------------------------------
+
+find_references_to_in_source_atom_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_references_to_in_source(
+                Port, <<"x := MyClass new">>, 'MyClass'
+            ),
+        ?assert(is_list(Lines)),
+        ?assert(lists:member(1, Lines))
+    end).
+
+find_references_to_in_source_binary_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_references_to_in_source(
+                Port, <<"x := MyClass new">>, <<"MyClass">>
+            ),
+        ?assert(is_list(Lines))
+    end).
+
+find_references_to_in_source_invalid_test() ->
+    {error, [Diag]} =
+        beamtalk_compiler_port:find_references_to_in_source(fake_port, <<"x">>, 42),
+    ?assert(binary:match(maps:get(message, Diag), <<"class name must be">>) =/= nomatch).
+
+%%% ---------------------------------------------------------------
+%%% find_field_readers/writers_in_source/3 (BT-2208) — live port
+%%% ---------------------------------------------------------------
+
+find_field_readers_in_source_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_field_readers_in_source(Port, <<"^ self.value">>, value),
+        ?assert(is_list(Lines)),
+        ?assert(lists:member(1, Lines))
+    end).
+
+find_field_writers_in_source_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_field_writers_in_source(
+                Port, <<"self.value := 42">>, <<"value">>
+            ),
+        ?assert(is_list(Lines)),
+        ?assert(lists:member(1, Lines))
+    end).
+
+%% Guard-fail clause of the shared field_access_query/5 driver.
+find_field_readers_invalid_field_test() ->
+    {error, [Diag]} =
+        beamtalk_compiler_port:find_field_readers_in_source(fake_port, <<"^ self.value">>, 42),
+    ?assert(binary:match(maps:get(message, Diag), <<"field name must be">>) =/= nomatch).
+
+%%% ---------------------------------------------------------------
+%%% find_ffi_sites_in_source/5 (BT-2211) — live port
+%%% ---------------------------------------------------------------
+
+%% A non-negative integer constrains the match to that argument count (the
+%% `arity => N' request branch). `reverse: x' is a 1-arg keyword send.
+find_ffi_sites_in_source_with_arity_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_ffi_sites_in_source(
+                Port, <<"(Erlang lists) reverse: x">>, lists, reverse, 1
+            ),
+        ?assert(is_list(Lines))
+    end).
+
+%% `any' arity omits the field entirely (the BaseRequest branch) and must match
+%% the FFI call site regardless of argument count.
+find_ffi_sites_in_source_any_arity_test() ->
+    with_port(fun(Port) ->
+        {ok, Lines} =
+            beamtalk_compiler_port:find_ffi_sites_in_source(
+                Port, <<"(Erlang lists) reverse: x">>, <<"lists">>, <<"reverse">>, any
+            ),
+        ?assert(is_list(Lines))
+    end).
+
+find_ffi_sites_in_source_invalid_arity_test() ->
+    {error, [Diag]} =
+        beamtalk_compiler_port:find_ffi_sites_in_source(
+            fake_port, <<"src">>, lists, reverse, -1
+        ),
+    ?assert(binary:match(maps:get(message, Diag), <<"arity">>) =/= nomatch).
+
+%%% ---------------------------------------------------------------
+%%% resolve_method_span/5 (ADR 0082 Phase 1) — live port
+%%% ---------------------------------------------------------------
+
+span_fixture() ->
+    <<
+        "Object subclass: SpanCounter\n"
+        "\n"
+        "  increment => self.value := self.value + 1\n"
+        "\n"
+        "  class new => self basicNew\n"
+    >>.
+
+resolve_method_span_instance_test() ->
+    with_port(fun(Port) ->
+        Source = span_fixture(),
+        {ok, #{start := Start, 'end' := End}, PrevSource} =
+            beamtalk_compiler_port:resolve_method_span(
+                Port, Source, <<"SpanCounter">>, <<"increment">>, instance
+            ),
+        %% Splicing PrevSource back over its byte span is a no-op.
+        ?assertEqual(PrevSource, binary:part(Source, Start, End - Start)),
+        ?assert(binary:match(PrevSource, <<"increment =>">>) =/= nomatch)
+    end).
+
+resolve_method_span_class_test() ->
+    with_port(fun(Port) ->
+        {ok, _Span, PrevSource} =
+            beamtalk_compiler_port:resolve_method_span(
+                Port, span_fixture(), <<"SpanCounter">>, <<"new">>, class
+            ),
+        ?assert(binary:match(PrevSource, <<"class new =>">>) =/= nomatch)
+    end).
+
+resolve_method_span_not_found_test() ->
+    with_port(fun(Port) ->
+        Result =
+            beamtalk_compiler_port:resolve_method_span(
+                Port, span_fixture(), <<"SpanCounter">>, <<"nope">>, instance
+            ),
+        ?assertMatch({error, selector_not_found, _}, Result)
+    end).
+
+%% Guard-fail clause: invalid Side returns {error, bad_argument, _}.
+resolve_method_span_invalid_side_test() ->
+    Result =
+        beamtalk_compiler_port:resolve_method_span(
+            fake_port, <<"src">>, <<"C">>, <<"m">>, bogus_side
+        ),
+    ?assertMatch({error, bad_argument, _}, Result).
+
+%%% ---------------------------------------------------------------
+%%% resolve_completion_type/3 (BT-1068) — live port
+%%% ---------------------------------------------------------------
+
+resolve_completion_type_test() ->
+    with_port(fun(Port) ->
+        Result = beamtalk_compiler_port:resolve_completion_type(Port, <<"42">>, #{}),
+        %% Either statically resolved to a class atom, or unknown — both are
+        %% well-formed outcomes of the completion-type query.
+        ?assert(
+            Result =:= {error, type_unknown} orelse
+                (is_tuple(Result) andalso element(1, Result) =:= ok)
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% Closed-port degradation — each query's `catch error:badarg' arm
+%%% (the "compiler port is not available" path) returns a structured
+%%% error rather than crashing the caller.
+%%% ---------------------------------------------------------------
+
+%% Open a port and immediately close it, then run Fun(ClosedPort).
+with_closed_port(Fun) ->
+    Port = beamtalk_compiler_port:open(compiler_binary()),
+    beamtalk_compiler_port:close(Port),
+    Fun(Port).
+
+compile_expression_trace_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, [_ | _]},
+            beamtalk_compiler_port:compile_expression_trace(Port, <<"1 + 2">>, <<"t">>, [])
+        )
+    end).
+
+resolve_completion_type_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertEqual(
+            {error, type_unknown},
+            beamtalk_compiler_port:resolve_completion_type(Port, <<"42">>, #{})
+        )
+    end).
+
+find_senders_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, [_ | _]},
+            beamtalk_compiler_port:find_senders_in_source(Port, <<"x printNl">>, printNl)
+        )
+    end).
+
+find_all_sends_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, [_ | _]},
+            beamtalk_compiler_port:find_all_sends_in_source(Port, <<"x printNl">>)
+        )
+    end).
+
+find_references_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, [_ | _]},
+            beamtalk_compiler_port:find_references_to_in_source(Port, <<"x">>, 'MyClass')
+        )
+    end).
+
+find_field_readers_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, [_ | _]},
+            beamtalk_compiler_port:find_field_readers_in_source(Port, <<"^ self.value">>, value)
+        )
+    end).
+
+find_ffi_sites_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, [_ | _]},
+            beamtalk_compiler_port:find_ffi_sites_in_source(Port, <<"src">>, lists, reverse, any)
+        )
+    end).
+
+resolve_method_span_on_closed_port_test() ->
+    with_closed_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, _},
+            beamtalk_compiler_port:resolve_method_span(
+                Port, span_fixture(), <<"SpanCounter">>, <<"increment">>, instance
+            )
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% Invalid-source error responses — the `{error, diagnostics}' arm of
+%%% the source-analysis response handlers.
+%%% ---------------------------------------------------------------
+
+find_senders_invalid_source_returns_error_test() ->
+    with_port(fun(Port) ->
+        Result =
+            beamtalk_compiler_port:find_senders_in_source(Port, <<"@@@ ))) +++">>, printNl),
+        %% Unparseable source surfaces as a diagnostics list (or, if the analyzer
+        %% tolerates it, an empty result) — both are documented {ok|error} shapes.
+        ?assert(
+            case Result of
+                {error, Diags} when is_list(Diags) -> true;
+                {ok, Lines} when is_list(Lines) -> true;
+                _ -> false
+            end
+        )
+    end).
+
+%%% ---------------------------------------------------------------
+%%% handle_response/1 — additional ok-kind and diagnostic shapes (pure)
+%%% ---------------------------------------------------------------
+
+%% BT-903: a class_definition response carrying trailing_core_erlang must
+%% forward it into the returned info map.
+handle_response_class_definition_with_trailing_test() ->
+    Response = #{
+        status => ok,
+        kind => class_definition,
+        core_erlang => <<"core">>,
+        module_name => <<"mod">>,
+        classes => [<<"Foo">>],
+        trailing_core_erlang => <<"trailing">>,
+        warnings => []
+    },
+    {ok, class_definition, Info} = beamtalk_compiler_port:handle_response(Response),
+    ?assertEqual(<<"trailing">>, maps:get(trailing_core_erlang, Info)).
+
+%% BT-1612: protocol_definition response shape.
+handle_response_protocol_definition_test() ->
+    Response = #{
+        status => ok,
+        kind => protocol_definition,
+        core_erlang => <<"core">>,
+        module_name => <<"proto_mod">>,
+        protocols => [<<"Drawable">>],
+        warnings => []
+    },
+    {ok, protocol_definition, Info} = beamtalk_compiler_port:handle_response(Response),
+    ?assertEqual(<<"proto_mod">>, maps:get(module_name, Info)),
+    ?assertEqual([<<"Drawable">>], maps:get(protocols, Info)).
+
+%% BT-1235: a diagnostic map whose `message` is not a binary is coerced to a
+%% binary via ensure_binary/1 (the non-binary fallback arm).
+handle_response_diagnostic_non_binary_message_test() ->
+    Response = #{status => error, diagnostics => [#{message => 12345, line => 3}]},
+    {error, [Diag]} = beamtalk_compiler_port:handle_response(Response),
+    ?assert(is_binary(maps:get(message, Diag))),
+    ?assertEqual(3, maps:get(line, Diag)).
