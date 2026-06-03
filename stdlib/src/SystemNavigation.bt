@@ -311,7 +311,9 @@ sealed typed Object subclass: SystemNavigation
     fallbackScope := self allClasses select: [:cls |
       fallbackClasses includes: cls name
     ]
-    fallbackInstance := fallbackScope select: [:c | c includesSelector: aSelector]
+    fallbackInstance := fallbackScope select: [:c |
+      c includesSelector: aSelector
+    ]
     fallbackClassSide := (fallbackScope select: [:c |
       c class includesSelector: aSelector
     ]) collect: [:c | c class]
@@ -507,11 +509,7 @@ sealed typed Object subclass: SystemNavigation
   /// `indexedSiteRecordsFrom:into:`), keeping `acc` strongly typed rather than
   /// `Dynamic` (BT-2302).
   indexedSelectorsFrom: indexedRows :: List(Dictionary) into: result :: List(Symbol) -> List(Symbol) =>
-    indexedRows
-      inject: result
-      into: [:acc :row |
-        acc add: (row at: #selector)
-      ]
+    indexedRows inject: result into: [:acc :row | acc add: (row at: #selector)]
 
   /// Append senders of `aSelector` found in any instance method of `aScope`
   /// (a class) to `result`. Returns the (possibly extended) result list.
