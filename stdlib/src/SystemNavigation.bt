@@ -500,6 +500,19 @@ sealed typed Object subclass: SystemNavigation
   indexedSenderRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
     self indexedSiteRecordsFrom: indexedRows into: result
 
+  /// Map the indexed `defined_selectors_bt` rows to their `#selector` Symbols,
+  /// appending to `result`. Each row's `at: #selector` access is `Dynamic`, so
+  /// the explicit `-> List(Symbol)` return anchors element-type inference for
+  /// the `selectorsMatching:` fallback accumulator (mirrors
+  /// `indexedSiteRecordsFrom:into:`), keeping `acc` strongly typed rather than
+  /// `Dynamic` (BT-2302).
+  indexedSelectorsFrom: indexedRows :: List(Dictionary) into: result :: List(Symbol) -> List(Symbol) =>
+    indexedRows
+      inject: result
+      into: [:acc :row |
+        acc add: (row at: #selector)
+      ]
+
   /// Append senders of `aSelector` found in any instance method of `aScope`
   /// (a class) to `result`. Returns the (possibly extended) result list.
   ///
@@ -1231,7 +1244,7 @@ sealed typed Object subclass: SystemNavigation
     partition := (Erlang beamtalk_xref) defined_selectors_bt
     indexedRows := partition at: #indexed
     fallbackClasses := partition at: #fallback_classes
-    indexedSels := indexedRows collect: [:row | row at: #selector]
+    indexedSels := self indexedSelectorsFrom: indexedRows into: List new
     // Miss-policy fallback: gather selectors only from the loaded-but-unindexed
     // classes (instance, class-side, and their extensions). Keep the growing
     // accumulator on the RIGHT of `++` so each step copies only the small
