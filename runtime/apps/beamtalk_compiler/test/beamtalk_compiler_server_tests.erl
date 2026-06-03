@@ -211,6 +211,114 @@ unknown_info() ->
 %%% Helpers
 %%% ---------------------------------------------------------------
 
+%%% ---------------------------------------------------------------
+%%% Public API integration — drive each server call through to the live
+%%% compiler port (covers the API wrappers + handle_call clauses + the
+%%% do_compile / do_diagnostics / do_version / send_port_request plumbing).
+%%% ---------------------------------------------------------------
+
+server_api_test_() ->
+    {setup, fun start_compiler/0, fun stop_compiler/1, [
+        {"compile_expression/3", fun api_compile_expression/0},
+        {"compile_expression/4 with options", fun api_compile_expression_opts/0},
+        {"compile_expression_trace/3", fun api_compile_trace/0},
+        {"compile_expression_trace/4 with options", fun api_compile_trace_opts/0},
+        {"compile/2 class definition", fun api_compile/0},
+        {"diagnostics/1", fun api_diagnostics/0},
+        {"version/0", fun api_version/0},
+        {"resolve_completion_type/1", fun api_resolve_completion_type/0},
+        {"find_senders_in_source/2", fun api_find_senders/0},
+        {"find_all_sends_in_source/1", fun api_find_all_sends/0},
+        {"find_references_to_in_source/2", fun api_find_references/0},
+        {"find_field_readers_in_source/2", fun api_find_field_readers/0},
+        {"find_field_writers_in_source/2", fun api_find_field_writers/0},
+        {"find_ffi_sites_in_source/4", fun api_find_ffi_sites/0},
+        {"resolve_method_span/4", fun api_resolve_method_span/0}
+    ]}.
+
+api_compile_expression() ->
+    {ok, Core, []} = beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, []),
+    ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
+
+api_compile_expression_opts() ->
+    Options = #{class_module_index => #{<<"Counter">> => <<"bt@app@counter">>}},
+    {ok, Core, _} =
+        beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, [], Options),
+    ?assert(is_binary(Core)).
+
+api_compile_trace() ->
+    {ok, Core, []} =
+        beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, []),
+    ?assert(is_binary(Core)).
+
+api_compile_trace_opts() ->
+    Options = #{class_hierarchy => #{'Counter' => #{superclass => 'Object'}}},
+    {ok, Core, _} =
+        beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, [], Options),
+    ?assert(is_binary(Core)).
+
+api_compile() ->
+    Source = <<"Object subclass: TmpServerC\n\n  foo => 1\n">>,
+    Result = beamtalk_compiler_server:compile(Source, #{}),
+    ?assertMatch({ok, _}, Result).
+
+api_diagnostics() ->
+    Result = beamtalk_compiler_server:diagnostics(<<"1 + 2">>),
+    ?assertMatch({ok, _}, Result).
+
+api_version() ->
+    Result = beamtalk_compiler_server:version(),
+    ?assertMatch({ok, _}, Result).
+
+api_resolve_completion_type() ->
+    Result = beamtalk_compiler_server:resolve_completion_type(<<"42">>),
+    ?assert(
+        Result =:= {error, type_unknown} orelse
+            (is_tuple(Result) andalso element(1, Result) =:= ok)
+    ).
+
+api_find_senders() ->
+    {ok, Lines} = beamtalk_compiler_server:find_senders_in_source(<<"x printNl">>, printNl),
+    ?assert(lists:member(1, Lines)).
+
+api_find_all_sends() ->
+    {ok, Sends} = beamtalk_compiler_server:find_all_sends_in_source(<<"x printNl">>),
+    ?assert(lists:any(fun(S) -> maps:get(selector, S) =:= <<"printNl">> end, Sends)).
+
+api_find_references() ->
+    {ok, Lines} =
+        beamtalk_compiler_server:find_references_to_in_source(<<"x := MyClass new">>, 'MyClass'),
+    ?assert(lists:member(1, Lines)).
+
+api_find_field_readers() ->
+    {ok, Lines} =
+        beamtalk_compiler_server:find_field_readers_in_source(<<"^ self.value">>, value),
+    ?assert(lists:member(1, Lines)).
+
+api_find_field_writers() ->
+    {ok, Lines} =
+        beamtalk_compiler_server:find_field_writers_in_source(<<"self.value := 42">>, value),
+    ?assert(lists:member(1, Lines)).
+
+api_find_ffi_sites() ->
+    {ok, Lines} =
+        beamtalk_compiler_server:find_ffi_sites_in_source(
+            <<"(Erlang lists) reverse: x">>, lists, reverse, any
+        ),
+    ?assert(is_list(Lines)).
+
+api_resolve_method_span() ->
+    Source = <<
+        "Object subclass: SpanServerC\n"
+        "\n"
+        "  increment => self.value := self.value + 1\n"
+    >>,
+    {ok, #{start := Start, 'end' := End}, Prev} =
+        beamtalk_compiler_server:resolve_method_span(
+            Source, <<"SpanServerC">>, <<"increment">>, instance
+        ),
+    ?assertEqual(Prev, binary:part(Source, Start, End - Start)).
+
 start_compiler() ->
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
