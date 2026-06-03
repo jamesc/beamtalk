@@ -901,3 +901,87 @@ fn test_flat_map_with_field_mutation_uses_foldl() {
         "flatMap: body should update 'n' field via maps:put. Got:\n{code}"
     );
 }
+
+// ── select: pure (no mutations) ───────────────────────────────────────
+
+#[test]
+fn test_list_select_pure_generates_lists_filter() {
+    // Pure select: with a literal block and no mutations delegates to lists:filter.
+    // This exercises the path: generate_list_select → generate_simple_list_op("filter")
+    // covering filter_ops.rs:38 and the "filter" => "select:" match arm in mod.rs.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items select: [:item | item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'filter'"),
+        "Pure select: should generate lists:filter. Got:\n{code}"
+    );
+    // Runtime fallback for non-list receivers uses the 'select:' selector (mapped
+    // from the 'filter' operation string by generate_simple_list_op).
+    assert!(
+        code.contains("'select:'"),
+        "Runtime fallback should use 'select:' selector. Got:\n{code}"
+    );
+    // Pure path must NOT use foldl (that's the mutation-threading path).
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure select: must NOT use lists:foldl. Got:\n{code}"
+    );
+}
+
+// ── BT-909: non-literal callable in simple list ops ───────────────────
+
+#[test]
+fn test_list_do_non_literal_callable_emits_arity_check() {
+    // BT-909: do: with a non-literal callable (method parameter) must emit an
+    // is_function/2 arity check so that Tier-2 (2-arg) blocks are wrapped to
+    // satisfy lists:foreach's arity-1 contract.
+    let src =
+        "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items do: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foreach'"),
+        "Non-literal callable do: should still generate lists:foreach. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal callable do: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_list_collect_non_literal_callable_emits_arity_check() {
+    // BT-909: collect: with a non-literal callable emits the same arity-check
+    // wrapper as do:, here wrapping for lists:map (arity-1 contract).
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items collect: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'map'"),
+        "Non-literal callable collect: should still generate lists:map. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal callable collect: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_list_select_non_literal_callable_emits_arity_check() {
+    // BT-909: select: with a non-literal callable also emits the arity-check wrapper.
+    // This additionally covers the "filter" => "select:" match arm in mod.rs via the
+    // non-literal code path (the non-literal else branch still uses the selector).
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items with: block =>\n    items select: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'filter'"),
+        "Non-literal callable select: should generate lists:filter. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "Non-literal callable select: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+    // Runtime fallback selector is 'select:' (mapped from 'filter').
+    assert!(
+        code.contains("'select:'"),
+        "Non-literal callable select: fallback should use 'select:' selector. Got:\n{code}"
+    );
+}
