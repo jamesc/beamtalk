@@ -20,7 +20,7 @@ All eight child issues are merged to `main`. The epic is complete; this ADR is `
 | 4b | [BT-2301](https://linear.app/beamtalk/issue/BT-2301) | Runtime: `put_method/4`, extension, and ClassBuilder lifecycle hooks | M | BT-2298 | #2434 | `0c681057` |
 | 5a | [BT-2302](https://linear.app/beamtalk/issue/BT-2302) | Stdlib: migrate `referencesTo:` + `implementorsOf:` + `selectorsMatching:` to xref | M | BT-2299 | #2439 | `8778ea83` |
 | 5b | [BT-2303](https://linear.app/beamtalk/issue/BT-2303) | Stdlib: migrate `unimplementedSelectors` + `unusedSelectors` to xref | M | BT-2299 | #2441 | `393fa9dc` |
-| 6 | [BT-2304](https://linear.app/beamtalk/issue/BT-2304) | Codegen: synthetic-method xref emission + parity tests + ADR Accepted→Implemented | M | BT-2298 | _this PR_ | _on merge_ |
+| 6 | [BT-2304](https://linear.app/beamtalk/issue/BT-2304) | Codegen: synthetic-method xref emission + parity tests + ADR Accepted→Implemented | M | BT-2298 | #2442 | this commit |
 
 Phases 4 and 5 each split into two sibling issues (4a/4b, 5a/5b) — they touch overlapping files and serialize across waves, but conceptually live in the same phase of the migration.
 

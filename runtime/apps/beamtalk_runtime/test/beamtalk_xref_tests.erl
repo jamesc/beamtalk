@@ -277,7 +277,10 @@ synthetic_accessor_visibility_test_() ->
 
                 %% Synthetic accessors delegate to runtime map primitives, so they
                 %% contribute no senders — `value` / `withValue:` send nothing.
-                ?assertEqual([], beamtalk_xref:senders_of('value'))
+                %% Assert both the getter and the setter to catch a regression
+                %% where synthetic setters start recording sends.
+                ?assertEqual([], beamtalk_xref:senders_of('value')),
+                ?assertEqual([], beamtalk_xref:senders_of('withValue:'))
             end)
         ]
     end}.

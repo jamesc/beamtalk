@@ -3871,36 +3871,48 @@ fn test_method_xref_emits_synthetic_accessors_for_value_class() {
     let code =
         generate_module(&module, CodegenOptions::new("point")).expect("codegen should succeed");
 
+    // Scope the assertions to the `methodXref` payload so they cannot be
+    // satisfied by unrelated parts of the generated module (exports, dispatch,
+    // method signatures, etc.). The payload runs from `'methodXref' => [` up to
+    // the next class-info field, `'classState'`.
+    let mx_start = code.find("'methodXref' => [").expect("methodXref present");
+    let mx_tail = &code[mx_start..];
+    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+
     // Synthetic getter rows for both slots, tagged synthetic.
     assert!(
-        code.contains("'source_status' => 'synthetic'"),
-        "auto-accessors should be tagged synthetic. Got:\n{code}"
+        mx_seg.contains("'source_status' => 'synthetic'"),
+        "auto-accessors should be tagged synthetic. Got:\n{mx_seg}"
     );
-    // Getter selectors `x` and `y` are present as synthetic rows.
+    // Getter selectors `x` and `y` are both present as synthetic rows.
     assert!(
-        code.contains("'selector' => 'x'"),
-        "getter `x` synthetic row missing. Got:\n{code}"
+        mx_seg.contains("'selector' => 'x'"),
+        "getter `x` synthetic row missing. Got:\n{mx_seg}"
+    );
+    assert!(
+        mx_seg.contains("'selector' => 'y'"),
+        "getter `y` synthetic row missing. Got:\n{mx_seg}"
     );
     // The `with*:` setter selectors are emitted.
     assert!(
-        code.contains("'selector' => 'withX:'") && code.contains("'selector' => 'withY:'"),
-        "setter rows `withX:` / `withY:` missing. Got:\n{code}"
+        mx_seg.contains("'selector' => 'withX:'") && mx_seg.contains("'selector' => 'withY:'"),
+        "setter rows `withX:` / `withY:` missing. Got:\n{mx_seg}"
     );
     // Every synthetic row carries a derived synthetic_origin line.
     assert!(
-        code.contains("'synthetic_origin' =>"),
-        "synthetic rows must carry synthetic_origin. Got:\n{code}"
+        mx_seg.contains("'synthetic_origin' =>"),
+        "synthetic rows must carry synthetic_origin. Got:\n{mx_seg}"
     );
     // Accessors delegate to runtime map primitives — no Beamtalk sends.
     assert!(
-        code.contains("'sends' => []"),
-        "synthetic accessors should have empty sends. Got:\n{code}"
+        mx_seg.contains("'sends' => []"),
+        "synthetic accessors should have empty sends. Got:\n{mx_seg}"
     );
     // The slot's declared type `Integer` is recorded as a reference on the
     // accessor (return/param type), like a hand-written typed accessor.
     assert!(
-        code.contains("'class' => 'Integer'"),
-        "slot type `Integer` should be a reference on the accessor. Got:\n{code}"
+        mx_seg.contains("'class' => 'Integer'"),
+        "slot type `Integer` should be a reference on the accessor. Got:\n{mx_seg}"
     );
 }
 
@@ -3942,14 +3954,36 @@ fn test_method_xref_user_accessor_suppresses_synthetic() {
 
     // The hand-written `x` getter is an indexed row; the synthetic getter for
     // `x` is suppressed. The `withX:` setter is still synthetic.
-    let synthetic_count = code.matches("'source_status' => 'synthetic'").count();
+    //
+    // Scope to the `methodXref` payload (between `'methodXref' => [` and the
+    // next class-info field `'classState'`) so a global `'withX:'` substring in
+    // exports/dispatch cannot satisfy the assertion.
+    let mx_start = code.find("'methodXref' => [").expect("methodXref present");
+    let mx_tail = &code[mx_start..];
+    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+
+    // Exactly one synthetic row survives.
+    let synthetic_count = mx_seg.matches("'source_status' => 'synthetic'").count();
     assert_eq!(
         synthetic_count, 1,
-        "only the `withX:` setter should be synthetic (user defined `x`). Got:\n{code}"
+        "only the `withX:` setter should be synthetic (user defined `x`). Got:\n{mx_seg}"
     );
+
+    // Prove that sole synthetic row is the `withX:` setter, not some other
+    // selector: isolate the row containing the synthetic marker (each row is a
+    // `~{ ... }~` map) and check its `selector`.
+    let synth_marker = mx_seg
+        .find("'source_status' => 'synthetic'")
+        .expect("synthetic marker present");
+    // Each row map opens with `~{'class_side' =>`; nested `~{...}~` reference
+    // maps do not, so anchor on the row prefix to isolate the owning row.
+    let row_start = mx_seg[..synth_marker]
+        .rfind("~{'class_side' =>")
+        .expect("synthetic row opens with ~{'class_side' =>");
+    let row = &mx_seg[row_start..synth_marker];
     assert!(
-        code.contains("'selector' => 'withX:'"),
-        "synthetic setter `withX:` should still be emitted. Got:\n{code}"
+        row.contains("'selector' => 'withX:'"),
+        "the surviving synthetic row must be the `withX:` setter. Got:\n{row}"
     );
 }
 
