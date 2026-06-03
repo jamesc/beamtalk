@@ -1014,6 +1014,203 @@ senders_of_bt_indexed_is_gen_filtered_test_() ->
             end)}
     end}.
 
+%%====================================================================
+%% Composite-query aggregate readers: all_sends_bt/0 + all_sent_selectors_bt/0
+%% (ADR 0087 Phase 5, BT-2303)
+%%====================================================================
+
+%% The two composite queries (`unimplementedSelectors` / `unusedSelectors`) read
+%% the whole-universe aggregate readers. While a class is indexed its sends come
+%% from the index (carrying the sent selector, the containing-method site, and
+%% the FFI-facing recv tag); once artificially purged it falls back and emits one
+%% `xref_miss` per reader tagged with the right query name. Erlang-FFI sends are
+%% dropped from the sent-selector set but kept (tagged) in the send-row stream.
+composite_query_aggregate_readers_test_() ->
+    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+        {timeout, 30,
+            ?_test(begin
+                Class = first_method_bearing_class(),
+                ?assertNotEqual(undefined, Class),
+
+                %% One instance method that sends a normal selector (self-recv),
+                %% an erlang-ffi "send", and a super-recv send. The send-row
+                %% stream must carry all three with mapped recv tags; the
+                %% sent-selector set must include the normal + super ones but
+                %% NOT the FFI one.
+                StubRows = [
+                    #{
+                        class_side => false,
+                        selector => 'navAggMethod',
+                        line => 1,
+                        sends => [
+                            #{selector => 'navAggNormalSend', line => 2, recv_kind => self_recv},
+                            #{selector => 'navAggFfiSend', line => 3, recv_kind => erlang_ffi},
+                            #{selector => 'navAggSuperSend', line => 4, recv_kind => super_recv}
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class(Class, StubRows),
+                try
+                    %% --- all_sends_bt/0: every send carried with site + recv. ---
+                    #{indexed := SendRows, fallback_classes := SendFb0} =
+                        beamtalk_xref:all_sends_bt(),
+                    ?assertNot(lists:member(Class, SendFb0)),
+                    OurSends = [
+                        R
+                     || R <- SendRows, maps:get(owner, R) =:= Class
+                    ],
+                    %% The normal send: sent selector + site fields + mapped recv.
+                    ?assert(
+                        lists:any(
+                            fun(R) ->
+                                maps:get(sent, R) =:= 'navAggNormalSend' andalso
+                                    maps:get(method, R) =:= 'navAggMethod' andalso
+                                    maps:get(class_side, R) =:= false andalso
+                                    maps:get(line, R) =:= 2 andalso
+                                    maps:get(recv, R) =:= self
+                            end,
+                            OurSends
+                        )
+                    ),
+                    %% The FFI send is present and tagged #erlang_ffi (BT applies
+                    %% the exclusion).
+                    ?assert(
+                        lists:any(
+                            fun(R) ->
+                                maps:get(sent, R) =:= 'navAggFfiSend' andalso
+                                    maps:get(recv, R) =:= erlang_ffi
+                            end,
+                            OurSends
+                        )
+                    ),
+                    %% The super send maps super_recv -> super.
+                    ?assert(
+                        lists:any(
+                            fun(R) ->
+                                maps:get(sent, R) =:= 'navAggSuperSend' andalso
+                                    maps:get(recv, R) =:= super
+                            end,
+                            OurSends
+                        )
+                    ),
+
+                    %% --- all_sent_selectors_bt/0: distinct set, FFI excluded. ---
+                    #{indexed := SentSels, fallback_classes := SentFb0} =
+                        beamtalk_xref:all_sent_selectors_bt(),
+                    ?assertNot(lists:member(Class, SentFb0)),
+                    ?assert(lists:member('navAggNormalSend', SentSels)),
+                    ?assert(lists:member('navAggSuperSend', SentSels)),
+                    %% The FFI send's "selector" is an Erlang function name, not a
+                    %% Beamtalk selector — it must not appear in the sent set.
+                    ?assertNot(lists:member('navAggFfiSend', SentSels)),
+
+                    %% --- Artificially purge: now loaded-but-unindexed. ---
+                    ok = beamtalk_xref:purge_class(Class),
+
+                    HandlerId = install_capture_handler(),
+                    try
+                        #{fallback_classes := SendFb1} = beamtalk_xref:all_sends_bt(),
+                        ?assert(lists:member(Class, SendFb1)),
+                        assert_single_miss(Class, unimplementedSelectors),
+
+                        #{fallback_classes := SentFb1} =
+                            beamtalk_xref:all_sent_selectors_bt(),
+                        ?assert(lists:member(Class, SentFb1)),
+                        assert_single_miss(Class, unusedSelectors)
+                    after
+                        remove_capture_handler(HandlerId)
+                    end
+                after
+                    %% Drop the synthetic rows so sibling tests are unaffected.
+                    ok = beamtalk_xref:purge_class(Class)
+                end
+            end)}
+    end}.
+
+%% The aggregate readers' indexed partitions must be gen-filtered: a re-register
+%% under a new generation must not leak a stale send row (mirrors the deferred
+%% CodeRabbit finding for senders_of_bt/1).
+all_sends_bt_indexed_is_gen_filtered_test_() ->
+    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+        {timeout, 30,
+            ?_test(begin
+                Class = first_method_bearing_class(),
+                ?assertNotEqual(undefined, Class),
+
+                Gen1 = [
+                    #{
+                        class_side => false,
+                        selector => 'aggGenSel',
+                        line => 1,
+                        sends => [#{selector => 'aggGenOneSend', line => 2, recv_kind => other}],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class(Class, Gen1),
+                try
+                    #{indexed := S1} = beamtalk_xref:all_sends_bt(),
+                    ?assert(
+                        lists:any(
+                            fun(R) ->
+                                maps:get(owner, R) =:= Class andalso
+                                    maps:get(sent, R) =:= 'aggGenOneSend'
+                            end,
+                            S1
+                        )
+                    ),
+
+                    Gen2 = [
+                        #{
+                            class_side => false,
+                            selector => 'aggGenSel',
+                            line => 1,
+                            sends => [
+                                #{selector => 'aggGenTwoSend', line => 2, recv_kind => other}
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ],
+                    ok = beamtalk_xref:register_class(Class, Gen2),
+
+                    #{indexed := S2} = beamtalk_xref:all_sends_bt(),
+                    %% Stale gen-1 send is filtered out...
+                    ?assertNot(
+                        lists:any(
+                            fun(R) ->
+                                maps:get(owner, R) =:= Class andalso
+                                    maps:get(sent, R) =:= 'aggGenOneSend'
+                            end,
+                            S2
+                        )
+                    ),
+                    %% ...and the current gen-2 send is present.
+                    ?assert(
+                        lists:any(
+                            fun(R) ->
+                                maps:get(owner, R) =:= Class andalso
+                                    maps:get(sent, R) =:= 'aggGenTwoSend'
+                            end,
+                            S2
+                        )
+                    ),
+
+                    %% The sent-selector set agrees with the gen filter.
+                    #{indexed := SentSels} = beamtalk_xref:all_sent_selectors_bt(),
+                    ?assertNot(lists:member('aggGenOneSend', SentSels)),
+                    ?assert(lists:member('aggGenTwoSend', SentSels))
+                after
+                    ok = beamtalk_xref:purge_class(Class)
+                end
+            end)}
+    end}.
+
 %% Assert exactly one xref_miss warning for `Class` tagged with `Query`. Drains
 %% the capture mailbox of misses for the class and checks the metadata. Each
 %% call drains independently, so the three queries above are checked in turn.

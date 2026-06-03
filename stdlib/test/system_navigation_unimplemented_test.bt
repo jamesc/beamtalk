@@ -18,6 +18,16 @@
 // process running (the source-text scan needs both). The BUnit harness does
 // not start the compiler port, so `allSendsIn:` returns `[]` here regardless of
 // source — hence these checks stay structural.
+//
+// BT-2303 migrated the sent / defined sets to read the runtime-maintained xref
+// index (`beamtalk_xref:all_sends_bt/0` for sends, `defined_selectors_bt/0` for
+// defines) with the BT-2299 miss-policy fallback: a loaded-but-unindexed class
+// falls back to the source-scan helpers below for that class only. The legacy
+// `collectAllSendsIn:…` helpers are retained as that fallback path, so the
+// structural assertions on them still hold. End-to-end correctness of the
+// index-backed result (the typo surfaces with sites; DNU / perform: / FFI do
+// not pollute) is covered by the E2E suite, which loads the fixtures into the
+// live index.
 
 TestCase subclass: SystemNavigationUnimplementedTest
 
@@ -72,6 +82,35 @@ TestCase subclass: SystemNavigationUnimplementedTest
   // The class-tag resolver helper (shared with sendersOf:) is present.
   testHelperResolveExtensionClassIsDefined =>
     self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+
+  // --- the index-backed helpers (BT-2303) must be defined ---
+
+  // The defined set is built from indexed `defined_selectors_bt` rows via this
+  // typed mapper; the DNU-handler scope set + indexed-send grouping back the
+  // index-read path.
+  testHelperDefinedSetFromIndexIsDefined =>
+    self assert: (SystemNavigation includesSelector: #definedSetFromIndex:into:)
+
+  testHelperDnuHandlerScopesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #dnuHandlerScopesFrom:fallback:into:)
+
+  testHelperGroupIndexedSendsIsDefined =>
+    self assert: (SystemNavigation includesSelector: #groupIndexedSends:excluding:dnuScopes:into:)
+
+  testHelperUnionFallbackClassesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #unionFallbackClasses:with:)
+
+  // The DNU-scope keying agrees across the indexed (owner-tag + side) and
+  // fallback (Behaviour scope) paths: an instance scope keys to the bare name,
+  // a class-side scope to the `" class"`-suffixed name. `Object class name` is
+  // already `"Object class"`, so the two helpers must produce the same key.
+  // `Object` is used because it is always loaded in the BUnit harness.
+  testDnuScopeKeyAgreesAcrossPaths =>
+    nav := SystemNavigation default
+    self assert: (nav dnuScopeKeyForOwner: #Object classSide: false) == "Object"
+    self assert: (nav dnuScopeKeyForOwner: #Object classSide: true) == "Object class"
+    self assert: (nav dnuScopeKeyFor: Object) == "Object"
+    self assert: (nav dnuScopeKeyFor: Object class) == "Object class"
 
   // The documented runtime-provided exclusion list is present and (currently)
   // empty — the stdlib comes back clean under the structural exclusions.

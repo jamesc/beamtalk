@@ -1420,16 +1420,32 @@ sealed typed Object subclass: SystemNavigation
   /// nowhere) surfaces with a site pointing straight at the offending method,
   /// letting an IDE jump the user to the mistake.
   ///
-  /// ## Single-pass design
+  /// ## Index-backed design (ADR 0087, BT-2303)
   ///
-  /// Computes `allSentSelectors − allDefinedSelectors`. The defined set is the
-  /// union of `selectorsForClass:` over every class in the navigation scope
-  /// (instance-side, class-side, and extension selectors). The sent set is
-  /// gathered by asking the compiler, once per method source, for EVERY send
-  /// via `(Erlang beamtalk_interface) allSendsIn:` — a single AST walk per
-  /// method rather than one walk per candidate selector. Sends whose selector
-  /// is already in the defined set are dropped; the rest are grouped by
-  /// selector into the result.
+  /// Computes `allSentSelectors − allDefinedSelectors`, both sets read from the
+  /// runtime-maintained xref index (`beamtalk_xref`) rather than re-parsed:
+  /// - The defined set is the indexed `defined_selectors_bt` rows
+  ///   (instance- and class-side), unioned with the extension selectors (not
+  ///   yet indexed) and the documented `runtimeProvidedSelectors`.
+  /// - The sent sites come from `all_sends_bt` — one indexed row per send,
+  ///   carrying the sent selector, the containing method's owner / side /
+  ///   selector / line, and the receiver tag. Sends whose selector is in the
+  ///   defined set are dropped; the rest are grouped by selector into the
+  ///   result, sites resolved to `#{#class, #selector, #line}` records.
+  ///
+  /// **Miss policy** (mirrors `sendersOf:` / `selectorsMatching:`). The index
+  /// is authoritative for loaded classes, but a miss must never become a wrong
+  /// answer:
+  /// - Indexed rows whose owning class is no longer loaded are dropped silently
+  ///   (stale), runtime-side.
+  /// - A class the registry reports as loaded but that is absent from the index
+  ///   falls back to the legacy source-scan (`collectAllSendsIn:excluding:into:`
+  ///   for sends, `selectorsForClass:` for defines) for that class only, and the
+  ///   runtime logs one `xref_miss` warning. The partitions are computed
+  ///   runtime-side by `beamtalk_xref:defined_selectors_bt/0` and
+  ///   `beamtalk_xref:all_sends_bt/0`.
+  /// - Extension selectors / sends (ADR 0066) are not yet in the index, so they
+  ///   are gathered unconditionally across the full scope.
   ///
   /// ## Exclusions (and their limits)
   ///
@@ -1460,9 +1476,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Performance
   ///
-  /// Naive: parses every method's source on every call (same envelope as
-  /// `sendersOf:` — a few seconds on a 200-class workspace). Fine for an
-  /// on-demand IDE lint; a maintained send/define index is a follow-up.
+  /// Two sub-millisecond ETS reads (`defined_selectors_bt` + `all_sends_bt`)
+  /// plus the unindexed extension scan, in place of the former per-call AST
+  /// walk over every method source (same migration as `sendersOf:`; see
+  /// `docs/development/benchmarks.md`).
   ///
   /// Returns `[]` when the registry is clean (modulo the documented
   /// exclusions). Source-less methods and `register/4` extensions (no source)
@@ -1474,19 +1491,60 @@ sealed typed Object subclass: SystemNavigation
   ///   // => [#{#selector => #printOnStream:, #sites => [#{#class => Foo, #selector => bar, #line => 3}]}]
   /// ```
   unimplementedSelectors -> List(Dictionary) =>
-    classList := self allClasses
-    definedSet := classList
-      inject: Set new
+    // ADR 0087: the runtime applies the miss policy and hands back the indexed
+    // defined-selector rows / send sites (stale rows already dropped) plus the
+    // loaded-but-unindexed classes that still need a source scan.
+    definedPartition := (Erlang beamtalk_xref) defined_selectors_bt
+    definedRows := definedPartition at: #indexed
+    sendsPartition := (Erlang beamtalk_xref) all_sends_bt
+    sendRows := sendsPartition at: #indexed
+    // The miss-policy fallback set is the union of the two partitions' fallback
+    // classes: a loaded-but-unindexed class needs BOTH its defined selectors
+    // gathered AND its sends source-scanned, and the two `_bt` reads compute the
+    // miss set independently (one warning per query each).
+    fallbackClasses := self unionFallbackClasses: (definedPartition at: #fallback_classes) with: (sendsPartition at: #fallback_classes)
+    fallbackScope := self allClasses select: [:cls |
+      fallbackClasses includes: cls name
+    ]
+    // Defined set = indexed defines + fallback-class defines + extension
+    // selectors (not yet indexed) + the documented runtime-provided selectors.
+    indexedDefined := self definedSetFromIndex: definedRows into: Set new
+    withFallbackDefined := fallbackScope
+      inject: indexedDefined
       into: [:acc :cls |
         (self selectorsForClass: cls) inject: acc into: [:innerAcc :sel |
           innerAcc add: sel
         ]
       ]
-    excludedSet := self runtimeProvidedSelectors inject: definedSet into: [:acc :sel |
+    withExtDefined := self allClasses
+      inject: withFallbackDefined
+      into: [:acc :cls |
+        (self extensionSelectorsForBothSides: cls) inject: acc into: [:innerAcc :sel |
+          innerAcc add: sel
+        ]
+      ]
+    excludedSet := self runtimeProvidedSelectors inject: withExtDefined into: [:acc :sel |
       acc add: sel
     ]
-    grouped := classList
-      inject: Dictionary new
+    // The coarse DNU heuristic suppresses `self`/`super` sends in a class that
+    // defines `doesNotUnderstand:args:`. Build the set of scope keys (owner +
+    // side) that handle DNU from the SAME defined-selector rows, so the indexed
+    // send walk can replay the per-scope `handlesDnu` decision without re-probing.
+    dnuScopes := self
+      dnuHandlerScopesFrom: definedRows
+      fallback: fallbackScope
+      into: Set new
+    // Group indexed send sites by their sent selector, applying the FFI / DNU /
+    // defined exclusions exactly as the source-scan path does.
+    grouped := self
+      groupIndexedSends: sendRows
+      excluding: excludedSet
+      dnuScopes: dnuScopes
+      into: Dictionary new
+    // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
+    // both sides, as the legacy walk did.
+    groupedWithFallback := fallbackScope
+      inject: grouped
       into: [:acc :cls |
         withInstance := self
           collectAllSendsIn: cls
@@ -1497,10 +1555,110 @@ sealed typed Object subclass: SystemNavigation
           excluding: excludedSet
           into: withInstance
       ]
-    groupedWithExt := self collectExtensionAllSendsExcluding: excludedSet into: grouped
+    // Extensions are not in the index yet, so scan them unconditionally.
+    groupedWithExt := self collectExtensionAllSendsExcluding: excludedSet into: groupedWithFallback
     groupedWithExt keys inject: List new into: [:acc :sel |
       acc add: #{#selector => sel, #sites => (groupedWithExt at: sel)}
     ]
+
+  /// Union two fallback-class lists into a List of class-name Symbols, dropping
+  /// duplicates. Internal helper for the composite queries: the defined-set and
+  /// sent-set `_bt` reads each compute their own miss partition, so a class
+  /// missing from the index can appear in both — the source-scan fallback must
+  /// visit it exactly once.
+  unionFallbackClasses: a :: List(Symbol) with: b :: List(Symbol) -> List(Symbol) =>
+    (a ++ b) unique
+
+  /// Add each indexed `defined_selectors_bt` row's `#selector` Symbol to the Set
+  /// `result`. Returns the (possibly extended) Set. The explicit `-> Set(Symbol)`
+  /// return anchors element-type inference for the defined-set accumulator
+  /// (mirrors `indexedSelectorsFrom:into:`), keeping `acc` strongly typed rather
+  /// than `Dynamic` (BT-2303).
+  definedSetFromIndex: definedRows :: List(Dictionary) into: result :: Set(Symbol) -> Set(Symbol) =>
+    definedRows inject: result into: [:acc :row | acc add: (row at: #selector)]
+
+  /// Build the set of scope keys (`ownerName` for an instance-side scope,
+  /// `ownerName ++ " class"` for a class-side scope) whose methods include
+  /// `doesNotUnderstand:args:` — the classes the coarse DNU heuristic must
+  /// suppress `self`/`super` sends in (see `unimplementedSelectors`). Returns the
+  /// (possibly extended) Set of String keys.
+  ///
+  /// The handler set is read from the SAME indexed `defined_selectors_bt` rows
+  /// the defined set comes from (a row whose `#selector` is
+  /// `doesNotUnderstand:args:` marks its `owner`/`class_side` scope), then
+  /// extended with the loaded-but-unindexed fallback scopes probed directly via
+  /// `methods includes:` (mirroring the legacy per-scope check). Keying on
+  /// owner + side keeps the side-specific semantics of the source-scan path:
+  /// instance-side DNU suppresses instance-side sends, class-side DNU suppresses
+  /// class-side sends.
+  dnuHandlerScopesFrom: definedRows :: List(Dictionary) fallback: fallbackScope :: List(Behaviour) into: result :: Set(String) -> Set(String) =>
+    fromIndex := definedRows
+      inject: result
+      into: [:acc :row |
+        (row at: #selector) == #doesNotUnderstand:args:
+          ifTrue: [
+            acc add: (self dnuScopeKeyForOwner: (row at: #owner) classSide: (row at: #class_side))
+          ]
+          ifFalse: [acc]
+      ]
+    fallbackScope
+      inject: fromIndex
+      into: [:acc :cls |
+        withInstance := (cls methods includes: #doesNotUnderstand:args:) ifTrue: [
+          acc add: (self dnuScopeKeyFor: cls)
+        ] ifFalse: [acc]
+        (cls class methods includes: #doesNotUnderstand:args:) ifTrue: [
+          withInstance add: (self dnuScopeKeyFor: cls class)
+        ] ifFalse: [withInstance]
+      ]
+
+  /// The DNU-scope key for an xref owner-tag / class-side pair: the owner name
+  /// String for an instance-side scope, suffixed with `" class"` for a
+  /// class-side scope. Matches `dnuScopeKeyFor:` so an indexed scope and a
+  /// `Behaviour` scope for the same class+side produce the same key.
+  dnuScopeKeyForOwner: ownerTag :: Symbol classSide: isClassSide :: Boolean -> String =>
+    base := ownerTag asString
+    isClassSide ifTrue: [base ++ " class"] ifFalse: [base]
+
+  /// The DNU-scope key for a `Behaviour` scope: its `name` String, which already
+  /// carries the `" class"` suffix for a metaclass (so `Counter class name` is
+  /// `"Counter class"`). The fallback-scope counterpart of
+  /// `dnuScopeKeyForOwner:classSide:`.
+  dnuScopeKeyFor: aScope :: Behaviour -> String => aScope name asString
+
+  /// Group indexed send rows (`beamtalk_xref:all_sends_bt/0`) by their sent
+  /// selector into `result` (`selector -> [sites]`), dropping any send that is
+  /// excluded. Returns the (possibly extended) Dictionary.
+  ///
+  /// Internal helper for `unimplementedSelectors`. Each `row` is a Dictionary
+  /// with atom keys `#sent` (the sent selector), `#owner` (class-name Symbol),
+  /// `#class_side` (Boolean), `#method` (the containing method's selector),
+  /// `#line` (positive Integer), and `#recv` (the receiver tag `#self` / `#super`
+  /// / `#erlang_ffi` / `#other`). A send is dropped when its `#sent` selector is
+  /// in `excluded`, when `#recv` is `#erlang_ffi`, or when its scope handles DNU
+  /// and `#recv` is `#self` / `#super` — the same three exclusions `recordSend:…`
+  /// applies on the source-scan path.
+  groupIndexedSends: sendRows :: List(Dictionary) excluding: excluded :: Set(Symbol) dnuScopes: dnuScopes :: Set(String) into: result :: Dictionary -> Dictionary =>
+    sendRows
+      inject: result
+      into: [:acc :row |
+        sentSel := row at: #sent
+        recv := row at: #recv
+        skipForFfi := recv == #erlang_ffi
+        handlesDnu := dnuScopes includes: (self dnuScopeKeyForOwner: (row at: #owner) classSide: (row at: #class_side))
+        skipForDnu := handlesDnu and: [(recv == #self) or: [recv == #super]]
+        ((excluded includes: sentSel) or: [skipForFfi or: [skipForDnu]])
+          ifTrue: [acc]
+          ifFalse: [
+            site := #{
+              #class => (self senderClassFor: (row at: #owner) classSide: (row at: #class_side)),
+              #selector => (row at: #method),
+              #line => (row at: #line)
+            }
+            existing := acc at: sentSel ifAbsent: [List new]
+            acc at: sentSel put: (existing add: site)
+          ]
+      ]
 
   /// Selectors that are genuinely resolvable at runtime but are NOT surfaced
   /// through the compile-time `methods` dictionary, so `unimplementedSelectors`
@@ -1696,18 +1854,27 @@ sealed typed Object subclass: SystemNavigation
   /// candidates for an IDE "unused methods" pane — each one still warrants human
   /// judgement before deletion.
   ///
-  /// ## Single-pass design
+  /// ## Index-backed design (ADR 0087, BT-2303)
   ///
-  /// Computes `allDefinedSelectors − allSentSelectors`. The sent set is gathered
-  /// by asking the compiler, once per method source, for EVERY send via
-  /// `(Erlang beamtalk_interface) allSendsIn:` — a single AST walk per method
-  /// rather than one walk per candidate selector, exactly as
-  /// `unimplementedSelectors` does. The defined candidates are built by walking
-  /// `cls methods` (instance-side, owner `cls`) and `cls class methods`
-  /// (class-side, owner `cls class`) directly, because each candidate must
-  /// remember its *owning* class — the flattened `selectorsForClass:` discards
-  /// that. A candidate survives into the result only if its selector is absent
-  /// from the sent set and survives every exclusion below.
+  /// Computes `allDefinedSelectors − allSentSelectors`. The sent set is read
+  /// from the runtime-maintained xref index via
+  /// `beamtalk_xref:all_sent_selectors_bt/0` (the distinct set of selectors sent
+  /// somewhere, Erlang-FFI sends already excluded runtime-side) rather than
+  /// re-parsed, unioned with the unindexed extension-body sends and the
+  /// loaded-but-unindexed fallback classes' source-scanned sends. The defined
+  /// candidates are built by walking `cls methods` (instance-side, owner `cls`)
+  /// and `cls class methods` (class-side, owner `cls class`) over the live class
+  /// registry — a reflective method-dictionary read, NOT a source re-parse — so
+  /// each candidate remembers its *owning* class object for the `#class` field.
+  /// A candidate survives into the result only if its selector is absent from
+  /// the sent set and survives every exclusion below.
+  ///
+  /// **Miss policy** (mirrors `sendersOf:`). Indexed sent-selector rows whose
+  /// owning class is no longer loaded are dropped silently (stale), runtime-side;
+  /// a class the registry reports as loaded but absent from the index has its
+  /// sends source-scanned (`collectSentSelectorsIn:into:`) for that class only,
+  /// and the runtime logs one `xref_miss` warning. The partition is computed
+  /// runtime-side by `beamtalk_xref:all_sent_selectors_bt/0`.
   ///
   /// ## Exclusions (and their limits)
   ///
@@ -1749,10 +1916,10 @@ sealed typed Object subclass: SystemNavigation
   ///
   /// ## Performance
   ///
-  /// Naive: parses every method's source on every call (same envelope as
-  /// `sendersOf:` / `unimplementedSelectors` — a few seconds on a 200-class
-  /// workspace). Fine for an on-demand IDE lint; a maintained send/define index
-  /// is a follow-up.
+  /// One sub-millisecond ETS read (`all_sent_selectors_bt`) for the sent set
+  /// plus the reflective defined-candidate walk and the unindexed extension
+  /// scan, in place of the former per-call AST walk over every method source
+  /// (same migration as `sendersOf:`; see `docs/development/benchmarks.md`).
   ///
   /// Returns `[]` when nothing qualifies. Note that a real stdlib has many
   /// public selectors that are part of the API surface but sent nowhere in the
@@ -1765,13 +1932,25 @@ sealed typed Object subclass: SystemNavigation
   /// ```
   unusedSelectors -> List(Dictionary) =>
     classList := self allClasses
-    sentSet := classList
-      inject: Set new
+    // ADR 0087: the runtime applies the miss policy and hands back the indexed
+    // sent selectors (stale rows + Erlang-FFI sends already dropped) plus the
+    // loaded-but-unindexed classes that still need a source scan for their sends.
+    sentPartition := (Erlang beamtalk_xref) all_sent_selectors_bt
+    indexedSent := sentPartition at: #indexed
+    fallbackClasses := sentPartition at: #fallback_classes
+    sentSet := self sentSetFromIndex: indexedSent into: Set new
+    // Miss-policy fallback: source-scan sends only from the loaded-but-unindexed
+    // classes, both sides, exactly as the legacy walk did.
+    withFallbackSent := (classList select: [:cls |
+      fallbackClasses includes: cls name
+    ])
+      inject: sentSet
       into: [:acc :cls |
         withInstance := self collectSentSelectorsIn: cls into: acc
         self collectSentSelectorsIn: cls class into: withInstance
       ]
-    fullSentSet := self collectExtensionSentSelectorsInto: sentSet
+    // Extensions are not in the index yet, so scan their bodies unconditionally.
+    fullSentSet := self collectExtensionSentSelectorsInto: withFallbackSent
     excluded := self runtimeCalledSelectors inject: Set new into: [:acc :sel |
       acc add: sel
     ]
@@ -1791,6 +1970,15 @@ sealed typed Object subclass: SystemNavigation
           excluded: excluded
           into: withInstance
       ]
+
+  /// Add each indexed `all_sent_selectors_bt` selector Symbol to the Set
+  /// `result`. Returns the (possibly extended) Set. Each indexed element is
+  /// `Dynamic` (it comes through the FFI partition map), so the explicit
+  /// `-> Set(Symbol)` return anchors element-type inference for the sent-set
+  /// accumulator (mirrors `definedSetFromIndex:into:`), keeping `acc` strongly
+  /// typed rather than `Dynamic` (BT-2303).
+  sentSetFromIndex: indexedSent :: List(Symbol) into: result :: Set(Symbol) -> Set(Symbol) =>
+    indexedSent inject: result into: [:acc :sel | acc add: sel]
 
   /// Selectors the runtime / framework invokes WITHOUT a source-visible Beamtalk
   /// send, so an override of one would otherwise look unused to `unusedSelectors`.

@@ -56,6 +56,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     implementors_of_bt/1,
     defined_selectors/2,
     defined_selectors_bt/0,
+    all_sends_bt/0,
+    all_sent_selectors_bt/0,
     method_info/3
 ]).
 
@@ -162,6 +164,28 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     selector := selector()
 }.
 
+%% The receiver tag the BT layer matches on (`#self` / `#super` / `#erlang_ffi`
+%% / `#other`). It is the FFI-facing spelling produced by
+%% `beamtalk_interface:allSendsIn:`, NOT the internal `recv_kind()`
+%% (`self_recv | ...`); `recv_kind_to_bt/1` maps between them so the indexed and
+%% source-scan fallback paths feed `SystemNavigation` the same atoms (BT-2303).
+-type bt_recv_kind() :: self | super | erlang_ffi | other.
+
+%% A send site reduced to the fields `SystemNavigation unimplementedSelectors`
+%% consumes: the *sent* selector, the containing method's owner / side /
+%% selector / line, and the receiver tag (for the FFI + DNU exclusions). This is
+%% a `bt_row()` plus the `sent` selector and `recv` tag — the senders table is
+%% keyed by the sent selector, so the aggregate walk carries it back out
+%% (BT-2303).
+-type send_row() :: #{
+    sent := selector(),
+    owner := class_name(),
+    class_side := class_side(),
+    method := selector(),
+    line := pos_integer(),
+    recv := bt_recv_kind()
+}.
+
 -export_type([
     method_xref_entry/0,
     method_info/0,
@@ -169,6 +193,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     bt_row/0,
     impl_row/0,
     selector_row/0,
+    send_row/0,
+    bt_recv_kind/0,
     source_status/0,
     provenance/0,
     recv_kind/0
@@ -605,6 +631,95 @@ defined_selectors_bt() ->
     #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
 
 -doc """
+Return every send site across the whole index with the ADR 0087 miss-policy
+applied, the partition `SystemNavigation unimplementedSelectors` needs to
+compute `allSentSelectors − allDefinedSelectors` without re-parsing every method
+(BT-2303, Phase 5).
+
+`unimplementedSelectors` groups *every* send by its sent selector and reports
+the sites of any selector defined nowhere, so this returns the whole senders
+universe (not a single key's lookup). It is the senders-table analogue of
+`defined_selectors_bt/0`. The return map mirrors the other `_bt` reads:
+
+- `indexed` — one `send_row()` per senders-table row whose owner class is still
+  loaded (**stale rows dropped**) and whose `gen` is live (Phase 4 / BT-2300).
+  Each row carries the `sent` selector (the table key), the containing method's
+  `owner` / `class_side` / `method` / `line`, and the `recv` tag (mapped to the
+  FFI-facing `#self` / `#super` / `#erlang_ffi` / `#other` spelling) so the BT
+  side can apply the FFI and `doesNotUnderstand:` exclusions exactly as the
+  source-scan path does.
+- `fallback_classes` — the loaded-but-unindexed, method-bearing classes the BT
+  side must source-scan for sends. One `xref_miss` `?LOG_WARNING` is emitted per
+  class. See `senders_of_bt/1` for the full rationale.
+""".
+-spec all_sends_bt() ->
+    #{indexed := [send_row()], fallback_classes := [class_name()]}.
+all_sends_bt() ->
+    {Loaded, FallbackClasses} = miss_partition(unimplementedSelectors),
+    IndexedRows =
+        case ets:whereis(?SENDERS_TABLE) of
+            undefined ->
+                [];
+            _ ->
+                %% Whole-universe walk over the senders bag: each row is
+                %% `{SentSelector, Site}`. Pull every row under one stable
+                %% snapshot so the per-site `gen` is available, then keep only
+                %% sites whose owner is still loaded and whose generation is live
+                %% (mirrors `defined_selectors_bt/0`, but over senders).
+                {Snapshot, Rows} = read_stable(fun() ->
+                    ets:tab2list(?SENDERS_TABLE)
+                end),
+                [
+                    site_to_send_row(Sent, Site)
+                 || {Sent, Site} <- Rows,
+                    sets:is_element(maps:get(owner, Site), Loaded),
+                    is_live_gen(maps:get(owner, Site), Site, Snapshot)
+                ]
+        end,
+    #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
+
+-doc """
+Return the distinct set of *sent* selectors across the whole index with the ADR
+0087 miss-policy applied, the partition `SystemNavigation unusedSelectors` needs
+to compute `allDefinedSelectors − allSentSelectors` (BT-2303, Phase 5).
+
+`unusedSelectors` only needs the *set* of selectors that are sent somewhere — it
+does not need the sites — so this projects the senders universe down to the
+distinct sent selectors, dropping Erlang-FFI sends (an `Erlang module …` chain
+carries an Erlang function name, not a Beamtalk selector, and counting it would
+spuriously mark a same-named Beamtalk selector as used — the same exclusion the
+BT source-scan applies). The return map mirrors the other `_bt` reads:
+
+- `indexed` — the distinct sent selectors (FFI sends excluded) drawn from rows
+  whose owner class is still loaded and whose generation is live (**stale rows
+  dropped**).
+- `fallback_classes` — the loaded-but-unindexed, method-bearing classes the BT
+  side must source-scan for sends. One `xref_miss` `?LOG_WARNING` is emitted per
+  class. See `senders_of_bt/1`.
+""".
+-spec all_sent_selectors_bt() ->
+    #{indexed := [selector()], fallback_classes := [class_name()]}.
+all_sent_selectors_bt() ->
+    {Loaded, FallbackClasses} = miss_partition(unusedSelectors),
+    Selectors =
+        case ets:whereis(?SENDERS_TABLE) of
+            undefined ->
+                [];
+            _ ->
+                {Snapshot, Rows} = read_stable(fun() ->
+                    ets:tab2list(?SENDERS_TABLE)
+                end),
+                lists:usort([
+                    Sent
+                 || {Sent, Site} <- Rows,
+                    maps:get(recv_kind, Site, other) =/= erlang_ffi,
+                    sets:is_element(maps:get(owner, Site), Loaded),
+                    is_live_gen(maps:get(owner, Site), Site, Snapshot)
+                ])
+        end,
+    #{indexed => Selectors, fallback_classes => FallbackClasses}.
+
+-doc """
 Return the `method_info()` record for a method, or `undefined` if the
 class+selector+side triple is not registered.
 
@@ -819,6 +934,36 @@ site_to_bt_row(Site) ->
         method => maps:get(method, Site),
         line => maps:get(line, Site)
     }.
+
+-doc """
+Project a sent-selector / `site()` pair onto the `send_row()` the BT
+`unimplementedSelectors` walk consumes: the `bt_row()` fields plus the `sent`
+selector (the senders-table key) and the FFI-facing `recv` tag (BT-2303).
+""".
+-spec site_to_send_row(selector(), site()) -> send_row().
+site_to_send_row(Sent, Site) ->
+    #{
+        sent => Sent,
+        owner => maps:get(owner, Site),
+        class_side => maps:get(class_side, Site),
+        method => maps:get(method, Site),
+        line => maps:get(line, Site),
+        recv => recv_kind_to_bt(maps:get(recv_kind, Site, other))
+    }.
+
+-doc """
+Map the internal `recv_kind()` back to the FFI-facing tag the BT layer matches
+on. The inverse of `recv_to_recv_kind/1`: the index stores `self_recv` /
+`super_recv` (to avoid clashing with the bare `self` atom), but
+`SystemNavigation` compares against `#self` / `#super` / `#erlang_ffi` —
+exactly what `beamtalk_interface:allSendsIn:` returns on the source-scan
+fallback path — so the two paths feed identical atoms (BT-2303).
+""".
+-spec recv_kind_to_bt(recv_kind()) -> bt_recv_kind().
+recv_kind_to_bt(self_recv) -> self;
+recv_kind_to_bt(super_recv) -> super;
+recv_kind_to_bt(erlang_ffi) -> erlang_ffi;
+recv_kind_to_bt(_) -> other.
 
 -doc """
 Emit the ADR 0087 miss-policy warning for an index miss on `Class` under the
