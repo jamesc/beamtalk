@@ -599,28 +599,10 @@ pub(crate) fn build_dep_class_index(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::*;
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    /// Create a minimal beamtalk.toml manifest in a directory.
-    fn write_manifest(dir: &std::path::Path, name: &str, deps: &str) {
-        let content = format!(
-            r#"[package]
-name = "{name}"
-version = "0.1.0"
-
-{deps}"#
-        );
-        fs::write(dir.join("beamtalk.toml"), content).unwrap();
-    }
-
-    /// Create a minimal .bt source file.
-    fn write_source(dir: &std::path::Path, filename: &str, content: &str) {
-        let src_dir = dir.join("src");
-        fs::create_dir_all(&src_dir).unwrap();
-        fs::write(src_dir.join(filename), content).unwrap();
-    }
 
     #[test]
     fn test_normalize_path_resolves_parent() {
@@ -666,7 +648,7 @@ version = "0.1.0"
     fn test_resolve_no_dependencies() {
         let temp = TempDir::new().unwrap();
         let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        write_manifest(temp.path(), "my_app", "");
+        write_manifest(temp.path(), "my_app", "0.1.0", "");
         let options = beamtalk_core::CompilerOptions::default();
 
         let result = resolve_path_dependencies(&project_root, &options).unwrap();
@@ -680,6 +662,7 @@ version = "0.1.0"
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 utils = { path = "../nonexistent" }"#,
         );
@@ -706,6 +689,7 @@ utils = { path = "../nonexistent" }"#,
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 utils = { path = "utils" }"#,
         );
@@ -728,11 +712,12 @@ utils = { path = "utils" }"#,
         // Create dependency with a different package name
         let dep_dir = temp.path().join("utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "wrong_name", "");
+        write_manifest(&dep_dir, "wrong_name", "0.1.0", "");
 
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 utils = { path = "utils" }"#,
         );
@@ -762,6 +747,7 @@ utils = { path = "utils" }"#,
         write_manifest(
             &dep_dir,
             "dep_a",
+            "0.1.0",
             &format!(
                 r#"[dependencies]
 my_app = {{ path = "{project_root_str}" }}"#,
@@ -772,6 +758,7 @@ my_app = {{ path = "{project_root_str}" }}"#,
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 dep_a = { path = "dep_a" }"#,
         );
@@ -794,11 +781,12 @@ dep_a = { path = "dep_a" }"#,
         // Create dependency with manifest but no source files
         let dep_dir = temp.path().join("utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "utils", "");
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
 
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 utils = { path = "utils" }"#,
         );
@@ -845,7 +833,7 @@ utils = { path = "utils" }"#,
         // Create C (leaf dependency)
         let c_dir = temp.path().join("pkg_c");
         fs::create_dir_all(&c_dir).unwrap();
-        write_manifest(&c_dir, "pkg_c", "");
+        write_manifest(&c_dir, "pkg_c", "0.1.0", "");
 
         // Create B (depends on C)
         let b_dir = temp.path().join("pkg_b");
@@ -853,6 +841,7 @@ utils = { path = "utils" }"#,
         write_manifest(
             &b_dir,
             "pkg_b",
+            "0.1.0",
             r#"[dependencies]
 pkg_c = { path = "../pkg_c" }"#,
         );
@@ -861,6 +850,7 @@ pkg_c = { path = "../pkg_c" }"#,
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 pkg_b = { path = "pkg_b" }"#,
         );
@@ -881,6 +871,7 @@ pkg_b = { path = "pkg_b" }"#,
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 json = { git = "https://github.com/jamesc/beamtalk-json", tag = "v1.0.0" }"#,
         );
@@ -910,7 +901,7 @@ json = { git = "https://github.com/jamesc/beamtalk-json", tag = "v1.0.0" }"#,
         // Create dependency package: dep_utils with a Helper class
         let dep_dir = temp.path().join("dep_utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "dep_utils", "");
+        write_manifest(&dep_dir, "dep_utils", "0.1.0", "");
         write_source(
             &dep_dir,
             "helper.bt",
@@ -921,6 +912,7 @@ json = { git = "https://github.com/jamesc/beamtalk-json", tag = "v1.0.0" }"#,
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             r#"[dependencies]
 dep_utils = { path = "dep_utils" }"#,
         );

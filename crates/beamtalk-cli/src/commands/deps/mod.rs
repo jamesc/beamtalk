@@ -443,23 +443,35 @@ fn newest_bt_mtime(dir: &std::path::Path) -> Option<std::time::SystemTime> {
     newest
 }
 
+/// Shared test fixture helpers for all `deps` sub-module tests.
+///
+/// Accessible from child modules (`path`, `graph`, …) via
+/// `use super::super::test_support::*`.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
+pub(super) mod test_support {
     use std::fs;
-    use tempfile::TempDir;
 
-    fn write_manifest(dir: &std::path::Path, name: &str, deps: &str) {
-        let content = format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n{deps}");
+    /// Write a minimal `beamtalk.toml` into `dir`.
+    pub fn write_manifest(dir: &std::path::Path, name: &str, version: &str, deps: &str) {
+        let content = format!("[package]\nname = \"{name}\"\nversion = \"{version}\"\n\n{deps}");
         fs::write(dir.join("beamtalk.toml"), content).unwrap();
     }
 
-    fn write_source(dir: &std::path::Path, filename: &str, content: &str) {
+    /// Create `dir/src/<filename>` with the given content.
+    pub fn write_source(dir: &std::path::Path, filename: &str, content: &str) {
         let src_dir = dir.join("src");
         fs::create_dir_all(&src_dir).unwrap();
         fs::write(src_dir.join(filename), content).unwrap();
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::*;
+    use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+    use tempfile::TempDir;
 
     fn create_dep_ebin_with_beam(project_root: &std::path::Path, dep_name: &str) {
         let root_utf8 = camino::Utf8PathBuf::from_path_buf(project_root.to_path_buf()).unwrap();
@@ -484,7 +496,7 @@ mod tests {
     fn test_ensure_deps_no_dependencies() {
         let temp = TempDir::new().unwrap();
         let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        write_manifest(temp.path(), "my_app", "");
+        write_manifest(temp.path(), "my_app", "0.1.0", "");
         let options = beamtalk_core::CompilerOptions::default();
 
         let result = ensure_deps_resolved(&root, &options).unwrap();
@@ -499,7 +511,7 @@ mod tests {
         // Create dep directory with manifest and source
         let dep_dir = temp.path().join("utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "utils", "");
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
         write_source(
             &dep_dir,
             "helper.bt",
@@ -513,6 +525,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nutils = { path = \"utils\" }",
         );
 
@@ -531,12 +544,13 @@ mod tests {
         // Create dep directory
         let dep_dir = temp.path().join("utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "utils", "");
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
 
         // Create main manifest with path dep — no ebin dir
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nutils = { path = \"utils\" }",
         );
 
@@ -554,7 +568,7 @@ mod tests {
         // Create dep directory
         let dep_dir = temp.path().join("utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "utils", "");
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
 
         // Create ebin dir but no .beam files
         let test_layout = BuildLayout::new(&root);
@@ -564,6 +578,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nutils = { path = \"utils\" }",
         );
 
@@ -584,6 +599,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\njson = { git = \"https://example.com/json\", tag = \"v1.0\" }",
         );
 
@@ -602,7 +618,7 @@ mod tests {
         // Create dep directory with manifest
         let dep_dir = temp.path().join("utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "utils", "");
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
 
         // Create compiled ebin FIRST (older mtime)
         create_dep_ebin_with_beam(temp.path(), "utils");
@@ -620,6 +636,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nutils = { path = \"utils\" }",
         );
 
@@ -638,7 +655,7 @@ mod tests {
         // Create dep with source
         let dep_dir = temp.path().join("utils");
         fs::create_dir_all(&dep_dir).unwrap();
-        write_manifest(&dep_dir, "utils", "");
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
         write_source(
             &dep_dir,
             "helper.bt",
@@ -651,6 +668,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nutils = { path = \"utils\" }",
         );
 
@@ -681,7 +699,7 @@ mod tests {
         // Create shared (leaf dep)
         let shared_dir = temp.path().join("shared");
         fs::create_dir_all(&shared_dir).unwrap();
-        write_manifest(&shared_dir, "shared", "");
+        write_manifest(&shared_dir, "shared", "0.1.0", "");
 
         // Create utils (depends on shared)
         let utils_dir = temp.path().join("utils");
@@ -689,6 +707,7 @@ mod tests {
         write_manifest(
             &utils_dir,
             "utils",
+            "0.1.0",
             "[dependencies]\nshared = { path = \"../shared\" }",
         );
 
@@ -699,6 +718,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nutils = { path = \"utils\" }",
         );
 
@@ -722,7 +742,7 @@ mod tests {
         // Create shared (leaf dep) with source
         let shared_dir = temp.path().join("shared");
         fs::create_dir_all(&shared_dir).unwrap();
-        write_manifest(&shared_dir, "shared", "");
+        write_manifest(&shared_dir, "shared", "0.1.0", "");
         write_source(
             &shared_dir,
             "base.bt",
@@ -735,6 +755,7 @@ mod tests {
         write_manifest(
             &utils_dir,
             "utils",
+            "0.1.0",
             "[dependencies]\nshared = { path = \"../shared\" }",
         );
         write_source(
@@ -751,6 +772,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nutils = { path = \"utils\" }",
         );
 
@@ -786,13 +808,14 @@ mod tests {
 
         let shared_dir = temp.path().join("shared");
         fs::create_dir_all(&shared_dir).unwrap();
-        write_manifest(&shared_dir, "shared", "");
+        write_manifest(&shared_dir, "shared", "0.1.0", "");
 
         let a_dir = temp.path().join("pkg_a");
         fs::create_dir_all(&a_dir).unwrap();
         write_manifest(
             &a_dir,
             "pkg_a",
+            "0.1.0",
             "[dependencies]\nshared = { path = \"../shared\" }",
         );
 
@@ -801,12 +824,14 @@ mod tests {
         write_manifest(
             &b_dir,
             "pkg_b",
+            "0.1.0",
             "[dependencies]\nshared = { path = \"../shared\" }",
         );
 
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\npkg_a = { path = \"pkg_a\" }\npkg_b = { path = \"pkg_b\" }",
         );
 
@@ -847,6 +872,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\njson = { git = \"https://example.com/json\", tag = \"v1.0\" }",
         );
 
@@ -911,6 +937,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\njson = { git = \"https://example.com/json\", tag = \"v1.0\" }",
         );
 
@@ -934,7 +961,7 @@ mod tests {
         // Create leaf dep
         let leaf_dir = temp.path().join("leaf");
         fs::create_dir_all(&leaf_dir).unwrap();
-        write_manifest(&leaf_dir, "leaf", "");
+        write_manifest(&leaf_dir, "leaf", "0.1.0", "");
 
         // Create middle dep (depends on leaf)
         let middle_dir = temp.path().join("middle");
@@ -942,6 +969,7 @@ mod tests {
         write_manifest(
             &middle_dir,
             "middle",
+            "0.1.0",
             "[dependencies]\nleaf = { path = \"../leaf\" }",
         );
 
@@ -954,6 +982,7 @@ mod tests {
         write_manifest(
             &middle_dir,
             "middle",
+            "0.1.0",
             "[dependencies]\nleaf = { path = \"../leaf\" }  # changed",
         );
 
@@ -961,6 +990,7 @@ mod tests {
         write_manifest(
             temp.path(),
             "my_app",
+            "0.1.0",
             "[dependencies]\nmiddle = { path = \"middle\" }",
         );
 
