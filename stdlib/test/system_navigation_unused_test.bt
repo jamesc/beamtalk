@@ -21,6 +21,17 @@
 // process running (the source-text scan needs both). The BUnit harness does not
 // start the compiler port, so `allSendsIn:` returns `[]` here regardless of
 // source — hence these checks stay structural.
+//
+// BT-2303 migrated the sent set to read the runtime-maintained xref index
+// (`beamtalk_xref:all_sent_selectors_bt/0`) with the BT-2299 miss-policy
+// fallback: a loaded-but-unindexed class falls back to the source-scan
+// `collectSentSelectorsIn:into:` helper for that class only. The defined
+// candidates still come from the live class registry's method dictionaries
+// (a reflective read, not a source re-parse) so each candidate keeps its owning
+// class object. The legacy sent-scan helpers are retained as the fallback path,
+// so the structural assertions on them still hold. End-to-end correctness (an
+// unused method surfaces; the runtime-called / TestCase / primitive / FFI
+// exclusions hold) is covered by the E2E suite against the live index.
 
 TestCase subclass: SystemNavigationUnusedTest
 
@@ -86,6 +97,11 @@ TestCase subclass: SystemNavigationUnusedTest
   // The class-tag resolver helper (shared with the other queries) is present.
   testHelperResolveExtensionClassIsDefined =>
     self assert: (SystemNavigation includesSelector: #resolveExtensionClass:)
+
+  // The index-backed sent-set mapper (BT-2303): indexed `all_sent_selectors_bt`
+  // selectors are folded into the sent Set via this typed helper.
+  testHelperSentSetFromIndexIsDefined =>
+    self assert: (SystemNavigation includesSelector: #sentSetFromIndex:into:)
 
   // --- the predicates compute correctly (these do not need the compiler port) ---
 
