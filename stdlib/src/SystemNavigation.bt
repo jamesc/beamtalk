@@ -261,10 +261,26 @@ sealed typed Object subclass: SystemNavigation
   /// as the class and once as the metaclass.
   ///
   /// Does NOT walk inherited methods — only classes with their own
-  /// definition of the selector are returned. Iterates the navigation
-  /// scope so stdlib and user classes are both in the search set.
+  /// definition of the selector are returned.
   ///
   /// Matches Pharo's `SystemNavigation >> #allImplementorsOf:`.
+  ///
+  /// ## Maintained index (ADR 0087, BT-2302)
+  ///
+  /// The implementors are read from the runtime-maintained xref methods table
+  /// (`beamtalk_xref`), populated at class-load time by codegen's baked
+  /// `register_class/0` payload — one `methods` row per `{class, side,
+  /// selector}` definition. This is a sub-millisecond ETS read in place of the
+  /// former `includesSelector:` probe over every class in the scope.
+  ///
+  /// **Miss policy.** Mirrors `sendersOf:`:
+  /// - Indexed implementor rows whose class is no longer loaded are dropped
+  ///   silently (stale).
+  /// - A class the registry reports as loaded but that is absent from the index
+  ///   falls back to the legacy `includesSelector:` / `class includesSelector:`
+  ///   probe for that class only, and the runtime logs one `xref_miss` warning.
+  ///   The partition is computed runtime-side by
+  ///   `beamtalk_xref:implementors_of_bt/1`.
   ///
   /// Raises an error if the argument is not a Symbol.
   ///
@@ -278,12 +294,30 @@ sealed typed Object subclass: SystemNavigation
     (aSelector isKindOf: Symbol) ifFalse: [
       self error: "SystemNavigation implementorsOf: requires a Symbol argument"
     ]
-    classes := self allClasses
-    instanceImpls := classes select: [:c | c includesSelector: aSelector]
-    classSideImpls := (classes select: [:c |
+    // ADR 0087: the runtime applies the miss policy and hands back the indexed
+    // implementor rows (stale rows already dropped) plus the loaded-but-unindexed
+    // classes that still need a direct `includesSelector:` probe.
+    partition := (Erlang beamtalk_xref) implementors_of_bt: aSelector
+    indexedRows := partition at: #indexed
+    fallbackClasses := partition at: #fallback_classes
+    // Map each indexed `{#owner, #class_side}` row to the class object
+    // (instance-side) or the metaclass object (class-side), reusing the same
+    // owner-tag/class-side resolver as `sendersOf:`.
+    indexImpls := indexedRows collect: [:row |
+      self senderClassFor: (row at: #owner) classSide: (row at: #class_side)
+    ]
+    // Miss-policy fallback: probe only the loaded-but-unindexed classes, on
+    // both sides, exactly as the legacy scan did.
+    fallbackScope := self allClasses select: [:cls |
+      fallbackClasses includes: cls name
+    ]
+    fallbackInstance := fallbackScope select: [:c |
+      c includesSelector: aSelector
+    ]
+    fallbackClassSide := (fallbackScope select: [:c |
       c class includesSelector: aSelector
     ]) collect: [:c | c class]
-    instanceImpls ++ classSideImpls
+    indexImpls ++ fallbackInstance ++ fallbackClassSide
 
   /// Return the message sends that occur in the body of `aMethod` — the
   /// outgoing-call set of a single method, the dual of `sendersOf:`.
@@ -397,7 +431,7 @@ sealed typed Object subclass: SystemNavigation
     partition := (Erlang beamtalk_xref) senders_of_bt: aSelector
     indexedRows := partition at: #indexed
     fallbackClasses := partition at: #fallback_classes
-    indexScan := self indexedSenderRecordsFrom: indexedRows into: List new
+    indexScan := self indexedSiteRecordsFrom: indexedRows into: List new
     // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
     // walking both instance and class side as the legacy scan did (BT-2195).
     // Filter `allClasses` (typed List(Behaviour)) by the fallback name set
@@ -437,16 +471,20 @@ sealed typed Object subclass: SystemNavigation
       (cls isKindOf: Symbol) not
     ]) ifTrue: [cls class] ifFalse: [cls]
 
-  /// Map the xref index rows returned by `beamtalk_xref:senders_of_bt/1` onto
-  /// `#{#class, #selector, #line}` result records, appending to `result`.
+  /// Map the xref index `bt_row()`s returned by `beamtalk_xref:senders_of_bt/1`
+  /// or `references_to_bt/1` onto `#{#class, #selector, #line}` result records,
+  /// appending to `result`.
   ///
   /// Each `row` is a Dictionary with atom keys `#owner` (class-name Symbol),
   /// `#class_side` (Boolean), `#method` (Symbol), and `#line` (positive
   /// Integer). `#class` is resolved via `senderClassFor:classSide:` so the
   /// record shape is byte-for-byte identical to the legacy source-scan path.
-  /// The explicit `-> List(Dictionary)` return anchors element-type inference
-  /// for the `sendersOf:` accumulator.
-  indexedSenderRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
+  /// The `bt_row()` shape is shared by senders and references (both index a
+  /// site to the *containing* method's selector), so the same mapper backs both
+  /// `sendersOf:` and `referencesTo:` (BT-2302). The explicit
+  /// `-> List(Dictionary)` return anchors element-type inference for the
+  /// accumulator.
+  indexedSiteRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
     indexedRows
       inject: result
       into: [:acc :row |
@@ -457,6 +495,21 @@ sealed typed Object subclass: SystemNavigation
             #line => (row at: #line)
           }
       ]
+
+  /// Backwards-compatible alias for `indexedSiteRecordsFrom:into:`, retained
+  /// because the `sendersOf:` migration (BT-2299) named the mapper for senders
+  /// before `referencesTo:` (BT-2302) generalised it. Delegates unchanged.
+  indexedSenderRecordsFrom: indexedRows :: List(Dictionary) into: result :: List(Dictionary) -> List(Dictionary) =>
+    self indexedSiteRecordsFrom: indexedRows into: result
+
+  /// Map the indexed `defined_selectors_bt` rows to their `#selector` Symbols,
+  /// appending to `result`. Each row's `at: #selector` access is `Dynamic`, so
+  /// the explicit `-> List(Symbol)` return anchors element-type inference for
+  /// the `selectorsMatching:` fallback accumulator (mirrors
+  /// `indexedSiteRecordsFrom:into:`), keeping `acc` strongly typed rather than
+  /// `Dynamic` (BT-2302).
+  indexedSelectorsFrom: indexedRows :: List(Dictionary) into: result :: List(Symbol) -> List(Symbol) =>
+    indexedRows inject: result into: [:acc :row | acc add: (row at: #selector)]
 
   /// Append senders of `aSelector` found in any instance method of `aScope`
   /// (a class) to `result`. Returns the (possibly extended) result list.
@@ -511,19 +564,29 @@ sealed typed Object subclass: SystemNavigation
   ///   the reference appears
   ///
   /// A method that mentions `aClass` multiple times produces one record per
-  /// occurrence. Iterates the navigation scope and walks both instance-side
-  /// and class-side method dictionaries (BT-2195), so stdlib and user
-  /// classes are both covered on both sides. Class names that appear in
-  /// type annotations (parameter, return, or generic parameters such as
-  /// `List(Counter)`) are also matched. Matches Pharo's
-  /// `SystemNavigation >> #allReferencesTo:`.
+  /// occurrence. Class names that appear in type annotations (parameter,
+  /// return, or generic parameters such as `List(Counter)`) are also matched.
+  /// Matches Pharo's `SystemNavigation >> #allReferencesTo:`.
   ///
-  /// Naive implementation: parses every method's source on every call. Same
-  /// performance envelope as `sendersOf:`. A maintained
-  /// `class -> [sites]` index is a follow-up optimization.
+  /// ## Maintained index (ADR 0087, BT-2302)
+  ///
+  /// The class-body reference sites are read from the runtime-maintained xref
+  /// index (`beamtalk_xref`), populated at class-load time by codegen's baked
+  /// `register_class/0` payload (the same `references` channel that feeds the
+  /// methods / senders tables). This is a sub-millisecond ETS read in place of
+  /// the former per-call walk over every method source — same envelope as
+  /// `sendersOf:`, see `docs/development/benchmarks.md`.
+  ///
+  /// **Miss policy.** Identical to `sendersOf:`:
+  /// - Rows whose owning class is no longer loaded are dropped silently (stale).
+  /// - A class the registry reports as loaded but that is absent from the index
+  ///   falls back to the legacy source-scan (`collectReferencesFor:in:into:`)
+  ///   for that class only, and the runtime logs one `xref_miss` warning. The
+  ///   partition is computed runtime-side by `beamtalk_xref:references_to_bt/1`.
   ///
   /// Extension methods (ADR 0066) are scanned when registered with source via
-  /// `beamtalk_extensions:register/5` (BT-2196). The `#class` for an
+  /// `beamtalk_extensions:register/5` (BT-2196), unchanged by the migration —
+  /// extensions are not yet part of the index. The `#class` for an
   /// extension hit is the extended target class (or the metaclass atom for
   /// `Target class` extensions); `register/4` registrations without source
   /// remain invisible.
@@ -566,17 +629,28 @@ sealed typed Object subclass: SystemNavigation
       ifFalse: [
         self error: "SystemNavigation referencesTo: requires a class/metaclass object."
       ]
-    // `name` is a Symbol for both Class and Metaclass; convert to String for
-    // the downstream FFI shape.
-    targetName := aClass name asString
-    classScan := self allClasses
-      inject: List new
+    // `name` is a Symbol for both Class and Metaclass. The xref index is keyed
+    // by the class-name atom, so the Symbol drives the index read directly; the
+    // String form is still needed for the fallback source-scan FFI shape.
+    targetSymbol := aClass name
+    targetName := targetSymbol asString
+    // ADR 0087: the runtime applies the miss policy and hands back the indexed
+    // reference sites (stale rows already dropped) plus the loaded-but-unindexed
+    // classes that still need a source scan.
+    partition := (Erlang beamtalk_xref) references_to_bt: targetSymbol
+    indexedRows := partition at: #indexed
+    fallbackClasses := partition at: #fallback_classes
+    indexScan := self indexedSiteRecordsFrom: indexedRows into: List new
+    // Miss-policy fallback: source-scan only the loaded-but-unindexed classes,
+    // walking both instance and class side as the legacy scan did (BT-2195).
+    classScan := (self allClasses select: [:cls |
+      fallbackClasses includes: cls name
+    ])
+      inject: indexScan
       into: [:acc :cls |
-        // BT-2195: Walk both instance side (`cls`) and class side
-        // (`cls class`, the metaclass). `collectReferencesFor:in:into:`
-        // skips scopes for which `>>` is not yet supported, so the
-        // metaclass walk is safe even on registry entries that don't
-        // carry source.
+        // `collectReferencesFor:in:into:` skips scopes for which `>>` is not
+        // yet supported, so the metaclass walk is safe even on registry
+        // entries that don't carry source.
         withInstance := self
           collectReferencesFor: targetName
           in: cls
@@ -587,6 +661,7 @@ sealed typed Object subclass: SystemNavigation
           into: withInstance
       ]
     // BT-2196: walk source-bearing extensions registered via `register/5`.
+    // Extensions are not in the index yet, so this scan is unconditional.
     self collectExtensionReferencesFor: targetName into: classScan
 
   /// Append references to a class (identified by `targetName`) found in any
@@ -1108,15 +1183,34 @@ sealed typed Object subclass: SystemNavigation
   /// Return a sorted, deduplicated list of selectors whose name contains
   /// `aPattern` (case-insensitive substring match).
   ///
-  /// Powers omni-bar / Cmd-T "find any selector" surfaces in an IDE. Pure
-  /// registry walk — no AST parsing required. For each class in the
-  /// navigation scope, collects instance-side selectors, class-side
-  /// selectors, and extension-method selectors (ADR 0066) registered on
-  /// either side, then filters by lowercase substring match.
+  /// Powers omni-bar / Cmd-T "find any selector" surfaces in an IDE. Collects
+  /// instance-side selectors, class-side selectors, and extension-method
+  /// selectors (ADR 0066), then filters by lowercase substring match.
   ///
   /// Matching uses `selectorString lowercase includesSubstring: aPattern
   /// lowercase`, mirroring Pharo's `SystemNavigation >>
   /// #allSelectorsContaining:`.
+  ///
+  /// ## Maintained index (ADR 0087, BT-2302)
+  ///
+  /// The class-body selectors are read from the runtime-maintained xref methods
+  /// table (`beamtalk_xref`), populated at class-load time by codegen's baked
+  /// `register_class/0` payload — one `methods` row per `{class, side,
+  /// selector}` definition. This is a sub-millisecond ETS read in place of the
+  /// former `methods` / `class methods` probe over every class in the scope.
+  ///
+  /// **Miss policy.** Mirrors `sendersOf:`:
+  /// - Indexed selector rows whose class is no longer loaded are dropped
+  ///   silently (stale).
+  /// - A class the registry reports as loaded but that is absent from the index
+  ///   falls back to the legacy `selectorsForClass:` gather for that class only,
+  ///   and the runtime logs one `xref_miss` warning. The partition is computed
+  ///   runtime-side by `beamtalk_xref:defined_selectors_bt/0`.
+  ///
+  /// Extension-method selectors (ADR 0066) are not yet in the index, so they
+  /// are still gathered unconditionally via `selectorsForClass:` over the full
+  /// scope; the final `unique sort` absorbs the overlap with the indexed and
+  /// fallback selectors.
   ///
   /// Raises an error if the argument is not a String, or if the pattern is
   /// empty (an empty pattern would match every selector and is almost
@@ -1142,16 +1236,28 @@ sealed typed Object subclass: SystemNavigation
         self error: "SystemNavigation selectorsMatching: requires a non-empty pattern (empty would match every selector)"
       ]
     needle := aPattern lowercase
-    // `++` copies only its LEFT operand (it lowers to Erlang `++`), so keep the
-    // growing accumulator on the RIGHT: `(perClass) ++ acc` copies just the
-    // small per-class selector list each step and shares `acc`, keeping the
-    // registry walk O(total_selectors). The original `acc ++ (perClass)` copied
-    // the growing accumulator on every class — O(n²). Order is reversed but
-    // irrelevant: the result is de-duplicated and sorted below. (A `Set`
-    // accumulator would not help — stdlib `Set` is ordsets-backed, so `add:`
-    // is itself O(n).)
-    allSels := self allClasses inject: List new into: [:acc :cls |
+    // ADR 0087: the runtime applies the miss policy and hands back the indexed
+    // class-body selector rows (stale rows already dropped) plus the
+    // loaded-but-unindexed classes that still need a `selectorsForClass:` gather.
+    partition := (Erlang beamtalk_xref) defined_selectors_bt
+    indexedRows := partition at: #indexed
+    fallbackClasses := partition at: #fallback_classes
+    indexedSels := self indexedSelectorsFrom: indexedRows into: List new
+    // Miss-policy fallback: gather selectors only from the loaded-but-unindexed
+    // classes (instance, class-side, and their extensions). Keep the growing
+    // accumulator on the RIGHT of `++` so each step copies only the small
+    // per-class list and shares `acc` — `++` copies only its LEFT operand, so
+    // `(perClass) ++ acc` keeps the walk O(total_selectors) rather than O(n²).
+    fallbackScope := self allClasses select: [:cls |
+      fallbackClasses includes: cls name
+    ]
+    fallbackSels := fallbackScope inject: indexedSels into: [:acc :cls |
       (self selectorsForClass: cls) ++ acc
+    ]
+    // Extension selectors are not in the index yet, so gather them across the
+    // full scope; `unique sort` below absorbs any overlap with the above.
+    allSels := self allClasses inject: fallbackSels into: [:acc :cls |
+      (self extensionSelectorsForBothSides: cls) ++ acc
     ]
     matches := allSels select: [:sel |
       sel asString lowercase includesSubstring: needle
@@ -1174,7 +1280,20 @@ sealed typed Object subclass: SystemNavigation
   selectorsForClass: aClass :: Behaviour -> List(Symbol) =>
     instance := aClass methods
     classSide := aClass class methods
-    (aClass respondsTo: #name) ifFalse: [^instance ++ classSide]
+    instance ++ classSide ++ (self extensionSelectorsForBothSides: aClass)
+
+  /// Return the extension-method selectors (ADR 0066) registered against the
+  /// class on either the instance tag or the metaclass tag.
+  ///
+  /// Split out of `selectorsForClass:` (BT-2302) so `selectorsMatching:` can
+  /// gather extension selectors over the full scope independently of the
+  /// indexed class-body selectors (extensions are not yet in the xref index).
+  ///
+  /// The `respondsTo: #name` guard keeps a registry-shaped value that lacks a
+  /// name from aborting the walk — it contributes no extension selectors
+  /// instead. (Every real `Behaviour` answers `name`; the guard is defensive.)
+  extensionSelectorsForBothSides: aClass :: Behaviour -> List(Symbol) =>
+    (aClass respondsTo: #name) ifFalse: [^List new]
     className := aClass name
     instanceExtensions := self extensionSelectorsFor: className
     // class_object_tag/1 is the runtime authority that encodes the metaclass
@@ -1182,7 +1301,7 @@ sealed typed Object subclass: SystemNavigation
     // the same authority (BT-2223), so forward and reverse cannot drift.
     metaTag := (Erlang beamtalk_class_registry) class_object_tag: className
     classSideExtensions := self extensionSelectorsFor: metaTag
-    instance ++ classSide ++ instanceExtensions ++ classSideExtensions
+    instanceExtensions ++ classSideExtensions
 
   /// Return the selectors of all extension methods (ADR 0066) registered
   /// against the given class tag.

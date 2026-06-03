@@ -845,6 +845,114 @@ miss_policy_fallback_test_() ->
             end)}
     end}.
 
+%%====================================================================
+%% Miss-policy fallback for referencesTo: / implementorsOf: /
+%% selectorsMatching: (ADR 0087 Phase 5, BT-2302)
+%%====================================================================
+
+%% The three navigation queries migrated in BT-2302 share the `senders_of_bt/1`
+%% partition shape: while a method-bearing class is indexed its rows come from
+%% the index and it never appears as a fallback class; once artificially purged
+%% (loaded-but-unindexed) it falls back and emits exactly one `xref_miss`
+%% warning tagged with the right query name. This exercises all three new
+%% `_bt/0,1` read APIs against the live runtime app.
+nav_query_miss_policy_test_() ->
+    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+        {timeout, 30,
+            ?_test(begin
+                Class = first_method_bearing_class(),
+                ?assertNotEqual(undefined, Class),
+
+                %% Stub rows: one instance-side method that references `Integer`,
+                %% plus one class-side method. Gives every query something to
+                %% match while indexed: a reference (referencesTo:), implementors
+                %% on both sides (implementorsOf:), and named selectors
+                %% (selectorsMatching:).
+                StubRows = [
+                    #{
+                        class_side => false,
+                        selector => 'navProbeInstance',
+                        line => 1,
+                        sends => [],
+                        references => [#{class => 'Integer', line => 1}],
+                        source_status => unindexed_runtime_fun,
+                        provenance => class_body
+                    },
+                    #{
+                        class_side => true,
+                        selector => 'navProbeClassSide',
+                        line => 1,
+                        sends => [],
+                        references => [],
+                        source_status => unindexed_runtime_fun,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class(Class, StubRows),
+
+                %% --- While indexed: rows come from the index, no fallback. ---
+                #{indexed := RefIndexed, fallback_classes := RefFb0} =
+                    beamtalk_xref:references_to_bt('Integer'),
+                ?assertNot(lists:member(Class, RefFb0)),
+                ?assert(
+                    lists:any(
+                        fun(R) ->
+                            maps:get(owner, R) =:= Class andalso
+                                maps:get(method, R) =:= 'navProbeInstance'
+                        end,
+                        RefIndexed
+                    )
+                ),
+
+                #{indexed := ImplInst, fallback_classes := ImplFb0} =
+                    beamtalk_xref:implementors_of_bt('navProbeInstance'),
+                ?assertNot(lists:member(Class, ImplFb0)),
+                ?assert(
+                    lists:member(#{owner => Class, class_side => false}, ImplInst)
+                ),
+                #{indexed := ImplCls} =
+                    beamtalk_xref:implementors_of_bt('navProbeClassSide'),
+                ?assert(
+                    lists:member(#{owner => Class, class_side => true}, ImplCls)
+                ),
+
+                #{indexed := SelRows, fallback_classes := SelFb0} =
+                    beamtalk_xref:defined_selectors_bt(),
+                ?assertNot(lists:member(Class, SelFb0)),
+                ?assert(
+                    lists:member(
+                        #{owner => Class, class_side => false, selector => 'navProbeInstance'},
+                        SelRows
+                    )
+                ),
+
+                %% --- Artificially purge: now loaded-but-unindexed. ---
+                ok = beamtalk_xref:purge_class(Class),
+
+                HandlerId = install_capture_handler(),
+                try
+                    #{fallback_classes := RefFb1} =
+                        beamtalk_xref:references_to_bt('Integer'),
+                    ?assert(lists:member(Class, RefFb1)),
+                    assert_single_miss(Class, referencesTo),
+
+                    #{fallback_classes := ImplFb1} =
+                        beamtalk_xref:implementors_of_bt('navProbeInstance'),
+                    ?assert(lists:member(Class, ImplFb1)),
+                    assert_single_miss(Class, implementorsOf),
+
+                    #{fallback_classes := SelFb1} =
+                        beamtalk_xref:defined_selectors_bt(),
+                    ?assert(lists:member(Class, SelFb1)),
+                    assert_single_miss(Class, selectorsMatching)
+                after
+                    remove_capture_handler(HandlerId),
+                    %% Restore so later tests in the same VM see a clean index.
+                    ok = beamtalk_xref:register_class(Class, StubRows)
+                end
+            end)}
+    end}.
+
 %% The CodeRabbit finding deferred from BT-2299 to BT-2300: the `indexed`
 %% partition of senders_of_bt/1 must be filtered to the live generation so a
 %% re-register never exposes a stale sender row. Re-register a loaded class
@@ -906,6 +1014,16 @@ senders_of_bt_indexed_is_gen_filtered_test_() ->
             end)}
     end}.
 
+%% Assert exactly one xref_miss warning for `Class` tagged with `Query`. Drains
+%% the capture mailbox of misses for the class and checks the metadata. Each
+%% call drains independently, so the three queries above are checked in turn.
+assert_single_miss(Class, Query) ->
+    Misses = [M || M <- collect_xref_misses(Class), maps:get(query, M) =:= Query],
+    ?assertEqual(1, length(Misses)),
+    [Meta] = Misses,
+    ?assertEqual(xref_miss, maps:get(reason, Meta)),
+    ?assertEqual(Query, maps:get(query, Meta)),
+    ?assertEqual([beamtalk, runtime], maps:get(domain, Meta)).
 setup_app() ->
     %% The miss policy needs both a live class registry (to report a class as
     %% loaded) and a running xref server. Bring up the full runtime app when we

@@ -89,6 +89,7 @@
 
 ### Internal
 
+- **`SystemNavigation` xref read-path migration (ADR 0087 Phase 5)** — `referencesTo:`, `implementorsOf:`, and `selectorsMatching:` now resolve from the runtime-maintained `beamtalk_xref` index (new `references_to_bt/1`, `implementors_of_bt/1`, `defined_selectors_bt/0` read APIs) instead of walking every method source / probing every class on each call, mirroring the `sendersOf:` migration (BT-2299). Each applies the ADR 0087 miss policy: indexed rows whose owning class is unloaded are dropped silently, and a loaded-but-unindexed class falls back to the legacy source-scan / `includesSelector:` probe for that class only, emitting one `xref_miss` warning. Public BT API and result shapes are unchanged; extension methods stay on the unconditional source scan (not yet indexed) (BT-2302).
 - Fix `build --stdlib-mode` to resolve FFI types via `NativeTypeRegistry` — eliminates 202 spurious untyped-FFI warnings from `just dialyzer-specs` (#2138).
 - Replace 16 `format!()` calls with `Document` API in `counted_loops.rs` codegen — continues the BT-875 cleanup (BT-2102).
 - Deduplicate atom-char escape helper into `beamtalk-core::util` (BT-2113).

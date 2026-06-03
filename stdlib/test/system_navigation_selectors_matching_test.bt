@@ -46,3 +46,21 @@ TestCase subclass: SystemNavigationSelectorsMatchingTest
 
   testHelperExtensionSelectorsForIsDefined =>
     self assert: (SystemNavigation includesSelector: #extensionSelectorsFor:)
+
+  // --- BT-2302: xref-backed read path + miss-policy fallback ---
+  //
+  // `selectorsMatching:` now reads class-body selectors from the
+  // runtime-maintained xref methods table
+  // (`beamtalk_xref:defined_selectors_bt/0`) instead of probing `methods` /
+  // `class methods` over every class in the scope, falling back to the
+  // `selectorsForClass:` gather only for loaded-but-unindexed classes.
+  // Extension selectors are not in the index yet, so they are still gathered
+  // unconditionally via `extensionSelectorsForBothSides:` over the full scope.
+  // The behavioural coverage — that a registry-loaded class artificially purged
+  // from the index still resolves via fallback and emits exactly one
+  // `xref_miss` warning — lives in the runtime EUnit suite
+  // (`beamtalk_xref_tests:nav_query_miss_policy_test_`), because the live class
+  // registry + xref server are required. The check below covers the extension
+  // gather split out for the index path.
+  testHelperExtensionSelectorsForBothSidesIsDefined =>
+    self assert: (SystemNavigation includesSelector: #extensionSelectorsForBothSides:)

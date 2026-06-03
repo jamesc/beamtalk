@@ -34,3 +34,18 @@ TestCase subclass: SystemNavigationImplementorsTest
   testCompositionPrimitivesPresent =>
     self assert: (SystemNavigation includesSelector: #allClasses)
     self assert: (Behaviour includesSelector: #includesSelector:)
+
+  // --- BT-2302: xref-backed read path + miss-policy fallback ---
+  //
+  // `implementorsOf:` now reads the implementor set from the runtime-maintained
+  // xref methods table (`beamtalk_xref:implementors_of_bt/1`) instead of probing
+  // `includesSelector:` over every class in the scope, falling back to the
+  // direct probe only for loaded-but-unindexed classes. The behavioural
+  // coverage — that a registry-loaded class artificially purged from the index
+  // still resolves via fallback and emits exactly one `xref_miss` warning —
+  // lives in the runtime EUnit suite
+  // (`beamtalk_xref_tests:nav_query_miss_policy_test_`), because the live class
+  // registry + xref server are required. The check below covers the shared
+  // owner-tag/class-side -> class-object resolver that maps the indexed rows.
+  testHelperSenderClassForIsDefined =>
+    self assert: (SystemNavigation includesSelector: #senderClassFor:classSide:)
