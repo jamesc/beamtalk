@@ -448,22 +448,11 @@ fn topological_sort(graph: &BTreeMap<String, DepNode>, root_name: &str) -> Resul
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::*;
     use super::*;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
-
-    /// Create a minimal beamtalk.toml manifest in a directory.
-    fn write_manifest(dir: &std::path::Path, name: &str, version: &str, deps: &str) {
-        let content = format!(
-            r#"[package]
-name = "{name}"
-version = "{version}"
-
-{deps}"#
-        );
-        fs::write(dir.join("beamtalk.toml"), content).unwrap();
-    }
 
     #[test]
     fn test_topological_sort_linear_chain() {
