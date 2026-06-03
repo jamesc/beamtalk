@@ -3306,6 +3306,43 @@ fn test_native_facade_register_class_includes_meta() {
     );
 }
 
+/// BT-2385: `native:` facade `register_class/0` bakes a `methodXref` list into
+/// its `BuilderState`, exactly like the standard `register_class/0` path. Before
+/// this fix native classes (e.g. `Subprocess`, `TranscriptStream`) loaded with no
+/// baked `method_xref`, so they were absent from `beamtalk_xref` and every
+/// navigation query source-scanned them via the miss-policy fallback.
+#[test]
+fn test_native_facade_register_class_bakes_method_xref() {
+    let module = make_native_actor_module();
+    let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
+    let code = result.unwrap();
+    let register_fn =
+        extract_core_fn(&code, "'register_class'/0 = fun").expect("register_class/0 not found");
+    // The methodXref field is present and a list (not a `~{ }~` map).
+    assert!(
+        register_fn.contains("'methodXref' => ["),
+        "native register_class/0 should bake a methodXref list. Got:\n{register_fn}"
+    );
+    // The instance methods `doWork` and `process:` are recorded, instance-side,
+    // and tagged indexed (they carry analysable Beamtalk source).
+    assert!(
+        register_fn.contains("'selector' => 'doWork'"),
+        "doWork xref entry missing. Got:\n{register_fn}"
+    );
+    assert!(
+        register_fn.contains("'selector' => 'process:'"),
+        "process: xref entry missing. Got:\n{register_fn}"
+    );
+    assert!(
+        register_fn.contains("'class_side' => 'false'"),
+        "instance-side entries should carry 'class_side' => 'false'. Got:\n{register_fn}"
+    );
+    assert!(
+        register_fn.contains("'source_status' => 'indexed'"),
+        "native instance-method rows should be tagged indexed. Got:\n{register_fn}"
+    );
+}
+
 #[test]
 fn test_native_facade_spawn_error_raises_instantiation_error() {
     // ADR 0056: spawn failure should raise instantiation_error with reason in details

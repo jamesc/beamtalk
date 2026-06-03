@@ -449,6 +449,20 @@ create_protocol_class(Name, Info) ->
             requiredMethods => <<"Return the required method selectors for this protocol.">>,
             conformingClasses => <<"Return the classes conforming to this protocol.">>
         },
+        %% ADR 0087 Phase 2 (BT-2298) / BT-2385: protocol class objects expose two
+        %% class-side methods (`requiredMethods`, `conformingClasses`) dispatched
+        %% by the shared Erlang module `beamtalk_protocol_object` — they have no
+        %% analysable Beamtalk body, so codegen never bakes a method_xref for
+        %% them. Without this the protocol class (e.g. Printable) is absent from
+        %% beamtalk_xref and every navigation query source-scans it via the
+        %% miss-policy fallback. Record both as `unindexed_runtime_fun` rows
+        %% (the genuine sourceless category, mirroring beamtalk_bootstrap's stub
+        %% classes) so the class is indexed. `beamtalk_object_class:init/1`
+        %% forwards this list to beamtalk_xref before start/2 yields.
+        method_xref => [
+            protocol_class_xref_entry(requiredMethods),
+            protocol_class_xref_entry(conformingClasses)
+        ],
         instance_methods => #{},
         fields => [],
         doc => Doc
@@ -471,3 +485,26 @@ create_protocol_class(Name, Info) ->
             ),
             ok
     end.
+
+-doc """
+Build a single `unindexed_runtime_fun` method_xref entry for a protocol class
+object's class-side method (BT-2385).
+
+Protocol class objects share the Erlang dispatch module
+`beamtalk_protocol_object`, so `requiredMethods` / `conformingClasses` have no
+analysable Beamtalk source. They are recorded with empty `sends` / `references`
+and `source_status => unindexed_runtime_fun`, matching the sourceless stub-class
+convention in `beamtalk_bootstrap:stub_method_entry/2`. The `line` is a
+placeholder (`1`) because `beamtalk_xref` requires a `pos_integer()`.
+""".
+-spec protocol_class_xref_entry(atom()) -> map().
+protocol_class_xref_entry(Selector) ->
+    #{
+        class_side => true,
+        selector => Selector,
+        line => 1,
+        sends => [],
+        references => [],
+        source_status => unindexed_runtime_fun,
+        provenance => class_body
+    }.

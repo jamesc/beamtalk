@@ -503,6 +503,25 @@ impl CoreErlangGenerator {
                 .filter(|m| m.kind == MethodKind::Primary)
                 .collect();
 
+            // Class-side primary methods (used for both the signature/source maps
+            // below and the xref index).
+            let class_methods_primary: Vec<_> = class
+                .class_methods
+                .iter()
+                .filter(|m| m.kind == MethodKind::Primary)
+                .collect();
+
+            // ADR 0087 Phase 2 (BT-2298) / BT-2385: per-method cross-reference
+            // index. The standard `register_class/0` path bakes this for every
+            // class; native-facade classes (`native:` actors like Subprocess and
+            // TranscriptStream) went down their own builder-state path that
+            // omitted it, so their methods were absent from `beamtalk_xref` and
+            // every navigation query source-scanned them via the miss-policy
+            // fallback. Bake the same `methodXref` list here so native classes
+            // are indexed like the rest.
+            let method_xref_doc =
+                self.build_method_xref_list(class, &instance_methods, &class_methods_primary);
+
             // Method source
             let mut method_source_docs: Vec<Document<'static>> = Vec::new();
             for (method_idx, method) in instance_methods.iter().enumerate() {
@@ -656,6 +675,13 @@ impl CoreErlangGenerator {
                         "'classMethodSignatures' => ~{",
                         class_method_sigs_doc,
                         "}~,",
+                        line(),
+                        // ADR 0087 Phase 2 (BT-2298) / BT-2385: per-method xref
+                        // index. A list of maps, not a `~{ }~` map, so it is
+                        // wrapped only by build_method_xref_list.
+                        "'methodXref' => ",
+                        method_xref_doc,
+                        ",",
                         line(),
                         "'classState' => ~{",
                         class_vars_doc,
