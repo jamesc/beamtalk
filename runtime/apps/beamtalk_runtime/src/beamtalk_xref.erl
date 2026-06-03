@@ -622,11 +622,17 @@ read_stable(Fetch) ->
 -spec read_stable_loop(fun(() -> T), non_neg_integer()) -> {gen_snapshot(), T} when
     T :: term().
 read_stable_loop(Fetch, 0) ->
-    %% Exhausted retries — accept the fetch paired with the snapshot taken
-    %% immediately after it, which is consistent with every row installed up to
-    %% that point. Reachable only under a sustained write storm.
+    %% Exhausted retries — pin the snapshot BEFORE the fetch. Because writers
+    %% insert a generation's rows before publishing its gen bump, a fetch taken
+    %% at or after this snapshot observes a superset of every row the snapshot's
+    %% generations had installed, so filtering by it can only drop rows from
+    %% *later* generations, never miss one of its own. Pairing with a
+    %% *post*-fetch snapshot instead could race a publish and filter the older
+    %% fetch as if its rows were stale, yielding a false empty/partial view.
+    %% Reachable only under a sustained write storm.
+    Snapshot = gen_snapshot(),
     Result = Fetch(),
-    {gen_snapshot(), Result};
+    {Snapshot, Result};
 read_stable_loop(Fetch, Retries) ->
     Before = gen_snapshot(),
     Result = Fetch(),
