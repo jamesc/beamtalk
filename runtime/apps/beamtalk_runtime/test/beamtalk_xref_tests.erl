@@ -250,7 +250,11 @@ generation_increments_test_() ->
                 ok = beamtalk_xref:register_class('Counter', counter_xref()),
                 ?assertEqual(2, current_gen('Counter')),
 
-                %% put_method also bumps the gen.
+                %% put_method is a surgical single-method patch and must NOT
+                %% bump the class generation (Phase 4 / BT-2300) — a bump would
+                %% strand the unbumped sibling methods behind the reader's
+                %% current-gen filter. The patched method joins the class's
+                %% current generation, leaving it unchanged at 2.
                 NewEntry = #{
                     class_side => false,
                     selector => 'increment',
@@ -261,7 +265,7 @@ generation_increments_test_() ->
                     provenance => put_method
                 },
                 ok = beamtalk_xref:put_method('Counter', false, 'increment', NewEntry),
-                ?assertEqual(3, current_gen('Counter')),
+                ?assertEqual(2, current_gen('Counter')),
 
                 %% A fresh class starts at gen 1.
                 ok = beamtalk_xref:register_class('Point', point_xref()),
@@ -356,24 +360,24 @@ put_method_normalises_selector_and_side_test_() ->
 %% method_info reads — current generation wins on stale bag rows
 %%====================================================================
 
-method_info_picks_highest_generation_test_() ->
+method_info_picks_current_generation_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
-                %% `?METHODS_TABLE` is a bag; `register_class` does NOT purge
-                %% before inserting under the new gen, so re-registering a
-                %% class without an intervening `purge_class/1` accumulates
-                %% rows from older generations. `method_info/3` must pick the
-                %% row carrying the highest `gen` so live patches always win.
+                %% `?METHODS_TABLE` is a bag; `register_class` inserts under a
+                %% new gen and publishes it before the async old-gen sweep
+                %% runs, so a window exists where rows from two generations
+                %% coexist. `method_info/3` must return the row carrying the
+                %% class's *current* gen, never a stale one (Phase 4 / BT-2300).
                 ok = beamtalk_xref:register_class('Counter', counter_xref()),
                 Info1 = beamtalk_xref:method_info('Counter', false, 'increment'),
                 ?assertEqual(1, maps:get(gen, Info1)),
                 ?assertEqual(14, maps:get(line, Info1)),
 
-                %% Re-register with the same selector at a different line; the
-                %% old row at line 8 (gen 1) stays in the bag alongside the new
-                %% gen-2 row at line 42. `method_info/3` must return the gen-2
-                %% row, not whichever row ETS picks first.
+                %% Re-register the same selector at a different line. Before the
+                %% async sweep lands, the old line-14 (gen 1) row can still sit
+                %% in the bag beside the new line-42 (gen 2) row. `method_info/3`
+                %% must return the gen-2 row regardless of ETS bag order.
                 Counter2 = lists:map(
                     fun
                         (#{selector := 'increment'} = E) ->
@@ -388,11 +392,16 @@ method_info_picks_highest_generation_test_() ->
                 ?assertEqual(2, maps:get(gen, Info2)),
                 ?assertEqual(42, maps:get(line, Info2)),
 
-                %% Sanity: the bag really does still hold both generations
-                %% — the read picks the higher one rather than relying on a
-                %% prior purge.
+                %% After the async sweep drains, only the current-gen row
+                %% survives in the bag (memory hygiene, ADR 0087 §Atomicity
+                %% step 4). Flush the gen_server mailbox so the sweep cast has
+                %% certainly been processed before asserting.
+                flush_xref(),
                 Rows = ets:lookup(beamtalk_xref_methods, {'Counter', false, 'increment'}),
-                ?assertEqual(2, length(Rows)),
+                ?assertEqual(1, length(Rows)),
+                [{_, OnlyInfo}] = Rows,
+                ?assertEqual(2, maps:get(gen, OnlyInfo)),
+                ?assertEqual(42, maps:get(line, OnlyInfo)),
 
                 %% Unknown method → undefined.
                 ?assertEqual(
@@ -404,6 +413,145 @@ method_info_picks_highest_generation_test_() ->
                     undefined,
                     beamtalk_xref:method_info('NoSuchClass', false, 'increment')
                 )
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Generation filtering on the read path (Phase 4 / BT-2300)
+%%====================================================================
+
+%% A re-register that drops a method/send/reference must not leave the
+%% dropped item visible through any list reader, even before the async
+%% old-gen sweep has run. Correctness comes from the reader's current-gen
+%% filter, not from the sweep — so this test deliberately does NOT flush.
+read_path_filters_stale_generation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% Gen 1: increment sends '+' and references Integer; value and
+                %% class-side new also present.
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+                ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
+                ?assertEqual(1, length(beamtalk_xref:references_to('Integer'))),
+                ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('value')),
+                ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
+
+                %% Gen 2: re-register WITHOUT the `value` method, with
+                %% `increment` now sending '-' (not '+') and referencing Float
+                %% (not Integer). The gen-1 rows linger in the bag until the
+                %% async sweep, but no reader may surface them.
+                Gen2Xref = [
+                    #{
+                        class_side => false,
+                        selector => 'increment',
+                        line => 14,
+                        sends => [#{selector => '-', line => 17, recv_kind => self_recv}],
+                        references => [#{class => 'Float', line => 16}],
+                        source_status => indexed,
+                        provenance => class_body
+                    },
+                    #{
+                        class_side => true,
+                        selector => 'new',
+                        line => 8,
+                        sends => [#{selector => 'basicNew', line => 9, recv_kind => super_recv}],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class('Counter', Gen2Xref),
+
+                %% senders_of: the dropped '+' send is gone; the new '-' is live.
+                ?assertEqual([], beamtalk_xref:senders_of('+')),
+                MinusSites = beamtalk_xref:senders_of('-'),
+                ?assertEqual(1, length(MinusSites)),
+                [MinusSite] = MinusSites,
+                ?assertEqual(2, maps:get(gen, MinusSite)),
+
+                %% references_to: Integer dropped, Float live.
+                ?assertEqual([], beamtalk_xref:references_to('Integer')),
+                ?assertEqual(1, length(beamtalk_xref:references_to('Float'))),
+
+                %% implementors_of: the removed `value` no longer reports Counter.
+                ?assertEqual([], beamtalk_xref:implementors_of('value')),
+                ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('increment')),
+
+                %% defined_selectors: `value` dropped, `increment` retained.
+                InstSels = beamtalk_xref:defined_selectors('Counter', false),
+                ?assertEqual(['increment'], InstSels),
+                ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true))
+            end)
+        ]
+    end}.
+
+%% The async sweep eventually reclaims the stale-gen rows from every table.
+%% Filtering already hides them; this asserts the memory-hygiene step.
+async_sweep_reclaims_old_generation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+
+                %% Drain the sweep casts.
+                flush_xref(),
+
+                %% Only the current generation (3) survives in every table.
+                MethodRows = ets:tab2list(beamtalk_xref_methods),
+                CounterMethodGens = [
+                    maps:get(gen, Info)
+                 || {{'Counter', _, _}, Info} <- MethodRows
+                ],
+                ?assertEqual([3], lists:usort(CounterMethodGens)),
+
+                SenderGens = [
+                    maps:get(gen, Site)
+                 || {_, Site} <- ets:tab2list(beamtalk_xref_senders),
+                    maps:get(owner, Site) =:= 'Counter'
+                ],
+                ?assertEqual([3], lists:usort(SenderGens)),
+
+                RefGens = [
+                    maps:get(gen, Site)
+                 || {_, Site} <- ets:tab2list(beamtalk_xref_references),
+                    maps:get(owner, Site) =:= 'Counter'
+                ],
+                ?assertEqual([3], lists:usort(RefGens)),
+
+                %% The view is still complete after the sweep.
+                ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
+                ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false)))
+            end)
+        ]
+    end}.
+
+%% A never-registered class patched via put_method/4 establishes generation 1
+%% and the patched method is immediately visible through the read path — the
+%% reader's current-gen filter must not hide it.
+put_method_on_fresh_class_is_visible_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Entry = #{
+                    class_side => false,
+                    selector => 'ping',
+                    line => 3,
+                    sends => [#{selector => 'pong', line => 4, recv_kind => self_recv}],
+                    references => [#{class => 'Boolean', line => 5}],
+                    source_status => indexed,
+                    provenance => put_method
+                },
+                ok = beamtalk_xref:put_method('Fresh', false, 'ping', Entry),
+
+                ?assertEqual(1, current_gen('Fresh')),
+                ?assert(lists:member('ping', beamtalk_xref:defined_selectors('Fresh', false))),
+                ?assertEqual([{'Fresh', false}], beamtalk_xref:implementors_of('ping')),
+                ?assertEqual(1, length(beamtalk_xref:senders_of('pong'))),
+                ?assertEqual(1, length(beamtalk_xref:references_to('Boolean'))),
+                #{owner := 'Fresh'} = beamtalk_xref:method_info('Fresh', false, 'ping')
             end)
         ]
     end}.
@@ -805,6 +953,67 @@ nav_query_miss_policy_test_() ->
             end)}
     end}.
 
+%% The CodeRabbit finding deferred from BT-2299 to BT-2300: the `indexed`
+%% partition of senders_of_bt/1 must be filtered to the live generation so a
+%% re-register never exposes a stale sender row. Re-register a loaded class
+%% twice with a *different* send selector each generation and assert the
+%% partition only ever reflects the current generation.
+senders_of_bt_indexed_is_gen_filtered_test_() ->
+    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+        {timeout, 30,
+            ?_test(begin
+                Class = first_method_bearing_class(),
+                ?assertNotEqual(undefined, Class),
+
+                Gen1 = [
+                    #{
+                        class_side => false,
+                        selector => 'someSel',
+                        line => 1,
+                        sends => [#{selector => 'genOneSend', line => 2, recv_kind => other}],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class(Class, Gen1),
+                try
+                    %% Gen 1 send is visible in the indexed partition.
+                    #{indexed := Idx1} = beamtalk_xref:senders_of_bt('genOneSend'),
+                    ?assert(lists:any(fun(R) -> maps:get(owner, R) =:= Class end, Idx1)),
+
+                    %% Re-register the class WITHOUT the gen-1 send (it now sends
+                    %% `genTwoSend` instead). The gen-1 sender row lingers in the
+                    %% bag until the async sweep, but the gen filter inside
+                    %% senders_of/1 must keep it out of the indexed partition.
+                    Gen2 = [
+                        #{
+                            class_side => false,
+                            selector => 'someSel',
+                            line => 1,
+                            sends => [
+                                #{selector => 'genTwoSend', line => 2, recv_kind => other}
+                            ],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ],
+                    ok = beamtalk_xref:register_class(Class, Gen2),
+
+                    %% Stale gen-1 send no longer surfaces for this class...
+                    #{indexed := Idx2} = beamtalk_xref:senders_of_bt('genOneSend'),
+                    ?assertNot(lists:any(fun(R) -> maps:get(owner, R) =:= Class end, Idx2)),
+                    %% ...and the current gen-2 send does.
+                    #{indexed := Idx3} = beamtalk_xref:senders_of_bt('genTwoSend'),
+                    ?assert(lists:any(fun(R) -> maps:get(owner, R) =:= Class end, Idx3))
+                after
+                    %% Drop the synthetic rows so sibling tests are unaffected.
+                    ok = beamtalk_xref:purge_class(Class)
+                end
+            end)}
+    end}.
+
 %% Assert exactly one xref_miss warning for `Class` tagged with `Query`. Drains
 %% the capture mailbox of misses for the class and checks the metadata. Each
 %% call drains independently, so the three queries above are checked in turn.
@@ -815,7 +1024,6 @@ assert_single_miss(Class, Query) ->
     ?assertEqual(xref_miss, maps:get(reason, Meta)),
     ?assertEqual(Query, maps:get(query, Meta)),
     ?assertEqual([beamtalk, runtime], maps:get(domain, Meta)).
-
 setup_app() ->
     %% The miss policy needs both a live class registry (to report a class as
     %% loaded) and a running xref server. Bring up the full runtime app when we
@@ -935,3 +1143,11 @@ current_gen(Class) ->
         [] -> 0;
         [{_, Gen}] -> Gen
     end.
+
+%% Barrier that guarantees every async sweep cast enqueued by a prior write
+%% has been processed. A `sys:get_state/1` is a synchronous call into the
+%% gen_server, so it cannot be handled until the gen_server has drained all
+%% earlier mailbox messages (the sweep casts) ahead of it.
+flush_xref() ->
+    _ = sys:get_state(beamtalk_xref),
+    ok.

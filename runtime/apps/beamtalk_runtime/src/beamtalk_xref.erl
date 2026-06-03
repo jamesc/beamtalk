@@ -13,13 +13,18 @@ Owns four ETS tables that maintain a runtime-resident `selector → sites` /
 `class → references` index, populated at class-load time via
 `register_class/2`. Reads (`senders_of/1`, `references_to/1`,
 `implementors_of/1`, `defined_selectors/2`) hit ETS directly and do not
-serialize through the gen_server. Writes serialize through the gen_server
-so per-class generation bumps stay atomic.
+serialize through the gen_server; each filters rows to the owning class's
+current generation. Writes serialize through the gen_server so per-class
+generation bumps stay atomic.
 
 Phase 1 (BT-2297) provides the skeleton: tables, API contract, supervisor
 wiring. Subsequent phases land producers (codegen → `register_class/0`,
-lifecycle hooks) and read-path migration in `SystemNavigation`. The
-multi-generation reload sweep lands in Phase 4 (BT-2300).
+lifecycle hooks) and read-path migration in `SystemNavigation`. Phase 4
+(BT-2300) adds the atomic install protocol: a whole-class (re)register
+inserts the new generation's rows, publishes the gen bump in one ETS write,
+and reclaims the superseded generation's rows via an async sweep — readers
+filter by `current_gen` throughout, so they never observe a partially-built
+or stale generation.
 
 Storage layout (all `protected, named_table, {read_concurrency, true}`):
 - `beamtalk_xref_methods` (bag): per-method definitions
@@ -74,6 +79,10 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -define(SENDERS_TABLE, beamtalk_xref_senders).
 -define(REFERENCES_TABLE, beamtalk_xref_references).
 -define(CLASS_GEN_TABLE, xref_class_gen).
+
+%% Bound on `read_stable/1` revalidation retries (Phase 4 / BT-2300). Converges
+%% in 0-1 retries in practice; the bound only caps spin under a write storm.
+-define(READ_STABLE_RETRIES, 100).
 
 %%====================================================================
 %% Types
@@ -179,14 +188,14 @@ start_link() ->
 -doc """
 Register all per-method xref rows for a class. Synchronous.
 
-Bumps the class's generation counter, inserts new rows under the new
-generation, then atomically publishes the new generation in
-`xref_class_gen`. Readers observing during the call see either the
-pre- or post-write state (the gen-bump is the atomic publish).
-
-Phase 1 (BT-2297): the multi-gen reload sweep (old-gen `select_delete`)
-is out of scope and lands in Phase 4 / BT-2300. For now `purge_class/1`
-is the primary way to drop old rows before re-registering.
+Whole-class (re)load follows the ADR 0087 §Atomicity protocol: the new
+generation's rows are inserted first, then the generation is published in
+`xref_class_gen` in one ETS write (the atomic publish), then the superseded
+generation's rows are reclaimed by an async sweep. Readers filter by the
+published `current_gen`, so an observer always sees a complete generation —
+either the pre-register one or the fully-built post-register one — and never
+an empty or partially-built view. No `purge_class/1` is required between
+re-registers; the sweep handles stale rows.
 """.
 -spec register_class(class_name(), [method_xref_entry()]) -> ok.
 register_class(Class, MethodXref) when is_atom(Class), is_list(MethodXref) ->
@@ -205,8 +214,12 @@ Replace the xref rows for a single method without touching siblings.
 
 Used for method-level edits (`put_method/4` source patches, ADR 0082;
 extension registers, ADR 0066) where only one method's data changes.
-Synchronous. Bumps the owning class's generation so the new rows are
-visible atomically.
+Synchronous. Unlike `register_class/2`, a single-method patch does NOT bump
+the class generation — the unbumped sibling methods must stay on the current
+generation rather than being stranded behind the reader's `current_gen`
+filter. The addressed method's prior rows are deleted synchronously and the
+new rows installed under the class's current generation (establishing
+generation 1 for a never-before-registered class).
 """.
 -spec put_method(class_name(), class_side(), selector(), method_xref_entry()) -> ok.
 put_method(Class, ClassSide, Selector, MethodXref) when
@@ -351,12 +364,24 @@ go through the gen_server.
 Phase 1 (BT-2297): no miss-policy fallback. Callers should treat an
 empty result as "no known senders"; the source-scan fallback for
 unloaded / unindexed classes lands with Phase 3 (BT-2299).
+
+Phase 4 (BT-2300): rows are filtered to each owner class's current
+generation. Because `register_class/2` and `put_method/4` install under a
+new generation without synchronously purging the old one (the sweep is
+async), the bag can transiently hold stale rows from an earlier
+generation. Filtering by the owner's `current_gen` guarantees a reader
+never observes a stale site.
 """.
 -spec senders_of(selector()) -> [site()].
 senders_of(Selector) when is_atom(Selector) ->
     case ets:whereis(?SENDERS_TABLE) of
-        undefined -> [];
-        _ -> [Site || {_Sel, Site} <- ets:lookup(?SENDERS_TABLE, Selector)]
+        undefined ->
+            [];
+        _ ->
+            {Snapshot, Sites} = read_stable(fun() ->
+                [Site || {_Sel, Site} <- ets:lookup(?SENDERS_TABLE, Selector)]
+            end),
+            live_gen_sites(Sites, Snapshot)
     end.
 
 -doc """
@@ -366,12 +391,14 @@ correct result without re-parsing every method (BT-2299, Phase 3).
 
 The return map has two keys:
 
-- `indexed` — the sender sites drawn straight from the ETS index, but with
-  **stale rows dropped**: a site whose `owner` class is no longer reported as
-  loaded by `beamtalk_class_registry` is silently discarded. Each surviving
-  row is shaped `#{owner := atom(), class_side := boolean(), method := atom(),
-  line := pos_integer()}` for the BT side to map onto `#{#class, #selector,
-  #line}` records.
+- `indexed` — the sender sites drawn from the ETS index, with **stale rows
+  dropped** on two axes: (1) `senders_of/1` already filters to each owner's
+  current generation (Phase 4 / BT-2300), so a re-register can never surface a
+  site from a superseded generation here; and (2) this function additionally
+  discards any site whose `owner` class is no longer reported as loaded by
+  `beamtalk_class_registry`. Each surviving row is shaped `#{owner := atom(),
+  class_side := boolean(), method := atom(), line := pos_integer()}` for the BT
+  side to map onto `#{#class, #selector, #line}` records.
 
 - `fallback_classes` — the class names that the registry reports as loaded,
   that have **no rows in the index at all** (an index miss, per ADR 0087
@@ -406,13 +433,19 @@ senders_of_bt(Selector) when is_atom(Selector) ->
 
 -doc """
 Return all sites that reference `Class` (type annotations, class
-literals, etc.). Direct ETS lookup.
+literals, etc.). Direct ETS lookup, filtered to each owner's current
+generation (Phase 4 / BT-2300 — see `senders_of/1`).
 """.
 -spec references_to(class_name()) -> [site()].
 references_to(Class) when is_atom(Class) ->
     case ets:whereis(?REFERENCES_TABLE) of
-        undefined -> [];
-        _ -> [Site || {_Cls, Site} <- ets:lookup(?REFERENCES_TABLE, Class)]
+        undefined ->
+            [];
+        _ ->
+            {Snapshot, Sites} = read_stable(fun() ->
+                [Site || {_Cls, Site} <- ets:lookup(?REFERENCES_TABLE, Class)]
+            end),
+            live_gen_sites(Sites, Snapshot)
     end.
 
 -doc """
@@ -446,7 +479,9 @@ references_to_bt(Class) when is_atom(Class) ->
 
 -doc """
 Return all `{Class, ClassSide}` pairs that implement `Selector`.
-Direct ETS lookup via `match_object` on the methods bag.
+Direct ETS lookup via `match_object` on the methods bag, filtered to each
+class's current generation (Phase 4 / BT-2300) so a stale row left by an
+un-swept reload never reports a phantom implementor.
 """.
 -spec implementors_of(selector()) -> [{class_name(), class_side()}].
 implementors_of(Selector) when is_atom(Selector) ->
@@ -454,10 +489,17 @@ implementors_of(Selector) when is_atom(Selector) ->
         undefined ->
             [];
         _ ->
-            %% Match keys of shape {Class, ClassSide, Selector} where Selector matches.
-            %% Use ets:match/2 with key wildcard on Class and ClassSide.
-            Matches = ets:match(?METHODS_TABLE, {{'$1', '$2', Selector}, '_'}),
-            lists:usort([{Cls, CS} || [Cls, CS] <- Matches])
+            %% Pull the full {Key, Info} rows (not just the key fields) so the
+            %% per-row `gen` is available for the current-generation filter,
+            %% under a stable gen snapshot so a concurrent reload cannot make
+            %% the rows and the gens disagree.
+            {Snapshot, Rows} = read_stable(fun() ->
+                ets:match_object(?METHODS_TABLE, {{'_', '_', Selector}, '_'})
+            end),
+            lists:usort([
+                {Cls, CS}
+             || {{Cls, CS, _Sel}, Info} <- Rows, is_live_gen(Cls, Info, Snapshot)
+            ])
     end.
 
 -doc """
@@ -491,6 +533,9 @@ implementors_of_bt(Selector) when is_atom(Selector) ->
 -doc """
 Return the selectors defined on `Class` for the given side
 (`ClassSide = true` for class-side methods, `false` for instance-side).
+
+Filtered to `Class`'s current generation (Phase 4 / BT-2300): a selector
+that only survives in a stale, un-swept generation is not reported.
 """.
 -spec defined_selectors(class_name(), class_side()) -> [selector()].
 defined_selectors(Class, ClassSide) when is_atom(Class), is_boolean(ClassSide) ->
@@ -498,8 +543,17 @@ defined_selectors(Class, ClassSide) when is_atom(Class), is_boolean(ClassSide) -
         undefined ->
             [];
         _ ->
-            Matches = ets:match(?METHODS_TABLE, {{Class, ClassSide, '$1'}, '_'}),
-            lists:usort([Sel || [Sel] <- Matches])
+            %% `Class` is fixed; capture its generation and the matching rows
+            %% under one stable snapshot so a concurrent reload cannot strand
+            %% the filter on a generation whose rows the fetch missed or whose
+            %% rows the sweep removed mid-read.
+            {Snapshot, Rows} = read_stable(fun() ->
+                ets:match_object(?METHODS_TABLE, {{Class, ClassSide, '_'}, '_'})
+            end),
+            lists:usort([
+                Sel
+             || {{_Cls, _CS, Sel}, Info} <- Rows, is_live_gen(Class, Info, Snapshot)
+            ])
     end.
 
 -doc """
@@ -530,13 +584,22 @@ defined_selectors_bt() ->
             undefined ->
                 [];
             _ ->
-                %% Each methods-table row is keyed {Class, ClassSide, Selector}.
-                %% Project to the selector_row() the BT layer consumes, dropping
-                %% rows whose owner is no longer loaded (stale).
-                Matches = ets:match(?METHODS_TABLE, {{'$1', '$2', '$3'}, '_'}),
+                %% Whole-universe walk: pull full {Key, Info} rows (not just the
+                %% key fields) under one stable snapshot so the per-row `gen` is
+                %% available, then project to the selector_row() the BT layer
+                %% consumes. Drop rows whose owner is no longer loaded (stale
+                %% class) or that survive only in a stale, un-swept generation
+                %% (Phase 4 / BT-2300) — mirrors `implementors_of/1`, but spans
+                %% every class so each row is filtered against its own class's
+                %% generation in the snapshot.
+                {Snapshot, Rows} = read_stable(fun() ->
+                    ets:match_object(?METHODS_TABLE, {{'_', '_', '_'}, '_'})
+                end),
                 [
                     #{owner => Cls, class_side => CS, selector => Sel}
-                 || [Cls, CS, Sel] <- Matches, sets:is_element(Cls, Loaded)
+                 || {{Cls, CS, Sel}, Info} <- Rows,
+                    sets:is_element(Cls, Loaded),
+                    is_live_gen(Cls, Info, Snapshot)
                 ]
         end,
     #{indexed => IndexedRows, fallback_classes => FallbackClasses}.
@@ -548,6 +611,14 @@ class+selector+side triple is not registered.
 Used by the LSP `nav-query` op (BT-2239) to surface the method-header line
 number to `textDocument/implementation` consumers (BT-2241). Direct ETS
 lookup — does not go through the gen_server.
+
+Phase 4 (BT-2300): `?METHODS_TABLE` is a bag, and `register_class/2` /
+`put_method/4` install under a new generation without synchronously
+purging the old one (the sweep is async). Multiple rows can therefore
+share `{Class, ClassSide, Selector}`. The lookup is filtered to `Class`'s
+current generation: the live row wins over any un-swept predecessor, and
+a selector that survives *only* in a stale generation (it was dropped by
+the latest `register_class/2`) correctly reads as `undefined`.
 """.
 -spec method_info(class_name(), class_side(), selector()) -> method_info() | undefined.
 method_info(Class, ClassSide, Selector) when
@@ -557,27 +628,12 @@ method_info(Class, ClassSide, Selector) when
         undefined ->
             undefined;
         _ ->
-            %% `?METHODS_TABLE` is a bag — after a class re-register without an
-            %% intervening `purge_class/1` (allowed by the write contract),
-            %% multiple rows can share `{Class, ClassSide, Selector}`. Pick the
-            %% row carrying the highest `gen` so live patches and reloads always
-            %% win over stale generations.
-            case ets:lookup(?METHODS_TABLE, {Class, ClassSide, Selector}) of
-                [] ->
-                    undefined;
-                [{_Key, Info}] ->
-                    Info;
-                [{_Key, First} | Rest] ->
-                    lists:foldl(
-                        fun({_K, Cur}, Best) ->
-                            case maps:get(gen, Cur, 0) >= maps:get(gen, Best, 0) of
-                                true -> Cur;
-                                false -> Best
-                            end
-                        end,
-                        First,
-                        Rest
-                    )
+            {Snapshot, Rows} = read_stable(fun() ->
+                ets:lookup(?METHODS_TABLE, {Class, ClassSide, Selector})
+            end),
+            case [Info || {_Key, Info} <- Rows, is_live_gen(Class, Info, Snapshot)] of
+                [] -> undefined;
+                [Info | _] -> Info
             end
     end.
 
@@ -650,6 +706,110 @@ indexed_class_set() ->
             sets:from_list(Classes)
     end.
 
+%%====================================================================
+%% Internal: generation filtering (Phase 4 / BT-2300)
+%%====================================================================
+
+-doc """
+Current generation for `Class`, or `0` when the class has never been
+registered. `xref_class_gen` is a `set` table, so the lookup is O(1) and a
+registered class always has exactly one row.
+""".
+-spec current_gen(class_name()) -> non_neg_integer().
+current_gen(Class) ->
+    case ets:whereis(?CLASS_GEN_TABLE) of
+        undefined ->
+            0;
+        _ ->
+            case ets:lookup(?CLASS_GEN_TABLE, Class) of
+                [] -> 0;
+                [{_, Gen}] -> Gen
+            end
+    end.
+
+%% A snapshot of the per-class generation table: class → current gen.
+-type gen_snapshot() :: #{class_name() => gen()}.
+
+-doc """
+Run `Fetch` against ETS under a *stable* generation snapshot, returning
+`{Snapshot, Result}`.
+
+The lock-free atomicity protocol (ADR 0087 §Atomicity). Writers insert a new
+generation's rows BEFORE publishing the gen bump, and the async sweep only
+ever reclaims *strictly older* generations. So if the `xref_class_gen`
+snapshot is identical immediately before and immediately after `Fetch` runs,
+no publish completed during the fetch, and therefore:
+
+- every row carrying a snapshot gen was already installed before the fetch
+  began (insert-before-publish), so the fetch cannot miss a live row; and
+- no row carrying a snapshot gen was swept during the fetch (the sweep that
+  removes generation `G` only runs once `G` is no longer current, i.e. only
+  after a later publish — which would have changed the snapshot).
+
+If the snapshot changed across the fetch, a publish raced us; we retry, up to
+`?READ_STABLE_RETRIES` times. Retries converge almost immediately because the
+fetch is a single ETS read while each racing write is a full gen_server
+round-trip; the bound only guards against a pathological write storm and
+caps CPU spin. On the (practically unreachable) final attempt we accept the
+last fetch paired with its *post*-fetch snapshot — still a correct filter for
+any row installed before that snapshot, never a hang. `Fetch` MUST be
+side-effect-free (it may run several times).
+""".
+-spec read_stable(fun(() -> T)) -> {gen_snapshot(), T} when T :: term().
+read_stable(Fetch) ->
+    case ets:whereis(?CLASS_GEN_TABLE) of
+        undefined ->
+            {#{}, Fetch()};
+        _ ->
+            read_stable_loop(Fetch, ?READ_STABLE_RETRIES)
+    end.
+
+-spec read_stable_loop(fun(() -> T), non_neg_integer()) -> {gen_snapshot(), T} when
+    T :: term().
+read_stable_loop(Fetch, 0) ->
+    %% Exhausted retries — pin the snapshot BEFORE the fetch. Because writers
+    %% insert a generation's rows before publishing its gen bump, a fetch taken
+    %% at or after this snapshot observes a superset of every row the snapshot's
+    %% generations had installed, so filtering by it can only drop rows from
+    %% *later* generations, never miss one of its own. Pairing with a
+    %% *post*-fetch snapshot instead could race a publish and filter the older
+    %% fetch as if its rows were stale, yielding a false empty/partial view.
+    %% Reachable only under a sustained write storm.
+    Snapshot = gen_snapshot(),
+    Result = Fetch(),
+    {Snapshot, Result};
+read_stable_loop(Fetch, Retries) ->
+    Before = gen_snapshot(),
+    Result = Fetch(),
+    After = gen_snapshot(),
+    case Before =:= After of
+        true -> {Before, Result};
+        false -> read_stable_loop(Fetch, Retries - 1)
+    end.
+
+-spec gen_snapshot() -> gen_snapshot().
+gen_snapshot() ->
+    maps:from_list(ets:tab2list(?CLASS_GEN_TABLE)).
+
+-doc """
+Whether `Info`/site map's `gen` is the live generation for `Class` per the
+captured `Snapshot`. A row with no `gen` field (legacy / hand-rolled) is
+treated as gen `0`, and an unregistered class as gen `0`, so such a row only
+survives before any real registration has bumped the counter.
+""".
+-spec is_live_gen(class_name(), map(), gen_snapshot()) -> boolean().
+is_live_gen(Class, Info, Snapshot) ->
+    maps:get(gen, Info, 0) =:= maps:get(Class, Snapshot, 0).
+
+-doc """
+Filter a list of sender / reference `site()` maps to the rows whose `gen`
+matches their `owner`'s generation in the captured `Snapshot`, dropping stale
+rows left behind by an un-swept reload.
+""".
+-spec live_gen_sites([site()], gen_snapshot()) -> [site()].
+live_gen_sites(Sites, Snapshot) ->
+    [Site || Site <- Sites, is_live_gen(maps:get(owner, Site), Site, Snapshot)].
+
 -doc "Project a full `site()` down to the `bt_row()` fields the BT layer needs.".
 -spec site_to_bt_row(site()) -> bt_row().
 site_to_bt_row(Site) ->
@@ -701,19 +861,47 @@ init([]) ->
     {ok, #state{}}.
 
 handle_call({register_class, Class, MethodXref}, _From, State) ->
-    Gen = bump_gen(Class),
-    insert_method_xref_rows(Class, MethodXref, Gen),
+    %% ADR 0087 §Atomicity, steps (1)-(4). Compute the next generation
+    %% WITHOUT publishing it, insert the new rows under it, THEN publish the
+    %% gen bump in one ETS write. Readers filter by `current_gen`, so until
+    %% the publish they see the previous (consistent) generation and after it
+    %% the fully-built new generation — never a partially-built view, and
+    %% never an empty one. The old-gen rows are reclaimed asynchronously.
+    NewGen = next_gen(Class),
+    insert_method_xref_rows(Class, MethodXref, NewGen),
+    publish_gen(Class, NewGen),
+    schedule_sweep(Class, NewGen),
     {reply, ok, State};
 handle_call({purge_class, Class}, _From, State) ->
     do_purge_class(Class),
     {reply, ok, State};
 handle_call({put_method, Class, ClassSide, Selector, MethodXref}, _From, State) ->
-    Gen = bump_gen(Class),
+    %% `put_method/4` is a SURGICAL single-method patch, not a whole-class
+    %% reload, so it must NOT bump the class generation: the class's sibling
+    %% methods keep their existing rows, all of which carry the current gen,
+    %% and a gen bump here would strand every sibling behind the reader's
+    %% `current_gen` filter. Instead, install the one method's rows under the
+    %% class's *current* generation (1 for a never-registered class) and delete
+    %% the addressed method's prior rows synchronously. Siblings stay live
+    %% throughout. The addressed method itself is delete-then-insert on the same
+    %% generation, so a reader can observe a sub-call window where just that one
+    %% method is absent — the documented single-method-patch semantics (same as
+    %% `purge_method/3`); whole-class atomicity is `register_class/2`'s job.
+    %%
+    %% For a never-registered class the gen-1 publish is deferred until AFTER
+    %% the row insert (insert-before-publish, ADR 0087 §Atomicity): publishing
+    %% gen 1 first would let a `read_stable` observer snapshot a stable gen 1
+    %% while the row is not yet inserted and report the fresh method as absent.
+    {Gen, NeedsPublish} = put_method_gen(Class),
     delete_method_rows(Class, ClassSide, Selector),
     %% Force the entry's class_side/selector to match the addressed slot —
     %% protects against accidental drift between the call args and the map.
     Normalised = MethodXref#{class_side => ClassSide, selector => Selector},
     insert_method_xref_rows(Class, [Normalised], Gen),
+    case NeedsPublish of
+        true -> publish_gen(Class, Gen);
+        false -> ok
+    end,
     {reply, ok, State};
 handle_call({purge_method, Class, ClassSide, Selector}, _From, State) ->
     delete_method_rows(Class, ClassSide, Selector),
@@ -721,6 +909,20 @@ handle_call({purge_method, Class, ClassSide, Selector}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+handle_cast({sweep, Class, _RequestedGen}, State) ->
+    %% ADR 0087 §Atomicity step (4): reclaim rows left under a generation
+    %% older than the published one. Pure memory hygiene — readers already
+    %% ignore these rows via the `current_gen` filter, so a delayed or dropped
+    %% sweep is never a correctness problem.
+    %%
+    %% The keep-gen is re-read here rather than taken from the cast payload:
+    %% several writes to the same class can enqueue several sweep casts, and an
+    %% earlier sweep must not delete rows belonging to a generation a later
+    %% write has since published. Re-reading the live `current_gen` makes every
+    %% sweep converge on "keep only the current generation", which is always
+    %% safe regardless of cast ordering.
+    sweep_stale_gens(Class, current_gen(Class)),
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -729,9 +931,9 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, _State) ->
     %% ETS tables are owned by this process; they die automatically. The
-    %% supervisor restart brings up fresh empty tables — Phase 4's
-    %% miss-policy fallback / re-register hook will repopulate from the
-    %% class registry as classes are reloaded.
+    %% supervisor restart brings up fresh empty tables — the miss-policy
+    %% fallback (Phase 3) repopulates them at read time as classes are
+    %% navigated, and subsequent reloads re-bake their rows via register_class.
     ok.
 
 code_change(OldVsn, State, Extra) ->
@@ -742,22 +944,102 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 
 -doc """
-Increment the per-class generation counter and return the new generation.
-On first registration the counter starts at 1.
+Compute the next per-class generation WITHOUT publishing it. On first
+registration the next generation is 1, otherwise `current + 1`.
 
-The increment + new-gen-row insert is the atomic publish step described
-in ADR 0087 §Atomicity. Phase 1 only writes the new-gen rows; the
-async sweep of old-gen rows lands in Phase 4 (BT-2300).
+ADR 0087 §Atomicity separates computing the new generation (this) from
+publishing it (`publish_gen/2`): rows are inserted under the new gen first,
+and only then is the gen made visible to readers, so there is no instant at
+which `current_gen` points at a half-built generation.
 """.
--spec bump_gen(class_name()) -> gen().
-bump_gen(Class) ->
-    NewGen =
-        case ets:lookup(?CLASS_GEN_TABLE, Class) of
-            [] -> 1;
-            [{_, Current}] -> Current + 1
-        end,
-    true = ets:insert(?CLASS_GEN_TABLE, {Class, NewGen}),
-    NewGen.
+-spec next_gen(class_name()) -> gen().
+next_gen(Class) ->
+    case ets:lookup(?CLASS_GEN_TABLE, Class) of
+        [] -> 1;
+        [{_, Current}] -> Current + 1
+    end.
+
+-doc """
+Publish `Gen` as `Class`'s current generation in one ETS write — the atomic
+publish step (ADR 0087 §Atomicity step 3). After this returns, readers
+filtering by `current_gen` observe the just-installed rows.
+""".
+-spec publish_gen(class_name(), gen()) -> ok.
+publish_gen(Class, Gen) ->
+    true = ets:insert(?CLASS_GEN_TABLE, {Class, Gen}),
+    ok.
+
+-doc """
+Resolve the generation under which a `put_method/4` patch installs its row,
+returning `{Gen, NeedsPublish}`.
+
+A single-method patch does NOT bump the class generation (that would strand
+the unbumped siblings behind the reader's `current_gen` filter); it joins the
+class's current generation, so `NeedsPublish` is `false`. A class that has
+never been registered has no gen row, so the patch establishes generation 1
+and `NeedsPublish` is `true` — but the caller must publish *after* inserting
+the row (insert-before-publish), so the publish is the caller's job, not this
+function's. Establishing the gen here (rather than publishing it) keeps this
+read-only: it never makes a half-built generation visible.
+""".
+-spec put_method_gen(class_name()) -> {gen(), boolean()}.
+put_method_gen(Class) ->
+    case ets:lookup(?CLASS_GEN_TABLE, Class) of
+        [] -> {1, true};
+        [{_, Current}] -> {Current, false}
+    end.
+
+-doc """
+Asynchronously reclaim rows for `Class` carrying a generation other than
+`KeepGen` (ADR 0087 §Atomicity step 4). Cast to self so the synchronous
+write call returns to the caller immediately; the sweep is memory hygiene,
+not a correctness step (readers already filter stale gens out).
+""".
+-spec schedule_sweep(class_name(), gen()) -> ok.
+schedule_sweep(Class, KeepGen) ->
+    gen_server:cast(?MODULE, {sweep, Class, KeepGen}),
+    ok.
+
+-doc """
+Delete every row for `Class` whose `gen` is not `KeepGen`, across all three
+index tables. Runs inside the gen_server (the tables are `protected`), so it
+never races a concurrent write to the same class.
+
+`methods` rows are matched by their `{Class, _, _}` key with the owner gen
+inside the value map; `senders` / `references` rows are keyed by selector /
+referenced class with the owner + gen inside the value map. All three use a
+`select_delete` guard `owner =:= Class andalso gen < KeepGen`.
+
+The guard is `<` (strictly older), not `=/=`: when several writes to the
+same class enqueue several sweep casts, an earlier sweep re-reads the live
+`current_gen` (see `handle_cast`), but a row carrying a *newer* generation
+than the one this sweep computed must never be deleted. Bounding deletion to
+strictly-older generations makes every sweep idempotent and order-insensitive
+— it only ever reclaims rows a later generation has already superseded.
+""".
+-spec sweep_stale_gens(class_name(), gen()) -> ok.
+sweep_stale_gens(Class, KeepGen) ->
+    %% Methods: key carries the class; value carries the gen.
+    _ = ets:select_delete(
+        ?METHODS_TABLE,
+        [
+            {
+                {{Class, '_', '_'}, #{gen => '$1'}},
+                [{'<', '$1', {const, KeepGen}}],
+                [true]
+            }
+        ]
+    ),
+    StaleSiteSpec = [
+        {
+            {'_', #{owner => '$1', gen => '$2'}},
+            [{'=:=', '$1', {const, Class}}, {'<', '$2', {const, KeepGen}}],
+            [true]
+        }
+    ],
+    _ = ets:select_delete(?SENDERS_TABLE, StaleSiteSpec),
+    _ = ets:select_delete(?REFERENCES_TABLE, StaleSiteSpec),
+    ok.
 
 %%====================================================================
 %% Internal: write helpers
