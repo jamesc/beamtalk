@@ -1698,9 +1698,6 @@ fn parse_bunit_result_json(stdout: &str, stderr: &str) -> Result<BunitResult> {
     })
 }
 
-/// Calls the `BUnit` runner directly, bypassing `EUnit` wrappers. The runner
-/// discovers test classes, executes them with the specified concurrency level,
-/// and returns aggregated results as JSON.
 /// Build cover instrumentation preamble/epilogue for the `BUnit` eval command.
 ///
 /// Gated on the `BUNIT_COVER` env var (mirrors `STDLIB_COVER` in
@@ -1743,6 +1740,9 @@ fn bunit_cover_fragments(
     (preamble, epilogue)
 }
 
+/// Calls the `BUnit` runner directly, bypassing `EUnit` wrappers. The runner
+/// discovers test classes, executes them with the specified concurrency level,
+/// and returns aggregated results as JSON.
 fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     debug!("Running BUnit tests with jobs={}", pipeline.jobs);
 
