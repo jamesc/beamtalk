@@ -790,3 +790,156 @@ extenders_of_extensions_by_round_trip_test_() ->
             )
         end
     end}.
+
+%%% ============================================================================
+%%% ADR 0087 Phase 4 (BT-2301): xref index hooks for extension lifecycle
+%%% ============================================================================
+
+%% Setup that also stands up (and clears) a beamtalk_xref gen_server so the
+%% extension register/unregister hooks have somewhere to write.
+xref_setup() ->
+    setup(),
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    clear_xref_tables(),
+    ok.
+
+xref_cleanup(_) ->
+    clear_xref_tables(),
+    cleanup(undefined),
+    ok.
+
+clear_xref_tables() ->
+    try
+        sys:replace_state(beamtalk_xref, fun(S) ->
+            ets:delete_all_objects(beamtalk_xref_methods),
+            ets:delete_all_objects(beamtalk_xref_senders),
+            ets:delete_all_objects(beamtalk_xref_references),
+            ets:delete_all_objects(xref_class_gen),
+            S
+        end)
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+%% True when the compiler AST FFI walker that backs runtime xref send-parsing
+%% is loaded and reachable. A bare EUnit node may lack the compiler port, in
+%% which case the index degrades to empty sends; send-row assertions gate on
+%% this so they don't fail spuriously.
+compiler_walker_available() ->
+    erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) andalso
+        case catch beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>) of
+            {ok, [_ | _]} -> true;
+            _ -> false
+        end.
+
+register5_indexes_sends_in_xref_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% A sourced extension (register/5) is parsed and indexed: the
+                %% method becomes an implementor, and its sends are visible.
+                Fun = fun(_Args, _Self) -> ok end,
+                Source = <<"shout => self asString asUppercase">>,
+                ok = beamtalk_extensions:register('String', 'shout', Fun, mylib, Source),
+
+                ?assertEqual(
+                    [{'String', false}], beamtalk_xref:implementors_of('shout')
+                ),
+                Info = beamtalk_xref:method_info('String', false, 'shout'),
+                ?assertEqual(indexed, maps:get(source_status, Info)),
+                ?assertEqual(extension, maps:get(provenance, Info)),
+
+                %% `asUppercase` is sent by the extension body — visible only when
+                %% the compiler AST walker is available (a bare EUnit node without
+                %% the compiler port degrades to empty sends, but the indexed
+                %% method row above is always recorded).
+                case compiler_walker_available() of
+                    false ->
+                        ok;
+                    true ->
+                        UpperSites = beamtalk_xref:senders_of('asUppercase'),
+                        ?assert(
+                            lists:any(
+                                fun(S) ->
+                                    maps:get(owner, S) =:= 'String' andalso
+                                        maps:get(method, S) =:= 'shout'
+                                end,
+                                UpperSites
+                            )
+                        )
+                end
+            end)
+        ]
+    end}.
+
+register4_marks_unindexed_runtime_fun_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% A sourceless extension (register/4) is recorded as an
+                %% unindexed_runtime_fun marker: present as an implementor, but
+                %% with no scannable sends.
+                Fun = fun(_Args, _Self) -> ok end,
+                ok = beamtalk_extensions:register('Integer', 'doubled', Fun, mylib),
+
+                ?assertEqual(
+                    [{'Integer', false}], beamtalk_xref:implementors_of('doubled')
+                ),
+                Info = beamtalk_xref:method_info('Integer', false, 'doubled'),
+                ?assertEqual(unindexed_runtime_fun, maps:get(source_status, Info)),
+                ?assertEqual(extension, maps:get(provenance, Info))
+            end)
+        ]
+    end}.
+
+unregister_purges_xref_rows_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Register two extensions on the same class, then unregister one
+                %% — only its rows are purged; the sibling stays.
+                Fun = fun(_Args, _Self) -> ok end,
+                ok = beamtalk_extensions:register(
+                    'String', 'shout', Fun, mylib, <<"shout => self asUppercase">>
+                ),
+                ok = beamtalk_extensions:register(
+                    'String', 'whisper', Fun, mylib, <<"whisper => self asLowercase">>
+                ),
+                ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('shout')),
+                ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('whisper')),
+
+                ok = beamtalk_extensions:unregister('String', 'shout'),
+
+                %% `shout` gone from dispatch, sources, and xref.
+                ?assertEqual(not_found, beamtalk_extensions:lookup('String', 'shout')),
+                ?assertEqual(not_found, beamtalk_extensions:getSource('String', 'shout')),
+                ?assertEqual([], beamtalk_xref:implementors_of('shout')),
+                ?assertEqual([], beamtalk_xref:senders_of('asUppercase')),
+
+                %% Sibling `whisper` untouched — its method row survives the
+                %% narrow purge regardless of compiler availability.
+                ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('whisper')),
+                case compiler_walker_available() of
+                    false ->
+                        ok;
+                    true ->
+                        ?assertEqual(1, length(beamtalk_xref:senders_of('asLowercase')))
+                end
+            end)
+        ]
+    end}.
+
+unregister_unknown_is_noop_test_() ->
+    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Unregistering an extension that was never registered is a
+                %% harmless no-op.
+                ?assertEqual(ok, beamtalk_extensions:unregister('String', 'nope'))
+            end)
+        ]
+    end}.

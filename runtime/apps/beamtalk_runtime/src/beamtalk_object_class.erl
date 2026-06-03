@@ -591,6 +591,52 @@ refresh_xref(ClassName, MethodXref) ->
             register_xref(ClassName, MethodXref)
     end.
 
+-doc """
+Re-index a single hot-patched method in `beamtalk_xref` (ADR 0087 Phase 4,
+BT-2301).
+
+Called from the `{put_method, ...}` / `{put_class_method, ...}` handlers after
+a live `>>` edit (ADR 0082). Re-parses the one method's `Source` via the
+compiler AST FFI (`beamtalk_xref:build_method_entry/5`) and replaces just that
+`{Class, ClassSide, Selector}` row set via `beamtalk_xref:put_method/4`;
+sibling methods on the same class are untouched.
+
+A no-op when `beamtalk_xref` is not running. Hot-patched methods are tagged
+`source_status = indexed` (they carry source like any compiled method) with
+`provenance = put_method`.
+""".
+-spec put_method_xref(class_name(), boolean(), selector(), binary()) -> ok.
+put_method_xref(ClassName, ClassSide, Selector, Source) ->
+    %% build_method_entry/5 is pure; only the put_method/4 gen_server call must
+    %% be best-effort. A bare whereis/1 guard is racy: beamtalk_xref can die or
+    %% restart between the check and the call, which would crash this class
+    %% gen_server mid hot-patch. Degrade to a no-op on xref unavailability
+    %% instead, matching the documented behaviour (BT-2301).
+    Entry = beamtalk_xref:build_method_entry(
+        ClassSide, Selector, Source, indexed, put_method
+    ),
+    safe_xref(fun() -> beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry) end).
+
+-doc """
+Run a `beamtalk_xref` gen_server call best-effort (BT-2301).
+
+The xref index is advisory tooling state; a hot patch must not crash the class
+gen_server if it is unavailable. Catches the `noproc`/`{noproc, _}` /
+`{normal, _}` / `{{nodedown, _}, _}` exits raised by `gen_server:call/2`
+against a missing or restarting `beamtalk_xref`, degrading to a no-op. Other
+exits/errors propagate.
+""".
+-spec safe_xref(fun(() -> ok)) -> ok.
+safe_xref(Fun) ->
+    try Fun() of
+        ok -> ok
+    catch
+        exit:{noproc, _} -> ok;
+        exit:noproc -> ok;
+        exit:{normal, _} -> ok;
+        exit:{{nodedown, _}, _} -> ok
+    end.
+
 handle_call(
     {spawn, Args},
     _From,
@@ -744,7 +790,9 @@ handle_call(
                 find_inherited_class_method(Selector, Superclass)
         end,
     {reply, Result, State};
-handle_call({put_method, Selector, Fun, Source}, _From, State) ->
+handle_call(
+    {put_method, Selector, Fun, Source}, _From, #class_state{name = ClassName} = State
+) ->
     {arity, Arity} = erlang:fun_info(Fun, arity),
     MethodInfo = #{block => Fun, arity => Arity},
     %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
@@ -763,6 +811,10 @@ handle_call({put_method, Selector, Fun, Source}, _From, State) ->
         method_signatures = maps:remove(Selector, State#class_state.method_signatures),
         method_return_types = maps:remove(Selector, State#class_state.method_return_types)
     },
+    %% ADR 0087 Phase 4 (BT-2301): re-index the patched method from its Source so
+    %% the xref index reflects the live `>>` edit (ADR 0082). Instance-side, so
+    %% ClassSide = false. A no-op when xref / the compiler app is unavailable.
+    put_method_xref(ClassName, false, Selector, Source),
     %% ADR 0050 Phase 3: Notify compiler server of hot-patch.
     %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
     %% from the live class_state record instead.  Return types are cleared for
@@ -797,6 +849,10 @@ handle_call(
     %% is not yet present.
     beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
     beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
+    %% ADR 0087 Phase 4 (BT-2301): re-index the patched class-side method
+    %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
+    %% is unavailable.
+    put_method_xref(ClassName, true, Selector, Source),
     notify_hot_patch(NewState),
     {reply, ok, NewState};
 %% BT-572: Update class metadata after redefinition (hot reload).

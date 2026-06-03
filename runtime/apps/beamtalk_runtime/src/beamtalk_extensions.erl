@@ -72,6 +72,7 @@ See: docs/internal/design-self-as-object.md Section "Extension Registry Design"
     init/0,
     register/4,
     register/5,
+    unregister/2,
     lookup/2,
     list/1,
     extenders_of/1,
@@ -188,13 +189,11 @@ register(Class, Selector, Fun, Owner, Source) when
         [] ->
             %% New registration
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source),
-            ok;
+            maybe_store_source(Key, Source);
         [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
             %% Same owner updating - no conflict
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source),
-            ok;
+            maybe_store_source(Key, Source);
         [{Key, _OldFun, OldOwner}] ->
             %% Conflict: different owner
             ?LOG_WARNING(
@@ -210,9 +209,39 @@ register(Class, Selector, Fun, Owner, Source) when
 
             %% Overwrite (last-writer-wins)
             ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-            maybe_store_source(Key, Source),
-            ok
-    end.
+            maybe_store_source(Key, Source)
+    end,
+
+    %% ADR 0087 Phase 4 (BT-2301): maintain the xref index for extension methods
+    %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
+    %% `Source`) is re-parsed and indexed; a sourceless one (`register/4`, or
+    %% `register/5` with `Source = undefined`) is recorded as a marker row tagged
+    %% `unindexed_runtime_fun` (empty sends + references) so navigation knows the
+    %% method exists but cannot be scanned. Extension methods are instance-side,
+    %% so ClassSide = false.
+    index_extension_xref(Class, Selector, Source),
+    ok.
+
+-doc """
+Unregister an extension method from a class (ADR 0066 open classes).
+
+Removes the dispatch entry, any stored source body, and the method's xref
+index rows. Idempotent — unregistering an unknown extension is a no-op.
+
+ADR 0087 Phase 4 (BT-2301): the matching `beamtalk_xref:purge_method/3` call
+drops just this `{Class, false, Selector}` row set (extension methods are
+instance-side); sibling extensions on the same class are untouched.
+""".
+-spec unregister(atom(), atom()) -> ok.
+unregister(Class, Selector) when is_atom(Class), is_atom(Selector) ->
+    Key = {Class, Selector},
+    ets:delete(?EXTENSIONS_TABLE, Key),
+    ets:delete(?SOURCES_TABLE, Key),
+    %% Best-effort: the extension ETS rows are already mutated, so a
+    %% dead/restarting beamtalk_xref must not crash unregister. Degrade to a
+    %% no-op if the xref gen_server is unavailable (BT-2301).
+    safe_xref(fun() -> beamtalk_xref:purge_method(Class, false, Selector) end),
+    ok.
 
 -doc """
 Lookup an extension method.
@@ -436,3 +465,52 @@ maybe_store_source(Key, undefined) ->
 maybe_store_source(Key, Source) when is_binary(Source) ->
     ets:insert(?SOURCES_TABLE, {Key, Source}),
     ok.
+
+-doc """
+Update the xref index for a (re)registered extension method (BT-2301).
+
+A sourced extension (`Source` is a binary) is re-parsed via
+`beamtalk_xref:build_method_entry/5` and indexed as `source_status = indexed`,
+so its sends become visible to `SystemNavigation sendersOf:` etc. A sourceless
+extension (`Source = undefined`) is recorded as an `unindexed_runtime_fun`
+marker row (empty sends + references) — the method is known to exist but cannot
+be scanned. Provenance is `extension` for both. Extension methods are
+instance-side, so `ClassSide = false`.
+
+A no-op when `beamtalk_xref` is not running (e.g. early bootstrap, or a minimal
+embedded runtime).
+""".
+-spec index_extension_xref(atom(), atom(), binary() | undefined) -> ok.
+index_extension_xref(Class, Selector, Source) ->
+    {SourceStatus, SourceBin} =
+        case Source of
+            undefined -> {unindexed_runtime_fun, <<>>};
+            Bin when is_binary(Bin) -> {indexed, Bin}
+        end,
+    %% build_method_entry/5 is pure; only the put_method/4 gen_server call needs
+    %% to be best-effort so a dead/restarting beamtalk_xref cannot crash
+    %% register after the extension ETS rows are already mutated (BT-2301).
+    Entry = beamtalk_xref:build_method_entry(
+        false, Selector, SourceBin, SourceStatus, extension
+    ),
+    safe_xref(fun() -> beamtalk_xref:put_method(Class, false, Selector, Entry) end).
+
+-doc """
+Run a `beamtalk_xref` gen_server call best-effort (BT-2301).
+
+The xref index is advisory tooling state; extension register/unregister must
+not crash if it is unavailable. Catches the `noproc`/`{noproc, _}` /
+`{normal, _}` exits raised by `gen_server:call/2` against a missing or
+restarting `beamtalk_xref`, and the `undefined` returned for a name with no
+registered pid, degrading to a no-op. Other exits/errors propagate.
+""".
+-spec safe_xref(fun(() -> ok)) -> ok.
+safe_xref(Fun) ->
+    try Fun() of
+        ok -> ok
+    catch
+        exit:{noproc, _} -> ok;
+        exit:noproc -> ok;
+        exit:{normal, _} -> ok;
+        exit:{{nodedown, _}, _} -> ok
+    end.

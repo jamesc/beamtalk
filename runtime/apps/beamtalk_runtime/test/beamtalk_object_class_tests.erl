@@ -2464,6 +2464,22 @@ clear_xref_tables() ->
     end,
     ok.
 
+%% True when the compiler AST FFI walker that backs runtime xref send-parsing
+%% is loaded and the compiler server is reachable. In a bare EUnit node the
+%% compiler app / port may not be running, in which case build_method_entry/5
+%% degrades to empty sends — tests that assert *parsed* send rows must gate on
+%% this rather than fail spuriously.
+compiler_walker_available() ->
+    %% function_exported/3 reports false for a not-yet-loaded module; ensure the
+    %% compiler module is loaded first so we don't get a false negative when the
+    %% beam exists but hasn't been demand-loaded yet.
+    _ = code:ensure_loaded(beamtalk_compiler),
+    erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) andalso
+        case catch beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>) of
+            {ok, [_ | _]} -> true;
+            _ -> false
+        end.
+
 %% A class compiled with two instance methods, one class-side method, two sends
 %% across them, and one class reference — the fixture the AC calls for. This is
 %% the method_xref shape the Rust codegen bakes into register_class/0.
@@ -2638,6 +2654,91 @@ method_xref_forwarded_on_class_creation_test_() ->
                 ),
                 Info = beamtalk_xref:method_info('XrefRedefClass', false, realMethod),
                 ?assertEqual(indexed, maps:get(source_status, Info))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% ADR 0087 Phase 4 (BT-2301): put_method/4 re-indexes the patched
+%% method in beamtalk_xref from its Source.
+%%====================================================================
+
+put_method_reindexes_xref_test_() ->
+    {setup, fun xref_setup/0, fun xref_teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Start a class carrying an initial xref row for `greet` whose
+                %% body sends `#asString`.
+                ClassInfo = #{
+                    name => 'XrefPatchClass',
+                    module => xref_patch,
+                    instance_methods => #{},
+                    method_xref => [
+                        #{
+                            class_side => false,
+                            selector => 'greet',
+                            line => 1,
+                            sends => [#{selector => 'asString', line => 1, recv_kind => self_recv}],
+                            references => [],
+                            source_status => indexed,
+                            provenance => class_body
+                        }
+                    ]
+                },
+                {ok, Pid} = beamtalk_object_class:start_link('XrefPatchClass', ClassInfo),
+
+                %% Baseline: `greet` is an implementor and sends `asString`.
+                ?assertEqual(
+                    [{'XrefPatchClass', false}], beamtalk_xref:implementors_of('greet')
+                ),
+                AsStringBefore = beamtalk_xref:senders_of('asString'),
+                ?assert(
+                    lists:any(
+                        fun(S) -> maps:get(method, S) =:= 'greet' end, AsStringBefore
+                    )
+                ),
+
+                %% Live-patch `greet` with a body whose sends are DISJOINT from
+                %% the pre-patch body (#asString → #asUppercase only). Keeping the
+                %% selectors disjoint lets us assert the old `asString` send row is
+                %% gone *and* the new `asUppercase` row appears, without the result
+                %% depending on whether the walker happens to re-parse `asString`.
+                NewFun = fun(_Args, Self, State) -> {Self, State} end,
+                PatchedSource = <<"greet => self asUppercase">>,
+                ok = beamtalk_object_class:put_method(Pid, greet, NewFun, PatchedSource),
+
+                %% `greet` still an implementor (one row, replaced not duplicated
+                %% in the live view via method_info gen selection).
+                ?assertEqual(
+                    [{'XrefPatchClass', false}], beamtalk_xref:implementors_of('greet')
+                ),
+                Info = beamtalk_xref:method_info('XrefPatchClass', false, 'greet'),
+                ?assertEqual(put_method, maps:get(provenance, Info)),
+
+                %% The old `asString` send row from the pre-patch body is gone:
+                %% put_method replaced the method's rows wholesale.
+                ?assertEqual([], beamtalk_xref:senders_of('asString')),
+
+                %% When the compiler app is available the patched body's
+                %% `asUppercase` send is re-parsed and indexed under greet. In a
+                %% bare EUnit node without the compiler port the index degrades
+                %% to empty sends — assert the parsed-send visibility only when
+                %% the walker is actually present.
+                case compiler_walker_available() of
+                    false ->
+                        ok;
+                    true ->
+                        UpperSites = beamtalk_xref:senders_of('asUppercase'),
+                        ?assert(
+                            lists:any(
+                                fun(S) ->
+                                    maps:get(owner, S) =:= 'XrefPatchClass' andalso
+                                        maps:get(method, S) =:= 'greet'
+                                end,
+                                UpperSites
+                            )
+                        )
+                end
             end)
         ]
     end}.

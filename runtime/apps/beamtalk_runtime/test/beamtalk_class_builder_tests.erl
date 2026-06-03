@@ -934,3 +934,97 @@ register_class_method_fun_dropped_on_reload_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% ADR 0087 Phase 4 (BT-2301): ClassBuilder methods reach beamtalk_xref
+%%====================================================================
+
+%% Setup that also stands up (and clears) a beamtalk_xref gen_server so the
+%% ClassBuilder install path's method_xref forwarding has somewhere to write.
+xref_setup() ->
+    Acc = setup(),
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    clear_xref_tables(),
+    Acc.
+
+xref_teardown(Acc) ->
+    clear_xref_tables(),
+    teardown(Acc).
+
+clear_xref_tables() ->
+    try
+        sys:replace_state(beamtalk_xref, fun(S) ->
+            ets:delete_all_objects(beamtalk_xref_methods),
+            ets:delete_all_objects(beamtalk_xref_senders),
+            ets:delete_all_objects(xref_class_gen),
+            ets:delete_all_objects(beamtalk_xref_references),
+            S
+        end)
+    catch
+        _:_ -> ok
+    end,
+    ok.
+
+%% True when the compiler AST FFI walker that backs runtime xref send-parsing
+%% is loaded and reachable. A bare EUnit node may lack the compiler port, in
+%% which case the index degrades to empty sends; send-row assertions gate on
+%% this so they don't fail spuriously.
+compiler_walker_available() ->
+    erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) andalso
+        case catch beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>) of
+            {ok, [_ | _]} -> true;
+            _ -> false
+        end.
+
+classbuilder_methods_appear_in_xref_test_() ->
+    {setup, fun xref_setup/0, fun xref_teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                %% Build a class via ClassBuilder with methodSource: populated
+                %% (but no codegen-baked methodXref). The runtime derives the
+                %% xref index from the method sources, so the built methods are
+                %% discoverable in beamtalk_xref.
+                MethodFun = fun(Self, _Args, State) -> {reply, ok, State, Self} end,
+                State = #{
+                    className => 'BT2301BuilderXref',
+                    superclassRef => 'Object',
+                    fieldSpecs => #{count => 0},
+                    methodSpecs => #{'greet' => MethodFun},
+                    methodSource => #{'greet' => <<"greet => self count asString">>}
+                },
+                {ok, Pid} = beamtalk_class_builder:register(State),
+                ?assert(is_process_alive(Pid)),
+
+                %% The built `greet` method is an implementor in xref.
+                ?assertEqual(
+                    [{'BT2301BuilderXref', false}],
+                    beamtalk_xref:implementors_of('greet')
+                ),
+
+                %% Its source-derived sends (`count`, `asString`) are indexed —
+                %% but only when the compiler AST walker is reachable. A bare
+                %% EUnit node without the compiler port degrades to empty sends;
+                %% the implementor row above is always recorded.
+                case compiler_walker_available() of
+                    false ->
+                        ok;
+                    true ->
+                        AsStringSites = beamtalk_xref:senders_of('asString'),
+                        ?assert(
+                            lists:any(
+                                fun(S) ->
+                                    maps:get(owner, S) =:= 'BT2301BuilderXref' andalso
+                                        maps:get(method, S) =:= 'greet'
+                                end,
+                                AsStringSites
+                            )
+                        )
+                end,
+
+                gen_server:stop(Pid, normal, 5000)
+            end)
+        ]
+    end}.

@@ -37,7 +37,8 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     start_link/0,
     register_class/2,
     purge_class/1,
-    put_method/4
+    put_method/4,
+    purge_method/3
 ]).
 
 %% API — read path
@@ -48,6 +49,11 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     implementors_of/1,
     defined_selectors/2,
     method_info/3
+]).
+
+%% API — xref-entry construction helpers (ADR 0087 Phase 4, BT-2301)
+-export([
+    build_method_entry/5
 ]).
 
 %% gen_server callbacks
@@ -184,6 +190,132 @@ put_method(Class, ClassSide, Selector, MethodXref) when
     is_atom(Class), is_boolean(ClassSide), is_atom(Selector), is_map(MethodXref)
 ->
     gen_server:call(?MODULE, {put_method, Class, ClassSide, Selector, MethodXref}).
+
+-doc """
+Remove the xref rows for a single method without touching siblings.
+
+The narrow counterpart to `put_method/4` (which replaces). Used for
+method-level *removal* — e.g. `beamtalk_extensions:unregister/2` (ADR 0066)
+drops an extension method, so its `{Class, ClassSide, Selector}` method row
+plus every sender / reference row owned by that method must be purged while
+sibling methods on the same class stay intact. Synchronous. Idempotent —
+purging an unknown method is a no-op.
+
+Does not bump the class's generation: removal leaves no new rows to publish,
+and the surviving siblings keep their existing generation.
+""".
+-spec purge_method(class_name(), class_side(), selector()) -> ok.
+purge_method(Class, ClassSide, Selector) when
+    is_atom(Class), is_boolean(ClassSide), is_atom(Selector)
+->
+    gen_server:call(?MODULE, {purge_method, Class, ClassSide, Selector}).
+
+%%====================================================================
+%% API — xref-entry construction helpers
+%%====================================================================
+
+-doc """
+Build a single `method_xref_entry()` from a method's source text (ADR 0087
+Phase 4, BT-2301).
+
+This is the *runtime* counterpart to the compile-time `build_method_xref_entry`
+in `crates/.../gen_server/methods.rs`: it re-parses the one method's `Source`
+via the existing compiler AST FFI walkers (`find_all_sends_in_source/1` for
+sent selectors + receiver kind, `find_references_to_in_source/2` — there is no
+runtime "all references" walker, so class references are left empty for live
+edits; the class-reference channel is fully populated only at compile time).
+
+Used by the method-level mutation entry points that re-index a single method:
+`beamtalk_object_class:put_method/4` (live `>>` patch, ADR 0082) and
+`beamtalk_extensions:register/5` (sourced extension, ADR 0066).
+
+`Source` is the method's bare body text; the method-relative definition line is
+1 (the signature is the first source line). When the compiler app is absent or
+`Source` is empty / unparseable, returns an entry with empty `sends` /
+`references` rather than failing — the index degrades gracefully, mirroring the
+miss-policy fallback. `SourceStatus` is the caller-chosen tag (`indexed` for a
+sourced patch / extension, `unindexed_runtime_fun` for a sourceless one).
+`Provenance` records which mutation path produced the entry.
+""".
+-spec build_method_entry(class_side(), selector(), binary(), source_status(), provenance()) ->
+    method_xref_entry().
+build_method_entry(ClassSide, Selector, Source, SourceStatus, Provenance) when
+    is_boolean(ClassSide), is_atom(Selector), is_atom(SourceStatus), is_atom(Provenance)
+->
+    Sends =
+        case SourceStatus of
+            unindexed_runtime_fun -> [];
+            _ -> sends_from_source(Source)
+        end,
+    #{
+        class_side => ClassSide,
+        selector => Selector,
+        line => 1,
+        sends => Sends,
+        references => [],
+        source_status => SourceStatus,
+        provenance => Provenance
+    }.
+
+-doc """
+Extract `send_entry()` rows from a method's source via the compiler AST FFI.
+
+A no-op (empty list) when the source is not a binary, is empty, the compiler
+app is not loaded, or the walker reports an error. Maps the FFI's `recv`
+receiver tag (`self | super | erlang_ffi | other`) onto the xref `recv_kind`
+(`self_recv | super_recv | erlang_ffi | other`) and converts the binary
+selector to an atom.
+
+Security: `Source` is attacker-influenceable (live `>>` patches and extension
+registration both flow user text here), so the selector is converted with
+`binary_to_existing_atom` — never `binary_to_atom` — to avoid growing the
+global atom table from untrusted input (mirrors `beamtalk_repl_ops_nav`). A
+selector that has no existing atom (e.g. a send to a never-yet-seen message)
+is dropped from the index; it will be picked up once the atom exists. The
+255-byte guard is redundant with `existing_atom` but kept as a cheap fast-path
+reject for over-long inputs.
+""".
+-spec sends_from_source(term()) -> [send_entry()].
+sends_from_source(Source) when is_binary(Source), Source =/= <<>> ->
+    case erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) of
+        false ->
+            [];
+        true ->
+            case beamtalk_compiler:find_all_sends_in_source(Source) of
+                {ok, Hits} -> lists:filtermap(fun send_hit_to_entry/1, Hits);
+                {error, _} -> []
+            end
+    end;
+sends_from_source(_Source) ->
+    [].
+
+-define(MAX_ATOM_BYTES, 255).
+
+-spec send_hit_to_entry(map()) -> {true, send_entry()} | false.
+send_hit_to_entry(#{selector := SelBin, line := Line} = Hit) when
+    is_binary(SelBin), byte_size(SelBin) =< ?MAX_ATOM_BYTES
+->
+    %% binary_to_existing_atom (not binary_to_atom): the source is untrusted, so
+    %% we must not let it mint new atoms. A send whose selector is not yet an
+    %% atom anywhere is simply not indexed (dropped via the badarg catch).
+    try binary_to_existing_atom(SelBin, utf8) of
+        Selector ->
+            {true, #{
+                selector => Selector,
+                line => Line,
+                recv_kind => recv_to_recv_kind(maps:get(recv, Hit, other))
+            }}
+    catch
+        error:badarg -> false
+    end;
+send_hit_to_entry(_Hit) ->
+    false.
+
+-spec recv_to_recv_kind(atom()) -> recv_kind().
+recv_to_recv_kind(self) -> self_recv;
+recv_to_recv_kind(super) -> super_recv;
+recv_to_recv_kind(erlang_ffi) -> erlang_ffi;
+recv_to_recv_kind(_) -> other.
 
 %%====================================================================
 %% API — read path
@@ -446,6 +578,9 @@ handle_call({put_method, Class, ClassSide, Selector, MethodXref}, _From, State) 
     %% protects against accidental drift between the call args and the map.
     Normalised = MethodXref#{class_side => ClassSide, selector => Selector},
     insert_method_xref_rows(Class, [Normalised], Gen),
+    {reply, ok, State};
+handle_call({purge_method, Class, ClassSide, Selector}, _From, State) ->
+    delete_method_rows(Class, ClassSide, Selector),
     {reply, ok, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.

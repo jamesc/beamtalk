@@ -416,11 +416,16 @@ build_compiled_class_info(
                                                     %% codegen. Defaults to [] (not
                                                     %% undefined) so init/1 always gets
                                                     %% a list; maybe_put inserts [] as-is.
+                                                    %% ADR 0087 Phase 4 (BT-2301): when
+                                                    %% codegen did not bake methodXref
+                                                    %% (runtime-built ClassBuilder with
+                                                    %% only methodSource: populated),
+                                                    %% derive the index from the method
+                                                    %% sources so built methods are still
+                                                    %% discoverable in beamtalk_xref.
                                                     maybe_put(
                                                         method_xref,
-                                                        maps:get(
-                                                            methodXref, BuilderState, []
-                                                        ),
+                                                        builder_method_xref(BuilderState),
                                                         Base
                                                     )
                                                 )
@@ -453,6 +458,83 @@ maybe_put(_Key, nil, Map) ->
     Map;
 maybe_put(Key, Value, Map) ->
     Map#{Key => Value}.
+
+-doc """
+Compute the per-method xref index for a ClassBuilder-built class (BT-2301).
+
+Prefers a codegen-baked `methodXref` list when present (the compiled path,
+ADR 0087 Phase 2). When absent — a runtime-constructed ClassBuilder that only
+populated `methodSource:` / `classMethodSource:` — derives the index by
+re-parsing each method's source via `beamtalk_xref:build_method_entry/5`, so the
+built methods still appear in `beamtalk_xref:implementors_of/1` / `senders_of/1`.
+Instance methods are indexed with `ClassSide = false`, class-side methods with
+`ClassSide = true`; both are tagged `provenance = class_builder`,
+`source_status = indexed`.
+
+Returns the list (possibly empty) that `beamtalk_object_class:init/1` forwards
+to `beamtalk_xref:register_class/2`.
+""".
+-spec builder_method_xref(map()) -> [map()].
+builder_method_xref(BuilderState) ->
+    case maps:get(methodXref, BuilderState, undefined) of
+        Baked when is_list(Baked), Baked =/= [] ->
+            Baked;
+        _ ->
+            %% Only advertise xref rows for selectors the class can actually
+            %% dispatch: intersect the source maps with the installed
+            %% methodSpecs:/classMethods: selectors. Otherwise a stray
+            %% methodSource:/classMethodSource: entry with no matching install
+            %% would leak a phantom implementor/sender into xref.
+            InstanceSelectors = installed_selectors(maps:get(methodSpecs, BuilderState, #{})),
+            ClassSelectors = installed_selectors(maps:get(classMethods, BuilderState, #{})),
+            InstanceEntries = source_map_to_xref(
+                maps:get(methodSource, BuilderState, #{}), false, InstanceSelectors
+            ),
+            ClassEntries = source_map_to_xref(
+                maps:get(classMethodSource, BuilderState, #{}), true, ClassSelectors
+            ),
+            InstanceEntries ++ ClassEntries
+    end.
+
+-doc """
+Return the set of selectors installed by a `methodSpecs:`/`classMethods:` map
+(BT-2301). Non-map inputs yield the empty set.
+""".
+-spec installed_selectors(term()) -> sets:set(atom()).
+installed_selectors(SpecMap) when is_map(SpecMap) ->
+    sets:from_list(maps:keys(SpecMap));
+installed_selectors(_Other) ->
+    sets:new().
+
+-doc """
+Derive xref entries from a `selector => Source` map for one method side
+(BT-2301). `ClassSide` is `false` for instance methods, `true` for class-side.
+Only selectors present in `Installed` (the selectors actually installed on the
+class) are emitted, so xref never advertises a method the class cannot
+dispatch. Non-map inputs (or non-atom/non-binary pairs) are skipped.
+""".
+-spec source_map_to_xref(term(), boolean(), sets:set(atom())) -> [map()].
+source_map_to_xref(SourceMap, ClassSide, Installed) when is_map(SourceMap) ->
+    maps:fold(
+        fun
+            (Selector, Source, Acc) when is_atom(Selector), is_binary(Source) ->
+                case sets:is_element(Selector, Installed) of
+                    true ->
+                        Entry = beamtalk_xref:build_method_entry(
+                            ClassSide, Selector, Source, indexed, class_builder
+                        ),
+                        [Entry | Acc];
+                    false ->
+                        Acc
+                end;
+            (_Selector, _Source, Acc) ->
+                Acc
+        end,
+        [],
+        SourceMap
+    );
+source_map_to_xref(_NotMap, _ClassSide, _Installed) ->
+    [].
 
 -doc """
 Validate the arity of every class-method fun in a classMethods: spec (BT-2276).
