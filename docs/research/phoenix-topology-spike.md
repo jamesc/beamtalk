@@ -172,6 +172,13 @@ What integrating this with the main repo would look like:
      than ever attaching the browser's trust boundary directly to dist? The
      spike suggests **yes** — Phoenix as the authenticated front, dist behind it.
 
+  **Unresolved (for the auth ADR):** this spike validates Attach's technical
+  feasibility but does *not* settle the production auth/authz design. The ADR
+  must answer: (1) what authentication mechanism Phoenix uses for browser
+  connections (session cookies / JWT / OIDC); (2) how per-user authorization is
+  enforced given Attach's all-or-nothing RPC; and (3) whether Phoenix needs a
+  permission facade that validates/filters operations before invoking dist RPC.
+
 ## Hot-reload implications
 
 - Phoenix's dev code reloader operates on the **Phoenix node's** modules only.
@@ -232,6 +239,16 @@ to the workspace. Two thin layers, and one explicit decision:
 
 This "extract a term-returning op layer; JSON only at the WS edge; add a
 subscription facade" work is the natural first issue of the LiveView IDE epic.
+
+**Implementation status:** the spike demonstrates only the *client* side —
+`BtAttach.Workspace.eval/2` already consumes term tuples directly. The
+*server*-side refactor (factoring `beamtalk_repl_server:handle_protocol_request/2`
+→ `beamtalk_repl_ops_eval:handle/4` → `beamtalk_repl_shell:eval/2` so the op
+layer returns `{ok, Value, Output, Warnings} | {error, #beamtalk_error{}}`, plus
+the subscription facade in place of the direct `beamtalk_transcript_stream:subscribe/1`
+calls `beamtalk_ws_handler` wires today) is **future work** — a recommended
+first task of the LiveView IDE epic, *not* a prerequisite for the Attach
+topology decision itself.
 
 ## What this unblocks
 
