@@ -23,7 +23,9 @@ dispatch(testExit, [], _Instance) ->
 dispatch(testSkip, [], _Instance) ->
     throw({bunit_skip, <<"skip reason">>});
 dispatch(testAssertFail, [], _Instance) ->
-    error(#beamtalk_error{kind = assertion_failed, class = 'TestCase', message = <<"assert failed">>});
+    error(#beamtalk_error{
+        kind = assertion_failed, class = 'TestCase', message = <<"assert failed">>
+    });
 dispatch(setUp, [], Instance) ->
     Instance;
 dispatch(tearDown, [], _Instance) ->
