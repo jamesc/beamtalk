@@ -11,7 +11,7 @@
     session_id :: binary() | undefined,
     session_pid :: pid() | undefined,
     session_mon :: reference() | undefined,
-    authenticated :: boolean(),
+    authenticated = false :: boolean(),
     peer :: term(),
     %% BT-696: Pending eval request for streaming output correlation
     pending_eval :: term() | undefined,
@@ -19,5 +19,5 @@
     io_capture_pid :: pid() | undefined,
     stdin_ref :: reference() | undefined,
     %% BT-1433: Whether this session is subscribed to log streaming
-    log_subscribed :: boolean()
+    log_subscribed = false :: boolean()
 }).

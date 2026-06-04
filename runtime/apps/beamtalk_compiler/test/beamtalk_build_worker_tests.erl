@@ -162,9 +162,10 @@ handle_read_specs_mixed_test_() ->
             {ok, _} = beamtalk_build_worker:compile_core_file(CoreFile, OutDir),
             BeamFile = filename:join(OutDir, "test_build_worker_mod.beam"),
             ?assert(filelib:is_regular(BeamFile)),
-            Result = beamtalk_build_worker:handle_read_specs(
-                [BeamFile, "/nonexistent/missing.beam"]
-            ),
+            %% A path under TmpDir that we never create exercises the per-module
+            %% {error, Reason} branch without hardcoding an absolute path.
+            MissingBeam = filename:join(TmpDir, "missing.beam"),
+            Result = beamtalk_build_worker:handle_read_specs([BeamFile, MissingBeam]),
             ?assertEqual(ok, Result)
         end
     end}.
