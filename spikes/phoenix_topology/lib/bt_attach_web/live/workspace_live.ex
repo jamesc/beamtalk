@@ -18,6 +18,17 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    # Only attach over distribution on the *connected* (WebSocket) mount — the
+    # initial disconnected HTTP render would otherwise create a second, orphaned
+    # workspace session on every page load.
+    if connected?(socket) do
+      attach(socket)
+    else
+      {:ok, assign(socket, connected: false, error: nil)}
+    end
+  end
+
+  defp attach(socket) do
     socket =
       case Workspace.connect() do
         :ok ->
@@ -25,7 +36,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
           case Workspace.start_session(session_id) do
             pid when is_pid(pid) ->
-              if connected?(socket), do: Workspace.subscribe_transcript()
+              Workspace.subscribe_transcript()
 
               socket
               |> assign(:connected, true)
@@ -104,7 +115,8 @@ defmodule BtAttachWeb.WorkspaceLive do
         </div>
         <p style="color:#666;">Try <code>Transcript show: "hello"</code> to see a live push.</p>
       <% else %>
-        <pre style="background:#fff0f0; padding:1rem;">Not attached.
+        <%= if @error do %>
+          <pre style="background:#fff0f0; padding:1rem;">Not attached.
 
     <%= @error %>
 
@@ -113,6 +125,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       export BT_WORKSPACE_NODE=beamtalk_workspace_spike@localhost
       export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' ~/.beamtalk/workspaces/spike/vm.args)
     then restart this server.</pre>
+        <% else %>
+          <p>Connecting to workspace…</p>
+        <% end %>
       <% end %>
     </div>
     """

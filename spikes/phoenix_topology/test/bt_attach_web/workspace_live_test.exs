@@ -18,15 +18,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   use BtAttachWeb.ConnCase
   import Phoenix.LiveViewTest
 
+  # Excluded by default in test_helper.exs unless BT_WORKSPACE_COOKIE is set.
   @moduletag :workspace
-
-  setup do
-    if System.get_env("BT_WORKSPACE_COOKIE") in [nil, ""] do
-      {:skip, "BT_WORKSPACE_COOKIE not set"}
-    else
-      :ok
-    end
-  end
 
   test "eval round-trip renders the workspace result", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
