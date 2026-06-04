@@ -110,7 +110,7 @@ handle_inspect_missing_actor_param_returns_error_test() ->
 
 handle_inspect_unknown_actor_pid_returns_error_test() ->
     %% Valid PID string format but not registered in actor registry → unknown_actor.
-    %% encode_invalid_pid_error wraps it with the same "Invalid actor PID" message.
+    %% invalid_pid_error wraps it with the same "Invalid actor PID" message.
     PidBin = list_to_binary(pid_to_list(self())),
     Msg = make_msg(<<"inspect">>, <<"i-4">>, undefined, false),
     Result = beamtalk_repl_ops_actors:handle(
