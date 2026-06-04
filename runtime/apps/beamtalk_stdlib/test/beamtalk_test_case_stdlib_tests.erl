@@ -139,15 +139,31 @@ run_test_method_assert_fail_test() ->
     ),
     ?assertMatch({fail, testAssertFail, _}, Result).
 
+run_test_method_beamtalk_error_test() ->
+    %% Hits: error:#beamtalk_error{message = ErrMsg} catch-all (line 820–823)
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBeamtalkError, #{}, nil
+    ),
+    ?assertMatch({fail, testBeamtalkError, _}, Result).
+
+run_test_method_undef_test() ->
+    %% Hits: error:undef:TestST -> beamtalk_exception_handler:ensure_wrapped (line 824–829)
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testUndef, #{}, nil
+    ),
+    ?assertMatch({fail, testUndef, _}, Result).
+
 %%% ============================================================================
 %%% execute_tests/5 — runAll with methods (lines 163–187)
 %%% ============================================================================
 
 execute_tests_runall_pass_test() ->
+    %% FlatMethods values are ignored — only keys drive lifecycle detection.
+    %% tc_run_helper:dispatch/3 is called directly by run_test_method.
     FlatMethods = #{
-        testPass => {'FakeTest', {instance, fun(_, S) -> {reply, nil, S} end}},
-        setUp => {'FakeTest', {instance, fun(_, S) -> {reply, S, S} end}},
-        tearDown => {'FakeTest', {instance, fun(_, S) -> {reply, nil, S} end}}
+        testPass => {'FakeTest', {}},
+        setUp => {'FakeTest', {}},
+        tearDown => {'FakeTest', {}}
     },
     Result = beamtalk_test_case:execute_tests(runAll, [], 'FakeTest', tc_run_helper, FlatMethods),
     ?assert(is_binary(Result)),

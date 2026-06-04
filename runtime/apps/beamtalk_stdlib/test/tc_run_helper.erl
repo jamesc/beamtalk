@@ -26,6 +26,10 @@ dispatch(testAssertFail, [], _Instance) ->
     error(#beamtalk_error{
         kind = assertion_failed, class = 'TestCase', message = <<"assert failed">>
     });
+dispatch(testBeamtalkError, [], _Instance) ->
+    error(#beamtalk_error{kind = type_error, class = 'TestCase', message = <<"generic error">>});
+dispatch(testUndef, [], _Instance) ->
+    nonexistent_module_xyz_bt2391:'nope'();
 dispatch(setUp, [], Instance) ->
     Instance;
 dispatch(tearDown, [], _Instance) ->
