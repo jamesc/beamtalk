@@ -128,14 +128,15 @@ Embed and Separate were not built. Reasoning recorded for the decomposition:
 
 What integrating this with the main repo would look like:
 
-- **Repo layout:** a Mix project as a sibling toolchain, mirroring how
-  `editors/vscode` (TypeScript/npm) already lives in-repo. Candidate location
-  `editors/liveview/` or a top-level `web/`. A **separate repo** is viable under
-  Attach (the Phoenix app only needs a node name + cookie, never compiles
-  against Beamtalk source) but the monorepo subdir matches existing precedent
-  and keeps the LiveView versioned in lockstep with the eval/Transcript surface
-  it calls. Recommend monorepo subdir; revisit only if Mix/rebar3 release cadence
-  diverges.
+- **Repo layout (decided):** the Phoenix app lives **in the main repo** as a
+  sibling toolchain, mirroring how `editors/vscode` (TypeScript/npm) already
+  lives in-repo — a Mix project under `editors/` (e.g. `editors/liveview/`). A
+  separate repo was considered (under Attach the Phoenix app only needs a node
+  name + cookie and never compiles against Beamtalk source, so it is viable) but
+  the monorepo subdir matches existing precedent and keeps the LiveView
+  versioned in lockstep with the eval/Transcript surface it calls. (This spike's
+  throwaway code stays under `spikes/`; the productionised app is what lands in
+  `editors/`.)
 - **`just` recipes:** `just web` → discover the running workspace
   (`beamtalk workspace status <name>`), export `BT_WORKSPACE_NODE` +
   `BT_WORKSPACE_COOKIE` from `~/.beamtalk/workspaces/<id>/vm.args`, then
