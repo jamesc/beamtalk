@@ -1,0 +1,59 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+defmodule BtAttachWeb.WorkspaceLiveTest do
+  @moduledoc """
+  End-to-end proof of the BT-2394 Attach topology through the full Phoenix
+  LiveView stack against a *real* running Beamtalk workspace node.
+
+  Requires a workspace and its cookie in the environment:
+
+      beamtalk workspace create spike --background --persistent
+      export BT_WORKSPACE_NODE=beamtalk_workspace_spike@localhost
+      export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' \\
+        ~/.beamtalk/workspaces/spike/vm.args)
+
+  Skipped automatically if no workspace cookie is configured.
+  """
+  use BtAttachWeb.ConnCase
+  import Phoenix.LiveViewTest
+
+  @moduletag :workspace
+
+  setup do
+    if System.get_env("BT_WORKSPACE_COOKIE") in [nil, ""] do
+      {:skip, "BT_WORKSPACE_COOKIE not set"}
+    else
+      :ok
+    end
+  end
+
+  test "eval round-trip renders the workspace result", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    html = view |> form("form") |> render_submit(%{expr: "3 + 4"})
+    assert html =~ "7"
+  end
+
+  test "Transcript output streams live into the LiveView", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    marker = "hello-#{System.unique_integer([:positive])}"
+    view |> form("form") |> render_submit(%{expr: ~s|Transcript show: "#{marker}"|})
+
+    # The push is delivered asynchronously over distribution; poll the render.
+    assert eventually(fn -> render(view) =~ marker end)
+  end
+
+  defp eventually(fun, retries \\ 40) do
+    cond do
+      fun.() ->
+        true
+
+      retries == 0 ->
+        false
+
+      true ->
+        Process.sleep(50)
+        eventually(fun, retries - 1)
+    end
+  end
+end
