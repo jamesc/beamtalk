@@ -295,7 +295,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         Ok(Self::instantiation_error_stub(
             "'new'/0 = fun () ->",
-            Document::Str("Actor"),
+            "Actor",
             "new",
             "Use spawn instead",
         ))
@@ -311,7 +311,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         Ok(Self::instantiation_error_stub(
             "'new'/1 = fun (_InitArgs) ->",
-            Document::Str("Actor"),
+            "Actor",
             "new:",
             "Use spawnWith: instead",
         ))
@@ -327,7 +327,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name();
         Ok(Self::instantiation_error_stub(
             "'spawn'/0 = fun () ->",
-            leaf::var(class_name),
+            class_name,
             "spawn",
             "Abstract classes cannot be instantiated. Subclass it first.",
         ))
@@ -341,7 +341,7 @@ impl CoreErlangGenerator {
         let class_name = self.class_name();
         Ok(Self::instantiation_error_stub(
             "'spawn'/1 = fun (_InitArgs) ->",
-            leaf::var(class_name),
+            class_name,
             "spawnWith:",
             "Abstract classes cannot be instantiated. Subclass it first.",
         ))
@@ -359,8 +359,8 @@ impl CoreErlangGenerator {
     /// ```
     fn instantiation_error_stub(
         fun_decl: &'static str,
-        class_name_doc: Document<'static>,
-        selector: &'static str,
+        class_name: impl Into<String>,
+        selector: impl Into<String>,
         hint: &str,
     ) -> Document<'static> {
         docvec![
@@ -370,15 +370,15 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     docvec![
-                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', '",
-                        class_name_doc,
-                        "') in",
+                        "let Error0 = call 'beamtalk_error':'new'('instantiation_error', ",
+                        leaf::atom(class_name),
+                        ") in",
                     ],
                     line(),
                     docvec![
-                        "let Error1 = call 'beamtalk_error':'with_selector'(Error0, '",
-                        selector,
-                        "') in",
+                        "let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
+                        leaf::atom(selector),
+                        ") in",
                     ],
                     line(),
                     docvec![

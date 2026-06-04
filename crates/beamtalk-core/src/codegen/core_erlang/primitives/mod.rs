@@ -245,22 +245,21 @@ pub(crate) fn power_bif(params: &[String]) -> Option<Document<'static>> {
 /// call 'beamtalk_error':'raise'(Error2)
 /// ```
 pub(crate) fn build_dnu_error_doc(
-    class: &'static str,
-    selector: &'static str,
+    class: impl Into<String>,
+    selector: impl Into<String>,
     hint: &str,
 ) -> Document<'static> {
-    let hint_bin = core_erlang_binary_string(hint);
     docvec![
-        "let Error0 = call 'beamtalk_error':'new'('does_not_understand', '",
-        class,
-        "') in \
-         let Error1 = call 'beamtalk_error':'with_selector'(Error0, '",
-        selector,
-        "') in \
-         let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-        hint_bin,
-        ") in \
-         call 'beamtalk_error':'raise'(Error2)",
+        "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ",
+        leaf::atom(class),
+        ") in ",
+        "let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
+        leaf::atom(selector),
+        ") in ",
+        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
+        leaf::binary_lit(hint),
+        ") in ",
+        "call 'beamtalk_error':'raise'(Error2)",
     ]
 }
 
