@@ -14,6 +14,7 @@ accepting any protocol operations.
 """.
 
 -include_lib("kernel/include/logger.hrl").
+-include("beamtalk_ws_state.hrl").
 
 -export([
     init/2,
@@ -22,21 +23,6 @@ accepting any protocol operations.
     websocket_info/2,
     terminate/3
 ]).
-
--record(ws_state, {
-    session_id :: binary() | undefined,
-    session_pid :: pid() | undefined,
-    session_mon :: reference() | undefined,
-    authenticated :: boolean(),
-    peer :: term(),
-    %% BT-696: Pending eval request for streaming output correlation
-    pending_eval :: term() | undefined,
-    %% BT-698: IO capture process pid and correlation ref for stdin routing
-    io_capture_pid :: pid() | undefined,
-    stdin_ref :: reference() | undefined,
-    %% BT-1433: Whether this session is subscribed to log streaming
-    log_subscribed :: boolean()
-}).
 
 -doc "HTTP upgrade to WebSocket.".
 init(Req, _Opts) ->

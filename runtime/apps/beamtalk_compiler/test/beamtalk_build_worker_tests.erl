@@ -140,6 +140,42 @@ compile_modules_mixed(TmpDir) ->
     ?assertEqual(error, Result).
 
 %%% ---------------------------------------------------------------
+%%% handle_read_specs/1 — {read_specs, BeamFiles} command
+%%% ---------------------------------------------------------------
+
+%% Empty file list still emits a result-ok line.
+handle_read_specs_empty_test() ->
+    ?assertEqual(ok, beamtalk_build_worker:handle_read_specs([])).
+
+%% A readable .beam exercises the {ok, Specs} branch and a missing .beam
+%% exercises the per-module {error, Reason} warning branch. The batch still
+%% completes with result-ok (per-module errors are warnings, not fatal).
+%% We compile a real .beam to a temp dir rather than using code:which/1, which
+%% returns the atom `cover_compiled` for cover-instrumented modules.
+handle_read_specs_mixed_test_() ->
+    {setup, fun setup_temp_dir/0, fun cleanup_temp_dir/1, fun(TmpDir) ->
+        fun() ->
+            OutDir = filename:join(TmpDir, "specs_ebin"),
+            ok = filelib:ensure_dir(filename:join(OutDir, "dummy")),
+            CoreFile = filename:join(TmpDir, "test_build_worker_mod.core"),
+            ok = file:write_file(CoreFile, valid_core_erlang_source()),
+            {ok, _} = beamtalk_build_worker:compile_core_file(CoreFile, OutDir),
+            BeamFile = filename:join(OutDir, "test_build_worker_mod.beam"),
+            ?assert(filelib:is_regular(BeamFile)),
+            %% A path under TmpDir that we never create exercises the per-module
+            %% {error, Reason} branch without hardcoding an absolute path.
+            MissingBeam = filename:join(TmpDir, "missing.beam"),
+            Result = beamtalk_build_worker:handle_read_specs([BeamFile, MissingBeam]),
+            ?assertEqual(ok, Result)
+        end
+    end}.
+
+%% A non-list argument makes read_specs_batch/1 raise inside lists:map, which
+%% the handler's try/catch turns into a result-error line.
+handle_read_specs_crash_caught_test() ->
+    ?assertEqual(ok, beamtalk_build_worker:handle_read_specs(not_a_list)).
+
+%%% ---------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------
 

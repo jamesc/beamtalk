@@ -81,6 +81,46 @@ carry no Erlang abstract code (`erlc +from_core` emits empty abstract
 forms), so `cover` cannot instrument them and they are auto-excluded
 (BT-1672). They are exercised instead by the `.bt` BUnit suite.
 
+#### Integration-shaped modules (BT-2389)
+
+Some modules are only reached by a live external client, not by the
+TCP `repl_protocol` E2E suite or plain unit tests:
+
+- **`beamtalk_ws_handler`** — the Cowboy WebSocket handler for the REPL
+  protocol (used by MCP/LSP/browser clients). Its callbacks (`init/2`,
+  `websocket_init/1`, `websocket_handle/2`, `websocket_info/2`,
+  `terminate/3`) are largely pure frame-builders over a `#ws_state{}`
+  record. Rather than stand up a live WS client, they are driven
+  **directly** by EUnit: the record is shared via
+  `apps/beamtalk_workspace/include/beamtalk_ws_state.hrl`, and tests
+  construct handler state + decode real protocol messages
+  (`beamtalk_repl_protocol:decode/1`) to exercise each clause. The
+  post-auth `create_session`/resume paths use a lightweight fixture that
+  starts only `beamtalk_session_sup`. This is deterministic and needs no
+  socket.
+- **`beamtalk_build_worker`** — its pure compilation helpers
+  (`compile_core_erlang/1`, `compile_core_file/2`, `compile_modules/2`,
+  `handle_read_specs/1`) are unit-tested via `-ifdef(TEST)` exports; only
+  the escript stdin loop (`main/0`/`compile_loop/0`) needs a real port.
+- **`beamtalk_compiler_port` / `beamtalk_compiler_server`** — success
+  paths are covered by live-port integration EUnit tests (they spawn the
+  real Rust compiler port).
+
+> **`--app` discovery gotcha:** `coverage-runtime` runs
+> `rebar3 eunit --app=<app>`, which only auto-discovers a source module's
+> `Module_tests` **companion**. A standalone `*_callbacks_tests` suite
+> compiles fine but is silently skipped under `--app`, so its coverage
+> never reaches the merged badge. Keep callback/unit tests for a source
+> module in that module's `_tests` companion (e.g.
+> `beamtalk_ws_handler_tests`).
+
+**Genuinely unreachable (documented out-of-scope, not forced):** the
+`create_session` `{error, Reason}` arm (the session supervisor's
+`simple_one_for_one` child start does not fail deterministically), the
+`actor_snapshot_frames/0` live-registry branch, the `compile_core_file/2`
+beam-write-error arm, and root-only `permission_denied` / TOCTOU
+`error:badarg` / `exit:{noproc}` defensive catches in `beamtalk_file`.
+
 Coverage reports are saved to:
 - Rust HTML: `target/llvm-cov/html/index.html`
 - Erlang HTML: `runtime/_build/test/cover/index.html`
