@@ -60,14 +60,21 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   @impl true
-  def handle_event("eval", %{"expr" => expr}, socket) do
-    case Workspace.eval(socket.assigns.session_pid, expr) do
-      {:ok, value, _output, _warnings} ->
-        {:noreply, assign(socket, result: value, error: nil, expr: expr)}
+  def handle_event("eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
+      when is_pid(pid) do
+    case Workspace.eval(pid, expr) do
+      {:ok, term, _output, _warnings} ->
+        # eval returns the live term; render is display-only.
+        {:noreply, assign(socket, result: Workspace.render(term), error: nil, expr: expr)}
 
-      {:error, message, _output, _warnings} ->
-        {:noreply, assign(socket, result: nil, error: message, expr: expr)}
+      {:error, reason, _output, _warnings} ->
+        {:noreply, assign(socket, result: nil, error: inspect(reason), expr: expr)}
     end
+  end
+
+  # No session (attach failed) — don't crash on a missing assign.
+  def handle_event("eval", %{"expr" => expr}, socket) do
+    {:noreply, assign(socket, result: nil, error: "not attached to workspace", expr: expr)}
   end
 
   # Transcript push, delivered directly over distribution to this LiveView pid.

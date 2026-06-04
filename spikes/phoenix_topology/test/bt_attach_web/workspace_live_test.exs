@@ -36,7 +36,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert eventually(fn -> render(view) =~ marker end)
   end
 
-  defp eventually(fun, retries \\ 40) do
+  # ~6s total — generous for cross-node async transcript delivery under CI load.
+  defp eventually(fun, retries \\ 120) do
     cond do
       fun.() ->
         true

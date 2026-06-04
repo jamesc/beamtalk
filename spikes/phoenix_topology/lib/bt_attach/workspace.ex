@@ -59,20 +59,48 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
-  Evaluate a Beamtalk expression in `session_pid`. Returns the workspace's own
-  formatted result map (decoded from `beamtalk_repl_json:format_response/1`,
-  the same formatter the browser protocol uses), so display is surface-consistent.
+  Evaluate a Beamtalk expression in `session_pid`. Returns the **live Erlang
+  term** the workspace produced — no JSON. Over distribution that means
+  `Counter spawn` hands back a real, messageable remote pid wrapped in a
+  `{:beamtalk_object, class, module, pid}` tuple, not a flattened display string.
+
+  The term contract is the only coupling between Phoenix and the workspace:
+    * success → `{:ok, term, output, warnings}`
+    * error   → `{:error, reason_term, output, warnings}` (e.g. a `:beamtalk_error` tuple)
   """
   def eval(session_pid, expression) when is_binary(expression) do
     case rpc(:beamtalk_repl_shell, :eval, [session_pid, String.to_charlist(expression)]) do
       {:ok, value, output, warnings} ->
-        {:ok, format(value), to_string(output), Enum.map(warnings, &to_string/1)}
+        {:ok, value, to_string(output), Enum.map(warnings, &to_string/1)}
 
       {:error, reason, output, warnings} ->
-        {:error, format_error(reason), to_string(output), Enum.map(warnings, &to_string/1)}
+        {:error, reason, to_string(output), Enum.map(warnings, &to_string/1)}
 
       {:badrpc, reason} ->
-        {:error, "workspace unreachable: #{inspect(reason)}", "", []}
+        {:error, {:unreachable, reason}, "", []}
+    end
+  end
+
+  @doc """
+  Render a result *term* as a string for the page. Display is a separate
+  concern from the data path: `eval/2` returns the live term, and this only
+  stringifies it. A spawned actor renders as a live remote pid so it's obvious
+  the object lives on the workspace node, not here.
+  """
+  def render(value) do
+    case value do
+      bin when is_binary(bin) ->
+        bin
+
+      {:beamtalk_object, class, _module, pid} when is_pid(pid) ->
+        "##{class}⟨#{inspect(pid)} on #{node(pid)}⟩"
+
+      # Unwrap a synchronous actor reply (`c value` -> {:ok, 3}).
+      {:ok, inner} ->
+        render(inner)
+
+      other ->
+        inspect(other)
     end
   end
 
@@ -91,7 +119,14 @@ defmodule BtAttach.Workspace do
     unless Node.alive?() do
       # A unique short name so multiple dev runs don't collide on epmd.
       name = :"bt_attach_#{System.unique_integer([:positive])}@localhost"
-      {:ok, _} = :net_kernel.start([name, :shortnames])
+
+      # Two connected mounts can both pass Node.alive?/0 and race here; the
+      # loser sees {:error, {:already_started, _}}, which is fine.
+      case :net_kernel.start([name, :shortnames]) do
+        {:ok, _pid} -> :ok
+        {:error, {:already_started, _pid}} -> :ok
+        {:error, reason} -> raise "failed to start distributed node: #{inspect(reason)}"
+      end
     end
   end
 
@@ -106,35 +141,4 @@ defmodule BtAttach.Workspace do
   defp rpc(mod, fun, args) do
     :rpc.call(node_name(), mod, fun, args)
   end
-
-  # Reuse the workspace's own JSON formatter so the LiveView shows exactly what
-  # the WebSocket REPL would show for the same value.
-  defp format(value) do
-    case rpc(:beamtalk_repl_json, :format_response, [value]) do
-      json when is_binary(json) ->
-        case Jason.decode(json) do
-          {:ok, %{"value" => v}} -> stringify(v)
-          _ -> inspect(value)
-        end
-
-      _ ->
-        inspect(value)
-    end
-  end
-
-  defp format_error(reason) do
-    case rpc(:beamtalk_repl_json, :format_error, [reason]) do
-      json when is_binary(json) ->
-        case Jason.decode(json) do
-          {:ok, %{"message" => m}} -> m
-          _ -> inspect(reason)
-        end
-
-      _ ->
-        inspect(reason)
-    end
-  end
-
-  defp stringify(v) when is_binary(v), do: v
-  defp stringify(v), do: inspect(v)
 end

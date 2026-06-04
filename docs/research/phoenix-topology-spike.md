@@ -75,7 +75,7 @@ byte-identical values to the existing Phase-1 browser. Surface-consistent for fr
   - `eval round-trip renders the workspace result` → asserts `7`
   - `Transcript output streams live into the LiveView` → asserts a `Transcript show:` marker appears
 
-```
+```text
 $ mix test test/bt_attach_web/workspace_live_test.exs
 2 tests, 0 failures
 ```
@@ -183,6 +183,54 @@ What integrating this with the main repo would look like:
   reflects the new code with no Phoenix-side reload at all. (Exercised
   indirectly via session-bound eval state; a dedicated class-edit→re-eval demo
   is left to the LiveView IDE epic.)
+
+## API shape: return terms, encode JSON only at the WebSocket edge
+
+The spike surfaced a clear recommendation for how the LiveView IDE should talk
+to the workspace. Two thin layers, and one explicit decision:
+
+1. **Elixir client module (thin, necessary).** One module (`BtAttach.Workspace`
+   in the spike, ~120 LOC) owns node name / cookie / `connect`, and exposes
+   idiomatic functions. LiveViews never call `:rpc` directly.
+
+2. **Erlang contract: return terms, not JSON.** The existing curated op layer —
+   `beamtalk_repl_server:handle_protocol_request/2` → `handle_op/4` (protocol
+   2.0, already used by the browser and *explicitly built for "runtime-attached
+   LSP / MCP clients"*) — is the right **dispatch** surface to reuse. But today
+   it is also the **JSON boundary**: `beamtalk_repl_ops_eval:handle/4` calls the
+   term-returning core (`beamtalk_repl_shell:eval/2 → {ok, Term, Output, Warnings}`)
+   and then immediately `beamtalk_repl_json:encode_result/_`.
+
+   Over Erlang distribution, JSON is both overhead and **lossy in the way that
+   matters**: `Counter spawn` is a live term —
+   `{beamtalk_object, 'Counter', bt@counter, <0.369.0>}` carrying a **real,
+   messageable remote pid** — that JSON flattens to the dead string
+   `"#Actor<Counter,…>"`. An inspector, "send a message to this object", or
+   reference-following all need the term, not its `printString`. That liveness
+   is the whole point of a live-image IDE.
+
+   **Decision: the Attach path returns terms.** The op layer should be factored
+   so dispatch/validation/error-wrapping returns a structured term
+   (`{ok, Value, Output, Warnings} | {error, #beamtalk_error{}}`), and JSON
+   encoding moves to the **WebSocket transport edge only**. Then:
+     * Browser (WS): term → JSON at the boundary (unchanged on the wire).
+     * Phoenix (Attach), LSP, MCP: terms pass through natively.
+
+   The one condition: "terms" must be a *documented, stable* contract (the
+   result tuple + the `#beamtalk_error{}` record — Phoenix matches on the
+   `:beamtalk_error` tag, no shared `.hrl` needed), not raw internal shapes —
+   otherwise it just trades JSON-coupling for internal-shape-coupling.
+
+3. **One genuine gap: push-stream subscription.** `handle_op` covers
+   request/response (eval, load-source, inspect, …) but **not** the live push
+   streams (Transcript / actors / classes / bindings / flush), which today only
+   `beamtalk_ws_handler` wires up by calling `beamtalk_transcript_stream:subscribe/1`
+   etc. directly. A dist-attached client needs a small, stable **subscription
+   facade** rather than casting `{subscribe, self()}` tuples at gen_servers
+   (which is what this spike does as a shortcut).
+
+This "extract a term-returning op layer; JSON only at the WS edge; add a
+subscription facade" work is the natural first issue of the LiveView IDE epic.
 
 ## What this unblocks
 
