@@ -637,14 +637,13 @@ shutdown_invalid_cookie_denied_test() ->
     {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
     ?assertMatch([{text, _} | _], Frames).
 
-shutdown_valid_cookie_succeeds_test() ->
-    %% Correct cookie hits the success path. erlang:send_after/3 to an
-    %% unregistered name (beamtalk_repl_server may be down here) drops the
-    %% message silently at expiry, so this is side-effect-free.
-    Cookie = atom_to_binary(erlang:get_cookie(), utf8),
-    Json = op_json(<<"shutdown">>, #{<<"cookie">> => Cookie}),
-    {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, authed_state()),
-    ?assertMatch([{text, _} | _], Frames).
+%% NB: the valid-cookie shutdown success path is deliberately NOT tested here.
+%% On a valid cookie the handler arms `send_after(100, beamtalk_repl_server,
+%% shutdown_requested)`, and `beamtalk_repl_server` handles that message by
+%% calling `init:stop()` — halting the whole node. Firing it from an in-node
+%% EUnit suite (where other tests start a real `beamtalk_repl_server`) would be
+%% an order/timing-dependent way to kill the entire run. That branch is covered
+%% by the WebSocket E2E surface instead.
 
 shutdown_non_binary_cookie_denied_test() ->
     Json = op_json(<<"shutdown">>, #{<<"cookie">> => 42}),
