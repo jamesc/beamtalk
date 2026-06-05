@@ -226,3 +226,229 @@ execute_tests_run_single_not_found_test() ->
         'run:', [testMissing], 'FakeTest', tc_run_helper, #{}
     ),
     ?assertNotEqual(nomatch, binary:match(Result, <<"not found">>)).
+
+%%% ============================================================================
+%%% execute_tests/5 — runAll with no test methods (line 166)
+%%% ============================================================================
+
+execute_tests_runall_no_methods_test() ->
+    %% FlatMethods has no "test*" keys → discover_test_methods returns [] → line 166
+    Result = beamtalk_test_case:execute_tests(
+        runAll, [], 'FakeTest', tc_run_helper, #{setUp => {'FakeTest', {}}}
+    ),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"No test methods">>)).
+
+%%% ============================================================================
+%%% decode_beam_error/1 clause coverage via run_test_method/5 (BT-2404)
+%%%
+%%% decode_beam_error is private but reachable through run_test_method when
+%%% errors fall through to the generic `error:TestReason:TestST` catch clause
+%%% (line 830 of beamtalk_test_case.erl). All dispatchers below raise error
+%%% shapes that are NOT #beamtalk_error{} records and NOT `undef`, so they
+%%% bypass the specialised catch clauses and hit format_test_error/3.
+%%% ============================================================================
+
+decode_error_future_rejected_test() ->
+    %% {future_rejected, Inner} → "future rejected: ..."
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testFutureRejected, #{}, nil
+    ),
+    ?assertMatch({fail, testFutureRejected, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"future rejected">>)).
+
+decode_error_error_map_with_key_test() ->
+    %% {error, Map} with error key present → recurses into inner value
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testErrorMapWithKey, #{}, nil
+    ),
+    ?assertMatch({fail, testErrorMapWithKey, _}, Result).
+
+decode_error_error_map_no_key_test() ->
+    %% {error, Map} with no error key → print_string(Map)
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testErrorMapNoKey, #{}, nil
+    ),
+    ?assertMatch({fail, testErrorMapNoKey, _}, Result).
+
+decode_error_exception_map_test() ->
+    %% #{class := 'Exception', error := #beamtalk_error{message}} → extracts message
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testExceptionMap, #{}, nil
+    ),
+    ?assertMatch({fail, testExceptionMap, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"exc msg">>)).
+
+decode_error_class_map_test() ->
+    %% #{'$beamtalk_class' := _, error := #beamtalk_error{message}} → extracts message
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testClassMap, #{}, nil
+    ),
+    ?assertMatch({fail, testClassMap, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"cls msg">>)).
+
+decode_error_badkey_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBadKey, #{}, nil
+    ),
+    ?assertMatch({fail, testBadKey, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"not found in dictionary">>)).
+
+decode_error_badmap_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBadMap, #{}, nil
+    ),
+    ?assertMatch({fail, testBadMap, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"is not a map">>)).
+
+decode_error_badmatch_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBadMatch, #{}, nil
+    ),
+    ?assertMatch({fail, testBadMatch, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"no match of right-hand side">>)).
+
+decode_error_case_clause_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testCaseClause, #{}, nil
+    ),
+    ?assertMatch({fail, testCaseClause, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"no case clause matched">>)).
+
+decode_error_try_clause_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testTryClause, #{}, nil
+    ),
+    ?assertMatch({fail, testTryClause, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"no try clause matched">>)).
+
+decode_error_function_clause_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testFunctionClause, #{}, nil
+    ),
+    ?assertMatch({fail, testFunctionClause, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"no matching function clause">>)).
+
+decode_error_if_clause_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testIfClause, #{}, nil
+    ),
+    ?assertMatch({fail, testIfClause, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"no true branch">>)).
+
+decode_error_badarity_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBadArity, #{}, nil
+    ),
+    ?assertMatch({fail, testBadArity, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"function expects">>)).
+
+decode_error_badfun_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBadFun, #{}, nil
+    ),
+    ?assertMatch({fail, testBadFun, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"is not a function">>)).
+
+decode_error_badarg_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBadArg, #{}, nil
+    ),
+    ?assertMatch({fail, testBadArg, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"bad argument">>)).
+
+decode_error_badarith_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testBadArith, #{}, nil
+    ),
+    ?assertMatch({fail, testBadArith, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"bad arithmetic">>)).
+
+decode_error_noproc_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testNoproc, #{}, nil
+    ),
+    ?assertMatch({fail, testNoproc, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"no such process">>)).
+
+decode_error_timeout_test() ->
+    Result = beamtalk_test_case:run_test_method(
+        'FakeTest', tc_run_helper, testTimeout, #{}, nil
+    ),
+    ?assertMatch({fail, testTimeout, Msg} when is_binary(Msg), Result),
+    {fail, _, Msg} = Result,
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"timed out">>)).
+
+%%% ============================================================================
+%%% run_all/1, run_single/2, run_all_structured/1, run_single_structured/2
+%%% BIF-fallback paths (lines 221–360) — require bt@tc_stub on code path
+%%% ============================================================================
+
+run_all_with_tests_test() ->
+    %% resolve_module('TcStub') → 'bt@tc_stub'; discover finds testStubPass + testStubFail
+    Result = beamtalk_test_case:run_all('TcStub'),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"failed">>)).
+
+run_all_no_test_methods_test() ->
+    %% resolve_module('EmptyStub') → 'bt@empty_stub'; no test* exports → "No test methods"
+    Result = beamtalk_test_case:run_all('EmptyStub'),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"No test methods">>)).
+
+run_single_pass_test() ->
+    Result = beamtalk_test_case:run_single('TcStub', testStubPass),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"passed">>)).
+
+run_single_fail_test() ->
+    Result = beamtalk_test_case:run_single('TcStub', testStubFail),
+    ?assert(is_binary(Result)),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"failed">>)).
+
+run_all_structured_no_test_methods_test() ->
+    %% 'bt@empty_stub' has no test* exports → no-test-methods branch (lines 295–307)
+    Result = beamtalk_test_case:run_all_structured('EmptyStub'),
+    ?assert(is_map(Result)),
+    ?assertEqual('EmptyStub', maps:get(class, Result)),
+    ?assertEqual(0, maps:get(total, Result)),
+    ?assertEqual(0, maps:get(passed, Result)),
+    ?assertEqual([], maps:get(tests, Result)).
+
+run_all_structured_with_tests_test() ->
+    Result = beamtalk_test_case:run_all_structured('TcStub'),
+    ?assert(is_map(Result)),
+    ?assertEqual('TcStub', maps:get(class, Result)),
+    ?assert(is_integer(maps:get(total, Result))),
+    ?assert(maps:get(total, Result) > 0),
+    ?assert(is_list(maps:get(tests, Result))).
+
+run_single_structured_pass_test() ->
+    Result = beamtalk_test_case:run_single_structured('TcStub', testStubPass),
+    ?assert(is_map(Result)),
+    ?assertEqual('TcStub', maps:get(class, Result)),
+    ?assertEqual(1, maps:get(total, Result)),
+    ?assertEqual(1, maps:get(passed, Result)),
+    ?assertEqual(0, maps:get(failed, Result)).
+
+run_single_structured_fail_test() ->
+    Result = beamtalk_test_case:run_single_structured('TcStub', testStubFail),
+    ?assert(is_map(Result)),
+    ?assertEqual(1, maps:get(total, Result)),
+    ?assertEqual(0, maps:get(passed, Result)),
+    ?assertEqual(1, maps:get(failed, Result)).
