@@ -12,165 +12,134 @@
 // dropped write-only outer locals, and mis-threaded loop local-assignment RHS.
 
 TestCase subclass: ActorThreadingConstructsTest
+  field: a = nil
+
+  setUp => self.a := ActorThreadingCorpus spawn
+
+  tearDown => self.a stop
 
   // ── write-only conditional threads in non-last position ────────────────────
   testIfTrueNonLastWriteOnlyThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueNonLastWriteOnly: true) equals: 9
+    self assert: (self.a ifTrueNonLastWriteOnly: true) equals: 9
 
   testIfTrueNonLastWriteOnlyFalseUnchanged =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueNonLastWriteOnly: false) equals: 0
+    self assert: (self.a ifTrueNonLastWriteOnly: false) equals: 0
 
   // ── read+write conditional threads on EVERY invocation ─────────────────────
   testIfTrueNonLastReadWriteThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
+    self assert: (self.a ifTrueNonLastReadWrite: true) equals: 7
 
   // Second freshly-spawned actor must also thread (was first-call-only).
   testIfTrueNonLastReadWriteSecondInstanceThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
+    self assert: (self.a ifTrueNonLastReadWrite: true) equals: 7
     b := ActorThreadingCorpus spawn
     self assert: (b ifTrueNonLastReadWrite: true) equals: 7
+    b stop
 
   // Same actor, repeated calls must each thread independently.
   testIfTrueNonLastReadWriteRepeatedCallsThread =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
-    self assert: (a ifTrueNonLastReadWrite: true) equals: 7
-    self assert: (a ifTrueNonLastReadWrite: false) equals: 0
+    self assert: (self.a ifTrueNonLastReadWrite: true) equals: 7
+    self assert: (self.a ifTrueNonLastReadWrite: true) equals: 7
+    self assert: (self.a ifTrueNonLastReadWrite: false) equals: 0
 
   // ── ifTrue:ifFalse: threads in non-last position ───────────────────────────
   testIfTrueIfFalseNonLastTrueBranch =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueIfFalseNonLastReadWrite: true) equals: 2
+    self assert: (self.a ifTrueIfFalseNonLastReadWrite: true) equals: 2
 
   testIfTrueIfFalseNonLastFalseBranch =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueIfFalseNonLastReadWrite: false) equals: 101
+    self assert: (self.a ifTrueIfFalseNonLastReadWrite: false) equals: 101
 
   // ── conditional as local-assignment RHS binds value and threads local ──────
   testIfTrueIfFalseAssignRhsThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
+    self assert: (self.a ifTrueIfFalseAssignRhsReadWrite: true) equals: 5
 
   testIfTrueIfFalseAssignRhsFalseUnchanged =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifTrueIfFalseAssignRhsReadWrite: false) equals: 0
+    self assert: (self.a ifTrueIfFalseAssignRhsReadWrite: false) equals: 0
 
   // ── count: / detect: thread outer-local mutations ──────────────────────────
-  testCountNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a countNonLastReadWrite equals: 3
+  testCountNonLastThreads => self assert: self.a countNonLastReadWrite equals: 3
 
   testDetectNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a detectNonLastReadWrite equals: 3
+    self assert: self.a detectNonLastReadWrite equals: 3
 
   // ── loop local-assignment RHS threads the accumulator ──────────────────────
   testToDoAssignRhsThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a toDoAssignRhsReadWrite equals: 15
+    self assert: self.a toDoAssignRhsReadWrite equals: 15
 
   // ── ifFalse: threads in non-last position ──────────────────────────────────
   testIfFalseNonLastTrueBranchUnchanged =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifFalseNonLastReadWrite: true) equals: 0
+    self assert: (self.a ifFalseNonLastReadWrite: true) equals: 0
 
   testIfFalseNonLastFalseBranchThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifFalseNonLastReadWrite: false) equals: 7
+    self assert: (self.a ifFalseNonLastReadWrite: false) equals: 7
 
   // ── ifNotNil: threads in non-last position ─────────────────────────────────
   testIfNotNilNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifNotNilNonLastReadWrite: 10) equals: 10
+    self assert: (self.a ifNotNilNonLastReadWrite: 10) equals: 10
 
   testIfNotNilNonLastNilUnchanged =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a ifNotNilNonLastReadWrite: nil) equals: 0
+    self assert: (self.a ifNotNilNonLastReadWrite: nil) equals: 0
 
   // ── nested conditional in a branch rebinds the local for an intra-branch read ─
   testNestedConditionalIntraBranchRead =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a nestedConditionalIntraBranchRead: true) equals: 6
+    self assert: (self.a nestedConditionalIntraBranchRead: true) equals: 6
 
   testNestedConditionalIntraBranchReadFalse =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a nestedConditionalIntraBranchRead: false) equals: 0
+    self assert: (self.a nestedConditionalIntraBranchRead: false) equals: 0
 
   // ── BT-2356: remaining state-threading list/dict ops thread outer locals ──────
   testAllSatisfyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a allSatisfyNonLastReadWrite equals: 3
+    self assert: self.a allSatisfyNonLastReadWrite equals: 3
 
   testAnySatisfyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a anySatisfyNonLastReadWrite equals: 3
+    self assert: self.a anySatisfyNonLastReadWrite equals: 3
 
   testFlatMapNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a flatMapNonLastReadWrite equals: 3
+    self assert: self.a flatMapNonLastReadWrite equals: 3
 
   testTakeWhileNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a takeWhileNonLastReadWrite equals: 3
+    self assert: self.a takeWhileNonLastReadWrite equals: 3
 
   testDropWhileNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a dropWhileNonLastReadWrite equals: 3
+    self assert: self.a dropWhileNonLastReadWrite equals: 3
 
   testGroupByNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a groupByNonLastReadWrite equals: 3
+    self assert: self.a groupByNonLastReadWrite equals: 3
 
   testPartitionNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a partitionNonLastReadWrite equals: 3
+    self assert: self.a partitionNonLastReadWrite equals: 3
 
   testSortNonLastWriteOnlyThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a sortNonLastWriteOnly equals: 1
+    self assert: self.a sortNonLastWriteOnly equals: 1
 
   testDoWithKeyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a doWithKeyNonLastReadWrite equals: 2
+    self assert: self.a doWithKeyNonLastReadWrite equals: 2
 
   testKeysAndValuesDoNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a keysAndValuesDoNonLastReadWrite equals: 2
+    self assert: self.a keysAndValuesDoNonLastReadWrite equals: 2
 
   // ── BT-2356 (A): write-only outer locals through foldl list ops ──────────────
   testDoWriteOnlyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a doWriteOnlyNonLast equals: 7
+    self assert: self.a doWriteOnlyNonLast equals: 7
 
   testCollectWriteOnlyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a collectWriteOnlyNonLast equals: 7
+    self assert: self.a collectWriteOnlyNonLast equals: 7
 
   testSelectWriteOnlyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a selectWriteOnlyNonLast equals: 7
+    self assert: self.a selectWriteOnlyNonLast equals: 7
 
   testRejectWriteOnlyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a rejectWriteOnlyNonLast equals: 7
+    self assert: self.a rejectWriteOnlyNonLast equals: 7
 
   testCountWriteOnlyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a countWriteOnlyNonLast equals: 7
+    self assert: self.a countWriteOnlyNonLast equals: 7
 
   testDetectWriteOnlyNonLastThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: a detectWriteOnlyNonLast equals: true
+    self assert: self.a detectWriteOnlyNonLast equals: true
 
   // ── BT-2356 (B): nested list-op mutation inside a conditional branch ──────────
   testNestedListOpInBranchThreads =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a nestedListOpInBranch: true) equals: 6
+    self assert: (self.a nestedListOpInBranch: true) equals: 6
 
   testNestedListOpInBranchFalseUnchanged =>
-    a := ActorThreadingCorpus spawn
-    self assert: (a nestedListOpInBranch: false) equals: 0
+    self assert: (self.a nestedListOpInBranch: false) equals: 0
