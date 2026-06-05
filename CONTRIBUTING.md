@@ -15,6 +15,13 @@ Be kind, respectful, and constructive. We're building something fun — let's ke
 - **Docker Desktop** — for devcontainer support (recommended)
 - **VS Code** — with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 
+> **Optional — LiveView IDE (`editors/liveview`):** the web IDE is a Phoenix/Mix
+> project and needs **Elixir ≥ 1.17 built for OTP 27**. Install a precompiled
+> release or use asdf (`asdf install elixir 1.18.4-otp-27`) — **not** the distro
+> `elixir` package, which pins `erlang < 26` and conflicts with OTP 27. The
+> devcontainer and `scripts/setup-cloud.sh` install this for you. See
+> [`editors/liveview/README.md`](editors/liveview/README.md).
+
 ### Development Environment
 
 The easiest way to get started is with the devcontainer:
@@ -45,6 +52,9 @@ If you prefer a local setup:
    ```bash
    just ci
    ```
+6. _(Optional, for the LiveView IDE)_ Install Elixir ≥ 1.17 **built for OTP 27**
+   — a precompiled release or `asdf install elixir 1.18.4-otp-27`, never the
+   distro `elixir` package. Then `just web-setup`.
 
 ## Building & Testing
 

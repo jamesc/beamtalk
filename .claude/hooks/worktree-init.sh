@@ -143,7 +143,12 @@ ${_NODE_OPTS_BLOCK}"
   # through the proxy after an upgrade.
   _MARKER="# hex-bridge-proxy PATH (auto-added by worktree-init.sh)"
   _END_MARKER="# hex-bridge-proxy END"
-  _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\""
+  # HEX_CDN routes rebar3's hex through the bridge; HEX_MIRROR does the same for
+  # Mix/Hex (editors/liveview, BT-2401). ELIXIR_ERL_OPTIONS=+fnu keeps the
+  # precompiled Elixir from tripping on a non-UTF-8 container locale.
+  _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
+export HEX_MIRROR=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
+export ELIXIR_ERL_OPTIONS=\"\${ELIXIR_ERL_OPTIONS:-+fnu}\""
   if [[ -n "${_EXTRA_EXPORT_LINES}" ]]; then
     _EXPORT_BLOCK="${_EXPORT_BLOCK}
 ${_EXTRA_EXPORT_LINES}"

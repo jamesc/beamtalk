@@ -28,7 +28,7 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         esl-erlang git gettext-base \
-        socat netcat-openbsd lsof \
+        socat netcat-openbsd lsof unzip \
         curl wget jq htop strace \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
@@ -86,8 +86,27 @@ RUN git clone --depth 1 --branch ${REBAR3_VERSION} https://github.com/erlang/reb
     && cd / \
     && rm -rf /tmp/rebar3
 
+# Install Elixir (precompiled for OTP 27) for the editors/liveview Mix project.
+# BT-2401: NOT the distro `elixir` package — it pins erlang < 26 and conflicts
+# with OTP 27. We unzip a release built for OTP 27 and install Hex + rebar3 so
+# `mix deps.get` works out of the box.
+ARG ELIXIR_VERSION=1.18.4
+RUN curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+        "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-27.zip" \
+        -o /tmp/elixir-otp-27.zip \
+    && mkdir -p /opt/elixir \
+    && unzip -q /tmp/elixir-otp-27.zip -d /opt/elixir \
+    && rm -f /tmp/elixir-otp-27.zip \
+    && ln -sf /opt/elixir/bin/elixir /usr/local/bin/elixir \
+    && ln -sf /opt/elixir/bin/elixirc /usr/local/bin/elixirc \
+    && ln -sf /opt/elixir/bin/mix /usr/local/bin/mix \
+    && ln -sf /opt/elixir/bin/iex /usr/local/bin/iex \
+    && ELIXIR_ERL_OPTIONS="+fnu" mix local.hex --force \
+    && ELIXIR_ERL_OPTIONS="+fnu" mix local.rebar rebar3 /usr/local/bin/rebar3 --force
+
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \
+    && ELIXIR_ERL_OPTIONS="+fnu" elixir --version && ELIXIR_ERL_OPTIONS="+fnu" mix --version \
     && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true) && amp --version \
     && rebar3 --version
 
