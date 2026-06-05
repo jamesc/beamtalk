@@ -247,17 +247,11 @@ terminate(_Reason, _Req, #ws_state{session_id = SessionId, session_pid = Session
         peer => Peer,
         domain => [beamtalk, runtime]
     }),
-    %% Unsubscribe from Transcript push messages (ADR 0017)
-    beamtalk_transcript_stream:unsubscribe('Transcript'),
-    %% Unsubscribe from actor lifecycle push messages (BT-690)
-    beamtalk_repl_actors:unsubscribe(),
-    %% Unsubscribe from class-loaded push messages (BT-1020)
-    beamtalk_class_events:unsubscribe(),
-    %% Unsubscribe from bindings-changed push messages
-    beamtalk_bindings_events:unsubscribe(),
-    %% Unsubscribe from flush-completion push messages (ADR 0082 Phase 3, BT-2289)
-    beamtalk_flush_events:unsubscribe(),
-    %% Unsubscribe from log streaming (BT-1433)
+    %% BT-2399: unsubscribe from all live push streams (Transcript, actors,
+    %% classes, bindings, flush) via the stable facade.
+    beamtalk_repl_subscriptions:unsubscribe_all(),
+    %% Unsubscribe from log streaming (BT-1433) — a separate diagnostic stream,
+    %% not part of the workspace push-stream facade.
     beamtalk_ws_log_handler:unsubscribe(),
     %% Keep session alive for resume — session idle monitor handles cleanup.
     %% Don't delete from ETS or stop the process here.
@@ -380,13 +374,11 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                         domain => [beamtalk, runtime]
                     }),
                     beamtalk_workspace_meta:update_activity(),
-                    beamtalk_transcript_stream:subscribe('Transcript'),
-                    beamtalk_repl_actors:subscribe(),
-                    beamtalk_class_events:subscribe(),
-                    beamtalk_bindings_events:subscribe(),
-                    %% ADR 0082 Phase 3 (BT-2289): receive `{flush_completed, Files}`
-                    %% so LSP clients can emit `workspace/applyEdit` per touched file.
-                    beamtalk_flush_events:subscribe(),
+                    %% BT-2399: subscribe to all live push streams (Transcript,
+                    %% actors, classes, bindings, flush) via the stable facade.
+                    %% ADR 0082 Phase 3 (BT-2289): the flush stream lets LSP
+                    %% clients emit `workspace/applyEdit` per touched file.
+                    beamtalk_repl_subscriptions:subscribe_all(),
                     InitialActors = actor_snapshot_frames(),
                     AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
                     SessionMsg = iolist_to_binary(
@@ -438,13 +430,11 @@ create_session(SessionId, State) ->
                 domain => [beamtalk, runtime]
             }),
             beamtalk_workspace_meta:update_activity(),
-            beamtalk_transcript_stream:subscribe('Transcript'),
-            beamtalk_repl_actors:subscribe(),
-            beamtalk_class_events:subscribe(),
-            beamtalk_bindings_events:subscribe(),
-            %% ADR 0082 Phase 3 (BT-2289): flush-completion subscription so
-            %% LSP clients can emit `workspace/applyEdit` on flush.
-            beamtalk_flush_events:subscribe(),
+            %% BT-2399: subscribe to all live push streams (Transcript, actors,
+            %% classes, bindings, flush) via the stable facade. ADR 0082 Phase 3
+            %% (BT-2289): the flush stream lets LSP clients emit
+            %% `workspace/applyEdit` on flush.
+            beamtalk_repl_subscriptions:subscribe_all(),
             InitialActors = actor_snapshot_frames(),
             AuthOk = iolist_to_binary(json:encode(#{<<"type">> => <<"auth_ok">>})),
             SessionMsg = iolist_to_binary(

@@ -385,77 +385,26 @@ handle_protocol_request(Msg, SessionPid) ->
     end.
 
 -doc """
-Dispatch protocol ops to domain-specific handler modules (BT-705).
+Dispatch a protocol op and encode the result for the WebSocket transport.
 
-The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed
-in BT-2091 (protocol 2.0); sending them now returns `unknown_op`. The
-`bindings` and `clear` ops were removed in BT-2369 (ADR 0081 Phase 6) —
-session state is now read and mutated through the Beamtalk-native `Session`
-API (`Session current bindings`, `Session current clear`) via `eval`, so
-sending `bindings`/`clear` now returns `unknown_op`.
+Routing and term-result production live in `beamtalk_repl_ops:dispatch/4`; JSON
+encoding happens at this transport edge via `beamtalk_repl_ops:encode/2`
+(BT-2399, ADR 0017 Phase 3). The browser wire format is unchanged. Dist-attached
+clients (Phoenix LiveView, runtime-attached LSP / MCP) call
+`beamtalk_repl_ops:dispatch/4` directly and consume the live term result without
+this JSON step.
+
+The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed in
+BT-2091 (protocol 2.0); sending them now returns `unknown_op`. The `bindings`
+and `clear` ops were removed in BT-2369 (ADR 0081 Phase 6) — session state is
+now read and mutated through the Beamtalk-native `Session` API
+(`Session current bindings`, `Session current clear`) via `eval`, so sending
+`bindings`/`clear` now returns `unknown_op`.
 """.
-handle_op(<<"eval">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_eval:handle(<<"eval">>, Params, Msg, SessionPid);
-handle_op(<<"load-source">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_load:handle(<<"load-source">>, Params, Msg, SessionPid);
-handle_op(<<"load-project">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_load:handle(<<"load-project">>, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"actors">>;
-    Op =:= <<"inspect">>;
-    Op =:= <<"kill">>;
-    Op =:= <<"interrupt">>
-->
-    beamtalk_repl_ops_actors:handle(Op, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"sessions">>;
-    Op =:= <<"clone">>;
-    Op =:= <<"close">>;
-    Op =:= <<"health">>;
-    Op =:= <<"shutdown">>
-->
-    beamtalk_repl_ops_session:handle(Op, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"complete">>;
-    Op =:= <<"describe">>;
-    Op =:= <<"methods">>;
-    Op =:= <<"list-classes">>;
-    Op =:= <<"show-codegen">>;
-    Op =:= <<"test">>;
-    Op =:= <<"test-all">>;
-    Op =:= <<"erlang-help">>;
-    Op =:= <<"erlang-complete">>
-->
-    beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when Op =:= <<"unload">> ->
-    %% BT-1239: Restored — fully removes class from the system (actors, gen_server,
-    %% BEAM module, workspace_meta, session tracker). Previously returned a deprecation
-    %% error (BT-785) but that left orphaned bt@* BEAM modules.
-    beamtalk_repl_ops_load:handle(<<"unload">>, Params, Msg, SessionPid);
-handle_op(Op, Params, Msg, SessionPid) when
-    Op =:= <<"enable-tracing">>;
-    Op =:= <<"disable-tracing">>;
-    Op =:= <<"get-traces">>;
-    Op =:= <<"actor-stats">>;
-    Op =:= <<"export-traces">>
-->
-    beamtalk_repl_ops_perf:handle(Op, Params, Msg, SessionPid);
-%% BT-2239: structured navigation queries for runtime-attached LSP / MCP clients.
-handle_op(<<"nav-query">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_nav:handle(<<"nav-query">>, Params, Msg, SessionPid);
-%% BT-2244: bulk class+method symbol outline for runtime-attached LSP
-%% `textDocument/documentSymbol` and `workspace/symbol`. Sibling of
-%% `nav-query` — kept on a separate op so `nav-query`'s wire shape stays
-%% locked to selector-shaped navigation.
-handle_op(<<"nav-symbols">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_nav_symbols:handle(<<"nav-symbols">>, Params, Msg, SessionPid);
-handle_op(Op, _Params, Msg, _SessionPid) ->
-    Err0 = beamtalk_error:new(unknown_op, 'REPL'),
-    Err1 = beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Unknown operation: ">>, Op])
-    ),
-    beamtalk_repl_json:encode_error(Err1, Msg).
+handle_op(Op, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops:encode(
+        beamtalk_repl_ops:dispatch(Op, Params, Msg, SessionPid), Msg
+    ).
 
 %%% Protocol Parsing and Formatting
 

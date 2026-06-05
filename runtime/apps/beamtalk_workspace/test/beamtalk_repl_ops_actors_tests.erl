@@ -13,6 +13,11 @@ the handle/4 operation paths that require no running actor registry:
 - actors op → empty list when registry absent
 - inspect/kill ops with invalid or unknown PID strings → error JSON
 - interrupt op with a dead SessionPid → noproc catch → ok status JSON
+
+Plus the term-returning `handle_term/4` (BT-2399): the inspect success path
+through a live tagged-map actor must return an `{inspect, FieldMap}` term with
+internal fields filtered — exercising the introspection inside the `inspect`
+`try` body (the body whose exception-safety the BT-2399 fix restored).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -23,6 +28,22 @@ the handle/4 operation paths that require no running actor registry:
 
 make_msg(Op, Id, Session, Legacy) ->
     {protocol_msg, Op, Id, Session, #{}, Legacy}.
+
+%% Stop any stale globally-registered actor registry so start_link/4 below
+%% does not fail with {already_started, _}. Mirrors the pattern in
+%% beamtalk_repl_server_tests.
+stop_registry_if_running() ->
+    case whereis(beamtalk_actor_registry) of
+        undefined ->
+            ok;
+        Old ->
+            Ref = erlang:monitor(process, Old),
+            catch gen_server:stop(Old),
+            receive
+                {'DOWN', Ref, process, Old, _} -> ok
+            after 1000 -> ok
+            end
+    end.
 
 %%====================================================================
 %% validate_actor_pid/1
@@ -110,7 +131,7 @@ handle_inspect_missing_actor_param_returns_error_test() ->
 
 handle_inspect_unknown_actor_pid_returns_error_test() ->
     %% Valid PID string format but not registered in actor registry → unknown_actor.
-    %% encode_invalid_pid_error wraps it with the same "Invalid actor PID" message.
+    %% invalid_pid_error wraps it with the same "Invalid actor PID" message.
     PidBin = list_to_binary(pid_to_list(self())),
     Msg = make_msg(<<"inspect">>, <<"i-4">>, undefined, false),
     Result = beamtalk_repl_ops_actors:handle(
@@ -171,3 +192,37 @@ handle_interrupt_dead_session_catches_noproc_test() ->
     Result = beamtalk_repl_ops_actors:handle(<<"interrupt">>, #{}, Msg, Pid),
     Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+%%====================================================================
+%% handle_term/4 — inspect success path (live tagged-map actor)
+%%====================================================================
+
+handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
+    %% BT-2399: the term-returning inspect path must return an {inspect, FieldMap}
+    %% *term* (not JSON) for a live tagged-map actor, with internal bookkeeping
+    %% keys filtered out. This drives the whole introspection body of the inspect
+    %% `try` (is_tagged → field_names → maps:with) to its normal completion — the
+    %% body the BT-2399 fix moved back inside the `try` so any future throw there
+    %% is caught rather than escaping the op handler.
+    stop_registry_if_running(),
+    {ok, RegistryPid} = gen_server:start_link(
+        {local, beamtalk_actor_registry}, beamtalk_repl_actors, [], []
+    ),
+    {ok, ActorPid} = test_counter:start_link(0),
+    ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+    PidBin = list_to_binary(pid_to_list(ActorPid)),
+    Msg = make_msg(<<"inspect">>, <<"i-live">>, undefined, false),
+    try
+        Result = beamtalk_repl_ops_actors:handle_term(
+            <<"inspect">>, #{<<"actor">> => PidBin}, Msg, self()
+        ),
+        ?assertMatch({inspect, M} when is_map(M), Result),
+        {inspect, Fields} = Result,
+        %% User-visible field is present; internal bookkeeping keys are filtered.
+        ?assert(maps:is_key(value, Fields)),
+        ?assertNot(maps:is_key('$beamtalk_class', Fields)),
+        ?assertNot(maps:is_key('__methods__', Fields))
+    after
+        catch gen_server:stop(ActorPid),
+        catch gen_server:stop(RegistryPid)
+    end.
