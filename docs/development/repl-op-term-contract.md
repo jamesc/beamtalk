@@ -25,7 +25,7 @@ the whole point of a live-image IDE.
 
 So the op layer is split:
 
-```
+```text
                        ┌─ Phoenix / LSP / MCP (dist): consume terms directly
   dispatch/4 ─ term ───┤
                        └─ encode/2 ─ JSON ─ WebSocket (browser)
