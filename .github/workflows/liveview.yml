@@ -1,0 +1,76 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+name: LiveView IDE
+
+# Scoped to the editors/liveview Mix project so unrelated PRs don't pay the
+# Elixir build cost. Mirrors the editors/vscode split (BT-2401).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'editors/liveview/**'
+      - '.github/workflows/liveview.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'editors/liveview/**'
+      - '.github/workflows/liveview.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  liveview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: editors/liveview
+    steps:
+      - uses: actions/checkout@v6
+
+      # setup-beam installs an Elixir precompiled for the chosen OTP version —
+      # the supported toolchain (never the distro `elixir` package, which pins
+      # erlang < 26 and conflicts with Beamtalk's OTP 27).
+      - name: Install Erlang/OTP + Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.0'
+          elixir-version: '1.18'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Mix deps and build
+        uses: actions/cache@v5
+        with:
+          path: |
+            editors/liveview/deps
+            editors/liveview/_build
+          key: ${{ runner.os }}-liveview-mix-${{ hashFiles('editors/liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-liveview-mix-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Compile (warnings as errors)
+        run: mix compile --warnings-as-errors
+
+      # Proves the real esbuild + tailwind pipeline (no vendored *.min.js):
+      # downloads the standalone binaries, then bundles JS + CSS.
+      - name: Install asset toolchain (esbuild + tailwind)
+        run: mix assets.setup
+
+      - name: Build assets
+        run: mix assets.build
+
+      # Workspace-attach tests are skipped automatically (no BT_WORKSPACE_COOKIE).
+      - name: Run tests
+        run: mix test

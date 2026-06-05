@@ -129,6 +129,50 @@ dev-deploy-vscode: build-vscode
     echo "✅ Deployed JS + LSP to ${EXT_DIR}"
     echo "   Reload the VS Code extension host (Ctrl+Shift+P → 'Restart Extension Host') to pick up changes."
 
+# ═══════════════════════════════════════════════════════════════════════════
+# LiveView IDE (editors/liveview — Attach topology, BT-2401)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Fetch the LiveView app's Mix deps (routes through the hex bridge in cloud
+# sessions, where HEX_MIRROR points at the local proxy). Run once after clone.
+[unix]
+[working-directory: 'editors/liveview']
+web-setup:
+    @echo "📦 Fetching LiveView (editors/liveview) deps..."
+    mix deps.get
+    @echo "✅ Deps fetched. Run 'cd editors/liveview && mix assets.setup' once to"
+    @echo "   install the esbuild + tailwind binaries (downloaded on first use)."
+
+# Run the LiveView IDE against a running workspace (Attach topology).
+# Discovers the workspace's node name + cookie via the CLI, exports
+# BT_WORKSPACE_NODE / BT_WORKSPACE_COOKIE, then starts Phoenix on :4000.
+#   just web <workspace-name>
+[unix]
+web name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # `|| true` so a missing/stopped workspace (non-zero exit) falls through to
+    # the friendly message below instead of aborting under `set -e`/pipefail.
+    node=$(cargo run --bin beamtalk --quiet -- workspace status "{{name}}" 2>/dev/null | awk '/^Node:/ {print $2}' || true)
+    if [ -z "${node:-}" ]; then
+      echo "❌ Workspace '{{name}}' is not running." >&2
+      echo "   Start it first: beamtalk workspace create {{name}} --background --persistent" >&2
+      exit 1
+    fi
+    # The cookie lives at ~/.beamtalk/workspaces/<id>/cookie, where <id> is the
+    # node short name minus the beamtalk_workspace_ prefix.
+    id="${node#beamtalk_workspace_}"; id="${id%@localhost}"
+    cookie_file="${HOME}/.beamtalk/workspaces/${id}/cookie"
+    if [ ! -f "${cookie_file}" ]; then
+      echo "❌ Workspace cookie not found at ${cookie_file}" >&2
+      exit 1
+    fi
+    export BT_WORKSPACE_NODE="${node}"
+    export BT_WORKSPACE_COOKIE="$(cat "${cookie_file}")"
+    echo "🌐 LiveView IDE → ${node}  (http://localhost:4000)"
+    cd editors/liveview
+    exec mix phx.server
+
 # Build Erlang runtime
 [working-directory: 'runtime']
 build-erlang:
