@@ -78,6 +78,11 @@ defmodule BtAttach.Workspace do
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}, "", []}
+
+      # The workspace contract is {:ok,…}/{:error,…}; treat anything else as a
+      # data error rather than letting a CaseClauseError crash the LiveView.
+      other ->
+        {:error, {:unexpected_reply, other}, "", []}
     end
   end
 
