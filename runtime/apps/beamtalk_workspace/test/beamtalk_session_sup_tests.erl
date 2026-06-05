@@ -81,3 +81,36 @@ supervisor_count_children_test() ->
 
     %% Cleanup
     exit(Pid, normal).
+
+%%% stop_session/1 tests
+
+stop_session_unknown_pid_returns_not_found_test() ->
+    {ok, Sup} = beamtalk_session_sup:start_link(),
+
+    %% A pid that is not a child of this supervisor cannot be terminated by it.
+    Dead = spawn(fun() -> ok end),
+    ?assertEqual({error, not_found}, beamtalk_session_sup:stop_session(Dead)),
+
+    exit(Sup, normal).
+
+stop_session_terminates_live_session_test() ->
+    {ok, Sup} = beamtalk_session_sup:start_link(),
+
+    %% Start a real session under supervision.
+    {ok, SessionPid} = beamtalk_session_sup:start_session(<<"stop-session-test">>),
+    ?assert(is_process_alive(SessionPid)),
+    ?assertEqual(1, proplists:get_value(active, supervisor:count_children(Sup))),
+
+    %% Stopping it terminates the child and drops the active count.
+    ?assertEqual(ok, beamtalk_session_sup:stop_session(SessionPid)),
+    ?assertNot(is_process_alive(SessionPid)),
+    ?assertEqual(0, proplists:get_value(active, supervisor:count_children(Sup))),
+
+    %% Idempotent: a second stop on the just-terminated child is a non-fatal
+    %% no-op. `supervisor:terminate_child/2` returns `ok` for a dynamic child it
+    %% has recently terminated (vs `{error, not_found}` for a pid that was never
+    %% a child of this supervisor — covered above). Either way the call site
+    %% treats it as best-effort.
+    ?assertEqual(ok, beamtalk_session_sup:stop_session(SessionPid)),
+
+    exit(Sup, normal).

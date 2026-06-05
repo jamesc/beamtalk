@@ -32,6 +32,13 @@ defmodule BtAttach.WorkspaceTest do
       assert Workspace.format_value("6.0") == "6.0"
     end
 
+    test "raw float value renders via Float.to_string/1" do
+      # The is_float/1 guard handles a term that arrives as a native float
+      # (rather than the BT-1336 string form), e.g. from a fallback inspect path.
+      assert Workspace.format_value(6.0) == "6.0"
+      assert Workspace.format_value(3.14159) == "3.14159"
+    end
+
     test "integer renders as its digits" do
       assert Workspace.format_value(42) == "42"
     end

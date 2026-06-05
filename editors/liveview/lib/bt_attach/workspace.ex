@@ -87,6 +87,20 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Stop a workspace-supervised session started by `start_session/1`.
+
+  The session is owned by the workspace's `beamtalk_session_sup`, so it does not
+  go away just because the LiveView process exits; we must ask the supervisor to
+  terminate it or it leaks one orphaned session per mount/reconnect. Idempotent
+  and best-effort: a session that is already gone returns `{:error, :not_found}`
+  and an unreachable workspace returns `{:badrpc, _}` — both are non-fatal at the
+  call site (the LiveView is terminating anyway).
+  """
+  def close_session(session_pid) when is_pid(session_pid) do
+    rpc(:beamtalk_session_sup, :stop_session, [session_pid])
+  end
+
+  @doc """
   Evaluate a Beamtalk expression in `session_pid` through the curated op layer's
   term-returning seam (`beamtalk_repl_ops:dispatch/4`, BT-2399).
 

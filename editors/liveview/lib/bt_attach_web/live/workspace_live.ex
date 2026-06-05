@@ -21,6 +21,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   """
   use BtAttachWeb, :live_view
 
+  require Logger
+
   alias BtAttach.Workspace
 
   @impl true
@@ -45,19 +47,34 @@ defmodule BtAttachWeb.WorkspaceLive do
             pid when is_pid(pid) ->
               # Subscribe THIS LiveView pid (location-transparent over dist) to
               # the Transcript stream through the BT-2399 facade — no direct
-              # gen_server cast.
-              Workspace.subscribe_transcript(self())
+              # gen_server cast. The facade's cast returns `:ok`; a `{:badrpc, _}`
+              # (or any non-ok reply) means the transcript is NOT live, so we must
+              # not render the pane as connected and claim a working stream.
+              case Workspace.subscribe_transcript(self()) do
+                :ok ->
+                  socket
+                  |> assign(:connected, true)
+                  |> assign(:node, Workspace.node_name())
+                  |> assign(:session_id, session_id)
+                  |> assign(:session_pid, pid)
+                  |> assign(:result, nil)
+                  |> assign(:output, nil)
+                  |> assign(:error, nil)
+                  |> assign(:expr, "3 + 4")
+                  |> stream(:transcript, [])
 
-              socket
-              |> assign(:connected, true)
-              |> assign(:node, Workspace.node_name())
-              |> assign(:session_id, session_id)
-              |> assign(:session_pid, pid)
-              |> assign(:result, nil)
-              |> assign(:output, nil)
-              |> assign(:error, nil)
-              |> assign(:expr, "3 + 4")
-              |> stream(:transcript, [])
+                other ->
+                  # Transcript subscription failed: tear the half-started session
+                  # back down so we don't leak it, then render a non-connected
+                  # error page rather than a dead transcript pane.
+                  Logger.error("transcript subscribe failed: #{inspect(other)}")
+                  Workspace.close_session(pid)
+
+                  assign(socket,
+                    connected: false,
+                    error: "transcript subscribe failed: #{inspect(other)}"
+                  )
+              end
 
             {:error, reason} ->
               assign(socket,
@@ -119,8 +136,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     # Best-effort: drop our Transcript subscription so the workspace doesn't keep
     # pushing to a dead pid. The event server also auto-removes dead subscribers
     # via its monitor, so this is belt-and-braces.
+    #
+    # Crucially also CLOSE the workspace-supervised session: it is owned by the
+    # workspace's `beamtalk_session_sup`, not by this LiveView process, so it does
+    # NOT go away when we exit. Without this we leak one orphaned session per
+    # mount/reconnect (the session-lifecycle acceptance criterion).
     if socket.assigns[:connected] do
       Workspace.unsubscribe_transcript(self())
+
+      case socket.assigns[:session_pid] do
+        pid when is_pid(pid) -> Workspace.close_session(pid)
+        _ -> :ok
+      end
     end
 
     :ok

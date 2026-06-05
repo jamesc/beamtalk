@@ -17,8 +17,10 @@ Sessions are ephemeral - they start when a REPL connects and
 terminate when the connection closes.
 """.
 
--export([start_link/0, start_session/1]).
+-export([start_link/0, start_session/1, stop_session/1]).
 -export([init/1]).
+
+-include_lib("kernel/include/logger.hrl").
 
 %%% Public API
 
@@ -34,6 +36,30 @@ SessionId should be a unique identifier for the session (e.g., alice, bob).
 -spec start_session(atom() | binary()) -> {ok, pid()} | {error, term()}.
 start_session(SessionId) ->
     supervisor:start_child(?MODULE, [SessionId]).
+
+-doc """
+Stop a session previously started by `start_session/1`.
+
+Sessions are `temporary` children of this `simple_one_for_one` supervisor, so a
+session process does not terminate just because its owner (e.g. a dist-attached
+Phoenix LiveView) exits — the supervisor must be asked to terminate it, or one
+orphaned session leaks per mount/reconnect. Best-effort and non-fatal: a pid
+that was never a child of this supervisor returns `{error, not_found}`, and a
+second stop on a just-terminated child is a harmless `ok` no-op.
+""".
+-spec stop_session(pid()) -> ok | {error, not_found | simple_one_for_one}.
+stop_session(SessionPid) when is_pid(SessionPid) ->
+    case supervisor:terminate_child(?MODULE, SessionPid) of
+        ok ->
+            ok;
+        {error, Reason} = Error ->
+            ?LOG_DEBUG(
+                "stop_session/1 could not terminate ~p: ~p",
+                [SessionPid, Reason],
+                #{domain => [beamtalk, runtime]}
+            ),
+            Error
+    end.
 
 %%% supervisor callbacks
 
