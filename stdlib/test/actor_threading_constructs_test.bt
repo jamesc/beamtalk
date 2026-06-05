@@ -56,8 +56,7 @@ TestCase subclass: ActorThreadingConstructsTest
     self assert: (self.a ifTrueIfFalseAssignRhsReadWrite: false) equals: 0
 
   // ── count: / detect: thread outer-local mutations ──────────────────────────
-  testCountNonLastThreads =>
-    self assert: self.a countNonLastReadWrite equals: 3
+  testCountNonLastThreads => self assert: self.a countNonLastReadWrite equals: 3
 
   testDetectNonLastThreads =>
     self assert: self.a detectNonLastReadWrite equals: 3
