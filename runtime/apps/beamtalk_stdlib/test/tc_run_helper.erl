@@ -30,6 +30,54 @@ dispatch(testBeamtalkError, [], _Instance) ->
     error(#beamtalk_error{kind = type_error, class = 'TestCase', message = <<"generic error">>});
 dispatch(testUndef, [], _Instance) ->
     nonexistent_module_xyz_bt2391:'nope'();
+%% BT-2404: BEAM error-shape dispatchers for decode_beam_error/1 coverage.
+%% These all fall through to error:TestReason:TestST in run_test_method/5
+%% (they are not #beamtalk_error{} records nor `undef`, so they bypass
+%% the specialised catch clauses and reach format_test_error/3).
+dispatch(testFutureRejected, [], _Instance) ->
+    error({future_rejected, inner_reason});
+dispatch(testErrorMapWithKey, [], _Instance) ->
+    error({error, #{error => raw_inner_reason}});
+dispatch(testErrorMapNoKey, [], _Instance) ->
+    error({error, #{unrelated => value}});
+dispatch(testExceptionMap, [], _Instance) ->
+    error(#{
+        class => 'Exception',
+        '$beamtalk_class' => 'Exception',
+        error => #beamtalk_error{kind = type_error, class = 'TestCase', message = <<"exc msg">>}
+    });
+dispatch(testClassMap, [], _Instance) ->
+    error(#{
+        '$beamtalk_class' => 'RuntimeError',
+        error => #beamtalk_error{kind = type_error, class = 'TestCase', message = <<"cls msg">>}
+    });
+dispatch(testBadKey, [], _Instance) ->
+    error({badkey, my_key});
+dispatch(testBadMap, [], _Instance) ->
+    error({badmap, 42});
+dispatch(testBadMatch, [], _Instance) ->
+    error({badmatch, some_value});
+dispatch(testCaseClause, [], _Instance) ->
+    error({case_clause, some_value});
+dispatch(testTryClause, [], _Instance) ->
+    error({try_clause, some_value});
+dispatch(testFunctionClause, [], _Instance) ->
+    error(function_clause);
+dispatch(testIfClause, [], _Instance) ->
+    error(if_clause);
+dispatch(testBadArity, [], _Instance) ->
+    F = fun(X) -> X end,
+    error({badarity, {F, [1, 2]}});
+dispatch(testBadFun, [], _Instance) ->
+    error({badfun, not_a_fun});
+dispatch(testBadArg, [], _Instance) ->
+    error(badarg);
+dispatch(testBadArith, [], _Instance) ->
+    error(badarith);
+dispatch(testNoproc, [], _Instance) ->
+    error(noproc);
+dispatch(testTimeout, [], _Instance) ->
+    error(timeout);
 dispatch(setUp, [], Instance) ->
     Instance;
 dispatch(tearDown, [], _Instance) ->
