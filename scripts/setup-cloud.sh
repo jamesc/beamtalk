@@ -17,12 +17,18 @@ set -euo pipefail
 #
 # Environment variables:
 #   REBAR3_VERSION  - rebar3 version to install (default: 3.26.0)
+#   ELIXIR_VERSION  - Elixir version to install (default: 1.18.4, built for OTP 27)
 #   SKIP_RUST_TOOLS - set to 1 to skip cargo tool installation
 #   SKIP_ERLANG     - set to 1 to skip Erlang installation
+#   SKIP_ELIXIR     - set to 1 to skip Elixir installation
 #   SKIP_NODE       - set to 1 to skip Node.js installation
 #   SKIP_SKILLS     - set to 1 to skip Claude Code skills setup
 
 REBAR3_VERSION="${REBAR3_VERSION:-3.26.0}"
+# BT-2401: Elixir for the editors/liveview Mix project. Pinned to a release
+# precompiled for OTP 27 — the distro `elixir` package pins erlang < 26 and
+# conflicts with Beamtalk's OTP 27, so we never use apt for Elixir.
+ELIXIR_VERSION="${ELIXIR_VERSION:-1.18.4}"
 
 # --- Helpers ---
 
@@ -130,7 +136,7 @@ info "Installing system packages..."
 case "$OS_ID" in
   ubuntu|debian)
     PKGS=""
-    for pkg in git gettext-base curl wget jq htop strace socat netcat-openbsd lsof; do
+    for pkg in git gettext-base curl wget jq htop strace socat netcat-openbsd lsof unzip; do
       if ! dpkg -s "$pkg" &>/dev/null; then
         PKGS="$PKGS $pkg"
       fi
@@ -280,6 +286,60 @@ else
   ok "rebar3 v${REBAR3_VERSION} installed"
 fi
 
+# --- Elixir (precompiled for OTP 27) ---
+#
+# BT-2401: the LiveView app (editors/liveview) is a Mix project. We install a
+# precompiled Elixir release built for OTP 27 — NOT the distro `elixir` package,
+# which pins erlang < 26 and conflicts with Beamtalk's OTP 27.
+
+if [ "${SKIP_ELIXIR:-}" = "1" ]; then
+  warn "Skipping Elixir (SKIP_ELIXIR=1)"
+elif have mix && have elixir; then
+  ok "Elixir already installed ($(elixir --version 2>/dev/null | tail -1))"
+elif ! have erl; then
+  warn "Erlang not present — skipping Elixir (install Erlang/OTP 27 first)"
+else
+  info "Installing Elixir v${ELIXIR_VERSION} (precompiled for OTP 27)..."
+  require_sudo
+  ELIXIR_TMPDIR="$(mktemp -d)"
+  trap 'rm -rf "${ELIXIR_TMPDIR}"' EXIT
+  curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+    "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-27.zip" \
+    -o "${ELIXIR_TMPDIR}/elixir-otp-27.zip"
+  $SUDO rm -rf /opt/elixir
+  $SUDO mkdir -p /opt/elixir
+  $SUDO unzip -q "${ELIXIR_TMPDIR}/elixir-otp-27.zip" -d /opt/elixir
+  for _bin in elixir elixirc mix iex; do
+    $SUDO ln -sf "/opt/elixir/bin/${_bin}" "/usr/local/bin/${_bin}"
+  done
+  rm -rf "${ELIXIR_TMPDIR}"
+  trap - EXIT
+  ok "Elixir $(elixir --version 2>/dev/null | tail -1) installed"
+fi
+
+# Install Hex + register the system rebar3 with Mix so `mix deps.get` works with
+# no further setup. `mix local.hex` fetches from builds.hex.pm, which some MITM
+# egress proxies block (cloud sandboxes) — fall back to installing Hex from
+# GitHub in that case. +fnu guards against a C locale tripping Elixir's UTF-8
+# expectation during these calls.
+if have mix; then
+  export ELIXIR_ERL_OPTIONS="${ELIXIR_ERL_OPTIONS:-+fnu}"
+  if mix local.hex --force >/dev/null 2>&1; then
+    ok "Hex installed (builds.hex.pm)"
+  elif mix archive.install github hexpm/hex branch latest --force >/dev/null 2>&1; then
+    ok "Hex installed (GitHub fallback)"
+  else
+    warn "Could not install Hex — 'mix deps.get' may need manual Hex setup"
+  fi
+  if have rebar3; then
+    if mix local.rebar rebar3 "$(command -v rebar3)" --force >/dev/null 2>&1; then
+      ok "Registered system rebar3 with Mix"
+    else
+      warn "Could not register rebar3 with Mix"
+    fi
+  fi
+fi
+
 # --- Skills repo (Claude Code skills & agents) ---
 
 if [ "${SKIP_SKILLS:-}" = "1" ]; then
@@ -299,7 +359,7 @@ echo ""
 info "Verifying installations..."
 ERRORS=0
 
-for cmd in rustc cargo erl node npm gh just rebar3; do
+for cmd in rustc cargo erl elixir mix node npm gh just rebar3; do
   if have "$cmd"; then
     ok "$cmd"
   else
