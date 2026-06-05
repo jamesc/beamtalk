@@ -126,6 +126,17 @@ dispatch_show_codegen_no_params_returns_error_term_test() ->
     Result = beamtalk_repl_ops:dispatch(<<"show-codegen">>, #{}, Msg, self()),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
+dispatch_tracing_invalid_arg_returns_error_term_test() ->
+    %% BT-2402: the tracing ops normalise invalid filter args into an {error, _}
+    %% term so dist clients always get an op_result(). An invalid actor PID is
+    %% rejected during filter parsing before the trace store is touched, so this
+    %% runs without a running store.
+    Msg = make_msg(<<"get-traces">>),
+    Result = beamtalk_repl_ops:dispatch(
+        <<"get-traces">>, #{<<"actor">> => <<"not-a-pid">>}, Msg, self()
+    ),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
 %% BT-2402: round-trip — encoding a dispatched term reproduces the handle_op JSON.
 encode_completions_term_matches_handle_op_json_test() ->
     Msg = make_msg(<<"complete">>),

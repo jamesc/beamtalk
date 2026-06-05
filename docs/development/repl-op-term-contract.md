@@ -75,11 +75,13 @@ matches on the `beamtalk_error` record tag, so no shared `.hrl` is required.
 * `Output` is captured stdout (`binary()`); `Warnings` is `[binary()]`.
 * Errors are the structured `#beamtalk_error{}` record (tag `beamtalk_error`),
   the same record used everywhere else in the runtime for user-facing errors.
-  The tracing ops (`beamtalk_repl_ops_perf`) additionally *raise* a
-  `#beamtalk_error{}` on invalid filter arguments; that exception is caught and
-  encoded at the WebSocket edge by
-  `beamtalk_repl_server:handle_protocol_request/2`, and dist clients can catch
-  it the same way.
+  Every handler **returns** `{error, #beamtalk_error{}}` for user-facing
+  failures — handlers never raise them across the seam. (The tracing ops'
+  internal filter/export helpers raise a structured `#beamtalk_error{}`, but
+  `beamtalk_repl_ops_perf:handle_term/4` catches and normalises it into the
+  term contract.) Unexpected, non-structured crashes still propagate as
+  exceptions — they are bugs, and the WebSocket edge logs them via
+  `beamtalk_repl_server:handle_protocol_request/2`.
 
 ## Porting status
 

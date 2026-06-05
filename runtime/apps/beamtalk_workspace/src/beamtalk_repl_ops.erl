@@ -123,7 +123,8 @@ Route a protocol op to its handler, returning a structured `op_result()` term.
 
 This is the term-returning entry point for dist-attached clients. It mirrors
 the op routing previously inlined in `beamtalk_repl_server:handle_op/4`. Every
-op returns a native `op_result()` term shape (BT-2402).
+op returns a native `op_result()` term shape (BT-2402) — handlers never raise a
+user-facing error, they return `{error, #beamtalk_error{}}`.
 """.
 -spec dispatch(binary(), map(), protocol_msg(), pid()) -> op_result().
 dispatch(<<"eval">>, Params, Msg, SessionPid) ->

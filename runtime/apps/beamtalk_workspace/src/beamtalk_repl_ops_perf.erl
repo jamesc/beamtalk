@@ -39,29 +39,40 @@ Term-returning handler for the tracing/performance ops (BT-2402).
 Returns `{ok, Value, Output, Warnings}` for the status/read ops
 (enable/disable-tracing, get-traces, actor-stats) and `{value, JsonValue}` for
 `export-traces` (whose payload is already a wire-shaped map). Invalid filter
-arguments raise a structured `#beamtalk_error{}` (caught and encoded at the
-WebSocket edge by `beamtalk_repl_server:handle_protocol_request/2`), preserving
-the long-standing argument-validation contract.
+arguments and export failures are returned as `{error, #beamtalk_error{}}` — the
+internal filter/export helpers raise a structured `#beamtalk_error{}` and this
+wrapper normalises it into the term contract, so dist clients always receive an
+`op_result()`.
 """.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
-handle_term(<<"enable-tracing">>, _Params, _Msg, _SessionPid) ->
+handle_term(Op, Params, Msg, SessionPid) ->
+    try
+        do_handle_term(Op, Params, Msg, SessionPid)
+    catch
+        error:(#beamtalk_error{} = Err) ->
+            {error, Err}
+    end.
+
+-spec do_handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+    beamtalk_repl_ops:op_result().
+do_handle_term(<<"enable-tracing">>, _Params, _Msg, _SessionPid) ->
     beamtalk_tracing:enable(),
     {ok, <<"Tracing enabled">>, <<>>, []};
-handle_term(<<"disable-tracing">>, _Params, _Msg, _SessionPid) ->
+do_handle_term(<<"disable-tracing">>, _Params, _Msg, _SessionPid) ->
     beamtalk_tracing:disable(),
     {ok, <<"Tracing disabled">>, <<>>, []};
-handle_term(<<"get-traces">>, Params, _Msg, _SessionPid) ->
+do_handle_term(<<"get-traces">>, Params, _Msg, _SessionPid) ->
     Limit = maps:get(<<"limit">>, Params, undefined),
     Opts = build_trace_filter_opts(Params),
     Traces = beamtalk_tracing:traces(Opts),
     Limited = apply_limit(Traces, Limit),
     {ok, Limited, <<>>, []};
-handle_term(<<"actor-stats">>, Params, _Msg, _SessionPid) ->
+do_handle_term(<<"actor-stats">>, Params, _Msg, _SessionPid) ->
     Actor = maps:get(<<"actor">>, Params, undefined),
     Stats = get_stats(Actor),
     {ok, Stats, <<>>, []};
-handle_term(<<"export-traces">>, Params, _Msg, _SessionPid) ->
+do_handle_term(<<"export-traces">>, Params, _Msg, _SessionPid) ->
     Opts = build_export_opts(Params),
     case beamtalk_tracing:exportTraces(Opts) of
         {ok, #{path := Path, count := Count}} ->
