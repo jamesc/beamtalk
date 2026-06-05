@@ -57,27 +57,41 @@ populated when the class has its own definition of the selector, otherwise
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([handle/4, describe_ops/0]).
+-export([handle/4, handle_term/4, describe_ops/0]).
 
--doc "Handle the `nav-query` op.".
+-doc """
+Handle the `nav-query` op for the WebSocket transport — encodes the term result
+to JSON at the edge (BT-2402).
+""".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
-handle(<<"nav-query">>, Params, Msg, _SessionPid) ->
+handle(Op, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
+
+-doc """
+Term-returning handler for `nav-query` (BT-2402, ADR 0085 read-surface).
+
+Returns `{value, #{<<"sites">> => Rows}}` — the site rows are already a
+wire-shaped JSON value (the whole point of `nav-query` is to skip the
+`term_to_json` inspect-string round-trip; see the module doc) — or
+`{error, #beamtalk_error{}}` on a validation failure.
+""".
+-spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+    beamtalk_repl_ops:op_result().
+handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
     case validate_params(Params) of
         {ok, {senders, Selector}} ->
             Sites = beamtalk_xref:senders_of(Selector),
-            encode_sites(Sites, Msg);
+            {value, sites_value(Sites)};
         {ok, {references, ClassName}} ->
             Sites = beamtalk_xref:references_to(ClassName),
-            encode_sites(Sites, Msg);
+            {value, sites_value(Sites)};
         {ok, {implementors, Selector}} ->
             Pairs = beamtalk_xref:implementors_of(Selector),
-            encode_implementors(Pairs, Selector, Msg);
+            {value, implementors_value(Pairs, Selector)};
         {error, Reason} ->
             Err = beamtalk_error:new(argument_error, 'REPL'),
             Msg1 = iolist_to_binary([<<"nav-query: ">>, Reason]),
-            beamtalk_repl_json:encode_error(
-                beamtalk_error:with_message(Err, Msg1), Msg
-            )
+            {error, beamtalk_error:with_message(Err, Msg1)}
     end.
 
 -doc "Advertise the `nav-query` op in `describe`.".
@@ -154,20 +168,18 @@ with_class(Params) ->
             {error, <<"`class` (non-empty string) is required for references">>}
     end.
 
--spec encode_sites([beamtalk_xref:site()], beamtalk_repl_protocol:protocol_msg()) -> binary().
-encode_sites(Sites, Msg) ->
+%% The site rows are already a JSON-shaped map of lists / binaries / integers /
+%% booleans / null; the `{value, _}` op_result tag encodes them with identity so
+%% term_to_json never sees them (BT-2402).
+-spec sites_value([beamtalk_xref:site()]) -> map().
+sites_value(Sites) ->
     Rows = [site_to_row(S) || S <- Sites],
-    Value = #{<<"sites">> => Rows},
-    %% Bypass term_to_json — the value is already a JSON-shaped map of
-    %% lists / binaries / integers / booleans / null, so we pass identity.
-    beamtalk_repl_protocol:encode_result(Value, Msg, fun(V) -> V end).
+    #{<<"sites">> => Rows}.
 
--spec encode_implementors([{atom(), boolean()}], atom(), beamtalk_repl_protocol:protocol_msg()) ->
-    binary().
-encode_implementors(Pairs, Selector, Msg) ->
+-spec implementors_value([{atom(), boolean()}], atom()) -> map().
+implementors_value(Pairs, Selector) ->
     Rows = [implementor_to_row(Cls, ClassSide, Selector) || {Cls, ClassSide} <- Pairs],
-    Value = #{<<"sites">> => Rows},
-    beamtalk_repl_protocol:encode_result(Value, Msg, fun(V) -> V end).
+    #{<<"sites">> => Rows}.
 
 -spec site_to_row(beamtalk_xref:site()) -> map().
 site_to_row(Site) ->

@@ -13,14 +13,28 @@ Extracted from beamtalk_repl_server (BT-705).
 
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4]).
+-export([handle/4, handle_term/4]).
 
--doc "Handle sessions/clone/close/health/shutdown ops.".
+-doc """
+Handle sessions/clone/close/health/shutdown ops for the WebSocket transport —
+encodes the term result to JSON at the edge (BT-2402).
+""".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
-handle(<<"sessions">>, _Params, Msg, _SessionPid) ->
+handle(Op, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
+
+-doc """
+Term-returning handler for sessions/clone/close/health/shutdown (BT-2402).
+Returns `{sessions, [Meta]}`, `{ok, NewSessionId, Output, Warnings}` (clone),
+`{status, ok}` (close/shutdown), `{health, WorkspaceId, Nonce}`, or
+`{error, #beamtalk_error{}}` — no JSON in this path.
+""".
+-spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+    beamtalk_repl_ops:op_result().
+handle_term(<<"sessions">>, _Params, _Msg, _SessionPid) ->
     case whereis(beamtalk_session_sup) of
         undefined ->
-            beamtalk_repl_protocol:encode_sessions([], Msg, fun beamtalk_repl_json:term_to_json/1);
+            {sessions, []};
         _Sup ->
             Children = supervisor:which_children(beamtalk_session_sup),
             Sessions = lists:filtermap(
@@ -32,17 +46,13 @@ handle(<<"sessions">>, _Params, Msg, _SessionPid) ->
                 end,
                 Children
             ),
-            beamtalk_repl_protocol:encode_sessions(
-                Sessions, Msg, fun beamtalk_repl_json:term_to_json/1
-            )
+            {sessions, Sessions}
     end;
-handle(<<"clone">>, _Params, Msg, _SessionPid) ->
+handle_term(<<"clone">>, _Params, _Msg, _SessionPid) ->
     NewSessionId = beamtalk_repl_server:generate_session_id(),
     case beamtalk_session_sup:start_session(NewSessionId) of
         {ok, _NewPid} ->
-            beamtalk_repl_protocol:encode_result(
-                NewSessionId, Msg, fun beamtalk_repl_json:term_to_json/1
-            );
+            {ok, NewSessionId, <<>>, []};
         {error, Reason} ->
             Err0 = beamtalk_error:new(session_error, 'REPL'),
             Err1 = beamtalk_error:with_message(
@@ -52,26 +62,19 @@ handle(<<"clone">>, _Params, Msg, _SessionPid) ->
                     io_lib:format("~p", [Reason])
                 ])
             ),
-            beamtalk_repl_json:encode_error(Err1, Msg)
+            {error, Err1}
     end;
-handle(<<"close">>, _Params, Msg, _SessionPid) ->
-    beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1);
-handle(<<"health">>, _Params, Msg, _SessionPid) ->
+handle_term(<<"close">>, _Params, _Msg, _SessionPid) ->
+    {status, ok};
+handle_term(<<"health">>, _Params, _Msg, _SessionPid) ->
     {ok, Nonce} = beamtalk_repl_server:get_nonce(),
     WorkspaceId =
         case beamtalk_workspace_meta:get_metadata() of
             {ok, Meta} -> maps:get(workspace_id, Meta, <<>>);
             {error, _} -> <<>>
         end,
-    Base = beamtalk_repl_protocol:base_response(Msg),
-    iolist_to_binary(
-        json:encode(Base#{
-            <<"workspace_id">> => WorkspaceId,
-            <<"nonce">> => Nonce,
-            <<"status">> => [<<"done">>]
-        })
-    );
-handle(<<"shutdown">>, Params, Msg, _SessionPid) ->
+    {health, WorkspaceId, Nonce};
+handle_term(<<"shutdown">>, Params, _Msg, _SessionPid) ->
     ProvidedCookie = maps:get(<<"cookie">>, Params, <<>>),
     NodeCookie = atom_to_binary(erlang:get_cookie(), utf8),
     ValidCookie =
@@ -82,11 +85,7 @@ handle(<<"shutdown">>, Params, Msg, _SessionPid) ->
         true ->
             ?LOG_INFO("Shutdown requested via protocol", #{domain => [beamtalk, runtime]}),
             erlang:send_after(100, beamtalk_repl_server, shutdown_requested),
-            beamtalk_repl_protocol:encode_status(
-                ok,
-                Msg,
-                fun beamtalk_repl_json:term_to_json/1
-            );
+            {status, ok};
         false ->
             ?LOG_WARNING("Shutdown rejected: invalid cookie", #{domain => [beamtalk, runtime]}),
             Err0 = beamtalk_error:new(auth_error, 'REPL'),
@@ -94,5 +93,5 @@ handle(<<"shutdown">>, Params, Msg, _SessionPid) ->
             Err2 = beamtalk_error:with_hint(
                 Err1, <<"Provide the correct node cookie for shutdown.">>
             ),
-            beamtalk_repl_json:encode_error(Err2, Msg)
+            {error, Err2}
     end.

@@ -40,28 +40,39 @@ leak compiler/runtime internals.
 
 | Tag | Shape | Produced by |
 |-----|-------|-------------|
-| result | `{ok, Value, Output, Warnings}` | `eval` |
+| result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, `clone`, tracing read ops |
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
 | actors | `{actors, [ActorMeta]}` | `actors` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
-| status | `{status, ok}` | `kill`, `interrupt` |
+| status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
+| value | `{value, JsonValue}` | `nav-query`, `nav-symbols`, `export-traces` |
+| loaded | `{loaded, Classes, Warnings}` | `load-source` |
+| load_project | `{load_project, Classes, Errors, Summary, Warnings}` | `load-project` |
+| sessions | `{sessions, [SessionMeta]}` | `sessions` |
+| health | `{health, WorkspaceId, Nonce}` | `health` |
+| completions | `{completions, [binary()]}` | `complete`, `erlang-complete` |
+| docs | `{docs, binary()}` | `erlang-help` |
+| codegen | `{codegen, CoreErlang, Warnings}` | `show-codegen` |
+| methods | `{methods, Methods, StateVars}` | `methods` |
+| class_list | `{class_list, [ClassInfo]}` | `list-classes` |
+| test_results | `{test_results, TestResult}` | `test`, `test-all` |
+| describe | `{describe, Ops, Versions}` | `describe` |
 | error | `{error, #beamtalk_error{}}` | any op |
-| error+io | `{error, #beamtalk_error{}, Output, Warnings}` | `eval` |
-| json | `{json, binary()}` | ops not yet ported (see below) |
+| error+io | `{error, #beamtalk_error{}, Output, Warnings}` | `eval`, `show-codegen` |
 
 `Value` and `inspect` payloads are live terms — over distribution they retain
-messageable pids and structure; only `encode/2` flattens them to JSON.
+messageable pids and structure; only `encode/2` flattens them to JSON. The
+`value` tag is distinct from `result`: its payload is *already* a wire-shaped
+JSON value (a map/list of binaries, integers, booleans, and `null`), so
+`encode/2` passes it through with the identity function rather than
+`term_to_json/1`.
 
-## Incremental porting
+## Porting status
 
-`eval` (the canonical core path) and the actor read-surface ops (`actors`,
-`inspect`, `kill`, `interrupt`) return native term shapes. The remaining ops
-(`load-*`, `unload`, `sessions`/`clone`/`close`/`health`/`shutdown`,
-`complete`/`describe`/…, tracing, `nav-*`) are still JSON-internally and are
-surfaced through the `{json, Binary}` escape tag so every op flows through the
-one `dispatch/4` → `encode/2` seam without a wire-format change. Porting those
-to native term shapes is tracked as follow-up work for the LiveView IDE epic
-(read-surface ADR 0085 / write-surface ADR 0082).
+All curated protocol ops return native `op_result()` term shapes (BT-2402); the
+`{json, Binary}` escape tag used during the incremental port (BT-2399) has been
+removed. Every op flows through the one `dispatch/4` → `encode/2` seam, and
+dist-attached clients consume the live terms directly without any JSON step.
 
 ## References
 
@@ -89,9 +100,21 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {actors, [map()]}
     | {inspect, map() | binary()}
     | {status, ok}
+    | {value, JsonValue :: term()}
+    | {loaded, Classes :: [map()], Warnings :: [binary()]}
+    | {load_project, Classes :: [binary()], Errors :: [map()], Summary :: binary(),
+        Warnings :: [binary()]}
+    | {sessions, [map()]}
+    | {health, WorkspaceId :: binary(), Nonce :: binary()}
+    | {completions, [binary()]}
+    | {docs, binary()}
+    | {codegen, CoreErlang :: binary(), Warnings :: [binary()]}
+    | {methods, Methods :: [map()], StateVars :: [binary()]}
+    | {class_list, [map()]}
+    | {test_results, map()}
+    | {describe, Ops :: map(), Versions :: map()}
     | {error, #beamtalk_error{}}
-    | {error, #beamtalk_error{}, Output :: binary(), Warnings :: [binary()]}
-    | {json, binary()}.
+    | {error, #beamtalk_error{}, Output :: binary(), Warnings :: [binary()]}.
 
 %%% Dispatch — op name → term result
 
@@ -99,9 +122,9 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
 Route a protocol op to its handler, returning a structured `op_result()` term.
 
 This is the term-returning entry point for dist-attached clients. It mirrors
-the op routing previously inlined in `beamtalk_repl_server:handle_op/4`. Ops
-that have been ported to the term contract return native term shapes; the rest
-are surfaced via the `{json, Binary}` escape tag.
+the op routing previously inlined in `beamtalk_repl_server:handle_op/4`. Every
+op returns a native `op_result()` term shape (BT-2402) — handlers never raise a
+user-facing error, they return `{error, #beamtalk_error{}}`.
 """.
 -spec dispatch(binary(), map(), protocol_msg(), pid()) -> op_result().
 dispatch(<<"eval">>, Params, Msg, SessionPid) ->
@@ -113,12 +136,12 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"interrupt">>
 ->
     beamtalk_repl_ops_actors:handle_term(Op, Params, Msg, SessionPid);
-dispatch(<<"load-source">>, Params, Msg, SessionPid) ->
-    {json, beamtalk_repl_ops_load:handle(<<"load-source">>, Params, Msg, SessionPid)};
-dispatch(<<"load-project">>, Params, Msg, SessionPid) ->
-    {json, beamtalk_repl_ops_load:handle(<<"load-project">>, Params, Msg, SessionPid)};
-dispatch(<<"unload">>, Params, Msg, SessionPid) ->
-    {json, beamtalk_repl_ops_load:handle(<<"unload">>, Params, Msg, SessionPid)};
+dispatch(Op, Params, Msg, SessionPid) when
+    Op =:= <<"load-source">>;
+    Op =:= <<"load-project">>;
+    Op =:= <<"unload">>
+->
+    beamtalk_repl_ops_load:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"sessions">>;
     Op =:= <<"clone">>;
@@ -126,7 +149,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"health">>;
     Op =:= <<"shutdown">>
 ->
-    {json, beamtalk_repl_ops_session:handle(Op, Params, Msg, SessionPid)};
+    beamtalk_repl_ops_session:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"complete">>;
     Op =:= <<"describe">>;
@@ -138,7 +161,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"erlang-help">>;
     Op =:= <<"erlang-complete">>
 ->
-    {json, beamtalk_repl_ops_dev:handle(Op, Params, Msg, SessionPid)};
+    beamtalk_repl_ops_dev:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"enable-tracing">>;
     Op =:= <<"disable-tracing">>;
@@ -146,11 +169,11 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"actor-stats">>;
     Op =:= <<"export-traces">>
 ->
-    {json, beamtalk_repl_ops_perf:handle(Op, Params, Msg, SessionPid)};
+    beamtalk_repl_ops_perf:handle_term(Op, Params, Msg, SessionPid);
 dispatch(<<"nav-query">>, Params, Msg, SessionPid) ->
-    {json, beamtalk_repl_ops_nav:handle(<<"nav-query">>, Params, Msg, SessionPid)};
+    beamtalk_repl_ops_nav:handle_term(<<"nav-query">>, Params, Msg, SessionPid);
 dispatch(<<"nav-symbols">>, Params, Msg, SessionPid) ->
-    {json, beamtalk_repl_ops_nav_symbols:handle(<<"nav-symbols">>, Params, Msg, SessionPid)};
+    beamtalk_repl_ops_nav_symbols:handle_term(<<"nav-symbols">>, Params, Msg, SessionPid);
 dispatch(Op, _Params, _Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(
@@ -183,9 +206,37 @@ encode({inspect, Bin}, Msg) when is_binary(Bin) ->
     beamtalk_repl_protocol:encode_inspect(Bin, Msg);
 encode({status, ok}, Msg) ->
     beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1);
+encode({value, JsonValue}, Msg) ->
+    %% Already-wire-shaped value (maps/lists/binaries/integers/booleans/null) —
+    %% encode with identity so term_to_json does not stringify it.
+    beamtalk_repl_protocol:encode_result(JsonValue, Msg, fun(V) -> V end);
+encode({loaded, Classes, Warnings}, Msg) ->
+    beamtalk_repl_protocol:encode_loaded(
+        Classes, Msg, fun beamtalk_repl_json:term_to_json/1, Warnings
+    );
+encode({load_project, Classes, Errors, Summary, Warnings}, Msg) ->
+    beamtalk_repl_protocol:encode_load_project(Classes, Errors, Summary, Warnings, Msg);
+encode({sessions, Sessions}, Msg) ->
+    beamtalk_repl_protocol:encode_sessions(
+        Sessions, Msg, fun beamtalk_repl_json:term_to_json/1
+    );
+encode({health, WorkspaceId, Nonce}, Msg) ->
+    beamtalk_repl_protocol:encode_health(WorkspaceId, Nonce, Msg);
+encode({completions, Completions}, Msg) ->
+    beamtalk_repl_protocol:encode_completions(Completions, Msg);
+encode({docs, DocText}, Msg) ->
+    beamtalk_repl_protocol:encode_docs(DocText, Msg);
+encode({codegen, CoreErlang, Warnings}, Msg) ->
+    beamtalk_repl_protocol:encode_codegen(CoreErlang, Warnings, Msg);
+encode({methods, Methods, StateVars}, Msg) ->
+    beamtalk_repl_protocol:encode_methods(Methods, StateVars, Msg);
+encode({class_list, ClassList}, Msg) ->
+    beamtalk_repl_protocol:encode_class_list(ClassList, Msg);
+encode({test_results, TestResult}, Msg) ->
+    beamtalk_repl_protocol:encode_test_results(TestResult, Msg);
+encode({describe, Ops, Versions}, Msg) ->
+    beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg);
 encode({error, Err}, Msg) ->
     beamtalk_repl_json:encode_error(Err, Msg);
 encode({error, Err, Output, Warnings}, Msg) ->
-    beamtalk_repl_json:encode_error(Err, Msg, Output, Warnings);
-encode({json, Bin}, _Msg) when is_binary(Bin) ->
-    Bin.
+    beamtalk_repl_json:encode_error(Err, Msg, Output, Warnings).

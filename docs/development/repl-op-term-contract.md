@@ -45,35 +45,59 @@ matches on the `beamtalk_error` record tag, so no shared `.hrl` is required.
 
 | Tag | Shape | Produced by |
 |-----|-------|-------------|
-| result | `{ok, Value, Output, Warnings}` | `eval` |
+| result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, `clone`, tracing read ops |
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
 | actors | `{actors, [ActorMeta]}` | `actors` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
-| status | `{status, ok}` | `kill`, `interrupt` |
+| status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
+| value | `{value, JsonValue}` | `nav-query`, `nav-symbols`, `export-traces` |
+| loaded | `{loaded, Classes, Warnings}` | `load-source` |
+| load_project | `{load_project, Classes, Errors, Summary, Warnings}` | `load-project` |
+| sessions | `{sessions, [SessionMeta]}` | `sessions` |
+| health | `{health, WorkspaceId, Nonce}` | `health` |
+| completions | `{completions, [binary()]}` | `complete`, `erlang-complete` |
+| docs | `{docs, binary()}` | `erlang-help` |
+| codegen | `{codegen, CoreErlang, Warnings}` | `show-codegen` |
+| methods | `{methods, Methods, StateVars}` | `methods` |
+| class_list | `{class_list, [ClassInfo]}` | `list-classes` |
+| test_results | `{test_results, TestResult}` | `test`, `test-all` |
+| describe | `{describe, Ops, Versions}` | `describe` |
 | error | `{error, #beamtalk_error{}}` | any op |
-| error+io | `{error, #beamtalk_error{}, Output, Warnings}` | `eval` |
-| json | `{json, binary()}` | ops not yet ported (see below) |
+| error+io | `{error, #beamtalk_error{}, Output, Warnings}` | `eval`, `show-codegen` |
 
 * `Value` and the `inspect` payload are **live terms** — over distribution they
   retain messageable pids and structure; only `encode/2` flattens them.
+* The `value` tag is distinct from `result`: its payload is *already* a
+  wire-shaped JSON value (a map/list of binaries, integers, booleans, and
+  `null`), so `encode/2` passes it through with the identity function rather
+  than `term_to_json/1`. This is what lets `nav-query` / `nav-symbols` hand the
+  LSP typed rows with no inspect-string round-trip.
 * `Output` is captured stdout (`binary()`); `Warnings` is `[binary()]`.
 * Errors are the structured `#beamtalk_error{}` record (tag `beamtalk_error`),
   the same record used everywhere else in the runtime for user-facing errors.
+  Every handler **returns** `{error, #beamtalk_error{}}` for user-facing
+  failures — handlers never raise them across the seam. (The tracing ops'
+  internal filter/export helpers raise a structured `#beamtalk_error{}`, but
+  `beamtalk_repl_ops_perf:handle_term/4` catches and normalises it into the
+  term contract.) Unexpected, non-structured crashes still propagate as
+  exceptions — they are bugs, and the WebSocket edge logs them via
+  `beamtalk_repl_server:handle_protocol_request/2`.
 
 ## Porting status
 
-`eval` (the canonical core path) and the actor read-surface ops (`actors`,
-`inspect`, `kill`, `interrupt`) return native term shapes today.
+**Complete (BT-2402).** Every curated protocol op returns a native
+`op_result()` term shape: the core path (`eval`), the actor read-surface
+(`actors`, `inspect`, `kill`, `interrupt`), the write-surface
+(`load-source` / `load-project` / `unload`, ADR 0082), the session ops
+(`sessions` / `clone` / `close` / `health` / `shutdown`), the developer
+read-surface (`complete` / `describe` / `methods` / `list-classes` /
+`show-codegen` / `test` / `test-all` / `erlang-help` / `erlang-complete`,
+ADR 0085), the tracing ops, and the navigation ops
+(`nav-query` / `nav-symbols`).
 
-The remaining ops — `load-source` / `load-project` / `unload`,
-`sessions` / `clone` / `close` / `health` / `shutdown`,
-`complete` / `describe` / `methods` / `list-classes` / `show-codegen` /
-`test` / `test-all` / `erlang-help` / `erlang-complete`, the tracing ops, and
-`nav-query` / `nav-symbols` — are still JSON-internally and are surfaced
-through the `{json, Binary}` escape tag, so every op still flows through the one
-`dispatch/4` → `encode/2` seam with no wire-format change. Porting those to
-native term shapes is incremental follow-up work for the LiveView IDE epic
-(read-surface ADR 0085, write-surface ADR 0082).
+The `{json, Binary}` escape tag used during the incremental port (BT-2399) has
+been removed. Every op flows through the one `dispatch/4` → `encode/2` seam, and
+dist-attached clients consume the live terms directly with no JSON step.
 
 ## Live push streams: the subscription facade
 
@@ -109,8 +133,19 @@ push frames; dist clients consume the messages directly.
 | Dispatch + term contract + JSON edge | `beamtalk_repl_ops` |
 | `eval` term handler | `beamtalk_repl_ops_eval:handle_term/4` |
 | Actor read-surface term handlers | `beamtalk_repl_ops_actors:handle_term/4` |
+| Write-surface term handlers (`load-*`, `unload`) | `beamtalk_repl_ops_load:handle_term/4` |
+| Session term handlers | `beamtalk_repl_ops_session:handle_term/4` |
+| Developer read-surface term handlers | `beamtalk_repl_ops_dev:handle_term/4` |
+| Tracing term handlers | `beamtalk_repl_ops_perf:handle_term/4` |
+| Navigation term handlers | `beamtalk_repl_ops_nav:handle_term/4`, `beamtalk_repl_ops_nav_symbols:handle_term/4` |
+| Per-tag JSON encoders | `beamtalk_repl_protocol:encode_*` |
 | Subscription facade | `beamtalk_repl_subscriptions` |
 | WebSocket transport edge | `beamtalk_repl_server:handle_op/4`, `beamtalk_ws_handler` |
+
+Each per-op module keeps a thin `handle/4` =
+`beamtalk_repl_ops:encode(handle_term(...), Msg)` wrapper for the WebSocket
+transport, so `dispatch/4` (terms, for dist clients) and `handle/4` (JSON, for
+the browser) share one implementation.
 
 ## References
 

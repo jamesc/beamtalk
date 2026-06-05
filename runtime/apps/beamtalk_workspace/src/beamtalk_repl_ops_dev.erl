@@ -15,6 +15,7 @@ Extracted from beamtalk_repl_server (BT-705).
 
 -export([
     handle/4,
+    handle_term/4,
     get_completions/1,
     get_context_completions/1,
     get_context_completions/2,
@@ -38,7 +39,7 @@ Extracted from beamtalk_repl_server (BT-705).
 -ifdef(TEST).
 -export([
     get_session_bindings/1,
-    validate_selector_if_present/5
+    validate_selector_if_present/4
 ]).
 -endif.
 
@@ -64,9 +65,27 @@ Extracted from beamtalk_repl_server (BT-705).
     'perform:withArguments:'
 ]).
 
--doc "Handle complete/describe/show-codegen/methods/list-classes/test/test-all/erlang-help/erlang-complete ops.".
+-doc """
+Handle complete/describe/show-codegen/methods/list-classes/test/test-all/
+erlang-help/erlang-complete ops for the WebSocket transport — encodes the term
+result to JSON at the edge (BT-2402).
+""".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
-handle(<<"complete">>, Params, Msg, SessionPid) ->
+handle(Op, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
+
+-doc """
+Term-returning handler for the developer read-surface ops (BT-2402, ADR 0085).
+
+Returns `{completions, [binary()]}`, `{docs, binary()}`,
+`{codegen, CoreErlang, Warnings}`, `{methods, Methods, StateVars}`,
+`{class_list, [ClassInfo]}`, `{test_results, TestResult}`,
+`{describe, Ops, Versions}`, or `{error, #beamtalk_error{}}` — no JSON in this
+path.
+""".
+-spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+    beamtalk_repl_ops:op_result().
+handle_term(<<"complete">>, Params, Msg, SessionPid) ->
     Code = maps:get(<<"code">>, Params, <<>>),
     %% BT-783: New protocol includes "cursor" field — Code is the full line up to cursor.
     %% Old protocol omits "cursor" — Code is a bare prefix (backward compat).
@@ -89,21 +108,8 @@ handle(<<"complete">>, Params, Msg, SessionPid) ->
             false ->
                 get_completions(Code)
         end,
-    case beamtalk_repl_protocol:is_legacy(Msg) of
-        true ->
-            iolist_to_binary(
-                json:encode(#{
-                    <<"type">> => <<"completions">>,
-                    <<"completions">> => Completions
-                })
-            );
-        false ->
-            Base = base_protocol_response(Msg),
-            iolist_to_binary(
-                json:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
-            )
-    end;
-handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
+    {completions, Completions};
+handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
     ModuleBin = nonempty_or_undefined(maps:get(<<"module">>, Params, undefined)),
@@ -147,21 +153,8 @@ handle(<<"erlang-complete">>, Params, Msg, _SessionPid) ->
                     error:badarg -> []
                 end
         end,
-    case beamtalk_repl_protocol:is_legacy(Msg) of
-        true ->
-            iolist_to_binary(
-                json:encode(#{
-                    <<"type">> => <<"completions">>,
-                    <<"completions">> => Completions
-                })
-            );
-        false ->
-            Base = base_protocol_response(Msg),
-            iolist_to_binary(
-                json:encode(Base#{<<"completions">> => Completions, <<"status">> => [<<"done">>]})
-            )
-    end;
-handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
+    {completions, Completions};
+handle_term(<<"erlang-help">>, Params, _Msg, _SessionPid) ->
     %% BT-1852: `:help Erlang <module>` and `:help Erlang <module> <function>`
     %% Delegates to beamtalk_erlang_help for formatting.
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
@@ -171,9 +164,7 @@ handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
             Err = beamtalk_error:new(invalid_argument, 'REPL'),
             Err1 = beamtalk_error:with_message(Err, <<"Module name required">>),
             Err2 = beamtalk_error:with_hint(Err1, <<"Usage: :help Erlang <module>">>),
-            beamtalk_repl_json:encode_error(
-                Err2, Msg
-            );
+            {error, Err2};
         _ ->
             %% Use binary_to_existing_atom to prevent atom table exhaustion
             %% from repeated queries with typos (atoms are never GC'd).
@@ -188,7 +179,7 @@ handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
                         end,
                     case Result of
                         {ok, Text} ->
-                            beamtalk_repl_protocol:encode_docs(Text, Msg);
+                            {docs, Text};
                         {error, not_found} ->
                             What =
                                 case FunctionBin of
@@ -212,20 +203,19 @@ handle(<<"erlang-help">>, Params, Msg, _SessionPid) ->
                                             <<" to see available functions and types.">>
                                         ])
                                 end,
-                            format_erlang_not_found_error(What, Hint, Msg)
+                            erlang_not_found_error(What, Hint)
                     end
             catch
                 error:badarg ->
-                    format_erlang_not_found_error(
+                    erlang_not_found_error(
                         iolist_to_binary([
                             <<"Erlang module '">>, ModuleBin, <<"'">>
                         ]),
-                        <<"Check the module name and ensure it is available on the code path.">>,
-                        Msg
+                        <<"Check the module name and ensure it is available on the code path.">>
                     )
             end
     end;
-handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
+handle_term(<<"show-codegen">>, Params, _Msg, SessionPid) ->
     %% BT-700: Compile expression and return Core Erlang source without evaluating.
     %% BT-1236: Also accepts class+selector to inspect a loaded class method.
     %% `class` takes priority when both are present; empty string is treated as absent.
@@ -244,13 +234,11 @@ handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
                 Err1,
                 <<"Provide 'class' along with 'selector' to inspect a specific method.">>
             ),
-            beamtalk_repl_json:encode_error(
-                Err2, Msg
-            );
+            {error, Err2};
         _ ->
             case {ClassBin, CodeBin} of
                 {CB, _} when CB =/= undefined ->
-                    show_codegen_class_method(CB, SelectorBin, Msg);
+                    show_codegen_class_method(CB, SelectorBin);
                 {undefined, CB} when CB =/= undefined ->
                     Code = binary_to_list(CB),
                     case Code of
@@ -260,23 +248,16 @@ handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
                             Err2 = beamtalk_error:with_hint(
                                 Err1, <<"Enter an expression to compile.">>
                             ),
-                            beamtalk_repl_json:encode_error(
-                                Err2, Msg
-                            );
+                            {error, Err2};
                         _ ->
                             case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
                                 {ok, CoreErlang, Warnings} ->
-                                    encode_codegen_response(CoreErlang, Warnings, Msg);
+                                    {codegen, CoreErlang, Warnings};
                                 {error, ErrorReason, Warnings} ->
                                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(
                                         ErrorReason
                                     ),
-                                    beamtalk_repl_json:encode_error(
-                                        WrappedReason,
-                                        Msg,
-                                        <<>>,
-                                        Warnings
-                                    )
+                                    {error, WrappedReason, <<>>, Warnings}
                             end
                     end;
                 {undefined, undefined} ->
@@ -286,23 +267,16 @@ handle(<<"show-codegen">>, Params, Msg, SessionPid) ->
                         Err1,
                         <<"Provide 'code' to compile an expression, or 'class' to inspect a loaded class.">>
                     ),
-                    beamtalk_repl_json:encode_error(
-                        Err2, Msg
-                    )
+                    {error, Err2}
             end
     end;
-handle(<<"methods">>, Params, Msg, _SessionPid) ->
+handle_term(<<"methods">>, Params, _Msg, _SessionPid) ->
     %% BT-1026: Return instance and class-side methods for a loaded class.
     ClassBin = maps:get(<<"class">>, Params, <<>>),
     Methods = list_class_methods_for_ws(ClassBin),
     StateVars = list_state_vars_for_ws(ClassBin),
-    Base = base_protocol_response(Msg),
-    iolist_to_binary(
-        json:encode(Base#{
-            <<"methods">> => Methods, <<"state_vars">> => StateVars, <<"status">> => [<<"done">>]
-        })
-    );
-handle(<<"list-classes">>, Params, Msg, SessionPid) ->
+    {methods, Methods, StateVars};
+handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
     %% BT-1404: List all available classes with one-line descriptions.
     %% BT-2091: Now also returns `source_file` and `actor_count` so editors
     %% (VS Code, LSP) can drive class navigation without the deprecated
@@ -325,9 +299,7 @@ handle(<<"list-classes">>, Params, Msg, SessionPid) ->
                 hint = undefined,
                 details = #{}
             },
-            beamtalk_repl_json:encode_error(
-                Error, Msg
-            );
+            {error, Error};
         _ ->
             case
                 try
@@ -347,9 +319,7 @@ handle(<<"list-classes">>, Params, Msg, SessionPid) ->
                 end
             of
                 {error, Error} ->
-                    beamtalk_repl_json:encode_error(
-                        Error, Msg
-                    );
+                    {error, Error};
                 {ok, ClassPids} ->
                     %% BT-2091: Fetch session-scoped data once for all classes.
                     %% Falls back to an empty tracker when SessionPid is undefined
@@ -421,13 +391,10 @@ handle(<<"list-classes">>, Params, Msg, SessionPid) ->
                         fun(A, B) -> maps:get(<<"name">>, A) =< maps:get(<<"name">>, B) end,
                         ClassInfos
                     ),
-                    Base = base_protocol_response(Msg),
-                    iolist_to_binary(
-                        json:encode(Base#{<<"class_list">> => Sorted, <<"status">> => [<<"done">>]})
-                    )
+                    {class_list, Sorted}
             end
     end;
-handle(<<"test">>, Params, Msg, _SessionPid) ->
+handle_term(<<"test">>, Params, _Msg, _SessionPid) ->
     ClassName = maps:get(<<"class">>, Params, undefined),
     FilePath = maps:get(<<"file">>, Params, undefined),
     case {ClassName, FilePath} of
@@ -436,25 +403,21 @@ handle(<<"test">>, Params, Msg, _SessionPid) ->
             Err1 = beamtalk_error:with_message(
                 Err0, <<"'class' and 'file' are mutually exclusive">>
             ),
-            beamtalk_repl_json:encode_error(
-                Err1, Msg
-            );
+            {error, Err1};
         {undefined, FP} when FP =/= undefined, not is_binary(FP) ->
             Err0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
             Err1 = beamtalk_error:with_message(
                 Err0, <<"'file' must be a binary path">>
             ),
-            beamtalk_repl_json:encode_error(
-                Err1, Msg
-            );
+            {error, Err1};
         {undefined, FP} when FP =/= undefined ->
-            run_test_op_file(FP, Msg);
+            run_test_op_file(FP);
         _ ->
-            run_test_op(ClassName, Msg)
+            run_test_op(ClassName)
     end;
-handle(<<"test-all">>, _Params, Msg, _SessionPid) ->
-    run_test_op(undefined, Msg);
-handle(<<"describe">>, _Params, Msg, _SessionPid) ->
+handle_term(<<"test-all">>, _Params, _Msg, _SessionPid) ->
+    run_test_op(undefined);
+handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
     Ops = describe_ops(),
     BeamtalkVsnBin =
         case application:get_key(beamtalk_workspace, vsn) of
@@ -467,22 +430,7 @@ handle(<<"describe">>, _Params, Msg, _SessionPid) ->
         <<"protocol">> => <<"2.0">>,
         <<"beamtalk">> => BeamtalkVsnBin
     },
-    beamtalk_repl_protocol:encode_describe(Ops, Versions, Msg).
-
-%%% show-codegen helpers
-
--doc "Encode a successful Core Erlang codegen response.".
--spec encode_codegen_response(binary(), [binary()], beamtalk_repl_protocol:protocol_msg()) ->
-    binary().
-encode_codegen_response(CoreErlang, Warnings, Msg) ->
-    Base = beamtalk_repl_protocol:base_response(Msg),
-    Result = Base#{<<"core_erlang">> => CoreErlang, <<"status">> => [<<"done">>]},
-    Result1 =
-        case Warnings of
-            [] -> Result;
-            _ -> Result#{<<"warnings">> => Warnings}
-        end,
-    iolist_to_binary(json:encode(Result1)).
+    {describe, Ops, Versions}.
 
 -doc """
 Handle show-codegen for a loaded class method (BT-1236).
@@ -496,42 +444,33 @@ class is unloaded between the whereis_class/1 lookup and subsequent calls,
 the noproc exit is translated to a structured class_not_found error.
 """.
 -spec show_codegen_class_method(
-    binary(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-show_codegen_class_method(ClassBin, SelectorBin, Msg) ->
+    binary(), binary() | undefined
+) -> beamtalk_repl_ops:op_result().
+show_codegen_class_method(ClassBin, SelectorBin) ->
     %% BT-1659: Support package-qualified class names (e.g. "json@Parser")
     case resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
-            beamtalk_repl_json:encode_error(
-                make_class_not_found_error(ClassBin),
-                Msg
-            );
+            {error, make_class_not_found_error(ClassBin)};
         {ok, ClassAtom} ->
             case beamtalk_runtime_api:whereis_class(ClassAtom) of
                 undefined ->
-                    beamtalk_repl_json:encode_error(
-                        make_class_not_found_error(ClassBin),
-                        Msg
-                    );
+                    {error, make_class_not_found_error(ClassBin)};
                 ClassPid ->
                     %% Guard all ClassPid gen_server calls against unload/reload races.
                     try
                         case
                             validate_selector_if_present(
-                                ClassBin, ClassAtom, ClassPid, SelectorBin, Msg
+                                ClassBin, ClassAtom, ClassPid, SelectorBin
                             )
                         of
-                            {error, ErrResponse} ->
-                                ErrResponse;
+                            {error, Err} ->
+                                {error, Err};
                             ok ->
-                                compile_class_source(ClassBin, ClassAtom, ClassPid, Msg)
+                                compile_class_source(ClassBin, ClassAtom, ClassPid)
                         end
                     catch
                         exit:{noproc, _} ->
-                            beamtalk_repl_json:encode_error(
-                                make_class_not_found_error(ClassBin),
-                                Msg
-                            );
+                            {error, make_class_not_found_error(ClassBin)};
                         exit:{timeout, _} ->
                             Err0 = beamtalk_error:new(runtime_error, ClassAtom),
                             Err1 = beamtalk_error:with_message(
@@ -542,9 +481,7 @@ show_codegen_class_method(ClassBin, SelectorBin, Msg) ->
                                     <<"' is not responding (may be under heavy load)">>
                                 ])
                             ),
-                            beamtalk_repl_json:encode_error(
-                                Err1, Msg
-                            )
+                            {error, Err1}
                     end
             end
     end.
@@ -556,9 +493,9 @@ Reads from workspace_meta first (updated by :load and method patching), falling
 back to the on-disk file recorded in the beamtalk_source module attribute.
 """.
 -spec compile_class_source(
-    binary(), atom(), pid(), beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
+    binary(), atom(), pid()
+) -> beamtalk_repl_ops:op_result().
+compile_class_source(ClassBin, ClassAtom, ClassPid) ->
     ModuleName = beamtalk_runtime_api:module_name(ClassPid),
     SourcePath = beamtalk_repl_modules:resolve_source_path(ModuleName),
     %% Prefer the live in-memory source over the on-disk file; the metadata is
@@ -588,18 +525,13 @@ compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
                     <<". Class may have been defined inline.">>
                 ])
             ),
-            beamtalk_repl_json:encode_error(
-                Err1, Msg
-            );
+            {error, Err1};
         {ok, SourceBin} ->
             case beamtalk_repl_compiler:compile_file_for_codegen(SourceBin, CompilePath) of
                 {ok, CoreErlang, Warnings} ->
-                    encode_codegen_response(CoreErlang, Warnings, Msg);
+                    {codegen, CoreErlang, Warnings};
                 {error, ErrorReason} ->
-                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
-                    beamtalk_repl_json:encode_error(
-                        WrappedReason, Msg
-                    )
+                    {error, beamtalk_repl_errors:ensure_structured_error(ErrorReason)}
             end;
         {error, Reason} ->
             Err0 = beamtalk_error:new(runtime_error, ClassAtom),
@@ -609,22 +541,21 @@ compile_class_source(ClassBin, ClassAtom, ClassPid, Msg) ->
                     io_lib:format("Cannot read source file ~s: ~p", [SourcePath, Reason])
                 )
             ),
-            beamtalk_repl_json:encode_error(
-                Err1, Msg
-            )
+            {error, Err1}
     end.
 
 -doc """
 Validate that SelectorBin exists on the class (instance-side or class-side).
 Returns ok when selector is undefined (no validation needed) or when found.
-Returns {error, EncodedResponse} when the selector is unknown.
+Returns `{error, #beamtalk_error{}}` when the selector is unknown (BT-2402: a
+structured error term rather than a pre-encoded JSON binary).
 """.
 -spec validate_selector_if_present(
-    binary(), atom(), pid(), binary() | undefined, beamtalk_repl_protocol:protocol_msg()
-) -> ok | {error, binary()}.
-validate_selector_if_present(_ClassBin, _ClassAtom, _ClassPid, undefined, _Msg) ->
+    binary(), atom(), pid(), binary() | undefined
+) -> ok | {error, #beamtalk_error{}}.
+validate_selector_if_present(_ClassBin, _ClassAtom, _ClassPid, undefined) ->
     ok;
-validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin, Msg) ->
+validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin) ->
     InstanceMethods = beamtalk_runtime_api:local_instance_methods(ClassPid),
     ClassMethods = beamtalk_runtime_api:local_class_methods(ClassPid),
     AllMethods = InstanceMethods ++ ClassMethods,
@@ -650,10 +581,7 @@ validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin, Msg) ->
                     <<"Use :help ">>, ClassBin, <<" to see available selectors.">>
                 ])
             ),
-            {error,
-                beamtalk_repl_json:encode_error(
-                    Err2, Msg
-                )}
+            {error, Err2}
     end.
 
 -doc """
@@ -673,42 +601,33 @@ Execute a test run and encode the result.
 When ClassName is undefined, runs all discovered TestCase subclasses.
 When ClassName is a binary, runs tests for that specific class.
 """.
--spec run_test_op(binary() | undefined, beamtalk_repl_protocol:protocol_msg()) -> binary().
-run_test_op(undefined, Msg) ->
+-spec run_test_op(binary() | undefined) -> beamtalk_repl_ops:op_result().
+run_test_op(undefined) ->
     try
         TestResult = beamtalk_test_runner:run_all(0),
-        beamtalk_repl_protocol:encode_test_results(TestResult, Msg)
+        {test_results, TestResult}
     catch
         error:#{error := #beamtalk_error{} = Err} ->
-            beamtalk_repl_json:encode_error(
-                Err, Msg
-            );
+            {error, Err};
         _Class:Reason ->
             ?LOG_ERROR("test-all op failed: ~p", [Reason], #{domain => [beamtalk, runtime]}),
             Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
             Err1 = beamtalk_error:with_message(
                 Err0, iolist_to_binary(io_lib:format("Test run failed: ~p", [Reason]))
             ),
-            beamtalk_repl_json:encode_error(
-                Err1, Msg
-            )
+            {error, Err1}
     end;
-run_test_op(ClassName, Msg) when is_binary(ClassName) ->
+run_test_op(ClassName) when is_binary(ClassName) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassName) of
         {error, badarg} ->
-            beamtalk_repl_json:encode_error(
-                make_class_not_found_error(ClassName),
-                Msg
-            );
+            {error, make_class_not_found_error(ClassName)};
         {ok, ClassAtom} ->
             try
                 TestResult = beamtalk_test_runner:run_class_by_name(ClassAtom),
-                beamtalk_repl_protocol:encode_test_results(TestResult, Msg)
+                {test_results, TestResult}
             catch
                 error:#{error := #beamtalk_error{} = Err} ->
-                    beamtalk_repl_json:encode_error(
-                        Err, Msg
-                    );
+                    {error, Err};
                 _Class:Reason ->
                     ?LOG_ERROR("test op failed for ~s: ~p", [ClassName, Reason], #{
                         domain => [beamtalk, runtime]
@@ -720,28 +639,24 @@ run_test_op(ClassName, Msg) when is_binary(ClassName) ->
                             io_lib:format("Test run failed for ~s: ~p", [ClassName, Reason])
                         )
                     ),
-                    beamtalk_repl_json:encode_error(
-                        Err1, Msg
-                    )
+                    {error, Err1}
             end
     end.
 
 -doc """
-Execute a file-scoped test run and encode the result.
+Execute a file-scoped test run and return the result term.
 
 Discovers all TestCase subclasses whose beamtalk_source attribute matches
 FilePath (by path suffix) and runs them. Returns an aggregated TestResult.
 """.
--spec run_test_op_file(binary(), beamtalk_repl_protocol:protocol_msg()) -> binary().
-run_test_op_file(FilePath, Msg) ->
+-spec run_test_op_file(binary()) -> beamtalk_repl_ops:op_result().
+run_test_op_file(FilePath) ->
     try
         TestResult = beamtalk_test_runner:run_file(FilePath),
-        beamtalk_repl_protocol:encode_test_results(TestResult, Msg)
+        {test_results, TestResult}
     catch
         error:#{error := #beamtalk_error{} = Err} ->
-            beamtalk_repl_json:encode_error(
-                Err, Msg
-            );
+            {error, Err};
         _Class:Reason ->
             ?LOG_ERROR("test file op failed for ~s: ~p", [FilePath, Reason], #{
                 domain => [beamtalk, runtime]
@@ -753,9 +668,7 @@ run_test_op_file(FilePath, Msg) ->
                     io_lib:format("Test run failed for file ~s: ~p", [FilePath, Reason])
                 )
             ),
-            beamtalk_repl_json:encode_error(
-                Err1, Msg
-            )
+            {error, Err1}
     end.
 
 %%% Internal helpers
@@ -2009,15 +1922,12 @@ should_include_class(Name, _Super, _ModName, {superclass, FilterAtom}) ->
 %%% Erlang FFI Help (BT-1852)
 %%% ============================================================================
 
--doc "Encode a \"not found\" error for Erlang help lookups.".
--spec format_erlang_not_found_error(binary(), binary(), beamtalk_repl_protocol:protocol_msg()) ->
-    binary().
-format_erlang_not_found_error(What, Hint, Msg) ->
+-doc "Build a \"not found\" error term for Erlang help lookups (BT-2402).".
+-spec erlang_not_found_error(binary(), binary()) -> {error, #beamtalk_error{}}.
+erlang_not_found_error(What, Hint) ->
     Err = beamtalk_error:new(does_not_understand, 'Erlang'),
     Err1 = beamtalk_error:with_message(
         Err, iolist_to_binary([What, <<" not found">>])
     ),
     Err2 = beamtalk_error:with_hint(Err1, Hint),
-    beamtalk_repl_json:encode_error(
-        Err2, Msg
-    ).
+    {error, Err2}.

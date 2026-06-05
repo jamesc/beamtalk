@@ -233,10 +233,14 @@ tmp_export_path(Tag) ->
 error_handling_test_() ->
     {setup, fun setup_trace_store/0, fun cleanup_trace_store/1, fun(_Setup) ->
         [
-            {"invalid PID raises structured error", fun() ->
-                ?assertError(
-                    #beamtalk_error{kind = invalid_argument, class = 'Tracing'},
-                    beamtalk_repl_ops_perf:handle(
+            %% BT-2402: invalid filter args are now returned as a structured
+            %% {error, #beamtalk_error{}} term from handle_term/4 (and encoded as
+            %% an error response by handle/4) rather than raised, so dist clients
+            %% always receive an op_result().
+            {"invalid PID returns structured error term", fun() ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = invalid_argument, class = 'Tracing'}},
+                    beamtalk_repl_ops_perf:handle_term(
                         <<"get-traces">>,
                         #{<<"actor">> => <<"not-a-pid">>},
                         make_msg(<<"get-traces">>),
@@ -244,11 +248,11 @@ error_handling_test_() ->
                     )
                 )
             end},
-            {"unknown selector raises structured error", fun() ->
+            {"unknown selector returns structured error term", fun() ->
                 PidStr = list_to_binary(pid_to_list(self())),
-                ?assertError(
-                    #beamtalk_error{kind = invalid_argument, class = 'Tracing'},
-                    beamtalk_repl_ops_perf:handle(
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = invalid_argument, class = 'Tracing'}},
+                    beamtalk_repl_ops_perf:handle_term(
                         <<"get-traces">>,
                         #{
                             <<"actor">> => PidStr,
@@ -259,16 +263,26 @@ error_handling_test_() ->
                     )
                 )
             end},
-            {"invalid PID in actor-stats raises structured error", fun() ->
-                ?assertError(
-                    #beamtalk_error{kind = invalid_argument, class = 'Tracing'},
-                    beamtalk_repl_ops_perf:handle(
+            {"invalid PID in actor-stats returns structured error term", fun() ->
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = invalid_argument, class = 'Tracing'}},
+                    beamtalk_repl_ops_perf:handle_term(
                         <<"actor-stats">>,
                         #{<<"actor">> => <<"garbage">>},
                         make_msg(<<"actor-stats">>),
                         self()
                     )
                 )
+            end},
+            {"handle/4 encodes the error as an error response", fun() ->
+                Result = beamtalk_repl_ops_perf:handle(
+                    <<"get-traces">>,
+                    #{<<"actor">> => <<"not-a-pid">>},
+                    make_msg(<<"get-traces">>),
+                    self()
+                ),
+                Decoded = decode_response(Result),
+                ?assert(maps:is_key(<<"error">>, Decoded))
             end}
         ]
     end}.
