@@ -125,6 +125,9 @@
 - Migrate remaining codegen modules (`expressions.rs`, `intrinsics.rs`, `repl/codegen.rs`, `control_flow/`, `dispatch_codegen.rs`, `value_type_codegen.rs`, `gen_server/`, `mod.rs`, primitives) to `document::leaf` API (ADR 0089 Phase 2) (BT-2320..BT-2330).
 - Use canonical `safe_class_method_fn_name` in supervisor and spec codegen — adds atom-length safety guard for pathologically long selectors (BT-2339).
 - Remove `capture_expression` in favour of direct `Document` splicing, closing the value-type raw-fragment leaf seam (BT-2348).
+- Fix ADR 0089 leaf-API violations in `instantiation_error_stub` and `build_dnu_error_doc` — replaced manual `'...'` atom quoting with `leaf::atom()` and `core_erlang_binary_string` with `leaf::binary_lit` (BT-2390).
+- **Phoenix LiveView topology spike (ADR 0017 Phase 3)** — validated the Attach topology (Livebook-style: Phoenix as a separate BEAM node connecting to the workspace over Erlang distribution) end-to-end with zero runtime changes. Report in `docs/research/phoenix-topology-spike.md`; throwaway code in `spikes/phoenix_topology/` (BT-2394).
+- Document integration-testing strategy for modules only reachable via live external clients (`beamtalk_ws_handler`, `beamtalk_build_worker`) — added to `docs/development/testing-strategy.md` (BT-2389).
 
 ## 0.4.0 — 2026-04-27
 
