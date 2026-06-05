@@ -3,8 +3,10 @@
 
 defmodule BtAttachWeb.WorkspaceLiveTest do
   @moduledoc """
-  End-to-end proof of the BT-2394 Attach topology through the full Phoenix
-  LiveView stack against a *real* running Beamtalk workspace node.
+  End-to-end proof of the Wave-1 LiveView IDE (BT-2407) through the full Phoenix
+  LiveView stack against a *real* running Beamtalk workspace node, on the
+  BT-2394 Attach topology. Exercises the BT-2399 term-returning op layer (eval)
+  and subscription facade (Transcript), plus session-bound eval state.
 
   Requires a workspace and its cookie in the environment:
 
@@ -13,7 +15,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' \\
         ~/.beamtalk/workspaces/spike/vm.args)
 
-  Skipped automatically if no workspace cookie is configured.
+  Tag-gated: excluded from the default `mix test` run (see test_helper.exs) and
+  run only in the workspace-gated CI job.
   """
   use BtAttachWeb.ConnCase
   import Phoenix.LiveViewTest
@@ -21,10 +24,19 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # Excluded by default in test_helper.exs unless BT_WORKSPACE_COOKIE is set.
   @moduletag :workspace
 
-  test "eval round-trip renders the workspace result", %{conn: conn} do
+  test "eval round-trip renders the workspace result term", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     html = view |> form("form") |> render_submit(%{expr: "3 + 4"})
     assert html =~ "7"
+  end
+
+  test "eval state persists across evals within a session", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    # Bind a variable, then read it back in a later eval on the same session.
+    view |> form("form") |> render_submit(%{expr: "x := 21 * 2"})
+    html = view |> form("form") |> render_submit(%{expr: "x"})
+    assert html =~ "42"
   end
 
   test "Transcript output streams live into the LiveView", %{conn: conn} do

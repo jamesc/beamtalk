@@ -126,6 +126,23 @@ beamtalk_repl_subscriptions:subscribe(transcript).
 The browser edge (`beamtalk_ws_handler`) re-encodes these push messages to JSON
 push frames; dist clients consume the messages directly.
 
+### Subscribing a remote pid over RPC (Attach topology)
+
+The `subscribe_all/0` / `subscribe/1` forms register `self()`. That is correct
+on the workspace node (the WebSocket handler *is* the consumer), but a
+dist-attached client calling over `rpc:call/4` would register the short-lived
+RPC proxy rather than its own pid. The explicit-pid forms take the subscriber
+pid directly, so a Phoenix LiveView registers its own location-transparent pid:
+
+```erlang
+%% Run on the workspace node via rpc:call/4, passing the LiveView pid:
+beamtalk_repl_subscriptions:subscribe_all(LiveViewPid).
+beamtalk_repl_subscriptions:subscribe(transcript, LiveViewPid).
+```
+
+The facade still owns every `gen_server:cast`; clients pass only a `stream()`
+name and a pid, never an internal `{subscribe, …}` tuple (BT-2407).
+
 ## Where this lives
 
 | Concern | Module |
