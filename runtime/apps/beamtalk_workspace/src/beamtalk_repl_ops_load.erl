@@ -17,7 +17,7 @@ respectively.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4, resolve_class_to_module/1, resolve_module_atoms/2]).
+-export([handle/4, handle_term/4, resolve_class_to_module/1, resolve_module_atoms/2]).
 
 %% BT-1723: Shared sync logic callable from both protocol handler and primitives.
 -export([sync_project/2]).
@@ -274,9 +274,23 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
         total_files => TotalFiles
     }}.
 
--doc "Handle load/reload/unload/modules ops.".
+-doc """
+Handle load-source/load-project/unload ops for the WebSocket transport —
+encodes the term result to JSON at the edge (BT-2402).
+""".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
-handle(<<"load-project">>, Params, Msg, SessionPid) ->
+handle(Op, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
+
+-doc """
+Term-returning handler for load-source/load-project/unload (BT-2402, ADR 0082
+write-surface). Returns `{loaded, Classes, Warnings}`,
+`{load_project, Classes, Errors, Summary, Warnings}`, `{ok, Value, Output,
+Warnings}` (unload), or `{error, #beamtalk_error{}}` — no JSON in this path.
+""".
+-spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+    beamtalk_repl_ops:op_result().
+handle_term(<<"load-project">>, Params, _Msg, SessionPid) ->
     PathBin = maps:get(<<"path">>, Params, <<".">>),
     Path = binary_to_list(PathBin),
     IncludeTests = maps:get(<<"include_tests">>, Params, false),
@@ -288,48 +302,34 @@ handle(<<"load-project">>, Params, Msg, SessionPid) ->
     },
     case sync_project(Path, Options) of
         {error, Err} ->
-            beamtalk_repl_json:encode_error(Err, Msg);
+            {error, Err};
         {ok, Result} ->
-            Base = beamtalk_repl_protocol:base_response(Msg),
             DepErrors = maps:get(dep_errors, Result, []),
             %% BT-2089: Surface collision warnings to the load-project caller
             %% so that cross-project class collisions produce a clear
             %% diagnostic instead of silent eviction.
             Warnings = maps:get(warnings, Result, []),
-            Response0 = Base#{
-                <<"status">> => [<<"done">>],
-                <<"classes">> => maps:get(classes, Result),
-                <<"errors">> => maps:get(errors, Result) ++ DepErrors,
-                <<"summary">> => maps:get(summary, Result)
-            },
-            Response =
-                case Warnings of
-                    [] -> Response0;
-                    _ -> Response0#{<<"warnings">> => Warnings}
-                end,
-            iolist_to_binary(json:encode(Response))
+            {load_project, maps:get(classes, Result), maps:get(errors, Result) ++ DepErrors,
+                maps:get(summary, Result), Warnings}
     end;
-handle(<<"load-source">>, Params, Msg, SessionPid) ->
+handle_term(<<"load-source">>, Params, _Msg, SessionPid) ->
     Source = maps:get(<<"source">>, Params, <<>>),
     case Source of
         <<>> ->
             Err = beamtalk_error:new(empty_expression, 'REPL'),
             Err1 = beamtalk_error:with_message(Err, <<"Empty source">>),
             Err2 = beamtalk_error:with_hint(Err1, <<"Enter Beamtalk source code to compile.">>),
-            beamtalk_repl_json:encode_error(Err2, Msg);
+            {error, Err2};
         _ ->
             case beamtalk_repl_shell:load_source(SessionPid, Source) of
                 {ok, Classes} ->
                     Warnings = collect_load_warnings(Classes),
-                    beamtalk_repl_protocol:encode_loaded(
-                        Classes, Msg, fun beamtalk_repl_json:term_to_json/1, Warnings
-                    );
+                    {loaded, Classes, Warnings};
                 {error, Reason} ->
-                    WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
-                    beamtalk_repl_json:encode_error(WrappedReason, Msg)
+                    {error, beamtalk_repl_errors:ensure_structured_error(Reason)}
             end
     end;
-handle(<<"unload">>, Params, Msg, SessionPid) ->
+handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
     %% BT-1239: Restore unload op — fully removes class from system (actors, gen_server,
     %% BEAM module, workspace_meta, session tracker).
     ClassNameBin = maps:get(<<"module">>, Params, <<>>),
@@ -340,22 +340,19 @@ handle(<<"unload">>, Params, Msg, SessionPid) ->
                 Err0,
                 iolist_to_binary([<<"Class not found: '">>, ClassNameBin, <<"'">>])
             ),
-            beamtalk_repl_json:encode_error(Err1, Msg);
+            {error, Err1};
         {ok, ClassName} ->
             case beamtalk_runtime_api:remove_class_from_system(ClassName) of
                 {ok, ModuleName} ->
                     %% Clean up workspace-level and session-level tracking.
                     beamtalk_workspace_meta:unregister_module(ModuleName),
                     beamtalk_repl_shell:remove_from_tracker(SessionPid, ModuleName),
-                    beamtalk_repl_protocol:encode_result(
+                    {ok,
                         iolist_to_binary([
                             <<"Class '">>, ClassNameBin, <<"' removed from system">>
-                        ]),
-                        Msg,
-                        fun beamtalk_repl_json:term_to_json/1
-                    );
+                        ]), <<>>, []};
                 {error, Err} ->
-                    beamtalk_repl_json:encode_error(Err, Msg)
+                    {error, Err}
             end
     end.
 

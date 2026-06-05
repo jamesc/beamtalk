@@ -352,9 +352,8 @@ handle_show_codegen_selector_without_class_test() ->
 
 validate_selector_undefined_returns_ok_test() ->
     %% When SelectorBin is undefined, no validation is needed.
-    Msg = make_msg(<<"show-codegen">>, <<"sc-8">>, undefined, false),
     Result = beamtalk_repl_ops_dev:validate_selector_if_present(
-        <<"SomeClass">>, 'SomeClass', self(), undefined, Msg
+        <<"SomeClass">>, 'SomeClass', self(), undefined
     ),
     ?assertEqual(ok, Result).
 
@@ -1030,7 +1029,7 @@ handle_list_classes_unknown_filter_returns_error_test() ->
     ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"Unknown filter">>)).
 
 %%====================================================================
-%% encode helpers: encode_codegen_response via show-codegen success path
+%% encode helpers: {codegen, _, _} term via show-codegen success path
 %%====================================================================
 
 %% validate_list_classes_filter/1 is internal; its observable behaviour is
@@ -1468,22 +1467,19 @@ show_codegen_class_selector_not_found() ->
 
 validate_selector_known() ->
     Pid = beamtalk_runtime_api:whereis_class('WidgetDev'),
-    Msg = make_msg(<<"show-codegen">>, <<"vs-1">>, undefined, false),
     Result = beamtalk_repl_ops_dev:validate_selector_if_present(
-        <<"WidgetDev">>, 'WidgetDev', Pid, <<"render">>, Msg
+        <<"WidgetDev">>, 'WidgetDev', Pid, <<"render">>
     ),
     ?assertEqual(ok, Result).
 
 validate_selector_unknown() ->
     Pid = beamtalk_runtime_api:whereis_class('WidgetDev'),
-    Msg = make_msg(<<"show-codegen">>, <<"vs-2">>, undefined, false),
+    %% BT-2402: validate_selector_if_present/4 returns a structured error term
+    %% (no longer a pre-encoded JSON binary).
     Result = beamtalk_repl_ops_dev:validate_selector_if_present(
-        <<"WidgetDev">>, 'WidgetDev', Pid, <<"noSuchSelectorXyz">>, Msg
+        <<"WidgetDev">>, 'WidgetDev', Pid, <<"noSuchSelectorXyz">>
     ),
-    ?assertMatch({error, _}, Result),
-    {error, Encoded} = Result,
-    Decoded = json:decode(Encoded),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
+    ?assertMatch({error, #beamtalk_error{}}, Result).
 
 get_methods_for_receiver_class() ->
     %% A class-name receiver with empty prefix returns class-side methods plus
@@ -1554,7 +1550,7 @@ show_codegen_class_compiles_source() ->
     ?assertNotEqual(nomatch, binary:match(ErrMsg, <<"No source">>)).
 
 %%====================================================================
-%% Live REPL session: show-codegen `code` path + encode_codegen_response
+%% Live REPL session: show-codegen `code` path + {codegen, _, _} term
 %%====================================================================
 
 session_codegen_test_() ->

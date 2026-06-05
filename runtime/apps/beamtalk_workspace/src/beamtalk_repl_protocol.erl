@@ -38,6 +38,12 @@ Legacy format (backward compatible):
     encode_describe/3,
     encode_test_results/2,
     encode_trace_result/5,
+    encode_completions/2,
+    encode_codegen/3,
+    encode_methods/3,
+    encode_class_list/2,
+    encode_health/3,
+    encode_load_project/5,
     is_legacy/1,
     get_op/1,
     get_id/1,
@@ -589,6 +595,107 @@ encode_trace_result(Steps, Msg, TermToJson, Output, Warnings) ->
                 json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
             )
     end.
+
+-doc """
+Encode a completions response (BT-2402).
+
+Legacy clients receive a bare `#{type, completions}` map; new clients receive
+the base response with a `completions` array and a `done` status. Used by the
+`complete` and `erlang-complete` ops.
+""".
+-spec encode_completions([binary()], protocol_msg()) -> binary().
+encode_completions(Completions, Msg) ->
+    case Msg#protocol_msg.legacy of
+        true ->
+            iolist_to_binary(
+                json:encode(#{
+                    <<"type">> => <<"completions">>,
+                    <<"completions">> => Completions
+                })
+            );
+        false ->
+            Base = base_response(Msg),
+            iolist_to_binary(
+                json:encode(Base#{
+                    <<"completions">> => Completions, <<"status">> => [<<"done">>]
+                })
+            )
+    end.
+
+-doc """
+Encode a show-codegen response (BT-2402).
+
+Carries the generated Core Erlang source and any compiler warnings. There is no
+legacy form — `show-codegen` is a new-protocol-only op.
+""".
+-spec encode_codegen(binary(), [binary()], protocol_msg()) -> binary().
+encode_codegen(CoreErlang, Warnings, Msg) ->
+    Base = base_response(Msg),
+    Result = Base#{<<"core_erlang">> => CoreErlang, <<"status">> => [<<"done">>]},
+    iolist_to_binary(json:encode(maybe_add_warnings(Result, Warnings))).
+
+-doc """
+Encode a methods response (BT-2402).
+
+`Methods` is a list of method-descriptor maps and `StateVars` a list of
+instance-variable name binaries for the `methods` op.
+""".
+-spec encode_methods([map()], [binary()], protocol_msg()) -> binary().
+encode_methods(Methods, StateVars, Msg) ->
+    Base = base_response(Msg),
+    iolist_to_binary(
+        json:encode(Base#{
+            <<"methods">> => Methods,
+            <<"state_vars">> => StateVars,
+            <<"status">> => [<<"done">>]
+        })
+    ).
+
+-doc """
+Encode a list-classes response (BT-2402).
+
+`ClassList` is the sorted list of class-info maps for the `list-classes` op.
+""".
+-spec encode_class_list([map()], protocol_msg()) -> binary().
+encode_class_list(ClassList, Msg) ->
+    Base = base_response(Msg),
+    iolist_to_binary(
+        json:encode(Base#{<<"class_list">> => ClassList, <<"status">> => [<<"done">>]})
+    ).
+
+-doc """
+Encode a health response (BT-2402).
+
+Carries the workspace identifier and the connection nonce for the `health` op.
+""".
+-spec encode_health(binary(), binary(), protocol_msg()) -> binary().
+encode_health(WorkspaceId, Nonce, Msg) ->
+    Base = base_response(Msg),
+    iolist_to_binary(
+        json:encode(Base#{
+            <<"workspace_id">> => WorkspaceId,
+            <<"nonce">> => Nonce,
+            <<"status">> => [<<"done">>]
+        })
+    ).
+
+-doc """
+Encode a load-project response (BT-2402).
+
+`Classes` is the list of loaded class-name binaries, `Errors` the combined
+per-file and dependency-activation error maps, `Summary` the human-readable
+reload summary, and `Warnings` any class-collision warnings.
+""".
+-spec encode_load_project([binary()], [map()], binary(), [binary()], protocol_msg()) -> binary().
+encode_load_project(Classes, Errors, Summary, Warnings, Msg) ->
+    Base = base_response(Msg),
+    Response = Base#{
+        <<"status">> => [<<"done">>],
+        <<"classes">> => Classes,
+        <<"errors">> => Errors,
+        <<"summary">> => Summary
+    },
+    iolist_to_binary(json:encode(maybe_add_warnings(Response, Warnings))).
 
 %%% Utilities
 

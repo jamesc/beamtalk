@@ -22,47 +22,55 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
--export([handle/4, describe_ops/0]).
+-export([handle/4, handle_term/4, describe_ops/0]).
 
--doc "Handle enable-tracing, get-traces, actor-stats, and export-traces ops.".
+-doc """
+Handle enable-tracing/disable-tracing/get-traces/actor-stats/export-traces ops
+for the WebSocket transport — encodes the term result to JSON at the edge
+(BT-2402).
+""".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
-handle(<<"enable-tracing">>, _Params, Msg, _SessionPid) ->
+handle(Op, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
+
+-doc """
+Term-returning handler for the tracing/performance ops (BT-2402).
+
+Returns `{ok, Value, Output, Warnings}` for the status/read ops
+(enable/disable-tracing, get-traces, actor-stats) and `{value, JsonValue}` for
+`export-traces` (whose payload is already a wire-shaped map). Invalid filter
+arguments raise a structured `#beamtalk_error{}` (caught and encoded at the
+WebSocket edge by `beamtalk_repl_server:handle_protocol_request/2`), preserving
+the long-standing argument-validation contract.
+""".
+-spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+    beamtalk_repl_ops:op_result().
+handle_term(<<"enable-tracing">>, _Params, _Msg, _SessionPid) ->
     beamtalk_tracing:enable(),
-    beamtalk_repl_protocol:encode_result(
-        <<"Tracing enabled">>, Msg, fun beamtalk_repl_json:term_to_json/1
-    );
-handle(<<"disable-tracing">>, _Params, Msg, _SessionPid) ->
+    {ok, <<"Tracing enabled">>, <<>>, []};
+handle_term(<<"disable-tracing">>, _Params, _Msg, _SessionPid) ->
     beamtalk_tracing:disable(),
-    beamtalk_repl_protocol:encode_result(
-        <<"Tracing disabled">>, Msg, fun beamtalk_repl_json:term_to_json/1
-    );
-handle(<<"get-traces">>, Params, Msg, _SessionPid) ->
+    {ok, <<"Tracing disabled">>, <<>>, []};
+handle_term(<<"get-traces">>, Params, _Msg, _SessionPid) ->
     Limit = maps:get(<<"limit">>, Params, undefined),
     Opts = build_trace_filter_opts(Params),
     Traces = beamtalk_tracing:traces(Opts),
     Limited = apply_limit(Traces, Limit),
-    beamtalk_repl_protocol:encode_result(
-        Limited, Msg, fun beamtalk_repl_json:term_to_json/1
-    );
-handle(<<"actor-stats">>, Params, Msg, _SessionPid) ->
+    {ok, Limited, <<>>, []};
+handle_term(<<"actor-stats">>, Params, _Msg, _SessionPid) ->
     Actor = maps:get(<<"actor">>, Params, undefined),
     Stats = get_stats(Actor),
-    beamtalk_repl_protocol:encode_result(
-        Stats, Msg, fun beamtalk_repl_json:term_to_json/1
-    );
-handle(<<"export-traces">>, Params, Msg, _SessionPid) ->
+    {ok, Stats, <<>>, []};
+handle_term(<<"export-traces">>, Params, _Msg, _SessionPid) ->
     Opts = build_export_opts(Params),
     case beamtalk_tracing:exportTraces(Opts) of
         {ok, #{path := Path, count := Count}} ->
-            Result = #{
+            %% Result is already a JSON-shaped map with binary keys; the
+            %% `value` tag encodes it with identity (no term_to_json).
+            {value, #{
                 <<"path">> => iolist_to_binary(Path),
                 <<"count">> => Count
-            },
-            %% Result is already a JSX-compatible map with binary keys;
-            %% use identity to avoid term_to_json stringifying the map.
-            beamtalk_repl_protocol:encode_result(
-                Result, Msg, fun(X) -> X end
-            );
+            }};
         {error, Reason} ->
             ErrMsg = iolist_to_binary(
                 io_lib:format("Failed to export traces: ~p", [Reason])

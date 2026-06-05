@@ -81,11 +81,26 @@ inherited tail).
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4, describe_ops/0]).
+-export([handle/4, handle_term/4, describe_ops/0]).
 
--doc "Handle the `nav-symbols` op.".
+-doc """
+Handle the `nav-symbols` op for the WebSocket transport — encodes the term
+result to JSON at the edge (BT-2402).
+""".
 -spec handle(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) -> binary().
-handle(<<"nav-symbols">>, Params, Msg, _SessionPid) ->
+handle(Op, Params, Msg, SessionPid) ->
+    beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
+
+-doc """
+Term-returning handler for `nav-symbols` (BT-2402, ADR 0085 read-surface).
+
+Returns `{value, #{<<"classes">> => Sorted}}` — the class/method outline is
+already a wire-shaped JSON value (see the module doc) — or
+`{error, #beamtalk_error{}}` on an invalid `scope`.
+""".
+-spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
+    beamtalk_repl_ops:op_result().
+handle_term(<<"nav-symbols">>, Params, _Msg, _SessionPid) ->
     case validate_scope(maps:get(<<"scope">>, Params, undefined)) of
         {ok, Scope} ->
             ClassPids = safe_all_classes(),
@@ -97,14 +112,13 @@ handle(<<"nav-symbols">>, Params, Msg, _SessionPid) ->
                 fun(A, B) -> maps:get(<<"name">>, A) =< maps:get(<<"name">>, B) end,
                 ClassRows
             ),
-            Value = #{<<"classes">> => Sorted},
-            beamtalk_repl_protocol:encode_result(Value, Msg, fun(V) -> V end);
+            {value, #{<<"classes">> => Sorted}};
         {error, Reason} ->
             Err0 = beamtalk_error:new(argument_error, 'REPL'),
             Err1 = beamtalk_error:with_message(
                 Err0, iolist_to_binary([<<"nav-symbols: ">>, Reason])
             ),
-            beamtalk_repl_json:encode_error(Err1, Msg)
+            {error, Err1}
     end.
 
 -doc "Advertise the `nav-symbols` op in `describe`.".

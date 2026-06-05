@@ -74,12 +74,68 @@ dispatch_unknown_op_returns_error_term_test() ->
     {error, Err} = Result,
     ?assertEqual(unknown_op, Err#beamtalk_error.kind).
 
-dispatch_unported_op_returns_json_passthrough_test() ->
-    %% `close` is not yet ported to a native term shape — it is surfaced via the
-    %% {json, Binary} escape tag so it still flows through the one seam.
+dispatch_close_returns_status_term_test() ->
+    %% BT-2402: `close` is now ported to a native term shape — the {json, Binary}
+    %% escape tag was removed once every op returned a native op_result().
     Msg = make_msg(<<"close">>),
     Result = beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, self()),
-    ?assertMatch({json, Bin} when is_binary(Bin), Result).
+    ?assertEqual({status, ok}, Result).
+
+dispatch_sessions_no_supervisor_returns_sessions_term_test() ->
+    %% No beamtalk_session_sup in unit tests → empty sessions list term.
+    Msg = make_msg(<<"sessions">>),
+    ?assertEqual({sessions, []}, beamtalk_repl_ops:dispatch(<<"sessions">>, #{}, Msg, self())).
+
+dispatch_describe_returns_describe_term_test() ->
+    Msg = make_msg(<<"describe">>),
+    Result = beamtalk_repl_ops:dispatch(<<"describe">>, #{}, Msg, self()),
+    ?assertMatch({describe, Ops, Versions} when is_map(Ops) andalso is_map(Versions), Result).
+
+dispatch_load_source_empty_returns_error_term_test() ->
+    Msg = make_msg(<<"load-source">>),
+    Result = beamtalk_repl_ops:dispatch(<<"load-source">>, #{<<"source">> => <<>>}, Msg, self()),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+dispatch_nav_query_missing_kind_returns_error_term_test() ->
+    Msg = make_msg(<<"nav-query">>),
+    Result = beamtalk_repl_ops:dispatch(<<"nav-query">>, #{}, Msg, self()),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+dispatch_complete_returns_completions_term_test() ->
+    %% Empty prefix → empty completions list, no runtime registry needed.
+    Msg = make_msg(<<"complete">>),
+    Result = beamtalk_repl_ops:dispatch(<<"complete">>, #{<<"code">> => <<>>}, Msg, self()),
+    ?assertEqual({completions, []}, Result).
+
+dispatch_methods_unknown_class_returns_methods_term_test() ->
+    Msg = make_msg(<<"methods">>),
+    Result = beamtalk_repl_ops:dispatch(
+        <<"methods">>, #{<<"class">> => <<"NoSuchClassXyz">>}, Msg, self()
+    ),
+    ?assertEqual({methods, [], []}, Result).
+
+dispatch_unload_unknown_class_returns_error_term_test() ->
+    Msg = make_msg(<<"unload">>),
+    Result = beamtalk_repl_ops:dispatch(
+        <<"unload">>, #{<<"module">> => <<"NoSuchClassXyz">>}, Msg, self()
+    ),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+dispatch_show_codegen_no_params_returns_error_term_test() ->
+    Msg = make_msg(<<"show-codegen">>),
+    Result = beamtalk_repl_ops:dispatch(<<"show-codegen">>, #{}, Msg, self()),
+    ?assertMatch({error, #beamtalk_error{}}, Result).
+
+%% BT-2402: round-trip — encoding a dispatched term reproduces the handle_op JSON.
+encode_completions_term_matches_handle_op_json_test() ->
+    Msg = make_msg(<<"complete">>),
+    Params = #{<<"code">> => <<>>},
+    Term = beamtalk_repl_ops:dispatch(<<"complete">>, Params, Msg, self()),
+    Encoded = beamtalk_repl_ops:encode(Term, Msg),
+    ViaServer = beamtalk_repl_server:handle_op(<<"complete">>, Params, Msg, self()),
+    ?assertEqual(ViaServer, Encoded),
+    Decoded = json:decode(Encoded),
+    ?assertEqual([], maps:get(<<"completions">>, Decoded)).
 
 %%====================================================================
 %% encode/2 — term result → JSON at the WebSocket edge
@@ -105,10 +161,24 @@ encode_error_term_produces_error_json_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)),
     ?assert(binary:match(maps:get(<<"error">>, Decoded), <<"Invalid actor PID">>) =/= nomatch).
 
-encode_json_passthrough_is_identity_test() ->
-    Msg = make_msg(<<"close">>),
-    Bin = beamtalk_repl_protocol:encode_status(ok, Msg, fun beamtalk_repl_json:term_to_json/1),
-    ?assertEqual(Bin, beamtalk_repl_ops:encode({json, Bin}, Msg)).
+encode_value_term_is_identity_encoded_test() ->
+    %% BT-2402: the `value` tag carries an already-wire-shaped JSON value, encoded
+    %% with identity (no term_to_json). A map of binaries/lists survives intact.
+    Msg = make_msg(<<"nav-query">>),
+    Value = #{<<"sites">> => []},
+    Encoded = beamtalk_repl_ops:encode({value, Value}, Msg),
+    Decoded = json:decode(Encoded),
+    ?assertEqual([], maps:get(<<"sites">>, maps:get(<<"value">>, Decoded))),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_describe_term_matches_handle_op_json_test() ->
+    %% Encoding a dispatched term at the edge must reproduce exactly what the
+    %% WebSocket transport returns via handle_op/4 (wire format unchanged).
+    Msg = make_msg(<<"describe">>),
+    Term = beamtalk_repl_ops:dispatch(<<"describe">>, #{}, Msg, self()),
+    Encoded = beamtalk_repl_ops:encode(Term, Msg),
+    ViaServer = beamtalk_repl_server:handle_op(<<"describe">>, #{}, Msg, self()),
+    ?assertEqual(ViaServer, Encoded).
 
 %%====================================================================
 %% beamtalk_repl_subscriptions — facade
