@@ -24,6 +24,23 @@ the subscribe/unsubscribe calls. The **calling process** becomes the subscriber
 LiveView process subscribes its own location-transparent pid and receives the
 push messages natively.
 
+## Subscribing on behalf of a remote pid (Attach topology)
+
+The `subscribe/1` / `subscribe_all/0` forms register `self()`, which is correct
+when the caller *is* the long-lived consumer (the WebSocket handler runs on the
+workspace node, so `self()` is the handler pid). A **dist-attached** client
+(Phoenix LiveView, BT-2407) cannot use those forms over `rpc:call/4`: the RPC
+proxy spawned on the workspace node would become the (short-lived) subscriber
+instead of the LiveView pid, and its `'DOWN'` would immediately unsubscribe it.
+
+The `subscribe/2` / `subscribe_all/1` forms take an **explicit subscriber pid**.
+A LiveView passes its own location-transparent pid; the facade registers that
+pid and the workspace pushes messages to it directly over distribution. The
+underlying event servers already accept an explicit pid in their subscribe cast,
+so this is the same registration the WebSocket edge uses — only the subscriber
+identity differs. The facade still owns every cast: clients never cast
+`{subscribe, Pid}` tuples at the gen_servers themselves.
+
 ## Streams and the messages they push
 
 | Stream | Push message to the subscriber |
@@ -46,7 +63,23 @@ match on them (the browser edge re-encodes them to JSON push frames in
 * ADR 0017 Phase 3 (Browser Connectivity).
 """.
 
--export([streams/0, subscribe/1, unsubscribe/1, subscribe_all/0, unsubscribe_all/0]).
+-export([
+    streams/0,
+    subscribe/1,
+    subscribe/2,
+    unsubscribe/1,
+    unsubscribe/2,
+    subscribe_all/0,
+    subscribe_all/1,
+    unsubscribe_all/0,
+    unsubscribe_all/1
+]).
+
+%% Registered names of the underlying event servers (all local to the workspace
+%% node). The facade owns these so the cross-node subscribe cast lives in one
+%% place; clients address the streams by their `stream()` name only.
+-define(TRANSCRIPT_REF, 'Transcript').
+-define(ACTOR_REGISTRY, beamtalk_actor_registry).
 
 -type stream() :: transcript | actors | classes | bindings | flush.
 
@@ -99,3 +132,49 @@ subscribe_all() ->
 -spec unsubscribe_all() -> ok.
 unsubscribe_all() ->
     lists:foreach(fun unsubscribe/1, streams()).
+
+-doc """
+Subscribe an explicit `Pid` to a single live push stream. Used by dist-attached
+clients (Phoenix LiveView, Attach topology) that call this over `rpc:call/4` and
+must register their own location-transparent pid rather than the short-lived RPC
+proxy. The registered pid receives the stream's push messages (see the module
+doc table).
+""".
+-spec subscribe(stream(), pid()) -> ok.
+subscribe(transcript, Pid) when is_pid(Pid) ->
+    gen_server:cast(?TRANSCRIPT_REF, {subscribe, Pid});
+subscribe(actors, Pid) when is_pid(Pid) ->
+    gen_server:cast(?ACTOR_REGISTRY, {subscribe_lifecycle, Pid});
+subscribe(classes, Pid) when is_pid(Pid) ->
+    gen_server:cast(beamtalk_class_events, {subscribe, Pid});
+subscribe(bindings, Pid) when is_pid(Pid) ->
+    gen_server:cast(beamtalk_bindings_events, {subscribe, Pid});
+subscribe(flush, Pid) when is_pid(Pid) ->
+    gen_server:cast(beamtalk_flush_events, {subscribe, Pid}).
+
+-doc "Unsubscribe an explicit `Pid` from a single live push stream.".
+-spec unsubscribe(stream(), pid()) -> ok.
+unsubscribe(transcript, Pid) when is_pid(Pid) ->
+    gen_server:cast(?TRANSCRIPT_REF, {unsubscribe, Pid});
+unsubscribe(actors, Pid) when is_pid(Pid) ->
+    gen_server:cast(?ACTOR_REGISTRY, {unsubscribe_lifecycle, Pid});
+unsubscribe(classes, Pid) when is_pid(Pid) ->
+    gen_server:cast(beamtalk_class_events, {unsubscribe, Pid});
+unsubscribe(bindings, Pid) when is_pid(Pid) ->
+    gen_server:cast(beamtalk_bindings_events, {unsubscribe, Pid});
+unsubscribe(flush, Pid) when is_pid(Pid) ->
+    gen_server:cast(beamtalk_flush_events, {unsubscribe, Pid}).
+
+-doc """
+Subscribe an explicit `Pid` to every live push stream. The one call a
+dist-attached client makes over RPC to mirror the browser's live surface with
+its own pid as the subscriber.
+""".
+-spec subscribe_all(pid()) -> ok.
+subscribe_all(Pid) when is_pid(Pid) ->
+    lists:foreach(fun(Stream) -> subscribe(Stream, Pid) end, streams()).
+
+-doc "Unsubscribe an explicit `Pid` from every live push stream.".
+-spec unsubscribe_all(pid()) -> ok.
+unsubscribe_all(Pid) when is_pid(Pid) ->
+    lists:foreach(fun(Stream) -> unsubscribe(Stream, Pid) end, streams()).

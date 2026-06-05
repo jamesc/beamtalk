@@ -41,7 +41,7 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `eval` | -- | *(implicit: any expression)* | `evaluate` | -- | Core evaluation; CLI uses REPL client, LSP has no eval |
+| `eval` | -- | *(implicit: any expression)* | `evaluate` | -- | Core evaluation; CLI uses REPL client, LSP has no eval. The LiveView IDE (Attach topology, `editors/liveview/`, BT-2407) is a further consumer: it dispatches the same `eval` op via the term-returning seam (`beamtalk_repl_ops:dispatch/4`, BT-2399) over Erlang distribution, so it shares the same structured result — surface-consistent by construction, no JSON-flattened string. |
 | `stdin` | -- | *(implicit: interactive input)* | -- | -- | Provides input to a blocked eval; CLI handles interactively |
 | `complete` | -- | *(implicit: tab completion)* | `complete` | `completion` | Autocompletion suggestions |
 | `show-codegen` | -- | `:show-codegen` / `:sc` | `show_codegen` | -- | Show generated Core Erlang |

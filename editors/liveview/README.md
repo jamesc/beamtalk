@@ -11,9 +11,18 @@ This is the productionised successor to the BT-2394 spike
 
 ## The interesting files
 
-- `lib/bt_attach/workspace.ex` — the entire Attach client (connect, eval, transcript).
-- `lib/bt_attach_web/live/workspace_live.ex` — the LiveView page.
-- `test/bt_attach_web/workspace_live_test.exs` — end-to-end test against a real workspace.
+- `lib/bt_attach/workspace.ex` — the entire Attach client. `eval/2` dispatches
+  through the BT-2399 term-returning op layer (`beamtalk_repl_ops:dispatch/4`)
+  and returns the live Erlang term, not JSON; `render_term/1` reuses the
+  workspace's own formatter so display matches the Phase-1 browser; Transcript
+  is subscribed through the `beamtalk_repl_subscriptions` facade (no direct
+  `{subscribe, self()}` cast at gen_servers).
+- `lib/bt_attach_web/live/workspace_live.ex` — the two-pane LiveView (Workspace +
+  live Transcript). Each mount gets its own workspace-supervised session;
+  eval state persists across evals within the session.
+- `test/bt_attach_web/workspace_live_test.exs` — `:workspace`-tagged end-to-end
+  tests against a real workspace (eval round-trip, session persistence, live
+  Transcript push).
 
 ## Toolchain
 
