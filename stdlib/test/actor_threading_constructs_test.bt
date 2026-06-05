@@ -34,6 +34,7 @@ TestCase subclass: ActorThreadingConstructsTest
     self assert: (self.a ifTrueNonLastReadWrite: true) equals: 7
     b := ActorThreadingCorpus spawn
     self assert: (b ifTrueNonLastReadWrite: true) equals: 7
+    b stop
 
   // Same actor, repeated calls must each thread independently.
   testIfTrueNonLastReadWriteRepeatedCallsThread =>
