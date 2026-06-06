@@ -167,8 +167,9 @@ node kind            // => one of #beamtalkSupervisor #beamtalkActor
                      //            #otpSupervisor #otpProcess
 node behaviourClass  // => Class | nil   (the Beamtalk class, nil for foreign)
 node strategy        // => Symbol | nil  (#oneForOne … ; supervisors only)
-node restartCount    // => Integer       (from count_children / child accounting)
-node childCount      // => Integer
+node childCount      // => Integer       (live children; supervisors only)
+node restartIntensity // => Dictionary | nil  (configured #{maxRestarts, window};
+                     //   supervisors only — see note on restart *counts* below)
 node children        // => List(SupervisionNode)   (snapshot children)
 node parent          // => SupervisionNode | nil
 node isSupervisor    // => Boolean
@@ -182,23 +183,51 @@ populated) or a foreign-process badge (`#otpProcess`/`#otpSupervisor`,
 `behaviourClass` is `nil`, `registeredName`/module identify it).
 
 ```beamtalk
-// Find every running Counter and how often it has been restarted:
+// Find every running Counter and its supervisor's configured restart budget:
 (ProcessNavigation default tree findClass: Counter)
-  collect: [:n | n restartCount]      // => #(0 2)
+  collect: [:n | n parent restartIntensity]   // => #(#{#maxRestarts => 10, ...})
 
 // Foreign processes are visible, just differently tagged:
 (ProcessNavigation system tree nodesOfKind: #otpProcess) size   // => 11
 ```
 
+**On restart *counts* (acceptance-criteria gap, called out honestly).** OTP's
+*public* supervisor API exposes the configured restart *budget*
+(`maxRestarts` / `restartWindow`, already surfaced by `beamtalk_supervisor`
+via the class-side `maxRestarts`/`restartWindow` methods) and live child
+*counts* (`count_children`), but **not a per-child restart *history* or
+cumulative restart *count*.** The running tally lives in the supervisor's
+private state and is only reachable by parsing `sys:get_status/1`'s internal
+report — undocumented, version-fragile, and explicitly *not* a public
+contract. This ADR therefore surfaces `restartIntensity` (the configured
+budget, public and stable) on the node, and treats a true per-child restart
+*counter* as an **open question** deferred to implementation: if a stable
+source emerges (e.g. a runtime-maintained tally hooked into the
+supervisor's child-restart path, paralleling the maintained xref index of
+ADR 0087), it can be added as `node restartCount` without breaking the
+record. The acceptance criterion "restart history" is answered as: *budget
+now, history deferred with a documented reason.*
+
 ### 4. Snapshot semantics
 
 Construction **snapshots** the tree: `ProcessNavigation default` walks
 `which_children` top-down once and freezes the structure (pids, names, kinds,
-counts, adjacency) into immutable records. Walking the returned tree never
-re-enters OTP, so iteration is internally consistent and cannot deadlock or
-observe a half-mutated tree. This matches Pharo's / Squeak's process-browser
-idiom (snapshot then browse) and the snapshot-friendly ordering
-`SystemNavigation` already adopts.
+counts, adjacency) into immutable records. Once frozen, walking the returned
+tree never re-enters OTP, so *iteration* is internally consistent — it can
+never deadlock, block on a busy process, or observe records mutating mid-walk.
+
+Honest caveat: **construction itself is not atomic.** The snapshot is
+assembled from many separate `which_children` calls (one per supervisor), and
+the tree can mutate between them — a child can be restarted, or appear/vanish,
+between the moment its parent is read and the moment it is read. So the
+snapshot is a *best-effort point-in-time view*, not a globally-consistent
+cut. This is the same guarantee `:observer` and LiveDashboard provide (BEAM
+offers no atomic whole-tree freeze), and it is acceptable precisely because
+the model is "snapshot then browse, re-snapshot to refresh" — matching
+Pharo's / Squeak's process-browser idiom and the snapshot-friendly ordering
+`SystemNavigation` already adopts. A node whose pid died during or after
+construction is detected lazily: `node status` returns `nil` rather than
+raising.
 
 To observe change, take a new snapshot:
 
@@ -241,14 +270,27 @@ the user's dependencies and belong in `default`.
 One new module, `beamtalk_process_navigation`, exporting the snapshot builder
 and the guarded status fetch. It delegates entirely to existing OTP calls —
 `supervisor:which_children/1`, `supervisor:count_children/1`,
-`erlang:process_info/2` (for registered name, dictionary `'$beamtalk_class'`
-tag, current function), and `sys:get_status/1` (lazy). No new gen_server, no
-ETS, no maintained index. Kind classification reads the process dictionary:
-Beamtalk actors/supervisors carry a `'$beamtalk_class'` tag (the same tag
-`ChangeLog` and friends use for type inference); processes without it are
-`#otpProcess` / `#otpSupervisor` (the latter detected via
-`supervisor:which_children/1` succeeding, or the OTP `$ancestors`/behaviour
-metadata).
+`erlang:process_info/2` (registered name, current function, dictionary), and
+`sys:get_status/1` (lazy). No new gen_server, no ETS, no maintained index.
+
+Kind classification reuses machinery the runtime already has:
+
+- **`#beamtalkActor`** — `beamtalk_actor:is_beamtalk_actor/1` already answers
+  this: it reads `process_info(Pid, dictionary)` and tests for the
+  `'$beamtalk_actor'` marker that every Beamtalk actor's `init/1` plants via
+  `erlang:put('$beamtalk_actor', Class)`. The marker's value **is** the
+  `behaviourClass`. (Note: the actor's `'$beamtalk_class'` lives in the
+  gen_server *state map*, not the readable process dictionary —
+  `'$beamtalk_actor'` is the correct, pid-reachable tag.)
+- **`#beamtalkSupervisor`** — matched by pid against the supervisor registry
+  that `beamtalk_supervisor:get_root/0` and `current:/1` already maintain
+  (class ↔ pid), since Beamtalk supervisors run the OTP `supervisor`
+  behaviour and do *not* carry an actor process-dict marker.
+- **`#otpSupervisor` / `#otpProcess`** — any remaining pid: classified as a
+  supervisor when it presents the OTP supervisor behaviour (detectable via
+  `process_info(Pid, dictionary)` `$ancestors`/`'$initial_call'` or a guarded
+  `supervisor:which_children/1`), otherwise a plain process. `behaviourClass`
+  is `nil`; `registeredName` / initial-call module identify it.
 
 ### 8. Push vs pull — out of scope
 
@@ -420,9 +462,24 @@ change-events deferred to BT-2193.
   understand "snapshot, not live."
 - No push events in v1; a "live" IDE pane must poll. Acceptable (LiveDashboard
   does the same) but is a known follow-up dependency on BT-2193.
-- `kind` classification leans on the `'$beamtalk_class'` process-dictionary
-  tag and OTP behaviour metadata; an exotic foreign process could be
+- `kind` classification leans on the `'$beamtalk_actor'` process-dictionary
+  marker and OTP behaviour metadata; an exotic foreign process could be
   mis-tagged `#otpProcess`. Low impact (it still appears, just generically).
+- **Information exposure.** `ProcessNavigation system` enumerates *every*
+  process on the node — including runtime internals, other sessions'
+  supervisors, and foreign package processes — with pids and registered
+  names. Over the authenticated remote front (ADR 0091) this is a
+  reconnaissance surface. Mitigation: `default` (the `Workspace processes`
+  alias and the IDE pane's source) is *already* scoped to the workspace's own
+  application tree with infra filtered; `system` is the privileged, opt-in
+  view. The ADR-0091 authenticated boundary gates *who can eval at all*, so
+  `system` is no more exposing than the FFI those callers already have — but
+  the asymmetry (`default` safe-by-default, `system` privileged) should be
+  documented at the call site, not just here.
+- Per-child restart *history* is not publicly available from OTP (see §3);
+  the ADR ships configured restart *budget* only and defers true restart
+  counts. Anyone expecting "how many times has this crashed" from v1 will not
+  find it.
 
 ### Neutral
 - Adds three stdlib classes (`ProcessNavigation`, `SupervisionTree`,
