@@ -11,8 +11,11 @@ defmodule BtAttach.Application do
       BtAttachWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:bt_attach, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: BtAttach.PubSub},
-      # Start a worker by calling: BtAttach.Worker.start_link(arg)
-      # {BtAttach.Worker, arg},
+      # Per-tab workspace-session registry (BT-2410 Wave 4): owns the
+      # resume/cleanup lifecycle that lets a reconnecting LiveView re-bind to its
+      # tab's existing session and reaps sessions for tabs that close. Started
+      # before the Endpoint so it is available to the first connected mount.
+      BtAttach.SessionRegistry,
       # Start to serve requests, typically the last entry
       BtAttachWeb.Endpoint
     ]

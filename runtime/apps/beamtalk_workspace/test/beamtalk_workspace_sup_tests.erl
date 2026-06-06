@@ -118,8 +118,7 @@ repl_server_spec_test() ->
             #{
                 port => 49152,
                 workspace_id => <<"test123">>,
-                bind_addr => {127, 0, 0, 1},
-                web_port => undefined
+                bind_addr => {127, 0, 0, 1}
             }
         ]},
         maps:get(start, ReplSpec)
@@ -429,8 +428,7 @@ repl_server_config_test() ->
             #{
                 port => 12345,
                 workspace_id => <<"ws-custom">>,
-                bind_addr => {127, 0, 0, 1},
-                web_port => undefined
+                bind_addr => {127, 0, 0, 1}
             }
         ]},
         maps:get(start, ReplSpec)

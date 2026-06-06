@@ -82,7 +82,6 @@ pub(crate) fn start_beam_node(
             config.port,
             name,
             config.bind_addr,
-            config.web_port,
             config.log_level,
             config.otp_app_name,
             config.hex_dep_names,
@@ -91,7 +90,6 @@ pub(crate) fn start_beam_node(
         repl_startup::build_eval_cmd(
             config.port,
             config.bind_addr,
-            config.web_port,
             config.log_level,
             config.otp_app_name,
             config.hex_dep_names,

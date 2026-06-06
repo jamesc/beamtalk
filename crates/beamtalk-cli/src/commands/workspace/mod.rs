@@ -82,8 +82,6 @@ pub struct WorkspaceConfig<'a> {
     pub port: u16,
     /// Network bind address for the WebSocket server.
     pub bind_addr: Option<std::net::Ipv4Addr>,
-    /// Port for the web interface (None = disabled).
-    pub web_port: Option<u16>,
     /// Whether the workspace should auto-stop when all clients disconnect.
     pub auto_cleanup: bool,
     /// Maximum idle seconds before auto-stop (None = use environment or default).
@@ -1040,7 +1038,6 @@ mod tests {
         WorkspaceConfig {
             port: 0,
             bind_addr: None,
-            web_port: None,
             auto_cleanup: false,
             max_idle_seconds: Some(60),
             log_level: "info",
@@ -1438,7 +1435,6 @@ mod tests {
                     let config = WorkspaceConfig {
                         port: 0,
                         bind_addr: None,
-                        web_port: None,
                         auto_cleanup: false,
                         max_idle_seconds: Some(60),
                         log_level: "info",

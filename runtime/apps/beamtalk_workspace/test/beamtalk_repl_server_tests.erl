@@ -409,14 +409,8 @@ tcp_integration_test_() ->
             %% BT-666: interrupt operation tests
             {"interrupt no eval", fun() -> tcp_interrupt_no_eval_test(Port) end},
             {"interrupt unknown session", fun() -> tcp_interrupt_unknown_session_test(Port) end},
-            %% BT-686: browser page tests
-            {"GET / returns HTML page", fun() -> http_index_page_test(Port) end},
-            {"HTML contains auth panel", fun() -> http_index_has_auth_panel_test(Port) end},
-            {"HTML contains transcript", fun() -> http_index_has_transcript_test(Port) end},
-            {"HTML contains eval panel", fun() -> http_index_has_eval_panel_test(Port) end},
-            {"HTML serves workspace page with static JS", fun() ->
-                http_index_has_websocket_js_test(Port)
-            end},
+            %% The /ws route is the shared REPL transport; the Phase-1 browser
+            %% static routes (`/`, `/static/[...]`) were removed in BT-2415.
             {"GET /ws without upgrade returns error", fun() -> http_ws_no_upgrade_test(Port) end},
             %% bind:as: / unbind: session refresh
             {"bind:as: appears in bindings immediately", fun() ->
@@ -2818,9 +2812,9 @@ tcp_interrupt_unknown_session_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"int2">>}, Resp),
     ?assert(lists:member(<<"done">>, maps:get(<<"status">>, Resp))).
 
-%%% BT-686: Browser page (index.html) tests
-%%% These verify the cowboy_static route serves the workspace browser UI
-%%% and that the HTML contains expected interactive elements.
+%%% HTTP-level checks against the cowboy listener.
+%%% The Phase-1 browser page (index.html) tests were removed in BT-2415 along
+%%% with the static routes; only the `/ws` protocol route remains.
 
 %% Helper: HTTP GET request via raw TCP (avoids inets dependency)
 http_get(Port, Path) ->
@@ -2850,52 +2844,6 @@ http_read_all(Sock, Acc) ->
         {ok, Data} -> http_read_all(Sock, <<Acc/binary, Data/binary>>);
         {error, closed} -> {ok, Acc}
     end.
-
-%% Extract HTTP body (everything after \r\n\r\n)
-http_body(Response) ->
-    case binary:match(Response, <<"\r\n\r\n">>) of
-        {Pos, Len} ->
-            Start = Pos + Len,
-            binary:part(Response, Start, byte_size(Response) - Start);
-        nomatch ->
-            <<>>
-    end.
-
-%% Test: GET / returns 200 with HTML content
-http_index_page_test(Port) ->
-    Response = http_get(Port, <<"/">>),
-    ?assert(binary:match(Response, <<"200">>) =/= nomatch),
-    ?assert(binary:match(Response, <<"text/html">>) =/= nomatch),
-    Body = http_body(Response),
-    ?assert(binary:match(Body, <<"<!DOCTYPE html">>) =/= nomatch).
-
-%% Test: HTML contains cookie input and connect button (auth panel)
-http_index_has_auth_panel_test(Port) ->
-    Body = http_body(http_get(Port, <<"/">>)),
-    ?assert(binary:match(Body, <<"cookie-input">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"connect-btn">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"auth-panel">>) =/= nomatch).
-
-%% Test: HTML contains transcript pane
-http_index_has_transcript_test(Port) ->
-    Body = http_body(http_get(Port, <<"/">>)),
-    ?assert(binary:match(Body, <<"transcript">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"Transcript">>) =/= nomatch).
-
-%% Test: HTML contains eval input and send button
-http_index_has_eval_panel_test(Port) ->
-    Body = http_body(http_get(Port, <<"/">>)),
-    ?assert(binary:match(Body, <<"eval-input">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"send-btn">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"eval-panel">>) =/= nomatch).
-
-%% Test: HTML serves workspace page with static JS reference
-http_index_has_websocket_js_test(Port) ->
-    Body = http_body(http_get(Port, <<"/">>)),
-    ?assert(binary:match(Body, <<"workspace.js">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"workspace.css">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"Beamtalk Workspace">>) =/= nomatch),
-    ?assert(binary:match(Body, <<"auth">>) =/= nomatch).
 
 %% Test: GET /ws without WebSocket upgrade headers returns error (not 101)
 http_ws_no_upgrade_test(Port) ->

@@ -334,7 +334,6 @@ fn run_package_as_otp_application(
     let ws_config = workspace::WorkspaceConfig {
         port: 0,                // ephemeral port: OS assigns
         bind_addr: None,        // loopback default
-        web_port: None,         // disabled
         auto_cleanup: false,    // persistent (not auto_cleanup)
         max_idle_seconds: None, // use workspace default
         log_level: "info",

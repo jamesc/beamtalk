@@ -46,6 +46,7 @@ beamtalk_workspace_sup
     tcp_port => inet:port_number() | undefined,
     bind_addr => inet:ip4_address(),
     auto_cleanup => boolean(),
+    %% web_port (the Phase-1 browser HTTP listener) was removed in BT-2415.
     max_idle_seconds => integer()
 }.
 
@@ -69,7 +70,6 @@ init(Config) ->
     Repl = maps:get(repl, Config, true),
     TcpPort = maps:get(tcp_port, Config, undefined),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
-    WebPort = maps:get(web_port, Config, undefined),
     AutoCleanup = maps:get(auto_cleanup, Config, true),
     MaxIdleSeconds = maps:get(max_idle_seconds, Config, 3600 * 4),
 
@@ -212,7 +212,7 @@ init(Config) ->
                 }
             ] ++
             repl_child_specs(
-                Repl, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, MaxIdleSeconds
+                Repl, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds
             ),
 
     {ok, {SupFlags, ChildSpecs}}.
@@ -224,11 +224,11 @@ Return child specs for REPL-mode children.
 When repl=false (run mode), these are omitted: no TCP listener, no idle monitor,
 no per-connection session supervisor.
 """.
-repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _WebPort, _AutoCleanup, _MaxIdleSeconds) ->
+repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _AutoCleanup, _MaxIdleSeconds) ->
     [];
-repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, MaxIdleSeconds) ->
+repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds) ->
     [
-        %% REPL TCP server (session-per-connection architecture)
+        %% REPL WebSocket server (session-per-connection architecture)
         #{
             id => beamtalk_repl_server,
             start =>
@@ -236,8 +236,7 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, WebPort, AutoCleanup, Max
                     #{
                         port => TcpPort,
                         workspace_id => WorkspaceId,
-                        bind_addr => BindAddr,
-                        web_port => WebPort
+                        bind_addr => BindAddr
                     }
                 ]},
             restart => permanent,
