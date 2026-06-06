@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot tests for list transform operations WITH outer-scope variable
+// mutations inside the predicate/transform blocks. Exercises the
+// *_with_mutations codegen paths in transform_ops.rs.
+// BT-2413.
+
+numbers := [1, 2, 3, 4, 5]
+
+// count: with outer-scope mutation
+seenCount := 0
+evenCount := numbers count: [:n |
+    seenCount := seenCount + 1
+    n % 2 = 0
+]
+
+// flatMap: with outer-scope mutation
+flatSeen := 0
+flat := numbers flatMap: [:n |
+    flatSeen := flatSeen + 1
+    [n, n * 10]
+]
+
+// takeWhile: with outer-scope mutation
+takeSeen := 0
+firstSmall := numbers takeWhile: [:n |
+    takeSeen := takeSeen + 1
+    n < 4
+]
+
+// dropWhile: with outer-scope mutation
+dropSeen := 0
+fromThree := numbers dropWhile: [:n |
+    dropSeen := dropSeen + 1
+    n < 3
+]
+
+// partition: with outer-scope mutation
+partSeen := 0
+parts := numbers partition: [:n |
+    partSeen := partSeen + 1
+    n > 3
+]
+
+// groupBy: with outer-scope mutation
+groupSeen := 0
+grouped := numbers groupBy: [:n |
+    groupSeen := groupSeen + 1
+    n % 2 = 0
+]
