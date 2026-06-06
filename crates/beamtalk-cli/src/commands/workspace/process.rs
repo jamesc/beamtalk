@@ -263,6 +263,13 @@ pub fn start_detached_node(
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
     let cookie = read_workspace_cookie(workspace_id)?;
 
+    // Keep Erlang distribution off untrusted networks (ADR 0091 Decision 5):
+    // warn before launch if a pre-existing epmd is already bound to a
+    // non-loopback interface. The node will register with that (already-running)
+    // daemon, and `ERL_EPMD_ADDRESS` (set in `build_detached_node_command`) only
+    // constrains an epmd we start ourselves — so loopback epmd is not automatic.
+    super::epmd::warn_if_epmd_promiscuous();
+
     let (eval_cmd, project_path) = prepare_workspace_paths(workspace_id, config)?;
 
     // Write cookie to args file (BT-726: not visible in `ps aux`)

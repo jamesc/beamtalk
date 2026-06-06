@@ -9,7 +9,7 @@
 //! **DDD Context:** CLI
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket};
 use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result, miette};
@@ -18,6 +18,9 @@ use super::storage::workspace_dir;
 
 /// epmd binary protocol port.
 const EPMD_PORT: u16 = 4369;
+
+/// Short connect timeout (ms) for the loopback-posture preflight probes.
+const EPMD_POSTURE_PROBE_TIMEOUT_MS: u64 = 300;
 
 /// TCP connect timeout for epmd queries in milliseconds.
 const EPMD_CONNECT_TIMEOUT_MS: u64 = 500;
@@ -164,6 +167,106 @@ pub(super) fn is_epmd_name_conflict(workspace_id: &str) -> bool {
     content.contains("already_registered") || content.contains("Protocol: register")
 }
 
+/// The bind posture of the epmd daemon this host would register the workspace
+/// node with (ADR 0091 Decision 5, review finding F1).
+///
+/// epmd is a *persistent per-user daemon*: a workspace node joins whatever epmd
+/// is already running, which on many developer machines was started by other
+/// Erlang tooling and may listen on `0.0.0.0`. "Loopback epmd" is therefore not
+/// automatic, and `ERL_EPMD_ADDRESS=127.0.0.1` only governs an epmd a node
+/// *starts itself* — it does not re-bind an epmd that is already up. This enum
+/// is the result of actively probing the *running* posture so the launcher can
+/// warn before exposing a node registration on a non-loopback interface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum EpmdPosture {
+    /// No epmd reachable on loopback — a fresh node will start its own,
+    /// constrained to loopback by `ERL_EPMD_ADDRESS` (set in `startup_command`).
+    NotRunning,
+    /// epmd is reachable on loopback and *not* on this host's primary
+    /// non-loopback interface — the safe, default posture.
+    LoopbackOnly,
+    /// epmd answers on a non-loopback interface (bound to `0.0.0.0` or that
+    /// interface): the port mapper, and every node name registered with it, is
+    /// visible off-host. The address that answered is carried for the warning.
+    Promiscuous(Ipv4Addr),
+}
+
+/// Discover this host's primary non-loopback IPv4 address without enumerating
+/// interfaces or sending any packets.
+///
+/// Uses the standard "connected UDP socket" trick: a `connect/2` on a datagram
+/// socket only sets the default route/destination (the kernel picks the egress
+/// interface) — no datagram is sent — so `local_addr/0` then reports the IP the
+/// OS would source from. The destination is `192.0.2.1` (RFC 5737 TEST-NET-1),
+/// which is guaranteed never to be routed, so this works offline and on
+/// air-gapped hosts. Returns `None` when the host has only loopback addressing.
+fn primary_non_loopback_ipv4() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind(("0.0.0.0", 0)).ok()?;
+    socket.connect(("192.0.2.1", 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if !ip.is_loopback() && !ip.is_unspecified() => Some(ip),
+        _ => None,
+    }
+}
+
+/// Returns `true` if epmd accepts a TCP connection at `addr` within the short
+/// preflight timeout. A refused/timed-out connection means epmd is not reachable
+/// at that address (the loopback-only / not-running cases).
+fn epmd_reachable_at(addr: IpAddr) -> bool {
+    let socket = SocketAddr::new(addr, EPMD_PORT);
+    TcpStream::connect_timeout(
+        &socket,
+        Duration::from_millis(EPMD_POSTURE_PROBE_TIMEOUT_MS),
+    )
+    .is_ok()
+}
+
+/// Probe the running epmd's bind posture (ADR 0091 Decision 5 / finding F1).
+///
+/// The launcher calls this *before* spawning a workspace node so it can warn
+/// when a pre-existing epmd is exposed off-host — the case `ERL_EPMD_ADDRESS`
+/// cannot fix because the node merely joins the already-running daemon. The
+/// probe is two cheap TCP connects: loopback (is epmd up?) and this host's
+/// primary non-loopback interface (is it reachable off-loopback?).
+pub(super) fn check_epmd_loopback() -> EpmdPosture {
+    if let Some(ip) = primary_non_loopback_ipv4() {
+        if epmd_reachable_at(IpAddr::V4(ip)) {
+            return EpmdPosture::Promiscuous(ip);
+        }
+    }
+
+    if epmd_reachable_at(IpAddr::V4(Ipv4Addr::LOCALHOST)) {
+        EpmdPosture::LoopbackOnly
+    } else {
+        EpmdPosture::NotRunning
+    }
+}
+
+/// Warn (on stderr) when a pre-existing epmd is bound to a non-loopback
+/// interface, so an operator launching a workspace knows the port mapper — and
+/// every node name it holds — is reachable off-host (ADR 0091 Decision 5).
+///
+/// This *warns* rather than *refuses*: epmd is a shared per-user daemon that
+/// other Erlang tooling may have started promiscuously through no fault of this
+/// launch, and refusing would break the zero-config localhost dev story
+/// (ADR 0020 Principle 3). The remediation is actionable in the message. Returns
+/// the probed posture so callers/tests can assert on it.
+pub(super) fn warn_if_epmd_promiscuous() -> EpmdPosture {
+    let posture = check_epmd_loopback();
+    if let EpmdPosture::Promiscuous(ip) = posture {
+        eprintln!(
+            "⚠️  epmd is reachable on a non-loopback interface ({ip}:{EPMD_PORT}).\n   \
+             Erlang distribution should stay off untrusted networks (ADR 0091). A pre-existing\n   \
+             epmd was started promiscuously (likely bound to 0.0.0.0) by other tooling; the\n   \
+             workspace node will register with it and be visible off-host.\n   \
+             Remediation: stop the stray epmd and let the workspace start its own loopback epmd\n   \
+             (`epmd -kill` when no other Erlang nodes need it), or, for a trusted private network,\n   \
+             export ERL_EPMD_ADDRESS=<private-interface-ip> before launching — never 0.0.0.0."
+        );
+    }
+    posture
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,5 +297,43 @@ mod tests {
     fn is_epmd_name_conflict_returns_false_for_unknown_workspace() {
         let result = is_epmd_name_conflict("__nonexistent_workspace_id__");
         assert!(!result, "unknown workspace should return false");
+    }
+
+    #[test]
+    fn primary_non_loopback_ipv4_is_never_loopback_or_unspecified() {
+        // May be None on a loopback-only host (e.g. minimal CI); when present it
+        // must be a genuine non-loopback, specified address — the property the
+        // promiscuity probe relies on. Sends no packets.
+        if let Some(ip) = primary_non_loopback_ipv4() {
+            assert!(
+                !ip.is_loopback(),
+                "must not return a loopback address: {ip}"
+            );
+            assert!(!ip.is_unspecified(), "must not return 0.0.0.0: {ip}");
+        }
+    }
+
+    #[test]
+    fn check_epmd_loopback_is_total_and_consistent() {
+        // The probe must never panic/hang and must agree with itself: if it
+        // reports a non-loopback address, that address must be a real one.
+        match check_epmd_loopback() {
+            EpmdPosture::NotRunning | EpmdPosture::LoopbackOnly => {}
+            EpmdPosture::Promiscuous(ip) => {
+                assert!(!ip.is_loopback(), "promiscuous addr must be non-loopback");
+            }
+        }
+    }
+
+    #[test]
+    fn warn_if_epmd_promiscuous_returns_a_posture_without_panicking() {
+        // Belt-and-braces: warning is best-effort and must return the posture it
+        // probed (the value the running-posture check in BT-2424 asserts on)
+        // without panicking. We don't pin the variant — the sandbox's epmd state
+        // is not under test control — only that a valid posture comes back.
+        match warn_if_epmd_promiscuous() {
+            EpmdPosture::NotRunning | EpmdPosture::LoopbackOnly => {}
+            EpmdPosture::Promiscuous(ip) => assert!(!ip.is_loopback()),
+        }
     }
 }
