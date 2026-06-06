@@ -33,8 +33,16 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   require Logger
 
+  alias BtAttach.Facade
   alias BtAttach.SessionRegistry
   alias BtAttach.Workspace
+
+  # All RBAC-relevant workspace ops go through the curated facade (ADR 0091
+  # Decision 3) — never a raw Workspace/:rpc call from an event handler. Pure
+  # transport/display/lifecycle helpers (connect, render_term, session start)
+  # stay on Workspace: they are not browser-supplied ops. `ctx/1` carries the
+  # request identity the facade audits / RBAC gates on (BT-2421).
+  defp ctx(socket), do: %{user: socket.assigns[:current_user]}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -140,8 +148,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (the old pid's subscriptions died with it), so the resumed tab gets its
   # Transcript and bindings flowing again with its accumulated state intact.
   defp bind_session(socket, session_id, pid) do
-    with :ok <- Workspace.subscribe_transcript(self()),
-         :ok <- Workspace.subscribe_bindings(self()) do
+    with :ok <- Facade.dispatch(:subscribe_transcript, %{pid: self()}, ctx(socket)),
+         :ok <- Facade.dispatch(:subscribe_bindings, %{pid: self()}, ctx(socket)) do
       socket
       |> assign(:connected, true)
       |> assign(:node, Workspace.node_name())
@@ -201,7 +209,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def handle_event("eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    case Workspace.eval(pid, expr) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
       {:ok, term, output, _warnings} ->
         # eval returns the live term; rendering is display-only and reuses the
         # workspace's own formatter for surface-consistency with the browser.
@@ -375,7 +383,11 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, save_result: nil, save_error: "Enter a selector to save a method.")
 
       true ->
-        case Workspace.save_method(class, selector, source) do
+        case Facade.dispatch(
+               :save,
+               %{class: class, selector: selector, source: source},
+               ctx(socket)
+             ) do
           {:ok, saved_class} ->
             # The patch is live + logged; refresh the change-history pane so the
             # new entry is visible (ChangeLog coherence).
@@ -397,7 +409,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Drive the write-surface flush and render its summary, then refresh changes so
   # the (now-flushed) entries drop out of the active view.
   defp flush_changes(socket) do
-    case Workspace.flush() do
+    case Facade.dispatch(:flush, %{}, ctx(socket)) do
       {:ok, summary} ->
         socket
         |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
@@ -412,7 +424,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # rows. A workspace that is unreachable or returns an unexpected shape renders an
   # error rather than crashing the pane.
   defp assign_changes(socket) do
-    case Workspace.change_history() do
+    case Facade.dispatch(:changes, %{}, ctx(socket)) do
       rows when is_list(rows) ->
         assign(socket, changes: rows, changes_error: nil)
 
@@ -428,7 +440,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # references without a string round-trip; `inspectable?` flags object-valued
   # bindings the user can drill into.
   defp assign_bindings(socket, pid) do
-    case Workspace.list_bindings(pid) do
+    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
       {:error, reason} ->
         assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
 
@@ -449,7 +461,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Inspect a binding selected by name: resolve its live term from the current
   # binding list, then inspect that term. The term — not a string — drives the op.
   defp inspect_binding(socket, pid, name) do
-    case Workspace.list_bindings(pid) do
+    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
       pairs when is_list(pairs) ->
         case List.keyfind(pairs, name, 0) do
           {^name, term} -> inspect_term(socket, name, term)
@@ -467,7 +479,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # deeper. Non-object terms are not inspectable, so we say so rather than guess.
   defp inspect_term(socket, label, term) do
     if Workspace.inspectable?(term) do
-      case Workspace.inspect_value(term) do
+      case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
         {:ok, fields} when is_map(fields) ->
           assign(socket,
             inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
