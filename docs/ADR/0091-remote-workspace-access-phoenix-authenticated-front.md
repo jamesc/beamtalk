@@ -79,13 +79,16 @@ front**, with a three-segment trust path and a per-operation authorization facad
 Five sub-decisions:
 
 ```
-┌─────────┐  ① HTTPS + OIDC   ┌──────────────┐  ② TLS-dist (when    ┌─────────────┐
-│ Browser │ ───────────────── │   Phoenix    │     crossing hosts)  │  Workspace  │
-│ (user)  │  session cookie   │  LiveView    │ ──────────────────── │  BEAM node  │
-└─────────┘  (HttpOnly,       │  node        │  ③ curated op facade  │  (eval, RCE)│
-             Secure,          │  ④ RBAC      │     + RBAC, never raw │             │
-             SameSite)        └──────────────┘     :rpc passthrough  └─────────────┘
-                              Phoenix is the ONLY node on the dist mesh
+   UNTRUSTED NETWORK              TRUSTED HOST / PRIVATE NETWORK
+┌─────────┐  ① HTTPS + OIDC   ┌──────────────┐  ② internal dist     ┌─────────────┐
+│ Browser │ ═══════════════╗  │   Phoenix    │     (loopback /       │  Workspace  │
+│ (user)  │  session cookie║  │  LiveView    │ ──────────────────── │  BEAM node  │
+└─────────┘  (HttpOnly,    ╚═▶│  node        │     private iface,    │  (eval, RCE)│
+             Secure,          │  ③ facade    │     never public)     │             │
+             SameSite)        │  ④ RBAC      │  ③ curated op facade  └─────────────┘
+                              └──────────────┘     + RBAC, never raw
+   The ONLY untrusted boundary is ①.   :rpc passthrough
+   Phoenix is the ONLY node on the dist mesh; ② stays off untrusted networks.
 ```
 
 ### Decision 1 — Authentication: OIDC/SSO at the Phoenix front
@@ -173,23 +176,38 @@ Roles are coarse and few on purpose; a finer policy engine is explicitly future
 work (see Consequences). The Observer↔Collaborator↔Owner ladder is the minimum
 that makes "shared workspace" safe to offer.
 
-### Decision 5 — Transport hardening: co-locate by default, TLS-dist when remote
+### Decision 5 — Transport hardening: keep distribution off untrusted networks (co-locate)
 
-- **Default — co-locate.** Phoenix and the workspace run on the **same trusted
-  host** (or the same private/overlay network), and Erlang distribution stays on
-  **loopback** — it never leaves the host. epmd is bound to loopback. The only
-  network-facing service is Phoenix's HTTPS port. This is the simplest secure
-  deployment and the recommended one.
-- **When the link must cross hosts — TLS distribution.** If Phoenix and the
-  workspace are on different hosts across an untrusted network, the dist link
-  **must** use `inet_tls_dist` (ADR 0020 Layer 3 Option B), and epmd exposure
-  must be eliminated (ERL_DIST_PORT / `-erl_epmd_port` pinning, or epmdless dist).
-  A network overlay (Tailscale/WireGuard, ADR 0020 Layer 3 Option A) is an
-  accepted alternative that carries dist over an encrypted, identity-bearing
-  tunnel.
+The governing invariant: **Erlang distribution must never traverse an untrusted
+network in cleartext.** We satisfy it by **deployment, not by mandating an
+encryption dependency** — because the only hop that *has* to cross an untrusted
+network is browser → Phoenix, and that is already secured by HTTPS + OIDC
+(Decision 1). The Phoenix → workspace dist link is **internal infrastructure**
+and is kept internal:
+
+- **Same host (default, recommended):** Erlang distribution stays on **loopback**
+  and never leaves the machine. epmd is bound to loopback. The only
+  network-facing service is Phoenix's HTTPS port. Zero extra config, no certs, no
+  overlay.
+- **Same trusted private network / VPC:** dist binds to the **private interface**,
+  never a public one; epmd is bound to that interface or eliminated (pinned dist
+  port / epmdless). This is a standard private-cluster posture — no overlay or
+  TLS-dist required.
+
+**No transport-encryption dependency is mandated** — neither a network overlay
+(Tailscale/WireGuard) nor TLS distribution. Both are *operator options*, not
+platform requirements:
+
+- An operator who *insists* on splitting Phoenix and the workspace across an
+  **untrusted** network owns securing that hop. Options, roughly in order of
+  preference: **keep them co-located instead**; an SSH tunnel; a network overlay
+  (ADR 0020 Layer 3 Option A); or TLS distribution (`inet_tls_dist`, ADR 0020
+  Layer 3 Option B). **Note:** the `ssl_dist`/`inet_tls_dist` support referenced
+  by ADR 0020 was **removed in PR #1401** and is not currently in the tree; using
+  it would require reintroducing it. The platform does not depend on it.
 
 The browser's trust boundary is **always** HTTPS-to-Phoenix; raw distribution is
-**never** exposed to it.
+**never** exposed to it, and by default never leaves the trusted host/network.
 
 #### Cookie management/rotation for the Phoenix↔workspace link
 
@@ -376,6 +394,26 @@ parallel identity channel — which is exactly what putting Phoenix in front avo
 must never sit on Erlang distribution. epmd + unencrypted dist + all-or-nothing
 cookie is not a browser-facing boundary.
 
+### Mandate always-on TLS distribution (Phoenix↔workspace, every deployment)
+Require `inet_tls_dist` on the back link unconditionally, for one uniform mode.
+**Rejected:** (1) the `ssl_dist`/`inet_tls_dist` support was **removed in PR #1401**
+and is not in the tree — mandating it reintroduces deleted machinery against the
+project's stated direction; (2) it adds cert lifecycle (generation, rotation,
+expiry — explicitly deferred by ADR 0020) to the common co-located solo case; (3)
+the motivating intuition that it "helps Windows" does not hold — in the remote
+topology the Windows machine is a browser talking HTTPS to Phoenix and never
+participates in dist (ADR 0017: remote browser access implies a Linux/macOS-hosted
+workspace), and TLS cert/key files share the same filesystem-ACL weakness as the
+cookie. The uniformity benefit is captured instead by the Decision 5 invariant
+("dist never crosses an untrusted network in cleartext"), satisfied by deployment.
+
+### Mandate a network overlay (Tailscale/WireGuard) for the back link
+Require an overlay to carry dist between Phoenix and the workspace.
+**Rejected:** an overlay is a heavy operational dependency to impose on every
+deployment, and ADR 0020 itself frames overlays as "convenience, not dependency."
+Co-locating (loopback / private interface) needs no overlay at all. Overlays
+remain an *operator option* for the untrusted-split case, never a requirement.
+
 ## Consequences
 
 ### Positive
@@ -399,8 +437,15 @@ cookie is not a browser-facing boundary.
   patched like the workspace host.
 - **OIDC operational surface** — IdP config, client secrets, callback URLs, group→role
   mapping — is real setup cost for operators (acceptable: it's opt-in, remote-only).
-- **Cross-host TLS-dist adds cert management** (mitigated by co-locate-by-default,
-  where dist never leaves loopback).
+- **The co-locate invariant is operator-enforced, not code-enforced.** Nothing in
+  the platform *prevents* an operator from splitting Phoenix and the workspace
+  across an untrusted network with bare dist; the safe posture (same host/private
+  network, loopback/private epmd, never public) is the documented default and the
+  binding's default, but a determined misconfiguration can still expose dist.
+- **No built-in encrypted cross-host dist.** `inet_tls_dist` was removed (PR #1401);
+  an operator who genuinely needs Phoenix and the workspace on different untrusted
+  hosts must reintroduce TLS-dist or supply their own tunnel. We accept this rather
+  than mandate an overlay/cert dependency on every deployment.
 - **RBAC is coarse (3 roles).** Finer per-op/per-resource policy is future work.
 
 ### Neutral
@@ -432,18 +477,21 @@ Lands as **BT-2411 (LiveView IDE Wave 5)**, gated on this ADR. Phased:
 - **Tests:** Observer denied `eval`; Collaborator denied `kill`/`flush`; Owner
   allowed all; facade rejects off-list ops with 403 and no dist call.
 
-### Phase 3 — Transport hardening
+### Phase 3 — Transport posture (keep dist internal)
 - **Co-locate default:** `just web` discovers a loopback-dist workspace; epmd
-  bound to loopback. Document that dist never leaves the host.
-- **Cross-host:** wire `inet_tls_dist` for the Phoenix↔workspace link (reuse
-  ADR 0020 Layer 3 cert plumbing); pin/eliminate epmd port; document overlay
-  (Tailscale/WireGuard) as the alternative.
+  bound to loopback. Verify dist never leaves the host in the default deployment.
+- **Private-network deployment:** document binding dist + epmd to the private
+  interface (never `0.0.0.0`); pin/eliminate the epmd port.
+- **No mandated encryption dependency:** document the untrusted-split case as
+  operator-owned (prefer co-locate; SSH tunnel / overlay / reintroduced
+  `inet_tls_dist` as their choice). Do **not** add an overlay or cert dependency
+  to the default path.
 - Cookie provisioning to Phoenix via secret management; `rotate-cookie` + reconnect.
-- **Components:** workspace dist/TLS config
+- **Components:** workspace dist/epmd bind config
   (`crates/beamtalk-cli/src/commands/workspace/**`, `vm.args` generation),
   `Justfile`/release recipe, deployment docs.
-- **Tests:** TLS-dist smoke test (Phoenix↔workspace across hosts); loopback-epmd
-  posture check.
+- **Tests:** loopback/private-only dist + epmd posture check (assert no public
+  bind in the default deployment).
 
 ### Phase 4 — Docs
 - Extend `docs/security/threat-model.md` (ADR 0058 Phase 0) with the remote/Phoenix
