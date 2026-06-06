@@ -20,7 +20,7 @@ Accepted (2026-06-06)
 | 4 | [BT-2431](https://linear.app/beamtalk/issue/BT-2431) | Surfaces: LSP/MCP/browser + surface-parity | M | BT-2430 |
 | 4 | [BT-2433](https://linear.app/beamtalk/issue/BT-2433) | E2E + comprehensive tests + docs + ADR → Implemented | M | BT-2430, BT-2431 |
 
-```
+```text
 Wave 1: BT-2426
 Wave 2: BT-2427  BT-2428          (parallel)
 Wave 3: BT-2429
@@ -107,7 +107,8 @@ tree is not a stable value.
    expansion at a configurable limit (default e.g. 200): beyond it, the node
    reports `childCount` (from the cheap `count_children/1`) and a truncation
    marker instead of materialising every child. Full expansion of a large
-   dynamic supervisor is opt-in (`ProcessNavigation from: aSup limit: n`).
+   dynamic supervisor is opt-in (`(ProcessNavigation from: aSup limit: n)
+   unwrap`).
 2. **No self-deadlock on the walk.** The introspection object must run as a
    plain value in the calling eval worker, never as a class-side gen_server —
    exactly the lesson `SystemNavigation` documents
@@ -126,8 +127,10 @@ tree is not a stable value.
 5. **OTP logger discipline** (`CLAUDE.md`): the shim uses `?LOG_*` with
    `domain => [beamtalk, runtime]`; no `io:format`.
 6. **Structured errors** (`CLAUDE.md`): boundary failures (dead supervisor,
-   stale pid) surface as `#beamtalk_error{}`, consistent with `whichChild`'s
-   existing `stale_handle` kind.
+   stale pid) carry a structured `#beamtalk_error{}` reason, surfaced through
+   `from:`'s `Result error: (beamtalk_error <reason>)` per the supervisor
+   family convention (ADR 0080) — consistent with `whichChild`'s existing
+   `stale_handle` kind.
 
 ## Decision
 
@@ -143,25 +146,36 @@ deferred to the Announcements substrate (BT-2193).
 ### 1. Receiver — a dedicated `ProcessNavigation` value class
 
 ```beamtalk
-ProcessNavigation default     // workspace-scoped, internal plumbing filtered
-ProcessNavigation system      // everything, including runtime infra
-ProcessNavigation from: aRoot // rooted at one supervisor subtree
+ProcessNavigation default     // -> ProcessNavigation  (workspace-scoped, plumbing filtered)
+ProcessNavigation system      // -> ProcessNavigation  (everything, incl. runtime infra)
+ProcessNavigation from: aRoot // -> Result(ProcessNavigation, Error)  (rooted subtree)
 ```
+
+`default` and `system` cannot fail (they snapshot the live tree), so they
+return a `ProcessNavigation` directly and chain fluently — `ProcessNavigation
+default tree`. `from:` takes a *user-supplied* root that can be the wrong type
+or already dead, so it follows the supervisor family's Result convention (ADR
+0080: `supervise`, `whichChild`, `terminate:` all return `Result`) and returns
+`Result(ProcessNavigation, Error)`. Callers unwrap to navigate:
+`(ProcessNavigation from: aSup) unwrap tree`, or `ifOk:ifError:` for a
+recoverable root.
 
 `from:` accepts **either** a Beamtalk `Supervisor` object (pid pulled from its
 handle) **or** a raw `Pid` — the latter is required because `system` walks
 *foreign* OTP supervisors that have no Beamtalk `Supervisor` wrapper, and a
 user drilling into an `#otpSupervisor` node passes `node pid`. A pid that
 turns out not to be a supervisor (a plain worker, or one that errors on
-`which_children`) yields a single-node tree, not an error — recursion only
-descends where `which_children` succeeds. Passing a non-`Supervisor`,
-non-`Pid` value is the type error shown below.
+`which_children`) is **not** an error — `from:` returns `Result ok:` with a
+single-node tree (recursion only descends where `which_children` succeeds).
+The Result error variant is reserved for the two genuine failures shown below:
+a wrong-type argument (`type_error`) and an already-dead supervisor
+(`stale_handle`).
 
 `ProcessNavigation` is a `sealed typed Object subclass` — a value object, not
-an actor — exactly like `SystemNavigation`. Constructors capture a snapshot
-(see §4) and hand back a `SupervisionTree`. The class side is just a
-constructor surface; all query logic is instance-side so it runs as plain
-Erlang in the calling eval worker (constraint 2).
+an actor — exactly like `SystemNavigation`. `default`/`system` return the
+navigation directly; `tree` yields the `SupervisionTree` snapshot (see §4).
+The class side is just a constructor surface; all query logic is instance-side
+so it runs as plain Erlang in the calling eval worker (constraint 2).
 
 A convenience alias lives on the existing facade, paralleling
 `Workspace actors`:
@@ -407,17 +421,24 @@ bt> ProcessNavigation default tree size
 
 ### Error behaviour
 
+`from:` returns a `Result`; the error variant carries a structured
+`#beamtalk_error{}` reason and renders as the supervisor family's shorthand
+(ADR 0080), `Result error: (beamtalk_error <reason>)`:
+
 ```beamtalk
 bt> ProcessNavigation from: 42
-// => #beamtalk_error{ kind = type_error,
-//      message = "ProcessNavigation from: expects a Supervisor or Pid, got 42" }
+// => Result error: (beamtalk_error type_error)
+//      "ProcessNavigation from: expects a Supervisor or Pid, got 42"
+
+bt> (ProcessNavigation from: 42) unwrap
+// => raises: ProcessNavigation from: expects a Supervisor or Pid, got 42
 
 bt> deadNode status
 // => nil          "process died since snapshot — not an error"
 
 bt> ProcessNavigation from: aStoppedSupervisor
-// => #beamtalk_error{ kind = stale_handle,
-//      message = "supervisor <0.200.0> is not alive" }
+// => Result error: (beamtalk_error stale_handle)
+//      "supervisor <0.200.0> is not alive"
 ```
 
 ## Prior Art
@@ -641,8 +662,10 @@ project's Phase-0 convention):
    not a raise); a child in `restarting` state (`kind => #restarting`,
    `pid => nil`); mixed Beamtalk/foreign nodes; a `DynamicSupervisor` past the
    child cap (truncation marker + `childCount`); lazy `status` returning `nil`
-   for a dead node; `from:` accepting a `Supervisor` and a `Pid`, and the
-   type error for neither. **Deny-list parity test:** assert `default`'s node
+   for a dead node; `from:` returning `Result ok:` for a `Supervisor` and a
+   `Pid`, `Result error: (beamtalk_error type_error)` for neither, and
+   `Result error: (beamtalk_error stale_handle)` for a dead supervisor.
+   **Deny-list parity test:** assert `default`'s node
    set ⊆ `system`'s, and that each currently-known internal supervisor
    (`beamtalk_workspace_changelog`, session sup, `beamtalk_xref`, compiler
    server, subprocess sup, …) is filtered from `default` — this test is the
