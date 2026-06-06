@@ -666,6 +666,26 @@ A one-line note will be added to ADR 0058 pointing to this ADR for the remote
 multi-user case. ADR 0058's "Trusted Developer Tool" stance is otherwise intact:
 the Owner (execute) role still has full RCE; only Observer is non-executing.
 
+## Implementation Tracking
+
+**Epic:** BT-2416 — Remote Workspace Access — Phoenix Authenticated Front (ADR 0091)
+**Implements:** ADR 0017 Phase 3 / LiveView IDE Wave 5 (BT-2411 umbrella)
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 1 | BT-2417 | OIDC authentication flow | M | — |
+| 1 | BT-2419 | Session lifecycle + browser-edge hardening | M | BT-2417 |
+| 2 | BT-2420 | Curated op facade (no raw `:rpc` passthrough) | M | BT-2417 |
+| 2 | BT-2421 | Two-level RBAC (Owner/Observer) + fail-closed mapping + audit | M | BT-2419, BT-2420 |
+| 3 | BT-2418 | epmd/dist loopback hardening | M | — |
+| 3 | BT-2422 | Non-localhost deployment recipe + cookie provisioning | M | BT-2417, BT-2418 |
+| 4 | BT-2423 | Security docs: remote trust path + deployment guide | S | BT-2421, BT-2422 |
+| 4 | BT-2424 | End-to-end auth-boundary test | M | BT-2421, BT-2418 |
+
+Deferred (ADR Open Questions): workspace-side `beamtalk_authorized_ops` allowlist;
+middle "Collaborator" RBAC rung; reintroducing `inet_tls_dist` (removed PR #1401).
+
 ## Open Questions
 - **When (if ever) to introduce a middle "Collaborator" rung.** v1 is two-level
   (Decision 4). A future Collaborator would only be meaningful if it sits on the
