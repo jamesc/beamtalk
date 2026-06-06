@@ -3,6 +3,34 @@
 ## Status
 Accepted (2026-06-06)
 
+## Implementation Tracking
+
+**Epic:** [BT-2425](https://linear.app/beamtalk/issue/BT-2425) — Supervision Tree Introspection API (ADR 0092)
+**Design issue:** [BT-2395](https://linear.app/beamtalk/issue/BT-2395)
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-2426](https://linear.app/beamtalk/issue/BT-2426) | Runtime shim: flat `default`-scope snapshot (`beamtalk_process_navigation`) | M | – |
+| 1 | [BT-2427](https://linear.app/beamtalk/issue/BT-2427) | `SupervisionNode` value class + flat `Workspace processes` | M | BT-2426 |
+| 2 | [BT-2428](https://linear.app/beamtalk/issue/BT-2428) | Foreign procs, `system` scope, dynamic-sup cap, `from:`, lazy `status` | M | BT-2426 |
+| 3 | [BT-2429](https://linear.app/beamtalk/issue/BT-2429) | `SupervisionTree` + `ProcessNavigation` classes | M | BT-2427, BT-2428 |
+| 3 | [BT-2430](https://linear.app/beamtalk/issue/BT-2430) | Repoint `Workspace processes` to `ProcessNavigation default tree` | S | BT-2429 |
+| 4 | [BT-2432](https://linear.app/beamtalk/issue/BT-2432) | ADR-0091 role placement (`default`→Read, `system`→privileged) | S | BT-2430 |
+| 4 | [BT-2431](https://linear.app/beamtalk/issue/BT-2431) | Surfaces: LSP/MCP/browser + surface-parity | M | BT-2430 |
+| 4 | [BT-2433](https://linear.app/beamtalk/issue/BT-2433) | E2E + comprehensive tests + docs + ADR → Implemented | M | BT-2430, BT-2431 |
+
+```
+Wave 1: BT-2426
+Wave 2: BT-2427  BT-2428          (parallel)
+Wave 3: BT-2429
+Wave 4: BT-2430
+Wave 5: BT-2432  BT-2431          (parallel)
+Wave 6: BT-2433                   (epic closer → flips Status to Implemented)
+```
+
+BT-2432 additionally depends on ADR-0091 Phase-2 role infrastructure landing.
+
 ## Context
 
 ### The Problem
