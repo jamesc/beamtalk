@@ -20,6 +20,18 @@ if System.get_env("PHX_SERVER") do
   config :bt_attach, BtAttachWeb.Endpoint, server: true
 end
 
+# Resolve the IDE's OIDC configuration once at boot (ADR 0091 Decision 1).
+#
+# Read from ~/.beamtalk/ide.toml (or $BT_IDE_CONFIG) with per-key env overrides;
+# fail closed (raise, stopping boot) on an incomplete/invalid config rather than
+# serving an RCE-bearing tool with broken auth. When OIDC is not requested (no
+# file, no BT_OIDC_* env) this resolves to `nil` and the front runs
+# unauthenticated — the unchanged zero-config localhost story (ADR 0020). Tests
+# set `config :bt_attach, :oidc, ...` directly and are unaffected by this block.
+unless config_env() == :test do
+  config :bt_attach, :oidc, BtAttach.IdeConfig.load!()
+end
+
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you
