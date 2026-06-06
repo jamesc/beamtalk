@@ -156,7 +156,7 @@ over HTTPS.
 **Session vs. shared state.** RBAC governs *operations*; it does not by itself
 isolate data. Per-session bindings are isolated (the spike showed tab-isolated
 `x`), but **actor state and the Transcript are workspace-shared** (ADR 0010 / ADR
-0017) — so a Collaborator/Observer who can `inspect`/watch Transcript sees shared
+0017) — so an Observer who can `inspect`/watch Transcript sees shared
 actor state and any output a privileged user printed. This is intended for the
 shared-image use case; operators must understand "Observer" means "can see the
 shared world read-only," not "sees nothing sensitive."
@@ -202,8 +202,8 @@ ADR 0058's acknowledged "no eval audit trail" gap.
 
 **Honest framing — the facade is not a sandbox.** Any role holding `eval` has
 arbitrary Beamtalk and therefore full RCE on the workspace (`Erlang os cmd:`,
-unchanged from ADR 0058). The facade's value is enabling **least-privilege roles
-that lack `eval`** — read-only observation, or write-without-admin — not
+unchanged from ADR 0058). The facade's value is enabling a **least-privilege role
+that lacks `eval`** — read-only observation (the Observer role) — not
 constraining the eval role.
 
 **Honest framing — the facade is Phoenix-side discipline, not a workspace-enforced
@@ -220,19 +220,28 @@ cookie, so the attacker can open their own dist connection and the workspace-sid
 allowlist no longer contains them — it raises the bar against app-level bugs, not
 against host compromise.
 
-### Decision 4 — RBAC roles
+### Decision 4 — RBAC roles (two levels for v1: Owner + Observer)
 
-Three built-in roles, mapped from OIDC claims/groups by Phoenix:
+**Two built-in roles for v1**, mapped from OIDC claims/groups by Phoenix. The
+capability columns (execute / read / admin) are kept explicit so a future middle
+rung slots in additively (see Open Questions), but v1 ships exactly the one
+boundary that matters — **execute vs. read**:
 
-| Role | eval / load-source | read (inspect, bindings, actors, sessions, transcript) | admin (kill, flush/reload, rotate) | Use case |
+| Role | execute (eval, load-source, save/flush, reload) | read (inspect, bindings, actors, sessions, transcript, complete) | admin (kill, rotate-cookie) | Use case |
 |------|:--:|:--:|:--:|----------|
-| **Owner** | ✅ | ✅ | ✅ | The workspace owner / driver. Full RCE — equivalent to ADR 0058's authenticated user. |
-| **Collaborator** | ✅ | ✅ | ❌ | Pair programming. Can evaluate and read, cannot kill actors, flush code, or rotate secrets. |
-| **Observer** | ❌ | ✅ | ❌ | Read-only audience (review, teaching, monitoring). **Cannot inject or evaluate code.** This is the role the facade makes meaningful. |
+| **Owner** | ✅ | ✅ | ✅ | Driver(s) who own the image. Full RCE — equivalent to ADR 0058's authenticated user. Multiple Owners are allowed (shared workspace); pair programming = give your pair Owner. |
+| **Observer** | ❌ | ✅ | ❌ | Read-only audience (review, teaching, screencasting, monitoring). **Cannot inject or evaluate code.** This is the role the facade makes meaningful. |
 
-Roles are coarse and few on purpose; a finer policy engine is explicitly future
-work (see Consequences). The Observer↔Collaborator↔Owner ladder is the minimum
-that makes "shared workspace" safe to offer.
+**Why two roles, not three.** The only security boundary that actually contains
+anything is **execute vs. read** ("Observer vs. anyone-with-eval"). A middle
+"Collaborator" (eval but not kill/rotate) would sit on the *execute* side of that
+line: a user with `eval`/`load-source` can `Erlang os cmd: "..."` or hot-load a
+persistent backdoor (ADR 0082) regardless of whether they can also kill actors,
+and rotating the cookie does not even evict already-loaded code. A middle rung
+therefore adds policy machinery and a name that *sounds* like containment without
+providing any — security theater. v1 draws the line where the trust boundary is.
+Reintroducing Collaborator later is **purely additive** (a new role value + op
+grants), with no migration.
 
 **Claim→role mapping must fail closed.** Mapping OIDC claims/groups to roles is the
 single most security-critical configuration step. The implementation must: (a)
@@ -240,16 +249,6 @@ default to **no-access (deny)** when no role claim matches — never a usability
 fallback to a privileged role; (b) **raise a startup error** when a configured
 claim path points at a nonexistent claim key (no silent fall-through); and (c) log
 the **resolved role with the raw claim values** at session mount for audit.
-
-**Honest framing — Collaborator is, in practice, near-full RCE.** Collaborator
-holds `eval` + `load-source`, so a malicious Collaborator can
-`Erlang os cmd: "..."` or hot-load a persistent backdoor (ADR 0082). The only
-real constraint vs. Owner is "cannot kill actors / rotate the cookie" — and cookie
-rotation does not evict already-loaded code anyway. **Operators must treat a
-Collaborator as trusted to roughly the same degree as the workspace owner.** The
-meaningful security boundary in this ladder is **Observer vs. everyone-with-eval**,
-not Owner vs. Collaborator. (Whether `load-source` should require Owner rather than
-Collaborator is an open question — see Open Questions.)
 
 **Observer read-grant is contingent on read-surface safety.** Granting Observer
 the read ops assumes each one triggers **no user code** (per the live-image caveat
@@ -399,7 +398,7 @@ typically a *consumer* of a URL their team set up, and SSO is the login flow the
 already know from every other internal tool.
 
 ### Smalltalk developer
-The shared-workspace + Observer/Collaborator roles bring something Smalltalk
+The shared-workspace + Owner/Observer roles bring something Smalltalk
 images never had cleanly: multiple people looking at **one live image** with
 differentiated rights — a driver, a navigator, and a read-only audience watching
 the Transcript and Inspector update live. This is the Smalltalk "shared world"
@@ -415,10 +414,10 @@ Phoenix concern by construction, because dist can't do it.
 A real deployment story: an authenticating front (OIDC) they can wire to existing
 SSO, a dist link they can reason about (co-located/loopback by default, or bound
 to a private interface — never public, no overlay or cert dependency imposed), an
-audit trail of authorized ops, and roles to hand out read-only access without
-granting code execution. The honest caveats are documented up front: keeping dist
-off untrusted networks is operator-enforced (not code-enforced); and
-Owner/Collaborator hold full RCE — only Observer is non-executing.
+audit trail of authorized ops, and a read-only Observer role to hand out
+without granting code execution. The honest caveats are documented up front:
+keeping dist off untrusted networks is operator-enforced (not code-enforced); and
+the Owner role holds full RCE — only Observer is non-executing.
 
 ### Tooling developer
 The curated facade is a stable, documented contract (term tuples / `#beamtalk_error{}`)
@@ -467,8 +466,9 @@ foreclosed one.
   *deployment option*, so both are reachable.
 - **BEAM veterans** dislike the facade's narrowing but concede it's the only RBAC
   substrate and is already built (BT-2399).
-- **Security purists** note (correctly) that Owner/Collaborator = RCE, so RBAC only
-  truly contains Observer. We state this plainly rather than overselling the facade.
+- **Security purists** note (correctly) that anyone with `eval` = RCE, so RBAC's
+  real boundary is Observer-vs-execute. We state this plainly (and chose a two-role
+  model that draws exactly that line) rather than overselling the facade.
 
 ## Alternatives Considered
 
@@ -547,9 +547,8 @@ remain an *operator option* for the untrusted-split case, never a requirement.
 - **Amends ADR 0058 Principle 6** — shared multi-user workspaces now exist (behind
   Phoenix). The shared-secret-shared-state risk is real; it is mitigated, not
   eliminated, by RBAC + the trusted front.
-- **Owner/Collaborator roles are full/near-full RCE.** RBAC meaningfully constrains
-  only Observer. The facade is not a sandbox; an `eval`-holding role can do anything
-  ADR 0058 allows.
+- **The Owner role is full RCE.** RBAC meaningfully constrains only Observer. The
+  facade is not a sandbox; the `eval`-holding role can do anything ADR 0058 allows.
 - **Phoenix becomes a high-value target.** It holds the dist cookie and full RPC
   power; a Phoenix compromise = workspace compromise. Its host must be trusted and
   patched like the workspace host.
@@ -564,9 +563,10 @@ remain an *operator option* for the untrusted-split case, never a requirement.
   an operator who genuinely needs Phoenix and the workspace on different untrusted
   hosts must reintroduce TLS-dist or supply their own tunnel. We accept this rather
   than mandate an overlay/cert dependency on every deployment.
-- **RBAC is coarse (3 roles), and Collaborator ≈ Owner in blast radius.** The only
-  meaningful boundary is Observer vs. eval-holders; Collaborator must be trusted
-  almost like the owner. Finer per-op/per-resource policy is future work.
+- **RBAC is two-level (execute vs. read).** This is deliberate — it is the only
+  boundary that contains anything (see Decision 4). A finer middle rung
+  (Collaborator) and per-op/per-resource policy are deferred, additive future work;
+  until then there is no "eval but limited" tier.
 - **Authorization can lag IdP state.** Server-side sessions do not observe IdP
   revocation/role-change in real time; enforcement lags by up to the configured
   re-validation interval / session TTL (Decision 1). For an RCE-bearing tool this
@@ -609,16 +609,16 @@ Lands as **BT-2411 (LiveView IDE Wave 5)**, gated on this ADR. Phased:
   note in Decision 3). **Optional defense-in-depth:** workspace-side
   `beamtalk_authorized_ops` entry module so app-level Phoenix bugs cannot reach
   `beamtalk_repl_shell:eval/2` directly.
-- RBAC: map OIDC claims/groups → Owner/Collaborator/Observer; **fail closed**
+- RBAC: map OIDC claims/groups → Owner/Observer; **fail closed**
   (no match → deny; bad claim path → startup error); enforce per op before RPC;
   structured audit log per authorized op (`user`, `op`, `role`, raw claims at mount).
 - **Read-surface sign-off (acceptance criterion):** confirm each Observer-granted
   read op triggers no user code under ADR 0085.
 - **Components:** `editors/liveview/lib/**` (facade + policy + audit); optionally
   `runtime/apps/beamtalk_workspace/src/beamtalk_authorized_ops.erl`.
-- **Tests:** Observer denied `eval`; Collaborator denied `kill`/`flush`; Owner
-  allowed all; facade rejects off-list ops with 403 and no dist call; unmatched
-  claim → deny (not a default role).
+- **Tests:** Observer denied `eval`/`load-source`/`save`/`kill`; Observer allowed
+  read ops; Owner allowed all; facade rejects off-list ops with 403 and no dist
+  call; unmatched claim → deny (not a default role).
 
 ### Phase 3 — Transport posture (keep dist internal)
 - **Co-locate default:** `just web` discovers a loopback-dist workspace. Set
@@ -640,7 +640,7 @@ Lands as **BT-2411 (LiveView IDE Wave 5)**, gated on this ADR. Phased:
 
 ### Phase 4 — Docs
 - Extend `docs/security/threat-model.md` (ADR 0058 Phase 0) with the remote/Phoenix
-  trust path and the Owner/Collaborator/Observer caveat.
+  trust path and the Owner/Observer (execute-vs-read) caveat.
 - Non-localhost deployment guide; update `docs/development/surface-parity.md` if the
   facade op set is surfaced anywhere user-visible.
 
@@ -664,19 +664,15 @@ overturning it:
 
 A one-line note will be added to ADR 0058 pointing to this ADR for the remote
 multi-user case. ADR 0058's "Trusted Developer Tool" stance is otherwise intact:
-Owner/Collaborator roles still have full RCE; only Observer is non-executing.
+the Owner (execute) role still has full RCE; only Observer is non-executing.
 
 ## Open Questions
-- **Should `load-source`/`save`/`flush` require Owner, not Collaborator?** As
-  written, Collaborator is near-full RCE (Consequences). Moving code-installing ops
-  to Owner would make Collaborator "evaluate but don't persist," a more defensible
-  middle rung — at the cost of pair-programming convenience (a navigator who can't
-  hot-load). Decide before Phase 2.
-- **Is 3-role RBAC the right v1, or Owner + Observer only?** A simpler v1 —
-  OIDC + an allowlist of Owners + a read-only Observer — delivers most of the value
-  (real identity for audit; non-owners can't eval) with less policy machinery, and
-  defers Collaborator until the read-surface (ADR 0085) settles the execution-vector
-  question. Adopt the 3-role design now, or stage it?
+- **When (if ever) to introduce a middle "Collaborator" rung.** v1 is two-level
+  (Decision 4). A future Collaborator would only be meaningful if it sits on the
+  *read* side of the execute boundary (e.g. "eval into a scratch session but cannot
+  `load-source`/`save` persistent code") — i.e. a genuinely smaller capability, not
+  just "eval minus kill." Revisit once the read-surface (ADR 0085) settles which
+  ops trigger user code, and only if a real use case demands an intermediate tier.
 - **Workspace-side `beamtalk_authorized_ops` allowlist — ship in v1 or defer?**
   Cheap defense-in-depth against Phoenix app-bugs; does not contain host compromise.
 
