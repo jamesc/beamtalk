@@ -902,7 +902,9 @@ The protocol is implemented in:
 |------|-------------|
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_protocol.erl` | Protocol encoder/decoder (incl. `output` field) |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_server.erl` | WebSocket server and request dispatch |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops.erl` | Central dispatch table; returns native `op_result()` terms |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_load.erl` | `load-source`, `load-project`, `unload` op handlers |
+| `runtime/apps/beamtalk_workspace/src/beamtalk_repl_subscriptions.erl` | Push-stream subscription facade for Transcript, actors, etc. |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl` | Expression evaluation and I/O capture |
 | `runtime/apps/beamtalk_workspace/src/beamtalk_repl_shell.erl` | Session state bridge |
 | `crates/beamtalk-cli/src/commands/repl/mod.rs` | Rust CLI client |
