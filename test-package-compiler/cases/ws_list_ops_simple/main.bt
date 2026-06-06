@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot tests for list transform operations without state mutations.
+// Covers the simple (no-mutation-threading) codegen paths in transform_ops.rs:
+// generate_list_count, generate_list_flat_map, generate_list_take_while,
+// generate_list_drop_while, generate_list_partition, generate_list_group_by.
+// BT-2413.
+
+numbers := [1, 2, 3, 4, 5]
+
+// count: — number of elements satisfying a predicate
+evenCount := numbers count: [:n | n % 2 = 0]
+
+// flatMap: — map each element to a list then concatenate
+flat := numbers flatMap: [:n | [n, n * 10]]
+
+// takeWhile: — take elements while predicate holds
+firstSmall := numbers takeWhile: [:n | n < 4]
+
+// dropWhile: — drop elements while predicate holds
+fromThree := numbers dropWhile: [:n | n < 3]
+
+// partition: — split into (matching, non-matching) tuple
+parts := numbers partition: [:n | n > 3]
+
+// groupBy: — group elements by a key function
+grouped := numbers groupBy: [:n | n % 2 = 0]

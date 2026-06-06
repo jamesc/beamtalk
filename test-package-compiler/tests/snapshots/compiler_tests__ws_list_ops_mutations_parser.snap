@@ -1,0 +1,246 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    method_definitions: [],
+    protocols: [],
+    expressions: [
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 278,
+                            end: 285,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 278,
+                            end: 285,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Snapshot tests for list transform operations WITH outer-scope variable",
+                        span: Span {
+                            start: 278,
+                            end: 285,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "mutations inside the predicate/transform blocks. Exercises the",
+                        span: Span {
+                            start: 278,
+                            end: 285,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "*_with_mutations codegen paths in transform_ops.rs.",
+                        span: Span {
+                            start: 278,
+                            end: 285,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "BT-2413.",
+                        span: Span {
+                            start: 278,
+                            end: 285,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 278,
+                            end: 285,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: Literal(
+                                    Integer(
+                                        1,
+                                    ),
+                                    Span {
+                                        start: 290,
+                                        end: 291,
+                                    },
+                                ),
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 289,
+                            end: 290,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 278,
+                    end: 290,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ,",
+                span: Span {
+                    start: 291,
+                    end: 292,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 303,
+                    end: 304,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 436,
+                    end: 437,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 565,
+                    end: 566,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 702,
+                    end: 703,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 836,
+                    end: 837,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 966,
+                    end: 967,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [],
+                trailing: None,
+            },
+            expression: Error {
+                message: "Unexpected token: expected expression, found ]",
+                span: Span {
+                    start: 1101,
+                    end: 1102,
+                },
+            },
+            preceding_blank_line: false,
+        },
+    ],
+    span: Span {
+        start: 278,
+        end: 1102,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}
+
+Diagnostics:
+Diagnostic { severity: Error, message: "Expected ']' to close block", span: Span { start: 291, end: 292 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ,", span: Span { start: 291, end: 292 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 303, end: 304 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 436, end: 437 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 565, end: 566 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 702, end: 703 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 836, end: 837 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 966, end: 967 }, hint: None, category: None, notes: [] }
+Diagnostic { severity: Error, message: "Unexpected token: expected expression, found ]", span: Span { start: 1101, end: 1102 }, hint: None, category: None, notes: [] }
