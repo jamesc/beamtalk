@@ -128,14 +128,35 @@ is a bypass of the entire OIDC + RBAC stack. It uses the same session handling
 (HttpOnly cookie, no URL token, RBAC applies); it is not a static bearer token.
 The **documented default for non-localhost is OIDC**.
 
-```elixir
-# editors/liveview/config/runtime.exs (illustrative)
-config :bt_ide, :oidc,
-  issuer: System.fetch_env!("BT_OIDC_ISSUER"),
-  client_id: System.fetch_env!("BT_OIDC_CLIENT_ID"),
-  client_secret: System.fetch_env!("BT_OIDC_CLIENT_SECRET"),
-  redirect_uri: System.fetch_env!("BT_OIDC_REDIRECT_URI")
+**Configuration is read once at boot — never re-entered per start, and not on the
+workspace.** OIDC config is a *Phoenix-deployment* concern; the workspace node
+knows nothing about OIDC (it only trusts the Phoenix node via the dist cookie), so
+`beamtalk workspace create`/restart never touches it. Non-secret config **and the
+role map** live in a persistent declarative file, `~/.beamtalk/ide.toml`; the
+**client secret** is resolved at boot from env or a `chmod 600` file (never inline,
+never logged — ADR 0058 Principle 3). Every key may be **overridden by an env var**
+for pure-12-factor / k8s deployments. Phoenix reads the file once in `runtime.exs`;
+changing config (including roles) means editing the file + reload, not re-launching
+with fresh flags.
+
+```toml
+# ~/.beamtalk/ide.toml — persistent; read once at Phoenix boot
+[oidc]
+issuer            = "https://idp.example.com"     # env override: BT_OIDC_ISSUER
+client_id         = "beamtalk-ide"                # env override: BT_OIDC_CLIENT_ID
+redirect_uri      = "https://ide.example.com/oidc/callback"
+groups_claim      = "groups"                      # which OIDC claim carries group membership
+client_secret_env = "BT_OIDC_CLIENT_SECRET"       # secret from env (or client_secret_file = "/run/secrets/…")
+
+[oidc.roles]                                       # IdP group value -> Beamtalk role (Decision 4)
+owner    = ["beamtalk-owners", "platform-admins"]
+observer = ["beamtalk-observers"]
+# unmatched -> DENY (fail-closed)
 ```
+
+Resolution order per key: **env var → `ide.toml` → error/deny**. A missing file is
+fine if every required key is supplied by env (the 12-factor path); a present file
+is the "configure once on a host" path. Either way it is set-once, not per-start.
 
 ```
 # Unauthenticated browser hitting the IDE
@@ -243,12 +264,15 @@ providing any — security theater. v1 draws the line where the trust boundary i
 Reintroducing Collaborator later is **purely additive** (a new role value + op
 grants), with no migration.
 
-**Claim→role mapping must fail closed.** Mapping OIDC claims/groups to roles is the
-single most security-critical configuration step. The implementation must: (a)
-default to **no-access (deny)** when no role claim matches — never a usability
-fallback to a privileged role; (b) **raise a startup error** when a configured
-claim path points at a nonexistent claim key (no silent fall-through); and (c) log
-the **resolved role with the raw claim values** at session mount for audit.
+**Claim→role mapping must fail closed.** The mapping is declarative config — the
+`[oidc.roles]` table in `~/.beamtalk/ide.toml` (Decision 1), keyed off the
+`groups_claim` — so it is set once and edited in place, not re-specified per start.
+It is the single most security-critical configuration step, so the implementation
+must: (a) default to **no-access (deny)** when no role claim matches — never a
+usability fallback to a privileged role; (b) **raise a startup error** when
+`groups_claim` points at a nonexistent claim key, or when the file/env supply no
+role map at all (no silent fall-through); and (c) log the **resolved role with the
+raw claim values** at session mount for audit.
 
 **Observer read-grant is contingent on read-surface safety.** Granting Observer
 the read ops assumes each one triggers **no user code** (per the live-image caveat
