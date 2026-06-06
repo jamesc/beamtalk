@@ -72,10 +72,16 @@ defmodule BtAttachWeb.OidcFlowTest do
       assert redirected_to(conn) == ~p"/oidc/auth"
     end
 
-    test "GET /oidc/auth 302s to the IdP and stashes session params", %{conn: conn} do
+    test "GET /oidc/auth 302s to the IdP and stashes a Lax, path-scoped handshake cookie",
+         %{conn: conn} do
       conn = get(conn, ~p"/oidc/auth")
       assert redirected_to(conn) =~ "https://idp.test/authorize"
-      assert get_session(conn, :oidc_session_params) == %{state: "xyz"}
+
+      handshake = conn.resp_cookies["_bt_oidc_handshake"]
+      assert handshake.value != ""
+      assert handshake.same_site == "Lax"
+      assert handshake.path == "/oidc"
+      assert handshake.http_only
     end
 
     test "a valid callback mints a session and lands authenticated in the IDE", %{conn: conn} do
@@ -88,6 +94,8 @@ defmodule BtAttachWeb.OidcFlowTest do
 
       assert redirected_to(conn) == ~p"/"
       assert get_session(conn, "bt_user")["sub"] == "alice"
+      # The minted session cookie is SameSite=Strict (BT-2419).
+      assert conn.resp_cookies["_bt_attach_key"].same_site == "Strict"
 
       # The session now satisfies the gate.
       authed = conn |> recycle() |> get(~p"/")

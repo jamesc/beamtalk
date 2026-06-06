@@ -1,14 +1,19 @@
 defmodule BtAttachWeb.Endpoint do
   use Phoenix.Endpoint, otp_app: :bt_attach
 
-  # The session will be stored in the cookie and signed,
-  # this means its contents can be read but not tampered with.
-  # Set :encryption_salt if you would also like to encrypt it.
+  # The authenticated session cookie (ADR 0091 Decision 1 / BT-2419). It gates an
+  # RCE-bearing tool, so it is `HttpOnly` (cookie store default), `SameSite=Strict`
+  # — not Lax — and `Secure` outside dev/test. The one flow that genuinely needs a
+  # cross-site top-level redirect to carry state (browser → IdP → /oidc/callback)
+  # does NOT rely on this cookie: the OIDC handshake state lives in a separate
+  # `SameSite=Lax`, `path=/oidc`, short-lived encrypted cookie scoped to that
+  # handler (`BtAttachWeb.OidcHandshake`), so the main session stays Strict.
   @session_options [
     store: :cookie,
     key: "_bt_attach_key",
     signing_salt: "f7iEj/hj",
-    same_site: "Lax"
+    same_site: "Strict",
+    secure: Application.compile_env(:bt_attach, :secure_session, false)
   ]
 
   socket "/live", Phoenix.LiveView.Socket,

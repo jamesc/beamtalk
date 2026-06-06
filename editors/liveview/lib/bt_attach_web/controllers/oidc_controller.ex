@@ -22,15 +22,14 @@ defmodule BtAttachWeb.OidcController do
 
   alias BtAttach.Oidc
   alias BtAttachWeb.Auth
-
-  @session_params_key :oidc_session_params
+  alias BtAttachWeb.OidcHandshake
 
   @doc "Start the OIDC authorization-code flow: 302 → IdP."
   def auth(conn, _params) do
     with config when is_map(config) <- Auth.oidc_config(),
          {:ok, %{url: url, session_params: session_params}} <- Oidc.authorize_url(config) do
       conn
-      |> put_session(@session_params_key, session_params)
+      |> OidcHandshake.put(session_params)
       |> redirect(external: url)
     else
       nil ->
@@ -50,39 +49,44 @@ defmodule BtAttachWeb.OidcController do
 
   @doc "OIDC redirect target: exchange the code, mint the session, enter the IDE."
   def callback(conn, params) do
-    session_params = get_session(conn, @session_params_key)
     config = Auth.oidc_config()
 
     cond do
       is_nil(config) ->
         redirect(conn, to: ~p"/")
 
-      is_nil(session_params) ->
-        # No in-flight flow (stale/forged callback): refuse, don't exchange.
-        Logger.warning("OIDC callback without session_params (possible CSRF/replay)",
-          domain: [:beamtalk, :liveview]
-        )
-
-        deny(conn)
-
       true ->
-        conn = delete_session(conn, @session_params_key)
+        case OidcHandshake.take(conn) do
+          {:ok, session_params, conn} ->
+            exchange(conn, config, params, session_params)
 
-        case Oidc.callback(config, params, session_params) do
-          {:ok, %{claims: claims}} ->
-            Logger.info("OIDC login: sub=#{inspect(claims["sub"])}",
-              domain: [:beamtalk, :liveview]
-            )
-
-            Auth.log_in(conn, claims)
-
-          {:error, reason} ->
-            Logger.warning("OIDC callback rejected: #{inspect(reason)}",
+          :error ->
+            # No in-flight handshake (stale/forged callback, or expired/tampered
+            # handshake cookie): refuse, don't exchange.
+            Logger.warning("OIDC callback without a valid handshake (possible CSRF/replay)",
               domain: [:beamtalk, :liveview]
             )
 
             deny(conn)
         end
+    end
+  end
+
+  defp exchange(conn, config, params, session_params) do
+    case Oidc.callback(config, params, session_params) do
+      {:ok, %{claims: claims}} ->
+        Logger.info("OIDC login: sub=#{inspect(claims["sub"])}",
+          domain: [:beamtalk, :liveview]
+        )
+
+        Auth.log_in(conn, claims)
+
+      {:error, reason} ->
+        Logger.warning("OIDC callback rejected: #{inspect(reason)}",
+          domain: [:beamtalk, :liveview]
+        )
+
+        deny(conn)
     end
   end
 
