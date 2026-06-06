@@ -822,6 +822,23 @@ The [Beamtalk VS Code extension](https://github.com/jamesc/beamtalk/tree/main/ed
 
 The extension connects to the same workspace as the REPL and MCP server. Changes made in VS Code (file saves trigger hot-reload) are immediately visible in the REPL and to AI agents.
 
+## LiveView IDE
+
+The [LiveView IDE](https://github.com/jamesc/beamtalk/tree/main/editors/liveview/) is a Phoenix LiveView client that connects to the workspace over **Erlang distribution** (the Attach topology), bypassing the WebSocket JSON protocol entirely. It consumes native `op_result()` terms end-to-end via `beamtalk_repl_ops:dispatch/4`.
+
+```bash
+just web-setup    # mix deps.get + asset build
+just web <name>   # Start the LiveView IDE, connecting to workspace <name>
+```
+
+**Current capabilities (Wave 1):**
+
+- **Eval pane** — expression evaluation returning structured results, display-formatted with the same surface-shared rules as CLI / REPL / MCP
+- **Transcript pane** — real-time captured output via `beamtalk_repl_subscriptions`
+- **Session lifecycle** — each browser tab gets its own workspace-supervised session; bindings and loaded classes persist across evals
+
+**Requirements:** Elixir ≥ 1.17 on OTP 27. See `editors/liveview/README.md` and `CONTRIBUTING.md` for setup.
+
 ## Testing Framework
 
 Beamtalk includes a native test framework inspired by Smalltalk's SUnit.
@@ -987,13 +1004,13 @@ The command exits non-zero if total coverage falls below the threshold. JSON out
 
 ## Shared Protocol Architecture
 
-All interfaces — REPL, VS Code, MCP — connect to the same live BEAM workspace node via the same WebSocket JSON protocol (`beamtalk_ws_handler`). This means:
+All browser-facing interfaces — REPL, VS Code, MCP — connect to the same live BEAM workspace node via the same WebSocket JSON protocol (`beamtalk_ws_handler`). This means:
 
 - An agent loading a file via MCP is immediately visible in VS Code and the REPL
 - A developer hot-reloading a class in VS Code is immediately available to the agent
 - All interfaces share actors, loaded modules, and workspace state
 
-Adding a new interface requires only a protocol adapter over the existing WebSocket transport.
+Adding a new WebSocket-based interface requires only a protocol adapter over the existing transport. The LiveView IDE uses an alternative **Attach topology** — it runs as a separate BEAM node and calls into the workspace over Erlang distribution, consuming native `op_result()` terms from `beamtalk_repl_ops:dispatch/4` without the JSON encoding step.
 
 ## Native Erlang Integration
 
