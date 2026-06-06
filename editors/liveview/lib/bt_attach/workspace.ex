@@ -338,6 +338,190 @@ defmodule BtAttach.Workspace do
 
   def inspect_value(_term), do: {:error, :not_inspectable}
 
+  # ── write-surface: method-level edit / save / flush (ADR 0082, BT-2409) ─────
+
+  @doc """
+  Save (durably patch) a single method on a class in the attached workspace,
+  through the write-surface (ADR 0082, Wave 3).
+
+  This is the method editor's "Save" action. Per ADR 0082 the operation is the
+  Beamtalk-level `aClass compile: #selector source: body` primitive — but rather
+  than building a `compile:source:` *eval string* (which would force escaping the
+  body's quotes, backslashes, and `{` interpolation markers back into Beamtalk
+  source — exactly the fragility ADR 0082 calls out), we call the runtime install
+  chokepoint `beamtalk_repl_eval:compile_method/6` directly over distribution,
+  passing the body as a **String value**. `>>`, `compile:source:`, and this entry
+  all converge at the same in-memory install + ChangeLog append, so the saved
+  method is compiled, flushed into the live BEAM module, and recorded in the
+  workspace's change history (the ChangeLog coherence criterion) in one step.
+
+  `selector` is the method selector (e.g. `"increment"` or `"at:put:"`), `source`
+  the method definition body. Author metadata is stamped as `liveview` / `human`
+  for the audit trail.
+
+  Returns:
+
+    * success → `{:ok, class}` where `class` is the class-name binary the install
+      confirmed
+    * error   → `{:error, reason_term}` where `reason_term` is the structured
+      `#beamtalk_error{}` for a failed compile/save (rendered via
+      `render_error/1`), or `{:unreachable, _}` if the workspace is gone
+
+  The term contract is the only coupling: no JSON crosses the Attach path.
+  """
+  def save_method(class, selector, source)
+      when is_binary(class) and is_binary(selector) and is_binary(source) do
+    # compile_method/6: (ClassNameBin, Selector, SourceBin, Intent, Author, AuthorKind).
+    # Intent `durable` so the patch is logged as a keepable change (ADR 0082); the
+    # selector and body are passed as values — no source-string round-trip.
+    args = [class, selector, source, :durable, "liveview", :human]
+
+    case rpc(:beamtalk_repl_eval, :compile_method, args) do
+      {:ok, class_bin} ->
+        {:ok, to_string(class_bin)}
+
+      # A compile/install failure returns {error, Reason}; structure it so the
+      # LiveView renders an actionable #beamtalk_error{} rather than a flattened
+      # internal term.
+      {:error, reason} ->
+        {:error, structure_error(reason)}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  Flush the workspace's pending durable changes to disk (ADR 0082 `Workspace
+  flush`). This is the "Save All to Disk" action — it replays the ChangeLog
+  entries written by `save_method/3` into their `.bt` source files.
+
+  Calls `beamtalk_workspace_flush:flush/0` directly, which returns a term
+  contract (never raises on a normal conflict): a `FlushResult`-shaped summary
+  map on success, or `{error, #beamtalk_error{}}` on a hard runtime error. The
+  summary's `conflicts` / `skipped` lists carry recoverable conditions
+  (external-edit conflicts, non-flushable stdlib patches) for the caller to
+  render.
+
+  Returns `{:ok, summary_map}` or `{:error, reason_term}`.
+  """
+  def flush do
+    case rpc(:beamtalk_workspace_flush, :flush, []) do
+      {:ok, summary} when is_map(summary) -> {:ok, summary}
+      {:error, reason} -> {:error, structure_error(reason)}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  List the workspace's active change history (ADR 0082 `Workspace changes`) — the
+  per-method ChangeLog entries that are dirty (installed in memory, not yet
+  flushed to disk). This is the ChangeLog-coherence view: after `save_method/3`,
+  the saved `(class, selector)` should appear here.
+
+  Reads `beamtalk_workspace_changelog:change_entries/0` — the same
+  `$beamtalk_class`-tagged value maps that back the `ChangeLog.bt` /
+  `ChangeEntry.bt` value objects — in a **single RPC**. Each entry is already a
+  plain atom-keyed map (not an opaque `#entry{}` record), so nothing fragile
+  crosses the node boundary and there is no per-entry round-trip. We keep only the
+  entries flagged `active` (current epoch, not orphaned, not yet flushed — the
+  exact `Workspace changes` predicate) and render display rows newest-first.
+
+  Returns a list of row maps, or `{:error, reason}` if the workspace is
+  unreachable or returns an unexpected shape.
+  """
+  def change_history do
+    case rpc(:beamtalk_workspace_changelog, :change_entries, []) do
+      entries when is_list(entries) ->
+        entries
+        |> Enum.filter(&active_entry?/1)
+        |> Enum.map(&entry_to_row/1)
+        |> Enum.reverse()
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # The change-entry value map carries an `active` boolean (current epoch, not
+  # orphaned, not flushed) — the same predicate `Workspace changes` filters on.
+  defp active_entry?(%{active: active}), do: active == true
+  defp active_entry?(_), do: false
+
+  @doc """
+  Render a `FlushResult` summary map (ADR 0082 `Workspace flush`) to a one-line
+  status string for the page. Pure (no RPC), so it is unit-tested directly.
+
+  Over distribution the workspace returns an atom-keyed map; keys are read
+  defensively (atom or string) so an unexpected shape degrades to `inspect/1`
+  rather than crashing the pane. Conflicts and skipped (non-flushable) counts are
+  appended when present, since they are the recoverable conditions the user acts
+  on.
+  """
+  def format_flush_summary(summary) when is_map(summary) do
+    flushed = summary_field(summary, :flushed, 0)
+    files = summary |> summary_field(:files, []) |> List.wrap()
+    conflicts = summary |> summary_field(:conflicts, []) |> List.wrap()
+    skipped = summary |> summary_field(:skipped, []) |> List.wrap()
+
+    base = "Flushed #{flushed} change(s) across #{length(files)} file(s)"
+
+    parts =
+      [base]
+      |> maybe_append(conflicts != [], "#{length(conflicts)} conflict(s)")
+      |> maybe_append(skipped != [], "#{length(skipped)} skipped")
+
+    Enum.join(parts, " · ")
+  end
+
+  def format_flush_summary(other), do: inspect(other)
+
+  defp summary_field(map, key, default) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+  end
+
+  defp maybe_append(parts, false, _text), do: parts
+  defp maybe_append(parts, true, text), do: parts ++ [text]
+
+  # Render one ChangeEntry value map (atom-keyed, from `change_entries/0`) to a
+  # display row. `className` arrives as an atom and `selector` as a Symbol (atom)
+  # or `nil` for a new-class entry; `to_string/1` renders atoms verbatim. We read
+  # every key defensively with a default so a future field addition can't crash
+  # the pane.
+  defp entry_to_row(entry) when is_map(entry) do
+    %{
+      class: to_string(Map.get(entry, :className, "")),
+      selector: present_selector(Map.get(entry, :selector)),
+      kind: to_string(Map.get(entry, :kind, "")),
+      intent: to_string(Map.get(entry, :intent, "")),
+      flushable: Map.get(entry, :flushable, false) == true,
+      flushed: Map.get(entry, :flushed, false) == true,
+      author_kind: to_string(Map.get(entry, :authorKind, ""))
+    }
+  end
+
+  # ChangeLog selector is nil for a new-class entry; show a placeholder.
+  defp present_selector(nil), do: "(class)"
+  defp present_selector(value), do: to_string(value)
+
+  # Turn a runtime `{error, Reason}` into a structured `#beamtalk_error{}` term so
+  # the LiveView renders an actionable message. `ensure_structured_error/1` is the
+  # workspace's own wrapper — already structured reasons pass through unchanged,
+  # raw reasons get wrapped — so we never flatten an error to an opaque string.
+  defp structure_error(reason) do
+    case rpc(:beamtalk_repl_errors, :ensure_structured_error, [reason]) do
+      {:badrpc, _} -> reason
+      structured -> structured
+    end
+  end
+
   defp dispatch_inspect_result(result) do
     case result do
       {:inspect, fields} when is_map(fields) -> {:ok, fields}

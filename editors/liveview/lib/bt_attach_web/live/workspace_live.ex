@@ -76,7 +76,16 @@ defmodule BtAttachWeb.WorkspaceLive do
                 |> assign(:inspect_target, nil)
                 |> assign(:inspect_rows, [])
                 |> assign(:inspect_error, nil)
+                # Method editor (Wave 3): the write-surface edit/save/flush pane.
+                |> assign(:edit_class, "")
+                |> assign(:edit_selector, "")
+                |> assign(:edit_source, "")
+                |> assign(:save_result, nil)
+                |> assign(:save_error, nil)
+                |> assign(:flush_result, nil)
+                |> assign(:flush_error, nil)
                 |> assign_bindings(pid)
+                |> assign_changes()
                 |> stream(:transcript, [])
               else
                 other ->
@@ -166,6 +175,30 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("drill", _params, socket), do: {:noreply, socket}
 
+  # ── method editor (Wave 3, write-surface ADR 0082) ──────────────────────────
+
+  # Save (durably patch) the edited method on the workspace via the write-surface.
+  # On success the method is compiled + flushed into the live BEAM module and an
+  # entry is recorded in the workspace ChangeLog, so a subsequent eval observes the
+  # new behaviour and the change appears in the change-history pane. A failed
+  # compile/save returns a structured #beamtalk_error{} we render as an actionable
+  # message (not a flattened string).
+  @impl true
+  def handle_event(
+        "save_method",
+        %{"class" => class, "selector" => selector, "source" => source},
+        socket
+      ) do
+    {:noreply, save_method(socket, class, selector, source)}
+  end
+
+  # Flush all pending durable changes to disk ("Save All to Disk", ADR 0082
+  # `Workspace flush`). The summary's conflicts/skipped lists carry recoverable
+  # conditions; a hard runtime failure renders as a structured error.
+  def handle_event("flush", _params, socket) do
+    {:noreply, flush_changes(socket)}
+  end
+
   # Transcript push, delivered directly over distribution to this LiveView pid.
   @impl true
   def handle_info({:transcript_output, text}, socket) do
@@ -212,6 +245,76 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp present(""), do: nil
   defp present(nil), do: nil
   defp present(output) when is_binary(output), do: output
+
+  # ── method editor helpers (Wave 3) ──────────────────────────────────────────
+
+  # Validate the edit form, then drive the write-surface save. Empty class or
+  # selector is a local validation error (rendered without a round-trip); a real
+  # save threads the body value straight to the workspace install chokepoint.
+  defp save_method(socket, class, selector, source) do
+    class = String.trim(class)
+    selector = String.trim(selector)
+
+    socket =
+      assign(socket,
+        edit_class: class,
+        edit_selector: selector,
+        edit_source: source
+      )
+
+    cond do
+      class == "" ->
+        assign(socket, save_result: nil, save_error: "Enter a class name to save a method.")
+
+      selector == "" ->
+        assign(socket, save_result: nil, save_error: "Enter a selector to save a method.")
+
+      true ->
+        case Workspace.save_method(class, selector, source) do
+          {:ok, saved_class} ->
+            # The patch is live + logged; refresh the change-history pane so the
+            # new entry is visible (ChangeLog coherence).
+            socket
+            |> assign(
+              save_result: "Saved #{selector} on #{saved_class}",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+            |> assign_changes()
+
+          {:error, reason} ->
+            assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
+        end
+    end
+  end
+
+  # Drive the write-surface flush and render its summary, then refresh changes so
+  # the (now-flushed) entries drop out of the active view.
+  defp flush_changes(socket) do
+    case Workspace.flush() do
+      {:ok, summary} ->
+        socket
+        |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
+        |> assign_changes()
+
+      {:error, reason} ->
+        assign(socket, flush_result: nil, flush_error: Workspace.render_error(reason))
+    end
+  end
+
+  # Read the active ChangeLog ("Workspace changes", ADR 0082) and assign display
+  # rows. A workspace that is unreachable or returns an unexpected shape renders an
+  # error rather than crashing the pane.
+  defp assign_changes(socket) do
+    case Workspace.change_history() do
+      rows when is_list(rows) ->
+        assign(socket, changes: rows, changes_error: nil)
+
+      {:error, reason} ->
+        assign(socket, changes: [], changes_error: Workspace.render_error(reason))
+    end
+  end
 
   # ── bindings + inspector helpers ────────────────────────────────────────────
 
@@ -418,6 +521,85 @@ defmodule BtAttachWeb.WorkspaceLive do
               follow its live references.
             </p>
           <% end %>
+        <% end %>
+
+        <h2>Method Editor (write-surface)</h2>
+        <p style="color:#666;">
+          Edit a method and Save to compile + flush it onto the workspace
+          (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
+          eval observes the new behaviour.
+        </p>
+        <form phx-submit="save_method" style="margin:1rem 0;">
+          <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+            <input
+              name="class"
+              value={@edit_class}
+              placeholder="Class (e.g. Counter)"
+              autocomplete="off"
+              style="flex:1; padding:.5rem; font-family:inherit;"
+            />
+            <input
+              name="selector"
+              value={@edit_selector}
+              placeholder="selector (e.g. increment)"
+              autocomplete="off"
+              style="flex:1; padding:.5rem; font-family:inherit;"
+            />
+          </div>
+          <textarea
+            name="source"
+            rows="4"
+            placeholder="increment => self.value := self.value + 1"
+            style="width:100%; padding:.5rem; font-family:inherit; box-sizing:border-box;"
+          ><%= @edit_source %></textarea>
+          <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+            <button type="submit" style="padding:.5rem 1rem;">Save Method</button>
+            <button type="button" phx-click="flush" style="padding:.5rem 1rem;">
+              Save All to Disk (flush)
+            </button>
+          </div>
+        </form>
+
+        <%= if @save_result do %>
+          <pre style="background:#f0fff0; padding:.75rem; border:1px solid #cec;"><%= @save_result %></pre>
+        <% end %>
+        <%= if @save_error do %>
+          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @save_error %></pre>
+        <% end %>
+        <%= if @flush_result do %>
+          <pre style="background:#eef6ff; padding:.75rem; border:1px solid #cce;"><%= @flush_result %></pre>
+        <% end %>
+        <%= if @flush_error do %>
+          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @flush_error %></pre>
+        <% end %>
+
+        <h2>Changes (ChangeLog)</h2>
+        <%= if @changes_error do %>
+          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @changes_error %></pre>
+        <% end %>
+        <%= if @changes == [] do %>
+          <p style="color:#666;">No pending changes. Save a method to record one.</p>
+        <% else %>
+          <table style="width:100%; border-collapse:collapse;">
+            <thead>
+              <tr style="border-bottom:1px solid #ccc; text-align:left;">
+                <th style="padding:.25rem .5rem;">Class</th>
+                <th style="padding:.25rem .5rem;">Selector</th>
+                <th style="padding:.25rem .5rem;">Intent</th>
+                <th style="padding:.25rem .5rem;">Flushable</th>
+                <th style="padding:.25rem .5rem;">Author</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={c <- @changes} style="border-bottom:1px solid #eee;">
+                <td style="padding:.25rem .5rem; font-weight:bold;">{c.class}</td>
+                <td style="padding:.25rem .5rem;">{c.selector}</td>
+                <td style="padding:.25rem .5rem;">{c.intent}</td>
+                <td style="padding:.25rem .5rem;">{if c.flushable, do: "yes", else: "no"}</td>
+                <td style="padding:.25rem .5rem;">{c.author_kind}</td>
+              </tr>
+            </tbody>
+          </table>
         <% end %>
 
         <h2>Transcript (live)</h2>

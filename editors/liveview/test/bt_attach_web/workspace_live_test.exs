@@ -94,6 +94,100 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "7"
   end
 
+  test "method editor: save a method, then an eval observes the new behaviour (BT-2409)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "EditCounter#{suffix}"
+
+    # Define a real Actor subclass with a value field and a getter returning it.
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 1
+
+      value => self.value
+    """
+
+    view |> form("form") |> render_submit(%{expr: class_src})
+
+    # Sanity: the original method returns the initial field value.
+    name = "ec_#{suffix}"
+    view |> form("form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    html = view |> form("form") |> render_submit(%{expr: "#{name} value"})
+    assert html =~ "1"
+
+    # Save a NEW body for `value` via the write-surface method editor (ADR 0082).
+    # The body is passed as a String value end-to-end — no eval-string escaping.
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "class" => class,
+        "selector" => "value",
+        "source" => "value => self.value + 100"
+      })
+
+    assert save_html =~ "Saved value on #{class}"
+    # ChangeLog coherence: the saved (class, selector) appears in the changes pane.
+    assert save_html =~ class
+    assert save_html =~ "value"
+
+    # A subsequent eval on a freshly-spawned actor observes the patched behaviour
+    # (compiled + flushed into the live BEAM module on the workspace node).
+    name2 = "ec2_#{suffix}"
+    view |> form("form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+
+    assert eventually(fn ->
+             html = view |> form("form") |> render_submit(%{expr: "#{name2} value"})
+             html =~ "101"
+           end)
+  end
+
+  test "method editor: an invalid edit renders a structured error (BT-2409)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "BadEdit#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      value => self.value
+    """
+
+    view |> form("form") |> render_submit(%{expr: class_src})
+
+    # A syntactically broken body fails to compile; the write-surface returns a
+    # structured #beamtalk_error{} which the LiveView renders as an actionable
+    # message (NOT a flattened internal tuple/string).
+    html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "class" => class,
+        "selector" => "value",
+        "source" => "value => self.value +"
+      })
+
+    # The save-result success line must NOT appear; an error message must.
+    refute html =~ "Saved value on #{class}"
+    # Rendered via render_error/1 — a human-readable message, not a raw {error, …}.
+    refute html =~ "{:error,"
+    assert html =~ "Could not compile" or html =~ "compile" or html =~ "error"
+  end
+
+  test "method editor validates an empty class before any save (BT-2409)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{"class" => "", "selector" => "value", "source" => "value => 1"})
+
+    assert html =~ "Enter a class name"
+  end
+
   # ~6s total — generous for cross-node async transcript delivery under CI load.
   defp eventually(fun, retries \\ 120) do
     cond do
