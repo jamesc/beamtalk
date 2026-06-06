@@ -101,6 +101,44 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Check whether a workspace session pid is still alive (BT-2410 Wave 4).
+
+  Used by the resume path: before re-binding a reconnecting LiveView to a session
+  the Phoenix-side registry still remembers, we confirm the remote session
+  process actually exists — the workspace could have restarted between the
+  disconnect and the reconnect, leaving the registry entry stale.
+
+  `is_process_alive/1` is evaluated **on the workspace node**, where the session
+  pid is local (a remote `is_process_alive/1` would `badarg`). Returns a boolean
+  for a reachable workspace; an unreachable workspace yields `{:badrpc, _}`, which
+  the caller treats as not-alive (resume falls back to a fresh session).
+  """
+  def session_alive?(session_pid) when is_pid(session_pid) do
+    case rpc(:erlang, :is_process_alive, [session_pid]) do
+      result when is_boolean(result) -> result
+      {:badrpc, _reason} -> false
+    end
+  end
+
+  @doc """
+  Count the workspace-supervised sessions currently alive (BT-2410 Wave 4).
+
+  A read-only probe of `beamtalk_session_sup`'s active children, used by the
+  session-teardown tests to assert that closing a LiveView (after the resume
+  grace window) leaves no orphaned session. Returns the active-child count for a
+  reachable workspace, or `{:error, {:unreachable, _}}` otherwise.
+  """
+  def session_count do
+    case rpc(:supervisor, :count_children, [:beamtalk_session_sup]) do
+      counts when is_list(counts) ->
+        Keyword.get(counts, :active, 0)
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+    end
+  end
+
+  @doc """
   Evaluate a Beamtalk expression in `session_pid` through the curated op layer's
   term-returning seam (`beamtalk_repl_ops:dispatch/4`, BT-2399).
 

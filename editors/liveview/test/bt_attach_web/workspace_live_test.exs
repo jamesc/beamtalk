@@ -188,6 +188,76 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "Enter a class name"
   end
 
+  # ── Wave 4: multi-tab isolation / session resume / teardown (BT-2410) ────────
+
+  test "two tabs map to two isolated workspace sessions (BT-2410)", %{conn: conn} do
+    # Two distinct per-tab tokens — exactly what `sessionStorage` mints per tab —
+    # must yield two isolated sessions: a binding set in one tab is invisible in
+    # the other (the spike's tab1 x=100 / tab2 x=999 property, now first-class).
+    tab1 = with_token(conn, "tab1-#{System.unique_integer([:positive])}")
+    tab2 = with_token(conn, "tab2-#{System.unique_integer([:positive])}")
+
+    {:ok, view1, _} = live(tab1, "/")
+    {:ok, view2, _} = live(tab2, "/")
+
+    view1 |> form("form") |> render_submit(%{expr: "x := 100"})
+    view2 |> form("form") |> render_submit(%{expr: "x := 999"})
+
+    # Each tab reads back ITS OWN x — no cross-tab leakage.
+    assert view1 |> form("form") |> render_submit(%{expr: "x"}) =~ "100"
+    assert view2 |> form("form") |> render_submit(%{expr: "x"}) =~ "999"
+  end
+
+  test "a reconnect resumes the same session and retains state (BT-2410)", %{conn: conn} do
+    # One tab: same token across two mounts simulates a socket drop + reconnect
+    # (or a page reload re-establishing the WebSocket). The reconnecting LiveView
+    # must re-bind to the SAME workspace session and see its accumulated bindings.
+    conn = with_token(conn, "resume-#{System.unique_integer([:positive])}")
+
+    {:ok, view1, _} = live(conn, "/")
+    view1 |> form("form") |> render_submit(%{expr: "y := 7"})
+    assert view1 |> form("form") |> render_submit(%{expr: "y"}) =~ "7"
+
+    # Disconnect: stopping the LiveView fires terminate/2 → release/1, which opens
+    # the grace window (it does NOT close the session). The same-tab reconnect
+    # below lands inside that window.
+    GenServer.stop(view1.pid)
+
+    {:ok, view2, _} = live(conn, "/")
+    # Resumed onto the same session: the earlier binding is still there, with no
+    # re-eval — state survived the reconnect.
+    assert view2 |> form("form") |> render_submit(%{expr: "y"}) =~ "7"
+    # And the live bindings pane was resubscribed + re-read on resume.
+    assert eventually(fn -> render(view2) =~ "y" end)
+  end
+
+  test "closing a tab tears down its session after the grace window (BT-2410)", %{conn: conn} do
+    # The no-orphaned-sessions guarantee: a tab that closes and never reconnects
+    # has its workspace-supervised session reaped after the (test-shortened) grace
+    # window — the active-session count returns to its pre-mount value.
+    conn = with_token(conn, "teardown-#{System.unique_integer([:positive])}")
+
+    before = BtAttach.Workspace.session_count()
+    assert is_integer(before)
+
+    {:ok, view, _} = live(conn, "/")
+    view |> form("form") |> render_submit(%{expr: "z := 1"})
+    # One more active session while the tab is open.
+    assert eventually(fn -> BtAttach.Workspace.session_count() == before + 1 end)
+
+    # Close the tab and DON'T reconnect: after the grace window the registry reaps
+    # the session, so the count returns to baseline (no leak).
+    GenServer.stop(view.pid)
+    assert eventually(fn -> BtAttach.Workspace.session_count() == before end)
+  end
+
+  # Set the per-tab resume token on the conn so the connected mount reads it back
+  # via `get_connect_params/1` — the test analogue of the `sessionStorage` token
+  # the browser replays on the LiveSocket params.
+  defp with_token(conn, token) do
+    Phoenix.LiveViewTest.put_connect_params(conn, %{"workspace_token" => token})
+  end
+
   # ~6s total — generous for cross-node async transcript delivery under CI load.
   defp eventually(fun, retries \\ 120) do
     cond do
