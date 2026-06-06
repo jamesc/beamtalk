@@ -1,9 +1,11 @@
 # ADR 0017: Browser Connectivity to Running Workspaces
 
 ## Status
-Implemented (Phases 0–2, 2026-02-17)
+Implemented (Phases 0–2, 2026-02-17); Phase 3 In Progress (2026-06-06)
 
 **Update (2026-02-17):** Context updated to reflect ADR 0022 (embedded compiler — no Unix socket daemon) and ADR 0027 (cross-platform support — Beamtalk runs natively on Windows/macOS). Phase 0 infrastructure (Cowboy, WebSocket handler, cookie auth) delivered by ADR 0020/BT-683; Phase 0 here reduces to serving a static HTML page.
+
+**Update (2026-06-06):** Phase 3 (Phoenix LiveView IDE) moves from deferred to **in progress**. The BT-2394 spike (`docs/research/phoenix-topology-spike.md`) settled the topology — **Attach** (Phoenix as its own BEAM node, connected over Erlang distribution + `:rpc`). Implementation is tracked by the LiveView IDE epic **BT-2398** (Waves 1–4 localhost; Wave 5 = remote auth, BT-2411). The remote auth/authz design for Phase 3 is decided in **[ADR 0091 — Connection Security for Remote Workspace Access](0091-remote-workspace-access-phoenix-authenticated-front.md)** (Phoenix as authenticated front: OIDC, per-op RBAC facade, TLS-dist behind it).
 
 ## Context
 
