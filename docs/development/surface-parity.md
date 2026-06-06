@@ -36,6 +36,23 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 | REPL meta-commands | `handle_repl_command()` in `crates/beamtalk-cli/src/commands/repl/mod.rs` |
 | MCP tools | `#[tool(...)]` in `crates/beamtalk-mcp/src/server.rs` |
 | LSP capabilities | `ServerCapabilities` in `crates/beamtalk-lsp/src/server.rs` |
+| LiveView IDE ops | `@ops` in `editors/liveview/lib/bt_attach/facade.ex` |
+
+### LiveView IDE (remote authenticated front, ADR 0091)
+
+The Phoenix LiveView IDE (`editors/liveview/`, Attach topology) is **not a new
+op vocabulary** — its curated facade (`BtAttach.Facade`) dispatches the *same*
+REPL ops (`eval`, `inspect`, `bindings`, `load-source`, save/flush, the
+transcript/bindings subscriptions, …) via the BT-2399 term-returning seam, so
+results are surface-consistent by construction (live terms; JSON only at the
+WebSocket edge). It adds, **only on this surface**, two access controls that do
+not change op output:
+
+- **Curated facade** — the browser cannot supply an arbitrary `{m,f,a}`; an
+  off-vocabulary op is refused (403) with no dist call (`surface-specific`).
+- **Two-level RBAC** — `Owner` (execute+read+admin) vs. `Observer` (read-only);
+  per-op authorization runs before any dist call, keyed to the OIDC identity
+  (`surface-specific`). See [`docs/security/threat-model.md`](../security/threat-model.md).
 
 ## Core Operations
 
