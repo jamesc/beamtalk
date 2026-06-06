@@ -127,7 +127,6 @@ pub fn beam_paths_for_layout(runtime_dir: &Path, layout: RuntimeLayout) -> BeamP
 pub fn build_eval_cmd(
     port: u16,
     bind_addr: Option<Ipv4Addr>,
-    web_port: Option<u16>,
     log_level: &str,
     otp_app_name: Option<&str>,
     hex_dep_names: &[String],
@@ -141,7 +140,7 @@ pub fn build_eval_cmd(
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
-        startup_prelude(port, bind_addr, web_port, log_level),
+        startup_prelude(port, bind_addr, log_level),
     )
 }
 
@@ -156,7 +155,6 @@ pub fn build_eval_cmd_with_node(
     port: u16,
     node_name: &str,
     bind_addr: Option<Ipv4Addr>,
-    web_port: Option<u16>,
     log_level: &str,
     otp_app_name: Option<&str>,
     hex_dep_names: &[String],
@@ -172,7 +170,7 @@ pub fn build_eval_cmd_with_node(
          {{ok, ActualPort}} = beamtalk_repl_server:get_port(), \
          io:format(\"BEAMTALK_PORT:~B~n\", [ActualPort]), \
          receive stop -> ok end.",
-        startup_prelude(port, bind_addr, web_port, log_level),
+        startup_prelude(port, bind_addr, log_level),
     )
 }
 
@@ -250,21 +248,11 @@ fn otp_app_start_fragment(otp_app_name: Option<&str>) -> String {
 ///
 /// Callers append their own shutdown logic (e.g. `receive stop -> ok end`
 /// or cover export).
-pub fn startup_prelude(
-    port: u16,
-    bind_addr: Option<Ipv4Addr>,
-    web_port: Option<u16>,
-    log_level: &str,
-) -> String {
+pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) -> String {
     let bind_addr_erl = format_bind_addr_erl(bind_addr);
-    let web_port_erl = match web_port {
-        Some(p) => format!("{p}"),
-        None => "undefined".to_string(),
-    };
     format!(
         "logger:remove_handler(default), \
          application:set_env(beamtalk_runtime, repl_port, {port}), \
-         application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, Cwd}} = file:get_cwd(), \
@@ -273,7 +261,6 @@ pub fn startup_prelude(
              project_path => list_to_binary(Cwd), \
              tcp_port => {port}, \
              bind_addr => {bind_addr_erl}, \
-             web_port => {web_port_erl}, \
              auto_cleanup => false, \
              max_idle_seconds => 14400}})"
     )
@@ -409,7 +396,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_contains_required_steps() {
-        let cmd = build_eval_cmd(9000, None, None, "info", None, &[]);
+        let cmd = build_eval_cmd(9000, None, "info", None, &[]);
         // Must set application env before starting apps
         assert!(cmd.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         // Must start the workspace OTP application
@@ -424,27 +411,27 @@ mod tests {
         assert!(cmd.contains("receive stop -> ok end"));
         // Default bind address should be loopback
         assert!(cmd.contains("bind_addr => {127,0,0,1}"));
-        // No web_port by default
-        assert!(cmd.contains("web_port => undefined"));
+        // BT-2415: web_port plumbing removed (browser workspace gone)
+        assert!(!cmd.contains("web_port"));
     }
 
     #[test]
     fn eval_cmd_with_node_includes_node_name() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None, "info", None, &[]);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, &[]);
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
         assert!(cmd.contains("beamtalk_workspace_sup:start_link"));
     }
 
     #[test]
     fn eval_cmd_with_node_escapes_special_chars() {
-        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, None, "info", None, &[]);
+        let cmd = build_eval_cmd_with_node(9000, "node'inject", None, "info", None, &[]);
         assert!(cmd.contains("node\\'inject"));
         assert!(!cmd.contains("node'inject"));
     }
 
     #[test]
     fn startup_prelude_contains_set_env_and_ensure_started() {
-        let prelude = startup_prelude(9000, None, None, "info");
+        let prelude = startup_prelude(9000, None, "info");
         assert!(prelude.contains("application:set_env(beamtalk_runtime, repl_port, 9000)"));
         assert!(prelude.contains("application:ensure_all_started(beamtalk_workspace)"));
         // Must start workspace supervisor (which starts all singletons and services)
@@ -458,13 +445,13 @@ mod tests {
         assert!(!prelude.contains("receive"));
         // Default bind address
         assert!(prelude.contains("bind_addr => {127,0,0,1}"));
-        // No web_port by default
-        assert!(prelude.contains("web_port => undefined"));
+        // BT-2415: web_port plumbing removed (browser workspace gone)
+        assert!(!prelude.contains("web_port"));
     }
 
     #[test]
     fn startup_prelude_sets_log_level() {
-        let prelude = startup_prelude(9000, None, None, "debug");
+        let prelude = startup_prelude(9000, None, "debug");
         assert!(
             prelude.contains("application:set_env(beamtalk_runtime, log_level, debug)"),
             "Should set log_level in app env: {prelude}"
@@ -474,33 +461,20 @@ mod tests {
     #[test]
     fn startup_prelude_with_custom_bind_addr() {
         use std::net::Ipv4Addr;
-        let prelude = startup_prelude(9000, Some(Ipv4Addr::new(192, 168, 1, 5)), None, "info");
+        let prelude = startup_prelude(9000, Some(Ipv4Addr::new(192, 168, 1, 5)), "info");
         assert!(prelude.contains("bind_addr => {192,168,1,5}"));
     }
 
     #[test]
     fn startup_prelude_with_all_interfaces() {
         use std::net::Ipv4Addr;
-        let prelude = startup_prelude(9000, Some(Ipv4Addr::UNSPECIFIED), None, "info");
+        let prelude = startup_prelude(9000, Some(Ipv4Addr::UNSPECIFIED), "info");
         assert!(prelude.contains("bind_addr => {0,0,0,0}"));
     }
 
     #[test]
-    fn startup_prelude_with_web_port() {
-        let prelude = startup_prelude(9000, None, Some(8080), "info");
-        assert!(prelude.contains("web_port => 8080"));
-        assert!(prelude.contains("application:set_env(beamtalk_runtime, web_port, 8080)"));
-    }
-
-    #[test]
-    fn eval_cmd_with_web_port() {
-        let cmd = build_eval_cmd(9000, None, Some(9090), "info", None, &[]);
-        assert!(cmd.contains("web_port => 9090"));
-    }
-
-    #[test]
     fn eval_cmd_with_otp_app_starts_application() {
-        let cmd = build_eval_cmd(9000, None, None, "info", Some("my_app"), &[]);
+        let cmd = build_eval_cmd(9000, None, "info", Some("my_app"), &[]);
         // Must start the OTP application after workspace bootstrap
         assert!(cmd.contains("application:ensure_all_started(my_app)"));
         // OTP app start must come after workspace_sup:start_link
@@ -517,7 +491,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_without_otp_app_has_no_ensure_all_started_extra() {
-        let cmd = build_eval_cmd(9000, None, None, "info", None, &[]);
+        let cmd = build_eval_cmd(9000, None, "info", None, &[]);
         // Should only have ensure_all_started for beamtalk_workspace, not any other
         let count = cmd.matches("ensure_all_started").count();
         assert_eq!(count, 1, "Only beamtalk_workspace should be started");
@@ -525,7 +499,7 @@ mod tests {
 
     #[test]
     fn eval_cmd_with_node_and_otp_app() {
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None, "info", Some("my_app"), &[]);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", Some("my_app"), &[]);
         assert!(cmd.contains("application:ensure_all_started(my_app)"));
         assert!(cmd.contains("application:set_env(beamtalk_runtime, node_name, 'mynode')"));
     }
@@ -533,7 +507,7 @@ mod tests {
     #[test]
     fn eval_cmd_with_hex_deps_starts_them_before_workspace() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
-        let cmd = build_eval_cmd(9000, None, None, "info", None, &hex_deps);
+        let cmd = build_eval_cmd(9000, None, "info", None, &hex_deps);
         assert!(
             cmd.contains("ensure_all_started(cowboy)"),
             "Should start cowboy: {cmd}"
@@ -554,7 +528,7 @@ mod tests {
     #[test]
     fn eval_cmd_with_node_and_hex_deps() {
         let hex_deps = vec!["hackney".to_string()];
-        let cmd = build_eval_cmd_with_node(9000, "mynode", None, None, "info", None, &hex_deps);
+        let cmd = build_eval_cmd_with_node(9000, "mynode", None, "info", None, &hex_deps);
         assert!(
             cmd.contains("ensure_all_started(hackney)"),
             "Should start hackney: {cmd}"

@@ -122,10 +122,6 @@ pub enum WorkspaceCommand {
         #[arg(long)]
         idle_timeout: Option<u64>,
 
-        /// Port for the web interface
-        #[arg(long)]
-        web_port: Option<u16>,
-
         /// Confirm binding to a non-loopback network address
         #[arg(long)]
         confirm_network: bool,
@@ -165,7 +161,6 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
             bind,
             persistent,
             idle_timeout,
-            web_port,
             confirm_network,
         } => {
             if background {
@@ -175,7 +170,6 @@ pub fn run(command: WorkspaceCommand) -> Result<()> {
                     bind.as_deref(),
                     persistent,
                     idle_timeout,
-                    web_port,
                     confirm_network,
                 )
             } else {
@@ -304,17 +298,9 @@ fn run_create_background(
     bind: Option<&str>,
     persistent: bool,
     idle_timeout: Option<u64>,
-    web_port: Option<u16>,
     confirm_network: bool,
 ) -> Result<()> {
     use crate::commands::repl::bind::{resolve_bind_addr, validate_network_binding};
-
-    // Reject --web-port 0 (ephemeral web port can't be reported; BT-689)
-    if web_port == Some(0) {
-        return Err(miette::miette!(
-            "--web-port 0 is not supported. Specify an explicit port for the web interface."
-        ));
-    }
 
     let cwd = std::env::current_dir()
         .map_err(|e| miette::miette!("Could not determine current directory: {e}"))?;
@@ -328,14 +314,11 @@ fn run_create_background(
         if let Ok(Some(info)) = super::storage::get_node_info(&workspace_id) {
             if super::is_node_running(&info, Some(&workspace_id)) {
                 println!("Workspace '{workspace_id}' already running");
-                let has_startup_flags = bind.is_some()
-                    || port != 0
-                    || web_port.is_some()
-                    || persistent
-                    || idle_timeout.is_some();
+                let has_startup_flags =
+                    bind.is_some() || port != 0 || persistent || idle_timeout.is_some();
                 if has_startup_flags {
                     eprintln!(
-                        "  ⚠️  Startup flags (--port, --bind, --web-port, --persistent, \
+                        "  ⚠️  Startup flags (--port, --bind, --persistent, \
                          --idle-timeout) have no effect on an already-running workspace.\n  \
                          Stop it first with `beamtalk workspace stop {name}` to restart with new settings."
                     );
@@ -359,7 +342,6 @@ fn run_create_background(
     let config = super::WorkspaceConfig {
         port,
         bind_addr: Some(bind_addr),
-        web_port,
         auto_cleanup: !persistent,
         max_idle_seconds: idle_timeout,
         log_level: "info",

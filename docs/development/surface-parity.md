@@ -45,7 +45,7 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 | `stdin` | -- | *(implicit: interactive input)* | -- | -- | Provides input to a blocked eval; CLI handles interactively |
 | `complete` | -- | *(implicit: tab completion)* | `complete` | `completion` | Autocompletion suggestions |
 | `show-codegen` | -- | `:show-codegen` / `:sc` | `show_codegen` | -- | Show generated Core Erlang |
-| `load-source` | -- | `surface-specific: browser workspace internal` | -- | -- | Load inline source string |
+| `load-source` | -- | `surface-specific: LiveView IDE Editor pane` | -- | -- | Load inline source string (the Phase-1 vanilla-JS browser workspace was removed in BT-2415; the op is now consumed by the Phoenix LiveView IDE) |
 | `load-project` | -- | `:sync` / `:s` | `load_project` | -- | Sync project files from `beamtalk.toml` |
 
 ## Session Operations

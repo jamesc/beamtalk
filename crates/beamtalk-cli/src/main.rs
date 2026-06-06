@@ -150,15 +150,6 @@ enum Command {
         /// (emergency|alert|critical|error|warning|notice|info|debug)
         #[arg(long, default_value = "info")]
         log_level: String,
-
-        /// Start browser workspace (serves HTML UI at `http://localhost:<port>/`)
-        #[arg(long)]
-        web: bool,
-
-        /// Port for the browser workspace HTTP server (default: same as REPL WebSocket port).
-        /// Only used with --web.
-        #[arg(long, requires = "web")]
-        web_port: Option<u16>,
     },
 
     /// Check source files for errors without compiling
@@ -473,8 +464,6 @@ fn run() -> Result<()> {
             bind,
             confirm_network,
             log_level,
-            web,
-            web_port,
         } => commands::repl::run(
             port,
             node,
@@ -487,8 +476,6 @@ fn run() -> Result<()> {
             bind.as_deref(),
             confirm_network,
             &log_level,
-            web,
-            web_port,
         ),
         Command::Check { path } => {
             println!("Checking: {path}");
