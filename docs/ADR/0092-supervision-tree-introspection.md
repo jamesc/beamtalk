@@ -393,12 +393,14 @@ Kind classification reuses machinery the runtime already has:
 
 This ADR is **pull/snapshot only.** A LiveView IDE wanting live tree updates
 re-snapshots on a timer (cheap) for v1. A genuine *change-event* story —
-subscribe to "child added" / "child crashed" — is the **Announcements
-package's** job (BT-2193), not this surface. The seam: when Announcements
-lands, `ProcessNavigation` can expose `announcer` returning a stream of
-tree-delta events, layered on top of this snapshot API without changing it.
-Designing the event substrate here would duplicate BT-2193 and couple
-introspection to a notification system that does not yet exist.
+subscribe to "child added" / "child crashed" — belongs to the **Announcements
+event substrate (ADR 0093 / BT-2396)**, not this surface. Supervision deltas
+are discrete typed events (`SupervisionChildAdded` / `SupervisionChildCrashed`)
+published on `SystemAnnouncer` (ADR 0093 §5); a tool subscribes there. The
+seam: `ProcessNavigation` can later expose an `announcer` accessor over those
+events, layered on top of this snapshot API without changing it. Designing the
+event substrate here would duplicate ADR 0093 and couple introspection to a
+notification system that did not yet exist when this ADR was written.
 
 ### REPL session
 

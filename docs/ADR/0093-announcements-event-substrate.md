@@ -110,8 +110,10 @@ substrate and `telemetry`'s measurement role.
 │   SystemAnnouncer (singleton) · when:do: / announce: / …       │
 ├──────────────────────────────────────────────────────────────┤
 │ runtime (Erlang)  beamtalk_announcements                       │
-│   typed dispatch over pg topic-groups + monitor-based liveness │
-│   MRO match · sync(call) + async(cast) · fault isolation       │
+│   ETS subscription table (gen_server owns writes + monitors);  │
+│   dispatch runs caller-side off concurrent ETS reads.          │
+│   MRO match (deduped) · async + isolated sync · pg = system    │
+│   subscriber-group registry (membership, not transport)        │
 ├──────────────────────────────────────────────────────────────┤
 │ existing: pg (membership)   ·   telemetry (measurement, 0069)  │
 └──────────────────────────────────────────────────────────────┘
@@ -120,31 +122,62 @@ substrate and `telemetry`'s measurement role.
 ### 1. Layer 1 — runtime bus (`beamtalk_announcements`)
 
 A runtime module providing typed publish/subscribe, slotted into
-`beamtalk_runtime_sup` as a worker (template: `beamtalk_xref`, ADR 0087).
-**It reuses `pg` as the transport** — one `pg` group per *announcer identity*
-— and layers the typed concerns on top that `pg` lacks:
+`beamtalk_runtime_sup` as a worker **after `beamtalk_bootstrap`** (which starts
+`pg`) — template: `beamtalk_xref` (ADR 0087). The design follows the same
+hot-path discipline as `beamtalk_xref` and `beamtalk_trace_store`: **the
+gen_server is not in the dispatch path.**
 
-- **Typed dispatch with MRO matching.** Subscriptions are keyed by
-  `Announcement` class. On `announce: anEvent`, the bus walks the event's
-  superclass chain and delivers to subscribers of the event class *or any
-  ancestor* (subscribe to `UIEvent`, receive `ButtonClicked`). The MRO walk
-  happens at announce time, so live class-hierarchy changes are respected.
-- **Liveness.** `erlang:monitor/2` on each subscriber; a `DOWN` removes its
-  subscriptions (the `pg` group membership *is* the liveness for the broadcast
-  fan-out; monitors handle the typed-subscription table).
-- **Sync + async.** `announce:` → `cast` (fire-and-forget); `announceAndWait:`
-  → `call` (blocks until every subscriber's handler returns).
-- **Fault isolation.** Each handler runs guarded; a crash is caught, logged
-  (`domain => [beamtalk, announcements]`), and does not affect siblings or the
-  publisher.
+- **Subscription table = ETS, gen_server owns writes only.** Subscriptions
+  `{AnnouncementClass, SubscriberPid, Handler, OnceFlag}` live in an ETS table.
+  `when:…` / `unsubscribe:` go through the gen_server (serialised writes, and
+  it arms `erlang:monitor/2` per subscriber). The ETS table is created with
+  `{heir, SupervisorPid, …}` so it **survives a bus crash** (the
+  `beamtalk_trace_store` pattern); on restart the gen_server re-arms monitors
+  from the table, so subscriptions are not silently lost.
+- **Dispatch runs in the announcing process, off concurrent ETS reads** — not
+  in the gen_server. `announce:` / `announceAndWait:` do a `read_concurrency`
+  ETS lookup of matching subscribers and fan out with direct `Pid ! Msg`
+  (async) or a gathered request/response (sync) **from the caller's own
+  process**. This is the ADR-0087/0092 lesson: routing dispatch through a
+  central gen_server would (a) self-deadlock when a handler re-announces under
+  `announceAndWait:` and (b) serialise every event through one mailbox. Keeping
+  dispatch caller-side eliminates both.
+- **`pg`'s role is *subscriber-group registry for `SystemAnnouncer`*, not a
+  message transport.** `pg` has no send primitive — you `pg:get_members/1` and
+  send yourself. For the singleton system bus we register subscribers in a `pg`
+  group so that *membership is cluster-wide for free*; v1 still delivers
+  **locally only** (the announcing node sends to local members). Genuine
+  cross-node *delivery* (ordering, partition handling, remote handler
+  execution) is the package's job (Layer 3) — not "free." Per-instance
+  `Announcer`s use the ETS table directly (no `pg` group), so there is no
+  dynamic-atom pressure; where a `pg` group is needed it is keyed by a
+  `{beamtalk_announcer, Ref}` tuple, never a minted atom.
+- **Typed dispatch with MRO matching.** On `announce: anEvent` the matcher
+  walks the event's superclass chain (ETS metadata reads) and delivers to
+  subscribers of the event class *or any ancestor* (subscribe to `UIEvent`,
+  receive `ButtonClicked`); the walk is at announce time so live hierarchy
+  changes are respected. **Delivery is de-duplicated per subscriber process**
+  across the MRO walk — a process that subscribed to *both* `UIEvent` and
+  `ButtonClicked` receives one delivery per *subscription* it registered
+  (Pharo's rule), and the matcher never double-sends for a single ancestor
+  walk. (See cost note below; this is why high-volume streaming is *excluded* —
+  §5.)
+- **Sync + async, fault-isolated.** `announce:` is async (direct sends, no
+  wait). `announceAndWait:` gathers replies in the caller via
+  `spawn_monitor`-per-handler + `receive` with a timeout, so a slow/blocked
+  handler cannot wedge the bus and a crashing handler is isolated (caught,
+  logged `domain => [beamtalk, announcements]`, never propagated to siblings or
+  the announcer). `announceAndWait:` from inside a handler is therefore safe —
+  there is no shared gen_server to deadlock on.
+- **`doOnce:` is claimed atomically.** Since dispatch is caller-side and two
+  `announce:` can run concurrently, a `doOnce` subscription is taken with an
+  atomic `ets:take/2` (or gen_server compare-and-delete) — whichever announce
+  wins delivers, the loser sees it gone, so it fires at most once. (Single-node
+  guarantee; weakens under the package's distributed path, noted there.)
 
-Why `pg` rather than BT-2193's ETS-per-announcer or a brand-new bus: `pg` is
-already started, already the project's broadcast primitive, cluster-ready
-(the v2 distributed path is then *free* — same code, `pg` spans nodes on OTP
-23+), and avoids standing up bespoke ETS ownership/heir machinery. The typed
-table (class → subscribers, monitors) is small per-announcer state the module
-owns; `pg` carries the fan-out. (BT-2193's "no pg" note predates this
-consolidation goal — it optimised a single package in isolation.)
+This reverses BT-2193's "no pg / ETS-per-announcer" choice *only* for the
+shared `SystemAnnouncer` (where cluster-wide membership is worth having);
+per-instance announcers keep the lean ETS model BT-2193 specced.
 
 ### 2. Layer 2 — stdlib typed veneer
 
@@ -170,12 +203,55 @@ sealed Announcer subclass: SystemAnnouncer
 ```
 
 `SystemAnnouncer current` is the shared bus the runtime emits onto and tools
-subscribe to. System facilities publish well-known `Announcement` subclasses
-(stdlib-provided): `TranscriptChanged`, `ActorSpawned` / `ActorStopped`,
-`ClassLoaded` / `ClassRemoved`, `BindingChanged`, and (ADR 0092)
-`SupervisionChildAdded` / `SupervisionChildCrashed`. These are the **five
-consuming ADRs' channels, unified** — a tool subscribes once and filters by
-event class instead of wiring five bespoke transports.
+subscribe to. System facilities publish well-known **discrete** `Announcement`
+subclasses (stdlib-provided): `ActorSpawned` / `ActorStopped`, `ClassLoaded` /
+`ClassRemoved`, `BindingChanged`, and (ADR 0092) `SupervisionChildAdded` /
+`SupervisionChildCrashed`. A tool subscribes once and filters by event class
+instead of wiring four bespoke transports.
+
+### 5. What does *not* belong on this bus (scope boundary)
+
+Two of the "five consumers" are **not** discrete domain events and must stay
+off `SystemAnnouncer`:
+
+- **Transcript line streaming (ADR 0017/0054).** This is a high-volume,
+  ordered byte/line stream, not a typed domain event. Routing it through the
+  typed bus would add a hop, force per-line MRO matching, and make the
+  announcements path a throughput bottleneck shared with discrete events.
+  Transcript keeps its **own dedicated direct-push channel**
+  (`beamtalk_transcript_stream` with `subscribe/1`/`unsubscribe/1`, sending
+  `Pid ! {transcript_output, …}` straight from the Transcript process). It is
+  a *stream*, governed by ADR 0017/0054, not this ADR.
+- **`telemetry` measurement events** (spans/counters) — §4; the measurement
+  bus, bridged from, not merged.
+
+Per-consumer placement:
+
+| Consumer (ADR) | Needs typed MRO events? | Mechanism |
+|---|---|---|
+| actor spawn/stop (0017/0046) | discrete, typed | `SystemAnnouncer` (`ActorSpawned`/`Stopped`) — *or* a `telemetry` attach if the consumer only needs a counter (§4) |
+| class load/remove (0046) | discrete, typed | `SystemAnnouncer` (`ClassLoaded`/`Removed`) |
+| bindings changed (0091) | discrete, typed | `SystemAnnouncer` (`BindingChanged`) |
+| supervision deltas (0092) | discrete, typed | `SystemAnnouncer` (`SupervisionChild…`) |
+| **Transcript lines (0017/0054)** | **no — a stream** | **dedicated `beamtalk_transcript_stream`, NOT this bus** |
+
+So this substrate consolidates the **discrete** push channels; it deliberately
+does not swallow the Transcript *stream*. That is the honest line, and it keeps
+the bus from becoming a throughput chokepoint.
+
+### 6. Security — subscription is a read capability (ties to ADR 0091)
+
+Subscribing to `SystemAnnouncer` observes everything the system emits, so it is
+a **read** operation under ADR 0091's role model. The remote front's
+push-subscription facade (ADR 0091) is the gate: it wraps `SystemAnnouncer`
+subscription as a named, RBAC-checked op (Observer role may subscribe to the
+curated system events; subscribing to *all* events, or to internal/infra
+announcements, is gated like ADR 0092's `system` scope). Direct
+`SystemAnnouncer current` access from in-image Beamtalk code is unrestricted —
+but that already implies an `eval`-capable (Owner) session, which ADR 0091
+treats as fully privileged, so no boundary is bypassed. The ADR-0091
+implementation issue owns adding `subscribe`/`unsubscribe` to the authoritative
+op list; this ADR fixes the requirement.
 
 ### 3. Layer 3 — the package (re-scoped BT-2193)
 
@@ -266,7 +342,8 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
 - **Operator.** Subscriptions are monitored (no leak), handlers are isolated
   (no cascade), and the bus is `pg` (inspectable with standard tools). The
   package bridge exports to existing observability without coupling.
-- **Tooling developer.** One typed feed replaces five bespoke transports;
+- **Tooling developer.** One typed feed replaces the discrete bespoke
+  transports (Transcript streaming stays its own channel, §5);
   filtering by `Announcement` subclass is a clean, evolvable contract for the
   LiveView/VSCode panes (ADRs 0017/0046/0085/0091).
 
@@ -293,10 +370,22 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
 
 ### Substrate fork
 
-- **`pg` (chosen):** already started, already our broadcast primitive, cluster-ready, no new ownership machinery. *Con:* typed/MRO/liveness must be layered on top (we do).
-- **ETS-per-announcer + monitors (BT-2193's original):** fine for isolated app announcers; but doesn't give cluster distribution for free and re-introduces bespoke ETS heir/ownership handling the runtime already solved with `pg`.
-- **`gen_event`:** rejected — serialised single-process dispatch, shared failure domain.
-- **`telemetry` as the substrate:** rejected — untyped, no liveness/MRO, and it would overload ADR 0069's measurement bus with reactive domain logic.
+- **ETS subscription table + caller-side dispatch (chosen):** gen_server owns
+  writes + monitors + ETS heir (crash-survivable); dispatch runs in the
+  announcing process off `read_concurrency` ETS, so there is no central
+  dispatch mailbox to deadlock (`announceAndWait:` reentrancy) or bottleneck.
+  This is the `beamtalk_xref` / `beamtalk_trace_store` pattern.
+- **`pg` for `SystemAnnouncer` membership only:** gives cluster-wide
+  *membership* for the shared bus at no extra cost — but `pg` has no send
+  primitive, so it is a registry, not a transport, and v1 delivery is local.
+  Per-instance announcers don't use `pg`.
+- **Central dispatch gen_server (rejected):** the obvious "announce → call the
+  bus → it sends to everyone" design self-deadlocks on reentrant
+  `announceAndWait:` and serialises all events through one mailbox.
+- **`gen_event` (rejected):** serialised single-process dispatch, shared
+  failure domain.
+- **`telemetry` as the substrate (rejected):** untyped, no liveness/MRO, and it
+  would overload ADR 0069's measurement bus with reactive domain logic.
 
 ### Tension points
 - Designers split (a)↔(b) on "lean core"; the dependency-direction fact breaks the tie toward (b)/(c).
@@ -313,25 +402,41 @@ exists to stop.
 ## Consequences
 
 ### Positive
-- One typed substrate replaces five bespoke push channels before they are built.
+- One typed substrate replaces the **discrete** bespoke push channels before
+  they are built (Transcript streaming stays on its own channel — §5).
 - System facilities and app code share one mechanism (`SystemAnnouncer` is the
   Pharo-correct home).
-- Free single-node→cluster path via `pg`; clean `telemetry` boundary preserved.
-- Monitored + isolated by construction; hot-reload-safe (process-rooted subs).
+- Dispatch off the hot path (caller-side, concurrent ETS) → no central mailbox
+  to deadlock or bottleneck; crash-survivable via ETS heir; monitored + isolated
+  by construction; hot-reload-safe (process-rooted subs). Clean `telemetry`
+  boundary preserved (§4).
+- `pg` gives `SystemAnnouncer` cluster-wide *membership* for free, leaving only
+  cross-node *delivery* (the genuinely hard part) to the package.
 
 ### Negative
 - Three layers to build and document vs BT-2193's single package.
-- Re-scopes BT-2193 and requires follow-up edits to five ADRs (0017/0046/0054/
-  0091/0092) to point at the shared substrate.
+- Re-scopes BT-2193 and requires follow-up edits to four ADRs (0046/0054/0091/
+  0092) to point at the shared substrate, plus confirming Transcript stays on
+  ADR 0017/0054's stream.
 - Two buses coexist (`telemetry` + Announcements); the "measure vs react" line
-  must be taught or people will reach for the wrong one. (Mitigated by the
-  package bridge for the overlap cases.)
+  must be taught or people will reach for the wrong one. (Mitigated by §4 + the
+  package bridge.)
+- **No cross-event ordering guarantee** across different announcing processes
+  (each fans out from its own process); within a single `announce:` order is
+  per-subscription. Consumers needing causal order (e.g. `ActorSpawned` before a
+  dependent event) must not assume it — documented, not engineered, in v1.
+- MRO matching costs an ETS-metadata walk per announce (~ depth × ~150 ns + fan-
+  out send cost). Fine for discrete events at human/IDE rates; **not** fine for
+  line-rate streams — which is precisely why Transcript is excluded (§5).
 
 ### Neutral
 - Adds a runtime worker (`beamtalk_announcements`) under `beamtalk_runtime_sup`
-  and 3–4 stdlib classes + a handful of system `Announcement` subclasses.
-- `pg` gains a second role (membership *and* announcement transport); both are
-  standard `pg` usage.
+  (after `beamtalk_bootstrap`) and 3–4 stdlib classes + a handful of system
+  `Announcement` subclasses.
+- `pg` gains a second use (class-registry membership *and* `SystemAnnouncer`
+  subscriber membership); both are ordinary `pg` group usage.
+- `announceAndWait:` is `spawn_monitor`-per-handler — N transient processes per
+  sync announce; acceptable for the low-frequency sync path, not the async one.
 
 ## Implementation
 
@@ -369,7 +474,7 @@ events), **package** (re-scoped), **docs/tests**. No parser/codegen changes.
 - Related issues: BT-2396 (this ADR), BT-2193 (package — to be re-scoped),
   BT-567 (original stdlib spec, superseded), BT-1242 (`class_removed` via pg)
 - Related ADRs: ADR 0069 (Tracing / `telemetry` measurement bus — the boundary),
-  ADR 0092 (Supervision Introspection — consumer; §8 points here), ADR 0017
+  ADR 0092 (Supervision Introspection — consumer; §8 updated to point here), ADR 0017
   (browser), ADR 0046 (VSCode sidebar), ADR 0054 (protocols), ADR 0091 (remote
   front), ADR 0070/0073 (package namespaces/distribution)
 - Code: `runtime/apps/beamtalk_runtime/src/beamtalk_runtime_sup.erl`,
