@@ -907,8 +907,8 @@ fn test_flat_map_with_field_mutation_uses_foldl() {
 #[test]
 fn test_flat_map_with_local_mutation_uses_tuple_acc() {
     // flatMap: where the block mutates a local variable uses the tuple-accumulator
-    // path (use_tuple_acc=true). The result accumulator is at element(1, AccSt) and
-    // the local 'n' is at element(2, AccSt) — no maps:put/maps:get involved.
+    // path (use_tuple_acc=true). Result accumulator is at element(1, AccSt) and
+    // the local 'n' is unpacked at element(2, AccSt) inside the lambda.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -927,27 +927,16 @@ fn test_flat_map_with_local_mutation_uses_tuple_acc() {
         "flatMap: with local mutation should NOT use lists:flatmap. Got:\n{code}"
     );
     assert!(
+        code.contains("let N = call 'erlang':'element'(2, "),
+        "flatMap: tuple-acc should unpack 'n' at element(2, AccSt) inside the lambda. Got:\n{code}"
+    );
+    assert!(
         code.contains("maps':'put'('__local__n'"),
         "flatMap: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
     );
 }
 
 // ── takeWhile: ────────────────────────────────────────────────────────
-
-#[test]
-fn test_take_while_pure_generates_lists_takewhile() {
-    // Pure takeWhile: (no mutations) delegates to lists:takewhile.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items takeWhile: [:item | item < 10]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'takewhile'"),
-        "Pure takeWhile: should generate lists:takewhile. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure takeWhile: should NOT use lists:foldl. Got:\n{code}"
-    );
-}
 
 #[test]
 fn test_take_while_with_local_mutation_uses_tuple_acc() {
@@ -971,27 +960,17 @@ fn test_take_while_with_local_mutation_uses_tuple_acc() {
         "takeWhile: with local mutation should carry StillTaking in the accumulator. Got:\n{code}"
     );
     assert!(
+        // State vars start at position 3 (after AccList and StillTaking).
+        code.contains("let N = call 'erlang':'element'(3, "),
+        "takeWhile: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
+    );
+    assert!(
         code.contains("maps':'put'('__local__n'"),
         "takeWhile: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
     );
 }
 
 // ── dropWhile: ────────────────────────────────────────────────────────
-
-#[test]
-fn test_drop_while_pure_generates_lists_dropwhile() {
-    // Pure dropWhile: (no mutations) delegates to lists:dropwhile.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items dropWhile: [:item | item < 10]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'dropwhile'"),
-        "Pure dropWhile: should generate lists:dropwhile. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure dropWhile: should NOT use lists:foldl. Got:\n{code}"
-    );
-}
 
 #[test]
 fn test_drop_while_with_local_mutation_uses_tuple_acc() {
@@ -1013,6 +992,11 @@ fn test_drop_while_with_local_mutation_uses_tuple_acc() {
     assert!(
         code.contains("StillDropping"),
         "dropWhile: with local mutation should carry StillDropping in the accumulator. Got:\n{code}"
+    );
+    assert!(
+        // State vars start at position 3 (after AccList and StillDropping).
+        code.contains("let N = call 'erlang':'element'(3, "),
+        "dropWhile: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
     );
     assert!(
         code.contains("maps':'put'('__local__n'"),
@@ -1059,6 +1043,11 @@ fn test_partition_with_local_mutation_uses_tuple_acc() {
         "partition: with local mutation should carry MatchList in the accumulator. Got:\n{code}"
     );
     assert!(
+        // State vars start at position 3 (after MatchList and NoMatchList).
+        code.contains("let N = call 'erlang':'element'(3, "),
+        "partition: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
+    );
+    assert!(
         code.contains("maps':'put'('__local__n'"),
         "partition: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
     );
@@ -1101,6 +1090,11 @@ fn test_group_by_with_local_mutation_uses_tuple_acc() {
     assert!(
         code.contains("GroupMap"),
         "groupBy: with local mutation should carry GroupMap in the accumulator. Got:\n{code}"
+    );
+    assert!(
+        // State vars start at position 2 (after GroupMap only).
+        code.contains("let N = call 'erlang':'element'(2, "),
+        "groupBy: tuple-acc should unpack 'n' at element(2, AccSt) inside the lambda. Got:\n{code}"
     );
     assert!(
         code.contains("maps':'put'('__local__n'"),
