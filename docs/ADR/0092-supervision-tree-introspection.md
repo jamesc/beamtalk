@@ -69,7 +69,17 @@ tree is not a stable value.
    `supervisor:`, `sys:`, and `erlang:process_info/2`. This ADR adds a thin
    Beamtalk-facing shim, not a new bookkeeping process. (Contrast ADR 0087,
    which *did* need a maintained index because re-parsing source was
-   structurally too slow; reading `which_children` is cheap, so no index here.)
+   structurally too slow; reading `which_children` on a *static* supervisor is
+   cheap, so no index here.) **Caveat — the dynamic case is not cheap.**
+   `which_children/1` on a `simple_one_for_one` `DynamicSupervisor` with
+   thousands of children (a connection pool, a per-request worker farm) copies
+   the entire child list out of the supervisor process in one message, then
+   the walk would `process_info` each pid — a real performance cliff OTP's own
+   docs warn about. The snapshot therefore **caps** per-supervisor child
+   expansion at a configurable limit (default e.g. 200): beyond it, the node
+   reports `childCount` (from the cheap `count_children/1`) and a truncation
+   marker instead of materialising every child. Full expansion of a large
+   dynamic supervisor is opt-in (`ProcessNavigation from: aSup limit: n`).
 2. **No self-deadlock on the walk.** The introspection object must run as a
    plain value in the calling eval worker, never as a class-side gen_server —
    exactly the lesson `SystemNavigation` documents
@@ -107,8 +117,17 @@ deferred to the Announcements substrate (BT-2193).
 ```beamtalk
 ProcessNavigation default     // workspace-scoped, internal plumbing filtered
 ProcessNavigation system      // everything, including runtime infra
-ProcessNavigation from: aSupervisor   // rooted at one supervisor subtree
+ProcessNavigation from: aRoot // rooted at one supervisor subtree
 ```
+
+`from:` accepts **either** a Beamtalk `Supervisor` object (pid pulled from its
+handle) **or** a raw `Pid` — the latter is required because `system` walks
+*foreign* OTP supervisors that have no Beamtalk `Supervisor` wrapper, and a
+user drilling into an `#otpSupervisor` node passes `node pid`. A pid that
+turns out not to be a supervisor (a plain worker, or one that errors on
+`which_children`) yields a single-node tree, not an error — recursion only
+descends where `which_children` succeeds. Passing a non-`Supervisor`,
+non-`Pid` value is the type error shown below.
 
 `ProcessNavigation` is a `sealed typed Object subclass` — a value object, not
 an actor — exactly like `SystemNavigation`. Constructors capture a snapshot
@@ -161,10 +180,10 @@ Each node is an immutable record (a `Value subclass:`) carrying everything the
 acceptance criteria enumerates:
 
 ```beamtalk
-node pid              // => a Pid (the live process)
+node pid              // => a Pid | nil   (nil for a child mid-restart, see below)
 node registeredName  // => Symbol | nil   (registered name if any)
 node kind            // => one of #beamtalkSupervisor #beamtalkActor
-                     //            #otpSupervisor #otpProcess
+                     //            #otpSupervisor #otpProcess #restarting
 node behaviourClass  // => Class | nil   (the Beamtalk class, nil for foreign)
 node strategy        // => Symbol | nil  (#oneForOne … ; supervisors only)
 node childCount      // => Integer       (live children; supervisors only)
@@ -181,6 +200,16 @@ node status          // => Dictionary | nil   (LAZY — see §5)
 Beamtalk class badge (`#beamtalkActor`/`#beamtalkSupervisor`, `behaviourClass`
 populated) or a foreign-process badge (`#otpProcess`/`#otpSupervisor`,
 `behaviourClass` is `nil`, `registeredName`/module identify it).
+
+**Children mid-restart.** `supervisor:which_children/1` returns
+`{Id, restarting, Type, Modules}` — the literal atom `restarting`, *not* a pid
+— for a child OTP is currently restarting. This is exactly the state a
+developer who just witnessed a crash is most likely to catch, so it must be a
+first-class outcome, not a crash in the walk. Such a node gets
+`kind => #restarting`, `pid => nil`, `status => nil`, and the `Id`/`Modules`
+still populate `behaviourClass` where derivable. The snapshot builder must
+guard every `process_info`/`is_beamtalk_actor` call against the `restarting`
+atom (never call `process_info(restarting, …)`).
 
 ```beamtalk
 // Find every running Counter and its supervisor's configured restart budget:
@@ -331,7 +360,7 @@ bt> ProcessNavigation default tree size
 ```beamtalk
 bt> ProcessNavigation from: 42
 // => #beamtalk_error{ kind = type_error,
-//      message = "ProcessNavigation from: expects a Supervisor, got 42" }
+//      message = "ProcessNavigation from: expects a Supervisor or Pid, got 42" }
 
 bt> deadNode status
 // => nil          "process died since snapshot — not an error"
@@ -439,8 +468,43 @@ exposed flat list — because the two steelmen target different real tasks
 ## Alternatives Considered
 
 See Steelman Analysis above for the four surface alternatives (A flat-only,
-B tree-only, C raw-FFI, D UI-gate) and the three receiver options. The
-decision is **tree-object-backed-by-flat-records on a dedicated
+B tree-only, C raw-FFI, D UI-gate) and the three receiver options.
+
+### Alternative E — Extend the existing `Supervisor` API to recurse (no new classes)
+
+Rather than three new classes, add one method to the existing `Supervisor`
+class — `recursiveChildren -> List(SupervisionNode)` — that walks down from a
+known Beamtalk supervisor root using the dispatch `which:`/`children` already
+provide, and let `Workspace supervisors collect: [:s | s recursiveChildren]`
+cover the workspace case.
+
+```beamtalk
+(WebApp current) recursiveChildren     // walk just this subtree
+Workspace supervisors flatCollect: [:s | s recursiveChildren]
+```
+
+This is the genuinely strong lightweight option: one method on an existing
+class, **no deny-list** (it only ever sees what the user's own supervisor
+hierarchy reaches), and it covers the primary use case — "debug a vanished
+actor under a supervisor I defined."
+
+**Why rejected.** It is structurally blind to exactly the things the
+acceptance criteria require: it can only start from a *Beamtalk* `Supervisor`
+object, so it cannot represent **foreign OTP supervisors** (no Beamtalk
+wrapper to call `recursiveChildren` on), cannot show the **root application
+tree** below a foreign root, and has no home for a **`system`** view of
+runtime infrastructure. It also re-roots the introspection surface back onto
+the actor/supervisor domain objects — the opposite of the `SystemNavigation`
+split that deliberately moved navigation *off* the domain facade into a
+dedicated query class. It is, however, a viable *Phase 1* if scope must
+shrink (see Implementation): ship `recursiveChildren` over Beamtalk-only
+trees first, then generalise to `ProcessNavigation` for foreign/`system`
+coverage. The full design is preferred because the foreign-process and
+`system` requirements are first-class in BT-2395, not nice-to-haves.
+
+---
+
+The decision is **tree-object-backed-by-flat-records on a dedicated
 `ProcessNavigation` class with a `Workspace processes` alias**, snapshot
 semantics, lazy guarded state, foreign processes tagged by `kind`, and
 change-events deferred to BT-2193.
@@ -465,51 +529,87 @@ change-events deferred to BT-2193.
 - `kind` classification leans on the `'$beamtalk_actor'` process-dictionary
   marker and OTP behaviour metadata; an exotic foreign process could be
   mis-tagged `#otpProcess`. Low impact (it still appears, just generically).
-- **Information exposure.** `ProcessNavigation system` enumerates *every*
-  process on the node — including runtime internals, other sessions'
-  supervisors, and foreign package processes — with pids and registered
-  names. Over the authenticated remote front (ADR 0091) this is a
-  reconnaissance surface. Mitigation: `default` (the `Workspace processes`
-  alias and the IDE pane's source) is *already* scoped to the workspace's own
-  application tree with infra filtered; `system` is the privileged, opt-in
-  view. The ADR-0091 authenticated boundary gates *who can eval at all*, so
-  `system` is no more exposing than the FFI those callers already have — but
-  the asymmetry (`default` safe-by-default, `system` privileged) should be
-  documented at the call site, not just here.
+- **Information exposure / ADR 0091 role placement.** `ProcessNavigation
+  system` enumerates *every* process on the node — runtime internals, other
+  sessions' supervisors, foreign package processes — with pids, registered
+  names, child counts and (lazily) internal state. ADR 0091's curated Read op
+  set is explicitly `info, inspect, bindings, actors, sessions, complete`
+  (§Decision 3) — **`processes` is not in it.** This ADR therefore requires
+  the ADR-0091 implementation issue (which "owns the authoritative list") to
+  place `processes` deliberately: `ProcessNavigation default` / `Workspace
+  processes` is a reasonable *Read* op (it is scoped like `actors`, just adds
+  supervision structure), but **`ProcessNavigation system` should NOT be a
+  plain Observer-read op** — it is a whole-node process map and a
+  lateral-movement aid in the compromised-Phoenix scenario ADR 0091 honestly
+  flags. Recommendation: `default`→Read, `system`→a higher role (or
+  `eval`-gated). The asymmetry (`default` safe-by-default, `system`
+  privileged) must be documented at the call site, not just here.
 - Per-child restart *history* is not publicly available from OTP (see §3);
   the ADR ships configured restart *budget* only and defers true restart
   counts. Anyone expecting "how many times has this crashed" from v1 will not
   find it.
 
 ### Neutral
-- Adds three stdlib classes (`ProcessNavigation`, `SupervisionTree`,
-  `SupervisionNode`) and one Erlang shim — a deliberate, bounded surface.
+- Adds up to three stdlib classes (`ProcessNavigation`, `SupervisionTree`,
+  `SupervisionNode`) and one Erlang shim — a deliberate, bounded surface,
+  shipped flat-list-first (Phase 0) so the tree classes are deferrable.
 - The infra deny-list (`default` vs `system`) is a maintained list of runtime
   module names; it grows as the runtime adds internal supervisors. Centralised
-  in the shim, so the cost is contained.
+  in the shim and pinned by the deny-list parity test (Implementation §4), so
+  the cost is contained and a missing entry fails CI rather than leaking.
+- `node pid` hands back a `Pid`, but `Pid`'s current protocol is thin
+  (`isAlive`, `kill`, `exit:`, equality, printing — `stdlib/src/Pid.bt`).
+  Inspecting a node is rich; *acting* on its process from the `Pid` alone is
+  limited today. For Beamtalk actors the richer move is `node behaviourClass`
+  + the actor object; growing `Pid` (e.g. `send:`) is out of scope here.
 
 ## Implementation
 
-High-level, downstream of acceptance (separate issues):
+High-level, downstream of acceptance (separate issues). Sequenced so the
+cheapest thing that proves the design ships first (napkin wire-check, per the
+project's Phase-0 convention):
 
-1. **Runtime shim** — `beamtalk_process_navigation.erl`: snapshot builder over
-   `which_children`/`count_children`/`process_info`, guarded `sys:get_status`,
-   kind classification, infra deny-list. Structured errors; `?LOG_*` with
-   `domain => [beamtalk, runtime]`.
-2. **Value classes** — `SupervisionNode` (`Value subclass:`),
-   `SupervisionTree` (collection protocol + tree navigation),
-   `ProcessNavigation` (`sealed typed Object subclass`, constructors
-   `default` / `system` / `from:`).
-3. **Facade alias** — `Workspace processes` on `WorkspaceInterface`.
-4. **Tests** — BUnit covering: tree walk, snapshot consistency under
-   concurrent mutation, mixed Beamtalk/foreign nodes, `default` vs `system`
-   filtering, lazy `status` returning `nil` for a dead node, `from:` type
-   errors.
-5. **Surfaces** — LSP / MCP / browser consumers (ADR 0085 pane); update
+0. **Phase 0 (napkin / wire-check)** — `beamtalk_process_navigation.erl`
+   exporting one function that returns the **flat `List(SupervisionNode)`**
+   for `default` (Beamtalk-only kinds, infra filtered), plus a minimal
+   `SupervisionNode` `Value subclass:` and the `Workspace processes` accessor
+   returning the flat list. This alone covers the REPL "debug a vanished
+   actor" use case and de-risks kind classification (`'$beamtalk_actor'`
+   marker + supervisor registry) and the `restarting`-atom guard before any
+   tree object exists. If this step is awkward, the design is wrong.
+1. **Runtime shim (full)** — extend Phase 0 with `count_children`, guarded
+   `sys:get_status` (lazy `status`), foreign-process classification
+   (`#otpSupervisor`/`#otpProcess`), `system` scope, the `simple_one_for_one`
+   child cap, and `from: aSupervisor | aPid`. Structured errors; `?LOG_*`
+   with `domain => [beamtalk, runtime]`.
+2. **Tree object** — `SupervisionTree` (collection protocol + parent/child
+   navigation) layered over the flat list, and `ProcessNavigation`
+   (`sealed typed Object subclass`, constructors `default` / `system` /
+   `from:`). Deferring this behind Phase 0/1 is the cheap escape hatch if
+   scope must shrink — flat-list-first remains useful on its own (see
+   Alternative E).
+3. **Facade alias** — `Workspace processes` returns `ProcessNavigation default
+   tree` once the tree object lands.
+4. **Tests** — BUnit covering: tree walk; the non-atomic snapshot under
+   concurrent mutation (a supervisor stopped mid-walk yields a *partial* tree,
+   not a raise); a child in `restarting` state (`kind => #restarting`,
+   `pid => nil`); mixed Beamtalk/foreign nodes; a `DynamicSupervisor` past the
+   child cap (truncation marker + `childCount`); lazy `status` returning `nil`
+   for a dead node; `from:` accepting a `Supervisor` and a `Pid`, and the
+   type error for neither. **Deny-list parity test:** assert `default`'s node
+   set ⊆ `system`'s, and that each currently-known internal supervisor
+   (`beamtalk_workspace_changelog`, session sup, `beamtalk_xref`, compiler
+   server, subprocess sup, …) is filtered from `default` — this test is the
+   ownership mechanism that catches a new runtime supervisor missing from the
+   deny-list.
+5. **Surfaces** — LSP / MCP / browser consumers (ADR 0085 pane, still
+   `Proposed` — this ADR unblocks it but does not depend on it); update
    `docs/development/surface-parity.md`.
+6. **ADR 0091 coordination** — the role-map issue places `processes`
+   (`default`→Read, `system`→privileged) in the authoritative op list.
 
-Affected components: **runtime** (new shim), **stdlib** (three classes + facade
-method), **docs/tests**. No parser or codegen changes.
+Affected components: **runtime** (new shim), **stdlib** (one value class first,
+two more later + facade method), **docs/tests**. No parser or codegen changes.
 
 ## References
 - Related issues: BT-2395 (this ADR), BT-448 (supervision syntax, shipped),
