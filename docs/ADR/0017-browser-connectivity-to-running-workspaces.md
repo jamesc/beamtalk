@@ -1,11 +1,13 @@
 # ADR 0017: Browser Connectivity to Running Workspaces
 
 ## Status
-Implemented (Phases 0–2, 2026-02-17). Phase-1 vanilla-JS browser frontend **removed** (2026-06-06, BT-2415) — superseded by the Phoenix LiveView IDE (ADR 0017 Phase 3 / ADR 0099).
+Implemented (Phases 0–2, 2026-02-17); Phase 3 In Progress (2026-06-06). Phase-1 vanilla-JS browser frontend **removed** (2026-06-06, BT-2415) — superseded by the Phoenix LiveView IDE (ADR 0017 Phase 3 / ADR 0099).
 
 **Update (2026-06-06, BT-2415):** The Phase-1 vanilla-JS browser workspace has been removed. The static assets (`priv/index.html`, `priv/static/workspace.css`, `priv/static/workspace.js`), the `cowboy_static` dispatch routes that served them (`/` and `/static/[...]`), the separate `--web`/`--web-port` browser HTTP listener (CLI flags, `beamtalk_repl_server` web listener, `web_port` plumbing through the supervisor and CLI), and their tests are gone. The browser surface is now delivered by the Phoenix LiveView IDE, which reaches the term-op layer directly. **What remains:** the `/ws` JSON-over-WebSocket REPL transport (cowboy listener `beamtalk_repl_ws`, `beamtalk_ws_handler`), which is the shared protocol transport for the CLI REPL, MCP, and VS Code clients — this is unaffected. `beamtalk_ws_log_handler` (VS Code Output panel log streaming) and the cowboy/ranch dependencies also remain.
 
 **Update (2026-02-17):** Context updated to reflect ADR 0022 (embedded compiler — no Unix socket daemon) and ADR 0027 (cross-platform support — Beamtalk runs natively on Windows/macOS). Phase 0 infrastructure (Cowboy, WebSocket handler, cookie auth) delivered by ADR 0020/BT-683; Phase 0 here reduces to serving a static HTML page.
+
+**Update (2026-06-06):** Phase 3 (Phoenix LiveView IDE) moves from deferred to **in progress**. The BT-2394 spike (`docs/research/phoenix-topology-spike.md`) settled the topology — **Attach** (Phoenix as its own BEAM node, connected over Erlang distribution + `:rpc`). Implementation is tracked by the LiveView IDE epic **BT-2398** (Waves 1–4 localhost; Wave 5 = remote auth, BT-2411). The remote auth/authz design for Phase 3 is decided in **[ADR 0091 — Connection Security for Remote Workspace Access](0091-remote-workspace-access-phoenix-authenticated-front.md)** (Phoenix as authenticated front: OIDC, per-op RBAC facade, TLS-dist behind it).
 
 ## Context
 

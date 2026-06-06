@@ -148,6 +148,8 @@ New features that touch security must be evaluated against these principles:
 
 6. **Beamtalk is single-user per workspace.** A workspace is owned by one developer. Multiple concurrent connections (e.g., multiple browser tabs, ADR 0017) from the same authenticated user are permitted — they share the same cookie and the same actor state intentionally. What is not permitted is sharing a workspace between two developers as a multi-user service, as that collapses the auth boundary to a shared secret. Each developer should have their own workspace.
 
+   **Amendment (2026-06-06, [ADR 0091](0091-remote-workspace-access-phoenix-authenticated-front.md)):** This principle is narrowed, not overturned, for remote access. The **raw boundary (cookie/dist) remains single-user** — anyone holding the cookie is fully trusted and unaudited; do not share it. Multi-user sharing of one workspace is permitted **only** behind the Phoenix authenticated front (ADR 0091), where every operation is RBAC-checked and audited against an OIDC identity and the dist secret never reaches a user. The Owner (execute) role still carries full RCE; only the Observer role is non-executing.
+
 ### What This ADR Does Not Do
 
 - It does not add a sandbox.
