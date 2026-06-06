@@ -220,22 +220,26 @@ atom (never call `process_info(restarting, …)`).
 (ProcessNavigation system tree nodesOfKind: #otpProcess) size   // => 11
 ```
 
-**On restart *counts* (acceptance-criteria gap, called out honestly).** OTP's
-*public* supervisor API exposes the configured restart *budget*
-(`maxRestarts` / `restartWindow`, already surfaced by `beamtalk_supervisor`
-via the class-side `maxRestarts`/`restartWindow` methods) and live child
-*counts* (`count_children`), but **not a per-child restart *history* or
-cumulative restart *count*.** The running tally lives in the supervisor's
-private state and is only reachable by parsing `sys:get_status/1`'s internal
-report — undocumented, version-fragile, and explicitly *not* a public
-contract. This ADR therefore surfaces `restartIntensity` (the configured
-budget, public and stable) on the node, and treats a true per-child restart
-*counter* as an **open question** deferred to implementation: if a stable
-source emerges (e.g. a runtime-maintained tally hooked into the
-supervisor's child-restart path, paralleling the maintained xref index of
-ADR 0087), it can be added as `node restartCount` without breaking the
-record. The acceptance criterion "restart history" is answered as: *budget
-now, history deferred with a documented reason.*
+**On restart *counts* (decided scope boundary).** OTP's *public* supervisor
+API exposes the configured restart *budget* (`maxRestarts` / `restartWindow`,
+already surfaced by `beamtalk_supervisor` via the class-side
+`maxRestarts`/`restartWindow` methods) and live child *counts*
+(`count_children`), but **not a per-child restart *history* or cumulative
+restart *count*.** The running tally lives in the supervisor's private state
+and is only reachable by parsing `sys:get_status/1`'s internal report —
+undocumented, version-fragile, and explicitly *not* a public contract.
+
+**Decision:** this ADR surfaces `restartIntensity` (the configured budget,
+public and stable) and **per-child restart *history* is out of scope** — it
+will not be sourced by parsing private supervisor state, because that couples
+the introspection surface to an OTP implementation detail. If a true restart
+counter is wanted later, the right shape is a **runtime-maintained tally
+hooked into the supervisor's child-restart path** (the same maintained-index
+pattern as ADR 0087's xref), which is its own ADR/issue, not a fragile read
+bolted onto this snapshot. The `SupervisionNode` record leaves room to add
+`restartCount` then without a breaking change. The acceptance criterion
+"restart history" is answered as: *budget now; history is a separate,
+deliberately-deferred feature with a documented reason.*
 
 ### 4. Snapshot semantics
 
@@ -283,7 +287,7 @@ This keeps snapshotting cheap (no blocking call per process) and makes "show me
 the state of *this* node" an explicit, bounded action — the renderer fetches
 status only for the node the user expanded, never for the whole tree at once.
 
-### 6. Public vs internal scope
+### 6. Public vs internal scope — and authorization
 
 `ProcessNavigation default` filters out the workspace's own plumbing — the
 REPL session supervisor, the ChangeLog supervisor, `beamtalk_xref`, the
@@ -293,6 +297,24 @@ shows everything. The deny-list lives in the Erlang shim (it knows the runtime
 module names) and is the single place that defines "infrastructure." Foreign
 *application* processes (a package's gen_server) are **not** filtered — they're
 the user's dependencies and belong in `default`.
+
+**Authorization (decided, not deferred).** The two scopes carry different
+privilege:
+
+- `ProcessNavigation default` / `Workspace processes` is a **Read** operation
+  under ADR 0091's role model — it is scoped exactly like the existing
+  `actors` Read op, just adding supervision structure, and is safe to grant
+  the Observer role.
+- `ProcessNavigation system` is **not** a plain Observer-read op. It exposes
+  the whole-node process map (runtime internals, other sessions' supervisors,
+  foreign processes) and is a lateral-movement aid in the compromised-Phoenix
+  scenario ADR 0091 flags. It is gated to a **privileged role** (at minimum,
+  one already holding `eval` — i.e. it grants no reconnaissance a code-running
+  caller couldn't already perform via FFI).
+
+The ADR-0091 implementation issue owns the authoritative op list and adds
+`processes` (`default`→Read, `system`→privileged) accordingly; this ADR fixes
+the *requirement*, that issue records the *wiring*.
 
 ### 7. The runtime shim
 
@@ -534,16 +556,12 @@ change-events deferred to BT-2193.
   sessions' supervisors, foreign package processes — with pids, registered
   names, child counts and (lazily) internal state. ADR 0091's curated Read op
   set is explicitly `info, inspect, bindings, actors, sessions, complete`
-  (§Decision 3) — **`processes` is not in it.** This ADR therefore requires
-  the ADR-0091 implementation issue (which "owns the authoritative list") to
-  place `processes` deliberately: `ProcessNavigation default` / `Workspace
-  processes` is a reasonable *Read* op (it is scoped like `actors`, just adds
-  supervision structure), but **`ProcessNavigation system` should NOT be a
-  plain Observer-read op** — it is a whole-node process map and a
-  lateral-movement aid in the compromised-Phoenix scenario ADR 0091 honestly
-  flags. Recommendation: `default`→Read, `system`→a higher role (or
-  `eval`-gated). The asymmetry (`default` safe-by-default, `system`
-  privileged) must be documented at the call site, not just here.
+  (§Decision 3) — **`processes` is not in it.** Decided (§6): `default` /
+  `Workspace processes` is a *Read* op (scoped like `actors`), `system` is
+  gated to a **privileged role** (at minimum `eval`-holding), and the
+  ADR-0091 implementation issue records the wiring. The asymmetry (`default`
+  safe-by-default, `system` privileged) is documented at the call site, not
+  just here.
 - Per-child restart *history* is not publicly available from OTP (see §3);
   the ADR ships configured restart *budget* only and defers true restart
   counts. Anyone expecting "how many times has this crashed" from v1 will not
