@@ -146,9 +146,9 @@ deferred to the Announcements substrate (BT-2193).
 ### 1. Receiver — a dedicated `ProcessNavigation` value class
 
 ```beamtalk
-ProcessNavigation default     // -> ProcessNavigation  (workspace-scoped, plumbing filtered)
-ProcessNavigation system      // -> ProcessNavigation  (everything, incl. runtime infra)
-ProcessNavigation from: aRoot // -> Result(ProcessNavigation, Error)  (rooted subtree)
+class default                            -> ProcessNavigation               // workspace-scoped, plumbing filtered
+class system                            -> ProcessNavigation               // everything, incl. runtime infra
+class from: aRoot :: Supervisor | Pid   -> Result(ProcessNavigation, Error) // rooted subtree
 ```
 
 `default` and `system` cannot fail (they snapshot the live tree), so they
@@ -167,9 +167,13 @@ user drilling into an `#otpSupervisor` node passes `node pid`. A pid that
 turns out not to be a supervisor (a plain worker, or one that errors on
 `which_children`) is **not** an error — `from:` returns `Result ok:` with a
 single-node tree (recursion only descends where `which_children` succeeds).
-The Result error variant is reserved for the two genuine failures shown below:
-a wrong-type argument (`type_error`) and an already-dead supervisor
-(`stale_handle`).
+The `aRoot :: Supervisor | Pid` annotation lets the type checker reject a
+wrong-type argument (`ProcessNavigation from: 42`) **statically**, so the
+common bug never reaches runtime; the `Result error: (beamtalk_error
+type_error)` variant remains as the defensive runtime fallback (e.g. an
+untyped `Dynamic` value flowing in via FFI). The Result error channel's
+*genuine runtime* failure is an already-dead supervisor (`stale_handle`) —
+the only failure the type system cannot catch.
 
 `ProcessNavigation` is a `sealed typed Object subclass` — a value object, not
 an actor — exactly like `SystemNavigation`. `default`/`system` return the
@@ -421,25 +425,34 @@ bt> ProcessNavigation default tree size
 
 ### Error behaviour
 
-`from:` returns a `Result`; the error variant carries a structured
-`#beamtalk_error{}` reason and renders as the supervisor family's shorthand
-(ADR 0080), `Result error: (beamtalk_error <reason>)`:
+A wrong-type root is caught **statically** by the `from: aRoot :: Supervisor
+| Pid` annotation — it never reaches runtime in typed code:
 
 ```beamtalk
 bt> ProcessNavigation from: 42
-// => Result error: (beamtalk_error type_error)
-//      "ProcessNavigation from: expects a Supervisor or Pid, got 42"
+// type error: `from:` expects Supervisor | Pid, got Integer (42)
+```
 
-bt> (ProcessNavigation from: 42) unwrap
-// => raises: ProcessNavigation from: expects a Supervisor or Pid, got 42
+The only failure the type system cannot prevent is a root that *is* the right
+type but already dead. That surfaces through the `Result`, rendered as the
+supervisor family's shorthand (ADR 0080), `Result error: (beamtalk_error
+<reason>)`:
 
-bt> deadNode status
-// => nil          "process died since snapshot — not an error"
-
+```beamtalk
 bt> ProcessNavigation from: aStoppedSupervisor
 // => Result error: (beamtalk_error stale_handle)
 //      "supervisor <0.200.0> is not alive"
+
+bt> (ProcessNavigation from: aStoppedSupervisor) unwrap
+// => raises: supervisor <0.200.0> is not alive
+
+bt> deadNode status
+// => nil          "process died since snapshot — not an error"
 ```
+
+(The runtime still defends the boundary — an untyped `Dynamic` value arriving
+via FFI yields `Result error: (beamtalk_error type_error)` rather than
+crashing — but typed call sites never see it.)
 
 ## Prior Art
 
@@ -663,8 +676,10 @@ project's Phase-0 convention):
    `pid => nil`); mixed Beamtalk/foreign nodes; a `DynamicSupervisor` past the
    child cap (truncation marker + `childCount`); lazy `status` returning `nil`
    for a dead node; `from:` returning `Result ok:` for a `Supervisor` and a
-   `Pid`, `Result error: (beamtalk_error type_error)` for neither, and
-   `Result error: (beamtalk_error stale_handle)` for a dead supervisor.
+   `Pid`, and `Result error: (beamtalk_error stale_handle)` for a dead
+   supervisor; a **type-checker test** asserting `from:` rejects a non-`Supervisor
+   | Pid` argument statically (plus the FFI/`Dynamic` runtime fallback yielding
+   `Result error: (beamtalk_error type_error)`).
    **Deny-list parity test:** assert `default`'s node
    set ⊆ `system`'s, and that each currently-known internal supervisor
    (`beamtalk_workspace_changelog`, session sup, `beamtalk_xref`, compiler
