@@ -1,7 +1,7 @@
 # ADR 0092: Supervision Tree Introspection API (Runtime Query Surface)
 
 ## Status
-Proposed (2026-06-06)
+Accepted (2026-06-06)
 
 ## Context
 
