@@ -9,10 +9,18 @@
 -moduledoc """
 WebSocket server for Beamtalk REPL (ADR 0020).
 
-Starts a cowboy HTTP/WebSocket listener for the REPL protocol.
+Starts a cowboy WebSocket listener for the REPL protocol. This is the shared
+transport used by the CLI REPL, MCP, and LSP clients, which connect over
+`ws://host:port/ws`; the Phoenix LiveView IDE instead reaches the term-op
+layer directly over dist Attach (ADR 0017 Phase 3).
 Client connections are handled by beamtalk_ws_handler.
 This module manages the listener lifecycle, port/nonce discovery,
 and protocol request dispatch.
+
+The Phase-1 vanilla-JS browser workspace (static HTML/JS/CSS served from
+`priv/`, the `/` and `/static/[...]` routes, and the optional separate `--web`
+HTTP listener) was removed in BT-2415; it is superseded by the Phoenix LiveView
+IDE (ADR 0017 Phase 3). Only the `/ws` protocol transport remains.
 
 Op handlers are delegated to domain-specific modules (BT-705):
 - beamtalk_repl_ops_eval: eval, clear, bindings
@@ -36,7 +44,6 @@ in BT-2091. Use the Beamtalk-native message sends instead:
 -export([
     start_link/1,
     get_port/0,
-    get_web_port/0,
     get_nonce/0,
     handle_protocol_request/2,
     generate_session_id/0,
@@ -72,13 +79,11 @@ in BT-2091. Use the Beamtalk-native message sends instead:
 ]).
 
 -define(LISTENER_REF, beamtalk_repl_ws).
--define(WEB_LISTENER_REF, beamtalk_web_http).
 
 -record(state, {
     port :: inet:port_number(),
     workspace_id :: binary() | undefined,
-    nonce :: binary(),
-    web_port :: inet:port_number() | undefined
+    nonce :: binary()
 }).
 
 %%% Public API
@@ -110,21 +115,12 @@ Used for stale port file detection (BT-611).
 get_nonce() ->
     gen_server:call(?MODULE, get_nonce).
 
--doc """
-Get the web port if a separate browser listener was started.
-Returns `undefined` if --web-port was not specified.
-""".
--spec get_web_port() -> {ok, inet:port_number() | undefined}.
-get_web_port() ->
-    gen_server:call(?MODULE, get_web_port).
-
 %%% gen_server callbacks
 
 init(Config) ->
     Port = maps:get(port, Config),
     WorkspaceId = maps:get(workspace_id, Config, undefined),
     BindAddr = maps:get(bind_addr, Config, {127, 0, 0, 1}),
-    WebPort = maps:get(web_port, Config, undefined),
     %% Generate a random nonce for stale port file detection (BT-611)
     Nonce = generate_nonce(),
     %% BT-666: Session registry for interrupt routing.
@@ -133,11 +129,11 @@ init(Config) ->
     %% Default: bind to 127.0.0.1 so only local processes can connect.
     %% --bind flag allows binding to other addresses (BT-691).
     %% Cookie handshake in beamtalk_ws_handler provides auth on shared machines.
+    %% Only the `/ws` protocol route remains; the Phase-1 browser static routes
+    %% (`/`, `/static/[...]`) were removed in BT-2415 (ADR 0017 Phase 3).
     Dispatch = cowboy_router:compile([
         {'_', [
-            {"/ws", beamtalk_ws_handler, []},
-            {"/", cowboy_static, {priv_file, beamtalk_workspace, "index.html"}},
-            {"/static/[...]", cowboy_static, {priv_dir, beamtalk_workspace, "static"}}
+            {"/ws", beamtalk_ws_handler, []}
         ]}
     ]),
     TransportOpts = #{
@@ -151,13 +147,10 @@ init(Config) ->
             ActualPort = ranch:get_port(?LISTENER_REF),
             %% Write port file so CLI can discover the actual port and nonce
             write_port_file(WorkspaceId, ActualPort, Nonce),
-            %% BT-689: Optionally start a separate browser HTTP listener on web_port
-            ActualWebPort = maybe_start_web_listener(WebPort, BindAddr),
             {ok, #state{
                 port = ActualPort,
                 workspace_id = WorkspaceId,
-                nonce = Nonce,
-                web_port = ActualWebPort
+                nonce = Nonce
             }};
         {error, Reason} ->
             {stop, {listen_failed, Reason}}
@@ -167,8 +160,6 @@ handle_call(get_port, _From, State) ->
     {reply, {ok, State#state.port}, State};
 handle_call(get_nonce, _From, State) ->
     {reply, {ok, State#state.nonce}, State};
-handle_call(get_web_port, _From, State) ->
-    {reply, {ok, State#state.web_port}, State};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
@@ -183,60 +174,15 @@ handle_info(shutdown_requested, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(Reason, #state{port = Port, web_port = WebPort}) ->
+terminate(Reason, #state{port = Port}) ->
     ?LOG_INFO("REPL server shutting down", #{
         reason => Reason, port => Port, domain => [beamtalk, runtime]
     }),
     cowboy:stop_listener(?LISTENER_REF),
-    case WebPort of
-        undefined -> ok;
-        _ -> cowboy:stop_listener(?WEB_LISTENER_REF)
-    end,
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-%%% Web Listener (BT-689)
-
--doc """
-Optionally start a separate cowboy HTTP listener for browser access.
-When web_port is undefined, no additional listener is started.
-When web_port is specified, starts a listener serving the browser UI
-on that port, separate from the WebSocket protocol port.
-""".
--spec maybe_start_web_listener(undefined | inet:port_number(), inet:ip_address()) ->
-    undefined | inet:port_number().
-maybe_start_web_listener(undefined, _BindAddr) ->
-    undefined;
-maybe_start_web_listener(WebPort, BindAddr) ->
-    Dispatch = cowboy_router:compile([
-        {'_', [
-            {"/ws", beamtalk_ws_handler, []},
-            {"/", cowboy_static, {priv_file, beamtalk_workspace, "index.html"}},
-            {"/static/[...]", cowboy_static, {priv_dir, beamtalk_workspace, "static"}}
-        ]}
-    ]),
-    TransportOpts = #{
-        socket_opts => [{ip, BindAddr}, {port, WebPort}],
-        num_acceptors => 5
-    },
-    ProtocolOpts = #{env => #{dispatch => Dispatch}},
-    case cowboy:start_clear(?WEB_LISTENER_REF, TransportOpts, ProtocolOpts) of
-        {ok, _Pid} ->
-            ActualWebPort = ranch:get_port(?WEB_LISTENER_REF),
-            ?LOG_INFO("Browser workspace listener started", #{
-                port => ActualWebPort, domain => [beamtalk, runtime]
-            }),
-            ActualWebPort;
-        {error, Reason} ->
-            ?LOG_ERROR("Failed to start browser workspace listener", #{
-                port => WebPort,
-                reason => Reason,
-                domain => [beamtalk, runtime]
-            }),
-            undefined
-    end.
 
 %%% Port File
 

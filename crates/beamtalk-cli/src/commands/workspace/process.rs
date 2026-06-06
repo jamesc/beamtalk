@@ -100,7 +100,7 @@ const LIVENESS_CHECK_INTERVAL: usize = 25;
 ///
 /// Resolves the project path, cleans up stale runtime files, writes the
 /// startup tombstone, and formats all Erlang-specific strings (bind address,
-/// web port, hex deps, OTP app start). Returns the eval command and project path.
+/// hex deps, OTP app start). Returns the eval command and project path.
 fn prepare_workspace_paths(
     workspace_id: &str,
     config: &super::WorkspaceConfig<'_>,
@@ -167,12 +167,6 @@ fn prepare_workspace_paths(
     // Format bind address as Erlang tuple for cowboy socket_opts
     let bind_addr_erl = beamtalk_cli::repl_startup::format_bind_addr_erl(config.bind_addr);
 
-    // Format web_port for Erlang (BT-689)
-    let web_port_erl = match config.web_port {
-        Some(p) => p.to_string(),
-        None => "undefined".to_string(),
-    };
-
     // ADR 0072 (BT-1724): Start hex dep OTP applications before the OTP app supervisor.
     let hex_deps_start = beamtalk_cli::repl_startup::hex_deps_start_fragment(config.hex_dep_names);
 
@@ -189,7 +183,6 @@ fn prepare_workspace_paths(
         workspace_id,
         &project_path_str,
         config.port,
-        &web_port_erl,
         &bind_addr_erl,
         config.auto_cleanup,
         idle_timeout,
@@ -593,7 +586,6 @@ fn build_workspace_eval_cmd(
     workspace_id: &str,
     project_path_str: &str,
     port: u16,
-    web_port_erl: &str,
     bind_addr_erl: &str,
     auto_cleanup: bool,
     idle_timeout: u64,
@@ -607,7 +599,6 @@ fn build_workspace_eval_cmd(
          application:set_env(beamtalk_runtime, workspace_id, <<\"{workspace_id}\">>), \
          application:set_env(beamtalk_runtime, project_path, <<\"{project_path_str}\">>), \
          application:set_env(beamtalk_runtime, tcp_port, {port}), \
-         application:set_env(beamtalk_runtime, web_port, {web_port_erl}), \
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
@@ -615,7 +606,6 @@ fn build_workspace_eval_cmd(
          project_path => <<\"{project_path_str}\">>, \
          tcp_port => {port}, \
          bind_addr => {bind_addr_erl}, \
-         web_port => {web_port_erl}, \
          auto_cleanup => {auto_cleanup}, \
          max_idle_seconds => {idle_timeout}}}), \
          logger:remove_handler(default), \

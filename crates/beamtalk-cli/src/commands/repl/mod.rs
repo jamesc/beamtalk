@@ -205,7 +205,7 @@ pub(crate) fn should_stop_workspace(ephemeral: bool, beam_guard_present: bool) -
 )]
 #[expect(
     clippy::fn_params_excessive_bools,
-    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network, web)"
+    reason = "bools map directly to CLI flags (foreground, persistent, no_color, confirm_network)"
 )]
 pub fn run(
     port_arg: Option<u16>,
@@ -219,18 +219,9 @@ pub fn run(
     bind: Option<&str>,
     confirm_network: bool,
     log_level: &str,
-    web: bool,
-    web_port: Option<u16>,
 ) -> Result<()> {
     // Initialize color support
     color::init(no_color);
-
-    // BT-689: Reject --web-port 0 (ephemeral port cannot be reported to user)
-    if web_port == Some(0) {
-        return Err(miette!(
-            "--web-port must be > 0 (use --web without --web-port to reuse the REPL port)"
-        ));
-    }
 
     // Validate log level against OTP logger levels (also prevents eval injection)
     {
@@ -308,7 +299,6 @@ pub fn run(
         let fg_config = workspace::WorkspaceConfig {
             port,
             bind_addr: Some(bind_addr),
-            web_port,
             auto_cleanup: false,    // not applicable in foreground mode
             max_idle_seconds: None, // not applicable in foreground mode
             log_level,
@@ -372,7 +362,6 @@ pub fn run(
         let ws_config = workspace::WorkspaceConfig {
             port,
             bind_addr: Some(bind_addr),
-            web_port,
             auto_cleanup: !persistent, // auto_cleanup is opposite of persistent flag
             max_idle_seconds: timeout,
             log_level,
@@ -454,26 +443,6 @@ pub fn run(
              editor integrations (e.g., VS Code) may not function correctly."
         );
         warn!("REPL backend connected without session id; stdout session contract not satisfied");
-    }
-
-    // BT-689: Print browser workspace URL when --web flag is used
-    if web {
-        if !is_new_workspace && beam_guard_opt.is_none() {
-            // Reconnecting to existing workspace — warn that --web/--web-port
-            // have no effect on already-running nodes
-            eprintln!(
-                "  ⚠️  --web has no effect on an already-running workspace.\n  \
-                 Stop the workspace first with `beamtalk workspace stop` to restart with --web."
-            );
-        } else {
-            let browser_port = web_port.unwrap_or(connect_port);
-            let browser_host = if connect_host == "127.0.0.1" || connect_host == "0.0.0.0" {
-                "localhost".to_string()
-            } else {
-                connect_host.clone()
-            };
-            println!("Browser workspace: http://{browser_host}:{browser_port}/");
-        }
     }
 
     // If reconnecting to existing workspace, show available actors

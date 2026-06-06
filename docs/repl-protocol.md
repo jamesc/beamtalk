@@ -241,7 +241,7 @@ Compile a Beamtalk expression and return the generated Core Erlang source withou
 
 #### `load-source` — Load Inline Source
 
-Compile and load Beamtalk source from an inline string (no file path needed). Used by the browser workspace Editor pane.
+Compile and load Beamtalk source from an inline string (no file path needed). Used by the Phoenix LiveView IDE Editor pane (the Phase-1 vanilla-JS browser workspace was removed in BT-2415).
 
 **Request:**
 ```json
