@@ -23,13 +23,25 @@ const csrfToken = document
 // every (re)connect via `get_connect_params/1` and re-binds to the live session.
 function tabToken() {
   const key = "bt_workspace_token"
-  let token = window.sessionStorage.getItem(key)
+  // tabToken() runs during LiveSocket construction, so a sessionStorage that
+  // throws (private mode, storage disabled) must not abort init — fall back to
+  // an ephemeral per-page token.
+  let token = null
+  try {
+    token = window.sessionStorage.getItem(key)
+  } catch (_err) {
+    token = null
+  }
   if (!token) {
     token =
       window.crypto && window.crypto.randomUUID
         ? window.crypto.randomUUID()
         : `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    window.sessionStorage.setItem(key, token)
+    try {
+      window.sessionStorage.setItem(key, token)
+    } catch (_err) {
+      // Storage unavailable: keep the ephemeral token for this page lifetime.
+    }
   }
   return token
 }

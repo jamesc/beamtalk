@@ -75,7 +75,7 @@ defmodule BtAttach.SessionRegistry do
   defmodule Entry do
     @moduledoc false
     @enforce_keys [:session_id, :session_pid]
-    defstruct [:session_id, :session_pid, :monitor_ref, :reap_timer]
+    defstruct [:session_id, :session_pid, :monitor_ref, :reap_timer, :reap_tag]
   end
 
   ## Public API
@@ -184,10 +184,13 @@ defmodule BtAttach.SessionRegistry do
     case Map.fetch(state.entries, token) do
       {:ok, entry} ->
         # Replace any existing reap timer (a release after a release just resets
-        # the window) and arm a fresh one.
+        # the window) and arm a fresh one. Tag the timer with a unique ref so a
+        # stale {:reap, token, _} still in the mailbox (cancel_timer lost the
+        # race with an already-fired timer) can't reap this newer window.
         entry = cancel_reap(entry)
-        timer = Process.send_after(self(), {:reap, token}, state.reap_after_ms)
-        {:noreply, put_entry(state, token, %Entry{entry | reap_timer: timer})}
+        reap_tag = make_ref()
+        timer = Process.send_after(self(), {:reap, token, reap_tag}, state.reap_after_ms)
+        {:noreply, put_entry(state, token, %Entry{entry | reap_timer: timer, reap_tag: reap_tag})}
 
       :error ->
         {:noreply, state}
@@ -195,9 +198,9 @@ defmodule BtAttach.SessionRegistry do
   end
 
   @impl true
-  def handle_info({:reap, token}, state) do
+  def handle_info({:reap, token, reap_tag}, state) do
     case Map.fetch(state.entries, token) do
-      {:ok, %Entry{reap_timer: timer} = entry} when timer != nil ->
+      {:ok, %Entry{reap_timer: timer, reap_tag: ^reap_tag} = entry} when timer != nil ->
         # The grace window elapsed without a reconnect: close the
         # workspace-supervised session and forget the token. This is the
         # no-orphaned-sessions guarantee for genuinely-closed tabs.
@@ -268,7 +271,7 @@ defmodule BtAttach.SessionRegistry do
 
   defp cancel_reap(%Entry{reap_timer: timer} = entry) do
     Process.cancel_timer(timer)
-    %Entry{entry | reap_timer: nil}
+    %Entry{entry | reap_timer: nil, reap_tag: nil}
   end
 
   defp demonitor(%Entry{monitor_ref: nil}), do: :ok
