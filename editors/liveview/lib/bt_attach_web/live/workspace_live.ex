@@ -42,7 +42,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # transport/display/lifecycle helpers (connect, render_term, session start)
   # stay on Workspace: they are not browser-supplied ops. `ctx/1` carries the
   # request identity the facade audits / RBAC gates on (BT-2421).
-  defp ctx(socket), do: %{user: socket.assigns[:current_user]}
+  defp ctx(socket),
+    do: %{user: socket.assigns[:current_user], role: socket.assigns[:role] || :owner}
 
   @impl true
   def mount(_params, _session, socket) do

@@ -124,7 +124,9 @@ defmodule BtAttachWeb.Auth do
   def require_authenticated(conn, _opts) do
     cond do
       conn.assigns[:current_user] ->
-        conn
+        # Resolve + attach the RBAC role; an authenticated user matching no role
+        # group is refused (403) — fail closed, no privileged fallback.
+        assign_role_or_deny(conn)
 
       oidc_enabled?() ->
         conn
@@ -138,6 +140,7 @@ defmodule BtAttachWeb.Auth do
         |> put_session(@session_key, @dev_claims)
         |> put_session(@logged_in_at_key, now())
         |> assign(:current_user, @dev_claims)
+        |> assign(:role, :owner)
 
       dev_auth_enabled?() ->
         Logger.warning(
@@ -151,7 +154,32 @@ defmodule BtAttachWeb.Auth do
         |> halt()
 
       true ->
+        # No gate active (localhost zero-config): fully trusted → Owner.
+        assign(conn, :role, :owner)
+    end
+  end
+
+  defp assign_role_or_deny(conn) do
+    case resolve_role(conn.assigns.current_user) do
+      {:ok, role} ->
+        assign(conn, :role, role)
+
+      {:error, :denied} ->
+        BtAttach.Rbac.audit_mount(conn.assigns.current_user, :denied)
+
         conn
+        |> put_status(:forbidden)
+        |> Phoenix.Controller.text("Not authorized: your account maps to no IDE role")
+        |> halt()
+    end
+  end
+
+  # Owner under dev-auth / auth-disabled (trusted); OIDC maps claims → role.
+  defp resolve_role(claims) do
+    if oidc_enabled?() do
+      BtAttach.Rbac.role_for(claims, oidc_config())
+    else
+      {:ok, :owner}
     end
   end
 
@@ -175,16 +203,39 @@ defmodule BtAttachWeb.Auth do
 
     cond do
       not auth_required?() ->
-        {:cont, assign_identity(socket, user, logged_in_at)}
+        {:cont, socket |> assign_identity(user, logged_in_at) |> assign_role(:owner)}
 
       valid_user && dev_connect_ok?(socket) ->
-        {:cont, socket |> assign_identity(valid_user, logged_in_at) |> arm_revalidation()}
+        mount_authorized(socket, valid_user, logged_in_at)
 
       true ->
         # Unauthenticated, expired, or a dev socket connecting from off-loopback.
         {:halt, Phoenix.LiveView.redirect(socket, to: login_path())}
     end
   end
+
+  # Resolve the RBAC role at mount, audit the resolved role + raw claims
+  # (ADR 0091 Decision 4), and fail closed if the user maps to no role. The
+  # denied path redirects to "/", which the HTTP gate answers 403 — no re-auth
+  # loop, since re-authenticating would resolve to the same denied role.
+  defp mount_authorized(socket, claims, logged_in_at) do
+    case resolve_role(claims) do
+      {:ok, role} ->
+        BtAttach.Rbac.audit_mount(claims, role)
+
+        {:cont,
+         socket
+         |> assign_identity(claims, logged_in_at)
+         |> assign_role(role)
+         |> arm_revalidation()}
+
+      {:error, :denied} ->
+        BtAttach.Rbac.audit_mount(claims, :denied)
+        {:halt, Phoenix.LiveView.redirect(socket, to: ~p"/")}
+    end
+  end
+
+  defp assign_role(socket, role), do: Phoenix.Component.assign(socket, :role, role)
 
   # When connected, schedule the re-validation timer and attach the hook that
   # acts on it. The hook handles ONLY our own message; everything else passes to

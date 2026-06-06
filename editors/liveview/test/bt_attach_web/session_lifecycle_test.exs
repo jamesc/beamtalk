@@ -15,7 +15,7 @@ defmodule BtAttachWeb.SessionLifecycleTest do
     redirect_uri: "https://ide.test/oidc/callback",
     groups_claim: "groups",
     client_secret: "shhh",
-    roles: %{}
+    roles: %{"owner" => ["beamtalk-owners"]}
   }
 
   setup do

@@ -29,7 +29,11 @@ end
 # unauthenticated — the unchanged zero-config localhost story (ADR 0020). Tests
 # set `config :bt_attach, :oidc, ...` directly and are unaffected by this block.
 unless config_env() == :test do
-  config :bt_attach, :oidc, BtAttach.IdeConfig.load!()
+  oidc = BtAttach.IdeConfig.load!()
+  # Fail closed at boot if OIDC is enabled without a role map (ADR 0091
+  # Decision 4): RBAC must never default to a privileged or silent fallback.
+  if oidc, do: BtAttach.Rbac.validate!(oidc)
+  config :bt_attach, :oidc, oidc
 end
 
 if config_env() == :prod do

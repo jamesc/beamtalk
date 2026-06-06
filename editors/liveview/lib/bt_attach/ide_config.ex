@@ -223,21 +223,40 @@ defmodule BtAttach.IdeConfig do
 
   # ── roles (consumed by BT-2421; loaded here so the same loader owns it) ───────
 
+  # The role map comes from `[oidc.roles]` in the file, with per-role env
+  # overrides (BT_OIDC_ROLES_OWNER / _OBSERVER, comma/space-separated groups)
+  # for the 12-factor path. An env value overrides the file's list for that role.
   defp roles(oidc_file) do
-    case Map.get(oidc_file, "roles") do
-      %{} = table ->
-        table
-        |> Enum.flat_map(fn
-          {role, groups} when is_binary(role) and is_list(groups) ->
-            [{role, Enum.filter(groups, &is_binary/1)}]
+    file_roles =
+      case Map.get(oidc_file, "roles") do
+        %{} = table ->
+          table
+          |> Enum.flat_map(fn
+            {role, groups} when is_binary(role) and is_list(groups) ->
+              [{role, Enum.filter(groups, &is_binary/1)}]
 
-          _ ->
-            []
-        end)
-        |> Map.new()
+            _ ->
+              []
+          end)
+          |> Map.new()
+
+        _ ->
+          %{}
+      end
+
+    file_roles
+    |> maybe_put_env_role("owner", "BT_OIDC_ROLES_OWNER")
+    |> maybe_put_env_role("observer", "BT_OIDC_ROLES_OBSERVER")
+  end
+
+  defp maybe_put_env_role(roles, role, env_key) do
+    case System.get_env(env_key) do
+      value when is_binary(value) and value != "" ->
+        groups = value |> String.split([",", " ", "\t"], trim: true)
+        Map.put(roles, role, groups)
 
       _ ->
-        %{}
+        roles
     end
   end
 

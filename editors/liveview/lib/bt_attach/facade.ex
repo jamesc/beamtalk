@@ -69,21 +69,38 @@ defmodule BtAttach.Facade do
   @doc """
   Dispatch a curated op to the workspace, returning its live-term result.
 
-  An op outside the vocabulary is refused with `{:error, :forbidden_op}` and
-  **never** reaches the workspace client (no dist call). `ctx` carries the
-  request identity (used by RBAC/audit in BT-2421); it is accepted here so the
-  call sites are already shaped for it.
+  Order of checks (all **before** any dist call):
+
+    1. Off-vocabulary op → `{:error, :forbidden_op}` (no dist call).
+    2. RBAC per-op authorization (BT-2421), keyed to the op's capability class
+       and the role carried in `ctx[:role]`. A denied op → `{:error,
+       :unauthorized}`, audited, **no dist call**. When `ctx` carries no role
+       (auth disabled — the trusted localhost story) the op is treated as
+       Owner-authorized.
+    3. Authorized → audited, then invoked on the workspace client.
+
+  `ctx` carries `:role` (RBAC) and `:user` (audit).
   """
   @spec dispatch(atom(), map(), map()) :: term()
   def dispatch(op, params, ctx \\ %{}) do
-    if known?(op) do
-      invoke(op, params, ctx)
-    else
-      Logger.warning("facade rejected off-vocabulary op: #{inspect(op)}",
-        domain: [:beamtalk, :liveview]
-      )
+    role = Map.get(ctx, :role, :owner)
+    user = Map.get(ctx, :user)
 
-      {:error, :forbidden_op}
+    cond do
+      not known?(op) ->
+        Logger.warning("facade rejected off-vocabulary op: #{inspect(op)}",
+          domain: [:beamtalk, :liveview]
+        )
+
+        {:error, :forbidden_op}
+
+      BtAttach.Rbac.authorize(role, op) != :ok ->
+        BtAttach.Rbac.audit(user, op, role, :deny)
+        {:error, :unauthorized}
+
+      true ->
+        BtAttach.Rbac.audit(user, op, role, :allow)
+        invoke(op, params, ctx)
     end
   end
 

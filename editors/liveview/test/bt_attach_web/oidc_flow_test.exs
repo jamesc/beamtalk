@@ -40,7 +40,7 @@ defmodule BtAttachWeb.OidcFlowTest do
     redirect_uri: "https://ide.test/oidc/callback",
     groups_claim: "groups",
     client_secret: "shhh",
-    roles: %{}
+    roles: %{"owner" => ["beamtalk-owners"]}
   }
 
   defp enable_oidc do
