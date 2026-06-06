@@ -48,6 +48,52 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert eventually(fn -> render(view) =~ marker end)
   end
 
+  test "bindings pane reflects an eval that defines a binding (BT-2408)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    name = "bt2408_#{System.unique_integer([:positive])}"
+
+    # Defining a binding fires the BT-2399 `bindings` push; the pane re-reads the
+    # read-surface and should list the new name and its value live.
+    view |> form("form") |> render_submit(%{expr: "#{name} := 123"})
+
+    assert eventually(fn ->
+             html = render(view)
+             html =~ name and html =~ "123"
+           end)
+  end
+
+  test "inspecting an object binding renders its live fields (BT-2408)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "Counter#{suffix}"
+    name = "counter_#{suffix}"
+
+    # Define a real Actor subclass with an instance field, then spawn + bind it.
+    # The whole class source is one eval (newlines and all). Over distribution the
+    # binding is a live {:beamtalk_object, …} handle, not a flattened string, so
+    # the bindings pane offers an Inspect button.
+    class_src = """
+    Actor subclass: #{class}
+      state: count = 7
+
+      count => self.count
+    """
+
+    view |> form("form") |> render_submit(%{expr: class_src})
+    view |> form("form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+
+    assert eventually(fn -> render(view) =~ name end)
+
+    # Follow the reference through the read-surface `inspect` op; the Inspector
+    # reads the live actor state and renders its structured instance fields
+    # (the `count` field, initialised to 7).
+    html = view |> element("button[phx-value-name='#{name}']") |> render_click()
+
+    assert html =~ "Inspecting"
+    assert html =~ "count"
+    assert html =~ "7"
+  end
+
   # ~6s total — generous for cross-node async transcript delivery under CI load.
   defp eventually(fun, retries \\ 120) do
     cond do

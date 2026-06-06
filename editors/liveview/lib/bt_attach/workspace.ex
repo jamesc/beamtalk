@@ -235,6 +235,121 @@ defmodule BtAttach.Workspace do
     rpc(:beamtalk_repl_subscriptions, :unsubscribe, [:transcript, pid])
   end
 
+  @doc """
+  Subscribe the given `pid` (the LiveView process) to the workspace's
+  bindings-changed push stream through the BT-2399 subscription facade.
+
+  Like the Transcript stream, this uses the facade's explicit-pid form so the
+  LiveView's own location-transparent pid is registered as the subscriber (not
+  the short-lived RPC proxy). The bindings stream is a *signal* stream: it pushes
+  `{:bindings_changed, session_id}` after each successful eval — a refresh
+  trigger, not the data itself. On that signal the LiveView re-reads the current
+  bindings via `list_bindings/1`, so the pane stays live without polling and
+  without a `{subscribe, self()}` cast at the gen_server.
+  """
+  def subscribe_bindings(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :subscribe, [:bindings, pid])
+  end
+
+  @doc "Unsubscribe `pid` from the bindings-changed push stream via the facade."
+  def unsubscribe_bindings(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :unsubscribe, [:bindings, pid])
+  end
+
+  @doc """
+  List the current workspace bindings for `session_pid` as `{name, term}` pairs.
+
+  Reads the session's live binding map through the read-surface
+  (`beamtalk_repl_shell:get_bindings/1`, ADR 0085): the values are **live Erlang
+  terms** — a bound `Counter spawn` is a real `{:beamtalk_object, class, module,
+  pid}` handle, not a flattened display string — so the Inspector can follow them
+  by reference. Display rendering is a separate concern handled by the caller via
+  `render_term/1`.
+
+  Returns a name-sorted list of `{name :: String.t(), term}` tuples, or
+  `{:error, reason}` if the workspace is unreachable or the shell returns an
+  unexpected shape (the call site renders the error rather than crashing).
+  """
+  def list_bindings(session_pid) when is_pid(session_pid) do
+    case rpc(:beamtalk_repl_shell, :get_bindings, [session_pid]) do
+      {:ok, bindings} when is_map(bindings) ->
+        bindings
+        |> Enum.map(fn {name, term} -> {to_string(name), term} end)
+        |> Enum.sort_by(fn {name, _term} -> name end)
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  True when `term` is a live, messageable Beamtalk object handle — the
+  reference-following case. Over distribution the `#beamtalk_object{}` record
+  arrives as a `{:beamtalk_object, class, module, pid_or_ref}` tuple (see
+  `beamtalk.hrl`). Only object terms backed by a real remote pid are
+  inspectable: name-resolving proxies carry `{:registered, name}` in the identity
+  slot (ADR 0079) and have no pid to `sys:get_state/2`, so they are not
+  drillable here.
+  """
+  def inspectable?({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: true
+  def inspectable?(_term), do: false
+
+  @doc """
+  Inspect a live object `term` through the read-surface `inspect` op (ADR 0085),
+  returning its structured instance fields as a live-term map.
+
+  This is the reference-following primitive: given a `{:beamtalk_object, class,
+  module, pid}` handle held in the LiveView, it extracts the real remote pid and
+  drives `beamtalk_repl_ops:dispatch("inspect", ...)`, which reads the actor's
+  live state and returns only its user-visible fields (`{:inspect, fields_map}`).
+  Because the fields are themselves live terms, an object-valued slot is again a
+  `{:beamtalk_object, ...}` tuple the caller can drill into recursively — the
+  whole point of carrying terms, not JSON, to the LiveView.
+
+    * success → `{:ok, fields :: map()}` (or `{:ok, binary}` for a non-tagged
+      raw state value the workspace stringified)
+    * error   → `{:error, reason_term}` (`#beamtalk_error{}` or a structured
+      reason); the caller renders it via `render_error/1`
+
+  Returns `{:error, :not_inspectable}` for any term that is not a pid-backed
+  object handle, so the caller never has to guess the term shape.
+  """
+  def inspect_value({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
+    pid_str = pid |> :erlang.pid_to_list() |> to_string()
+
+    case dispatch_inspect(pid_str) do
+      {:inspect, fields} when is_map(fields) -> {:ok, fields}
+      {:inspect, other} -> {:ok, other}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  def inspect_value(_term), do: {:error, :not_inspectable}
+
+  # Build the `inspect` request as a plain map, decode it on the workspace node
+  # (so we don't depend on the protocol record's `.hrl`), then dispatch through
+  # the term-returning op layer. `dispatch/4` returns the `{:inspect, _}` term
+  # directly — JSON encoding (`encode/2`) is never invoked, so the fields stay
+  # live terms with their messageable pids intact.
+  defp dispatch_inspect(pid_str) do
+    request = %{"op" => "inspect", "params" => %{"actor" => pid_str}}
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        # inspect ignores SessionPid; pass self() purely to satisfy dispatch/4.
+        rpc(:beamtalk_repl_ops, :dispatch, ["inspect", params, msg, self()])
+
+      other ->
+        other
+    end
+  end
+
   # ── internals ─────────────────────────────────────────────────────────────
 
   defp ensure_distributed do
