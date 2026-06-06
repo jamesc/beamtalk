@@ -188,8 +188,16 @@ defmodule BtAttachWeb.WorkspaceLive do
         "save_method",
         %{"class" => class, "selector" => selector, "source" => source},
         socket
-      ) do
+      )
+      when is_binary(class) and is_binary(selector) and is_binary(source) do
     {:noreply, save_method(socket, class, selector, source)}
+  end
+
+  # Malformed payload (missing keys or non-binary values): never let a crafted
+  # form event crash the LiveView — `save_method/4` calls `String.trim/1`, which
+  # would raise on a non-binary. Surface a validation error instead.
+  def handle_event("save_method", _params, socket) do
+    {:noreply, assign(socket, save_result: nil, save_error: "Invalid method form payload.")}
   end
 
   # Flush all pending durable changes to disk ("Save All to Disk", ADR 0082
