@@ -33,75 +33,45 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   require Logger
 
+  alias BtAttach.SessionRegistry
   alias BtAttach.Workspace
 
   @impl true
   def mount(_params, _session, socket) do
-    # Only attach over distribution on the *connected* (WebSocket) mount — the
-    # initial disconnected HTTP render would otherwise create a second, orphaned
-    # workspace session on every page load.
+    # LiveView `mount/3` runs TWICE: first on the disconnected HTTP render, then
+    # on the connected WebSocket mount (and again on every reconnect). Only the
+    # *connected* mount attaches over distribution — the disconnected render must
+    # NOT create a workspace session, or every page load would leak an orphaned
+    # one. The per-tab resume token is only present on the connected mount (it
+    # rides the LiveSocket `params`), so `get_connect_params/1` is the right read.
     if connected?(socket) do
-      attach(socket)
+      token = connect_token(socket)
+      attach(assign(socket, :token, token))
     else
-      {:ok, assign(socket, connected: false, error: nil)}
+      {:ok, assign(socket, connected: false, error: nil, token: nil)}
     end
   end
 
-  defp attach(socket) do
+  # The per-tab token minted in `sessionStorage` (assets/js/app.js) and replayed
+  # on every (re)connect. `get_connect_params/1` is only available on the
+  # connected mount; a non-binary/absent value just disables resume (each connect
+  # gets a fresh, non-resumable session) rather than crashing.
+  defp connect_token(socket) do
+    case get_connect_params(socket) do
+      %{"workspace_token" => token} when is_binary(token) -> token
+      _ -> nil
+    end
+  end
+
+  defp attach(%{assigns: %{token: token}} = socket) do
     socket =
       case Workspace.connect() do
         :ok ->
-          session_id = "phoenix-#{System.unique_integer([:positive])}"
-
-          case Workspace.start_session(session_id) do
-            pid when is_pid(pid) ->
-              # Subscribe THIS LiveView pid (location-transparent over dist) to
-              # the Transcript AND bindings streams through the BT-2399 facade —
-              # no direct gen_server cast. The facade's cast returns `:ok`; any
-              # non-ok reply (`{:badrpc, _}`) means a stream is NOT live, so we
-              # must not render the pane as connected and claim a working stream.
-              # Pattern-match both subscribe results (Wave-1 review rule) and tear
-              # the half-started session back down on any failure so it can't leak.
-              with :ok <- Workspace.subscribe_transcript(self()),
-                   :ok <- Workspace.subscribe_bindings(self()) do
-                socket
-                |> assign(:connected, true)
-                |> assign(:node, Workspace.node_name())
-                |> assign(:session_id, session_id)
-                |> assign(:session_pid, pid)
-                |> assign(:result, nil)
-                |> assign(:output, nil)
-                |> assign(:error, nil)
-                |> assign(:expr, "3 + 4")
-                |> assign(:inspect_target, nil)
-                |> assign(:inspect_rows, [])
-                |> assign(:inspect_error, nil)
-                # Method editor (Wave 3): the write-surface edit/save/flush pane.
-                |> assign(:edit_class, "")
-                |> assign(:edit_selector, "")
-                |> assign(:edit_source, "")
-                |> assign(:save_result, nil)
-                |> assign(:save_error, nil)
-                |> assign(:flush_result, nil)
-                |> assign(:flush_error, nil)
-                |> assign_bindings(pid)
-                |> assign_changes()
-                |> stream(:transcript, [])
-              else
-                other ->
-                  Logger.error("subscribe failed: #{inspect(other)}")
-                  # Drop whichever subscription may have succeeded before closing
-                  # the session, so we don't leave a dangling subscriber pushing
-                  # to a pid we're about to abandon.
-                  Workspace.unsubscribe_transcript(self())
-                  Workspace.unsubscribe_bindings(self())
-                  Workspace.close_session(pid)
-
-                  assign(socket,
-                    connected: false,
-                    error: "subscribe failed: #{inspect(other)}"
-                  )
-              end
+          # Resume the tab's existing session if the registry still holds a live
+          # one (reconnect within the grace window); otherwise start fresh.
+          case resume_or_start(token) do
+            {:ok, session_id, pid} ->
+              bind_session(socket, session_id, pid)
 
             {:error, reason} ->
               assign(socket,
@@ -116,6 +86,117 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     {:ok, socket}
   end
+
+  # Resume the tab's session if the registry has a *live* one for this token,
+  # else start a brand-new workspace-supervised session and register it.
+  #
+  # A registry hit is only trusted if the remote session pid is still reachable:
+  # the workspace could have died/restarted between the disconnect and this
+  # reconnect, leaving a stale entry. We probe with a cheap `is_process_alive/1`
+  # on the workspace node (`Workspace.session_alive?/1`) and fall back to a fresh
+  # session on a dead pid, so resume never claims success on a session that is
+  # already gone.
+  defp resume_or_start(token) do
+    case token && SessionRegistry.checkout(token) do
+      {:resumed, session_id, pid} ->
+        if Workspace.session_alive?(pid) do
+          {:ok, session_id, pid}
+        else
+          # Stale entry (workspace restarted): discard it and start fresh.
+          SessionRegistry.discard(token)
+          start_fresh(token)
+        end
+
+      _miss ->
+        start_fresh(token)
+    end
+  end
+
+  defp start_fresh(token) do
+    session_id = "phoenix-#{System.unique_integer([:positive])}"
+
+    case Workspace.start_session(session_id) do
+      pid when is_pid(pid) ->
+        # Register before binding so a crash mid-bind can't leak: the registry
+        # owns the close, keyed by the tab token (a nil token simply skips
+        # registration — that session is non-resumable and closed in terminate/2).
+        SessionRegistry.register(token, session_id, pid)
+        {:ok, session_id, pid}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Subscribe THIS LiveView pid (location-transparent over dist) to the Transcript
+  # AND bindings streams through the BT-2399 facade — no direct gen_server cast.
+  # The facade's cast returns `:ok`; any non-ok reply (`{:badrpc, _}`) means a
+  # stream is NOT live, so we must not render the pane as connected and claim a
+  # working stream. Pattern-match both subscribe results (Wave-1 review rule) and,
+  # on failure, release the session through the registry so it can't leak.
+  #
+  # Shared by the fresh-start and resume paths: on resume the same subscribe +
+  # bindings re-read re-establishes the live streams for the new LiveView pid
+  # (the old pid's subscriptions died with it), so the resumed tab gets its
+  # Transcript and bindings flowing again with its accumulated state intact.
+  defp bind_session(socket, session_id, pid) do
+    with :ok <- Workspace.subscribe_transcript(self()),
+         :ok <- Workspace.subscribe_bindings(self()) do
+      socket
+      |> assign(:connected, true)
+      |> assign(:node, Workspace.node_name())
+      |> assign(:session_id, session_id)
+      |> assign(:session_pid, pid)
+      |> assign(:result, nil)
+      |> assign(:output, nil)
+      |> assign(:error, nil)
+      |> assign(:expr, "3 + 4")
+      |> assign(:inspect_target, nil)
+      |> assign(:inspect_rows, [])
+      |> assign(:inspect_error, nil)
+      # Method editor (Wave 3): the write-surface edit/save/flush pane.
+      |> assign(:edit_class, "")
+      |> assign(:edit_selector, "")
+      |> assign(:edit_source, "")
+      |> assign(:save_result, nil)
+      |> assign(:save_error, nil)
+      |> assign(:flush_result, nil)
+      |> assign(:flush_error, nil)
+      |> assign_bindings(pid)
+      |> assign_changes()
+      |> stream(:transcript, [])
+    else
+      other ->
+        Logger.error("subscribe failed: #{inspect(other)}")
+        # Drop whichever subscription may have succeeded, then release the
+        # session through the registry (which closes it) so we don't leave a
+        # dangling subscriber or an orphaned session behind.
+        Workspace.unsubscribe_transcript(self())
+        Workspace.unsubscribe_bindings(self())
+        force_close(socket.assigns[:token], pid)
+
+        assign(socket,
+          connected: false,
+          error: "subscribe failed: #{inspect(other)}"
+        )
+    end
+  end
+
+  # Close a session immediately (not via the grace timer): used when binding
+  # fails, so a half-started session can't linger. A registered token is
+  # discarded (the registry closes + forgets it now); an unregistered (nil-token)
+  # session is closed directly.
+  defp force_close(token, _pid) when is_binary(token) do
+    SessionRegistry.discard(token)
+    :ok
+  end
+
+  defp force_close(_token, pid) when is_pid(pid) do
+    Workspace.close_session(pid)
+    :ok
+  end
+
+  defp force_close(_token, _pid), do: :ok
 
   @impl true
   def handle_event("eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
@@ -228,21 +309,37 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   @impl true
   def terminate(_reason, socket) do
-    # Best-effort: drop our Transcript subscription so the workspace doesn't keep
-    # pushing to a dead pid. The event server also auto-removes dead subscribers
-    # via its monitor, so this is belt-and-braces.
+    # Best-effort: drop our Transcript + bindings subscriptions so the workspace
+    # doesn't keep pushing to this (now-dead) pid. The event server also
+    # auto-removes dead subscribers via its monitor, so this is belt-and-braces.
     #
-    # Crucially also CLOSE the workspace-supervised session: it is owned by the
-    # workspace's `beamtalk_session_sup`, not by this LiveView process, so it does
-    # NOT go away when we exit. Without this we leak one orphaned session per
-    # mount/reconnect (the session-lifecycle acceptance criterion).
+    # Then hand the session to the registry's grace window rather than closing it
+    # outright. A LiveView `terminate/2` fires on BOTH a real tab close AND a
+    # transient socket drop (the latter immediately re-mounts and reconnects). If
+    # we closed the session here, a reconnect would always find it gone and lose
+    # the tab's accumulated state. So `release/1` schedules a short reap that a
+    # reconnecting `checkout/1` cancels (resume); if no reconnect arrives, the
+    # registry closes the workspace-supervised session — no orphaned sessions.
+    #
+    # The session is owned by the workspace's `beamtalk_session_sup` (not this
+    # LiveView process), so it does NOT go away just because we exit — the
+    # registry's reap is what actually reclaims it.
     if socket.assigns[:connected] do
       Workspace.unsubscribe_transcript(self())
       Workspace.unsubscribe_bindings(self())
 
-      case socket.assigns[:session_pid] do
-        pid when is_pid(pid) -> Workspace.close_session(pid)
-        _ -> :ok
+      case socket.assigns[:token] do
+        token when is_binary(token) ->
+          # Resumable session: defer teardown to the grace window.
+          SessionRegistry.release(token)
+
+        _ ->
+          # No token (resume disabled): nothing in the registry owns this
+          # session, so close it directly here or it would leak.
+          case socket.assigns[:session_pid] do
+            pid when is_pid(pid) -> Workspace.close_session(pid)
+            _ -> :ok
+          end
       end
     end
 
