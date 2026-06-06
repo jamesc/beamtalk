@@ -24,6 +24,54 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # Excluded by default in test_helper.exs unless BT_WORKSPACE_COOKIE is set.
   @moduletag :workspace
 
+  # ── RBAC: a read-only Observer at the connected LiveView (BT-2421/2424) ──────
+
+  describe "Observer (read-only role) on a live socket" do
+    setup do
+      Application.put_env(:bt_attach, :oidc, %{
+        issuer: "https://idp",
+        client_id: "id",
+        redirect_uri: "https://ide/callback",
+        groups_claim: "groups",
+        client_secret: "x",
+        roles: %{"owner" => ["beamtalk-owners"], "observer" => ["beamtalk-observers"]}
+      })
+
+      Application.put_env(:bt_attach, :session_ttl_secs, 3600)
+
+      on_exit(fn ->
+        Application.delete_env(:bt_attach, :oidc)
+        Application.delete_env(:bt_attach, :session_ttl_secs)
+      end)
+
+      :ok
+    end
+
+    defp observer_conn(conn) do
+      Plug.Test.init_test_session(conn, %{
+        "bt_user" => %{"sub" => "bob", "groups" => ["beamtalk-observers"]},
+        "bt_logged_in_at" => System.system_time(:second)
+      })
+    end
+
+    test "the execute UI (eval form) is hidden for an Observer", %{conn: conn} do
+      {:ok, _view, html} = live(observer_conn(conn), "/")
+      assert html =~ "read-only (Observer)"
+      refute html =~ ~s(phx-submit="eval")
+    end
+
+    test "a crafted eval event from an Observer is refused, not crashed", %{conn: conn} do
+      {:ok, view, _html} = live(observer_conn(conn), "/")
+
+      # The form is gated away, but a crafted client event must still be refused
+      # by the facade/RBAC (BT-2421) and rendered, not crash the LiveView on an
+      # unmatched case clause (the BT-2420 facade returns a 2-tuple eval never did).
+      html = render_hook(view, "eval", %{"expr" => "3 + 4"})
+      assert html =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
+  end
+
   test "eval round-trip renders the workspace result term", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     html = view |> form("form") |> render_submit(%{expr: "3 + 4"})

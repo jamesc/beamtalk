@@ -230,6 +230,15 @@ defmodule BtAttachWeb.WorkspaceLive do
            error: Workspace.render_error(reason),
            expr: expr
          )}
+
+      # The facade (BT-2420/2421) can short-circuit BEFORE dispatching to the
+      # workspace — an RBAC denial (`:unauthorized`, e.g. an Observer) or an
+      # off-vocabulary op (`:forbidden_op`) — returning a 2-tuple the workspace
+      # eval contract never produces. Render it as an actionable message rather
+      # than crashing the LiveView on an unmatched case clause.
+      {:error, reason} ->
+        {:noreply,
+         assign(socket, result: nil, output: nil, error: facade_error(reason), expr: expr)}
     end
   end
 
@@ -355,6 +364,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     :ok
   end
 
+  # Render a facade short-circuit (RBAC denial / off-vocabulary op) as a clear,
+  # user-facing message. These are Phoenix-side decisions, so they don't go
+  # through the workspace error formatter.
+  defp facade_error(:unauthorized),
+    do: "Not authorized: your role may not perform this operation."
+
+  defp facade_error(:forbidden_op), do: "Operation not permitted."
+  defp facade_error(reason), do: Workspace.render_error(reason)
+
   # Blank captured output is not worth rendering a pane for.
   defp present(""), do: nil
   defp present(nil), do: nil
@@ -402,7 +420,9 @@ defmodule BtAttachWeb.WorkspaceLive do
             |> assign_changes()
 
           {:error, reason} ->
-            assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
+            # `reason` may be a facade RBAC denial (`:unauthorized`) for a crafted
+            # event from a read-only role, or a workspace #beamtalk_error{}.
+            assign(socket, save_result: nil, save_error: facade_error(reason))
         end
     end
   end
@@ -417,7 +437,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> assign_changes()
 
       {:error, reason} ->
-        assign(socket, flush_result: nil, flush_error: Workspace.render_error(reason))
+        assign(socket, flush_result: nil, flush_error: facade_error(reason))
     end
   end
 
@@ -545,17 +565,28 @@ defmodule BtAttachWeb.WorkspaceLive do
       <h1>Beamtalk Workspace</h1>
 
       <%= if @connected do %>
-        <p>Attached to <strong>{@node}</strong> · session <code>{@session_id}</code></p>
+        <p>
+          Attached to <strong>{@node}</strong> · session <code>{@session_id}</code>
+          <span :if={@role == :observer} style="color:#a60;">· read-only (Observer)</span>
+        </p>
 
-        <form phx-submit="eval" style="display:flex; gap:.5rem; margin:1rem 0;">
-          <input
-            name="expr"
-            value={@expr}
-            autocomplete="off"
-            style="flex:1; padding:.5rem; font-family:inherit;"
-          />
-          <button type="submit" style="padding:.5rem 1rem;">Eval</button>
-        </form>
+        <%= if @role == :owner do %>
+          <form phx-submit="eval" style="display:flex; gap:.5rem; margin:1rem 0;">
+            <input
+              name="expr"
+              value={@expr}
+              autocomplete="off"
+              style="flex:1; padding:.5rem; font-family:inherit;"
+            />
+            <button type="submit" style="padding:.5rem 1rem;">Eval</button>
+          </form>
+        <% else %>
+          <p style="color:#666; margin:1rem 0;">
+            Your role is read-only — evaluation and editing are disabled. You can
+            still browse bindings, follow references in the Inspector, and watch
+            the live Transcript.
+          </p>
+        <% end %>
 
         <%= if @output do %>
           <pre style="background:#f7f7f7; padding:.75rem; border:1px solid #ddd;"><%= @output %></pre>
@@ -641,42 +672,44 @@ defmodule BtAttachWeb.WorkspaceLive do
           <% end %>
         <% end %>
 
-        <h2>Method Editor (write-surface)</h2>
-        <p style="color:#666;">
-          Edit a method and Save to compile + flush it onto the workspace
-          (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
-          eval observes the new behaviour.
-        </p>
-        <form phx-submit="save_method" style="margin:1rem 0;">
-          <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
-            <input
-              name="class"
-              value={@edit_class}
-              placeholder="Class (e.g. Counter)"
-              autocomplete="off"
-              style="flex:1; padding:.5rem; font-family:inherit;"
-            />
-            <input
-              name="selector"
-              value={@edit_selector}
-              placeholder="selector (e.g. increment)"
-              autocomplete="off"
-              style="flex:1; padding:.5rem; font-family:inherit;"
-            />
-          </div>
-          <textarea
-            name="source"
-            rows="4"
-            placeholder="increment => self.value := self.value + 1"
-            style="width:100%; padding:.5rem; font-family:inherit; box-sizing:border-box;"
-          ><%= @edit_source %></textarea>
-          <div style="display:flex; gap:.5rem; margin-top:.5rem;">
-            <button type="submit" style="padding:.5rem 1rem;">Save Method</button>
-            <button type="button" phx-click="flush" style="padding:.5rem 1rem;">
-              Save All to Disk (flush)
-            </button>
-          </div>
-        </form>
+        <%= if @role == :owner do %>
+          <h2>Method Editor (write-surface)</h2>
+          <p style="color:#666;">
+            Edit a method and Save to compile + flush it onto the workspace
+            (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
+            eval observes the new behaviour.
+          </p>
+          <form phx-submit="save_method" style="margin:1rem 0;">
+            <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+              <input
+                name="class"
+                value={@edit_class}
+                placeholder="Class (e.g. Counter)"
+                autocomplete="off"
+                style="flex:1; padding:.5rem; font-family:inherit;"
+              />
+              <input
+                name="selector"
+                value={@edit_selector}
+                placeholder="selector (e.g. increment)"
+                autocomplete="off"
+                style="flex:1; padding:.5rem; font-family:inherit;"
+              />
+            </div>
+            <textarea
+              name="source"
+              rows="4"
+              placeholder="increment => self.value := self.value + 1"
+              style="width:100%; padding:.5rem; font-family:inherit; box-sizing:border-box;"
+            ><%= @edit_source %></textarea>
+            <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+              <button type="submit" style="padding:.5rem 1rem;">Save Method</button>
+              <button type="button" phx-click="flush" style="padding:.5rem 1rem;">
+                Save All to Disk (flush)
+              </button>
+            </div>
+          </form>
+        <% end %>
 
         <%= if @save_result do %>
           <pre style="background:#f0fff0; padding:.75rem; border:1px solid #cec;"><%= @save_result %></pre>
