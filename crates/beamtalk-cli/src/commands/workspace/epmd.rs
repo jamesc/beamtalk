@@ -326,6 +326,20 @@ mod tests {
     }
 
     #[test]
+    fn bt2424_default_deployment_keeps_epmd_off_public_interfaces() {
+        // BT-2424 transport-posture smoke check: in the default deployment the
+        // workspace's epmd must not be reachable on a non-loopback interface. A
+        // standard CI/host runs at most a loopback epmd (or none), so the probe
+        // must not classify it as Promiscuous. A `Promiscuous` result here is a
+        // genuine finding (a stray epmd bound to 0.0.0.0), not test flakiness —
+        // which is exactly the posture this check is meant to catch.
+        assert!(
+            !matches!(check_epmd_loopback(), EpmdPosture::Promiscuous(_)),
+            "default deployment must not expose epmd on a public interface"
+        );
+    }
+
+    #[test]
     fn warn_if_epmd_promiscuous_returns_a_posture_without_panicking() {
         // Belt-and-braces: warning is best-effort and must return the posture it
         // probed (the value the running-posture check in BT-2424 asserts on)
