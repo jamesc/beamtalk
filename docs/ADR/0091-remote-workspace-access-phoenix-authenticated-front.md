@@ -50,8 +50,10 @@ trust boundary is **never** placed directly on Erlang distribution.
 | Browser ↔ Phoenix | not yet built | — |
 
 ADR 0020 already specifies the transport machinery this ADR composes:
-loopback-by-default binding, the cookie handshake, mTLS for distribution via OTP
-`ssl_dist` (Layer 3 Option B), and overlay networks (Layer 3 Option A). ADR 0058
+loopback-by-default binding, the cookie handshake, and overlay networks (Layer 3
+Option A). It also specced mTLS for distribution via OTP `ssl_dist` (Layer 3
+Option B), but that support was **removed in PR #1401** and is not in the tree
+(see Decision 5 — this ADR does not depend on it). ADR 0058
 establishes the **Trusted Developer Tool** stance: a valid cookie = full RCE as
 the workspace owner; there is no sandbox; and (Principle 6) a workspace is
 **single-user**. This ADR's hardest job is reconciling remote multi-user access
@@ -69,8 +71,9 @@ with that stance.
 4. **Reuse the term-op layer** (BT-2399) — the documented, stable
    `{ok, Value, Output, Warnings} | {error, #beamtalk_error{}}` op surface is the
    substrate, not raw internal shapes.
-5. **Don't roll our own crypto** (ADR 0020 Principle 2) — OIDC libraries, OTP
-   `ssl_dist`, and reverse-proxy TLS are the sanctioned primitives.
+5. **Don't roll our own crypto** (ADR 0020 Principle 2) — OIDC libraries,
+   reverse-proxy TLS, and OS/transport primitives are the sanctioned building
+   blocks (not a hand-rolled auth scheme).
 
 ## Decision
 
@@ -96,16 +99,34 @@ Five sub-decisions:
 The browser authenticates to Phoenix via **OIDC** (OpenID Connect) against an
 external identity provider (Google, Okta, Entra ID, Keycloak, …). On successful
 OIDC exchange, Phoenix establishes a **server-side session** carried in an
-`HttpOnly; Secure; SameSite=Lax` cookie. The LiveView socket inherits that
-session — no token in the URL (avoids the Jupyter/Livebook URL-token leakage
-class: browser history, Referer, screen-sharing).
+`HttpOnly; Secure; SameSite=Strict` cookie (Strict, not Lax — this cookie gates
+an RCE-bearing tool; the only route that needs Lax is the OIDC callback, scoped to
+that handler). The LiveView socket inherits that session — no token in the URL
+(avoids the Jupyter/Livebook URL-token leakage class: browser history, Referer,
+screen-sharing).
 
 OIDC from the start (rather than starting with passwords/phx.gen.auth) is chosen
 because the remote deployment story is inherently a team/operator story: the
 people who need non-localhost access already have an IdP, and SSO is where
-multi-user lands anyway. A local password/dev-token path remains available behind
-a config flag for IdP-less setups (CI, air-gapped), but the **documented default
-for non-localhost is OIDC**.
+multi-user lands anyway.
+
+**Session lifecycle (required, not an implementation detail).** A LiveView socket
+authorized at mount must **not** outlive the user's authorization. Because a
+mounted LiveView process keeps running after its session cookie/OIDC token expires
+or is revoked, the implementation must: (a) set an explicit **maximum session TTL**
+(operator-configurable, default ≤ 4h for an RCE-bearing tool); (b) **re-validate**
+the session/token on a timer and on every reconnect (`on_mount` in a
+`live_session`), tearing down the socket and its dist usage when validation fails;
+and (c) document the **maximum window** between IdP revocation/role-change and
+effective enforcement (a concrete SLA, e.g. ≤ the re-validation interval), since
+server-side sessions do not observe IdP de-provisioning in real time.
+
+**IdP-less path is loopback-only.** A local password/dev-token path remains
+available for IdP-less setups (CI, air-gapped), but it must be **refused on a
+non-loopback interface in code** (not merely discouraged in docs) — otherwise it
+is a bypass of the entire OIDC + RBAC stack. It uses the same session handling
+(HttpOnly cookie, no URL token, RBAC applies); it is not a static bearer token.
+The **documented default for non-localhost is OIDC**.
 
 ```elixir
 # editors/liveview/config/runtime.exs (illustrative)
@@ -124,6 +145,21 @@ GET https://ide.example.com/
 → 302 back to /oidc/callback?code=...
 → Phoenix mints session cookie; LiveView mounts with %{user: alice, roles: [...]}
 ```
+
+**Browser-edge hardening** (standard Phoenix, called out so it is not skipped):
+the LiveView socket validates the signed session and a **CSRF token** on connect,
+and the OIDC flow uses `state`/PKCE. This subsumes the DNS-rebinding / Origin
+concern ADR 0020 §Layer 2 raised for the bare-Cowboy browser path — here the
+browser never reaches the workspace's WebSocket directly; it only reaches Phoenix
+over HTTPS.
+
+**Session vs. shared state.** RBAC governs *operations*; it does not by itself
+isolate data. Per-session bindings are isolated (the spike showed tab-isolated
+`x`), but **actor state and the Transcript are workspace-shared** (ADR 0010 / ADR
+0017) — so a Collaborator/Observer who can `inspect`/watch Transcript sees shared
+actor state and any output a privileged user printed. This is intended for the
+shared-image use case; operators must understand "Observer" means "can see the
+shared world read-only," not "sees nothing sensitive."
 
 ### Decision 2 — Authorization: shared workspace + per-operation RBAC
 
@@ -146,10 +182,18 @@ workspace node does not — and is not asked to — know which human triggered a
 Phoenix exposes a **curated, documented op set** to the browser and invokes
 **only** that set on the workspace. It **never** proxies an arbitrary
 module/function/args triple from the browser into `:rpc.call/4`. The facade is
-the same term-returning op layer the WebSocket edge uses (BT-2399) —
-`eval`, `complete`, `info`, `inspect`, `bindings`, `actors`, `sessions`,
-`load-source`, `reload`, `kill`, plus the push-subscription facade
-(transcript / actors / classes / bindings / flush).
+the same term-returning op layer the WebSocket edge uses (BT-2399). Indicative
+op set (the implementation issue owns the authoritative list):
+
+- **Execute** (RCE-bearing): `eval`, `load-source`, method `save`/`flush`
+  (write-surface, ADR 0082), `reload`.
+- **Read** (no code injection): `info`, `inspect`, `bindings`, `actors`,
+  `sessions`, `complete`, plus the push-subscription facade
+  (transcript / actors / classes / bindings).
+- **Admin:** `kill`, `rotate-cookie`.
+
+Note `complete` is **inference-only — it does not evaluate** (ADR 0045: "inference
+without evaluation"), so it is safe to grant a non-executing role.
 
 The facade is the substrate RBAC hangs off: per-op authorization is only
 meaningful against a finite, named vocabulary of ops. It is also the natural
@@ -162,6 +206,20 @@ unchanged from ADR 0058). The facade's value is enabling **least-privilege roles
 that lack `eval`** — read-only observation, or write-without-admin — not
 constraining the eval role.
 
+**Honest framing — the facade is Phoenix-side discipline, not a workspace-enforced
+wall.** Once attached, the Phoenix node *can* technically `:rpc.call/4` anything;
+the curated op set is a rule the Phoenix code keeps, not a structural impossibility
+at the dist layer. So a Phoenix-app bug that lets an attacker control the RPC
+target (LiveView event injection, a facade logic bug, a compromised Elixir dep)
+can bypass RBAC. Two responses: (1) treat Phoenix as a high-value target hardened
+like the workspace host (see Consequences); (2) **optional defense-in-depth** — a
+workspace-side `beamtalk_authorized_ops` entry module that is the only IDE-facing
+exported surface, so a *limited* Phoenix bug cannot reach `beamtalk_repl_shell:eval/2`
+directly. Note the honest limit: a *full* Phoenix compromise also yields the dist
+cookie, so the attacker can open their own dist connection and the workspace-side
+allowlist no longer contains them — it raises the bar against app-level bugs, not
+against host compromise.
+
 ### Decision 4 — RBAC roles
 
 Three built-in roles, mapped from OIDC claims/groups by Phoenix:
@@ -170,11 +228,44 @@ Three built-in roles, mapped from OIDC claims/groups by Phoenix:
 |------|:--:|:--:|:--:|----------|
 | **Owner** | ✅ | ✅ | ✅ | The workspace owner / driver. Full RCE — equivalent to ADR 0058's authenticated user. |
 | **Collaborator** | ✅ | ✅ | ❌ | Pair programming. Can evaluate and read, cannot kill actors, flush code, or rotate secrets. |
-| **Observer** | ❌ | ✅ | ❌ | Read-only audience (review, teaching, monitoring). **No code execution.** This is the role the facade makes meaningful. |
+| **Observer** | ❌ | ✅ | ❌ | Read-only audience (review, teaching, monitoring). **Cannot inject or evaluate code.** This is the role the facade makes meaningful. |
 
 Roles are coarse and few on purpose; a finer policy engine is explicitly future
 work (see Consequences). The Observer↔Collaborator↔Owner ladder is the minimum
 that makes "shared workspace" safe to offer.
+
+**Claim→role mapping must fail closed.** Mapping OIDC claims/groups to roles is the
+single most security-critical configuration step. The implementation must: (a)
+default to **no-access (deny)** when no role claim matches — never a usability
+fallback to a privileged role; (b) **raise a startup error** when a configured
+claim path points at a nonexistent claim key (no silent fall-through); and (c) log
+the **resolved role with the raw claim values** at session mount for audit.
+
+**Honest framing — Collaborator is, in practice, near-full RCE.** Collaborator
+holds `eval` + `load-source`, so a malicious Collaborator can
+`Erlang os cmd: "..."` or hot-load a persistent backdoor (ADR 0082). The only
+real constraint vs. Owner is "cannot kill actors / rotate the cookie" — and cookie
+rotation does not evict already-loaded code anyway. **Operators must treat a
+Collaborator as trusted to roughly the same degree as the workspace owner.** The
+meaningful security boundary in this ladder is **Observer vs. everyone-with-eval**,
+not Owner vs. Collaborator. (Whether `load-source` should require Owner rather than
+Collaborator is an open question — see Open Questions.)
+
+**Observer read-grant is contingent on read-surface safety.** Granting Observer
+the read ops assumes each one triggers **no user code** (per the live-image caveat
+below). Because the read-surface (ADR 0085) is still Proposed, the
+per-op safety of `inspect`/`sessions` under that constraint must be **signed off as
+a Phase 2 acceptance criterion**, not assumed by forward reference.
+
+**Live-image caveat on "read":** Observer cannot inject or run its *own* code, but
+in a live image a read can trigger code an *already-privileged* user installed —
+e.g. rendering a value through a user-defined `displayString`/`printOn:`. The
+Inspector must therefore surface state via builtin field reflection (ADR 0035),
+**not** by invoking user display methods, or that rendering path becomes an
+execution vector reachable by Observers. This is a no-privilege-escalation risk
+(an Observer still cannot run code of *their* choosing), but "read = zero
+execution" is not literally true and the read-surface (ADR 0085) implementation
+must respect it.
 
 ### Decision 5 — Transport hardening: keep distribution off untrusted networks (co-locate)
 
@@ -186,9 +277,17 @@ network is browser → Phoenix, and that is already secured by HTTPS + OIDC
 and is kept internal:
 
 - **Same host (default, recommended):** Erlang distribution stays on **loopback**
-  and never leaves the machine. epmd is bound to loopback. The only
-  network-facing service is Phoenix's HTTPS port. Zero extra config, no certs, no
-  overlay.
+  and never leaves the machine. The only network-facing service is Phoenix's HTTPS
+  port. Zero extra config, no certs, no overlay.
+  - **epmd must be actively constrained, not assumed.** epmd is a *persistent
+    per-user daemon* — a workspace node joins whatever epmd is already running,
+    which on many developer machines was started by other Erlang tooling and may
+    listen on `0.0.0.0`. So loopback epmd is not automatic. The workspace launcher
+    must set **`ERL_EPMD_ADDRESS=127.0.0.1`** in the node's environment (alongside
+    the existing allowlisted env in `startup_command.rs`) and **preflight-check**
+    for a pre-existing promiscuous epmd, warning/refusing if one is bound to a
+    non-loopback interface. The Phase 3 "no public bind" test must assert the
+    *running* posture, backed by this enforcement — not just intent.
 - **Same trusted private network / VPC:** dist binds to the **private interface**,
   never a public one; epmd is bound to that interface or eliminated (pinned dist
   port / epmdless). This is a standard private-cluster posture — no overlay or
@@ -266,12 +365,16 @@ RBAC (see Alternatives). **What we adopt:** the authenticating-proxy-in-front
 pattern. **What differs:** we allow a *shared* workspace with role separation,
 which JupyterHub does not (it isolates per user).
 
-### Erlang/OTP `ssl_dist` + epmd
+### Erlang/OTP distribution + epmd
 `inet_tls_dist` provides mTLS for distribution (OTP 18+), battle-tested in
-RabbitMQ/CouchDB. epmd-as-network-service is a known exposure; the modern
-guidance is loopback epmd or epmdless dist with pinned ports. **What we adopt:**
-`ssl_dist` for cross-host links and loopback/epmdless posture — straight from
-ADR 0020 Layer 3, now made mandatory for remote Attach.
+RabbitMQ/CouchDB; ADR 0020 Layer 3 Option B specced it, but it was **removed in
+PR #1401** and is not in the tree. epmd-as-network-service is a known exposure;
+the modern guidance is loopback epmd or epmdless dist with pinned ports.
+**What we adopt:** the **loopback/private-interface + loopback-epmd posture** as
+the default — keeping distribution off untrusted networks entirely (Decision 5).
+**What we reject:** mandating `inet_tls_dist` — it is an *operator option* for the
+unusual untrusted-split case (and would require reintroducing the removed support),
+not a platform requirement. Keeping dist internal is cheaper and needs no certs.
 
 ### nREPL (Clojure) / "trusted dev tool" REPLs
 nREPL is explicit: a network REPL grants full environment access; protect it with
@@ -310,10 +413,12 @@ Phoenix concern by construction, because dist can't do it.
 
 ### Production operator
 A real deployment story: an authenticating front (OIDC) they can wire to existing
-SSO, a hardened dist link they can reason about (co-located/loopback by default,
-TLS-dist or overlay when crossing hosts), an audit trail of authorized ops, and
-roles to hand out read-only access without granting RCE. The honest caveat is
-documented up front: Owner/Collaborator = RCE; only Observer is non-execution.
+SSO, a dist link they can reason about (co-located/loopback by default, or bound
+to a private interface — never public, no overlay or cert dependency imposed), an
+audit trail of authorized ops, and roles to hand out read-only access without
+granting code execution. The honest caveats are documented up front: keeping dist
+off untrusted networks is operator-enforced (not code-enforced); and
+Owner/Collaborator hold full RCE — only Observer is non-executing.
 
 ### Tooling developer
 The curated facade is a stable, documented contract (term tuples / `#beamtalk_error{}`)
@@ -394,6 +499,19 @@ parallel identity channel — which is exactly what putting Phoenix in front avo
 must never sit on Erlang distribution. epmd + unencrypted dist + all-or-nothing
 cookie is not a browser-facing boundary.
 
+### Separate / WebSocket-only topology (browser → Phoenix WS → workspace WS, never dist)
+Distinct from "raw dist to browser": here Phoenix talks to the workspace over the
+**WebSocket op protocol** instead of attaching over distribution, so a Phoenix
+compromise does **not** immediately yield full `:rpc` on the workspace — it
+narrows the blast radius. **Not chosen as the default** (it forfeits Attach's
+location-transparent term access — the reason BT-2394 picked Attach, and re-imposes
+the duplicate-every-op tax the spike called out). **But documented as a
+deployment-tier option:** for a Phoenix front facing an **untrusted internet edge**
+(not just an org intranet), operators should consider the Separate topology to cap
+Phoenix-compromise blast radius. Attach + facade is the right call for the
+intranet/trusted-front common case this ADR targets; the internet-facing tier is a
+conscious, documented downgrade in convenience for a smaller blast radius.
+
 ### Mandate always-on TLS distribution (Phoenix↔workspace, every deployment)
 Require `inet_tls_dist` on the back link unconditionally, for one uniform mode.
 **Rejected:** (1) the `ssl_dist`/`inet_tls_dist` support was **removed in PR #1401**
@@ -446,7 +564,16 @@ remain an *operator option* for the untrusted-split case, never a requirement.
   an operator who genuinely needs Phoenix and the workspace on different untrusted
   hosts must reintroduce TLS-dist or supply their own tunnel. We accept this rather
   than mandate an overlay/cert dependency on every deployment.
-- **RBAC is coarse (3 roles).** Finer per-op/per-resource policy is future work.
+- **RBAC is coarse (3 roles), and Collaborator ≈ Owner in blast radius.** The only
+  meaningful boundary is Observer vs. eval-holders; Collaborator must be trusted
+  almost like the owner. Finer per-op/per-resource policy is future work.
+- **Authorization can lag IdP state.** Server-side sessions do not observe IdP
+  revocation/role-change in real time; enforcement lags by up to the configured
+  re-validation interval / session TTL (Decision 1). For an RCE-bearing tool this
+  window must be kept short and documented.
+- **The facade is Phoenix-side discipline.** A Phoenix-app bug can bypass RBAC; the
+  optional workspace-side allowlist mitigates app-level bugs but not host compromise
+  (which yields the cookie). Phoenix must be operated as a high-value host.
 
 ### Neutral
 - Per-user isolation remains achievable as a deployment pattern (one workspace per
@@ -455,31 +582,49 @@ remain an *operator option* for the untrusted-split case, never a requirement.
   Phoenix edge, not a new protocol.
 - Cookie rotation semantics (brief reconnect window) follow ADR 0020's existing
   rotate-cookie plan.
+- The read-surface ops lean on ADR 0085 (still **Proposed**), but the facade
+  *contract* reuses BT-2399 (shipped), so the dependency is soft — RBAC and the
+  facade can land before 0085's richer read views do.
 
 ## Implementation
 
 Lands as **BT-2411 (LiveView IDE Wave 5)**, gated on this ADR. Phased:
 
 ### Phase 1 — Authenticated front (OIDC) + session-bound LiveView
-- OIDC client in `editors/liveview` (issuer/client config via runtime env).
-- Server-side session, `HttpOnly; Secure; SameSite` cookie; LiveView mounts with
-  `%{user, roles}`. No token in URL.
-- IdP-less dev-token flag for CI/air-gapped.
-- **Components:** `editors/liveview/lib/**` (auth plug/pipeline), config.
-- **Tests:** unauthenticated → redirect; authenticated mount carries identity.
+- OIDC client in `editors/liveview` (issuer/client config via runtime env;
+  `state`/PKCE).
+- Server-side session, `HttpOnly; Secure; SameSite=Strict` cookie; LiveView mounts
+  with `%{user, roles}`. No token in URL. CSRF token validated on socket connect.
+- **Session lifecycle:** max session TTL (default ≤ 4h); `on_mount` re-validation
+  on a timer and on reconnect; socket teardown on validation failure (Decision 1).
+- IdP-less dev-token path **refused on non-loopback interfaces in code**.
+- **Components:** `editors/liveview/lib/**` (auth plug/pipeline, `live_session`).
+- **Tests:** unauthenticated → redirect; authenticated mount carries identity;
+  expired/revoked session tears down an already-mounted socket; dev-token rejected
+  on a non-loopback bind.
 
 ### Phase 2 — Curated op facade + RBAC
-- Facade module: only the documented op set reaches dist RPC; arbitrary
-  `{m,f,a}` from the browser is impossible by construction.
-- RBAC: map OIDC claims/groups → Owner/Collaborator/Observer; enforce per op
-  before RPC; structured audit log per authorized op (`user`, `op`, `role`).
-- **Components:** `editors/liveview/lib/**` (facade + policy + audit).
+- Facade module: only the documented op set reaches dist RPC; the browser cannot
+  supply an arbitrary `{m,f,a}` (enforced Phoenix-side — see the honest-framing
+  note in Decision 3). **Optional defense-in-depth:** workspace-side
+  `beamtalk_authorized_ops` entry module so app-level Phoenix bugs cannot reach
+  `beamtalk_repl_shell:eval/2` directly.
+- RBAC: map OIDC claims/groups → Owner/Collaborator/Observer; **fail closed**
+  (no match → deny; bad claim path → startup error); enforce per op before RPC;
+  structured audit log per authorized op (`user`, `op`, `role`, raw claims at mount).
+- **Read-surface sign-off (acceptance criterion):** confirm each Observer-granted
+  read op triggers no user code under ADR 0085.
+- **Components:** `editors/liveview/lib/**` (facade + policy + audit); optionally
+  `runtime/apps/beamtalk_workspace/src/beamtalk_authorized_ops.erl`.
 - **Tests:** Observer denied `eval`; Collaborator denied `kill`/`flush`; Owner
-  allowed all; facade rejects off-list ops with 403 and no dist call.
+  allowed all; facade rejects off-list ops with 403 and no dist call; unmatched
+  claim → deny (not a default role).
 
 ### Phase 3 — Transport posture (keep dist internal)
-- **Co-locate default:** `just web` discovers a loopback-dist workspace; epmd
-  bound to loopback. Verify dist never leaves the host in the default deployment.
+- **Co-locate default:** `just web` discovers a loopback-dist workspace. Set
+  `ERL_EPMD_ADDRESS=127.0.0.1` for the workspace node (in `startup_command.rs`'s
+  allowlisted env) and **preflight-check** for a pre-existing promiscuous epmd,
+  warning/refusing on a non-loopback bind. Verify dist never leaves the host.
 - **Private-network deployment:** document binding dist + epmd to the private
   interface (never `0.0.0.0`); pin/eliminate the epmd port.
 - **No mandated encryption dependency:** document the untrusted-split case as
@@ -520,6 +665,20 @@ overturning it:
 A one-line note will be added to ADR 0058 pointing to this ADR for the remote
 multi-user case. ADR 0058's "Trusted Developer Tool" stance is otherwise intact:
 Owner/Collaborator roles still have full RCE; only Observer is non-executing.
+
+## Open Questions
+- **Should `load-source`/`save`/`flush` require Owner, not Collaborator?** As
+  written, Collaborator is near-full RCE (Consequences). Moving code-installing ops
+  to Owner would make Collaborator "evaluate but don't persist," a more defensible
+  middle rung — at the cost of pair-programming convenience (a navigator who can't
+  hot-load). Decide before Phase 2.
+- **Is 3-role RBAC the right v1, or Owner + Observer only?** A simpler v1 —
+  OIDC + an allowlist of Owners + a read-only Observer — delivers most of the value
+  (real identity for audit; non-owners can't eval) with less policy machinery, and
+  defers Collaborator until the read-surface (ADR 0085) settles the execution-vector
+  question. Adopt the 3-role design now, or stage it?
+- **Workspace-side `beamtalk_authorized_ops` allowlist — ship in v1 or defer?**
+  Cheap defense-in-depth against Phoenix app-bugs; does not contain host compromise.
 
 ## References
 - Related issues: BT-2400 (this ADR), BT-2411 (Wave 5 — auth + non-localhost),
