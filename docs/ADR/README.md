@@ -119,6 +119,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0090](0090-array-canonical-representation.md) | Canonical Array Representation for O(log n) `at:put:` | Accepted | 2026-06-02 |
 | [0091](0091-remote-workspace-access-phoenix-authenticated-front.md) | Connection Security for Remote Workspace Access — Phoenix as Authenticated Front | Accepted | 2026-06-06 |
 | [0092](0092-supervision-tree-introspection.md) | Supervision Tree Introspection API (Runtime Query Surface) | Accepted | 2026-06-06 |
+| [0093](0093-announcements-event-substrate.md) | Announcements — Typed Event Substrate (Runtime Bus + stdlib Veneer) | Proposed | 2026-06-06 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
