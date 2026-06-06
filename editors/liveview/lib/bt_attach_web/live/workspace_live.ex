@@ -154,8 +154,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # term is carried back to the server by index against the current rows, so we
   # never round-trip a flattened string.
   def handle_event("drill", %{"index" => index}, %{assigns: %{inspect_rows: rows}} = socket) do
-    case Enum.at(rows, String.to_integer(index)) do
-      %{term: term, name: name} -> {:noreply, inspect_term(socket, name, term)}
+    # `index` is client-supplied; parse defensively so a malformed value can't
+    # crash the LiveView (`String.to_integer/1` would raise on non-digits).
+    with {i, ""} when i >= 0 <- Integer.parse(index),
+         %{term: term, name: name} <- Enum.at(rows, i) do
+      {:noreply, inspect_term(socket, name, term)}
+    else
       _ -> {:noreply, socket}
     end
   end

@@ -318,9 +318,28 @@ defmodule BtAttach.Workspace do
   object handle, so the caller never has to guess the term shape.
   """
   def inspect_value({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
-    pid_str = pid |> :erlang.pid_to_list() |> to_string()
+    # The `inspect` op identifies the actor by the *textual* pid form, the same
+    # contract the browser uses (`beamtalk_ws_handler` formats with pid_to_list,
+    # the op resolves with list_to_pid). Both sides must run on the SAME node:
+    # `pid_to_list/1` of a node-LOCAL pid yields the canonical `<0.X.Y>` text
+    # that `list_to_pid/1` round-trips on that node. Stringifying a *remote*
+    # workspace pid here on the Phoenix node would instead emit `<N.X.Y>` (N =
+    # the workspace's index in *our* dist table), and the workspace's
+    # `list_to_pid/1` would then `badarg` (or worse, resolve a different pid).
+    # So format the pid ON the workspace node, where it is local, via RPC.
+    case rpc(:erlang, :pid_to_list, [pid]) do
+      pid_chars when is_list(pid_chars) ->
+        dispatch_inspect_result(dispatch_inspect(to_string(pid_chars)))
 
-    case dispatch_inspect(pid_str) do
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+    end
+  end
+
+  def inspect_value(_term), do: {:error, :not_inspectable}
+
+  defp dispatch_inspect_result(result) do
+    case result do
       {:inspect, fields} when is_map(fields) -> {:ok, fields}
       {:inspect, other} -> {:ok, other}
       {:error, reason} -> {:error, reason}
@@ -328,8 +347,6 @@ defmodule BtAttach.Workspace do
       other -> {:error, {:unexpected_reply, other}}
     end
   end
-
-  def inspect_value(_term), do: {:error, :not_inspectable}
 
   # Build the `inspect` request as a plain map, decode it on the workspace node
   # (so we don't depend on the protocol record's `.hrl`), then dispatch through
