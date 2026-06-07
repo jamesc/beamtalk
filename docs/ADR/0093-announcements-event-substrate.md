@@ -677,6 +677,26 @@ re-scope):
 Affected components: **runtime** (new worker), **stdlib** (veneer + system
 events), **package** (re-scoped), **docs/tests**. No parser/codegen changes.
 
+## Implementation Tracking
+
+**Epic:** [BT-2438](https://linear.app/beamtalk/issue/BT-2438) — Announcements: Typed Event Substrate (ADR 0093)
+**Status:** Planned
+
+| Phase | Issue | Scope |
+|---|---|---|
+| 1 | BT-2439 | Runtime bus skeleton + ETS sub table + subscribe + async `announce:` |
+| 1 | BT-2440 | MRO subclass matching + per-subscription de-dup |
+| 1 | BT-2441 | `announceAndWait:` (sync) + `doOnce:` + `when:send:to:` + fault isolation |
+| 1 | BT-2442 | ETS heir crash-survival re-arm + dead-pid prune |
+| 2 | BT-2443 | stdlib veneer — `Announcement`/`Announcer`/`SystemAnnouncer`/`Subscription` |
+| 2 | BT-2444 | Introspection — self-inspection + `AnnouncementNavigation` + `SubscriptionNode` |
+| 3 | BT-2445 | System `Announcement` subclasses + runtime emit points |
+| 3 | BT-2446 | Point consumer ADRs (0017/0046/0054/0091/0092) at `SystemAnnouncer` |
+| 4 | BT-2193 | Package re-scope — distributed/`RecordingAnnouncer`/telemetry bridge |
+| 5 | BT-2447 | Language docs + surface-parity + e2e btscript; flip ADR → Implemented |
+
+Related: BT-2437 (`event:` emission manifest — separate track, §7). ADR-authoring issue BT-2396 is Done.
+
 ## Migration Path
 
 - **BT-2193** is re-scoped from "whole framework as a package" to "optional
