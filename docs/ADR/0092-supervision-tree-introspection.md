@@ -315,10 +315,11 @@ kept name- and shape-identical. The split is by *role*, not by vocabulary:
 Two alignment changes to the **shipped** live `Supervisor`
 (`stdlib/src/Supervisor.bt`) fall out of this and are part of this ADR's scope:
 
-- **Add `childCount` as the canonical name** for the running-children count;
-  keep the existing `count` (`Supervisor.bt:135`) as a thin deprecated alias so
-  current call sites and tests keep working. (`count` reads as "my own count"
-  on a non-collection; `childCount` is unambiguous and matches the node.)
+- **Rename `count` → `childCount`** (`Supervisor.bt:135`) for the
+  running-children count, updating its call sites and tests in the same change.
+  No deprecated alias is kept — pre-1.0, a clean rename is preferred over
+  carrying two names. (`count` reads as "my own count" on a non-collection;
+  `childCount` is unambiguous and matches the node.)
 - No change to `maxRestarts`/`restartWindow`/`strategy`/`children` — the node
   was aligned to *them*, not the reverse.
 
