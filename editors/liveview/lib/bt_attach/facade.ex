@@ -121,6 +121,15 @@ defmodule BtAttach.Facade do
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()
+
+  # ADR 0092: the supervision-tree snapshot. `processes` is the default-scope
+  # Read view (runtime plumbing filtered); `processes_system` is the privileged
+  # whole-node view, gated to Owners by the :execute capability above.
+  defp invoke(:processes, %{session_pid: pid}, _ctx),
+    do: client().supervision_tree(pid, "default")
+
+  defp invoke(:processes_system, %{session_pid: pid}, _ctx),
+    do: client().supervision_tree(pid, "system")
   defp invoke(:flush, _params, _ctx), do: client().flush()
 
   defp invoke(:save, %{class: class, selector: selector, source: source}, _ctx),

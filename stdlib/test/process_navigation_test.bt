@@ -47,6 +47,16 @@ TestCase subclass: ProcessNavigationTest
   testEmptyTreePrintString =>
     self assert: (SupervisionTree flatNodes: #()) printString equals: "#SupervisionTree<empty>"
 
+  // === Serialisable form (surface wire shape, BT-2431) ===
+  testAsDictionariesCount =>
+    self assert: self sampleTree asDictionaries size equals: 3
+
+  testAsDictionariesCarriesKindAndClass =>
+    first := self sampleTree asDictionaries first
+    self assert: (first at: #kind) equals: #beamtalkSupervisor
+    self assert: (first at: #isSupervisor) equals: true
+    self assert: (first at: #class) equals: #Counter
+
   // === SupervisionTree: collection protocol ===
   testNodesOfKind =>
     self assert: (self sampleTree nodesOfKind: #beamtalkActor) size equals: 1

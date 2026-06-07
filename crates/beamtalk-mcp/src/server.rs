@@ -354,6 +354,19 @@ pub struct InspectParams {
     pub actor: String,
 }
 
+/// Parameters for the `supervision_tree` MCP tool (ADR 0092).
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+pub struct SupervisionTreeParams {
+    /// Scope: "default" (the workspace application tree with runtime plumbing
+    /// filtered — the safe Read view) or "system" (everything, including
+    /// runtime internals and foreign processes — privileged).
+    #[serde(default)]
+    #[schemars(
+        description = "Scope: \"default\" (workspace tree, runtime plumbing filtered — the default) or \"system\" (everything, incl. runtime internals — privileged). Defaults to \"default\"."
+    )]
+    pub scope: Option<String>,
+}
+
 /// Parameters for the `reload_class` MCP tool.
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 pub struct ReloadClassParams {
@@ -988,6 +1001,47 @@ impl BeamtalkMcp {
 
         let actors = response.actors.unwrap_or_default();
         let text = fmt::format_actor_list(&actors, MCP_OUTPUT_MODE);
+
+        timer.mark_ok();
+        Ok(CallToolResult::success(vec![Content::text(text)]))
+    }
+
+    /// Snapshot the live supervision tree (ADR 0092).
+    #[tool(
+        description = "Snapshot the live OTP supervision tree as a flat list of node records (pid, registeredName, kind, class, childCount, isSupervisor, parentPid for adjacency). scope=\"default\" (the safe view: workspace tree, runtime plumbing filtered) or scope=\"system\" (everything, incl. runtime internals — privileged). Defaults to \"default\"."
+    )]
+    async fn supervision_tree(
+        &self,
+        Parameters(params): Parameters<SupervisionTreeParams>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let mut timer = ToolTimer::new("supervision_tree");
+        let scope = params.scope.as_deref().unwrap_or("default");
+        tracing::debug!(tool = "supervision_tree", scope, "tool invoked");
+        // Surface the snapshot through the same term-returning eval seam every
+        // surface shares (so the structured node data is identical across
+        // surfaces). `system` is the privileged whole-node view; `default` is
+        // the runtime-plumbing-filtered Read view (ADR 0091 / BT-2432).
+        let code = if scope == "system" {
+            "ProcessNavigation system tree asDictionaries"
+        } else {
+            "ProcessNavigation default tree asDictionaries"
+        };
+        let response = self
+            .client
+            .evaluate_with_options(code, false)
+            .await
+            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+
+        if response.is_error() {
+            let msg = response.error_message().unwrap_or("Unknown error");
+            return Ok(error_result(fmt::format_diagnostic(
+                &FmtDiagnostic::new(msg),
+                MCP_OUTPUT_MODE,
+            )));
+        }
+
+        let value = response.value_string();
+        let text = if value.is_empty() { "[]".to_string() } else { value };
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))

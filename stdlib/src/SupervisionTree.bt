@@ -136,6 +136,32 @@ typed Value subclass: SupervisionTree
   findClass: aClass :: Class -> List(SupervisionNode) =>
     self nodes select: [:node | node behaviourClass == aClass]
 
+  /// A serialisable form of the snapshot — one `Dictionary` per node carrying
+  /// its identity, kind, class, child count, and parent linkage (adjacency).
+  ///
+  /// This is the cross-surface wire form (ADR 0092 Implementation §5): the MCP
+  /// and LiveView/browser surfaces render this structure so every surface shows
+  /// equivalent data. Pids are rendered as Strings (JSON-stable); `parentPid`
+  /// reconstructs the tree.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessNavigation default tree asDictionaries
+  /// // => #(#{#pid => "<0.200.0>", #kind => #beamtalkSupervisor, ...}, ...)
+  /// ```
+  asDictionaries -> List(Dictionary) =>
+    self nodes collect: [:n |
+      #{
+        #pid => (n pid isNil ifTrue: [nil] ifFalse: [n pid asString]),
+        #registeredName => n registeredName,
+        #kind => n kind,
+        #class => (n behaviourClass isNil ifTrue: [nil] ifFalse: [n behaviourClass name]),
+        #childCount => n childCount,
+        #isSupervisor => n isSupervisor,
+        #parentPid => (n parent isNil ifTrue: [nil] ifFalse: [n parent pid asString])
+      }
+    ]
+
   /// Human-readable summary, e.g. `#SupervisionTree<6 nodes, root: #AppSup>` or
   /// `#SupervisionTree<empty>`.
   ///
