@@ -429,3 +429,102 @@ status_map_for_live_sys_process_test() ->
     after
         gen_server:stop(SupPid)
     end.
+
+%%====================================================================
+%% Tests: node / tree accessors (BT-2429)
+%%====================================================================
+
+%% A hand-built lite node map (the shape the shim mints), for testing the
+%% adjacency accessors without a live tree.
+lite_node(Pid, ParentPid, Kind) ->
+    #{
+        '$beamtalk_class' => 'SupervisionNode',
+        pid => Pid,
+        registeredName => nil,
+        kind => Kind,
+        behaviourClass => nil,
+        childCount => 0,
+        strategy => nil,
+        restartIntensity => nil,
+        truncated => false,
+        parent_pid => ParentPid
+    }.
+
+%% A small fixed tree: root <- childA, childB; childA <- grandchild.
+sample_flat_tree() ->
+    Root = self(),
+    ChildA = list_to_pid("<0.1.0>"),
+    ChildB = list_to_pid("<0.2.0>"),
+    Grand = list_to_pid("<0.3.0>"),
+    [
+        lite_node(Root, nil, otpSupervisor),
+        lite_node(ChildA, Root, otpSupervisor),
+        lite_node(ChildB, Root, otpProcess),
+        lite_node(Grand, ChildA, otpProcess)
+    ].
+
+root_of_returns_parentless_node_test() ->
+    Flat = sample_flat_tree(),
+    Root = beamtalk_process_navigation:rootOf(Flat),
+    ?assertEqual(self(), maps:get(pid, Root)),
+    ?assertEqual(nil, maps:get(parent_pid, Root)),
+    %% The returned root is enriched (carries the sibling set) so it navigates.
+    ?assert(maps:is_key(siblings, Root)).
+
+root_of_empty_is_nil_test() ->
+    ?assertEqual(nil, beamtalk_process_navigation:rootOf([])).
+
+enrich_attaches_siblings_test() ->
+    Flat = sample_flat_tree(),
+    Enriched = beamtalk_process_navigation:enrich(Flat),
+    ?assertEqual(length(Flat), length(Enriched)),
+    ?assert(lists:all(fun(N) -> maps:is_key(siblings, N) end, Enriched)).
+
+children_of_returns_direct_children_test() ->
+    Flat = sample_flat_tree(),
+    Root = beamtalk_process_navigation:rootOf(Flat),
+    Children = beamtalk_process_navigation:childrenOf(Root),
+    ChildPids = lists:sort([maps:get(pid, C) || C <- Children]),
+    Expected = lists:sort([list_to_pid("<0.1.0>"), list_to_pid("<0.2.0>")]),
+    ?assertEqual(Expected, ChildPids),
+    %% Children are enriched, so navigation chains (childA has a grandchild).
+    [GrandParent] = [C || C <- Children, maps:get(pid, C) =:= list_to_pid("<0.1.0>")],
+    Grandchildren = beamtalk_process_navigation:childrenOf(GrandParent),
+    ?assertEqual([list_to_pid("<0.3.0>")], [maps:get(pid, G) || G <- Grandchildren]).
+
+children_of_leaf_is_empty_test() ->
+    Flat = sample_flat_tree(),
+    Enriched = beamtalk_process_navigation:enrich(Flat),
+    [Leaf] = [N || N <- Enriched, maps:get(pid, N) =:= list_to_pid("<0.2.0>")],
+    ?assertEqual([], beamtalk_process_navigation:childrenOf(Leaf)).
+
+parent_of_returns_parent_test() ->
+    Flat = sample_flat_tree(),
+    Enriched = beamtalk_process_navigation:enrich(Flat),
+    [ChildA] = [N || N <- Enriched, maps:get(pid, N) =:= list_to_pid("<0.1.0>")],
+    Parent = beamtalk_process_navigation:parentOf(ChildA),
+    ?assertEqual(self(), maps:get(pid, Parent)).
+
+parent_of_root_is_nil_test() ->
+    Flat = sample_flat_tree(),
+    Root = beamtalk_process_navigation:rootOf(Flat),
+    ?assertEqual(nil, beamtalk_process_navigation:parentOf(Root)).
+
+node_field_accessors_test() ->
+    Node = #{
+        '$beamtalk_class' => 'SupervisionNode',
+        pid => self(),
+        registeredName => nil,
+        kind => beamtalkSupervisor,
+        behaviourClass => nil,
+        childCount => 2,
+        strategy => oneForOne,
+        restartIntensity => #{maxRestarts => 10, window => 60},
+        truncated => true,
+        parent_pid => nil
+    },
+    ?assertEqual(oneForOne, beamtalk_process_navigation:strategyOf(Node)),
+    ?assertEqual(
+        #{maxRestarts => 10, window => 60}, beamtalk_process_navigation:restartIntensityOf(Node)
+    ),
+    ?assertEqual(true, beamtalk_process_navigation:truncatedOf(Node)).

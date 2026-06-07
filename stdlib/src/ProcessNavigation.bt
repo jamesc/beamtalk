@@ -1,0 +1,87 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ProcessNavigation — live supervision-tree introspection queries (ADR 0092).
+///
+/// The dynamic twin of `SystemNavigation`: where `SystemNavigation` answers
+/// "who implements `#asString`, who sends `#+`" over the *static* class
+/// registry, `ProcessNavigation` answers "what is running, under whose
+/// supervision, in what state" over the *live* OTP supervision tree.
+///
+/// A `ProcessNavigation` is a value object — not an actor — so its queries run
+/// as plain Erlang in the calling eval worker, never routed through a class
+/// gen_server (which would self-deadlock when the walk reaches the worker's own
+/// supervisor; the same lesson `SystemNavigation` documents). Construction
+/// snapshots the live tree and freezes it; `tree` yields the navigable
+/// `SupervisionTree`. Re-construct to refresh.
+///
+/// Scopes:
+/// - `ProcessNavigation default` — the workspace application tree, with runtime
+///   plumbing filtered out. An ADR-0091 Read op, scoped like `Workspace actors`.
+/// - `ProcessNavigation system` — *everything*, including runtime internals and
+///   foreign processes. Privileged (ADR 0091): a lateral-movement aid, gated to
+///   an `eval`-holding role.
+/// - `ProcessNavigation from: aRoot` — a subtree rooted at a `Supervisor` handle
+///   or a `Pid`, returning a `Result` (the root may be dead).
+///
+/// ## Examples
+/// ```beamtalk
+/// ProcessNavigation default tree root            // => the snapshot root
+/// ProcessNavigation default tree findClass: Counter
+/// ProcessNavigation system tree size             // => 47
+/// (ProcessNavigation from: aSup) unwrap tree     // => a SupervisionTree
+/// ```
+typed Value subclass: ProcessNavigation
+  /// The frozen flat snapshot this navigation was constructed from.
+  field: nodes :: List(SupervisionNode) = #()
+
+  /// A navigation over the workspace application tree, with runtime plumbing
+  /// filtered out (the `default` scope). Cannot fail — it snapshots the live
+  /// tree — so it returns a `ProcessNavigation` directly and chains fluently.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessNavigation default tree root
+  /// ```
+  class default -> ProcessNavigation =>
+    ProcessNavigation nodes: (Erlang beamtalk_process_navigation) default_snapshot
+
+  /// A navigation over *everything*, including runtime infrastructure and
+  /// foreign processes (the `system` scope). Privileged (ADR 0091). Cannot fail.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessNavigation system tree size
+  /// ```
+  class system -> ProcessNavigation =>
+    ProcessNavigation nodes: (Erlang beamtalk_process_navigation) system_snapshot
+
+  /// A navigation over the subtree rooted at `aRoot` — a `Supervisor` handle or
+  /// a raw `Pid`.
+  ///
+  /// Returns a `Result`: the root is user-supplied and may already be dead. The
+  /// `:: Supervisor | Pid` annotation lets the type checker reject a wrong-type
+  /// argument statically, so `ProcessNavigation from: 42` never reaches runtime;
+  /// the `Result error: (beamtalk_error type_error)` variant remains the
+  /// defensive runtime fallback for untyped/FFI input. A dead root surfaces as
+  /// `Result error: (beamtalk_error stale_handle)`. A pid that is simply not a
+  /// supervisor is **not** an error — it yields `Result ok:` with a single-node
+  /// tree.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (ProcessNavigation from: aSup) unwrap tree
+  /// (ProcessNavigation from: aSup) ifOk: [:nav | nav tree] ifError: [:e | nil]
+  /// ```
+  class from: aRoot :: Supervisor | Pid -> Result(ProcessNavigation, Error) =>
+    ((Erlang beamtalk_process_navigation) from: aRoot)
+      map: [:snapshot | ProcessNavigation nodes: snapshot]
+
+  /// The navigable `SupervisionTree` snapshot for this navigation.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessNavigation default tree   // => a SupervisionTree
+  /// ```
+  tree -> SupervisionTree =>
+    SupervisionTree flatNodes: self nodes

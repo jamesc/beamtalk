@@ -1,0 +1,137 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SupervisionTree — a navigable snapshot of the live supervision tree (ADR 0092).
+///
+/// A `SupervisionTree` is a thin, immutable wrapper over a flat
+/// `List(SupervisionNode)` plus the parent/child adjacency captured at snapshot
+/// time. It is the high-level view layered on the flat records: the full
+/// collection protocol (`do:`, `select:`, `detect:`, `collect:`) plus tree
+/// navigation (`root`, `nodesOfKind:`, `findClass:`). Reach one via
+/// `ProcessNavigation default tree` or the `Workspace processes` alias.
+///
+/// The snapshot is *best-effort point-in-time*: iterating a tree never re-enters
+/// OTP (it is frozen), so the walk is internally consistent. To observe change,
+/// take a new snapshot.
+///
+/// ## Examples
+/// ```beamtalk
+/// tree := ProcessNavigation default tree
+/// tree root                          // => the snapshot root SupervisionNode
+/// tree size                          // => total node count
+/// tree do: [:node | Transcript showLine: node printString]
+/// tree select: [:node | node isSupervisor]
+/// tree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)
+/// tree findClass: Counter            // => List(SupervisionNode) for Counter actors
+/// ```
+typed Value subclass: SupervisionTree
+  /// The backing flat node list (lite records, without sibling enrichment).
+  field: flatNodes :: List(SupervisionNode) = #()
+
+  /// The flat list of nodes, each enriched so parent/child navigation works.
+  ///
+  /// This *is* the flat record API the ADR exposes; `root` is the navigable
+  /// head layered on top.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree nodes   // => #(a SupervisionNode, ...)
+  /// ```
+  nodes -> List(SupervisionNode) =>
+    (Erlang beamtalk_process_navigation) enrich: self flatNodes
+
+  /// The snapshot root — the first node with no parent — or `nil` for an empty
+  /// snapshot.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree root   // => a SupervisionNode | nil
+  /// ```
+  root -> SupervisionNode | Nil =>
+    (Erlang beamtalk_process_navigation) rootOf: self flatNodes
+
+  /// Total number of nodes in the snapshot.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree size   // => 6
+  /// ```
+  size -> Integer =>
+    self flatNodes size
+
+  /// Whether the snapshot is empty.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree isEmpty   // => false
+  /// ```
+  isEmpty -> Boolean =>
+    self flatNodes isEmpty
+
+  /// Pre-order walk: evaluate `aBlock` for every node in the snapshot.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree do: [:node | Transcript showLine: node printString]
+  /// ```
+  do: aBlock :: Block(SupervisionNode, Object) -> SupervisionTree =>
+    self nodes do: aBlock
+    self
+
+  /// The nodes for which `aBlock` answers `true`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree select: [:node | node isSupervisor]
+  /// ```
+  select: aBlock :: Block(SupervisionNode, Boolean) -> List(SupervisionNode) =>
+    self nodes select: aBlock
+
+  /// The first node for which `aBlock` answers `true`. Raises if none match —
+  /// use `detect:ifNone:` for a default.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree detect: [:node | node registeredName == #DatabasePool]
+  /// ```
+  detect: aBlock :: Block(SupervisionNode, Boolean) -> SupervisionNode =>
+    self nodes detect: aBlock
+
+  /// The first node for which `aBlock` answers `true`, or the value of
+  /// `noneBlock` if none match.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree detect: [:n | n isSupervisor] ifNone: [nil]
+  /// ```
+  detect: aBlock :: Block(SupervisionNode, Boolean) ifNone: noneBlock :: Block(Object) -> Object =>
+    self nodes detect: aBlock ifNone: noneBlock
+
+  /// Collect the result of applying `aBlock` to every node.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree collect: [:node | node registeredName]
+  /// ```
+  collect: aBlock :: Block(SupervisionNode, Object) -> List =>
+    self nodes collect: aBlock
+
+  /// The nodes whose `kind` equals `aKind` (e.g. `#beamtalkActor`,
+  /// `#otpProcess`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)
+  /// ```
+  nodesOfKind: aKind :: Symbol -> List(SupervisionNode) =>
+    self nodes select: [:node | node kind == aKind]
+
+  /// The nodes backed by the Beamtalk class `aClass` — every running instance of
+  /// that class in the supervision tree.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// tree findClass: Counter   // => List(SupervisionNode) for Counter actors
+  /// ```
+  findClass: aClass :: Class -> List(SupervisionNode) =>
+    self nodes select: [:node | node behaviourClass == aClass]

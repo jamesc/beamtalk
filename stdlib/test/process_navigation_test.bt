@@ -1,0 +1,92 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2429: Tests for the ProcessNavigation + SupervisionTree stdlib classes
+// (ADR 0092 Phase 3).
+//
+// The collection protocol and tree shape are tested here over a hand-built
+// SupervisionTree (BUnit has no live workspace tree). The full live walk
+// (`ProcessNavigation default tree root`, node parent/children navigation, lazy
+// `status`) is covered by the REPL e2e suite (BT-2433); the runtime adjacency
+// accessors have their own EUnit coverage.
+
+TestCase subclass: ProcessNavigationTest
+
+  // A small fixed snapshot: a supervisor, an actor, and a foreign process.
+  sampleNodes =>
+    sup := SupervisionNode pid: nil registeredName: #sup kind: #beamtalkSupervisor behaviourClass: Counter childCount: 1
+    actor := SupervisionNode pid: nil registeredName: nil kind: #beamtalkActor behaviourClass: Counter childCount: 0
+    foreign := SupervisionNode pid: nil registeredName: nil kind: #otpProcess behaviourClass: nil childCount: 0
+    #(sup, actor, foreign)
+
+  sampleTree =>
+    SupervisionTree flatNodes: self sampleNodes
+
+  // === SupervisionTree: shape ===
+  testTreeSize =>
+    self assert: self sampleTree size equals: 3
+
+  testTreeNodesCount =>
+    self assert: self sampleTree nodes size equals: 3
+
+  testTreeNodesAreSupervisionNodes =>
+    self assert: (self sampleTree nodes first isKindOf: SupervisionNode) equals: true
+
+  testTreeIsEmptyFalse =>
+    self assert: self sampleTree isEmpty equals: false
+
+  testEmptyTreeIsEmpty =>
+    self assert: (SupervisionTree flatNodes: #()) isEmpty equals: true
+
+  testTreeRootNotNil =>
+    self assert: self sampleTree root isNil equals: false
+
+  // === SupervisionTree: collection protocol ===
+  testNodesOfKind =>
+    self assert: (self sampleTree nodesOfKind: #beamtalkActor) size equals: 1
+
+  testFindClass =>
+    // Both the supervisor and the actor carry behaviourClass Counter.
+    self assert: (self sampleTree findClass: Counter) size equals: 2
+
+  testSelect =>
+    self assert: (self sampleTree select: [:n | n isSupervisor]) size equals: 1
+
+  testCollect =>
+    kinds := self sampleTree collect: [:n | n kind]
+    self assert: kinds size equals: 3
+
+  testDetect =>
+    found := self sampleTree detect: [:n | n kind == #otpProcess]
+    self assert: found kind equals: #otpProcess
+
+  testDetectIfNoneFallback =>
+    found := self sampleTree detect: [:n | n kind == #neverHappens] ifNone: [nil]
+    self assert: found equals: nil
+
+  testDoReturnsTree =>
+    result := self sampleTree do: [:n | n kind]
+    self assert: (result isKindOf: SupervisionTree) equals: true
+
+  // === ProcessNavigation: constructors over the live tree (FFI, no workspace) ===
+  testDefaultIsProcessNavigation =>
+    self assert: (ProcessNavigation default isKindOf: ProcessNavigation) equals: true
+
+  testDefaultTreeIsSupervisionTree =>
+    self assert: (ProcessNavigation default tree isKindOf: SupervisionTree) equals: true
+
+  testSystemTreeIsSupervisionTree =>
+    self assert: (ProcessNavigation system tree isKindOf: SupervisionTree) equals: true
+
+  testDefaultIsSubsetOfSystem =>
+    // The default scope filters infra, so its node set is a subset of system's.
+    self assert: (ProcessNavigation default tree size <= ProcessNavigation system tree size) equals: true
+
+  // === from: runtime type-error fallback (untyped FFI input) ===
+  // `ProcessNavigation from: 42` is rejected STATICALLY by the type checker
+  // (Supervisor | Pid); this exercises the defensive runtime fallback that the
+  // shim keeps for untyped/Dynamic input arriving via FFI.
+  testFromWrongTypeRuntimeFallback =>
+    result := (Erlang beamtalk_process_navigation) from: 42
+    self assert: result isError equals: true
+    self assert: result error kind equals: #type_error

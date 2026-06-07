@@ -82,7 +82,16 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     from/2,
     status/1,
     infra_deny_list/0,
-    is_infra/1
+    is_infra/1,
+    %% Node / tree accessors consumed by the SupervisionNode & SupervisionTree
+    %% stdlib classes (BT-2429).
+    enrich/1,
+    rootOf/1,
+    childrenOf/1,
+    parentOf/1,
+    strategyOf/1,
+    restartIntensityOf/1,
+    truncatedOf/1
 ]).
 
 -include("beamtalk.hrl").
@@ -125,7 +134,10 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     strategy := atom() | nil,
     restartIntensity := #{maxRestarts := term(), window := term()} | nil,
     truncated := boolean(),
-    parent_pid := pid() | nil
+    parent_pid := pid() | nil,
+    %% Optional: the shared sibling set attached by `enrich/1` so a node can
+    %% navigate to its parent/children. Absent on the lite nodes the shim mints.
+    siblings => [node_map()]
 }.
 
 -export_type([scope/0, node_map/0]).
@@ -245,6 +257,91 @@ status(Pid) when is_pid(Pid) ->
     end;
 status(_) ->
     nil.
+
+%%% ============================================================================
+%%% Node / tree accessors (BT-2429)
+%%%
+%%% The flat snapshot is a list of immutable node maps carrying parent linkage
+%%% (`parent_pid`). Parent/child navigation from a *bare* node needs the sibling
+%%% set, so the tree accessors embed the shared flat list under a `siblings` key
+%%% (a single shared term — no per-node copy, no cycle: the embedded list holds
+%%% lite nodes, the returned nodes are transient enriched copies). `Supervision
+%%% Tree` and `SupervisionNode` (stdlib) call these.
+%%% ============================================================================
+
+-doc """
+Enrich each node in `FlatList` with the shared sibling set, so parent/child
+navigation works on any node returned by the tree. Backs `SupervisionTree
+nodes`.
+""".
+-spec enrich([node_map()]) -> [node_map()].
+enrich(FlatList) ->
+    [attach_siblings(N, FlatList) || N <- FlatList].
+
+-doc """
+Return the snapshot root — the first node with no parent — enriched, or `nil`
+for an empty snapshot. Backs `SupervisionTree root`.
+""".
+-spec rootOf([node_map()]) -> node_map() | nil.
+rootOf(FlatList) ->
+    case lists:search(fun(N) -> maps:get(parent_pid, N, nil) =:= nil end, FlatList) of
+        {value, Root} -> attach_siblings(Root, FlatList);
+        false -> nil
+    end.
+
+-doc """
+Return the (enriched) snapshot children of `Node` — the sibling nodes whose
+`parent_pid` is `Node`'s pid. Backs `SupervisionNode children`.
+""".
+-spec childrenOf(node_map()) -> [node_map()].
+childrenOf(Node) ->
+    Siblings = maps:get(siblings, Node, []),
+    case maps:get(pid, Node, nil) of
+        nil ->
+            [];
+        SelfPid ->
+            [
+                attach_siblings(Child, Siblings)
+             || Child <- Siblings, maps:get(parent_pid, Child, nil) =:= SelfPid
+            ]
+    end.
+
+-doc """
+Return the (enriched) snapshot parent of `Node`, or `nil` for a root node or a
+node mid-restart. Backs `SupervisionNode parent`.
+""".
+-spec parentOf(node_map()) -> node_map() | nil.
+parentOf(Node) ->
+    Siblings = maps:get(siblings, Node, []),
+    case maps:get(parent_pid, Node, nil) of
+        nil ->
+            nil;
+        ParentPid ->
+            case lists:search(fun(N) -> maps:get(pid, N, nil) =:= ParentPid end, Siblings) of
+                {value, Parent} -> attach_siblings(Parent, Siblings);
+                false -> nil
+            end
+    end.
+
+-doc "Return a node's configured supervisor `strategy` (supervisors only; else `nil`).".
+-spec strategyOf(node_map()) -> atom() | nil.
+strategyOf(Node) ->
+    maps:get(strategy, Node, nil).
+
+-doc "Return a node's configured `restartIntensity` budget (supervisors only; else `nil`).".
+-spec restartIntensityOf(node_map()) -> map() | nil.
+restartIntensityOf(Node) ->
+    maps:get(restartIntensity, Node, nil).
+
+-doc "Return whether a node's children were truncated by the child cap.".
+-spec truncatedOf(node_map()) -> boolean().
+truncatedOf(Node) ->
+    maps:get(truncated, Node, false).
+
+%% Attach the shared sibling set to a node so its parent/child accessors resolve.
+-spec attach_siblings(node_map(), [node_map()]) -> node_map().
+attach_siblings(Node, Siblings) ->
+    Node#{siblings => Siblings}.
 
 -doc """
 Walk the given root pids under `Scope`, returning the flat node list (default

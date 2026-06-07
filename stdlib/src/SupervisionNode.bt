@@ -64,6 +64,77 @@ typed Value subclass: SupervisionNode
   isBeamtalk -> Boolean =>
     (self kind == #beamtalkActor) or: [self kind == #beamtalkSupervisor]
 
+  /// The snapshot children of this node (supervisors only; `#()` otherwise).
+  ///
+  /// Resolved from the shared sibling set captured at snapshot time, so it
+  /// reflects the frozen tree — re-snapshot to refresh. Returned children are
+  /// themselves navigable (`node children first parent`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node children   // => #(a SupervisionNode, ...)
+  /// ```
+  children -> List(SupervisionNode) =>
+    (Erlang beamtalk_process_navigation) childrenOf: self
+
+  /// The snapshot parent of this node, or `nil` for a root node or a node
+  /// caught mid-restart.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node parent   // => a SupervisionNode | nil
+  /// ```
+  parent -> SupervisionNode | Nil =>
+    (Erlang beamtalk_process_navigation) parentOf: self
+
+  /// The configured OTP restart strategy (`#oneForOne`, `#simpleOneForOne`, …)
+  /// for a Beamtalk supervisor node, or `nil` for actors and foreign processes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node strategy   // => #oneForOne
+  /// ```
+  strategy -> Symbol | Nil =>
+    (Erlang beamtalk_process_navigation) strategyOf: self
+
+  /// The configured restart *budget* — `#{#maxRestarts => n, #window => secs}` —
+  /// for a Beamtalk supervisor node, or `nil` otherwise. This is the public,
+  /// stable configured intensity; a per-child restart *count* is deliberately
+  /// out of scope (ADR 0092 §3).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node restartIntensity   // => #{#maxRestarts => 10, #window => 60}
+  /// ```
+  restartIntensity -> Dictionary | Nil =>
+    (Erlang beamtalk_process_navigation) restartIntensityOf: self
+
+  /// Whether this supervisor's children were truncated by the snapshot child cap
+  /// (a large `simpleOneForOne` pool, ADR 0092 §Constraints 1). When `true`,
+  /// `children` is empty but `childCount` still reports the live total.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node truncated   // => false
+  /// ```
+  truncated -> Boolean =>
+    (Erlang beamtalk_process_navigation) truncatedOf: self
+
+  /// Lazily fetch this node's live OTP status (ADR 0092 §5).
+  ///
+  /// Issues a timeout-guarded `sys:get_status` against the node's pid *at call
+  /// time* (never at snapshot time). Returns a `Dictionary` for an alive,
+  /// `sys`-compliant process; returns `nil` — not an error — for a process that
+  /// has since died, timed out, or is not `sys`-compliant. This is the liveness
+  /// check: a snapshot is a *past* truth, `status` is the *now*.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node status   // => #{#module => ..., #sysState => #running} | nil
+  /// ```
+  status -> Dictionary | Nil =>
+    (Erlang beamtalk_process_navigation) status: self pid
+
   /// Human-readable description, e.g. `#SupervisionNode<#beamtalkActor Counter
   /// #Pid<0.132.0>>` or, for a supervisor, `#SupervisionNode<#beamtalkSupervisor
   /// AppSup #Pid<0.200.0> children: 3>`.

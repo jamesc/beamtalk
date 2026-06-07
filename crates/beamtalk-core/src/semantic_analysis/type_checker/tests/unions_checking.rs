@@ -1687,3 +1687,28 @@ fn union_param_type_nil_compatible_with_object_union() {
         "Integer should be compatible with 'Object | Nil' (subclass of Object), got: {type_warnings:?}"
     );
 }
+
+#[test]
+fn process_navigation_from_rejects_non_supervisor_or_pid() {
+    // ADR 0092 (BT-2429): `ProcessNavigation from:` is typed `Supervisor | Pid`,
+    // so passing an Integer must be rejected statically — the common bug never
+    // reaches the runtime `type_error` fallback.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let module = make_module(vec![msg_send(
+        class_ref("ProcessNavigation"),
+        MessageSelector::Keyword(vec![KeywordPart::new("from:", span())]),
+        vec![int_lit(42)],
+    )]);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let type_warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("expects"))
+        .collect();
+    assert!(
+        !type_warnings.is_empty(),
+        "ProcessNavigation from: 42 should be rejected (expects Supervisor | Pid), got no type warnings: {:?}",
+        checker.diagnostics()
+    );
+}
