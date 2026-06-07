@@ -35,7 +35,7 @@ raw distribution or the REPL port on a non-loopback interface.
 Taking the LiveView IDE **past localhost** introduces exactly one untrusted hop
 and terminates it at Phoenix:
 
-```
+```text
    UNTRUSTED NETWORK              TRUSTED HOST / PRIVATE NETWORK
 ┌─────────┐  ① HTTPS + OIDC  ┌──────────────┐  ② internal dist  ┌─────────────┐
 │ Browser │ ───────────────▶ │   Phoenix    │ ────────────────▶ │  Workspace  │

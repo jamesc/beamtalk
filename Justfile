@@ -161,7 +161,7 @@ web name:
     fi
     # The cookie lives at ~/.beamtalk/workspaces/<id>/cookie, where <id> is the
     # node short name minus the beamtalk_workspace_ prefix.
-    id="${node#beamtalk_workspace_}"; id="${id%@localhost}"
+    id="${node#beamtalk_workspace_}"; id="${id%@*}"
     cookie_file="${HOME}/.beamtalk/workspaces/${id}/cookie"
     if [ ! -f "${cookie_file}" ]; then
       echo "❌ Workspace cookie not found at ${cookie_file}" >&2
@@ -195,7 +195,7 @@ web-remote name:
       echo "   Start it first: beamtalk workspace create {{name}} --background --persistent" >&2
       exit 1
     fi
-    id="${node#beamtalk_workspace_}"; id="${id%@localhost}"
+    id="${node#beamtalk_workspace_}"; id="${id%@*}"
     cookie_file="${HOME}/.beamtalk/workspaces/${id}/cookie"
     if [ ! -f "${cookie_file}" ]; then
       echo "❌ Workspace cookie not found at ${cookie_file}" >&2

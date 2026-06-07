@@ -12,7 +12,7 @@ For the security model and trust path, see
 
 ## The shape
 
-```
+```text
    UNTRUSTED NETWORK              TRUSTED HOST / PRIVATE NETWORK
 ┌─────────┐  HTTPS + OIDC    ┌──────────────┐  internal dist    ┌─────────────┐
 │ Browser │ ───────────────▶ │   Phoenix    │ ────────────────▶ │  Workspace  │
