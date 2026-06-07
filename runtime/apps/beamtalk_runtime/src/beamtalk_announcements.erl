@@ -1053,22 +1053,27 @@ the event's `$beamtalk_class` key and dispatches.
 'announceOn'(_Announcer, Event) ->
     ensure_started(),
     EventClass = event_class(Event),
-    %% For the stdlib veneer, invoke handlers directly (caller-side) rather than
-    %% sending raw messages to subscriber mailboxes. The raw `announce/2` sends
+    %% For the stdlib veneer, invoke handlers caller-side rather than sending raw
+    %% messages to subscriber mailboxes: the raw `announce/2` sends
     %% `{beamtalk_announcement, ...}` which requires a Beamtalk actor message loop
-    %% to process. The sync path (`announceAndWait`) already runs handlers via
-    %% spawn_monitor — for the async path we run them in-process without waiting.
+    %% to process, but a veneer handler is a Block/{send,...} tuple. Each handler
+    %% runs in its own transient process (fire-and-forget) so a slow or crashing
+    %% handler never blocks the publisher or its siblings — async semantics
+    %% (ADR 0093 §1), mirroring the sync path's spawn_monitor minus the gather.
     lists:foreach(
         fun(SubRef) ->
             case claim_row(SubRef) of
                 {ok, _Class, SubscriberPid, Handler, _Once} ->
                     case is_process_alive(SubscriberPid) of
                         true ->
-                            try
-                                run_handler(Handler, Event)
-                            catch
-                                _:_ -> ok
-                            end;
+                            _ = spawn(fun() ->
+                                try
+                                    run_handler(Handler, Event)
+                                catch
+                                    _:_ -> ok
+                                end
+                            end),
+                            ok;
                         false ->
                             ok
                     end;
@@ -1108,6 +1113,7 @@ Called from `Announcer unsubscribe: receiver`.
 """.
 -spec 'unsubscribeReceiver'(announcer(), term()) -> nil.
 'unsubscribeReceiver'(_Announcer, Receiver) ->
+    ensure_started(),
     ReceiverPid = extract_pid(Receiver),
     case ReceiverPid of
         undefined ->
@@ -1131,6 +1137,7 @@ Called from `Subscription unsubscribe`.
 """.
 -spec 'unsubscribeRef'(subscription()) -> nil.
 'unsubscribeRef'(#{ref := SubRef}) ->
+    ensure_started(),
     unsubscribe(SubRef),
     nil;
 'unsubscribeRef'(_) ->

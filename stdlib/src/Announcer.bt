@@ -3,19 +3,22 @@
 
 /// Announcer — a typed pub/sub dispatcher handle (ADR 0093 Layer 2).
 ///
-/// An `Announcer` is an opaque handle to a runtime subscription set, similar
-/// to how `Pid` is an opaque handle to a process. The underlying announcer is
-/// an Erlang `reference()` carried as the object's native boxing, reached via
-/// FFI; equality is by identity (`=:=`), like `Pid`.
+/// An `Announcer` is an opaque handle, similar to how `Pid` is an opaque handle
+/// to a process. The underlying announcer is an Erlang `reference()` carried as
+/// the object's native boxing, reached via FFI; equality is by identity
+/// (`=:=`), like `Pid`. `Announcer new` mints a fresh handle.
 ///
-/// Each `Announcer new` mints a fresh, independent dispatcher. Subscriptions
-/// are managed via the `when:do:` / `when:send:to:` / `when:doOnce:` protocol
-/// and announced to via `announce:` (async) or `announceAndWait:` (sync).
+/// Subscriptions are managed via the `when:do:` / `when:send:to:` /
+/// `when:doOnce:` protocol and announced to via `announce:` (async) or
+/// `announceAndWait:` (sync).
 ///
-/// There is deliberately no per-announcer process — the subscriber set lives
-/// in the shared runtime ETS table keyed by the announcer's ref, and dispatch
-/// runs caller-side off concurrent ETS reads (no central mailbox to deadlock or
-/// bottleneck).
+/// There is deliberately no per-announcer process — the subscriber set lives in
+/// the shared runtime ETS table and dispatch runs caller-side off concurrent
+/// ETS reads (no central mailbox to deadlock or bottleneck). Per ADR 0093 the
+/// table is keyed by a unique subscription ref and matched on the event's
+/// *class* (MRO), not by announcer: in v1 all announcers share one class-keyed
+/// bus, so the handle is an identity token rather than an isolated namespace.
+/// True per-instance subscription isolation is tracked as follow-up work.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -26,7 +29,7 @@
 /// ```
 typed Object subclass: Announcer
 
-  /// Create a new, independent Announcer (mints a fresh runtime ref via FFI).
+  /// Create a new Announcer handle (mints a fresh runtime ref via FFI).
   ///
   /// ## Examples
   /// ```beamtalk

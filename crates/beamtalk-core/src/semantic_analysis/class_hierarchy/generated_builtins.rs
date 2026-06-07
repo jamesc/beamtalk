@@ -214,7 +214,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "unsubscribe:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())], doc: Some("Remove all subscriptions held by `receiver` on this announcer.\n\n## Examples\n```beamtalk\nannouncer unsubscribe: self\n```".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Announcer".into()), param_types: vec![], doc: Some("Create a new, independent Announcer (mints a fresh runtime ref via FFI).\n\n## Examples\n```beamtalk\na := Announcer new\na class   // => Announcer\n```".into()) },
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Announcer".into()), param_types: vec![], doc: Some("Create a new Announcer handle (mints a fresh runtime ref via FFI).\n\n## Examples\n```beamtalk\na := Announcer new\na class   // => Announcer\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],
