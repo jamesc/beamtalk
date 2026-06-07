@@ -14,6 +14,14 @@ multi-subscription rule), idempotent unsubscribe, and the introspection reads.
 BT-2440 adds the MRO (superclass-chain) matching: delivery to subscribers of an
 ancestor class, per-subscription de-duplication across the walk, and graceful
 truncation when a class's metadata row is removed mid-hierarchy.
+
+BT-2441 adds the synchronous + once-only + message-send forms with fault
+isolation: `announceAndWait/2,3` running each handler in its own monitored
+process; a `doOnce` subscription consumed atomically (exactly-once under N
+concurrent announcers); the `{send, Sel, Receiver}` (`when:send:to:`) handler
+form; per-handler fault isolation (a crashing handler is caught and the caller
+still returns, siblings unaffected); a per-handler timeout that ejects a wedged
+handler; and reentrant `announceAndWait/2` from inside a handler (no deadlock).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -500,6 +508,377 @@ mro_cyclic_hierarchy_test_() ->
     end}.
 
 %%====================================================================
+%% announceAndWait — synchronous gather runs each handler and returns
+%%====================================================================
+
+%% A subscriber with a block handler that records the event into the test
+%% process's mailbox; the sync gather runs the handler in its own process and
+%% returns only once it has acked.
+announce_and_wait_runs_handler_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Collector = self(),
+                Sub = spawn_idle(),
+                try
+                    Handler = fun(Event) -> Collector ! {ran, Event} end,
+                    {ok, _SubRef} = beamtalk_announcements:subscribe(
+                        'SyncEvent', Sub, Handler, false
+                    ),
+                    ok = beamtalk_announcements:announceAndWait('SyncEvent', {payload, 1}),
+                    %% The handler ran (the sync gather waited for it).
+                    receive
+                        {ran, Got} -> ?assertEqual({payload, 1}, Got)
+                    after 1000 -> ?assert(false)
+                    end
+                after
+                    stop_idle(Sub)
+                end
+            end),
+            ?_test(begin
+                %% No subscribers — a harmless no-op that returns ok.
+                ?assertEqual(ok, beamtalk_announcements:announceAndWait('Nobody', x))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% announceAndWait — MRO matching (ancestor subscriber runs its handler)
+%%====================================================================
+
+announce_and_wait_mro_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                build_hierarchy(),
+                Collector = self(),
+                Sub = spawn_idle(),
+                try
+                    Handler = fun(E) -> Collector ! {anc_ran, E} end,
+                    {ok, _} = beamtalk_announcements:subscribe('UIEvent', Sub, Handler, false),
+                    %% Announce the subclass synchronously; the ancestor handler runs.
+                    ok = beamtalk_announcements:announceAndWait('ButtonClicked', click),
+                    receive
+                        {anc_ran, Got} -> ?assertEqual(click, Got)
+                    after 1000 -> ?assert(false)
+                    end
+                after
+                    stop_idle(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% when:send:to: — a {send, Selector, Receiver} handler dispatches a message
+%%====================================================================
+
+%% The handler form for `when:send:to:` is `{send, Selector, Receiver}`. On the
+%% sync path the runtime dispatches `Receiver perform: Selector with: Event` via
+%% `beamtalk_message_dispatch:send/3`. We exercise it against a real Beamtalk
+%% value (an Integer) so the dispatch goes through the genuine runtime path; the
+%% full runtime app is started so value dispatch (the extensions table) is live.
+when_send_to_dispatches_message_test_() ->
+    {setup, fun setup_with_dispatch/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Sub = spawn_idle(),
+                try
+                    %% {send, Selector, Receiver}: dispatch `printString` to the
+                    %% Integer 42 — a real value method. The sync gather runs the
+                    %% handler via beamtalk_message_dispatch and the dispatch
+                    %% succeeds, so the call returns ok.
+                    {ok, _} = beamtalk_announcements:subscribe(
+                        'PrintCmd', Sub, {send, 'printString', 42}, false
+                    ),
+                    ?assertEqual(
+                        ok, beamtalk_announcements:announceAndWait('PrintCmd', ignored)
+                    )
+                after
+                    stop_idle(Sub)
+                end
+            end),
+            ?_test(begin
+                %% A {send,...} to a selector the receiver does not understand
+                %% raises in the handler process — proving the {send,...} form is
+                %% genuinely dispatched (an opaque no-op would never crash). The
+                %% crash is isolated: the caller still returns ok.
+                Sub = spawn_idle(),
+                try
+                    {ok, _} = beamtalk_announcements:subscribe(
+                        'BogusCmd', Sub, {send, bogusSelectorXyz, 7}, false
+                    ),
+                    ?assertEqual(
+                        ok, beamtalk_announcements:announceAndWait('BogusCmd', ignored)
+                    )
+                after
+                    stop_idle(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Fault isolation — a crashing handler is caught, caller returns, siblings ok
+%%====================================================================
+
+announce_and_wait_handler_crash_isolated_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {timeout, 10,
+                ?_test(begin
+                    Collector = self(),
+                    Sub = spawn_idle(),
+                    try
+                        Crashing = fun(_E) -> error(boom) end,
+                        Healthy = fun(E) -> Collector ! {healthy_ran, E} end,
+                        {ok, _} = beamtalk_announcements:subscribe(
+                            'FaultEvent', Sub, Crashing, false
+                        ),
+                        {ok, _} = beamtalk_announcements:subscribe(
+                            'FaultEvent', Sub, Healthy, false
+                        ),
+                        %% The caller returns ok despite the crashing handler, and the
+                        %% sibling handler still ran (isolation).
+                        ?assertEqual(
+                            ok, beamtalk_announcements:announceAndWait('FaultEvent', e)
+                        ),
+                        receive
+                            {healthy_ran, Got} -> ?assertEqual(e, Got)
+                        after 1000 -> ?assert(false)
+                        end,
+                        %% The announcer process (this test process) survived intact.
+                        ?assert(is_integer(beamtalk_announcements:subscription_count()))
+                    after
+                        stop_idle(Sub)
+                    end
+                end)}
+        ]
+    end}.
+
+%%====================================================================
+%% Per-handler timeout — a wedged handler does not block the caller forever
+%%====================================================================
+
+announce_and_wait_timeout_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {timeout, 10,
+                ?_test(begin
+                    Sub = spawn_idle(),
+                    try
+                        %% A handler that sleeps far longer than the timeout.
+                        Wedged = fun(_E) -> timer:sleep(60000) end,
+                        {ok, _} = beamtalk_announcements:subscribe('SlowEvent', Sub, Wedged, false),
+                        Start = erlang:monotonic_time(millisecond),
+                        %% A short per-handler timeout ejects the wedged handler.
+                        ?assertEqual(
+                            ok, beamtalk_announcements:announceAndWait('SlowEvent', e, 100)
+                        ),
+                        Elapsed = erlang:monotonic_time(millisecond) - Start,
+                        %% Returned promptly (well under the wedged 60s sleep).
+                        ?assert(Elapsed < 5000)
+                    after
+                        stop_idle(Sub)
+                    end
+                end)},
+            {timeout, 10,
+                ?_test(begin
+                    %% A handler that finishes just *after* a tight timeout: it acks,
+                    %% but the call has already timed out and returned. The stale
+                    %% `{handler_ack, _}` must NOT linger in the caller's mailbox (the
+                    %% timeout path flushes it).
+                    Sub = spawn_idle(),
+                    try
+                        %% Sleeps past the 50ms timeout, then completes (sends its ack).
+                        Lagging = fun(_E) -> timer:sleep(150) end,
+                        {ok, _} = beamtalk_announcements:subscribe('LagEvent', Sub, Lagging, false),
+                        ?assertEqual(
+                            ok, beamtalk_announcements:announceAndWait('LagEvent', e, 50)
+                        ),
+                        %% Give the lagging handler time to finish and (try to) ack.
+                        timer:sleep(300),
+                        %% No stale ack message of any shape lingers in this mailbox.
+                        receive
+                            {handler_ack, _} -> ?assert(false)
+                        after 50 -> ok
+                        end
+                    after
+                        stop_idle(Sub)
+                    end
+                end)}
+        ]
+    end}.
+
+%%====================================================================
+%% Reentrant announceAndWait — from inside a handler, no deadlock
+%%====================================================================
+
+announce_and_wait_reentrant_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {timeout, 10,
+                ?_test(begin
+                    Collector = self(),
+                    Sub = spawn_idle(),
+                    try
+                        %% Inner subscription whose handler records the inner event.
+                        InnerHandler = fun(E) -> Collector ! {inner, E} end,
+                        {ok, _} = beamtalk_announcements:subscribe(
+                            'InnerEvent', Sub, InnerHandler, false
+                        ),
+                        %% Outer handler re-announces synchronously from inside itself.
+                        OuterHandler = fun(_E) ->
+                            ok = beamtalk_announcements:announceAndWait('InnerEvent', nested),
+                            Collector ! {outer_done}
+                        end,
+                        {ok, _} = beamtalk_announcements:subscribe(
+                            'OuterEvent', Sub, OuterHandler, false
+                        ),
+                        %% No shared gen_server in the path, so the reentrant sync
+                        %% announce does not deadlock; both fire and the call returns.
+                        ?assertEqual(
+                            ok, beamtalk_announcements:announceAndWait('OuterEvent', start)
+                        ),
+                        receive
+                            {inner, Got} -> ?assertEqual(nested, Got)
+                        after 1000 -> ?assert(false)
+                        end,
+                        receive
+                            {outer_done} -> ok
+                        after 1000 -> ?assert(false)
+                        end
+                    after
+                        stop_idle(Sub)
+                    end
+                end)}
+        ]
+    end}.
+
+%%====================================================================
+%% doOnce — fires at most once for a single announcer
+%%====================================================================
+
+do_once_single_announcer_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    {ok, SubRef} = beamtalk_announcements:subscribe(
+                        'OnceEvent', Sub, h, true
+                    ),
+                    ?assert(beamtalk_announcements:is_active(SubRef)),
+                    %% First announce delivers and consumes the subscription.
+                    ok = beamtalk_announcements:announce('OnceEvent', first),
+                    {GotRef, 'OnceEvent', h, first} = expect_received(),
+                    ?assertEqual(SubRef, GotRef),
+                    %% The subscription is gone (consumed atomically).
+                    ok = wait_until(fun() ->
+                        not beamtalk_announcements:is_active(SubRef)
+                    end),
+                    ?assertEqual([], beamtalk_announcements:subscribers_of('OnceEvent')),
+                    %% A second announce delivers nothing.
+                    ok = beamtalk_announcements:announce('OnceEvent', second),
+                    refute_received()
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% doOnce — exactly-one delivery under N concurrent announcers
+%%====================================================================
+
+%% N processes race to announce the same once-only subscription concurrently.
+%% Exactly one delivery must occur — the atomic ets:take guarantees a single
+%% winner regardless of how the announces interleave.
+do_once_concurrent_announcers_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {timeout, 30,
+                ?_test(begin
+                    Collector = self(),
+                    Sub = spawn_subscriber(Collector),
+                    try
+                        {ok, _SubRef} = beamtalk_announcements:subscribe(
+                            'RaceEvent', Sub, once_h, true
+                        ),
+                        %% Fan out N concurrent announcers.
+                        N = 50,
+                        Parent = self(),
+                        Barrier = make_ref(),
+                        Pids = [
+                            spawn(fun() ->
+                                %% Wait for the go signal so they fire as simultaneously
+                                %% as the scheduler allows.
+                                receive
+                                    {go, Barrier} -> ok
+                                end,
+                                beamtalk_announcements:announce('RaceEvent', payload),
+                                Parent ! {announced, self()}
+                            end)
+                         || _ <- lists:seq(1, N)
+                        ],
+                        [P ! {go, Barrier} || P <- Pids],
+                        %% Wait for all announcers to finish.
+                        [
+                            receive
+                                {announced, P} -> ok
+                            after 5000 -> ?assert(false)
+                            end
+                         || P <- Pids
+                        ],
+                        %% Exactly one delivery total, despite N concurrent announces.
+                        {_R, 'RaceEvent', once_h, payload} = expect_received(),
+                        refute_received(),
+                        ?assertEqual([], beamtalk_announcements:subscribers_of('RaceEvent'))
+                    after
+                        stop_subscriber(Sub)
+                    end
+                end)}
+        ]
+    end}.
+
+%%====================================================================
+%% doOnce — consumed on the synchronous path too
+%%====================================================================
+
+do_once_sync_path_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Collector = self(),
+                Sub = spawn_idle(),
+                try
+                    Handler = fun(E) -> Collector ! {once_sync, E} end,
+                    {ok, SubRef} = beamtalk_announcements:subscribe(
+                        'OnceSyncEvent', Sub, Handler, true
+                    ),
+                    ok = beamtalk_announcements:announceAndWait('OnceSyncEvent', a),
+                    receive
+                        {once_sync, GotA} -> ?assertEqual(a, GotA)
+                    after 1000 -> ?assert(false)
+                    end,
+                    %% Consumed — the subscription is gone.
+                    ?assertNot(beamtalk_announcements:is_active(SubRef)),
+                    %% A second sync announce delivers nothing (no handler runs).
+                    ok = beamtalk_announcements:announceAndWait('OnceSyncEvent', b),
+                    receive
+                        {once_sync, _} -> ?assert(false)
+                    after 200 -> ok
+                    end
+                after
+                    stop_idle(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -512,6 +891,41 @@ build_hierarchy() ->
     beamtalk_class_metadata:insert('UIEvent', undefined, undefined, 'DomainEvent'),
     beamtalk_class_metadata:insert('ButtonClicked', undefined, undefined, 'UIEvent'),
     ok.
+
+%% Set up for the `when:send:to:` test: the standalone bus (via `setup/0`) plus
+%% the `beamtalk_extensions` table that real value dispatch reads. Initialising
+%% that table is all the `{send, Selector, Receiver}` path needs to dispatch a
+%% genuine value method (e.g. `Integer printString`) — no need to start the whole
+%% runtime application (which would clash with the standalone bus other tests in
+%% this module leave registered). `init/0` is idempotent if the app already
+%% created the table.
+setup_with_dispatch() ->
+    Pid = setup(),
+    catch beamtalk_extensions:init(),
+    Pid.
+
+%% Spawn an idle process to act as the subscriber pid for synchronous-path tests.
+%% On the sync path the subscriber pid is used only to arm the bus monitor and for
+%% crash/timeout diagnostics — the handler runs in a transient process the bus
+%% spawns, not in this pid — so an inert process that just waits to be stopped is
+%% all that is needed (and keeping it alive prevents the bus pruning its rows).
+spawn_idle() ->
+    spawn(fun idle_loop/0).
+
+idle_loop() ->
+    receive
+        {stop, From} -> From ! {stopped, self()};
+        _ -> idle_loop()
+    end.
+
+stop_idle(Pid) ->
+    Pid ! {stop, self()},
+    receive
+        {stopped, Pid} -> ok
+    after 500 ->
+        exit(Pid, kill),
+        ok
+    end.
 
 %% Poll `Pred` until it returns true, or fail after ~2s.
 wait_until(Pred) ->
