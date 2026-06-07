@@ -878,18 +878,26 @@ disarm_monitor(SubscriberPid, #state{monitors = Monitors} = State) ->
 
 -doc """
 Prune every subscription owned by a dead `Pid` (on its `DOWN`) and drop its
-monitor entry. Removes the rows from both tables.
+monitor entry. Removes the rows from both tables. The table read is guarded:
+a `DOWN` can arrive while the subscription table is momentarily absent (during
+the crash→restart heir hand-off, or test teardown), in which case there is
+nothing to prune — only the monitor bookkeeping is dropped.
 """.
 -spec prune_subscriber(pid(), #state{}) -> #state{}.
 prune_subscriber(Pid, #state{monitors = Monitors} = State) ->
     %% Find and remove all of this pid's subscription rows from both tables.
-    Rows = ets:match_object(?SUBS_TABLE, {'_', '_', Pid, '_', '_'}),
-    lists:foreach(
-        fun({SubRef, AnnouncementClass, _Pid, _Handler, _Once}) ->
-            remove_subscription(SubRef, AnnouncementClass)
-        end,
-        Rows
-    ),
+    case ets:whereis(?SUBS_TABLE) of
+        undefined ->
+            ok;
+        _ ->
+            Rows = ets:match_object(?SUBS_TABLE, {'_', '_', Pid, '_', '_'}),
+            lists:foreach(
+                fun({SubRef, AnnouncementClass, _Pid, _Handler, _Once}) ->
+                    remove_subscription(SubRef, AnnouncementClass)
+                end,
+                Rows
+            )
+    end,
     State#state{monitors = maps:remove(Pid, Monitors)}.
 
 %%====================================================================
