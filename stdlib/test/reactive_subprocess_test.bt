@@ -43,6 +43,9 @@ TestCase subclass: ReactiveSubprocessTest
   partialLineScript =>
     self.isUnix ifTrue: ["printf hello"] ifFalse: ["<nul set /p =hello"]
 
+  partialStderrScript =>
+    self.isUnix ifTrue: ["printf hello >&2"] ifFalse: ["<nul set /p =hello>&2"]
+
   stdoutStderrScript =>
     self.isUnix ifTrue: [
       "echo out; echo err >&2"
@@ -53,7 +56,8 @@ TestCase subclass: ReactiveSubprocessTest
       "echo $BT_TEST_SEED; pwd"
     ] ifFalse: ["echo %BT_TEST_SEED%& cd"]
 
-  envDir => self.isUnix ifTrue: ["/tmp"] ifFalse: [System getEnv: "TEMP"]
+  envDir =>
+    self.isUnix ifTrue: [File tempDirectory] ifFalse: [System getEnv: "TEMP"]
 
   // cat executable: echoes stdin to stdout.
   // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
@@ -177,6 +181,45 @@ TestCase subclass: ReactiveSubprocessTest
     ])
     self assert: delegate stop equals: #ok
     self assert: proc stop equals: #ok
+
+  testPartialStderrLineFlushedOnExit =>
+    // Subprocess exits with a partial stderr fragment (no trailing newline).
+    // push_pending(stderr, ...) flushes the fragment as a line on exit (lines 418-419).
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self shellExe
+      args: (self shellArgs: self partialStderrScript)
+      notify: delegate) unwrap
+    self waitForExit: delegate from: proc
+    self assert: delegate stderrLines equals: #("hello")
+    self assert: delegate stop equals: #ok
+    self assert: proc stop equals: #ok
+
+  testOpenWithNonStringCommandRaisesTypeError =>
+    // Non-binary command argument fails the is_binary/1 guard in dispatch/3 (lines 114-115).
+    delegate := StubDelegate spawn
+    @expect type
+    self
+      should: [
+        ReactiveSubprocess
+          open: 42
+          args: #()
+          notify: delegate
+      ]
+      raise: #type_error
+    self assert: delegate stop equals: #ok
+
+  testStopWithoutCloseTerminatesPort =>
+    // Stop a running process without calling close first.
+    // terminate/2 runs the port_closed=false branch (lines 309-321) and cleans up the port.
+    delegate := StubDelegate spawn
+    proc := (ReactiveSubprocess
+      open: self sleepExe
+      args: self sleepArgs
+      notify: delegate) unwrap
+    self assert: proc exitCode equals: nil
+    self assert: proc stop equals: #ok
+    self assert: delegate stop equals: #ok
 
   // Helper: poll up to 50 times (10ms each) for delegate exitReceived.
   // Uses timesRepeat: to work around mutable locals not threading across block
