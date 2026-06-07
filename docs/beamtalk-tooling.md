@@ -831,11 +831,17 @@ just web-setup    # mix deps.get + asset build
 just web <name>   # Start the LiveView IDE, connecting to workspace <name>
 ```
 
-**Current capabilities (Wave 1):**
+**Current capabilities (Waves 1–4):**
 
 - **Eval pane** — expression evaluation returning structured results, display-formatted with the same surface-shared rules as CLI / REPL / MCP
 - **Transcript pane** — real-time captured output via `beamtalk_repl_subscriptions`
-- **Session lifecycle** — each browser tab gets its own workspace-supervised session; bindings and loaded classes persist across evals
+- **Bindings pane** — live session bindings list, updated in real time via the bindings subscription stream; object-valued bindings offer an Inspect action
+- **Inspector pane** — structured field view of live objects; object-valued fields are drillable (follow references into nested objects)
+- **Method Editor pane** — edit, save, and compile methods via the write-surface (ADR 0082); failed compiles render the structured `#beamtalk_error{}`
+- **Changes pane** — ChangeLog view of pending edits; Flush persists all changes to disk
+- **Per-tab session isolation** — each browser tab gets its own workspace-supervised session via a per-tab `sessionStorage` token; bindings and loaded classes persist across evals
+- **Session resume** — reconnecting tabs (LiveView reconnect, page reload) resume their existing session within a grace window instead of starting fresh
+- **Hot-reload coherence** — a method saved in one tab is immediately visible to evals in all tabs (inherent to the shared workspace node in the Attach topology)
 
 **Requirements:** Elixir ≥ 1.17 on OTP 27. See `editors/liveview/README.md` and `CONTRIBUTING.md` for setup.
 
