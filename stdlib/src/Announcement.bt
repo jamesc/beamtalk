@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Announcement — base event type for the typed Observer substrate (ADR 0093).
+///
+/// An Announcement is an immutable, typed payload representing "something
+/// happened." Applications subclass it and add `field:` slots to carry event
+/// data; dispatch matches on the event's class hierarchy (MRO), so subscribing
+/// to a superclass receives events from all subclasses.
+///
+/// As a `Value`, announcements compare structurally (`==`); dispatch keys on
+/// event *class* + subscription, never on event equality, so structural
+/// comparison is harmless. The `Value` base gives keyword-constructor
+/// ergonomics (`PriceChanged newPrice: 42`) and `field:`/`with*:` for free.
+///
+/// ## Examples
+/// ```beamtalk
+/// Value subclass: Announcement   // (this base — abstract, not instantiated)
+///
+/// Announcement subclass: PriceChanged
+///   field: newPrice :: Number = nil
+///
+/// event := PriceChanged newPrice: 42
+/// event newPrice          // => 42
+/// event class             // => PriceChanged
+/// ```
+///
+/// ## Subclassing
+/// ```beamtalk
+/// Announcement subclass: UIEvent
+/// UIEvent subclass: ButtonClicked
+///   field: buttonId :: String = ""
+///
+/// // Subscribe to UIEvent, receive ButtonClicked (MRO matching):
+/// announcer when: UIEvent do: [:e | e inspect printNl]
+/// announcer announce: (ButtonClicked buttonId: "submit")
+/// ```
+abstract Value subclass: Announcement

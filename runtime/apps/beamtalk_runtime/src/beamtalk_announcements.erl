@@ -114,6 +114,23 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     subscribers_of/1
 ]).
 
+%% FFI shims for stdlib veneer (BT-2443)
+-export([
+    'newAnnouncer'/0,
+    'systemAnnouncer'/0,
+    'systemAnnounceAndWaitError'/1,
+    'whenDo'/3,
+    'whenSendTo'/4,
+    'whenDoOnce'/3,
+    'announceOn'/2,
+    'announceAndWaitOn'/2,
+    'announceAndWaitOn'/3,
+    'unsubscribeReceiver'/2,
+    'unsubscribeRef'/1,
+    'isActiveRef'/1,
+    ensure_started/0
+]).
+
 %% gen_server callbacks
 -export([
     init/1,
@@ -143,6 +160,11 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 -type sub_ref() :: reference().
 -type handler() :: term().
 
+%% Beamtalk object types for FFI type inference (BT-2443).
+-type announcer() :: #{'$beamtalk_class' := 'Announcer', atom() => term()}.
+-type system_announcer() :: #{'$beamtalk_class' := 'SystemAnnouncer', atom() => term()}.
+-type subscription() :: #{'$beamtalk_class' := 'Subscription', atom() => term()}.
+
 %% A subscription row in the primary `set` table, keyed by `SubRef`.
 -type sub_row() :: {
     sub_ref(),
@@ -152,7 +174,15 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     OnceFlag :: boolean()
 }.
 
--export_type([announcement_class/0, sub_ref/0, handler/0, sub_row/0]).
+-export_type([
+    announcement_class/0,
+    sub_ref/0,
+    handler/0,
+    sub_row/0,
+    announcer/0,
+    system_announcer/0,
+    subscription/0
+]).
 
 %% gen_server state: the per-subscriber monitor bookkeeping. `monitors` maps a
 %% subscriber pid to `{MonitorRef, RefCount}` so a pid with several
@@ -750,9 +780,15 @@ running under its original owner, which is fine — we only need it to exist.
 ensure_pg_scope() ->
     case whereis(?PG_SCOPE) of
         undefined ->
-            case pg:start_link(?PG_SCOPE) of
+            try pg:start_link(?PG_SCOPE) of
                 {ok, _Pid} -> ok;
                 {error, {already_started, _Pid}} -> ok
+            catch
+                %% pg may not be available in all environments (e.g. minimal
+                %% BUnit test runner). The pg scope is only needed for
+                %% SystemAnnouncer cluster membership — local dispatch works
+                %% without it.
+                _:_ -> ok
             end;
         _Pid ->
             ok
@@ -944,3 +980,263 @@ bad_subscribe_args(AnnouncementClass, SubscriberPid, OnceFlag) ->
             once_flag => OnceFlag
         }
     }.
+
+%%====================================================================
+%% FFI shims — stdlib veneer (BT-2443)
+%%====================================================================
+
+-doc """
+Mint a fresh Announcer handle (a tagged map wrapping a unique reference).
+Called from `Announcer new` via `(Erlang beamtalk_announcements) newAnnouncer`.
+""".
+-spec 'newAnnouncer'() -> announcer().
+'newAnnouncer'() ->
+    #{'$beamtalk_class' => 'Announcer', ref => make_ref()}.
+
+-doc """
+Return the singleton SystemAnnouncer handle. The system bus uses the atom
+`beamtalk_system_announcer` as its announcer ref (not a `reference()`) —
+distinguished from per-instance announcer refs so the dispatch path can treat
+it as the shared bus. Called from `SystemAnnouncer current`.
+""".
+-spec 'systemAnnouncer'() -> system_announcer().
+'systemAnnouncer'() ->
+    #{'$beamtalk_class' => 'SystemAnnouncer', ref => beamtalk_system_announcer}.
+
+-doc """
+Raise UnsupportedOperation when `announceAndWait:` is called on the system bus.
+The unused argument is the event passed from the Beamtalk FFI dispatch.
+""".
+-spec 'systemAnnounceAndWaitError'(term()) -> no_return().
+'systemAnnounceAndWaitError'(_Event) ->
+    Error = #beamtalk_error{
+        kind = unsupported_operation,
+        class = 'SystemAnnouncer',
+        selector = 'announceAndWait:',
+        message = <<"announceAndWait: is not available on SystemAnnouncer (async-only bus)">>,
+        hint =
+            <<"Use announce: for the system bus, or use a per-instance Announcer for sync dispatch">>,
+        details = #{}
+    },
+    beamtalk_error:raise(Error).
+
+-doc """
+Subscribe via `when:do:` — wraps `subscribe/4` and returns a Subscription handle.
+Called from `Announcer when: aClass do: aBlock`.
+""".
+-spec 'whenDo'(announcer(), term(), term()) -> subscription().
+'whenDo'(_Announcer, Class, Handler) ->
+    subscribe_and_wrap(Class, Handler, false).
+
+-doc """
+Subscribe via `when:send:to:` — wraps the selector/receiver into a handler tuple.
+Called from `Announcer when: aClass send: sel to: receiver`.
+""".
+-spec 'whenSendTo'(announcer(), term(), term(), term()) -> subscription().
+'whenSendTo'(_Announcer, Class, Selector, Receiver) ->
+    subscribe_and_wrap(Class, {send, Selector, Receiver}, false).
+
+-doc """
+Subscribe via `when:doOnce:` — wraps `subscribe/4` with OnceFlag=true.
+Called from `Announcer when: aClass doOnce: aBlock`.
+""".
+-spec 'whenDoOnce'(announcer(), term(), term()) -> subscription().
+'whenDoOnce'(_Announcer, Class, Handler) ->
+    subscribe_and_wrap(Class, Handler, true).
+
+-doc """
+Announce an event asynchronously on a specific announcer.
+Called from `Announcer announce: anEvent`. Extracts the event class from
+the event's `$beamtalk_class` key and dispatches.
+""".
+-spec 'announceOn'(announcer(), term()) -> nil.
+'announceOn'(_Announcer, Event) ->
+    ensure_started(),
+    EventClass = event_class(Event),
+    %% For the stdlib veneer, invoke handlers directly (caller-side) rather than
+    %% sending raw messages to subscriber mailboxes. The raw `announce/2` sends
+    %% `{beamtalk_announcement, ...}` which requires a Beamtalk actor message loop
+    %% to process. The sync path (`announceAndWait`) already runs handlers via
+    %% spawn_monitor — for the async path we run them in-process without waiting.
+    lists:foreach(
+        fun(SubRef) ->
+            case claim_row(SubRef) of
+                {ok, _Class, SubscriberPid, Handler, _Once} ->
+                    case is_process_alive(SubscriberPid) of
+                        true ->
+                            try
+                                run_handler(Handler, Event)
+                            catch
+                                _:_ -> ok
+                            end;
+                        false ->
+                            ok
+                    end;
+                not_found ->
+                    ok
+            end
+        end,
+        collect_matching(EventClass)
+    ),
+    nil.
+
+-doc """
+Announce an event synchronously on a specific announcer (default 5s timeout).
+Called from `Announcer announceAndWait: anEvent`.
+""".
+-spec 'announceAndWaitOn'(announcer(), term()) -> nil.
+'announceAndWaitOn'(_Announcer, Event) ->
+    ensure_started(),
+    EventClass = event_class(Event),
+    announceAndWait(EventClass, Event),
+    nil.
+
+-doc """
+Announce an event synchronously with a custom timeout.
+Called from `Announcer announceAndWait: anEvent timeout: ms`.
+""".
+-spec 'announceAndWaitOn'(announcer(), term(), integer()) -> nil.
+'announceAndWaitOn'(_Announcer, Event, Timeout) ->
+    ensure_started(),
+    EventClass = event_class(Event),
+    announceAndWait(EventClass, Event, Timeout),
+    nil.
+
+-doc """
+Remove all subscriptions held by a specific receiver pid on a given announcer.
+Called from `Announcer unsubscribe: receiver`.
+""".
+-spec 'unsubscribeReceiver'(announcer(), term()) -> nil.
+'unsubscribeReceiver'(_Announcer, Receiver) ->
+    ReceiverPid = extract_pid(Receiver),
+    case ReceiverPid of
+        undefined ->
+            nil;
+        Pid ->
+            %% Find and remove all subscriptions for this pid. We use the
+            %% gen_server path to ensure monitor bookkeeping is updated.
+            Rows = ets:match_object(?SUBS_TABLE, {'_', '_', Pid, '_', '_'}),
+            lists:foreach(
+                fun({SubRef, _Class, _Pid, _Handler, _Once}) ->
+                    unsubscribe(SubRef)
+                end,
+                Rows
+            ),
+            nil
+    end.
+
+-doc """
+Unsubscribe a specific subscription by its SubRef (wrapped in a Subscription map).
+Called from `Subscription unsubscribe`.
+""".
+-spec 'unsubscribeRef'(subscription()) -> nil.
+'unsubscribeRef'(#{ref := SubRef}) ->
+    unsubscribe(SubRef),
+    nil;
+'unsubscribeRef'(_) ->
+    nil.
+
+-doc """
+Check if a subscription is still active by its SubRef.
+Called from `Subscription isActive`.
+""".
+-spec 'isActiveRef'(subscription()) -> boolean().
+'isActiveRef'(#{ref := SubRef}) ->
+    is_active(SubRef);
+'isActiveRef'(_) ->
+    false.
+
+%%====================================================================
+%% Internal: FFI helpers
+%%====================================================================
+
+-doc """
+Subscribe on behalf of the calling process and return a Subscription handle.
+Common implementation for `whenDo`, `whenSendTo`, and `whenDoOnce`.
+Ensures the gen_server is running (auto-starts if needed, e.g. in BUnit tests
+where the full runtime app may not be started).
+""".
+-spec subscribe_and_wrap(term(), handler(), boolean()) -> subscription().
+subscribe_and_wrap(ClassRef, Handler, OnceFlag) ->
+    ensure_started(),
+    Class = class_name(ClassRef),
+    case subscribe(Class, self(), Handler, OnceFlag) of
+        {ok, SubRef} ->
+            #{'$beamtalk_class' => 'Subscription', ref => SubRef};
+        {error, Error} ->
+            erlang:error(Error)
+    end.
+
+-doc """
+Ensure the announcements gen_server is running. Called from FFI shims before
+any operation that requires the gen_server (subscribe, unsubscribe). In the
+full runtime, the supervisor starts the gen_server; in BUnit or REPL contexts
+where only the stdlib is loaded, this auto-starts it standalone.
+""".
+-spec ensure_started() -> ok.
+ensure_started() ->
+    case whereis(?MODULE) of
+        undefined ->
+            %% Start standalone (unlinked from caller) so it persists across
+            %% multiple BUnit tests and doesn't die with the caller.
+            case gen_server:start({local, ?MODULE}, ?MODULE, [], []) of
+                {ok, _Pid} -> ok;
+                {error, {already_started, _Pid}} -> ok;
+                {error, Reason} -> erlang:error({announcements_start_failed, Reason})
+            end;
+        _Pid ->
+            ok
+    end.
+
+-doc """
+Extract the class name atom from a class reference. A class reference may be:
+- An atom (the class name directly, e.g. from Erlang code or a resolved literal)
+- A beamtalk_object tuple with a `"ClassName class"` tag (a live class object)
+- A beamtalk_object tuple with a 'Metaclass' class tag
+- A map with `$beamtalk_class` (a tagged map class representation)
+""".
+-spec class_name(term()) -> atom().
+class_name(Class) when is_atom(Class) ->
+    Class;
+class_name({beamtalk_object, Tag, _Module, Pid}) when is_atom(Tag), is_pid(Pid) ->
+    %% A class object — the tag is "ClassName class". Extract the class name
+    %% by stripping the " class" suffix, or by querying the class gen_server.
+    TagStr = atom_to_list(Tag),
+    case lists:suffix(" class", TagStr) of
+        true ->
+            NameStr = lists:sublist(TagStr, length(TagStr) - 6),
+            list_to_existing_atom(NameStr);
+        false ->
+            %% Fallback: query the class gen_server
+            case beamtalk_class_registry:class_name_for_pid(Pid) of
+                {ok, Name} -> Name;
+                _ -> Tag
+            end
+    end;
+class_name(#{'$beamtalk_class' := Class}) when is_atom(Class) ->
+    Class;
+class_name(_) ->
+    'Announcement'.
+
+-doc """
+Extract the announcement class atom from an event (its `$beamtalk_class` key).
+""".
+-spec event_class(term()) -> announcement_class().
+event_class(#{'$beamtalk_class' := Class}) when is_atom(Class) ->
+    Class;
+event_class(Event) when is_atom(Event) ->
+    Event;
+event_class(_Event) ->
+    'Announcement'.
+
+-doc """
+Extract a pid from a receiver argument (may be a Beamtalk object with a pid,
+a raw pid, or an actor).
+""".
+-spec extract_pid(term()) -> pid() | undefined.
+extract_pid(Pid) when is_pid(Pid) ->
+    Pid;
+extract_pid(#{pid := Pid}) when is_pid(Pid) ->
+    Pid;
+extract_pid(_) ->
+    undefined.

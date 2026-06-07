@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_process_navigation).
+-compile(nowarn_export_var_subexpr).
 
 %%% **DDD Context:** Actor System Context
 

@@ -7,6 +7,8 @@
     {env, [
         {classes, [
             #{name => 'Actor', module => 'bt@stdlib@actor', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Announcement', module => 'bt@stdlib@announcement', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
+            #{name => 'Announcer', module => 'bt@stdlib@announcer', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Array', module => 'bt@stdlib@array', parent => 'Collection', package => 'stdlib', kind => object, type_params => ['E']},
             #{name => 'AtomicCounter', module => 'bt@stdlib@atomic_counter', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'BEAMError', module => 'bt@stdlib@beamerror', parent => 'Error', package => 'stdlib', kind => object, type_params => []},
@@ -67,12 +69,14 @@
             #{name => 'Stream', module => 'bt@stdlib@stream', parent => 'Object', package => 'stdlib', kind => object, type_params => ['E']},
             #{name => 'String', module => 'bt@stdlib@string', parent => 'Binary', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Subprocess', module => 'bt@stdlib@subprocess', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
+            #{name => 'Subscription', module => 'bt@stdlib@subscription', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'SupervisionNode', module => 'bt@stdlib@supervision_node', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'SupervisionSpec', module => 'bt@stdlib@supervision_spec', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'SupervisionTree', module => 'bt@stdlib@supervision_tree', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'Supervisor', module => 'bt@stdlib@supervisor', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Symbol', module => 'bt@stdlib@symbol', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'System', module => 'bt@stdlib@system', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'SystemAnnouncer', module => 'bt@stdlib@system_announcer', parent => 'Announcer', package => 'stdlib', kind => object, type_params => []},
             #{name => 'SystemNavigation', module => 'bt@stdlib@system_navigation', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TestCase', module => 'bt@stdlib@test_case', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'TestResult', module => 'bt@stdlib@test_result', parent => 'Object', package => 'stdlib', kind => object, type_params => []},

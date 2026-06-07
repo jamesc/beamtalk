@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture: a simple Announcement subclass for announcements tests.
+
+Announcement subclass: TestEvent
+  field: payload :: Integer = 0

@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Subscription — the unsubscribe token returned by `when:do:` et al (ADR 0093).
+///
+/// A `Subscription` is an opaque runtime handle wrapping the subscription's
+/// unique `SubRef`. Each `when:…` returns a *distinct* `Subscription` — a
+/// process may hold several to the same class (Pharo's rule), so
+/// re-subscribing never silently replaces.
+///
+/// Like `Pid` and `Announcer`, a `Subscription` is a `typed Object subclass`
+/// (identity-based, no structural equality). The `SubRef` is the sole piece
+/// of internal state, reached via FFI.
+///
+/// ## Examples
+/// ```beamtalk
+/// sub := announcer when: PriceChanged do: [:e | e printNl]
+/// sub isActive     // => true
+/// sub unsubscribe
+/// sub isActive     // => false
+/// ```
+sealed typed Object subclass: Subscription
+
+  /// Remove exactly this subscription (the SubRef's row) from the bus.
+  /// Idempotent — unsubscribing an already-removed subscription is a no-op.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// sub unsubscribe   // => nil
+  /// ```
+  unsubscribe -> Nil => (Erlang beamtalk_announcements) unsubscribeRef: self
+
+  /// Whether this subscription is still active (the SubRef row exists in ETS).
+  /// Returns `false` after `unsubscribe` or after the subscriber process died.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// sub isActive   // => true
+  /// sub unsubscribe
+  /// sub isActive   // => false
+  /// ```
+  isActive -> Boolean => (Erlang beamtalk_announcements) isActiveRef: self

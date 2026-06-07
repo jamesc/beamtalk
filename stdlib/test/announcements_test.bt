@@ -1,0 +1,104 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Announcements stdlib veneer (BT-2443)
+
+TestCase subclass: AnnouncementsTest
+  field: announcer = nil
+
+  setUp => self withAnnouncer: Announcer new
+
+  // --- Announcer basics ---
+  testAnnouncerNew => self assert: self.announcer class equals: Announcer
+
+  testAnnouncerNewMintsDistinct =>
+    other := Announcer new
+    self deny: (self.announcer == other)
+
+  // --- Subscribe and announce (async) ---
+  testWhenDoSubscribes =>
+    sub := self.announcer when: TestEvent do: [:e | nil]
+    self assert: sub class equals: Subscription
+    self assert: sub isActive equals: true
+    sub unsubscribe
+
+  testAnnounceFiresHandler =>
+    received := AtomicCounter new: #announcementsTestReceived
+    self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
+    self.announcer announce: (TestEvent payload: 42)
+    Timer sleep: 50
+    self assert: received value equals: 42
+    received delete
+
+  // --- Unsubscribe ---
+  testUnsubscribeStopsDelivery =>
+    received := AtomicCounter new: #announcementsTestUnsub
+    sub := self.announcer when: TestEvent do: [:e | received increment]
+    self.announcer announce: (TestEvent payload: 1)
+    Timer sleep: 50
+    sub unsubscribe
+    self.announcer announce: (TestEvent payload: 2)
+    Timer sleep: 50
+    self assert: received value equals: 1
+    received delete
+
+  testUnsubscribeIdempotent =>
+    sub := self.announcer when: TestEvent do: [:e | nil]
+    sub unsubscribe
+    sub unsubscribe
+    self assert: sub isActive equals: false
+
+  // --- isActive ---
+  testIsActiveAfterSubscribe =>
+    sub := self.announcer when: TestEvent do: [:e | nil]
+    self assert: sub isActive equals: true
+    sub unsubscribe
+
+  testIsActiveAfterUnsubscribe =>
+    sub := self.announcer when: TestEvent do: [:e | nil]
+    sub unsubscribe
+    self assert: sub isActive equals: false
+
+  // --- doOnce ---
+  testDoOnceFiresOnce =>
+    received := AtomicCounter new: #announcementsTestDoOnce
+    self.announcer when: TestEvent doOnce: [:e | received increment]
+    self.announcer announce: (TestEvent payload: 1)
+    Timer sleep: 50
+    self.announcer announce: (TestEvent payload: 2)
+    Timer sleep: 50
+    self assert: received value equals: 1
+    received delete
+
+  // --- SystemAnnouncer ---
+  testSystemAnnouncerCurrent =>
+    sys := SystemAnnouncer current
+    self assert: sys class equals: SystemAnnouncer
+
+  testSystemAnnouncerIsAnnouncer =>
+    sys := SystemAnnouncer current
+    self assert: (sys isKindOf: Announcer) equals: true
+
+  testSystemAnnouncerAnnounceAndWaitRaises =>
+    sys := SystemAnnouncer current
+    self should: [
+      sys announceAndWait: (TestEvent payload: 1)
+    ] raise: #unsupported_operation
+
+  // --- announceAndWait (sync) ---
+  testAnnounceAndWaitSynchronous =>
+    received := AtomicCounter new: #announcementsTestSync
+    self.announcer when: TestEvent do: [:e | received incrementBy: e payload]
+    self.announcer announceAndWait: (TestEvent payload: 7)
+    // No sleep needed — announceAndWait is synchronous
+    self assert: received value equals: 7
+    received delete
+
+  // --- MRO matching ---
+  testMROMatchingSubclassDelivery =>
+    received := AtomicCounter new: #announcementsTestMRO
+    self.announcer when: ParentEvent do: [:e | received increment]
+    self.announcer announce: (ChildEvent detail: "test")
+    Timer sleep: 50
+    self assert: received value equals: 1
+    received delete

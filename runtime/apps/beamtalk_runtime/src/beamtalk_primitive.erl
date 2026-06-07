@@ -455,6 +455,14 @@ module_for_value(X) when is_map(X) ->
             'bt@stdlib@workspace_interface';
         'Package' ->
             'bt@stdlib@package';
+        'ErlangModule' ->
+            beamtalk_erlang_proxy;
+        'Announcer' ->
+            'bt@stdlib@announcer';
+        'SystemAnnouncer' ->
+            'bt@stdlib@system_announcer';
+        'Subscription' ->
+            'bt@stdlib@subscription';
         undefined ->
             'bt@stdlib@dictionary';
         Other ->

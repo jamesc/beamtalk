@@ -19,6 +19,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
     matches!(
         name,
         "Actor"
+            | "Announcement"
+            | "Announcer"
             | "Array"
             | "AtomicCounter"
             | "BEAMError"
@@ -79,12 +81,14 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Stream"
             | "String"
             | "Subprocess"
+            | "Subscription"
             | "SupervisionNode"
             | "SupervisionSpec"
             | "SupervisionTree"
             | "Supervisor"
             | "Symbol"
             | "System"
+            | "SystemAnnouncer"
             | "SystemNavigation"
             | "TestCase"
             | "TestResult"
@@ -153,6 +157,64 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "supervisionPolicy".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Default OTP restart policy for this actor class.\n\nReturns `#temporary` by default — the actor is not automatically restarted\non crash. Override in subclasses to declare a different default:\n\n- `#permanent` — always restart (e.g., a database pool)\n- `#transient` — restart only on abnormal exit (e.g., a request handler)\n- `#temporary` — never restart (the default)\n\n## Examples\n```beamtalk\nActor supervisionPolicy           // => #temporary\nDatabasePool supervisionPolicy    // => #permanent (if overridden)\n```".into()) },
                 MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this class is a supervisor.\n\nReturns `false` for Actor subclasses. Supervisor and DynamicSupervisor\nsubclasses override this to return `true`. Used by `SupervisionSpec childSpec`\nto determine OTP `type` (`#worker` vs `#supervisor`) and `shutdown` timeout.\n\n## Examples\n```beamtalk\nCounter isSupervisor   // => false\nWebApp isSupervisor    // => true (if WebApp subclasses Supervisor)\n```".into()) },
                 MethodInfo { selector: "supervisionSpec".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![], doc: Some("Return a SupervisionSpec for this actor class with default settings.\n\nCreates a SupervisionSpec with `actorClass` set to the receiver and\n`restart` set from `supervisionPolicy`. Use the fluent `with*:` API to\noverride per-child settings:\n\n## Examples\n```beamtalk\nDatabasePool supervisionSpec\n    // => SupervisionSpec with actorClass: DatabasePool, restart: #temporary\n\nDatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Announcement".into(),
+        ClassInfo {
+            name: "Announcement".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: true,
+            is_typed: false,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Announcer".into(),
+        ClassInfo {
+            name: "Announcer".into(),
+            superclass: Some("Object".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "when:do:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Subscription".into()), param_types: vec![Some("Class".into()), Some("Block".into())], doc: Some("Subscribe: deliver announcements of `aClass` (or any subclass, via MRO\nmatching) to the calling process by evaluating `aBlock` with the event.\n\nReturns a `Subscription` token for later unsubscription. Each call mints\na distinct subscription — re-subscribing never silently replaces.\n\n## Examples\n```beamtalk\nsub := announcer when: PriceChanged do: [:e | e newPrice printNl]\nsub isActive   // => true\n```".into()) },
+                MethodInfo { selector: "when:send:to:".into(), arity: 3, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Subscription".into()), param_types: vec![Some("Class".into()), Some("Symbol".into()), Some("Object".into())], doc: Some("Subscribe: when an announcement of `aClass` arrives, send `sel` to\n`receiver` with the event as the sole argument.\n\n## Examples\n```beamtalk\nannouncer when: PriceChanged send: #handlePrice: to: handler\n```".into()) },
+                MethodInfo { selector: "when:doOnce:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Subscription".into()), param_types: vec![Some("Class".into()), Some("Block".into())], doc: Some("Subscribe once: deliver exactly one announcement of `aClass`, then\nauto-unsubscribe. Consumed atomically under concurrent announcers.\n\n## Examples\n```beamtalk\nannouncer when: PriceChanged doOnce: [:e | e newPrice printNl]\n```".into()) },
+                MethodInfo { selector: "announce:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Announcement".into())], doc: Some("Announce an event asynchronously (fire-and-forget). Delivers to every\nsubscriber of the event's class or any ancestor (MRO matching).\n\n## Examples\n```beamtalk\nannouncer announce: (PriceChanged newPrice: 42)\n```".into()) },
+                MethodInfo { selector: "announceAndWait:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Announcement".into())], doc: Some("Announce an event synchronously — wait for every handler to complete,\nwith per-handler fault isolation and a default 5s timeout.\n\n## Examples\n```beamtalk\nannouncer announceAndWait: (PriceChanged newPrice: 42)\n```".into()) },
+                MethodInfo { selector: "announceAndWait:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Announcement".into()), Some("Integer".into())], doc: Some("Announce an event synchronously with a custom per-handler timeout (ms).\n\n## Examples\n```beamtalk\nannouncer announceAndWait: event timeout: 10000\n```".into()) },
+                MethodInfo { selector: "unsubscribe:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())], doc: Some("Remove all subscriptions held by `receiver` on this announcer.\n\n## Examples\n```beamtalk\nannouncer unsubscribe: self\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Announcer".into()), param_types: vec![], doc: Some("Create a new, independent Announcer (mints a fresh runtime ref via FFI).\n\n## Examples\n```beamtalk\na := Announcer new\na class   // => Announcer\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],
@@ -2484,6 +2546,33 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Subscription".into(),
+        ClassInfo {
+            name: "Subscription".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "unsubscribe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subscription".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Remove exactly this subscription (the SubRef's row) from the bus.\nIdempotent — unsubscribing an already-removed subscription is a no-op.\n\n## Examples\n```beamtalk\nsub unsubscribe   // => nil\n```".into()) },
+                MethodInfo { selector: "isActive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subscription".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this subscription is still active (the SubRef row exists in ETS).\nReturns `false` after `unsubscribe` or after the subscriber process died.\n\n## Examples\n```beamtalk\nsub isActive   // => true\nsub unsubscribe\nsub isActive   // => false\n```".into()) },
+            ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "SupervisionNode".into(),
         ClassInfo {
             name: "SupervisionNode".into(),
@@ -2721,6 +2810,35 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "erlangVersion".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the OTP/Erlang version string (e.g., \"27\").\n\n## Examples\n```beamtalk\nSystem erlangVersion\n// => _\n```".into()) },
                 MethodInfo { selector: "pid".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the OS process ID as an Integer.\n\n## Examples\n```beamtalk\nSystem pid\n// => _\n```".into()) },
                 MethodInfo { selector: "uniqueId".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return a unique positive monotonic integer.\n\nEach call returns a value strictly greater than any previous call\nwithin this VM instance. Useful for generating unique IDs.\n\n## Examples\n```beamtalk\nSystem uniqueId\n// => _\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "SystemAnnouncer".into(),
+        ClassInfo {
+            name: "SystemAnnouncer".into(),
+            superclass: Some("Announcer".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "announceAndWait:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Announcement".into())], doc: Some("PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.\nThe system bus is async-only (ADR 0093 §1).".into()) },
+                MethodInfo { selector: "announceAndWait:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Announcement".into()), Some("Integer".into())], doc: Some("PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.\nThe system bus is async-only (ADR 0093 §1).".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SystemAnnouncer".into()), param_types: vec![], doc: Some("The singleton system announcer instance.\n\n## Examples\n```beamtalk\nSystemAnnouncer current class   // => SystemAnnouncer\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],

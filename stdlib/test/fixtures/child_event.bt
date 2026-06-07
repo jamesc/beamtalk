@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture: a subclass of ParentEvent for MRO matching tests.
+
+ParentEvent subclass: ChildEvent
+  field: detail :: String = ""
