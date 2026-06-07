@@ -65,6 +65,19 @@ clear_all_subscriptions() ->
 spawn_subscriber(Collector) ->
     spawn(fun() -> subscriber_loop(Collector) end).
 
+%% Stop a spawned subscriber deterministically so it does not linger across test
+%% cases. Sends the `{stop, self()}` message `subscriber_loop/1` handles and
+%% waits for the ack; falls back to `exit/2` if the process is wedged or already
+%% gone.
+stop_subscriber(Sub) ->
+    Sub ! {stop, self()},
+    receive
+        {stopped, Sub} -> ok
+    after 500 ->
+        exit(Sub, kill),
+        ok
+    end.
+
 subscriber_loop(Collector) ->
     receive
         {beamtalk_announcement, SubRef, EventClass, Handler, Event} ->
@@ -103,17 +116,21 @@ deliver_to_subscriber_test_() ->
             ?_test(begin
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
-                {ok, SubRef} = beamtalk_announcements:subscribe(
-                    'PriceChanged', Sub, my_handler, false
-                ),
-                ?assert(beamtalk_announcements:is_active(SubRef)),
+                try
+                    {ok, SubRef} = beamtalk_announcements:subscribe(
+                        'PriceChanged', Sub, my_handler, false
+                    ),
+                    ?assert(beamtalk_announcements:is_active(SubRef)),
 
-                ok = beamtalk_announcements:announce('PriceChanged', {price, 42}),
-                {GotRef, GotClass, GotHandler, GotEvent} = expect_received(),
-                ?assertEqual(SubRef, GotRef),
-                ?assertEqual('PriceChanged', GotClass),
-                ?assertEqual(my_handler, GotHandler),
-                ?assertEqual({price, 42}, GotEvent)
+                    ok = beamtalk_announcements:announce('PriceChanged', {price, 42}),
+                    {GotRef, GotClass, GotHandler, GotEvent} = expect_received(),
+                    ?assertEqual(SubRef, GotRef),
+                    ?assertEqual('PriceChanged', GotClass),
+                    ?assertEqual(my_handler, GotHandler),
+                    ?assertEqual({price, 42}, GotEvent)
+                after
+                    stop_subscriber(Sub)
+                end
             end)
         ]
     end}.
@@ -128,16 +145,20 @@ single_class_match_test_() ->
             ?_test(begin
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
-                {ok, _SubRef} = beamtalk_announcements:subscribe(
-                    'PriceChanged', Sub, h, false
-                ),
-                %% Announcing a *different* class delivers nothing — no MRO/match
-                %% across class names in Phase 1.
-                ok = beamtalk_announcements:announce('OtherEvent', {x, 1}),
-                refute_received(),
-                %% The matching class still delivers.
-                ok = beamtalk_announcements:announce('PriceChanged', {x, 2}),
-                {_R, 'PriceChanged', h, {x, 2}} = expect_received()
+                try
+                    {ok, _SubRef} = beamtalk_announcements:subscribe(
+                        'PriceChanged', Sub, h, false
+                    ),
+                    %% Announcing a *different* class delivers nothing — no
+                    %% MRO/match across class names in Phase 1.
+                    ok = beamtalk_announcements:announce('OtherEvent', {x, 1}),
+                    refute_received(),
+                    %% The matching class still delivers.
+                    ok = beamtalk_announcements:announce('PriceChanged', {x, 2}),
+                    {_R, 'PriceChanged', h, {x, 2}} = expect_received()
+                after
+                    stop_subscriber(Sub)
+                end
             end)
         ]
     end}.
@@ -152,21 +173,25 @@ multiple_subscriptions_same_class_test_() ->
             ?_test(begin
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
-                {ok, SubRef1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
-                {ok, SubRef2} = beamtalk_announcements:subscribe('E', Sub, h2, false),
-                ?assertNotEqual(SubRef1, SubRef2),
-                ?assertEqual(2, beamtalk_announcements:subscription_count()),
-                ?assertEqual(
-                    lists:sort([SubRef1, SubRef2]),
-                    lists:sort(beamtalk_announcements:subscribers_of('E'))
-                ),
+                try
+                    {ok, SubRef1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
+                    {ok, SubRef2} = beamtalk_announcements:subscribe('E', Sub, h2, false),
+                    ?assertNotEqual(SubRef1, SubRef2),
+                    ?assertEqual(2, beamtalk_announcements:subscription_count()),
+                    ?assertEqual(
+                        lists:sort([SubRef1, SubRef2]),
+                        lists:sort(beamtalk_announcements:subscribers_of('E'))
+                    ),
 
-                ok = beamtalk_announcements:announce('E', payload),
-                %% Both subscriptions deliver (one message per subscription).
-                R1 = expect_received(),
-                R2 = expect_received(),
-                Handlers = lists:sort([element(3, R1), element(3, R2)]),
-                ?assertEqual([h1, h2], Handlers)
+                    ok = beamtalk_announcements:announce('E', payload),
+                    %% Both subscriptions deliver (one message per subscription).
+                    R1 = expect_received(),
+                    R2 = expect_received(),
+                    Handlers = lists:sort([element(3, R1), element(3, R2)]),
+                    ?assertEqual([h1, h2], Handlers)
+                after
+                    stop_subscriber(Sub)
+                end
             end)
         ]
     end}.
@@ -181,23 +206,27 @@ unsubscribe_test_() ->
             ?_test(begin
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
-                {ok, SubRef1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
-                {ok, SubRef2} = beamtalk_announcements:subscribe('E', Sub, h2, false),
+                try
+                    {ok, SubRef1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
+                    {ok, SubRef2} = beamtalk_announcements:subscribe('E', Sub, h2, false),
 
-                ok = beamtalk_announcements:unsubscribe(SubRef1),
-                ?assertNot(beamtalk_announcements:is_active(SubRef1)),
-                ?assert(beamtalk_announcements:is_active(SubRef2)),
-                ?assertEqual([SubRef2], beamtalk_announcements:subscribers_of('E')),
+                    ok = beamtalk_announcements:unsubscribe(SubRef1),
+                    ?assertNot(beamtalk_announcements:is_active(SubRef1)),
+                    ?assert(beamtalk_announcements:is_active(SubRef2)),
+                    ?assertEqual([SubRef2], beamtalk_announcements:subscribers_of('E')),
 
-                %% Idempotent: removing the same ref again is a no-op `ok`.
-                ?assertEqual(ok, beamtalk_announcements:unsubscribe(SubRef1)),
-                %% Unknown ref is also a no-op.
-                ?assertEqual(ok, beamtalk_announcements:unsubscribe(make_ref())),
+                    %% Idempotent: removing the same ref again is a no-op `ok`.
+                    ?assertEqual(ok, beamtalk_announcements:unsubscribe(SubRef1)),
+                    %% Unknown ref is also a no-op.
+                    ?assertEqual(ok, beamtalk_announcements:unsubscribe(make_ref())),
 
-                ok = beamtalk_announcements:announce('E', payload),
-                {_R, 'E', h2, payload} = expect_received(),
-                %% Only the surviving subscription delivered.
-                refute_received()
+                    ok = beamtalk_announcements:announce('E', payload),
+                    {_R, 'E', h2, payload} = expect_received(),
+                    %% Only the surviving subscription delivered.
+                    refute_received()
+                after
+                    stop_subscriber(Sub)
+                end
             end)
         ]
     end}.
