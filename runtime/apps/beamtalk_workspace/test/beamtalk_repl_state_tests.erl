@@ -31,6 +31,39 @@ new_with_socket_test() ->
     ?assertEqual(MockSocket, beamtalk_repl_state:get_listen_socket(State)),
     ?assertEqual(5678, beamtalk_repl_state:get_port(State)).
 
+%%% Session origin/debug metadata tests
+
+new_default_client_meta_test() ->
+    %% Absent options → metadata defaults to a map with kind => unknown.
+    State = beamtalk_repl_state:new(undefined, 0),
+    ?assertEqual(#{kind => <<"unknown">>}, beamtalk_repl_state:get_client_meta(State)),
+    ?assertEqual(<<"unknown">>, beamtalk_repl_state:get_client_kind(State)).
+
+new_with_client_meta_test() ->
+    %% client_meta option is stored and surfaced; kind is read from it.
+    Meta = #{kind => <<"repl">>, peer => <<"127.0.0.1:5000">>},
+    State = beamtalk_repl_state:new(undefined, 0, #{client_meta => Meta}),
+    ?assertEqual(Meta, beamtalk_repl_state:get_client_meta(State)),
+    ?assertEqual(<<"repl">>, beamtalk_repl_state:get_client_kind(State)).
+
+new_client_meta_without_kind_defaults_kind_test() ->
+    %% A metadata map missing `kind` is normalised to include kind => unknown.
+    State = beamtalk_repl_state:new(undefined, 0, #{client_meta => #{peer => <<"h:1">>}}),
+    ?assertEqual(<<"unknown">>, beamtalk_repl_state:get_client_kind(State)),
+    ?assertEqual(
+        #{kind => <<"unknown">>, peer => <<"h:1">>}, beamtalk_repl_state:get_client_meta(State)
+    ).
+
+new_client_meta_drops_undefined_values_test() ->
+    %% Keys carrying `undefined` (e.g. a ws peer that could not be formatted) are
+    %% pruned so `Session info` never surfaces an `undefined` value. Known keys
+    %% and a normalised `kind` survive.
+    Meta = #{kind => <<"repl">>, peer => undefined, node => undefined, user => <<"alice">>},
+    State = beamtalk_repl_state:new(undefined, 0, #{client_meta => Meta}),
+    ?assertEqual(
+        #{kind => <<"repl">>, user => <<"alice">>}, beamtalk_repl_state:get_client_meta(State)
+    ).
+
 %%% Bindings tests
 
 get_set_bindings_test() ->

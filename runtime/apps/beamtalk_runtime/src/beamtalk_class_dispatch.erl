@@ -413,19 +413,23 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
 
 -doc """
 Read this process's session context (`beamtalk_session_pid` /
-`beamtalk_session_id`) for explicit propagation into a class-method call.
+`beamtalk_session_id` / `beamtalk_session_meta`) for explicit propagation into a
+class-method call.
 
 ADR 0081 / BT-2379: the eval worker seeds these keys
-(`beamtalk_repl_shell:seed_session_context/2`). Class-method dispatch hops to
+(`beamtalk_repl_shell:seed_session_context/3`). Class-method dispatch hops to
 the class gen_server, so factory methods like `Session current` need the
-caller's context there. We read our own two keys cheaply with `get/1` and pass
-them in the message tuple, avoiding a `process_info(CallerPid, dictionary)`
-full-dictionary copy on the receiving side. Returns `{undefined, undefined}`
-when this process has no seeded context (the common non-REPL case).
+caller's context there — including the origin metadata so `Session current kind`
+reports the real client surface rather than `unknown`. We read our own keys
+cheaply with `get/1` and pass them in the message tuple, avoiding a
+`process_info(CallerPid, dictionary)` full-dictionary copy on the receiving
+side. Returns `{undefined, undefined, undefined}` when this process has no
+seeded context (the common non-REPL case).
 """.
--spec local_session_context() -> {pid() | undefined, binary() | undefined}.
+-spec local_session_context() ->
+    {pid() | undefined, binary() | undefined, map() | undefined}.
 local_session_context() ->
-    {get(beamtalk_session_pid), get(beamtalk_session_id)}.
+    {get(beamtalk_session_pid), get(beamtalk_session_id), get(beamtalk_session_meta)}.
 
 -doc """
 Unwrap a class gen_server call result for use in class_send.

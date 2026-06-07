@@ -233,12 +233,7 @@ do_show_codegen(Expression, State) ->
     Bindings = maps:merge(WorkspaceUserBindings, SessionBindings),
     SourceBin = list_to_binary(Expression),
     ModNameBin = iolist_to_binary(["beamtalk_repl_codegen_", integer_to_list(Counter)]),
-    KnownVars = [
-        atom_to_binary(K, utf8)
-     || K <- maps:keys(Bindings),
-        is_atom(K),
-        not beamtalk_repl_compiler:is_internal_key(K)
-    ],
+    KnownVars = beamtalk_repl_compiler:known_vars(Bindings),
     case beamtalk_repl_compiler:compile_for_codegen(SourceBin, ModNameBin, KnownVars) of
         {ok, CoreErlang, Warnings} ->
             {ok, CoreErlang, Warnings, NewState};

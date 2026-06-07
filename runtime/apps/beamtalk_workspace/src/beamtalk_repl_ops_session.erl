@@ -50,7 +50,10 @@ handle_term(<<"sessions">>, _Params, _Msg, _SessionPid) ->
     end;
 handle_term(<<"clone">>, _Params, _Msg, _SessionPid) ->
     NewSessionId = beamtalk_repl_server:generate_session_id(),
-    case beamtalk_session_sup:start_session(NewSessionId) of
+    %% `clone` is a term-op, i.e. the dist-attached surface — tag the new
+    %% session accordingly so `Workspace sessions` shows where it came from.
+    Meta = #{kind => <<"attach">>, connected_at => erlang:system_time(microsecond)},
+    case beamtalk_session_sup:start_session(NewSessionId, Meta) of
         {ok, _NewPid} ->
             {ok, NewSessionId, <<>>, []};
         {error, Reason} ->

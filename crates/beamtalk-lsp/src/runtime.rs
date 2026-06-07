@@ -621,8 +621,9 @@ async fn perform_auth_handshake(ws: &mut WsStream, cookie: &str) -> Result<(), S
         return Err(format!("unexpected pre-auth message: {auth_required_json}"));
     }
 
-    // Send auth (no resume — LSP always opens fresh)
-    let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
+    // Send auth (no resume — LSP always opens fresh). `client` tags the session
+    // surface so `Workspace sessions` can show it originated from the LSP.
+    let auth_msg = serde_json::json!({"type": "auth", "cookie": cookie, "client": "lsp"});
     let auth_str =
         serde_json::to_string(&auth_msg).map_err(|e| format!("failed to serialise auth: {e}"))?;
     ws.send(Message::Text(auth_str.into()))
