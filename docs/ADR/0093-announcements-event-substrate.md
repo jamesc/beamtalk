@@ -346,6 +346,23 @@ treats as fully privileged, so no boundary is bypassed. The ADR-0091
 implementation issue owns adding `subscribe`/`unsubscribe` to the authoritative
 op list; this ADR fixes the requirement.
 
+**Publish authority (who may *announce*, not just subscribe).** Unlike C#'s
+`event` — where only the declaring type can *raise* — Beamtalk's "an announcer
+is just an object" model does not language-enforce who may publish (nor does
+Pharo's `SystemAnnouncer`). Two boundaries matter:
+
+- **Remote front (the one that matters):** the ADR-0091 push facade is
+  **subscribe-only and must never expose a publish capability**. A remote
+  Observer can listen to curated system events but can never `announce:` onto
+  `SystemAnnouncer` — otherwise it could forge `ActorSpawned`/`ClassRemoved` and
+  mislead other subscribers. Same owner as the subscribe op list above.
+- **In-image:** publishing on `SystemAnnouncer` is unrestricted, but that again
+  implies an Owner/`eval` session — a forger with `eval` doesn't need to forge,
+  so no real boundary is crossed. For *app-level* encapsulation (C#'s "only the
+  owner raises"), the idiomatic answer is an **object-capability split** — the
+  owner privately holds the `Announcer` and hands out a subscribe-only view —
+  not a language keyword. No publish-side enforcement is added in v1.
+
 ### 7. Introspection & navigation — the third navigation sibling
 
 A pub/sub bus that can't be inspected is a black box, which would contradict the
@@ -402,6 +419,21 @@ handles (`Announcer`, `Subscription`) are `Object`; snapshot records
 default subscribersOf: …` grouped by `announcementClass`. The navigator reads
 are gated as a `system`-scope read under ADR 0091, like the supervision
 navigator (§6).
+
+**Future work (not in scope): declarative `event:` emission manifest.** The
+navigator above makes *subscriptions* (who listens) discoverable — a runtime
+fact. The symmetric half — *emissions* (which `Announcement` subclasses a class
+publishes) — is today invisible, buried in `announce:` calls in method bodies.
+A declarative `event:` member (alongside `state:` / `field:` / `classState:`,
+ADR 0067) would make emissions part of a class's published contract, enable
+`announce:` type-checking, and complete the event graph (publishers *and*
+subscribers). It is **deliberately deferred to its own ADR**: it is a new
+declarative member kind touching parser / semantic analysis / reflection /
+codegen, which would break this ADR's "no parser/codegen changes" property, and
+it is a different shape from C#'s `event` (a *manifest* of emitted types, not a
+per-object channel — the channel here is the `Announcer`). A pure-stdlib interim
+(`class emittedEvents -> List(Class)`, hand-declared, no new syntax) can deliver
+the discoverability win first if wanted.
 
 ### REPL session
 
