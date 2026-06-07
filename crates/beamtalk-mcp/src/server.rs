@@ -1041,7 +1041,11 @@ impl BeamtalkMcp {
         }
 
         let value = response.value_string();
-        let text = if value.is_empty() { "[]".to_string() } else { value };
+        let text = if value.is_empty() {
+            "[]".to_string()
+        } else {
+            value
+        };
 
         timer.mark_ok();
         Ok(CallToolResult::success(vec![Content::text(text)]))

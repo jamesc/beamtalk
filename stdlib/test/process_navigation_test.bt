@@ -14,32 +14,42 @@ TestCase subclass: ProcessNavigationTest
 
   // A small fixed snapshot: a supervisor, an actor, and a foreign process.
   sampleNodes =>
-    sup := SupervisionNode pid: nil registeredName: #sup kind: #beamtalkSupervisor behaviourClass: Counter childCount: 1
-    actor := SupervisionNode pid: nil registeredName: nil kind: #beamtalkActor behaviourClass: Counter childCount: 0
-    foreign := SupervisionNode pid: nil registeredName: nil kind: #otpProcess behaviourClass: nil childCount: 0
+    sup := SupervisionNode
+      pid: nil
+      registeredName: #sup
+      kind: #beamtalkSupervisor
+      behaviourClass: Counter
+      childCount: 1
+    actor := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkActor
+      behaviourClass: Counter
+      childCount: 0
+    foreign := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #otpProcess
+      behaviourClass: nil
+      childCount: 0
     #(sup, actor, foreign)
 
-  sampleTree =>
-    SupervisionTree flatNodes: self sampleNodes
+  sampleTree => SupervisionTree flatNodes: self sampleNodes
 
   // === SupervisionTree: shape ===
-  testTreeSize =>
-    self assert: self sampleTree size equals: 3
+  testTreeSize => self assert: self sampleTree size equals: 3
 
-  testTreeNodesCount =>
-    self assert: self sampleTree nodes size equals: 3
+  testTreeNodesCount => self assert: self sampleTree nodes size equals: 3
 
   testTreeNodesAreSupervisionNodes =>
     self assert: (self sampleTree nodes first isKindOf: SupervisionNode) equals: true
 
-  testTreeIsEmptyFalse =>
-    self assert: self sampleTree isEmpty equals: false
+  testTreeIsEmptyFalse => self assert: self sampleTree isEmpty equals: false
 
   testEmptyTreeIsEmpty =>
     self assert: (SupervisionTree flatNodes: #()) isEmpty equals: true
 
-  testTreeRootNotNil =>
-    self assert: self sampleTree root isNil equals: false
+  testTreeRootNotNil => self assert: self sampleTree root isNil equals: false
 
   testTreePrintStringShape =>
     self assert: (self sampleTree printString startsWith: "#SupervisionTree<") equals: true
@@ -77,7 +87,9 @@ TestCase subclass: ProcessNavigationTest
     self assert: found kind equals: #otpProcess
 
   testDetectIfNoneFallback =>
-    found := self sampleTree detect: [:n | n kind == #neverHappens] ifNone: [nil]
+    found := self sampleTree detect: [:n |
+      n kind == #neverHappens
+    ] ifNone: [nil]
     self assert: found equals: nil
 
   testDoReturnsTree =>

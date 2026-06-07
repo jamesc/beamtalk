@@ -74,8 +74,9 @@ typed Value subclass: ProcessNavigation
   /// (ProcessNavigation from: aSup) ifOk: [:nav | nav tree] ifError: [:e | nil]
   /// ```
   class from: aRoot :: Supervisor | Pid -> Result(ProcessNavigation, Error) =>
-    ((Erlang beamtalk_process_navigation) from: aRoot)
-      map: [:snapshot | ProcessNavigation nodes: snapshot]
+    ((Erlang beamtalk_process_navigation) from: aRoot) map: [:snapshot |
+      ProcessNavigation nodes: snapshot
+    ]
 
   /// The navigable `SupervisionTree` snapshot for this navigation.
   ///
@@ -83,5 +84,4 @@ typed Value subclass: ProcessNavigation
   /// ```beamtalk
   /// ProcessNavigation default tree   // => a SupervisionTree
   /// ```
-  tree -> SupervisionTree =>
-    SupervisionTree flatNodes: self nodes
+  tree -> SupervisionTree => SupervisionTree flatNodes: self nodes

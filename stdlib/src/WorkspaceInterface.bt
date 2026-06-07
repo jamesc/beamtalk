@@ -51,8 +51,7 @@ sealed typed Object subclass: WorkspaceInterface
   /// Workspace processes findClass: Counter    // => List(SupervisionNode)
   /// Workspace processes nodes                 // => the flat List(SupervisionNode)
   /// ```
-  processes -> SupervisionTree =>
-    ProcessNavigation default tree
+  processes -> SupervisionTree => ProcessNavigation default tree
 
   /// Look up a specific actor by pid string.
   ///

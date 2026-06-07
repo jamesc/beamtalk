@@ -56,8 +56,7 @@ typed Value subclass: SupervisionTree
   /// ```beamtalk
   /// tree size   // => 6
   /// ```
-  size -> Integer =>
-    self flatNodes size
+  size -> Integer => self flatNodes size
 
   /// Whether the snapshot is empty.
   ///
@@ -65,8 +64,7 @@ typed Value subclass: SupervisionTree
   /// ```beamtalk
   /// tree isEmpty   // => false
   /// ```
-  isEmpty -> Boolean =>
-    self flatNodes isEmpty
+  isEmpty -> Boolean => self flatNodes isEmpty
 
   /// Pre-order walk: evaluate `aBlock` for every node in the snapshot.
   ///
@@ -150,17 +148,22 @@ typed Value subclass: SupervisionTree
   /// // => #(#{#pid => "<0.200.0>", #kind => #beamtalkSupervisor, ...}, ...)
   /// ```
   asDictionaries -> List(Dictionary) =>
-    self nodes collect: [:n |
-      #{
-        #pid => (n pid isNil ifTrue: [nil] ifFalse: [n pid asString]),
-        #registeredName => n registeredName,
-        #kind => n kind,
-        #class => (n behaviourClass isNil ifTrue: [nil] ifFalse: [n behaviourClass name]),
-        #childCount => n childCount,
-        #isSupervisor => n isSupervisor,
-        #parentPid => (n parent isNil ifTrue: [nil] ifFalse: [n parent pid asString])
-      }
-    ]
+    self nodes
+      collect: [:n |
+        #{
+          #pid => (n pid isNil ifTrue: [nil] ifFalse: [n pid asString]),
+          #registeredName => n registeredName,
+          #kind => n kind,
+          #class => (n behaviourClass isNil ifTrue: [
+            nil
+          ] ifFalse: [n behaviourClass name]),
+          #childCount => n childCount,
+          #isSupervisor => n isSupervisor,
+          #parentPid => (n parent isNil ifTrue: [
+            nil
+          ] ifFalse: [n parent pid asString])
+        }
+      ]
 
   /// Human-readable summary, e.g. `#SupervisionTree<6 nodes, root: #AppSup>` or
   /// `#SupervisionTree<empty>`.
@@ -177,10 +180,14 @@ typed Value subclass: SupervisionTree
       ifFalse: [
         rootNode behaviourClass isNil
           ifTrue: [
-            rootNode registeredName isNil
-              ifTrue: [rootNode kind printString]
-              ifFalse: [rootNode registeredName printString]
+            rootNode registeredName isNil ifTrue: [
+              rootNode kind printString
+            ] ifFalse: [rootNode registeredName printString]
           ]
           ifFalse: [rootNode behaviourClass name printString]
       ]
-    "#SupervisionTree<" ++ self size asString ++ " nodes, root: " ++ rootLabel ++ ">"
+    "#SupervisionTree<"
+      ++ self size asString
+      ++ " nodes, root: "
+      ++ rootLabel
+      ++ ">"

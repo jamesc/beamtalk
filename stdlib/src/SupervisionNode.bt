@@ -117,8 +117,7 @@ typed Value subclass: SupervisionNode
   /// ```beamtalk
   /// node truncated   // => false
   /// ```
-  truncated -> Boolean =>
-    (Erlang beamtalk_process_navigation) truncatedOf: self
+  truncated -> Boolean => (Erlang beamtalk_process_navigation) truncatedOf: self
 
   /// Lazily fetch this node's live OTP status (ADR 0092 §5).
   ///
@@ -144,16 +143,22 @@ typed Value subclass: SupervisionNode
   /// node printString   // => "#SupervisionNode<#beamtalkActor Counter #Pid<0.132.0>>"
   /// ```
   printString -> String =>
-    identifier := self behaviourClass isNil
-      ifTrue: [
-        self registeredName isNil
-          ifTrue: [""]
-          ifFalse: [self registeredName asString]
-      ]
-      ifFalse: [self behaviourClass name asString]
+    identifier := self behaviourClass isNil ifTrue: [
+      self registeredName isNil ifTrue: [
+        ""
+      ] ifFalse: [self registeredName asString]
+    ] ifFalse: [self behaviourClass name asString]
     namePart := identifier isEmpty ifTrue: [""] ifFalse: [identifier ++ " "]
-    pidPart := self pid isNil ifTrue: ["restarting"] ifFalse: [self pid printString]
-    childrenPart := self isSupervisor
-      ifTrue: [" children: " ++ self childCount asString]
-      ifFalse: [""]
-    "#SupervisionNode<" ++ self kind printString ++ " " ++ namePart ++ pidPart ++ childrenPart ++ ">"
+    pidPart := self pid isNil ifTrue: [
+      "restarting"
+    ] ifFalse: [self pid printString]
+    childrenPart := self isSupervisor ifTrue: [
+      " children: " ++ self childCount asString
+    ] ifFalse: [""]
+    "#SupervisionNode<"
+      ++ self kind printString
+      ++ " "
+      ++ namePart
+      ++ pidPart
+      ++ childrenPart
+      ++ ">"
