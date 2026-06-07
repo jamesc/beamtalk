@@ -161,7 +161,7 @@ web name:
     fi
     # The cookie lives at ~/.beamtalk/workspaces/<id>/cookie, where <id> is the
     # node short name minus the beamtalk_workspace_ prefix.
-    id="${node#beamtalk_workspace_}"; id="${id%@localhost}"
+    id="${node#beamtalk_workspace_}"; id="${id%@*}"
     cookie_file="${HOME}/.beamtalk/workspaces/${id}/cookie"
     if [ ! -f "${cookie_file}" ]; then
       echo "❌ Workspace cookie not found at ${cookie_file}" >&2
@@ -171,6 +171,49 @@ web name:
     export BT_WORKSPACE_COOKIE="$(cat "${cookie_file}")"
     echo "🌐 LiveView IDE → ${node}  (http://localhost:4000)"
     cd editors/liveview
+    exec mix phx.server
+
+# Run the LiveView IDE as a NON-LOCALHOST authenticated front (ADR 0091).
+# Like `web`, but starts the server in prod mode behind OIDC + HTTPS, with the
+# dist cookie provisioned to Phoenix as an INFRASTRUCTURE SECRET (env), never
+# exposed to a browser. Distribution stays internal (co-located/loopback by
+# default; see docs/deployment/remote-liveview-ide.md for the private-interface
+# option). Prereqs (fail fast if missing):
+#   SECRET_KEY_BASE  — `mix phx.gen.secret` (signs the session cookie)
+#   PHX_HOST         — the IDE's public hostname (behind your TLS terminator)
+#   OIDC config      — ~/.beamtalk/ide.toml or BT_OIDC_* env (else boot fails closed)
+#   just web-remote <workspace-name>
+[unix]
+web-remote name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    : "${SECRET_KEY_BASE:?set SECRET_KEY_BASE — generate with: mix phx.gen.secret}"
+    : "${PHX_HOST:?set PHX_HOST to the IDE's public hostname (TLS-terminated)}"
+    node=$(cargo run --bin beamtalk --quiet -- workspace status "{{name}}" 2>/dev/null | awk '/^Node:/ {print $2}' || true)
+    if [ -z "${node:-}" ]; then
+      echo "❌ Workspace '{{name}}' is not running." >&2
+      echo "   Start it first: beamtalk workspace create {{name}} --background --persistent" >&2
+      exit 1
+    fi
+    id="${node#beamtalk_workspace_}"; id="${id%@*}"
+    cookie_file="${HOME}/.beamtalk/workspaces/${id}/cookie"
+    if [ ! -f "${cookie_file}" ]; then
+      echo "❌ Workspace cookie not found at ${cookie_file}" >&2
+      exit 1
+    fi
+    # The cookie is an infra secret shared between the two trusted hosts — it is
+    # set in the server's env and used ONLY for the Phoenix↔workspace dist link;
+    # it is never placed in a page, assign, or URL (browser ↔ Phoenix is HTTPS).
+    export BT_WORKSPACE_NODE="${node}"
+    export BT_WORKSPACE_COOKIE="$(cat "${cookie_file}")"
+    export PHX_SERVER=true
+    export MIX_ENV=prod
+    export PORT="${PORT:-8443}"
+    echo "🔒 Remote LiveView IDE → ${node}  (https://${PHX_HOST}:${PORT}, OIDC)"
+    echo "   Dist link is internal infrastructure; keep it off untrusted networks (ADR 0091)."
+    cd editors/liveview
+    mix deps.get --only prod
+    mix assets.deploy
     exec mix phx.server
 
 # Build Erlang runtime

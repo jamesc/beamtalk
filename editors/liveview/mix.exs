@@ -45,7 +45,12 @@ defmodule BtAttach.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.1.1"},
-      {:bandit, "~> 1.5"}
+      {:bandit, "~> 1.5"},
+      # OIDC authorization-code + PKCE for the authenticated front (ADR 0091
+      # Decision 1). Assent is a lightweight, framework-agnostic auth library
+      # (no Plug/DB coupling) that does discovery, PKCE and ID-token validation
+      # over OTP's built-in :httpc — we don't roll our own crypto (Principle 5).
+      {:assent, "~> 0.2"}
     ]
   end
 

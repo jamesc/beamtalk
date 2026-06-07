@@ -125,6 +125,17 @@ pub(super) fn build_detached_node_command(
     if let Ok(home) = std::env::var("HOME") {
         cmd.env("HOME", home);
     }
+    // Keep Erlang distribution off untrusted networks by default (ADR 0091
+    // Decision 5): pin the address epmd binds/contacts to loopback so a node
+    // that *starts* epmd does not expose the port mapper on `0.0.0.0`. epmd is a
+    // persistent per-user daemon, so this only governs an epmd this node starts;
+    // a pre-existing promiscuous epmd is caught separately by the launcher's
+    // preflight check (`epmd::check_epmd_loopback`). An operator deploying across
+    // a trusted private network can override by exporting `ERL_EPMD_ADDRESS`
+    // (e.g. the private interface address) before launching — never `0.0.0.0`.
+    let epmd_address =
+        std::env::var("ERL_EPMD_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string());
+    cmd.env("ERL_EPMD_ADDRESS", epmd_address);
     // Locale settings for proper string handling
     for var in &["LANG", "LC_ALL"] {
         if let Ok(val) = std::env::var(var) {
@@ -267,6 +278,32 @@ mod tests {
                     "{var} must be in the env allowlist on Windows"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_build_command_pins_epmd_address_to_loopback_by_default() {
+        // ADR 0091 Decision 5: the workspace node is launched with
+        // ERL_EPMD_ADDRESS pinned to loopback so an epmd it starts is not exposed
+        // on 0.0.0.0. When the operator pre-sets ERL_EPMD_ADDRESS (private-network
+        // deployment) we pass that through instead; otherwise it defaults to
+        // 127.0.0.1. Assert the var is present and, in the default case, loopback.
+        let cmd = build_test_command();
+        let epmd = cmd
+            .get_envs()
+            .find(|(k, _)| k == &OsStr::new("ERL_EPMD_ADDRESS"))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().into_owned());
+        assert!(
+            epmd.is_some(),
+            "ERL_EPMD_ADDRESS must be in the env allowlist"
+        );
+        if std::env::var("ERL_EPMD_ADDRESS").is_err() {
+            assert_eq!(
+                epmd.as_deref(),
+                Some("127.0.0.1"),
+                "default ERL_EPMD_ADDRESS must be loopback"
+            );
         }
     }
 

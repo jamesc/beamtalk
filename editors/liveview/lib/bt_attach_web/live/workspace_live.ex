@@ -33,8 +33,17 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   require Logger
 
+  alias BtAttach.Facade
   alias BtAttach.SessionRegistry
   alias BtAttach.Workspace
+
+  # All RBAC-relevant workspace ops go through the curated facade (ADR 0091
+  # Decision 3) — never a raw Workspace/:rpc call from an event handler. Pure
+  # transport/display/lifecycle helpers (connect, render_term, session start)
+  # stay on Workspace: they are not browser-supplied ops. `ctx/1` carries the
+  # request identity the facade audits / RBAC gates on (BT-2421).
+  defp ctx(socket),
+    do: %{user: socket.assigns[:current_user], role: socket.assigns[:role] || :owner}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -140,8 +149,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (the old pid's subscriptions died with it), so the resumed tab gets its
   # Transcript and bindings flowing again with its accumulated state intact.
   defp bind_session(socket, session_id, pid) do
-    with :ok <- Workspace.subscribe_transcript(self()),
-         :ok <- Workspace.subscribe_bindings(self()) do
+    with :ok <- Facade.dispatch(:subscribe_transcript, %{pid: self()}, ctx(socket)),
+         :ok <- Facade.dispatch(:subscribe_bindings, %{pid: self()}, ctx(socket)) do
       socket
       |> assign(:connected, true)
       |> assign(:node, Workspace.node_name())
@@ -201,7 +210,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def handle_event("eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    case Workspace.eval(pid, expr) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
       {:ok, term, output, _warnings} ->
         # eval returns the live term; rendering is display-only and reuses the
         # workspace's own formatter for surface-consistency with the browser.
@@ -221,6 +230,15 @@ defmodule BtAttachWeb.WorkspaceLive do
            error: Workspace.render_error(reason),
            expr: expr
          )}
+
+      # The facade (BT-2420/2421) can short-circuit BEFORE dispatching to the
+      # workspace — an RBAC denial (`:unauthorized`, e.g. an Observer) or an
+      # off-vocabulary op (`:forbidden_op`) — returning a 2-tuple the workspace
+      # eval contract never produces. Render it as an actionable message rather
+      # than crashing the LiveView on an unmatched case clause.
+      {:error, reason} ->
+        {:noreply,
+         assign(socket, result: nil, output: nil, error: facade_error(reason), expr: expr)}
     end
   end
 
@@ -346,6 +364,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     :ok
   end
 
+  # Render a facade short-circuit (RBAC denial / off-vocabulary op) as a clear,
+  # user-facing message. These are Phoenix-side decisions, so they don't go
+  # through the workspace error formatter.
+  defp facade_error(:unauthorized),
+    do: "Not authorized: your role may not perform this operation."
+
+  defp facade_error(:forbidden_op), do: "Operation not permitted."
+  defp facade_error(reason), do: Workspace.render_error(reason)
+
   # Blank captured output is not worth rendering a pane for.
   defp present(""), do: nil
   defp present(nil), do: nil
@@ -375,7 +402,11 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, save_result: nil, save_error: "Enter a selector to save a method.")
 
       true ->
-        case Workspace.save_method(class, selector, source) do
+        case Facade.dispatch(
+               :save,
+               %{class: class, selector: selector, source: source},
+               ctx(socket)
+             ) do
           {:ok, saved_class} ->
             # The patch is live + logged; refresh the change-history pane so the
             # new entry is visible (ChangeLog coherence).
@@ -389,7 +420,9 @@ defmodule BtAttachWeb.WorkspaceLive do
             |> assign_changes()
 
           {:error, reason} ->
-            assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
+            # `reason` may be a facade RBAC denial (`:unauthorized`) for a crafted
+            # event from a read-only role, or a workspace #beamtalk_error{}.
+            assign(socket, save_result: nil, save_error: facade_error(reason))
         end
     end
   end
@@ -397,14 +430,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Drive the write-surface flush and render its summary, then refresh changes so
   # the (now-flushed) entries drop out of the active view.
   defp flush_changes(socket) do
-    case Workspace.flush() do
+    case Facade.dispatch(:flush, %{}, ctx(socket)) do
       {:ok, summary} ->
         socket
         |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
         |> assign_changes()
 
       {:error, reason} ->
-        assign(socket, flush_result: nil, flush_error: Workspace.render_error(reason))
+        assign(socket, flush_result: nil, flush_error: facade_error(reason))
     end
   end
 
@@ -412,7 +445,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # rows. A workspace that is unreachable or returns an unexpected shape renders an
   # error rather than crashing the pane.
   defp assign_changes(socket) do
-    case Workspace.change_history() do
+    case Facade.dispatch(:changes, %{}, ctx(socket)) do
       rows when is_list(rows) ->
         assign(socket, changes: rows, changes_error: nil)
 
@@ -428,7 +461,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # references without a string round-trip; `inspectable?` flags object-valued
   # bindings the user can drill into.
   defp assign_bindings(socket, pid) do
-    case Workspace.list_bindings(pid) do
+    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
       {:error, reason} ->
         assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
 
@@ -449,7 +482,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Inspect a binding selected by name: resolve its live term from the current
   # binding list, then inspect that term. The term — not a string — drives the op.
   defp inspect_binding(socket, pid, name) do
-    case Workspace.list_bindings(pid) do
+    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
       pairs when is_list(pairs) ->
         case List.keyfind(pairs, name, 0) do
           {^name, term} -> inspect_term(socket, name, term)
@@ -467,7 +500,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # deeper. Non-object terms are not inspectable, so we say so rather than guess.
   defp inspect_term(socket, label, term) do
     if Workspace.inspectable?(term) do
-      case Workspace.inspect_value(term) do
+      case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
         {:ok, fields} when is_map(fields) ->
           assign(socket,
             inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
@@ -532,17 +565,28 @@ defmodule BtAttachWeb.WorkspaceLive do
       <h1>Beamtalk Workspace</h1>
 
       <%= if @connected do %>
-        <p>Attached to <strong>{@node}</strong> · session <code>{@session_id}</code></p>
+        <p>
+          Attached to <strong>{@node}</strong> · session <code>{@session_id}</code>
+          <span :if={@role == :observer} style="color:#a60;">· read-only (Observer)</span>
+        </p>
 
-        <form phx-submit="eval" style="display:flex; gap:.5rem; margin:1rem 0;">
-          <input
-            name="expr"
-            value={@expr}
-            autocomplete="off"
-            style="flex:1; padding:.5rem; font-family:inherit;"
-          />
-          <button type="submit" style="padding:.5rem 1rem;">Eval</button>
-        </form>
+        <%= if @role == :owner do %>
+          <form phx-submit="eval" style="display:flex; gap:.5rem; margin:1rem 0;">
+            <input
+              name="expr"
+              value={@expr}
+              autocomplete="off"
+              style="flex:1; padding:.5rem; font-family:inherit;"
+            />
+            <button type="submit" style="padding:.5rem 1rem;">Eval</button>
+          </form>
+        <% else %>
+          <p style="color:#666; margin:1rem 0;">
+            Your role is read-only — evaluation and editing are disabled. You can
+            still browse bindings, follow references in the Inspector, and watch
+            the live Transcript.
+          </p>
+        <% end %>
 
         <%= if @output do %>
           <pre style="background:#f7f7f7; padding:.75rem; border:1px solid #ddd;"><%= @output %></pre>
@@ -628,42 +672,44 @@ defmodule BtAttachWeb.WorkspaceLive do
           <% end %>
         <% end %>
 
-        <h2>Method Editor (write-surface)</h2>
-        <p style="color:#666;">
-          Edit a method and Save to compile + flush it onto the workspace
-          (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
-          eval observes the new behaviour.
-        </p>
-        <form phx-submit="save_method" style="margin:1rem 0;">
-          <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
-            <input
-              name="class"
-              value={@edit_class}
-              placeholder="Class (e.g. Counter)"
-              autocomplete="off"
-              style="flex:1; padding:.5rem; font-family:inherit;"
-            />
-            <input
-              name="selector"
-              value={@edit_selector}
-              placeholder="selector (e.g. increment)"
-              autocomplete="off"
-              style="flex:1; padding:.5rem; font-family:inherit;"
-            />
-          </div>
-          <textarea
-            name="source"
-            rows="4"
-            placeholder="increment => self.value := self.value + 1"
-            style="width:100%; padding:.5rem; font-family:inherit; box-sizing:border-box;"
-          ><%= @edit_source %></textarea>
-          <div style="display:flex; gap:.5rem; margin-top:.5rem;">
-            <button type="submit" style="padding:.5rem 1rem;">Save Method</button>
-            <button type="button" phx-click="flush" style="padding:.5rem 1rem;">
-              Save All to Disk (flush)
-            </button>
-          </div>
-        </form>
+        <%= if @role == :owner do %>
+          <h2>Method Editor (write-surface)</h2>
+          <p style="color:#666;">
+            Edit a method and Save to compile + flush it onto the workspace
+            (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
+            eval observes the new behaviour.
+          </p>
+          <form phx-submit="save_method" style="margin:1rem 0;">
+            <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+              <input
+                name="class"
+                value={@edit_class}
+                placeholder="Class (e.g. Counter)"
+                autocomplete="off"
+                style="flex:1; padding:.5rem; font-family:inherit;"
+              />
+              <input
+                name="selector"
+                value={@edit_selector}
+                placeholder="selector (e.g. increment)"
+                autocomplete="off"
+                style="flex:1; padding:.5rem; font-family:inherit;"
+              />
+            </div>
+            <textarea
+              name="source"
+              rows="4"
+              placeholder="increment => self.value := self.value + 1"
+              style="width:100%; padding:.5rem; font-family:inherit; box-sizing:border-box;"
+            ><%= @edit_source %></textarea>
+            <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+              <button type="submit" style="padding:.5rem 1rem;">Save Method</button>
+              <button type="button" phx-click="flush" style="padding:.5rem 1rem;">
+                Save All to Disk (flush)
+              </button>
+            </div>
+          </form>
+        <% end %>
 
         <%= if @save_result do %>
           <pre style="background:#f0fff0; padding:.75rem; border:1px solid #cec;"><%= @save_result %></pre>
