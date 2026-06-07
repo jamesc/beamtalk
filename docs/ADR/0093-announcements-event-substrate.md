@@ -196,13 +196,18 @@ Three classes in the **core image** (so the system can publish):
 // inheritance with an abstract base mirrors `abstract Value subclass: Number`.
 abstract Value subclass: Announcement
 
-// A dispatcher handle — an immutable Value wrapping a runtime subscription ref.
-// NOT an Actor: there is deliberately no per-announcer process (that would
-// reintroduce the central mailbox rejected in §4). The subscriber set lives in
-// the runtime ETS table keyed by `ref`; dispatch runs caller-side. `class new`
-// mints a fresh ref via FFI — the same pattern as `Random class new`.
-Value subclass: Announcer
-  field: ref :: Any = nil
+// A dispatcher handle — an opaque reflection of runtime state, exactly like
+// `Pid` / `Port` / `Reference` (ADR 0067, "Object's Three Roles"): an `Object
+// subclass:` with no declared data. The underlying announcer is an Erlang
+// `reference()` carried as the object's native boxing and reached via FFI;
+// equality is by identity (`=:=`), like `Pid`.
+//   - NOT a Value: we don't want `with*:` setters, structural equality,
+//     `new:`-map construction, or `fieldAt:` reflection on a capability handle.
+//   - NOT an Actor: there is deliberately no per-announcer process (that would
+//     reintroduce the central mailbox rejected in §4). The subscriber set lives
+//     in the shared runtime ETS table keyed by the ref; dispatch runs
+//     caller-side. `class new` mints a fresh announcer via FFI.
+typed Object subclass: Announcer
   class new -> Announcer => (Erlang beamtalk_announcements) newAnnouncer
   when: aClass :: Class do: aBlock :: Block -> Subscription => ...
   when: aClass :: Class send: sel :: Symbol to: receiver -> Subscription => ...
@@ -304,7 +309,7 @@ bt> Announcement subclass: PriceChanged
 PriceChanged
 
 bt> a := Announcer new
-an Announcer
+#Announcer<0.521.0>
 
 bt> a when: PriceChanged do: [:e | Transcript showLine: "now " ++ e newPrice printString]
 #Subscription<...>
@@ -348,7 +353,7 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
 ## User Impact
 
 - **Newcomer.** `when: X do: [...]` reads like every other block-taking message
-  they already use; `Announcer new` is an ordinary value constructor. They can watch
+  they already use; `Announcer new` hands back a plain handle. They can watch
   the system live (`SystemAnnouncer current when: ActorSpawned do: …`) — a
   tangible way to *see* what the runtime is doing.
 - **Smalltalk developer.** It *is* Pharo Announcements, including
