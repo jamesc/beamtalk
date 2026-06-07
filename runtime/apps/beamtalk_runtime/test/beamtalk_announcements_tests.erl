@@ -4,7 +4,8 @@
 -module(beamtalk_announcements_tests).
 
 -moduledoc """
-EUnit tests for `beamtalk_announcements` (BT-2439 / BT-2440 / ADR 0093 Phase 1).
+EUnit tests for `beamtalk_announcements` (BT-2439 / BT-2440 / BT-2441 / BT-2442 /
+ADR 0093 Phase 1).
 
 Covers the Phase-1 acceptance criteria: deliver to a subscriber of the exact
 class, a dead subscriber pruned automatically via monitor `DOWN`, an unrelated
@@ -22,6 +23,11 @@ concurrent announcers); the `{send, Sel, Receiver}` (`when:send:to:`) handler
 form; per-handler fault isolation (a crashing handler is caught and the caller
 still returns, siblings unaffected); a per-handler timeout that ejects a wedged
 handler; and reentrant `announceAndWait/2` from inside a handler (no deadlock).
+
+BT-2442 adds the heir crash-survival dead-pid prune: on restart after a bus crash,
+the gen_server re-reads the heir-preserved ETS table, re-arms monitors for live
+subscribers, and eagerly prunes any subscriber that died during the crash→restart
+gap (whose `DOWN` was lost to the dead bus process).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -879,6 +885,187 @@ do_once_sync_path_test_() ->
     end}.
 
 %%====================================================================
+%% Heir crash-survival: live subscriptions survive, dead-in-gap pruned (BT-2442)
+%%====================================================================
+
+%% Simulates a bus crash→restart with heir-preserved tables: subscriptions created
+%% before the crash survive after restart; a subscriber that dies during the gap
+%% (while no bus is running to process its DOWN) is pruned eagerly on restart via
+%% the `is_process_alive/1` check in `rearm_monitors/0`.
+%%
+%% These tests run last (EUnit processes test generators in file order) and use
+%% their own setup that ensures a fresh bus exists after the test completes,
+%% avoiding interference with other test fixtures.
+heir_crash_survival_test_() ->
+    case whereis(beamtalk_runtime_sup) of
+        Sup when is_pid(Sup) ->
+            %% The live runtime is supervising the singleton bus. This test needs
+            %% exclusive control of the bus lifecycle (stop + kill + restart),
+            %% which would fight the supervisor (restart intensity, already_started
+            %% races) and orphan the heir'd tables onto the real supervisor,
+            %% destabilising sibling children. Exercised in the standalone EUnit
+            %% context where no supervisor owns the bus.
+            {"heir crash-survival (skipped: live runtime supervises the bus)", ?_test(ok)};
+        undefined ->
+            heir_crash_survival_impl()
+    end.
+
+heir_crash_survival_impl() ->
+    {timeout, 15,
+        ?_test(begin
+            %% We need a fake supervisor registered as `beamtalk_runtime_sup` so the
+            %% bus uses it as the ETS heir and the tables survive a bus crash. If a
+            %% real supervisor is already registered (full app running), use it.
+            FakeSup = ensure_heir_process(),
+            try
+                %% Stop any existing bus (which may have wrong heir) and restart
+                %% fresh so the tables get created with the fake supervisor as heir.
+                stop_existing_bus(),
+                {ok, _} = beamtalk_announcements:start_link(),
+                clear_all_subscriptions(),
+
+                Collector = self(),
+                %% Two subscribers: one will stay alive, one will die during the gap.
+                LiveSub = spawn_subscriber(Collector),
+                DyingSub = spawn_subscriber(Collector),
+                try
+                    %% Subscribe both before the crash.
+                    {ok, LiveRef} = beamtalk_announcements:subscribe(
+                        'SurvivalEvent', LiveSub, live_h, false
+                    ),
+                    {ok, DyingRef} = beamtalk_announcements:subscribe(
+                        'SurvivalEvent', DyingSub, dying_h, false
+                    ),
+                    ?assert(beamtalk_announcements:is_active(LiveRef)),
+                    ?assert(beamtalk_announcements:is_active(DyingRef)),
+                    ?assertEqual(2, beamtalk_announcements:subscription_count()),
+
+                    %% Kill the bus (simulating a crash). Unlink first so the kill does
+                    %% not propagate to the test process. The tables survive via heir
+                    %% to the fake supervisor.
+                    BusPid = whereis(beamtalk_announcements),
+                    unlink(BusPid),
+                    BusMon = erlang:monitor(process, BusPid),
+                    exit(BusPid, kill),
+                    receive
+                        {'DOWN', BusMon, process, BusPid, _} -> ok
+                    after 2000 -> ?assert(false)
+                    end,
+
+                    %% Kill one subscriber during the gap — its DOWN goes nowhere
+                    %% because the bus process is dead.
+                    DyingMon = erlang:monitor(process, DyingSub),
+                    exit(DyingSub, kill),
+                    receive
+                        {'DOWN', DyingMon, process, DyingSub, _} -> ok
+                    after 1000 -> ?assert(false)
+                    end,
+
+                    %% The tables still exist (heir-preserved), confirm the rows are
+                    %% still there (both subscriptions still in ETS).
+                    ?assertEqual(2, ets:info(beamtalk_announcement_subs, size)),
+
+                    %% Restart the bus — it re-reads the heir-preserved tables and
+                    %% re-arms monitors, pruning dead-in-gap pids.
+                    {ok, _NewBus} = beamtalk_announcements:start_link(),
+
+                    %% The live subscriber's subscription survived.
+                    ?assert(beamtalk_announcements:is_active(LiveRef)),
+                    %% The dead-during-gap subscriber is pruned.
+                    ?assertNot(beamtalk_announcements:is_active(DyingRef)),
+                    ?assertEqual(1, beamtalk_announcements:subscription_count()),
+                    ?assertEqual([LiveRef], beamtalk_announcements:subscribers_of('SurvivalEvent')),
+
+                    %% Deliver to the live subscriber — proves the re-armed monitor
+                    %% and subscription are fully operational after restart.
+                    ok = beamtalk_announcements:announce('SurvivalEvent', post_crash),
+                    {GotRef, 'SurvivalEvent', live_h, post_crash} = expect_received(),
+                    ?assertEqual(LiveRef, GotRef),
+                    %% No delivery to the pruned subscription.
+                    refute_received()
+                after
+                    stop_subscriber(LiveSub),
+                    catch stop_subscriber(DyingSub),
+                    clear_all_subscriptions()
+                end
+            after
+                stop_heir_process(FakeSup)
+            end
+        end)}.
+
+%%====================================================================
+%% Heir crash-survival: dead subscriber monitor fires after restart (BT-2442)
+%%====================================================================
+
+%% Verifies that a subscriber which dies *after* restart is still auto-pruned via
+%% the re-armed monitor. This confirms re-arm actually wires up working monitors.
+heir_rearm_monitor_fires_on_later_death_test_() ->
+    case whereis(beamtalk_runtime_sup) of
+        Sup when is_pid(Sup) ->
+            %% See heir_crash_survival_test_/0 — skipped under the live runtime;
+            %% exercised in the standalone EUnit context.
+            {"heir re-arm monitor (skipped: live runtime supervises the bus)", ?_test(ok)};
+        undefined ->
+            heir_rearm_monitor_fires_on_later_death_impl()
+    end.
+
+heir_rearm_monitor_fires_on_later_death_impl() ->
+    {timeout, 15,
+        ?_test(begin
+            FakeSup = ensure_heir_process(),
+            try
+                stop_existing_bus(),
+                {ok, _} = beamtalk_announcements:start_link(),
+                clear_all_subscriptions(),
+
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    {ok, SubRef} = beamtalk_announcements:subscribe(
+                        'RearmEvent', Sub, h, false
+                    ),
+                    ?assert(beamtalk_announcements:is_active(SubRef)),
+
+                    %% Kill and restart the bus. Unlink first so the kill does not
+                    %% propagate to the test process.
+                    BusPid = whereis(beamtalk_announcements),
+                    unlink(BusPid),
+                    BusMon = erlang:monitor(process, BusPid),
+                    exit(BusPid, kill),
+                    receive
+                        {'DOWN', BusMon, process, BusPid, _} -> ok
+                    after 2000 -> ?assert(false)
+                    end,
+                    {ok, _NewBus} = beamtalk_announcements:start_link(),
+
+                    %% Subscription survived.
+                    ?assert(beamtalk_announcements:is_active(SubRef)),
+
+                    %% Now kill the subscriber *after* restart — the re-armed monitor
+                    %% should fire and prune it.
+                    SubMon = erlang:monitor(process, Sub),
+                    exit(Sub, kill),
+                    receive
+                        {'DOWN', SubMon, process, Sub, _} -> ok
+                    after 1000 -> ?assert(false)
+                    end,
+
+                    %% Wait for the bus to process the DOWN and prune.
+                    ok = wait_until(fun() ->
+                        beamtalk_announcements:subscription_count() =:= 0
+                    end),
+                    ?assertNot(beamtalk_announcements:is_active(SubRef)),
+                    ?assertEqual([], beamtalk_announcements:subscribers_of('RearmEvent'))
+                after
+                    catch stop_subscriber(Sub),
+                    clear_all_subscriptions()
+                end
+            after
+                stop_heir_process(FakeSup)
+            end
+        end)}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
 
@@ -925,6 +1112,72 @@ stop_idle(Pid) ->
     after 500 ->
         exit(Pid, kill),
         ok
+    end.
+
+%% Ensure the bus process is registered and running. Used by the heir tests that
+%% operate independently of the `{setup, ...}` fixtures.
+ensure_bus() ->
+    case whereis(beamtalk_announcements) of
+        undefined ->
+            {ok, _} = beamtalk_announcements:start_link(),
+            ok;
+        _Pid ->
+            ok
+    end.
+
+%% Stop any running bus and delete existing ETS tables so a fresh bus can be
+%% started with the correct heir. Used by heir tests that need to control the
+%% table lifecycle.
+stop_existing_bus() ->
+    case whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        Pid ->
+            unlink(Pid),
+            Mon = erlang:monitor(process, Pid),
+            gen_server:stop(Pid, normal, 2000),
+            receive
+                {'DOWN', Mon, process, Pid, _} -> ok
+            after 2000 ->
+                exit(Pid, kill),
+                receive
+                    {'DOWN', Mon, process, Pid, _} -> ok
+                after 1000 -> ok
+                end
+            end
+    end,
+    %% Delete any leftover tables so they get recreated with the correct heir.
+    catch ets:delete(beamtalk_announcement_subs),
+    catch ets:delete(beamtalk_announcement_by_class),
+    ok.
+
+%% Ensure a process registered as `beamtalk_runtime_sup` exists to act as the ETS
+%% heir in tests. If one already exists (full app running), returns `existing` and
+%% `stop_heir_process/1` is a no-op. Otherwise spawns a fake supervisor process
+%% that just receives ETS-TRANSFER messages and holds the tables.
+ensure_heir_process() ->
+    case whereis(beamtalk_runtime_sup) of
+        undefined ->
+            Pid = spawn(fun heir_loop/0),
+            true = register(beamtalk_runtime_sup, Pid),
+            {fake, Pid};
+        _Pid ->
+            existing
+    end.
+
+stop_heir_process(existing) ->
+    ok;
+stop_heir_process({fake, Pid}) ->
+    unregister(beamtalk_runtime_sup),
+    exit(Pid, kill),
+    ok.
+
+heir_loop() ->
+    receive
+        {'ETS-TRANSFER', _Table, _FromPid, _HeirData} ->
+            heir_loop();
+        _ ->
+            heir_loop()
     end.
 
 %% Poll `Pred` until it returns true, or fail after ~2s.
