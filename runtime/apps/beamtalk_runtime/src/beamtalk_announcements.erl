@@ -9,11 +9,15 @@
 -moduledoc """
 Runtime event bus for the typed Announcements substrate (ADR 0093 Layer 1).
 
-Phase 1 (BT-2439) — the runtime foundation + napkin proof. Stands up the
-`beamtalk_announcements` gen_server, a dedicated `beamtalk_pg` scope, and the
-ETS subscription table, and proves typed dispatch end-to-end: `subscribe/4`,
-`unsubscribe/1`, and an async `announce/2` that delivers to subscribers of one
-exact `Announcement` class (no MRO walk yet — that lands in BT-2440).
+Phase 1 — the runtime foundation. Stands up the `beamtalk_announcements`
+gen_server, a dedicated `beamtalk_pg` scope, and the ETS subscription table, and
+proves typed dispatch end-to-end: `subscribe/4`, `unsubscribe/1`, and an async
+`announce/2`.
+
+BT-2439 delivered the foundation with exact-class matching; BT-2440 adds the MRO
+(superclass-chain) walk to `announce/2`: an event is delivered to subscribers of
+its class *or any ancestor*, with the walk performed at announce time (live
+hierarchy changes respected) and delivery de-duplicated per subscription.
 
 Design (the `beamtalk_xref` / `beamtalk_trace_store` discipline — the gen_server
 is NOT in the dispatch path):
@@ -25,7 +29,8 @@ is NOT in the dispatch path):
   subscriptions to the same class (Pharo's rule): a second `subscribe` adds a
   row, it never replaces the first. A secondary by-class index
   (`ordered_set` on `{AnnouncementClass, SubRef}`) lets `announce/2` fetch the
-  matching subscribers for one class without scanning the whole table.
+  matching subscribers for one class without scanning the whole table, and the
+  MRO walk fetches it once per class on the event's superclass chain.
 
 - **Writes serialise through the gen_server.** `subscribe/4` / `unsubscribe/1`
   are `gen_server:call`s so the table writes are serialised and the bus can arm
@@ -47,8 +52,7 @@ is NOT in the dispatch path):
   from the surviving rows. The full crash→restart dead-pid prune is BT-2442;
   Phase 1 re-arms and keeps the data.
 
-Out of scope for this phase (later issues): MRO subclass matching + per-
-subscription de-dup (BT-2440), the sync `announceAndWait:` path / `doOnce:` /
+Out of scope here (later issues): the sync `announceAndWait:` path / `doOnce:` /
 `when:send:to:` / handler fault isolation (BT-2441), and the heir crash re-arm
 dead-pid prune (BT-2442).
 
@@ -191,14 +195,30 @@ is_active(_SubRef) ->
 %%====================================================================
 
 -doc """
-Announce `Event` (an announcement payload) to every subscriber of `EventClass`,
-asynchronously. Runs entirely in the *calling* process: a concurrent ETS read of
-the by-class index followed by a direct `Pid ! {beamtalk_announcement, SubRef,
-EventClass, Handler, Event}` to each live subscriber. Returns `ok` immediately
-(fire-and-forget).
+Announce `Event` (an announcement payload) to every subscriber of `EventClass`
+*or any of its ancestors*, asynchronously. Runs entirely in the *calling*
+process: it walks the event class's superclass chain via `read_concurrency` ETS
+metadata reads (`beamtalk_class_metadata:lookup_superclass/1`), gathers the
+matching subscriptions from the by-class index at each level, and sends a direct
+`Pid ! {beamtalk_announcement, SubRef, EventClass, Handler, Event}` to each live
+subscriber. Returns `ok` immediately (fire-and-forget).
 
-Phase 1 matches a single exact class — no superclass (MRO) walk, no per-
-subscription de-dup. MRO matching lands in BT-2440.
+MRO matching (BT-2440): subscribe to `UIEvent` and you receive `ButtonClicked`.
+The walk happens at announce time, so live hierarchy changes are respected. Each
+delivered message carries `EventClass` — the *announced* class — not the ancestor
+the subscription matched on.
+
+De-duplication is **per subscription**: a `SubRef` is delivered to at most once
+per `announce`, even though the MRO walk visits several classes. Because a
+subscription is registered against exactly one class, the dedup set guards the
+pathological cases — a corrupted hierarchy that revisits a class, or a future
+many-class subscription — rather than the common path. A process that holds two
+distinct subscriptions matching the event still receives two messages (one per
+`SubRef`, Pharo's rule).
+
+The walk stops gracefully at the root (`{ok, none}`), at a class whose metadata
+row is absent (`not_found` — e.g. a class removed mid-walk), and at a depth cap
+(`?MAX_HIERARCHY_DEPTH`) that bounds a corrupted cyclic hierarchy.
 
 A subscriber whose process has already died (its `DOWN` not yet processed by the
 bus) is skipped via an `is_process_alive/1` guard, so a stale row never produces
@@ -210,15 +230,63 @@ announce(EventClass, Event) when is_atom(EventClass) ->
         undefined ->
             ok;
         _ ->
-            %% Caller-side fan-out off the concurrent by-class index. Each index
-            %% row is `{{EventClass, SubRef}}`; the SubRef resolves the full
-            %% subscription row in the primary table.
-            IndexRows = ets:match_object(?BY_CLASS_TABLE, {{EventClass, '_'}}),
-            lists:foreach(
-                fun({{_Class, SubRef}}) -> deliver(SubRef, EventClass, Event) end,
-                IndexRows
-            ),
+            _ = walk_and_deliver(EventClass, EventClass, Event, sets:new([{version, 2}]), 0),
             ok
+    end.
+
+-doc """
+Walk the superclass chain from `CurrentClass` and deliver `Event` (announced as
+`EventClass`) to every subscription matching a class on the walk, de-duplicated
+per `SubRef` via the `Delivered` set. Returns the updated `Delivered` set.
+
+Terminates when the chain reaches the root (`{ok, none}`), a class with no
+metadata row (`not_found` — truncation), or the `?MAX_HIERARCHY_DEPTH` cap (a
+corrupted cyclic hierarchy). Caller-side; no bus call.
+""".
+-spec walk_and_deliver(
+    announcement_class(), announcement_class(), term(), sets:set(sub_ref()), non_neg_integer()
+) -> sets:set(sub_ref()).
+walk_and_deliver(_CurrentClass, EventClass, _Event, Delivered, Depth) when
+    Depth > ?MAX_HIERARCHY_DEPTH
+->
+    %% Runs in the *announcing* caller's process (announce/2 is caller-side), not
+    %% the bus process, so the `domain` metadata set in init/1 does not apply —
+    %% set it explicitly, matching bad_subscribe_args/3.
+    ?LOG_WARNING(#{
+        event => announcement_mro_walk_truncated,
+        reason => max_depth_exceeded,
+        event_class => EventClass,
+        max_depth => ?MAX_HIERARCHY_DEPTH,
+        domain => [beamtalk, announcements]
+    }),
+    Delivered;
+walk_and_deliver(CurrentClass, EventClass, Event, Delivered, Depth) ->
+    %% Deliver to every subscription registered against `CurrentClass`, skipping
+    %% any SubRef already delivered to on this walk (per-subscription de-dup).
+    IndexRows = ets:match_object(?BY_CLASS_TABLE, {{CurrentClass, '_'}}),
+    Delivered1 = lists:foldl(
+        fun({{_Class, SubRef}}, Acc) ->
+            case sets:is_element(SubRef, Acc) of
+                true ->
+                    Acc;
+                false ->
+                    deliver(SubRef, EventClass, Event),
+                    sets:add_element(SubRef, Acc)
+            end
+        end,
+        Delivered,
+        IndexRows
+    ),
+    %% Walk to the superclass, reading the live metadata at announce time. A
+    %% missing row (`not_found`) truncates the walk gracefully (class removed
+    %% mid-walk); the root (`{ok, none}`) ends it normally.
+    case beamtalk_class_metadata:lookup_superclass(CurrentClass) of
+        {ok, none} ->
+            Delivered1;
+        {ok, Super} ->
+            walk_and_deliver(Super, EventClass, Event, Delivered1, Depth + 1);
+        not_found ->
+            Delivered1
     end.
 
 -doc """
