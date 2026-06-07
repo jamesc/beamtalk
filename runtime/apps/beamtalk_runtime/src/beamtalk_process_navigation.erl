@@ -89,6 +89,7 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     rootOf/1,
     childrenOf/1,
     parentOf/1,
+    parentPidOf/1,
     strategyOf/1,
     restartIntensityOf/1,
     truncatedOf/1
@@ -243,8 +244,8 @@ process that is dead, timed out, or not `sys`-compliant.
 -spec status(term()) -> map() | nil.
 status(Pid) when is_pid(Pid) ->
     try sys:get_status(Pid, ?STATUS_TIMEOUT) of
-        {status, _Pid, {module, Mod}, _Data} ->
-            #{module => Mod, sysState => running}
+        {status, _Pid, {module, Mod}, Data} ->
+            #{module => Mod, sysState => sys_state(Data)}
     catch
         Class:Reason ->
             ?LOG_DEBUG("process navigation: status fetch failed", #{
@@ -257,6 +258,13 @@ status(Pid) when is_pid(Pid) ->
     end;
 status(_) ->
     nil.
+
+%% The OTP sys state (`running` | `suspended`) from `sys:get_status/1`'s status
+%% data — `[ProcDict, SysState, Parent, Dbg, Misc]`. Defaults to `running` if the
+%% report has an unexpected shape (defensive — never crash a status fetch).
+-spec sys_state([term()]) -> atom().
+sys_state([_ProcDict, SysState | _]) when is_atom(SysState) -> SysState;
+sys_state(_) -> running.
 
 %%% ============================================================================
 %%% Node / tree accessors (BT-2429)
@@ -322,6 +330,15 @@ parentOf(Node) ->
                 false -> nil
             end
     end.
+
+-doc """
+Return a node's parent pid directly (`pid() | nil`), without resolving the full
+parent node. The O(1) adjacency key for serialisation — avoids the O(n) sibling
+search `parentOf/1` does when only the parent's identity is needed.
+""".
+-spec parentPidOf(node_map()) -> pid() | nil.
+parentPidOf(Node) ->
+    maps:get(parent_pid, Node, nil).
 
 -doc "Return a node's configured supervisor `strategy` (supervisors only; else `nil`).".
 -spec strategyOf(node_map()) -> atom() | nil.
@@ -637,9 +654,15 @@ emit_node(Pid, ParentPid, Kind, BClass, Scope, Limit, Acc, Visited) ->
         false ->
             {[leaf_node(Pid, ParentPid, Kind, BClass) | Acc], Visited};
         true ->
-            Active = safe_count_children(Pid),
+            {Active, Total} = safe_child_counts(Pid),
             {Strategy, RestartIntensity} = supervisor_config(Kind, BClass),
-            case Active > Limit of
+            %% Cap on the TOTAL child count, not just the active count: a
+            %% `which_children` call copies *every* child (incl. `restarting` /
+            %% `undefined`) out of the supervisor, so a flapping pool with a low
+            %% active count but a huge child-spec count must still truncate (the
+            %% perf cliff the cap exists to prevent — ADR 0092 §Constraints 1).
+            %% `childCount` still reports the live (active) count.
+            case Total > Limit of
                 true ->
                     Node = supervisor_node(
                         Pid, ParentPid, Kind, BClass, Active, Strategy, RestartIntensity, true
@@ -910,23 +933,27 @@ from_error(Kind, Hint) ->
 %%% Internal helpers
 %%% ============================================================================
 
-%% Guarded `count_children`: the cheap live-child count (does not copy the child
-%% list out of the supervisor). Returns the `active` count, or `0` on any
-%% failure. Probes the process dictionary first so a non-supervisor is never
-%% sent the call.
--spec safe_count_children(pid()) -> non_neg_integer().
-safe_count_children(Pid) ->
+%% Guarded `count_children`: the cheap child counts (does not copy the child
+%% list out of the supervisor). Returns `{Active, Total}` — `Active` is the live
+%% child count (`childCount`), `Total` is the full child-spec count that bounds
+%% the `which_children` copy cost (the cap metric). `{0, 0}` on any failure or a
+%% non-supervisor. Probes the process dictionary first so a non-supervisor is
+%% never sent the call.
+-spec safe_child_counts(pid()) -> {non_neg_integer(), non_neg_integer()}.
+safe_child_counts(Pid) ->
     case looks_like_supervisor(Pid) of
         false ->
-            0;
+            {0, 0};
         true ->
             try gen_server:call(Pid, count_children, ?WHICH_CHILDREN_TIMEOUT) of
                 Counts when is_list(Counts) ->
-                    proplists:get_value(active, Counts, 0);
+                    Active = proplists:get_value(active, Counts, 0),
+                    Specs = proplists:get_value(specs, Counts, Active),
+                    {Active, max(Active, Specs)};
                 _ ->
-                    0
+                    {0, 0}
             catch
-                _:_ -> 0
+                _:_ -> {0, 0}
             end
     end.
 

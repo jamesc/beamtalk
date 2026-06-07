@@ -43,6 +43,11 @@ typed Value subclass: SupervisionTree
   /// The snapshot root — the first node with no parent — or `nil` for an empty
   /// snapshot.
   ///
+  /// Note: the `default` / `system` snapshot can be a *forest* (the app root,
+  /// workspace-attached supervisors, and standalone `supervise`d trees are each
+  /// parentless). `root` returns the first such root; iterate `nodes` (or
+  /// `select: [:n | n parentPid isNil]`) to reach every root in a forest.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// tree root   // => a SupervisionNode | nil
@@ -159,9 +164,9 @@ typed Value subclass: SupervisionTree
           ] ifFalse: [n behaviourClass name]),
           #childCount => n childCount,
           #isSupervisor => n isSupervisor,
-          #parentPid => (n parent isNil ifTrue: [
+          #parentPid => (n parentPid isNil ifTrue: [
             nil
-          ] ifFalse: [n parent pid asString])
+          ] ifFalse: [n parentPid asString])
         }
       ]
 

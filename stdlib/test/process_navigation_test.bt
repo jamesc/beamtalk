@@ -57,6 +57,16 @@ TestCase subclass: ProcessNavigationTest
   testEmptyTreePrintString =>
     self assert: (SupervisionTree flatNodes: #()) printString equals: "#SupervisionTree<empty>"
 
+  // A node with no recorded adjacency (constructor-built) has a nil parentPid.
+  testParentPidNilWithoutAdjacency =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkActor
+      behaviourClass: nil
+      childCount: 0
+    self assert: node parentPid equals: nil
+
   // === Serialisable form (surface wire shape, BT-2431) ===
   testAsDictionariesCount =>
     self assert: self sampleTree asDictionaries size equals: 3

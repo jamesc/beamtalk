@@ -575,6 +575,15 @@ parent_of_root_is_nil_test() ->
     Root = beamtalk_process_navigation:rootOf(Flat),
     ?assertEqual(nil, beamtalk_process_navigation:parentOf(Root)).
 
+parent_pid_of_returns_parent_pid_directly_test() ->
+    Flat = sample_flat_tree(),
+    Enriched = beamtalk_process_navigation:enrich(Flat),
+    [ChildA] = [N || N <- Enriched, maps:get(pid, N) =:= list_to_pid("<0.1.0>")],
+    %% Direct adjacency key: the parent's pid, without resolving the parent node.
+    ?assertEqual(self(), beamtalk_process_navigation:parentPidOf(ChildA)),
+    Root = beamtalk_process_navigation:rootOf(Flat),
+    ?assertEqual(nil, beamtalk_process_navigation:parentPidOf(Root)).
+
 node_field_accessors_test() ->
     Node = #{
         '$beamtalk_class' => 'SupervisionNode',

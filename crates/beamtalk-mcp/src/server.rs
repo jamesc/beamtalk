@@ -1040,15 +1040,13 @@ impl BeamtalkMcp {
             )));
         }
 
+        // The serialised tree (`asDictionaries`) renders as a Beamtalk list of
+        // node records, e.g. `#(#{#pid => "<0.200.0>", #kind => ...}, ...)`, or
+        // `#()` for an empty snapshot.
         let value = response.value_string();
-        let text = if value.is_empty() {
-            "[]".to_string()
-        } else {
-            value
-        };
 
         timer.mark_ok();
-        Ok(CallToolResult::success(vec![Content::text(text)]))
+        Ok(CallToolResult::success(vec![Content::text(value)]))
     }
 
     /// List all available Beamtalk classes with one-line descriptions (BT-1404).

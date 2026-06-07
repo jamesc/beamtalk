@@ -87,6 +87,16 @@ typed Value subclass: SupervisionNode
   parent -> SupervisionNode | Nil =>
     (Erlang beamtalk_process_navigation) parentOf: self
 
+  /// The pid of this node's parent supervisor, or `nil` for a root node — the
+  /// O(1) adjacency key, without materialising the full parent node (`parent`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node parentPid   // => a Pid | nil
+  /// ```
+  parentPid -> Pid | Nil =>
+    (Erlang beamtalk_process_navigation) parentPidOf: self
+
   /// The configured OTP restart strategy (`#oneForOne`, `#simpleOneForOne`, …)
   /// for a Beamtalk supervisor node, or `nil` for actors and foreign processes.
   ///
