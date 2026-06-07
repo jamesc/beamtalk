@@ -129,12 +129,19 @@ hot-path discipline as `beamtalk_xref` and `beamtalk_trace_store`: **the
 gen_server is not in the dispatch path.**
 
 - **Subscription table = ETS, gen_server owns writes only.** Subscriptions
-  `{AnnouncementClass, SubscriberPid, Handler, OnceFlag}` live in an ETS table.
-  `when:…` / `unsubscribe:` go through the gen_server (serialised writes, and
-  it arms `erlang:monitor/2` per subscriber). The ETS table is created with
-  `{heir, SupervisorPid, …}` so it **survives a bus crash** (the
-  `beamtalk_trace_store` pattern); on restart the gen_server re-arms monitors
-  from the table, so subscriptions are not silently lost.
+  `{AnnouncementClass, SubscriberPid, Handler, OnceFlag}` live in an ETS
+  **`set` keyed by `{AnnouncementClass, SubscriberPid}`** — one row per
+  subscriber per class, never a `bag`. (The unique key is what makes the
+  `doOnce:` `ets:take/2` below remove exactly one subscriber's row; a `bag`
+  would take *all* rows for the key.) `when:…` / `unsubscribe:` go through the
+  gen_server (serialised writes, and it arms `erlang:monitor/2` per subscriber).
+  The ETS table is created with `{heir, SupervisorPid, …}` so it **survives a
+  bus crash** (the `beamtalk_trace_store` pattern). On restart the gen_server
+  re-arms monitors from the table — and because a subscriber may have **died
+  during the crash→restart gap** (its `DOWN` went to the dead bus and is lost),
+  re-arm does an `is_process_alive/1` check per row and prunes the dead ones, so
+  the table cannot accumulate stale pids. (This is new exposure vs
+  `beamtalk_trace_store`, which monitors nothing.)
 - **Dispatch runs in the announcing process, off concurrent ETS reads** — not
   in the gen_server. `announce:` / `announceAndWait:` do a `read_concurrency`
   ETS lookup of matching subscribers and fan out with direct `Pid ! Msg`
@@ -144,22 +151,25 @@ gen_server is not in the dispatch path.**
   `announceAndWait:` and (b) serialise every event through one mailbox. Keeping
   dispatch caller-side eliminates both.
 - **`pg`'s role is *subscriber-group registry for `SystemAnnouncer`*, not a
-  message transport.** `pg` has no send primitive — you `pg:get_members/1` and
-  send yourself. For the singleton system bus we register subscribers in a `pg`
-  group so that *membership is cluster-wide for free*. **Delivery to any
-  connected node is also free, and is in scope for v1** — `pg` membership spans
-  connected nodes, `erlang:monitor/2` works cross-node, and `Pid ! Msg` is
-  location-transparent, so a subscriber on another node (e.g. an ADR-0091
-  LiveView IDE process on the Phoenix node, which is connected to the workspace
-  node over Erlang distribution) subscribes, is monitored, and receives events
-  with no extra mechanism. What is *not* free — and is deferred to the package
-  (Layer 3) — is delivery across the **absence** of a connection: netsplit /
-  partition tolerance, buffering and replay for a reconnecting subscriber, and
-  multi-node *workspace clusters*. Single-cluster cross-node delivery to live,
-  connected nodes needs none of that. Per-instance `Announcer`s use the ETS
-  table directly (no `pg` group), so there is no dynamic-atom pressure; where a
-  `pg` group is needed it is keyed by a `{beamtalk_announcer, Ref}` tuple, never
-  a minted atom.
+  message transport.** `pg` has no send primitive — you `pg:get_members/2` and
+  send yourself. Use a **dedicated Beamtalk scope** (`pg:start_link(beamtalk_pg)`),
+  not the default `pg` scope — both to keep announcer groups separate from the
+  existing `beamtalk_classes` membership use, and to avoid colliding with any
+  `pg` use on a connected non-Beamtalk node. For the singleton system bus we
+  register subscribers in a `beamtalk_pg` group so that *membership is
+  cluster-wide for free*. Cross-node **delivery to a connected node works in v1**
+  with no extra machinery — `pg` membership spans connected nodes, `monitor`
+  works cross-node, `Pid ! Msg` is location-transparent — **on two conditions
+  that ADR-0091 Phase-3 integration must confirm:** (1) both nodes run `pg`
+  under the `beamtalk_pg` scope; (2) the 0091 front subscribes directly (it may
+  instead front the bus with its own push facade, in which case this path is not
+  exercised — see Consequences for the failure-semantics caveat). What is
+  genuinely *out of scope* and deferred to the package (Layer 3) is delivery
+  across the **absence** of a connection: netsplit / partition tolerance,
+  buffering and replay for a reconnecting subscriber, and multi-node *workspace
+  clusters*. Per-instance `Announcer`s use the ETS table directly (no `pg`
+  group), so there is no dynamic-atom pressure; where a `pg` group is needed it
+  is keyed by a `{beamtalk_announcer, Ref}` tuple, never a minted atom.
 - **Typed dispatch with MRO matching.** On `announce: anEvent` the matcher
   walks the event's superclass chain (ETS metadata reads) and delivers to
   subscribers of the event class *or any ancestor* (subscribe to `UIEvent`,
@@ -173,15 +183,27 @@ gen_server is not in the dispatch path.**
 - **Sync + async, fault-isolated.** `announce:` is async (direct sends, no
   wait). `announceAndWait:` gathers replies in the caller via
   `spawn_monitor`-per-handler + `receive` with a timeout, so a slow/blocked
-  handler cannot wedge the bus and a crashing handler is isolated (caught,
-  logged `domain => [beamtalk, announcements]`, never propagated to siblings or
-  the announcer). `announceAndWait:` from inside a handler is therefore safe —
-  there is no shared gen_server to deadlock on.
+  handler cannot wedge the bus and a crashing handler is isolated. The reply
+  protocol is explicit: each spawned handler process sends `{Ref, ok}` on
+  success; the caller's `receive` loop *also* matches
+  `{'DOWN', Ref, process, _, Reason}` as the handler-crashed signal (logged
+  `domain => [beamtalk, announcements]`, never propagated to siblings or the
+  announcer) and the per-handler timeout ejects the loop — so a crashed handler
+  can never leave the caller blocked on a reply that never comes.
+  `announceAndWait:` from inside a handler is therefore safe — there is no shared
+  gen_server to deadlock on. **`announceAndWait:` is *not* available on
+  `SystemAnnouncer`** (it is sealed async-only): the system bus can have many
+  subscribers, and `spawn_monitor`-per-handler there would be an unbounded
+  process storm under rapid system events (startup actor spawns). Sync gather is
+  for per-instance announcers with a known, small subscriber set.
 - **`doOnce:` is claimed atomically.** Since dispatch is caller-side and two
-  `announce:` can run concurrently, a `doOnce` subscription is taken with an
-  atomic `ets:take/2` (or gen_server compare-and-delete) — whichever announce
-  wins delivers, the loser sees it gone, so it fires at most once. (Single-node
-  guarantee; weakens under the package's distributed path, noted there.)
+  `announce:` can run concurrently, a `doOnce` subscription is consumed with an
+  atomic `ets:take/2` on its unique `{AnnouncementClass, SubscriberPid}` key —
+  whichever announce wins the `take` delivers, the loser gets `[]` and skips it,
+  so it fires at most once. (A concurrent announcer may waste its MRO walk on a
+  row that's already taken — harmless; correctness rests on the single atomic
+  `take`, not the walk.) Single-node guarantee; weakens under the package's
+  distributed path, noted there.
 
 This reverses BT-2193's "no pg / ETS-per-announcer" choice *only* for the
 shared `SystemAnnouncer` (where cluster-wide membership is worth having);
@@ -195,6 +217,11 @@ Three classes in the **core image** (so the system can publish):
 // Base event — an immutable typed payload. Apps subclass it and add `field:`
 // slots; an announcement is a *fact*, so it is a Value (never mutable). Value
 // inheritance with an abstract base mirrors `abstract Value subclass: Number`.
+// NOTE: as a Value, two announcements with equal fields compare `==`
+// (structural). That is fine here — the dispatch path keys on event *class* +
+// subscription, never on event equality, so distinct-occurrence identity is
+// never needed. (Pharo's Announcement uses identity; we accept structural
+// equality as the price of Value's `field:`/keyword-ctor ergonomics.)
 abstract Value subclass: Announcement
 
 // A dispatcher handle — an opaque reflection of runtime state, exactly like
@@ -238,6 +265,13 @@ subclasses (stdlib-provided): `ActorSpawned` / `ActorStopped`, `ClassLoaded` /
 `ClassRemoved`, `BindingChanged`, and (ADR 0092) `SupervisionChildAdded` /
 `SupervisionChildCrashed`. A tool subscribes once and filters by event class
 instead of wiring four bespoke transports.
+
+**System events are announced only *after* the triggering action's metadata
+writes commit** — e.g. `ClassLoaded` fires from `beamtalk_object_class`'s
+`handle_call` reply path *after* the class's `beamtalk_class_metadata` row is
+written, so the MRO walk for the event (which reads that metadata) sees a
+consistent hierarchy. The trade is a small observable gap (class live before its
+announcement) over an inconsistent-read risk; the gap is the safe choice.
 
 ### 3. Layer 3 — the package (re-scoped BT-2193)
 
@@ -322,6 +356,10 @@ already exposes runtime *wiring* along two axes that share one shape — a
 `ProcessNavigation` walks the live supervision tree (`SupervisionNode`).
 Subscriptions are wiring of the same kind, so the substrate ships the **third
 sibling** in v1 — the pattern is settled, so there is no reason to defer it.
+(Risk, accepted: `ProcessNavigation` is Planned, not yet Implemented (ADR 0092
+BT-2427…2433); if its shape shifts during build, `AnnouncementNavigation` —
+deliberately the *same* shape — co-evolves with it. The `Announcer`
+self-inspection half costs nothing extra and is independent of that risk.)
 
 Two levels, mirroring ADR 0092's *object-knows-itself / navigator-discovers-
 system* split:
@@ -506,11 +544,11 @@ exists to stop.
   to deadlock or bottleneck; crash-survivable via ETS heir; monitored + isolated
   by construction; hot-reload-safe (process-rooted subs). Clean `telemetry`
   boundary preserved (§4).
-- `pg` membership + location-transparent send + cross-node monitors give
-  `SystemAnnouncer` free delivery to any *connected* node in v1 — the ADR-0091
-  LiveView front (a separate node over Erlang distribution) gets live updates
-  with no package. Only partition tolerance / replay / multi-workspace-cluster
-  fall to the package.
+- `pg` membership + location-transparent send + cross-node monitors let
+  `SystemAnnouncer` deliver to a *connected* node in v1 with no package — useful
+  for the ADR-0091 LiveView front — subject to the two integration conditions in
+  Layer 1 (shared `beamtalk_pg` scope; front subscribes directly). Only
+  partition tolerance / replay / multi-workspace-cluster fall to the package.
 - The bus is **navigable in v1** (§7): `AnnouncementNavigation` + the
   `Announcer` self-inspection methods make subscriptions a first-class,
   walkable part of the runtime — the third sibling of `SystemNavigation` /
@@ -530,8 +568,26 @@ exists to stop.
   per-subscription. Consumers needing causal order (e.g. `ActorSpawned` before a
   dependent event) must not assume it — documented, not engineered, in v1.
 - MRO matching costs an ETS-metadata walk per announce (~ depth × ~150 ns + fan-
-  out send cost). Fine for discrete events at human/IDE rates; **not** fine for
-  line-rate streams — which is precisely why Transcript is excluded (§5).
+  out send cost — the ns figure is an order-of-magnitude estimate, to be
+  confirmed by the Phase-1 EUnit benchmark). Fine for discrete events at
+  human/IDE rates; **not** fine for line-rate streams — which is precisely why
+  Transcript is excluded (§5).
+- **At-most-one in-flight delivery after `unsubscribe:`.** Because dispatch is
+  caller-side, a subscriber can receive a message for an `announce:` that was
+  already fanning out when its `unsubscribe:` completed. Handlers must be
+  idempotent / tolerate one spurious post-unsubscribe delivery — a real
+  behavioural difference from a centralised bus, and a documented contract, not
+  a bug.
+- **MRO walk truncates if a class is removed mid-announce.** A concurrent
+  `ClassRemoved` can make the superclass walk hit `not_found` and stop, so
+  subscribers of ancestors above the removed class miss that one event. Accepted
+  for the intended interactive/IDE use; documented, not engineered around.
+- **Cross-node sends absorb up to `net_ticktime` on unreachability short of a
+  full netsplit.** If a connected subscriber's node becomes unreachable
+  (port congestion, half-open TCP) the announcer keeps sending to it until the
+  cross-node monitor fires (default ~60 s). This is normal distribution jitter,
+  not partition handling (deferred to the package); cross-node consumers accept
+  it as v1 behaviour.
 
 ### Neutral
 - Adds a runtime worker (`beamtalk_announcements`) under `beamtalk_runtime_sup`
@@ -552,7 +608,14 @@ re-scope):
    class, `Announcer new`, `when:do:`, `announce:` (async) over a single `pg`
    group + monitor cleanup. Prove typed dispatch end-to-end from the REPL.
 1. **Runtime bus (full):** MRO match, `announceAndWait:` (sync), `when:send:to:`,
-   `when:doOnce:`, fault isolation, sup wiring. EUnit.
+   `when:doOnce:`, fault isolation, sup wiring. **EUnit must prove the
+   concurrency properties a REPL demo cannot** (the hardest-to-get-right parts):
+   (a) concurrent `announce:` from N processes against one `doOnce` subscription
+   → *exactly one* delivery; (b) subscriber dies before dispatch → no delivery,
+   no announcer crash; (c) bus crashes + restarts → subscriptions survive (heir)
+   and pids that died in the gap are pruned; (d) handler crash under
+   `announceAndWait:` → caller still returns (DOWN handled), siblings unaffected;
+   plus the MRO-walk microbenchmark backing the cost estimate.
 2. **stdlib veneer + introspection:** `Announcement` / `Announcer` /
    `SystemAnnouncer`, the `Announcer` self-inspection methods, and the
    `AnnouncementNavigation` navigator + `SubscriptionNode` value class (§7) —
