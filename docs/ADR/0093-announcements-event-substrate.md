@@ -108,6 +108,7 @@ substrate and `telemetry`'s measurement role.
 │ stdlib (CORE IMAGE)                                            │
 │   Announcement (base event) · Announcer (per-instance) ·       │
 │   SystemAnnouncer (singleton) · when:do: / announce: / …       │
+│   AnnouncementNavigation + SubscriptionNode (introspection)    │
 ├──────────────────────────────────────────────────────────────┤
 │ runtime (Erlang)  beamtalk_announcements                       │
 │   ETS subscription table (gen_server owns writes + monitors);  │
@@ -215,6 +216,10 @@ typed Object subclass: Announcer
   announce: anEvent :: Announcement -> Nil => ...           // async (cast)
   announceAndWait: anEvent :: Announcement -> Nil => ...     // sync (call)
   unsubscribe: receiver -> Nil => ...
+  // self-inspection (object-knows-itself; reads its own ETS rows by ref) — §7
+  subscriptions -> List(SubscriptionNode) => ...
+  subscribersOf: aClass :: Class -> List(SubscriptionNode) => ...
+  subscriptionCount -> Integer => ...
 
 // The one the *system* publishes through — Pharo's SystemAnnouncer.
 sealed Announcer subclass: SystemAnnouncer
@@ -272,6 +277,59 @@ treats as fully privileged, so no boundary is bypassed. The ADR-0091
 implementation issue owns adding `subscribe`/`unsubscribe` to the authoritative
 op list; this ADR fixes the requirement.
 
+### 7. Introspection & navigation — the third navigation sibling
+
+A pub/sub bus that can't be inspected is a black box, which would contradict the
+very reason this lives in the core (observability/tooling, §"Why now"). Beamtalk
+already exposes runtime *wiring* along two axes that share one shape — a
+**navigator** (`Object`) returning **snapshot records** (`Value`):
+`SystemNavigation` walks static structure (classes, `sendersOf:`); ADR 0092's
+`ProcessNavigation` walks the live supervision tree (`SupervisionNode`).
+Subscriptions are wiring of the same kind, so the substrate ships the **third
+sibling** in v1 — the pattern is settled, so there is no reason to defer it.
+
+Two levels, mirroring ADR 0092's *object-knows-itself / navigator-discovers-
+system* split:
+
+- **Object-knows-itself.** A live `Announcer` / `SystemAnnouncer` inspects its
+  own subscriptions (`subscriptions`, `subscribersOf:`, `subscriptionCount`
+  above) by reading its own ETS rows — cheap, caller-side.
+- **Navigator-discovers-system.** `AnnouncementNavigation` is the dynamic twin
+  of `SystemNavigation`, a `sealed typed Object subclass` (a query handle, not
+  an actor — exactly like `SystemNavigation`/`ProcessNavigation`):
+
+```beamtalk
+class default                          -> AnnouncementNavigation   // the system bus
+class of: anAnnouncer :: Announcer     -> AnnouncementNavigation   // one announcer
+  subscriptions                        -> List(SubscriptionNode)   // snapshot
+  subscribersOf: aClass :: Class       -> List(SubscriptionNode)
+  announcedClasses                     -> List(Class)              // distinct event types in use
+```
+
+It returns a **read-only snapshot** of the subscription graph as immutable
+`Value` records:
+
+```beamtalk
+sealed typed Value subclass: SubscriptionNode
+  field: announcementClass :: Class      = nil   // the subscribed-to event type
+  field: announcer         :: Announcer  = nil   // which bus
+  field: subscriber        :: Pid        = nil   // the live handler process
+  field: handlerKind       :: Symbol     = nil   // #do | #send | #doOnce
+  field: once              :: Boolean    = false
+```
+
+The **read-vs-mutate rule** is ADR 0092 §3a's, applied identically: a
+`SubscriptionNode` is a frozen fact and read-only; to *act* you cross back to
+the live `Subscription` token (`unsubscribe`) or the `Announcer`. This keeps the
+Object/Value split consistent across all three navigators — navigators
+(`SystemNavigation`, `ProcessNavigation`, `AnnouncementNavigation`) and live
+handles (`Announcer`, `Subscription`) are `Object`; snapshot records
+(`SupervisionNode`, `SubscriptionNode`) and domain events (`Announcement`) are
+`Value`. The IDE's "event wiring" pane (ADR 0017/0091) is `AnnouncementNavigation
+default subscribersOf: …` grouped by `announcementClass`. The navigator reads
+are gated as a `system`-scope read under ADR 0091, like the supervision
+navigator (§6).
+
 ### 3. Layer 3 — the package (re-scoped BT-2193)
 
 `beamtalk-announcements` shrinks to the genuinely-optional:
@@ -323,6 +381,12 @@ bt> SystemAnnouncer current when: ActorSpawned do: [:e | Transcript showLine: e 
 
 bt> Counter spawn
 Counter        "← the subscription above fires"
+
+bt> "Introspect the wiring — the third navigation sibling (§7):"
+bt> a subscriptions size
+1
+bt> (AnnouncementNavigation default subscribersOf: ActorSpawned) first handlerKind
+#do
 ```
 
 ### Error / edge behaviour
@@ -441,6 +505,11 @@ exists to stop.
   LiveView front (a separate node over Erlang distribution) gets live updates
   with no package. Only partition tolerance / replay / multi-workspace-cluster
   fall to the package.
+- The bus is **navigable in v1** (§7): `AnnouncementNavigation` + the
+  `Announcer` self-inspection methods make subscriptions a first-class,
+  walkable part of the runtime — the third sibling of `SystemNavigation` /
+  `ProcessNavigation`, with the same `Object`-navigator / `Value`-snapshot shape.
+  Pub/sub is not a black box.
 
 ### Negative
 - Three layers to build and document vs BT-2193's single package.
@@ -477,9 +546,12 @@ re-scope):
    group + monitor cleanup. Prove typed dispatch end-to-end from the REPL.
 1. **Runtime bus (full):** MRO match, `announceAndWait:` (sync), `when:send:to:`,
    `when:doOnce:`, fault isolation, sup wiring. EUnit.
-2. **stdlib veneer:** `Announcement` / `Announcer` / `SystemAnnouncer` +
-   registration (`generated_builtins.rs`, `build_stdlib.rs`); typed signatures.
-   BUnit.
+2. **stdlib veneer + introspection:** `Announcement` / `Announcer` /
+   `SystemAnnouncer`, the `Announcer` self-inspection methods, and the
+   `AnnouncementNavigation` navigator + `SubscriptionNode` value class (§7) —
+   the navigation pattern is settled by `SystemNavigation`/`ProcessNavigation`,
+   so it ships in v1, not later. Registration (`generated_builtins.rs`,
+   `build_stdlib.rs`); typed signatures. BUnit.
 3. **System events + consumer consolidation:** define the system `Announcement`
    subclasses; migrate the runtime emit points; update ADRs 0017/0046/0054/0091/
    0092 to subscribe via `SystemAnnouncer` (and ADR 0092 §8 to point here).
