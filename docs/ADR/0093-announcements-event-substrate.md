@@ -191,12 +191,19 @@ per-instance announcers keep the lean ETS model BT-2193 specced.
 Three classes in the **core image** (so the system can publish):
 
 ```beamtalk
-// Base event type — apps subclass it; carries typed state.
-abstract Object subclass: Announcement
+// Base event — an immutable typed payload. Apps subclass it and add `field:`
+// slots; an announcement is a *fact*, so it is a Value (never mutable). Value
+// inheritance with an abstract base mirrors `abstract Value subclass: Number`.
+abstract Value subclass: Announcement
 
-// A dispatcher instance. Apps spawn their own; the system has a singleton.
-Object subclass: Announcer
-  class spawn -> Announcer => (Erlang beamtalk_announcements) newAnnouncer
+// A dispatcher handle — an immutable Value wrapping a runtime subscription ref.
+// NOT an Actor: there is deliberately no per-announcer process (that would
+// reintroduce the central mailbox rejected in §4). The subscriber set lives in
+// the runtime ETS table keyed by `ref`; dispatch runs caller-side. `class new`
+// mints a fresh ref via FFI — the same pattern as `Random class new`.
+Value subclass: Announcer
+  field: ref :: Any = nil
+  class new -> Announcer => (Erlang beamtalk_announcements) newAnnouncer
   when: aClass :: Class do: aBlock :: Block -> Subscription => ...
   when: aClass :: Class send: sel :: Symbol to: receiver -> Subscription => ...
   when: aClass :: Class doOnce: aBlock :: Block -> Subscription => ...
@@ -293,16 +300,16 @@ the other, without coupling the two buses.
 
 ```beamtalk
 bt> Announcement subclass: PriceChanged
-...>   state: newPrice :: Money = nil
+...>   field: newPrice :: Money = nil
 PriceChanged
 
-bt> a := Announcer spawn
-#Announcer<<0.421.0>>
+bt> a := Announcer new
+an Announcer
 
 bt> a when: PriceChanged do: [:e | Transcript showLine: "now " ++ e newPrice printString]
 #Subscription<...>
 
-bt> a announce: (PriceChanged new: #{ #newPrice => 42 })
+bt> a announce: (PriceChanged newPrice: 42)
 now 42
 
 bt> "Subscribe to the system bus — one feed for everything the system emits:"
@@ -341,7 +348,7 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
 ## User Impact
 
 - **Newcomer.** `when: X do: [...]` reads like every other block-taking message
-  they already use; `Announcer spawn` mirrors `Counter spawn`. They can watch
+  they already use; `Announcer new` is an ordinary value constructor. They can watch
   the system live (`SystemAnnouncer current when: ActorSpawned do: …`) — a
   tangible way to *see* what the runtime is doing.
 - **Smalltalk developer.** It *is* Pharo Announcements, including
@@ -461,7 +468,7 @@ Downstream of acceptance (the `/plan-adr` step owns the epic + the BT-2193
 re-scope):
 
 0. **Phase 0 (napkin):** `beamtalk_announcements` with one `Announcement`
-   class, `Announcer spawn`, `when:do:`, `announce:` (async) over a single `pg`
+   class, `Announcer new`, `when:do:`, `announce:` (async) over a single `pg`
    group + monitor cleanup. Prove typed dispatch end-to-end from the REPL.
 1. **Runtime bus (full):** MRO match, `announceAndWait:` (sync), `when:send:to:`,
    `when:doOnce:`, fault isolation, sup wiring. EUnit.
