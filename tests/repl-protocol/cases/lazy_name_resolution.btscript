@@ -112,6 +112,27 @@ Workspace unbind: #loopBase
 // => nil
 
 // ===========================================================================
+// NO SPURIOUS "Unresolved class" WARNING FOR LAZILY-RESOLVED SINGLETONS
+// ===========================================================================
+//
+// Regression guard: ADR 0081 Phase 1 stopped eagerly injecting the singletons
+// into the session bindings map, so they dropped out of the KnownVars list sent
+// to the compiler and the structural validator began flagging `Workspace` (and
+// friends) as `Unresolved class`. known_vars/1 now re-adds the singleton binding
+// names from beamtalk_workspace_config, so a singleton send must compile cleanly
+// with no diagnostic warning.
+
+// Sending to a singleton must NOT warn that it is an unresolved class.
+Workspace classes
+// => NO-WARNING: Unresolved class
+
+Transcript show: "ok"
+// => NO-WARNING: Unresolved class
+
+Beamtalk version
+// => NO-WARNING: Unresolved class
+
+// ===========================================================================
 // UNDEFINED VARIABLE STILL RAISED FOR GENUINELY UNKNOWN NAMES
 // ===========================================================================
 

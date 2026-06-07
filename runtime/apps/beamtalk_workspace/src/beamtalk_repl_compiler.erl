@@ -23,6 +23,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
     compile_for_method_reload/2,
     format_formatted_diagnostics/1,
     is_internal_key/1,
+    known_vars/1,
     build_class_superclass_index/0,
     build_class_module_index/0,
     build_class_indexes/0
@@ -67,12 +68,7 @@ Like `compile_expression/3' but the generated module's `eval/1' returns
 compile_expression_trace(Expression, ModuleName, Bindings) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
-    KnownVars = [
-        atom_to_binary(K, utf8)
-     || K <- maps:keys(Bindings),
-        is_atom(K),
-        not is_internal_key(K)
-    ],
+    KnownVars = known_vars(Bindings),
     CompileOpts = add_class_indexes(#{}),
     wrap_compiler_errors(
         fun() ->
@@ -199,6 +195,43 @@ format_diagnostic_text(D) when is_binary(D) ->
 format_diagnostic_text(D) ->
     iolist_to_binary(io_lib:format("~p", [D])).
 
+-doc """
+Build the `KnownVars' list passed to the compiler port for a REPL eval.
+
+This is the set of names the structural validator must treat as already
+defined so it does not flag them as unresolved classes / undefined variables.
+It must mirror what the runtime name resolver
+(`beamtalk_workspace_interface_primitives:resolve_name/2') can resolve as a
+free identifier:
+
+- user variable bindings — session locals plus `bind:as:' globals, both already
+  present as atom keys in `Bindings' (internal `__'-prefixed keys excluded);
+- workspace singleton binding names (`Transcript'/`Beamtalk'/`Workspace'),
+  derived from `beamtalk_workspace_config:binding_names/0' — the same single
+  source of truth the resolver's singleton tier uses.
+
+ADR 0081 Phase 1 stopped eagerly injecting the singletons into the session
+bindings map (they are now resolved lazily), so they are no longer in
+`Bindings' and must be added back here — otherwise `Workspace classes' at the
+REPL reports a spurious `Unresolved class Workspace` warning.
+
+Class names (`Counter', `Integer', …) are not added here; the compiler already
+knows them via the class hierarchy.
+""".
+-spec known_vars(map()) -> [binary()].
+known_vars(Bindings) ->
+    UserVars = [
+        atom_to_binary(K, utf8)
+     || K <- maps:keys(Bindings),
+        is_atom(K),
+        not is_internal_key(K)
+    ],
+    SingletonVars = [
+        atom_to_binary(Name, utf8)
+     || Name <- beamtalk_workspace_config:binding_names()
+    ],
+    lists:usort(UserVars ++ SingletonVars).
+
 -doc "Check if a binding key is internal (not a user variable).".
 -spec is_internal_key(atom()) -> boolean().
 is_internal_key(Key) when is_atom(Key) ->
@@ -310,12 +343,7 @@ compile_for_method_reload(SourceBin, Options) ->
 compile_expression_via_port(Expression, ModuleName, Bindings) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
-    KnownVars = [
-        atom_to_binary(K, utf8)
-     || K <- maps:keys(Bindings),
-        is_atom(K),
-        not is_internal_key(K)
-    ],
+    KnownVars = known_vars(Bindings),
     CompileOpts = add_class_indexes(#{}),
     wrap_compiler_errors(
         fun() ->
