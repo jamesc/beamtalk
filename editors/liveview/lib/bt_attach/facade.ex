@@ -43,6 +43,17 @@ defmodule BtAttach.Facade do
     inspect: :read,
     bindings: :read,
     actors: :read,
+    # ADR 0092: the `default`-scope supervision-tree snapshot
+    # (`Workspace processes`) is a Read op, scoped exactly like `actors` — it
+    # adds supervision structure but no new power, safe for the Observer role.
+    processes: :read,
+    # ADR 0092: the `system`-scope snapshot (`ProcessNavigation system`) is NOT
+    # a plain Observer read. It exposes the whole-node process map (runtime
+    # internals, other sessions' supervisors, foreign processes) and is a
+    # lateral-movement aid in the compromised-Phoenix scenario ADR 0091 flags,
+    # so it is gated to a privileged (`:execute`-holding, i.e. Owner) role: it
+    # grants no reconnaissance a code-running caller couldn't already perform.
+    processes_system: :execute,
     sessions: :read,
     complete: :read,
     changes: :read,
