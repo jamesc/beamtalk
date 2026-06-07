@@ -897,6 +897,21 @@ do_once_sync_path_test_() ->
 %% their own setup that ensures a fresh bus exists after the test completes,
 %% avoiding interference with other test fixtures.
 heir_crash_survival_test_() ->
+    case whereis(beamtalk_runtime_sup) of
+        Sup when is_pid(Sup) ->
+            %% The live runtime is supervising the singleton bus. This test needs
+            %% exclusive control of the bus lifecycle (stop + kill + restart),
+            %% which would fight the supervisor (restart intensity, already_started
+            %% races) and orphan the heir'd tables onto the real supervisor,
+            %% destabilising sibling children. Exercised in the standalone EUnit
+            %% context where no supervisor owns the bus.
+            {"heir crash-survival (skipped: live runtime supervises the bus)",
+                ?_test(ok)};
+        undefined ->
+            heir_crash_survival_impl()
+    end.
+
+heir_crash_survival_impl() ->
     {timeout, 15,
         ?_test(begin
             %% We need a fake supervisor registered as `beamtalk_runtime_sup` so the
@@ -986,6 +1001,17 @@ heir_crash_survival_test_() ->
 %% Verifies that a subscriber which dies *after* restart is still auto-pruned via
 %% the re-armed monitor. This confirms re-arm actually wires up working monitors.
 heir_rearm_monitor_fires_on_later_death_test_() ->
+    case whereis(beamtalk_runtime_sup) of
+        Sup when is_pid(Sup) ->
+            %% See heir_crash_survival_test_/0 — skipped under the live runtime;
+            %% exercised in the standalone EUnit context.
+            {"heir re-arm monitor (skipped: live runtime supervises the bus)",
+                ?_test(ok)};
+        undefined ->
+            heir_rearm_monitor_fires_on_later_death_impl()
+    end.
+
+heir_rearm_monitor_fires_on_later_death_impl() ->
     {timeout, 15,
         ?_test(begin
             FakeSup = ensure_heir_process(),
