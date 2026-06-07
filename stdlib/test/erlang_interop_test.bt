@@ -24,8 +24,8 @@ TestCase subclass: ErlangInteropTest
     self assert: (Erlang lists nth: 2 with: #(10, 20, 30)) equals: 20
 
   testErlangFunctionCallsZeroArgUnaryOnProxy =>
-    // erlang:node/0 — returns current node atom
-    self assert: ((Erlang erlang) node) notNil
+    // erlang:node/0 — returns the current node name as a Symbol (Erlang atom)
+    self assert: ((Erlang erlang) node) class equals: Symbol
 
   testCachedProxy =>
     // Store proxy in variable and reuse
