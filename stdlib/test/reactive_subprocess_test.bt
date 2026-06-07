@@ -56,7 +56,8 @@ TestCase subclass: ReactiveSubprocessTest
       "echo $BT_TEST_SEED; pwd"
     ] ifFalse: ["echo %BT_TEST_SEED%& cd"]
 
-  envDir => self.isUnix ifTrue: [File tempDirectory] ifFalse: [System getEnv: "TEMP"]
+  envDir =>
+    self.isUnix ifTrue: [File tempDirectory] ifFalse: [System getEnv: "TEMP"]
 
   // cat executable: echoes stdin to stdout.
   // On Unix uses /bin/cat; on Windows uses beamtalk-exec --cat (built-in
@@ -198,7 +199,14 @@ TestCase subclass: ReactiveSubprocessTest
     // Non-binary command argument fails the is_binary/1 guard in dispatch/3 (lines 114-115).
     delegate := StubDelegate spawn
     @expect type
-    self should: [ReactiveSubprocess open: 42 args: #() notify: delegate] raise: #type_error
+    self
+      should: [
+        ReactiveSubprocess
+          open: 42
+          args: #()
+          notify: delegate
+      ]
+      raise: #type_error
     self assert: delegate stop equals: #ok
 
   testStopWithoutCloseTerminatesPort =>
