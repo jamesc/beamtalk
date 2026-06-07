@@ -699,29 +699,51 @@ classify_non_actor(Pid, Id, Type) ->
 %% Resolve the Beamtalk Supervisor/DynamicSupervisor class for a supervisor pid,
 %% or `error` for a foreign OTP supervisor. Prefers the `which_children` child-id
 %% hint (a class atom for a nested static supervisor); for a root pid with no
-%% hint, falls back to the supervisor's registered module — Beamtalk supervisors
-%% register under `{local, ?MODULE}`, so the module reverses to the class via the
-%% same mapping that drives stack-trace class resolution.
+%% hint, maps the supervisor's callback module (from its `'$initial_call'`) to
+%% the class via the live class registry — a reliable lookup, not a lossy
+%% snake_case→CamelCase name heuristic (which mangles e.g. `E2EAppSupervisor`).
 -spec beamtalk_supervisor_class(pid(), atom() | undefined) -> {ok, atom()} | error.
 beamtalk_supervisor_class(Pid, Id) ->
     case is_atom(Id) andalso Id =/= undefined andalso beamtalk_supervisor:is_supervisor(Id) of
         true ->
             {ok, Id};
         false ->
-            case registered_name(Pid) of
+            case class_name_for_module(supervisor_callback_module(Pid)) of
                 nil ->
                     error;
-                ModName ->
-                    case beamtalk_stack_frame:module_to_class(ModName) of
-                        nil ->
-                            error;
-                        ClassName ->
-                            case beamtalk_supervisor:is_supervisor(ClassName) of
-                                true -> {ok, ClassName};
-                                false -> error
-                            end
+                ClassName ->
+                    case beamtalk_supervisor:is_supervisor(ClassName) of
+                        true -> {ok, ClassName};
+                        false -> error
                     end
             end
+    end.
+
+%% The OTP supervisor's callback module, read from its `'$initial_call'`
+%% (`{supervisor, Module, 1}`). For a Beamtalk supervisor this is the class's
+%% generated module; `nil` if the process is not a marked supervisor.
+-spec supervisor_callback_module(pid()) -> module() | nil.
+supervisor_callback_module(Pid) ->
+    case erlang:process_info(Pid, dictionary) of
+        {dictionary, Dict} when is_list(Dict) ->
+            case lists:keyfind('$initial_call', 1, Dict) of
+                {'$initial_call', {supervisor, Module, _Arity}} -> Module;
+                _ -> nil
+            end;
+        _ ->
+            nil
+    end.
+
+%% Map a compiled module atom to its Beamtalk class name via the live class
+%% registry, or `nil` for a non-Beamtalk (foreign) module. Reliable: it matches
+%% the registry's recorded `module_name`, never reconstructs the name from text.
+-spec class_name_for_module(module() | nil) -> atom() | nil.
+class_name_for_module(nil) ->
+    nil;
+class_name_for_module(Module) ->
+    case lists:keyfind(Module, 2, beamtalk_class_registry:live_class_entries()) of
+        {Name, Module, _Pid} -> Name;
+        false -> nil
     end.
 
 %% A pid is a supervisor when the `which_children` hint says so, or — for a root

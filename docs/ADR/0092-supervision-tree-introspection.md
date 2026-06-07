@@ -1,24 +1,44 @@
 # ADR 0092: Supervision Tree Introspection API (Runtime Query Surface)
 
 ## Status
-Accepted (2026-06-06)
+Implemented (2026-06-07)
 
 ## Implementation Tracking
 
 **Epic:** [BT-2425](https://linear.app/beamtalk/issue/BT-2425) — Supervision Tree Introspection API (ADR 0092)
 **Design issue:** [BT-2395](https://linear.app/beamtalk/issue/BT-2395)
-**Status:** Planned
+**Status:** Implemented — all eight child issues complete.
 
-| Phase | Issue | Title | Size | Blocked by |
+| Phase | Issue | Title | Size | Status |
 |---|---|---|---|---|
-| 1 | [BT-2426](https://linear.app/beamtalk/issue/BT-2426) | Runtime shim: flat `default`-scope snapshot (`beamtalk_process_navigation`) | M | – |
-| 1 | [BT-2427](https://linear.app/beamtalk/issue/BT-2427) | `SupervisionNode` value class + flat `Workspace processes` | M | BT-2426 |
-| 2 | [BT-2428](https://linear.app/beamtalk/issue/BT-2428) | Foreign procs, `system` scope, dynamic-sup cap, `from:`, lazy `status` | M | BT-2426 |
-| 3 | [BT-2429](https://linear.app/beamtalk/issue/BT-2429) | `SupervisionTree` + `ProcessNavigation` classes | M | BT-2427, BT-2428 |
-| 3 | [BT-2430](https://linear.app/beamtalk/issue/BT-2430) | Repoint `Workspace processes` to `ProcessNavigation default tree` | S | BT-2429 |
-| 4 | [BT-2432](https://linear.app/beamtalk/issue/BT-2432) | ADR-0091 role placement (`default`→Read, `system`→privileged) | S | BT-2430 |
-| 4 | [BT-2431](https://linear.app/beamtalk/issue/BT-2431) | Surfaces: LSP/MCP/browser + surface-parity | M | BT-2430 |
-| 4 | [BT-2433](https://linear.app/beamtalk/issue/BT-2433) | E2E + comprehensive tests + docs + ADR → Implemented | M | BT-2430, BT-2431 |
+| 1 | [BT-2426](https://linear.app/beamtalk/issue/BT-2426) | Runtime shim: flat `default`-scope snapshot (`beamtalk_process_navigation`) | M | ✅ Done |
+| 1 | [BT-2427](https://linear.app/beamtalk/issue/BT-2427) | `SupervisionNode` value class + flat `Workspace processes` | M | ✅ Done |
+| 2 | [BT-2428](https://linear.app/beamtalk/issue/BT-2428) | Foreign procs, `system` scope, dynamic-sup cap, `from:`, lazy `status` | M | ✅ Done |
+| 3 | [BT-2429](https://linear.app/beamtalk/issue/BT-2429) | `SupervisionTree` + `ProcessNavigation` classes | M | ✅ Done |
+| 3 | [BT-2430](https://linear.app/beamtalk/issue/BT-2430) | Repoint `Workspace processes` to `ProcessNavigation default tree` | S | ✅ Done |
+| 4 | [BT-2432](https://linear.app/beamtalk/issue/BT-2432) | ADR-0091 role placement (`default`→Read, `system`→privileged) | S | ✅ Done |
+| 4 | [BT-2431](https://linear.app/beamtalk/issue/BT-2431) | Surfaces: LSP/MCP/browser + surface-parity | M | ✅ Done |
+| 4 | [BT-2433](https://linear.app/beamtalk/issue/BT-2433) | E2E + comprehensive tests + docs + ADR → Implemented | M | ✅ Done |
+
+**Delivered:**
+
+- **Runtime shim** `beamtalk_process_navigation` — flat snapshot (`default` /
+  `system` scopes), kind classification (`#beamtalkActor` /
+  `#beamtalkSupervisor` / `#otpSupervisor` / `#otpProcess` / `#restarting`),
+  infra deny-list, foreign-process classification, the `simple_one_for_one`
+  child cap, `from:`, and the lazy timeout-guarded `status`. No new gen_server
+  or ETS — a pure OTP wrapper.
+- **Stdlib** `SupervisionNode` (value record), `SupervisionTree` (collection
+  protocol + navigation + serialisable `asDictionaries`), and
+  `ProcessNavigation` (`default` / `system` / `from:`), with `Workspace
+  processes` aliased to `ProcessNavigation default tree`.
+- **Authorization** — `processes` (`default`) placed as an ADR-0091 Read op,
+  `processes_system` (`system`) gated to the privileged Owner role.
+- **Surfaces** — MCP `supervision_tree` tool + LiveView `processes` /
+  `processes_system` ops, with `surface-parity.md` updated.
+- **Tests** — EUnit (shim, deny-list parity, cap, `from:`, `status`, restarting,
+  partial tree), BUnit (value class + tree protocol), a type-checker test
+  (`from:` rejects a wrong-type root statically), and a REPL e2e btscript.
 
 ```text
 Wave 1: BT-2426

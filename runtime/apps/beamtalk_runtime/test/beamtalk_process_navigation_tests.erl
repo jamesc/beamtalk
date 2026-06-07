@@ -250,6 +250,71 @@ deny_listed_process_excluded_from_default_test() ->
     end.
 
 %%====================================================================
+%% Tests: deny-list parity (BT-2433) — default ⊆ system, infra filtered
+%%====================================================================
+
+%% This is the ownership mechanism (ADR 0092 Implementation §4): a new runtime
+%% supervisor that should be hidden from `default` but is missing from the
+%% deny-list fails CI here rather than leaking into the user-facing snapshot.
+deny_list_parity_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    DefaultPids = sets:from_list(
+        [maps:get(pid, N) || N <- beamtalk_process_navigation:default_snapshot()],
+        [{version, 2}]
+    ),
+    SystemPids = sets:from_list(
+        [maps:get(pid, N) || N <- beamtalk_process_navigation:system_snapshot()],
+        [{version, 2}]
+    ),
+    %% default's node set is a subset of system's.
+    ?assert(sets:is_subset(DefaultPids, SystemPids)),
+    %% Each currently-running internal supervisor/worker is in `system` but
+    %% filtered from `default`.
+    InfraNames = [
+        beamtalk_runtime_sup,
+        beamtalk_xref,
+        beamtalk_stdlib,
+        beamtalk_object_instances,
+        beamtalk_trace_store,
+        beamtalk_subprocess_sup,
+        beamtalk_reactive_subprocess_sup
+    ],
+    lists:foreach(
+        fun(Name) ->
+            case erlang:whereis(Name) of
+                undefined ->
+                    ok;
+                Pid ->
+                    ?assert(sets:is_element(Pid, SystemPids)),
+                    ?assertNot(sets:is_element(Pid, DefaultPids))
+            end
+        end,
+        InfraNames
+    ).
+
+%%====================================================================
+%% Tests: partial tree under mid-walk mutation (BT-2433)
+%%====================================================================
+
+%% A supervisor whose child died (the snapshot's non-atomic construction races
+%% with the live tree) yields a *partial* tree — the dead child is represented
+%% as a leaf, never a raise (ADR 0092 §4).
+partial_tree_does_not_raise_test() ->
+    Dead = spawn(fun() -> ok end),
+    _ = sys_wait_dead(Dead),
+    FakeSup = spawn_fake_supervisor([{child_a, Dead, worker, [some_mod]}]),
+    try
+        Nodes = beamtalk_process_navigation:snapshot_from_pids([FakeSup], system),
+        %% No raise: the root plus the dead child both appear.
+        ?assert(length(Nodes) >= 1),
+        DeadNode = node_with_pid(Nodes, Dead),
+        ?assertNotEqual(not_found, DeadNode),
+        ?assertEqual(0, maps:get(childCount, DeadNode))
+    after
+        FakeSup ! stop
+    end.
+
+%%====================================================================
 %% Tests: restarting child (ADR 0092 §3)
 %%====================================================================
 
