@@ -19,6 +19,8 @@ for manipulating state during REPL sessions.
     clear_bindings/1,
     get_eval_counter/1,
     increment_eval_counter/1,
+    get_client_meta/1,
+    get_client_kind/1,
     get_loaded_modules/1,
     add_loaded_module/2,
     set_loaded_modules/2,
@@ -44,6 +46,16 @@ for manipulating state during REPL sessions.
 -record(state, {
     listen_socket :: gen_tcp:socket() | undefined,
     port :: inet:port_number(),
+    %% Origin/debug metadata for this session, set once at creation (immutable for
+    %% its lifetime) and surfaced by `Workspace sessions` / `Session kind` /
+    %% `Session info`. An extensible map so new debug fields are just new keys:
+    %%   kind         :: binary()            -- always present; the client surface
+    %%                                          (`repl`/`mcp`/`lsp`/`liveview`/…)
+    %%   peer         :: binary() | undefined -- remote "host:port" (ws clients)
+    %%   node         :: atom()   | undefined -- calling node (dist-attached)
+    %%   user         :: binary() | undefined -- authenticated user (LiveView)
+    %%   connected_at :: integer()| undefined -- system_time microsecond at start
+    client_meta :: map(),
     %% BT-2365 (ADR 0081 Phase 1): holds ONLY session locals. Workspace globals
     %% (singletons + bind:as: names) are resolved lazily at eval time rather than
     %% injected here, so there is no injected_ws_keys reconciliation field.
@@ -79,12 +91,26 @@ for manipulating state during REPL sessions.
 new(ListenSocket, Port) ->
     new(ListenSocket, Port, #{}).
 
--doc "Create a new REPL state with options.".
+-doc """
+Create a new REPL state with options.
+
+`Options` may carry `client_meta => map()` to record session origin/debug
+metadata. The stored map always has a `kind` key (defaults to
+`#{kind => <<"unknown">>}` when absent or missing the key). Keys whose value is
+`undefined` are dropped so `Session info` only ever surfaces fields that are
+actually known (matching the documented "where known" contract — e.g. a
+WebSocket peer that could not be formatted is omitted, not shown as
+`undefined`).
+""".
 -spec new(gen_tcp:socket() | undefined, inet:port_number(), map()) -> state().
-new(ListenSocket, Port, _Options) ->
+new(ListenSocket, Port, Options) ->
+    Meta0 = maps:get(client_meta, Options, #{}),
+    Known = maps:filter(fun(_K, V) -> V =/= undefined end, Meta0),
+    Meta = maps:merge(#{kind => <<"unknown">>}, Known),
     #state{
         listen_socket = ListenSocket,
         port = Port,
+        client_meta = Meta,
         bindings = #{},
         eval_counter = 0,
         loaded_modules = [],
@@ -118,6 +144,16 @@ get_eval_counter(#state{eval_counter = Counter}) ->
 -spec increment_eval_counter(state()) -> state().
 increment_eval_counter(State = #state{eval_counter = Counter}) ->
     State#state{eval_counter = Counter + 1}.
+
+-doc "Get the full session origin/debug metadata map (always includes `kind`).".
+-spec get_client_meta(state()) -> map().
+get_client_meta(#state{client_meta = Meta}) ->
+    Meta.
+
+-doc "Get the originating client surface (the `kind` key of the metadata map).".
+-spec get_client_kind(state()) -> binary().
+get_client_kind(#state{client_meta = Meta}) ->
+    maps:get(kind, Meta, <<"unknown">>).
 
 -doc "Get loaded modules list.".
 -spec get_loaded_modules(state()) -> [atom()].

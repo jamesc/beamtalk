@@ -39,11 +39,94 @@ start_session(SessionId) ->
     Pid.
 
 %% Simulate "this process is the eval worker for SessionId" by seeding the
-%% process dict the way beamtalk_repl_shell:seed_session_context/2 does.
+%% process dict the way beamtalk_repl_shell:seed_session_context/3 does.
 seed_context(Pid, SessionId) ->
     put(beamtalk_session_pid, Pid),
     put(beamtalk_session_id, SessionId),
     ok.
+
+%% Build a Session value the way the factory primitives do, for the display
+%% primitives (kindOf/infoFor/printStringFor) which read embedded metadata only.
+make_session_value(Id, Pid, Meta) ->
+    #{'$beamtalk_class' => 'Session', id => Id, pid => Pid, meta => Meta}.
+
+%%====================================================================
+%% Display primitives: kindOf/1, infoFor/1, printStringFor/1
+%%====================================================================
+%%
+%% These read the embedded metadata only (no liveness check), so they are tested
+%% on hand-built Session values without a live shell. They are the regression
+%% guard for "Workspace sessions shows `#(a Session, a Session)`": printString
+%% must surface the kind + id.
+
+print_string_for_renders_kind_and_id_test() ->
+    Session = make_session_value(
+        <<"session_123_ab">>, self(), #{kind => <<"repl">>}
+    ),
+    ?assertEqual(
+        <<"a Session(repl: session_123_ab)">>,
+        beamtalk_session_primitives:printStringFor(Session)
+    ).
+
+print_string_for_missing_meta_defaults_unknown_test() ->
+    %% A legacy Session value minted before metadata existed (no meta key).
+    Legacy = #{'$beamtalk_class' => 'Session', id => <<"s1">>, pid => self()},
+    ?assertEqual(
+        <<"a Session(unknown: s1)">>,
+        beamtalk_session_primitives:printStringFor(Legacy)
+    ).
+
+print_string_for_does_not_liveness_check_test() ->
+    %% A dead pid must still render — printing a session list cannot raise just
+    %% because one session died mid-enumeration.
+    DeadPid = spawn(fun() -> ok end),
+    %% Ensure it has exited.
+    Ref = erlang:monitor(process, DeadPid),
+    receive
+        {'DOWN', Ref, process, DeadPid, _} -> ok
+    after 1000 -> erlang:demonitor(Ref, [flush])
+    end,
+    Session = make_session_value(<<"dead-1">>, DeadPid, #{kind => <<"ide">>}),
+    ?assertEqual(
+        <<"a Session(ide: dead-1)">>,
+        beamtalk_session_primitives:printStringFor(Session)
+    ).
+
+kind_of_returns_kind_test() ->
+    Session = make_session_value(<<"s1">>, self(), #{kind => <<"mcp">>}),
+    ?assertEqual(<<"mcp">>, beamtalk_session_primitives:kindOf(Session)).
+
+info_for_includes_id_and_meta_test() ->
+    Meta = #{kind => <<"liveview">>, peer => <<"10.0.0.2:443">>, user => <<"alice">>},
+    Session = make_session_value(<<"s1">>, self(), Meta),
+    Info = beamtalk_session_primitives:infoFor(Session),
+    ?assertEqual(<<"s1">>, maps:get(id, Info)),
+    ?assertEqual(<<"liveview">>, maps:get(kind, Info)),
+    ?assertEqual(<<"10.0.0.2:443">>, maps:get(peer, Info)),
+    ?assertEqual(<<"alice">>, maps:get(user, Info)).
+
+%%====================================================================
+%% Kind round-trips from the shell into minted Session values
+%%====================================================================
+
+with_id_carries_shell_kind_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(
+                    <<"prim-kind-1">>, #{kind => <<"mcp">>}
+                ),
+                beamtalk_session_table:insert(<<"prim-kind-1">>, Pid),
+                Session = beamtalk_session_primitives:withId(<<"prim-kind-1">>),
+                ?assertEqual(<<"mcp">>, beamtalk_session_primitives:kindOf(Session)),
+                ?assertEqual(
+                    <<"a Session(mcp: prim-kind-1)">>,
+                    beamtalk_session_primitives:printStringFor(Session)
+                ),
+                beamtalk_repl_shell:stop(Pid)
+            end)
+        ]
+    end}.
 
 %%====================================================================
 %% current/0

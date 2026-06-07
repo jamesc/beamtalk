@@ -20,6 +20,13 @@ The Beamtalk REPL uses a JSON-based message protocol over WebSocket for communic
 6. **Read session-started** — after auth_ok, server sends `{"op":"session-started","session":"<id>"}`
 7. **Protocol ready** — client can now send protocol operations
 
+The auth message accepts two optional fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `client` | string | Originating client surface, recorded as the session's `kind` and surfaced by `Workspace sessions` / `Session kind` / `Session info`. Normalised against an allowlist (`repl`, `mcp`, `lsp`, `liveview`, `ide`, `attach`); any other value collapses to `unknown`. The CLI REPL sends `repl`, the MCP server `mcp`, the LSP `lsp`. |
+| `resume` | string | Session id to resume. When the id maps to a live session within the grace window the connection re-binds to it; otherwise (unknown, dead, or non-string) a fresh session is created. |
+
 Session creation is deferred until after successful authentication to prevent resource exhaustion from unauthenticated connections.
 
 ### Cookie Authentication

@@ -50,6 +50,41 @@ child_spec_uses_repl_shell_test() ->
     %% Should use beamtalk_repl_shell:start_link/1
     ?assertEqual({beamtalk_repl_shell, start_link, []}, maps:get(start, ChildSpec)).
 
+%%% Client-kind normalisation tests (session origin metadata)
+
+normalize_kind_accepts_known_binaries_test() ->
+    [
+        ?assertEqual(K, beamtalk_session_sup:normalize_kind(K))
+     || K <- beamtalk_session_sup:known_kinds()
+    ].
+
+normalize_kind_lowercases_test() ->
+    ?assertEqual(<<"repl">>, beamtalk_session_sup:normalize_kind(<<"REPL">>)),
+    ?assertEqual(<<"liveview">>, beamtalk_session_sup:normalize_kind(<<"LiveView">>)).
+
+normalize_kind_accepts_atoms_test() ->
+    ?assertEqual(<<"mcp">>, beamtalk_session_sup:normalize_kind(mcp)),
+    ?assertEqual(<<"lsp">>, beamtalk_session_sup:normalize_kind(lsp)).
+
+normalize_kind_accepts_strings_test() ->
+    ?assertEqual(<<"ide">>, beamtalk_session_sup:normalize_kind("ide")).
+
+normalize_kind_unknown_string_falls_back_test() ->
+    ?assertEqual(<<"unknown">>, beamtalk_session_sup:normalize_kind(<<"bogus">>)),
+    ?assertEqual(<<"unknown">>, beamtalk_session_sup:normalize_kind(<<"">>)).
+
+normalize_kind_undefined_and_garbage_fall_back_test() ->
+    ?assertEqual(<<"unknown">>, beamtalk_session_sup:normalize_kind(undefined)),
+    ?assertEqual(<<"unknown">>, beamtalk_session_sup:normalize_kind(42)),
+    ?assertEqual(<<"unknown">>, beamtalk_session_sup:normalize_kind({tuple})).
+
+known_kinds_includes_user_visible_surfaces_test() ->
+    Known = beamtalk_session_sup:known_kinds(),
+    [
+        ?assert(lists:member(K, Known))
+     || K <- [<<"repl">>, <<"mcp">>, <<"lsp">>, <<"liveview">>, <<"unknown">>]
+    ].
+
 %%% Integration test
 
 supervisor_can_start_test() ->

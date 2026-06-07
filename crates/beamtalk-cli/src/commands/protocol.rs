@@ -142,8 +142,12 @@ impl ProtocolClient {
             _ => return Err(miette!("Unexpected pre-auth message: {auth_required}")),
         }
 
-        // Build auth message with optional resume field
-        let mut auth_msg = serde_json::json!({"type": "auth", "cookie": self.cookie.as_str()});
+        // Build auth message with optional resume field. `client` records the
+        // originating surface so `Workspace sessions` can show where a session
+        // came from; every CLI command (repl, transcript, completion probe)
+        // connects through this client, so they all report `repl`.
+        let mut auth_msg =
+            serde_json::json!({"type": "auth", "cookie": self.cookie.as_str(), "client": "repl"});
         if let Some(res) = resume {
             auth_msg["resume"] = serde_json::Value::String(res.to_string());
         }

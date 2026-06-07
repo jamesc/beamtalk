@@ -78,7 +78,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         :ok ->
           # Resume the tab's existing session if the registry still holds a live
           # one (reconnect within the grace window); otherwise start fresh.
-          case resume_or_start(token) do
+          case resume_or_start(token, session_meta(socket)) do
             {:ok, session_id, pid} ->
               bind_session(socket, session_id, pid)
 
@@ -105,7 +105,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # on the workspace node (`Workspace.session_alive?/1`) and fall back to a fresh
   # session on a dead pid, so resume never claims success on a session that is
   # already gone.
-  defp resume_or_start(token) do
+  defp resume_or_start(token, meta) do
     case token && SessionRegistry.checkout(token) do
       {:resumed, session_id, pid} ->
         if Workspace.session_alive?(pid) do
@@ -113,18 +113,33 @@ defmodule BtAttachWeb.WorkspaceLive do
         else
           # Stale entry (workspace restarted): discard it and start fresh.
           SessionRegistry.discard(token)
-          start_fresh(token)
+          start_fresh(token, meta)
         end
 
       _miss ->
-        start_fresh(token)
+        start_fresh(token, meta)
     end
   end
 
-  defp start_fresh(token) do
+  # Origin/debug metadata for a freshly-created workspace session: always the
+  # `liveview` kind and Phoenix `node`, plus the authenticated `user` when one is
+  # assigned (a plain binary, or extracted from a user struct's id/username).
+  # Surfaced by `Workspace sessions` / `Session info` on the workspace side.
+  defp session_meta(socket) do
+    base = %{kind: "liveview", node: node(), connected_at: System.system_time(:microsecond)}
+
+    case socket.assigns[:current_user] do
+      user when is_binary(user) -> Map.put(base, :user, user)
+      %{username: u} when is_binary(u) -> Map.put(base, :user, u)
+      %{id: id} when not is_nil(id) -> Map.put(base, :user, to_string(id))
+      _ -> base
+    end
+  end
+
+  defp start_fresh(token, meta) do
     session_id = "phoenix-#{System.unique_integer([:positive])}"
 
-    case Workspace.start_session(session_id) do
+    case Workspace.start_session(session_id, meta) do
       pid when is_pid(pid) ->
         # Register before binding so a crash mid-bind can't leak: the registry
         # owns the close, keyed by the tab token (a nil token simply skips

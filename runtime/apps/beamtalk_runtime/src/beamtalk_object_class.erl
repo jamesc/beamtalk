@@ -1091,21 +1091,45 @@ Seed this class gen_server with a session context passed explicitly in the
 class-method-call message (BT-2379), returning a zero-arity restore closure.
 
 ADR 0081: factory class methods like `Session current` /
-`Workspace currentSession` read `beamtalk_session_pid` / `beamtalk_session_id`
-from the process dictionary. Class-method dispatch hops from the eval worker to
-this gen_server, so the worker now sends its two context keys in the message
-tuple (`beamtalk_class_dispatch:local_session_context/0`) rather than having us
-copy its entire dictionary via `process_info/2`. We `put/2` them locally and
-restore the previous values (or erase) on the way out.
+`Workspace currentSession` read `beamtalk_session_pid` / `beamtalk_session_id` /
+`beamtalk_session_meta` from the process dictionary. Class-method dispatch hops
+from the eval worker to this gen_server, so the worker now sends its context
+keys in the message tuple (`beamtalk_class_dispatch:local_session_context/0`)
+rather than having us copy its entire dictionary via `process_info/2`. We
+`put/2` them locally and restore the previous values (or erase) on the way out.
+
+The 3-tuple shape carries the origin metadata (`Meta`) so `Session current kind`
+reports the real client surface. The 2-tuple clause remains for in-flight
+messages sent by a pre-upgrade caller across a hot-code reload (no metadata →
+`Session current` falls back to `kind => unknown`).
 """.
--spec seed_session_context_from({pid() | undefined, binary() | undefined} | term()) ->
-    fun(() -> ok).
-seed_session_context_from({SessionPid, SessionId}) ->
+-spec seed_session_context_from(
+    {pid() | undefined, binary() | undefined, map() | undefined}
+    | {pid() | undefined, binary() | undefined}
+    | term()
+) -> fun(() -> ok).
+seed_session_context_from({SessionPid, SessionId, SessionMeta}) ->
     PrevPid = put(beamtalk_session_pid, SessionPid),
     PrevId = put(beamtalk_session_id, SessionId),
+    PrevMeta = put(beamtalk_session_meta, SessionMeta),
     fun() ->
         restore_dict_key(beamtalk_session_pid, PrevPid),
         restore_dict_key(beamtalk_session_id, PrevId),
+        restore_dict_key(beamtalk_session_meta, PrevMeta),
+        ok
+    end;
+seed_session_context_from({SessionPid, SessionId}) ->
+    PrevPid = put(beamtalk_session_pid, SessionPid),
+    PrevId = put(beamtalk_session_id, SessionId),
+    %% A 2-tuple context carries no metadata, so clear any leftover `meta` for
+    %% the duration of this call (and restore it after). Managing all three keys
+    %% as a unit means `Session current kind` inside this call can never read a
+    %% stale other-session's metadata, regardless of what ran before.
+    PrevMeta = put(beamtalk_session_meta, undefined),
+    fun() ->
+        restore_dict_key(beamtalk_session_pid, PrevPid),
+        restore_dict_key(beamtalk_session_id, PrevId),
+        restore_dict_key(beamtalk_session_meta, PrevMeta),
         ok
     end;
 seed_session_context_from(_Other) ->
@@ -1117,7 +1141,7 @@ Mirror the calling process's session context into this class gen_server for the
 duration of a class-method call, returning a zero-arity closure that restores
 the prior state.
 
-ADR 0081 (BT-2367): `seed_session_context/2` seeds the eval *worker*, but
+ADR 0081 (BT-2367): `seed_session_context/3` seeds the eval *worker*, but
 class-method dispatch (`Session current`, `Workspace currentSession`) hops to
 this gen_server, where those keys are absent. We read them from the caller via
 `process_info/2` (no message-shape change) and `put/2` them locally, restoring
@@ -1130,11 +1154,14 @@ seed_caller_session_context({CallerPid, _Tag}) when is_pid(CallerPid) ->
         {dictionary, Dict} ->
             CallerPidCtx = proplists:get_value(beamtalk_session_pid, Dict),
             CallerIdCtx = proplists:get_value(beamtalk_session_id, Dict),
+            CallerMetaCtx = proplists:get_value(beamtalk_session_meta, Dict),
             PrevPid = put(beamtalk_session_pid, CallerPidCtx),
             PrevId = put(beamtalk_session_id, CallerIdCtx),
+            PrevMeta = put(beamtalk_session_meta, CallerMetaCtx),
             fun() ->
                 restore_dict_key(beamtalk_session_pid, PrevPid),
                 restore_dict_key(beamtalk_session_id, PrevId),
+                restore_dict_key(beamtalk_session_meta, PrevMeta),
                 ok
             end;
         undefined ->

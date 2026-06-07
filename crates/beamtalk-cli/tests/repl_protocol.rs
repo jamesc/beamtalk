@@ -577,10 +577,13 @@ impl ReplClient {
             }
         }
 
-        // Send cookie auth handshake (uses the same E2E_COOKIE passed via -setcookie)
+        // Send cookie auth handshake (uses the same E2E_COOKIE passed via -setcookie).
+        // `client: repl` mirrors the real CLI repl client so sessions created here
+        // carry the same origin metadata (`Session current kind` => "repl").
         let auth_msg = serde_json::json!({
             "type": "auth",
-            "cookie": E2E_COOKIE
+            "cookie": E2E_COOKIE,
+            "client": "repl"
         });
         ws.send(tungstenite::Message::Text(auth_msg.to_string().into()))
             .map_err(std::io::Error::other)?;
@@ -1361,6 +1364,19 @@ fn run_test_file(path: &PathBuf, client: &mut ReplClient) -> (usize, Vec<String>
                             "{file_name}:{}: `{}` expected warning containing `{}`, got warnings: {:?}",
                             case.line, case.expression, expected_warning, client.last_warnings
                         ));
+                    }
+                } else if case.expected.starts_with("NO-WARNING:") {
+                    // NO-WARNING:<substr> — assert no warning contains <substr>.
+                    // Guards against spurious diagnostics surviving a successful
+                    // eval (e.g. the recurring `Unresolved class Workspace`).
+                    let banned = case.expected.strip_prefix("NO-WARNING:").unwrap().trim();
+                    if let Some(hit) = client.last_warnings.iter().find(|w| w.contains(banned)) {
+                        failures.push(format!(
+                            "{file_name}:{}: `{}` expected NO warning containing `{}`, got: {hit:?}",
+                            case.line, case.expression, banned
+                        ));
+                    } else {
+                        pass_count += 1;
                     }
                 } else if case.expected.starts_with("INCLUDES:") {
                     // INCLUDES:<item> — comma-separated result must contain the item

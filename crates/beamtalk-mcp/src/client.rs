@@ -891,8 +891,9 @@ where
         _ => return Err(format!("Unexpected pre-auth message: {auth_required_json}")),
     }
 
-    // Send auth with optional resume
-    let mut auth_msg = serde_json::json!({"type": "auth", "cookie": cookie});
+    // Send auth with optional resume. `client` tags the session surface so
+    // `Workspace sessions` can show it originated from the MCP server.
+    let mut auth_msg = serde_json::json!({"type": "auth", "cookie": cookie, "client": "mcp"});
     if let Some(r) = resume {
         auth_msg["resume"] = serde_json::Value::String(r.to_string());
     }
