@@ -67,20 +67,13 @@ impl CoreErlangGenerator {
             let init_tuple_doc = plan.initial_vars_tuple_doc(self);
 
             let mut docs: Vec<Document<'static>> = Vec::new();
+            docs.push(super::list_recv_to_safe_list_doc(
+                recv_code,
+                list_var,
+                safe_list_var.clone(),
+            ));
             docs.push(docvec![
                 "let ",
-                leaf::var(list_var.clone()),
-                " = ",
-                recv_code,
-                " in let ",
-                leaf::var(safe_list_var.clone()),
-                " = case call 'erlang':'is_list'(",
-                leaf::var(list_var.clone()),
-                ") of <'true'> when 'true' -> ",
-                leaf::var(list_var.clone()),
-                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-                leaf::var(list_var),
-                ") end in let ",
                 leaf::var(lambda_var.clone()),
                 " = fun (",
                 leaf::var(item_var.clone()),
@@ -166,20 +159,13 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
+        docs.push(super::list_recv_to_safe_list_doc(
+            recv_code,
+            list_var,
+            safe_list_var.clone(),
+        ));
         docs.push(docvec![
             "let ",
-            leaf::var(list_var.clone()),
-            " = ",
-            recv_code,
-            " in let ",
-            leaf::var(safe_list_var.clone()),
-            " = case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> ",
-            leaf::var(list_var.clone()),
-            " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-            leaf::var(list_var),
-            ") end in let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),
@@ -279,20 +265,13 @@ impl CoreErlangGenerator {
             let init_tuple_doc = docvec!["{ [], ", vars_doc, "}"];
 
             let mut docs: Vec<Document<'static>> = Vec::new();
+            docs.push(super::list_recv_to_safe_list_doc(
+                recv_code,
+                list_var,
+                safe_list_var.clone(),
+            ));
             docs.push(docvec![
                 "let ",
-                leaf::var(list_var.clone()),
-                " = ",
-                recv_code,
-                " in let ",
-                leaf::var(safe_list_var.clone()),
-                " = case call 'erlang':'is_list'(",
-                leaf::var(list_var.clone()),
-                ") of <'true'> when 'true' -> ",
-                leaf::var(list_var.clone()),
-                " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-                leaf::var(list_var),
-                ") end in let ",
                 leaf::var(lambda_var.clone()),
                 " = fun (",
                 leaf::var(item_var.clone()),
@@ -393,20 +372,13 @@ impl CoreErlangGenerator {
 
         let mut docs: Vec<Document<'static>> = Vec::new();
         docs.push(pack_doc);
+        docs.push(super::list_recv_to_safe_list_doc(
+            recv_code,
+            list_var,
+            safe_list_var.clone(),
+        ));
         docs.push(docvec![
             "let ",
-            leaf::var(list_var.clone()),
-            " = ",
-            recv_code,
-            " in let ",
-            leaf::var(safe_list_var.clone()),
-            " = case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> ",
-            leaf::var(list_var.clone()),
-            " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
-            leaf::var(list_var),
-            ") end in let ",
             leaf::var(lambda_var.clone()),
             " = fun (",
             leaf::var(item_var.clone()),

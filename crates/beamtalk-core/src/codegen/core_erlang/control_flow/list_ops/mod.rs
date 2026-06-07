@@ -32,6 +32,43 @@ use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
 
+/// Emits the Core Erlang preamble that binds a receiver to a guaranteed-list
+/// variable (BT-524 `is_list` guard):
+///
+/// ```text
+/// let {list_var} = {recv_code}
+/// in let {safe_list_var} =
+///     case call 'erlang':'is_list'({list_var})
+///     of <'true'>  when 'true' -> {list_var}
+///        <'false'> when 'true' -> call 'beamtalk_collection':'to_list'({list_var})
+///     end
+/// in
+/// ```
+///
+/// `list_var` is consumed. Callers that still need `safe_list_var` after this
+/// call should pass `safe_list_var.clone()` and retain the original.
+pub(super) fn list_recv_to_safe_list_doc(
+    recv_code: Document<'static>,
+    list_var: String,
+    safe_list_var: impl Into<String>,
+) -> Document<'static> {
+    docvec![
+        "let ",
+        leaf::var(list_var.clone()),
+        " = ",
+        recv_code,
+        " in let ",
+        leaf::var(safe_list_var),
+        " = case call 'erlang':'is_list'(",
+        leaf::var(list_var.clone()),
+        ") of <'true'> when 'true' -> ",
+        leaf::var(list_var.clone()),
+        " <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(",
+        leaf::var(list_var),
+        ") end in ",
+    ]
+}
+
 impl CoreErlangGenerator {
     pub(in crate::codegen::core_erlang) fn generate_simple_list_op(
         &mut self,
