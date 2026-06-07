@@ -53,6 +53,17 @@ init([]) ->
             type => worker,
             modules => [beamtalk_bootstrap]
         },
+        %% Typed Announcements event bus (ADR 0093 Layer 1). MUST come AFTER
+        %% beamtalk_bootstrap, which starts pg — the bus stands up a dedicated
+        %% `beamtalk_pg` scope and relies on pg being available.
+        #{
+            id => beamtalk_announcements,
+            start => {beamtalk_announcements, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_announcements]
+        },
         %% Then register stdlib primitive classes (Integer, String, etc.)
         #{
             id => beamtalk_stdlib,
