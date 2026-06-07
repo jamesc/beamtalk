@@ -1,7 +1,7 @@
 # ADR 0093: Announcements — Typed Event Substrate (Runtime Bus + stdlib Veneer)
 
 ## Status
-Proposed (2026-06-06)
+Accepted (2026-06-07)
 
 ## Context
 
