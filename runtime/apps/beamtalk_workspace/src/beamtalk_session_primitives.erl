@@ -17,7 +17,7 @@ primitives here (the `FileHandle`/`Port` representation pattern):
 ```
 
 `current/0` reads the calling session from the eval-worker process dictionary
-(seeded in `beamtalk_repl_shell:seed_session_context/2`).  `withId/1` looks a
+(seeded in `beamtalk_repl_shell:seed_session_context/3`).  `withId/1` looks a
 session up by protocol id with a liveness check, so a captured value never
 carries a dead PID.
 
@@ -45,10 +45,18 @@ that would block to timeout against a dead PID.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% Bounded per-shell metadata lookup so one wedged shell cannot stall the whole
+%% enumeration (`liveSessions/0`) or a `withId/1` mint on the default 5s
+%% gen_server:call timeout. A live, idle shell answers get_session_meta in
+%% microseconds (it reads the state tuple, in any worker state), so 1s is
+%% generous slack for a busy-but-responsive shell while still skipping a
+%% genuinely wedged one promptly.
+-define(SESSION_ID_LOOKUP_TIMEOUT, 1000).
+
 %% Factory (class-side)
 -export([current/0, withId/1, idOf/1, liveSessions/0]).
 %% Session operations (instance-side, take a Session value)
--export([bindingsViewFor/1, resolveFor/2, clearFor/1]).
+-export([bindingsViewFor/1, resolveFor/2, clearFor/1, kindOf/1, infoFor/1, printStringFor/1]).
 %% Workspace-globals view (not a Session method)
 -export([globalsView/0]).
 %% BindingsView read/write primitives
@@ -65,7 +73,11 @@ that would block to timeout against a dead PID.
 -type session() :: #{
     '$beamtalk_class' := 'Session',
     id := binary(),
-    pid := pid()
+    pid := pid(),
+    %% Origin/debug metadata carried from the shell (always includes `kind`).
+    %% Read-only display data — `kindOf`/`infoFor`/`printStringFor` read it
+    %% without a liveness check so a dead session can still be inspected.
+    meta := map()
 }.
 
 -type bindings_view() ::
@@ -83,7 +95,7 @@ Return a `Session` value for the calling session, or `nil` outside an eval
 context.
 
 Reads `beamtalk_session_pid` / `beamtalk_session_id` from the process
-dictionary, seeded by `beamtalk_repl_shell:seed_session_context/2` on every
+dictionary, seeded by `beamtalk_repl_shell:seed_session_context/3` on every
 eval-worker spawn.  Compiled program code (no shell-spawned worker) finds
 `beamtalk_session_pid =:= undefined` and gets `nil`.
 """.
@@ -91,7 +103,12 @@ eval-worker spawn.  Compiled program code (no shell-spawned worker) finds
 current() ->
     case {get(beamtalk_session_pid), get(beamtalk_session_id)} of
         {Pid, Id} when is_pid(Pid), is_binary(Id) ->
-            make_session(Id, Pid);
+            Meta =
+                case get(beamtalk_session_meta) of
+                    M when is_map(M) -> M;
+                    _ -> #{}
+                end,
+            make_session(Id, Pid, Meta);
         _ ->
             nil
     end.
@@ -109,7 +126,7 @@ withId(SessionId) ->
     case to_binary_id(SessionId) of
         {ok, Id} ->
             case beamtalk_session_table:lookup_alive(Id) of
-                {ok, Pid} -> make_session(Id, Pid);
+                {ok, Pid} -> make_session(Id, Pid, fetch_meta(Pid));
                 error -> nil
             end;
         error ->
@@ -202,6 +219,44 @@ clearFor(Session) ->
     {Id, Pid} = session_id_pid(Session, 'clearFor:'),
     enqueue_session_mutation(Pid, Id, {clear, undefined, undefined}, 'clearFor:'),
     nil.
+
+-doc """
+Return the originating client surface of a `Session` as a String
+(`"repl"`/`"mcp"`/`"lsp"`/`"liveview"`/…, or `"unknown"`).
+
+Reads the embedded metadata directly with **no** liveness check: kind is
+immutable display data, so a dead session can still report where it came from
+(useful precisely when debugging a session that has gone away).
+""".
+-spec kindOf(session() | term()) -> binary().
+kindOf(Session) ->
+    {_Id, Meta} = session_meta(Session, 'kind'),
+    maps:get(kind, Meta, <<"unknown">>).
+
+-doc """
+Return a `Session`'s full origin/debug metadata as a Dictionary: its `id` plus
+every metadata key (`kind`, and where known `peer`, `node`, `user`,
+`connected_at`). Read-only and not liveness-checked — a primary tool for
+answering "what is this session and where did it come from?".
+""".
+-spec infoFor(session() | term()) -> map().
+infoFor(Session) ->
+    {Id, Meta} = session_meta(Session, 'info'),
+    Meta#{id => Id}.
+
+-doc """
+Render a `Session` for display as `a Session(<kind>: <id>)`, e.g.
+`a Session(repl: session_123_ab)`.
+
+Backs `Session>>printString`. Reads the embedded id/kind directly with no
+liveness check so printing a list of sessions (`Workspace sessions`) never
+raises just because one session died mid-enumeration.
+""".
+-spec printStringFor(session() | term()) -> binary().
+printStringFor(Session) ->
+    {Id, Meta} = session_meta(Session, 'printString'),
+    Kind = maps:get(kind, Meta, <<"unknown">>),
+    iolist_to_binary([<<"a Session(">>, Kind, <<": ">>, Id, <<")">>]).
 
 %%% ============================================================================
 %%% Workspace-globals view (not a Session method)
@@ -330,16 +385,47 @@ view_size(View) ->
 %%% Internal helpers
 %%% ============================================================================
 
--spec make_session(binary(), pid()) -> session().
-make_session(Id, Pid) ->
-    #{'$beamtalk_class' => 'Session', id => Id, pid => Pid}.
+%% Fetch a live shell's origin metadata for Session-value minting, bounded so a
+%% wedged shell cannot stall `withId/1`. Falls back to an empty map (→ `kind =>
+%% unknown` via make_session) if the shell exited or did not answer in time.
+-spec fetch_meta(pid()) -> map().
+fetch_meta(Pid) ->
+    try beamtalk_repl_shell:get_session_meta(Pid, ?SESSION_ID_LOOKUP_TIMEOUT) of
+        {ok, _Id, Meta} when is_map(Meta) -> Meta;
+        %% Non-`{ok, _, _}` reply (e.g. `{error, unknown_request}` from an older
+        %% shell during hot-code overlap) — degrade to an empty map rather than
+        %% crash withId/1 with a try_clause.
+        _ -> #{}
+    catch
+        exit:_ -> #{}
+    end.
 
-%% Bounded per-shell id lookup so one wedged shell cannot stall the whole
-%% enumeration on the default 5s gen_server:call timeout. A live, idle shell
-%% answers get_session_id in microseconds (it reads the state tuple, in any
-%% worker state), so 1s is generous slack for a busy-but-responsive shell while
-%% still skipping a genuinely wedged one promptly.
--define(SESSION_ID_LOOKUP_TIMEOUT, 1000).
+%% Extract {Id, Meta} from a Session value for display primitives, WITHOUT a
+%% liveness check (display data must survive the session's death). Selector
+%% names the Session method for the type-error message.
+-spec session_meta(session() | term(), atom()) -> {binary(), map()}.
+session_meta(#{'$beamtalk_class' := 'Session', id := Id, meta := Meta}, _Selector) when
+    is_binary(Id), is_map(Meta)
+->
+    {Id, Meta};
+session_meta(#{'$beamtalk_class' := 'Session', id := Id}, _Selector) when is_binary(Id) ->
+    %% Older Session value minted before metadata existed — id but no meta.
+    {Id, #{kind => <<"unknown">>}};
+session_meta(Other, Selector) ->
+    Err0 = beamtalk_error:new(type_error, 'Session', Selector),
+    beamtalk_error:raise(
+        beamtalk_error:with_message(
+            Err0,
+            iolist_to_binary([<<"Expected a Session value, got ">>, type_name(Other)])
+        )
+    ).
+
+-spec make_session(binary(), pid(), map()) -> session().
+make_session(Id, Pid, Meta) when is_map(Meta) ->
+    %% Always carry a `kind` so display primitives never have to special-case a
+    %% missing key (older shells / races default to `unknown`).
+    NormMeta = maps:merge(#{kind => <<"unknown">>}, Meta),
+    #{'$beamtalk_class' => 'Session', id => Id, pid => Pid, meta => NormMeta}.
 
 %% Mint a Session value for one live shell child of beamtalk_session_sup.
 %% `{false}` (filtermap drop) for non-pid children and for shells that have died
@@ -347,8 +433,14 @@ make_session(Id, Pid) ->
 %% is never minted into a Session value (mirrors withId/1's liveness discipline).
 -spec mint_live_session(tuple()) -> {true, session()} | false.
 mint_live_session({_ChildId, Pid, _Type, _Modules}) when is_pid(Pid) ->
-    try beamtalk_repl_shell:get_session_id(Pid, ?SESSION_ID_LOOKUP_TIMEOUT) of
-        {ok, Id} -> {true, make_session(Id, Pid)}
+    try beamtalk_repl_shell:get_session_meta(Pid, ?SESSION_ID_LOOKUP_TIMEOUT) of
+        {ok, Id, Meta} when is_binary(Id), is_map(Meta) ->
+            {true, make_session(Id, Pid, Meta)};
+        %% Non-`{ok, _, _}` reply (e.g. `{error, unknown_request}` from an older
+        %% shell during hot-code overlap) — skip rather than crash the enumeration
+        %% with a try_clause.
+        _ ->
+            false
     catch
         %% Shell exited (noproc), or did not reply within the bounded timeout
         %% (wedged in another call) — skip rather than mint a dead PID or stall

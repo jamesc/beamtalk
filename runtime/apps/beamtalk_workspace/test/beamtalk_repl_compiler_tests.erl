@@ -87,6 +87,54 @@ is_internal_key_normal_name_test() ->
     ?assertNot(beamtalk_repl_compiler:is_internal_key(myVar)).
 
 %%====================================================================
+%% known_vars/1
+%%====================================================================
+%%
+%% Regression guard for the recurring "Unresolved class `Workspace`" bug:
+%% after ADR 0081 Phase 1 the workspace singletons (Transcript/Beamtalk/
+%% Workspace) are resolved lazily and are no longer in the eval bindings map,
+%% so known_vars/1 must add them back from beamtalk_workspace_config — otherwise
+%% the structural validator flags `Workspace classes` as an unresolved class.
+
+%% The three workspace singletons are always known vars, even with no bindings.
+known_vars_includes_singletons_test() ->
+    KnownVars = beamtalk_repl_compiler:known_vars(#{}),
+    ?assert(lists:member(<<"Workspace">>, KnownVars)),
+    ?assert(lists:member(<<"Transcript">>, KnownVars)),
+    ?assert(lists:member(<<"Beamtalk">>, KnownVars)).
+
+%% The singleton list is derived from the workspace config single source of
+%% truth, not hardcoded in the compiler — assert parity so the two can't drift.
+known_vars_singletons_match_config_test() ->
+    KnownVars = beamtalk_repl_compiler:known_vars(#{}),
+    ConfigNames = [atom_to_binary(N, utf8) || N <- beamtalk_workspace_config:binding_names()],
+    %% Bidirectional parity: with no user bindings, known_vars/1 returns exactly
+    %% the (sorted, deduped) config singletons — extra names would also fail.
+    ?assertEqual(lists:usort(ConfigNames), KnownVars).
+
+%% User variable bindings (session locals + bind:as: globals) are included.
+known_vars_includes_user_bindings_test() ->
+    KnownVars = beamtalk_repl_compiler:known_vars(#{x => 1, myVar => 2}),
+    ?assert(lists:member(<<"x">>, KnownVars)),
+    ?assert(lists:member(<<"myVar">>, KnownVars)).
+
+%% Internal `__`-prefixed keys are excluded (they are not source identifiers).
+known_vars_excludes_internal_keys_test() ->
+    KnownVars = beamtalk_repl_compiler:known_vars(#{
+        '__workspace_user_bindings__' => #{}, '__repl_actor_registry__' => self()
+    }),
+    ?assertNot(lists:member(<<"__workspace_user_bindings__">>, KnownVars)),
+    ?assertNot(lists:member(<<"__repl_actor_registry__">>, KnownVars)).
+
+%% The result is sorted and de-duplicated (a binding shadowing a singleton name
+%% must not appear twice).
+known_vars_dedups_and_sorts_test() ->
+    KnownVars = beamtalk_repl_compiler:known_vars(#{'Workspace' => some_value}),
+    WorkspaceCount = length([N || N <- KnownVars, N =:= <<"Workspace">>]),
+    ?assertEqual(1, WorkspaceCount),
+    ?assertEqual(lists:usort(KnownVars), KnownVars).
+
+%%====================================================================
 %% build_class_superclass_index/0
 %%====================================================================
 

@@ -279,7 +279,16 @@ handle_auth(Data, State) ->
                 true ->
                     %% Check for session resume request
                     ResumeId = maps:get(<<"resume">>, AuthMsg, undefined),
-                    start_or_resume_session(ResumeId, State);
+                    %% Origin/debug metadata for a freshly-created session: the
+                    %% client surface it declared (`repl`/`mcp`/`lsp`/…, normalised
+                    %% downstream) plus the connecting peer. Surfaced by
+                    %% `Workspace sessions` / `Session info`.
+                    Meta = #{
+                        kind => maps:get(<<"client">>, AuthMsg, undefined),
+                        peer => format_peer(State#ws_state.peer),
+                        connected_at => erlang:system_time(microsecond)
+                    },
+                    start_or_resume_session(ResumeId, Meta, State);
                 false ->
                     ?LOG_WARNING("WebSocket auth failed: invalid cookie", #{
                         peer => State#ws_state.peer,
@@ -356,11 +365,11 @@ handle_protocol(Data, SessionPid, State) ->
     end.
 
 -doc "Start a new session or resume an existing one if session ID is provided.".
-start_or_resume_session(undefined, State) ->
+start_or_resume_session(undefined, Meta, State) ->
     %% No resume — create a new session
     SessionId = beamtalk_repl_server:generate_session_id(),
-    create_session(SessionId, State);
-start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
+    create_session(SessionId, Meta, State);
+start_or_resume_session(ResumeId, Meta, State) when is_binary(ResumeId) ->
     %% Try to resume existing session
     case beamtalk_session_table:lookup(ResumeId) of
         {ok, Pid} ->
@@ -401,7 +410,7 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                         peer => State#ws_state.peer,
                         domain => [beamtalk, runtime]
                     }),
-                    create_session(beamtalk_repl_server:generate_session_id(), State)
+                    create_session(beamtalk_repl_server:generate_session_id(), Meta, State)
             end;
         error ->
             %% Session not found — create new
@@ -410,16 +419,16 @@ start_or_resume_session(ResumeId, State) when is_binary(ResumeId) ->
                 peer => State#ws_state.peer,
                 domain => [beamtalk, runtime]
             }),
-            create_session(beamtalk_repl_server:generate_session_id(), State)
+            create_session(beamtalk_repl_server:generate_session_id(), Meta, State)
     end;
-start_or_resume_session(_Invalid, State) ->
+start_or_resume_session(_Invalid, Meta, State) ->
     %% Non-binary resume value (e.g. number, list) — ignore and create new
     SessionId = beamtalk_repl_server:generate_session_id(),
-    create_session(SessionId, State).
+    create_session(SessionId, Meta, State).
 
 -doc "Create a fresh session and send auth_ok + session-started messages.".
-create_session(SessionId, State) ->
-    case beamtalk_session_sup:start_session(SessionId) of
+create_session(SessionId, Meta, State) ->
+    case beamtalk_session_sup:start_session(SessionId, Meta) of
         {ok, SessionPid} ->
             MonRef = erlang:monitor(process, SessionPid),
             beamtalk_session_table:insert(SessionId, SessionPid),
@@ -463,6 +472,20 @@ create_session(SessionId, State) ->
             ),
             {[{text, ErrorJson}, {close, 1011, <<"Session creation failed">>}], State}
     end.
+
+-doc """
+Format a Cowboy peer (`{inet:ip_address(), inet:port_number()}`) as a
+`"host:port"` binary for session origin metadata, or `undefined` when the peer
+is unavailable.
+""".
+-spec format_peer({inet:ip_address(), inet:port_number()} | undefined) -> binary() | undefined.
+format_peer({IpAddr, Port}) when is_integer(Port) ->
+    case inet:ntoa(IpAddr) of
+        {error, _} -> undefined;
+        Host -> iolist_to_binary([Host, $:, integer_to_binary(Port)])
+    end;
+format_peer(_) ->
+    undefined.
 
 -doc "BT-696: Start async eval with this handler as the streaming subscriber.".
 handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) ->
