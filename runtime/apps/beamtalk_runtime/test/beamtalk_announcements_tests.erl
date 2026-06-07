@@ -4,12 +4,16 @@
 -module(beamtalk_announcements_tests).
 
 -moduledoc """
-EUnit tests for `beamtalk_announcements` (BT-2439 / ADR 0093 Phase 1).
+EUnit tests for `beamtalk_announcements` (BT-2439 / BT-2440 / ADR 0093 Phase 1).
 
 Covers the Phase-1 acceptance criteria: deliver to a subscriber of the exact
-class, a dead subscriber pruned automatically via monitor `DOWN`, single-class
-match (no MRO walk yet), distinct subscriptions to the same class (Pharo's
+class, a dead subscriber pruned automatically via monitor `DOWN`, an unrelated
+class delivering nothing, distinct subscriptions to the same class (Pharo's
 multi-subscription rule), idempotent unsubscribe, and the introspection reads.
+
+BT-2440 adds the MRO (superclass-chain) matching: delivery to subscribers of an
+ancestor class, per-subscription de-duplication across the walk, and graceful
+truncation when a class's metadata row is removed mid-hierarchy.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -53,6 +57,14 @@ clear_all_subscriptions() ->
     catch
         _:_ -> ok
     end,
+    %% Drop any class-hierarchy rows the MRO tests insert, so a stale superclass
+    %% link cannot leak into a later test's announce walk.
+    lists:foreach(
+        fun(C) ->
+            catch beamtalk_class_metadata:delete(C)
+        end,
+        ['ButtonClicked', 'UIEvent', 'DomainEvent', 'PriceChanged', 'OtherEvent']
+    ),
     ok.
 
 %%====================================================================
@@ -136,7 +148,7 @@ deliver_to_subscriber_test_() ->
     end}.
 
 %%====================================================================
-%% Single-class match — no MRO walk (Phase 1)
+%% An unrelated class delivers nothing (no spurious cross-class match)
 %%====================================================================
 
 single_class_match_test_() ->
@@ -149,8 +161,9 @@ single_class_match_test_() ->
                     {ok, _SubRef} = beamtalk_announcements:subscribe(
                         'PriceChanged', Sub, h, false
                     ),
-                    %% Announcing a *different* class delivers nothing — no
-                    %% MRO/match across class names in Phase 1.
+                    %% Announcing an *unrelated* class delivers nothing — with
+                    %% no metadata rows the MRO walk truncates immediately and
+                    %% 'OtherEvent' is not an ancestor of 'PriceChanged'.
                     ok = beamtalk_announcements:announce('OtherEvent', {x, 1}),
                     refute_received(),
                     %% The matching class still delivers.
@@ -302,8 +315,203 @@ invalid_subscribe_args_test_() ->
     end}.
 
 %%====================================================================
+%% MRO ancestor delivery — subscribe to an ancestor, receive a subclass event
+%%====================================================================
+
+%% Hierarchy: ButtonClicked -> UIEvent -> DomainEvent (root). A subscriber of any
+%% ancestor receives an announce of the subclass; the delivered EventClass is the
+%% *announced* class, not the matched ancestor.
+mro_ancestor_delivery_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                build_hierarchy(),
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    %% Subscribe to the *ancestor*, announce the *subclass*.
+                    {ok, SubRef} = beamtalk_announcements:subscribe(
+                        'UIEvent', Sub, h, false
+                    ),
+                    ok = beamtalk_announcements:announce('ButtonClicked', {click, 1}),
+                    {GotRef, GotClass, GotHandler, GotEvent} = expect_received(),
+                    ?assertEqual(SubRef, GotRef),
+                    %% Carries the announced class, not the matched ancestor.
+                    ?assertEqual('ButtonClicked', GotClass),
+                    ?assertEqual(h, GotHandler),
+                    ?assertEqual({click, 1}, GotEvent),
+                    %% No second delivery from a higher ancestor for this one sub.
+                    refute_received()
+                after
+                    stop_subscriber(Sub)
+                end
+            end),
+            ?_test(begin
+                %% Root-class subscriber also receives a deep subclass event.
+                build_hierarchy(),
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    {ok, _} = beamtalk_announcements:subscribe('DomainEvent', Sub, root_h, false),
+                    ok = beamtalk_announcements:announce('ButtonClicked', deep),
+                    {_R, 'ButtonClicked', root_h, deep} = expect_received(),
+                    refute_received()
+                after
+                    stop_subscriber(Sub)
+                end
+            end),
+            ?_test(begin
+                %% A sibling-class subscriber is NOT matched (not on the chain).
+                build_hierarchy(),
+                beamtalk_class_metadata:insert('OtherEvent', undefined, undefined, 'DomainEvent'),
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    {ok, _} = beamtalk_announcements:subscribe('OtherEvent', Sub, sib, false),
+                    ok = beamtalk_announcements:announce('ButtonClicked', x),
+                    refute_received()
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Per-subscription de-dup across the MRO walk
+%%====================================================================
+
+%% A process holding two subscriptions that both match the event (one on the
+%% subclass, one on an ancestor) receives TWO messages — one per subscription
+%% (Pharo's rule) — and the matcher never double-sends a single subscription even
+%% though the walk visits several ancestor classes.
+mro_per_subscription_dedup_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                build_hierarchy(),
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    %% Two distinct subscriptions on the same pid: one on the
+                    %% exact class, one on an ancestor. Both match 'ButtonClicked'.
+                    {ok, SubRefSub} = beamtalk_announcements:subscribe(
+                        'ButtonClicked', Sub, on_sub, false
+                    ),
+                    {ok, SubRefAnc} = beamtalk_announcements:subscribe(
+                        'UIEvent', Sub, on_anc, false
+                    ),
+                    ?assertNotEqual(SubRefSub, SubRefAnc),
+
+                    ok = beamtalk_announcements:announce('ButtonClicked', e),
+                    %% Exactly two deliveries — one per subscription.
+                    R1 = expect_received(),
+                    R2 = expect_received(),
+                    refute_received(),
+                    Handlers = lists:sort([element(3, R1), element(3, R2)]),
+                    ?assertEqual([on_anc, on_sub], Handlers),
+                    %% Each subscription delivered exactly once (distinct refs).
+                    Refs = lists:sort([element(1, R1), element(1, R2)]),
+                    ?assertEqual(lists:sort([SubRefSub, SubRefAnc]), Refs)
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Class removed mid-walk — truncation handled gracefully (no crash)
+%%====================================================================
+
+%% If an intermediate class's metadata row is gone, the walk stops at that point
+%% with no crash: subscribers below the gap still receive the event, ancestors
+%% above it do not.
+mro_truncation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                build_hierarchy(),
+                Collector = self(),
+                SubMid = spawn_subscriber(Collector),
+                SubTop = spawn_subscriber(Collector),
+                try
+                    {ok, RefMid} = beamtalk_announcements:subscribe(
+                        'UIEvent', SubMid, mid, false
+                    ),
+                    {ok, _RefTop} = beamtalk_announcements:subscribe(
+                        'DomainEvent', SubTop, top, false
+                    ),
+                    %% Remove the 'UIEvent' metadata row: the walk from
+                    %% 'ButtonClicked' reads superclass = 'UIEvent', delivers to
+                    %% RefMid, then lookup_superclass('UIEvent') is not_found and
+                    %% the walk truncates before reaching 'DomainEvent'.
+                    beamtalk_class_metadata:delete('UIEvent'),
+
+                    ok = beamtalk_announcements:announce('ButtonClicked', t),
+                    %% The mid-level subscriber still got it (delivered before the
+                    %% gap); a single, well-formed delivery, no crash.
+                    {GotRef, 'ButtonClicked', mid, t} = expect_received(),
+                    ?assertEqual(RefMid, GotRef),
+                    %% The above-the-gap root subscriber gets nothing.
+                    refute_received(),
+                    %% The bus survived (still answers calls).
+                    ?assert(is_integer(beamtalk_announcements:subscription_count()))
+                after
+                    stop_subscriber(SubMid),
+                    stop_subscriber(SubTop)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Corrupted cyclic hierarchy — depth cap bounds the walk, no crash, dedup holds
+%%====================================================================
+
+%% A metadata cycle (A -> B -> A) cannot loop forever: the depth cap truncates
+%% the walk, the bus does not crash, and a subscriber on a class in the cycle
+%% still receives exactly one delivery (per-subscription de-dup spans revisits).
+mro_cyclic_hierarchy_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% Cycle: 'CycA' -> 'CycB' -> 'CycA' -> ...
+                beamtalk_class_metadata:insert('CycA', undefined, undefined, 'CycB'),
+                beamtalk_class_metadata:insert('CycB', undefined, undefined, 'CycA'),
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    {ok, SubRef} = beamtalk_announcements:subscribe('CycA', Sub, cyc, false),
+                    ok = beamtalk_announcements:announce('CycA', boom),
+                    %% Exactly one delivery despite the walk revisiting 'CycA'.
+                    {GotRef, 'CycA', cyc, boom} = expect_received(),
+                    ?assertEqual(SubRef, GotRef),
+                    refute_received(),
+                    %% Bus survived the bounded walk.
+                    ?assert(is_integer(beamtalk_announcements:subscription_count()))
+                after
+                    stop_subscriber(Sub),
+                    catch beamtalk_class_metadata:delete('CycA'),
+                    catch beamtalk_class_metadata:delete('CycB')
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
+
+%% Stand up a 3-level class hierarchy in the metadata table for the MRO tests:
+%% ButtonClicked -> UIEvent -> DomainEvent (root, superclass = none).
+%% Rows carry only the superclass link (module/selectors undefined — the MRO walk
+%% reads only superclass). cleanup/1 drops these rows after each test.
+build_hierarchy() ->
+    beamtalk_class_metadata:insert('DomainEvent', undefined, undefined, none),
+    beamtalk_class_metadata:insert('UIEvent', undefined, undefined, 'DomainEvent'),
+    beamtalk_class_metadata:insert('ButtonClicked', undefined, undefined, 'UIEvent'),
+    ok.
 
 %% Poll `Pred` until it returns true, or fail after ~2s.
 wait_until(Pred) ->
