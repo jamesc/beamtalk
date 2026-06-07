@@ -23,7 +23,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// node := Workspace processes first
+/// node := Workspace processes root
 /// node kind            // => #beamtalkActor
 /// node pid             // => a Pid
 /// node behaviourClass  // => Counter   (the Beamtalk class, or nil for foreign)

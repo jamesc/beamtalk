@@ -41,6 +41,12 @@ TestCase subclass: ProcessNavigationTest
   testTreeRootNotNil =>
     self assert: self sampleTree root isNil equals: false
 
+  testTreePrintStringShape =>
+    self assert: (self sampleTree printString startsWith: "#SupervisionTree<") equals: true
+
+  testEmptyTreePrintString =>
+    self assert: (SupervisionTree flatNodes: #()) printString equals: "#SupervisionTree<empty>"
+
   // === SupervisionTree: collection protocol ===
   testNodesOfKind =>
     self assert: (self sampleTree nodesOfKind: #beamtalkActor) size equals: 1

@@ -135,3 +135,26 @@ typed Value subclass: SupervisionTree
   /// ```
   findClass: aClass :: Class -> List(SupervisionNode) =>
     self nodes select: [:node | node behaviourClass == aClass]
+
+  /// Human-readable summary, e.g. `#SupervisionTree<6 nodes, root: #AppSup>` or
+  /// `#SupervisionTree<empty>`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace processes printString   // => "#SupervisionTree<3 nodes, root: #AppSup>"
+  /// ```
+  printString -> String =>
+    self isEmpty ifTrue: [^"#SupervisionTree<empty>"]
+    rootNode := self root
+    rootLabel := rootNode isNil
+      ifTrue: ["?"]
+      ifFalse: [
+        rootNode behaviourClass isNil
+          ifTrue: [
+            rootNode registeredName isNil
+              ifTrue: [rootNode kind printString]
+              ifFalse: [rootNode registeredName printString]
+          ]
+          ifFalse: [rootNode behaviourClass name printString]
+      ]
+    "#SupervisionTree<" ++ self size asString ++ " nodes, root: " ++ rootLabel ++ ">"

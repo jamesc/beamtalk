@@ -31,27 +31,28 @@ sealed typed Object subclass: WorkspaceInterface
   actors -> List(Actor) =>
     (Erlang beamtalk_workspace_interface_primitives) actors
 
-  /// Return a flat snapshot of the live supervision tree as `SupervisionNode`
-  /// records (ADR 0092).
+  /// Return a navigable snapshot of the live supervision tree (ADR 0092).
   ///
-  /// Mirrors `Workspace actors`, but adds supervision structure: each node
-  /// carries its pid, registered name, kind (`#beamtalkActor`,
-  /// `#beamtalkSupervisor`, `#otpSupervisor`, `#otpProcess`, `#restarting`),
-  /// Beamtalk class, and live child count. The snapshot is best-effort
-  /// point-in-time — re-call to refresh. Scoped to the workspace application
-  /// tree with runtime plumbing filtered out (the `default` scope).
+  /// The dynamic counterpart of `Workspace actors`: a `SupervisionTree` over the
+  /// workspace application tree with runtime plumbing filtered out (the
+  /// `default` scope, `== ProcessNavigation default tree`). Walk it (`do:`,
+  /// `select:`, `findClass:`), reach the head (`root`), or take the flat record
+  /// list (`nodes`). The snapshot is best-effort point-in-time — re-call to
+  /// refresh.
   ///
-  /// This is the interim flat-list form; BT-2430 repoints it to the navigable
-  /// `SupervisionTree`. The `default`-scope reach is an ADR-0091 Read op,
-  /// scoped exactly like `actors`.
+  /// The `default`-scope reach is an ADR-0091 Read op, scoped exactly like
+  /// `actors`. For the privileged whole-node view use `ProcessNavigation system
+  /// tree`.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace processes                       // => #(a SupervisionNode, ...)
-  /// Workspace processes select: [:n | n isSupervisor]
+  /// Workspace processes root                  // => the snapshot root SupervisionNode
+  /// Workspace processes do: [:n | Transcript showLine: n printString]
+  /// Workspace processes findClass: Counter    // => List(SupervisionNode)
+  /// Workspace processes nodes                 // => the flat List(SupervisionNode)
   /// ```
-  processes -> List(SupervisionNode) =>
-    (Erlang beamtalk_process_navigation) default_snapshot
+  processes -> SupervisionTree =>
+    ProcessNavigation default tree
 
   /// Look up a specific actor by pid string.
   ///
