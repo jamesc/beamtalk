@@ -128,20 +128,24 @@ A runtime module providing typed publish/subscribe, slotted into
 hot-path discipline as `beamtalk_xref` and `beamtalk_trace_store`: **the
 gen_server is not in the dispatch path.**
 
-- **Subscription table = ETS, gen_server owns writes only.** Subscriptions
-  `{AnnouncementClass, SubscriberPid, Handler, OnceFlag}` live in an ETS
-  **`set` keyed by `{AnnouncementClass, SubscriberPid}`** — one row per
-  subscriber per class, never a `bag`. (The unique key is what makes the
-  `doOnce:` `ets:take/2` below remove exactly one subscriber's row; a `bag`
-  would take *all* rows for the key.) `when:…` / `unsubscribe:` go through the
-  gen_server (serialised writes, and it arms `erlang:monitor/2` per subscriber).
-  The ETS table is created with `{heir, SupervisorPid, …}` so it **survives a
-  bus crash** (the `beamtalk_trace_store` pattern). On restart the gen_server
-  re-arms monitors from the table — and because a subscriber may have **died
-  during the crash→restart gap** (its `DOWN` went to the dead bus and is lost),
-  re-arm does an `is_process_alive/1` check per row and prunes the dead ones, so
-  the table cannot accumulate stale pids. (This is new exposure vs
-  `beamtalk_trace_store`, which monitors nothing.)
+- **Subscription table = ETS, gen_server owns writes only.** Each subscription
+  is a row `{SubRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag}` in an
+  ETS **`set` keyed by a unique `SubRef`** (the ref the returned `Subscription`
+  wraps), with a secondary by-class index (`ordered_set` on
+  `{AnnouncementClass, SubRef}`) for the MRO lookup. Keying by `SubRef` — *not*
+  by `{Class, Pid}` — means a process may hold **multiple distinct subscriptions
+  to the same class** (Pharo's rule, and what the per-*subscription* de-dup below
+  assumes): a second `when: C do: […]` adds a row, it never silently replaces the
+  first. `doOnce:`'s `ets:take(SubRef)` stays atomic and selective on the unique
+  key. `when:…` / `unsubscribe:` go through the gen_server (serialised writes,
+  and it arms `erlang:monitor/2` per subscriber). The ETS table is created with
+  `{heir, SupervisorPid, …}` so it **survives a bus crash** (the
+  `beamtalk_trace_store` pattern). On restart the gen_server re-arms monitors
+  from the table — and because a subscriber may have **died during the
+  crash→restart gap** (its `DOWN` went to the dead bus and is lost), re-arm does
+  an `is_process_alive/1` check per row and prunes the dead ones, so the table
+  cannot accumulate stale pids. (New exposure vs `beamtalk_trace_store`, which
+  monitors nothing.)
 - **Dispatch runs in the announcing process, off concurrent ETS reads** — not
   in the gen_server. `announce:` / `announceAndWait:` do a `read_concurrency`
   ETS lookup of matching subscribers and fan out with direct `Pid ! Msg`
@@ -189,16 +193,21 @@ gen_server is not in the dispatch path.**
   `{'DOWN', Ref, process, _, Reason}` as the handler-crashed signal (logged
   `domain => [beamtalk, announcements]`, never propagated to siblings or the
   announcer) and the per-handler timeout ejects the loop — so a crashed handler
-  can never leave the caller blocked on a reply that never comes.
+  can never leave the caller blocked on a reply that never comes. The timeout
+  **defaults to 5 s** and is configurable via `announceAndWait:timeout:` (ms).
   `announceAndWait:` from inside a handler is therefore safe — there is no shared
   gen_server to deadlock on. **`announceAndWait:` is *not* available on
   `SystemAnnouncer`** (it is sealed async-only): the system bus can have many
   subscribers, and `spawn_monitor`-per-handler there would be an unbounded
   process storm under rapid system events (startup actor spawns). Sync gather is
-  for per-instance announcers with a known, small subscriber set.
+  for per-instance announcers with a known, small subscriber set. **Enforcement
+  is at runtime** — `SystemAnnouncer` overrides `announceAndWait:` to raise
+  `(UnsupportedOperation announceAndWait:)`, *not* a type-only prohibition,
+  because a value statically typed `Announcer` may dynamically be the system bus,
+  so the guard must hold at the call, not just the declared type.
 - **`doOnce:` is claimed atomically.** Since dispatch is caller-side and two
   `announce:` can run concurrently, a `doOnce` subscription is consumed with an
-  atomic `ets:take/2` on its unique `{AnnouncementClass, SubscriberPid}` key —
+  atomic `ets:take(SubRef)` on its unique key —
   whichever announce wins the `take` delivers, the loser gets `[]` and skips it,
   so it fires at most once. (A concurrent announcer may waste its MRO walk on a
   row that's already taken — harmless; correctness rests on the single atomic
@@ -241,7 +250,8 @@ typed Object subclass: Announcer
   when: aClass :: Class send: sel :: Symbol to: receiver -> Subscription => ...
   when: aClass :: Class doOnce: aBlock :: Block -> Subscription => ...
   announce: anEvent :: Announcement -> Nil => ...           // async (cast)
-  announceAndWait: anEvent :: Announcement -> Nil => ...     // sync (call)
+  announceAndWait: anEvent :: Announcement -> Nil => ...     // sync (call), 5s default timeout
+  announceAndWait: anEvent :: Announcement timeout: ms :: Integer -> Nil => ...
   unsubscribe: receiver -> Nil => ...
   // self-inspection (object-knows-itself; reads its own ETS rows by ref) — §7
   subscriptions -> List(SubscriptionNode) => ...
@@ -253,10 +263,12 @@ sealed Announcer subclass: SystemAnnouncer
   class current -> SystemAnnouncer => (Erlang beamtalk_announcements) system
 
 // The unsubscribe token returned by when:… — another opaque runtime handle
-// (Object, like Announcer), not data. `unsubscribe` removes exactly this row.
+// (Object, like Announcer), wrapping the subscription's unique SubRef. Each
+// when:… returns a *distinct* Subscription (a process may hold several to the
+// same class — Pharo's rule), so re-subscribing never silently replaces.
 sealed typed Object subclass: Subscription
-  unsubscribe -> Nil => ...
-  isActive    -> Boolean => ...
+  unsubscribe -> Nil => ...        // removes exactly this SubRef's row
+  isActive    -> Boolean => ...    // ets:member on the SubRef; false after unsubscribe
 ```
 
 `SystemAnnouncer current` is the shared bus the runtime emits onto and tools
@@ -439,7 +451,7 @@ the discoverability win first if wanted.
 
 ```beamtalk
 bt> Announcement subclass: PriceChanged
-...>   field: newPrice :: Money = nil
+...>   field: newPrice :: Number = nil
 PriceChanged
 
 bt> a := Announcer new

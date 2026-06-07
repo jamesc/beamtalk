@@ -336,10 +336,13 @@ sup ifNotNil: [:s | s terminate: Worker]    // control goes through the live obj
 deeper := (ProcessNavigation from: node pid) unwrap tree
 ```
 
-`node asSupervisor` returns the registered live `Supervisor` for a
-`#beamtalkSupervisor` node (looked up by `registeredName` via
-`Supervisor current`), and `nil` for foreign processes, dead pids, or
-`#restarting` nodes. This is the only node→live bridge; all mutation stays on
+`node asSupervisor` returns the live `Supervisor` for a `#beamtalkSupervisor`
+node — by `registeredName` via `Supervisor current` when the node is named, and
+by a **pid-based fallback** when it is not (an anonymous Beamtalk supervisor is
+still bridged, since its `pid` is live and its class is known). It returns `nil`
+only for foreign processes, dead pids, or `#restarting` nodes — so a node with
+`kind = #beamtalkSupervisor` and `isSupervisor = true` always bridges while
+alive, named or not. This is the only node→live bridge; all mutation stays on
 the live object (ADR 0080 family), all discovery stays on the navigator, all
 frozen facts stay on the node.
 
