@@ -99,7 +99,7 @@ veneer (the part that was going to be a package), and a thin package for the
 genuinely-optional extras.** Draw a firm line between this typed-domain-event
 substrate and `telemetry`'s measurement role.
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────┐
 │ package: beamtalk-announcements (OPTIONAL)                     │
 │   distributed cross-node delivery · RecordingAnnouncer ·       │
