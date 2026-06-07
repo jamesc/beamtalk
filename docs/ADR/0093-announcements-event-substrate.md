@@ -224,6 +224,12 @@ typed Object subclass: Announcer
 // The one the *system* publishes through — Pharo's SystemAnnouncer.
 sealed Announcer subclass: SystemAnnouncer
   class current -> SystemAnnouncer => (Erlang beamtalk_announcements) system
+
+// The unsubscribe token returned by when:… — another opaque runtime handle
+// (Object, like Announcer), not data. `unsubscribe` removes exactly this row.
+sealed typed Object subclass: Subscription
+  unsubscribe -> Nil => ...
+  isActive    -> Boolean => ...
 ```
 
 `SystemAnnouncer current` is the shared bus the runtime emits onto and tools
@@ -232,6 +238,35 @@ subclasses (stdlib-provided): `ActorSpawned` / `ActorStopped`, `ClassLoaded` /
 `ClassRemoved`, `BindingChanged`, and (ADR 0092) `SupervisionChildAdded` /
 `SupervisionChildCrashed`. A tool subscribes once and filters by event class
 instead of wiring four bespoke transports.
+
+### 3. Layer 3 — the package (re-scoped BT-2193)
+
+`beamtalk-announcements` shrinks to the genuinely-optional:
+
+- **Hardened distributed delivery** beyond live connected nodes: netsplit /
+  partition tolerance, buffering + replay for reconnecting subscribers, and
+  multi-node *workspace clusters*. (Plain cross-node delivery to a *connected*
+  node — including the ADR-0091 LiveView front — is already handled by the core
+  bus over Erlang distribution; see Layer 1.)
+- **`RecordingAnnouncer`** — the test double that records `announce:` calls
+  without dispatching.
+- **`telemetry` / OpenTelemetry bridge** — re-emit announcements as telemetry
+  spans for ops pipelines (the bridge direction ADR 0069 anticipated).
+
+### 4. The line vs `telemetry` (ADR 0069)
+
+| | `telemetry` (ADR 0069) | Announcements (this ADR) |
+|---|---|---|
+| Purpose | **Measurement** — spans, counters, durations | **Typed domain events** you react to |
+| Event identity | string list `[beamtalk, actor, dispatch]` | `Announcement` subclass (typed, MRO) |
+| Delivery | sync, in caller process, fire-and-forget | async or sync; isolated; monitored |
+| Subscriber | metrics handler (export to StatsD/OTel) | app logic / IDE pane reacting |
+| Liveness | none (handlers are module funs) | `monitor`-based per subscriber |
+
+Rule of thumb: *measure* with `telemetry`, *react* with Announcements. Actor
+spawn/stop can legitimately produce **both** (a telemetry counter for ops, a
+`SystemAnnouncer` event for the IDE) — the package's bridge is how one becomes
+the other, without coupling the two buses.
 
 ### 5. What does *not* belong on this bus (scope boundary)
 
@@ -330,35 +365,6 @@ default subscribersOf: …` grouped by `announcementClass`. The navigator reads
 are gated as a `system`-scope read under ADR 0091, like the supervision
 navigator (§6).
 
-### 3. Layer 3 — the package (re-scoped BT-2193)
-
-`beamtalk-announcements` shrinks to the genuinely-optional:
-
-- **Hardened distributed delivery** beyond live connected nodes: netsplit /
-  partition tolerance, buffering + replay for reconnecting subscribers, and
-  multi-node *workspace clusters*. (Plain cross-node delivery to a *connected*
-  node — including the ADR-0091 LiveView front — is already handled by the core
-  bus over Erlang distribution; see Layer 1.)
-- **`RecordingAnnouncer`** — the test double that records `announce:` calls
-  without dispatching.
-- **`telemetry` / OpenTelemetry bridge** — re-emit announcements as telemetry
-  spans for ops pipelines (the bridge direction ADR 0069 anticipated).
-
-### 4. The line vs `telemetry` (ADR 0069)
-
-| | `telemetry` (ADR 0069) | Announcements (this ADR) |
-|---|---|---|
-| Purpose | **Measurement** — spans, counters, durations | **Typed domain events** you react to |
-| Event identity | string list `[beamtalk, actor, dispatch]` | `Announcement` subclass (typed, MRO) |
-| Delivery | sync, in caller process, fire-and-forget | async or sync; isolated; monitored |
-| Subscriber | metrics handler (export to StatsD/OTel) | app logic / IDE pane reacting |
-| Liveness | none (handlers are module funs) | `monitor`-based per subscriber |
-
-Rule of thumb: *measure* with `telemetry`, *react* with Announcements. Actor
-spawn/stop can legitimately produce **both** (a telemetry counter for ops, a
-`SystemAnnouncer` event for the IDE) — the package's bridge is how one becomes
-the other, without coupling the two buses.
-
 ### REPL session
 
 ```beamtalk
@@ -409,7 +415,7 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
 |---|---|---|
 | **Pharo Announcements + `SystemAnnouncer`** | Typed `Announcement` subclasses, `when:do:` / `when:send:to:`, subclass dispatch; `SystemAnnouncer uniqueInstance` is **core image**, the system publishes class/method change events through it. | **Take:** the whole typed-Observer protocol *and the it-lives-in-the-core decision*. This ADR's central move is recognising Beamtalk is in the same position. **Adapt:** weak refs → BEAM `monitor`. |
 | **GemStone Announcements** | Same family, server-side. | Confirms the model scales to a shared multi-client image — our exact LiveView situation. |
-| **Phoenix.PubSub** | topic-string + cluster broadcast over `pg2`/`pg`. | **Take:** `pg` as the cluster-ready transport (free v2 distribution). **Leave:** topic *strings* — we want typed events + MRO, not stringly-typed topics. |
+| **Phoenix.PubSub** | topic-string + cluster broadcast over `pg2`/`pg`. | **Take:** `pg` for cluster-wide membership (free connected-node delivery in v1; partition tolerance to the package — Layer 1/3). **Leave:** topic *strings* — we want typed events + MRO, not stringly-typed topics. |
 | **Erlang `gen_event`** | Serialised handler dispatch in one process. | **Leave:** single-process serialisation is a bottleneck and a shared failure domain; `pg` fan-out + isolated handlers is more BEAM-idiomatic. |
 | **Erlang `telemetry`** (ADR 0069) | Untyped measurement bus. | **Leave** as the measurement layer; **bridge** to it from the package. Explicitly *not* the typed Observer. |
 | **ROS typed topics / Akka EventStream** | Typed publish/subscribe by message class. | Confirms type-keyed (not string-keyed) subscription is the ergonomic choice for domain events. |
@@ -529,8 +535,9 @@ exists to stop.
 
 ### Neutral
 - Adds a runtime worker (`beamtalk_announcements`) under `beamtalk_runtime_sup`
-  (after `beamtalk_bootstrap`) and 3–4 stdlib classes + a handful of system
-  `Announcement` subclasses.
+  (after `beamtalk_bootstrap`) and ~6 stdlib classes (`Announcement`,
+  `Announcer`, `SystemAnnouncer`, `Subscription`, `AnnouncementNavigation`,
+  `SubscriptionNode`) + a handful of system `Announcement` subclasses.
 - `pg` gains a second use (class-registry membership *and* `SystemAnnouncer`
   subscriber membership); both are ordinary `pg` group usage.
 - `announceAndWait:` is `spawn_monitor`-per-handler — N transient processes per
