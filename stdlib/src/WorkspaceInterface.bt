@@ -31,6 +31,28 @@ sealed typed Object subclass: WorkspaceInterface
   actors -> List(Actor) =>
     (Erlang beamtalk_workspace_interface_primitives) actors
 
+  /// Return a flat snapshot of the live supervision tree as `SupervisionNode`
+  /// records (ADR 0092).
+  ///
+  /// Mirrors `Workspace actors`, but adds supervision structure: each node
+  /// carries its pid, registered name, kind (`#beamtalkActor`,
+  /// `#beamtalkSupervisor`, `#otpSupervisor`, `#otpProcess`, `#restarting`),
+  /// Beamtalk class, and live child count. The snapshot is best-effort
+  /// point-in-time — re-call to refresh. Scoped to the workspace application
+  /// tree with runtime plumbing filtered out (the `default` scope).
+  ///
+  /// This is the interim flat-list form; BT-2430 repoints it to the navigable
+  /// `SupervisionTree`. The `default`-scope reach is an ADR-0091 Read op,
+  /// scoped exactly like `actors`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace processes                       // => #(a SupervisionNode, ...)
+  /// Workspace processes select: [:n | n isSupervisor]
+  /// ```
+  processes -> List(SupervisionNode) =>
+    (Erlang beamtalk_process_navigation) default_snapshot
+
   /// Look up a specific actor by pid string.
   ///
   /// ## Examples

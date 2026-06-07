@@ -75,8 +75,19 @@ and the lazy guarded `status` fetch land in Phase 2 (BT-2428).
 
 %% A scope selector. Phase 1 implements `default`; `system` lands in BT-2428.
 -type scope() :: default | system.
-%% A `SupervisionNode` value record (tagged map). See the moduledoc.
--type node_map() :: map().
+%% A `SupervisionNode` value record (tagged map). The exact `'$beamtalk_class'`
+%% field lets the Beamtalk type checker infer FFI results as `SupervisionNode`
+%% (the same mechanism `beamtalk_workspace_changelog:changeLog/0` uses for
+%% `ChangeLog`), so `Workspace processes` types as `List(SupervisionNode)`.
+-type node_map() :: #{
+    '$beamtalk_class' := 'SupervisionNode',
+    pid := pid() | nil,
+    registeredName := atom() | nil,
+    kind := atom(),
+    behaviourClass := beamtalk_object() | nil,
+    childCount := non_neg_integer(),
+    parent_pid := pid() | nil
+}.
 
 -export_type([scope/0, node_map/0]).
 
@@ -177,14 +188,24 @@ is_infra(_) ->
 %%% ============================================================================
 
 -doc """
-The `default`-scope root pids: the OTP application root supervisor (if any) and
-the supervisors attached to the workspace via `Workspace startSupervisor:`.
+The `default`-scope root pids: the supervision-tree roots reachable in the
+workspace.
 
-Reads `beamtalk_supervisor:get_root/0` (an ETS lookup) and the
-`{user_supervisor, _}` children of `beamtalk_workspace_sup`. The workspace
-supervisor is referenced by registered name only (no code dependency on the
-workspace app), so this degrades to just the app root — or to `[]` — when the
-workspace layer is not running (e.g. in a bare runtime EUnit harness).
+Three sources, in walk order:
+  1. the OTP application root supervisor (`beamtalk_supervisor:get_root/0`),
+  2. the supervisors attached to the workspace via `Workspace startSupervisor:`
+     (the `{user_supervisor, _}` children of `beamtalk_workspace_sup`),
+  3. any standalone Beamtalk supervisor started via `SupClass supervise`, found
+     by scanning `erlang:registered/0` (Beamtalk supervisors register under
+     `{local, ?MODULE}`).
+
+Order matters: (1) and (2) are walked first, so a *nested* supervisor — which is
+both reachable as a child and registered under its module — is captured under
+its real parent (correct `parent_pid`) before the registered scan reaches it;
+the visited-set then skips the duplicate. Only genuinely top-level standalone
+supervisors survive (3) as roots. The workspace supervisor is referenced by
+registered name only (no code dependency on the workspace app), so this degrades
+gracefully when the workspace layer is not running.
 """.
 -spec default_root_pids() -> [pid()].
 default_root_pids() ->
@@ -195,7 +216,31 @@ default_root_pids() ->
             _ ->
                 []
         end,
-    RootSup ++ workspace_user_supervisor_pids().
+    RootSup ++ workspace_user_supervisor_pids() ++ registered_beamtalk_supervisor_pids().
+
+%% Pids of standalone Beamtalk supervisors found in the global name registry —
+%% those started via `SupClass supervise` (registered under `{local, ?MODULE}`).
+%% Foreign supervisors and non-supervisor registered processes are excluded; the
+%% `default` walk additionally drops any that are infra via the deny-list.
+-spec registered_beamtalk_supervisor_pids() -> [pid()].
+registered_beamtalk_supervisor_pids() ->
+    lists:filtermap(
+        fun(Name) ->
+            case erlang:whereis(Name) of
+                Pid when is_pid(Pid) ->
+                    IsBtSup =
+                        looks_like_supervisor(Pid) andalso
+                            beamtalk_supervisor_class(Pid, undefined) =/= error,
+                    case IsBtSup of
+                        true -> {true, Pid};
+                        false -> false
+                    end;
+                _ ->
+                    false
+            end
+        end,
+        erlang:registered()
+    ).
 
 -spec workspace_user_supervisor_pids() -> [pid()].
 workspace_user_supervisor_pids() ->
@@ -323,12 +368,40 @@ classify(Pid, Id, Type) ->
 classify_non_actor(Pid, Id, Type) ->
     case is_supervisor_pid(Pid, Type) of
         true ->
-            case is_atom(Id) andalso beamtalk_supervisor:is_supervisor(Id) of
-                true -> {beamtalkSupervisor, class_object(Id)};
-                false -> {otpSupervisor, nil}
+            case beamtalk_supervisor_class(Pid, Id) of
+                {ok, ClassName} -> {beamtalkSupervisor, class_object(ClassName)};
+                error -> {otpSupervisor, nil}
             end;
         false ->
             {otpProcess, nil}
+    end.
+
+%% Resolve the Beamtalk Supervisor/DynamicSupervisor class for a supervisor pid,
+%% or `error` for a foreign OTP supervisor. Prefers the `which_children` child-id
+%% hint (a class atom for a nested static supervisor); for a root pid with no
+%% hint, falls back to the supervisor's registered module — Beamtalk supervisors
+%% register under `{local, ?MODULE}`, so the module reverses to the class via the
+%% same mapping that drives stack-trace class resolution.
+-spec beamtalk_supervisor_class(pid(), atom() | undefined) -> {ok, atom()} | error.
+beamtalk_supervisor_class(Pid, Id) ->
+    case is_atom(Id) andalso Id =/= undefined andalso beamtalk_supervisor:is_supervisor(Id) of
+        true ->
+            {ok, Id};
+        false ->
+            case registered_name(Pid) of
+                nil ->
+                    error;
+                ModName ->
+                    case beamtalk_stack_frame:module_to_class(ModName) of
+                        nil ->
+                            error;
+                        ClassName ->
+                            case beamtalk_supervisor:is_supervisor(ClassName) of
+                                true -> {ok, ClassName};
+                                false -> error
+                            end
+                    end
+            end
     end.
 
 %% A pid is a supervisor when the `which_children` hint says so, or — for a root
