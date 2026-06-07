@@ -19,6 +19,36 @@ BT-2439 delivered the foundation with exact-class matching; BT-2440 adds the MRO
 its class *or any ancestor*, with the walk performed at announce time (live
 hierarchy changes respected) and delivery de-duplicated per subscription.
 
+BT-2441 adds the synchronous, fault-isolated path and the once-only consume:
+
+- **`announceAndWait/2,3` — synchronous gather, caller-side.** Walks the same MRO
+  chain as `announce/2` to collect matching subscriptions, then `spawn_monitor`s
+  one transient process *per matching subscription* to run that subscription's
+  handler. The caller's `receive` loop gathers `{Ref, ok}` acks and treats a
+  `{'DOWN', Ref, process, _, Reason}` as the handler-crashed signal — logged
+  `domain => [beamtalk, announcements]`, never re-raised into the caller or a
+  sibling handler. A per-handler timeout (5s default, configurable in ms via
+  `announceAndWait/3`) ejects the loop so a slow or wedged handler can never leave
+  the caller blocked forever. Because the gather runs entirely in the *caller's*
+  process — there is no shared gen_server in the path — an `announceAndWait/2`
+  issued from inside a handler is reentrant-safe and cannot deadlock.
+
+- **Handler invocation (`run_handler/2`).** The transient process runs the stored
+  handler: a `fun/1` (block) is applied to the event, a `fun/0` is applied with no
+  args, and a `{send, Selector, Receiver}` handler (the `when:send:to:` form) is
+  dispatched via `beamtalk_message_dispatch:send/3` with the event as the sole
+  argument. Any other opaque term is a no-op success (the async path delivers it
+  as a message to the subscriber instead — see `deliver/3`).
+
+- **`doOnce` consumed atomically.** A subscription registered with `OnceFlag =
+  true` is consumed with an atomic `ets:take/2` on its unique `SubRef` at delivery
+  time, on both the async (`announce/2`) and sync (`announceAndWait/2,3`) paths.
+  With caller-side dispatch two announces may race for the same once-only row;
+  whichever wins the `take` delivers and the loser gets `[]` and skips it, so a
+  `doOnce` subscription fires **at most once** even under concurrent announcers.
+  The by-class index row is removed alongside the primary row so the consumed
+  subscription leaves no stale index entry.
+
 Design (the `beamtalk_xref` / `beamtalk_trace_store` discipline — the gen_server
 is NOT in the dispatch path):
 
@@ -52,9 +82,9 @@ is NOT in the dispatch path):
   from the surviving rows. The full crash→restart dead-pid prune is BT-2442;
   Phase 1 re-arms and keeps the data.
 
-Out of scope here (later issues): the sync `announceAndWait:` path / `doOnce:` /
-`when:send:to:` / handler fault isolation (BT-2441), and the heir crash re-arm
-dead-pid prune (BT-2442).
+Out of scope here (later issues): the heir crash re-arm dead-pid prune (BT-2442)
+and the stdlib typed veneer classes — `Announcer` / `Announcement` /
+`Subscription` (BT-2444).
 
 See also: docs/ADR/0093-announcements-event-substrate.md §1
 """.
@@ -74,7 +104,9 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 
 %% API — dispatch (caller-side, off concurrent ETS reads)
 -export([
-    announce/2
+    announce/2,
+    announceAndWait/2,
+    announceAndWait/3
 ]).
 
 %% API — introspection (direct ETS reads)
@@ -99,6 +131,10 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 
 %% Dedicated pg scope (ADR 0093 §1 — NOT the default scope).
 -define(PG_SCOPE, beamtalk_pg).
+
+%% Per-handler timeout for the synchronous `announceAndWait/2` gather (ADR 0093
+%% §1 — "defaults to 5 s", configurable in ms via `announceAndWait/3`).
+-define(DEFAULT_ANNOUNCE_TIMEOUT, 5000).
 
 %%====================================================================
 %% Types
@@ -230,28 +266,110 @@ announce(EventClass, Event) when is_atom(EventClass) ->
         undefined ->
             ok;
         _ ->
-            _ = walk_and_deliver(EventClass, EventClass, Event, sets:new([{version, 2}]), 0),
-            ok
+            lists:foreach(
+                fun(SubRef) -> deliver(SubRef, EventClass, Event) end,
+                collect_matching(EventClass)
+            )
     end.
 
 -doc """
-Walk the superclass chain from `CurrentClass` and deliver `Event` (announced as
-`EventClass`) to every subscription matching a class on the walk, de-duplicated
-per `SubRef` via the `Delivered` set. Returns the updated `Delivered` set.
-
-Terminates when the chain reaches the root (`{ok, none}`), a class with no
-metadata row (`not_found` — truncation), or the `?MAX_HIERARCHY_DEPTH` cap (a
-corrupted cyclic hierarchy). Caller-side; no bus call.
+Announce `Event` synchronously: deliver to every matching subscriber *and wait*
+for each handler to complete, with per-handler fault isolation and a default 5 s
+timeout. Equivalent to `announceAndWait(EventClass, Event,
+?DEFAULT_ANNOUNCE_TIMEOUT)`. See `announceAndWait/3`.
 """.
--spec walk_and_deliver(
-    announcement_class(), announcement_class(), term(), sets:set(sub_ref()), non_neg_integer()
-) -> sets:set(sub_ref()).
-walk_and_deliver(_CurrentClass, EventClass, _Event, Delivered, Depth) when
+-spec announceAndWait(announcement_class(), term()) -> ok.
+announceAndWait(EventClass, Event) when is_atom(EventClass) ->
+    announceAndWait(EventClass, Event, ?DEFAULT_ANNOUNCE_TIMEOUT).
+
+-doc """
+Announce `Event` synchronously to every subscriber of `EventClass` *or any of its
+ancestors* and gather each handler's completion before returning. Runs entirely
+in the *calling* process — there is no shared gen_server in the path, so an
+`announceAndWait/2,3` issued from inside a handler is reentrant-safe and cannot
+deadlock.
+
+Matching uses the same MRO walk and per-subscription de-duplication as
+`announce/2`. For each matching subscription the bus `spawn_monitor`s one
+transient process that runs the subscription's handler (see `run_handler/2`) and
+sends a `{handler_ack, ReplyRef}` ack to the caller on success. The caller's
+`receive` loop gathers those acks; a `{'DOWN', MonRef, process, _, Reason}` with
+an abnormal `Reason` is the handler-crashed signal — caught, logged
+`domain => [beamtalk, announcements]`, and **never** re-raised into the caller or
+propagated to sibling handlers (each runs in its own process). A per-handler
+`Timeout` (ms) ejects the wait so a slow or wedged handler cannot block the caller
+forever; on timeout every still-pending handler is demonitored (a final
+`DOWN`/ack flushed) and logged, and the call returns — the lingering handler
+process is left to finish or die on its own (it is unlinked, so it cannot harm the
+caller).
+
+`doOnce` subscriptions are consumed with the same atomic `ets:take/2` as the async
+path, so a once-only subscription fires at most once across concurrent
+`announce`/`announceAndWait` callers. Returns `ok` once every spawned handler has
+acked, crashed, or timed out.
+""".
+-spec announceAndWait(announcement_class(), term(), timeout()) -> ok.
+announceAndWait(EventClass, Event, Timeout) when is_atom(EventClass) ->
+    case ets:whereis(?BY_CLASS_TABLE) of
+        undefined ->
+            ok;
+        _ ->
+            %% Spawn one monitored handler process per matching subscription that
+            %% survives the atomic claim (doOnce consume happens here, so the
+            %% concurrent-race guarantee holds). A subscription whose subscriber
+            %% process has already died is skipped — its handler is not run — for
+            %% parity with the async `deliver/3` guard (a doOnce row is still
+            %% consumed by the claim, matching the async path). Then gather every
+            %% reply.
+            Pending = lists:foldl(
+                fun(SubRef, Acc) ->
+                    case claim_row(SubRef) of
+                        {ok, _Class, SubscriberPid, Handler, _Once} ->
+                            case is_process_alive(SubscriberPid) of
+                                true ->
+                                    spawn_handler(
+                                        EventClass, Event, Handler, SubscriberPid, Acc
+                                    );
+                                false ->
+                                    Acc
+                            end;
+                        not_found ->
+                            Acc
+                    end
+                end,
+                #{},
+                collect_matching(EventClass)
+            ),
+            gather_replies(Pending, EventClass, Timeout)
+    end.
+
+-doc """
+Collect the `SubRef`s of every subscription matching `EventClass` *or any of its
+ancestors*, de-duplicated per `SubRef`, by walking the event class's superclass
+chain (`beamtalk_class_metadata:lookup_superclass/1`) and reading the by-class
+index at each level. Caller-side; no bus call. Used by both `announce/2` (async)
+and `announceAndWait/3` (sync), which then deliver to / spawn handlers for the
+returned refs — the actual subscription row (handler, once flag, liveness) is read
+at delivery time, so this list is purely a matching set.
+
+The walk stops gracefully at the root (`{ok, none}`), at a class whose metadata
+row is absent (`not_found` — e.g. a class removed mid-walk), and at the
+`?MAX_HIERARCHY_DEPTH` cap that bounds a corrupted cyclic hierarchy.
+""".
+-spec collect_matching(announcement_class()) -> [sub_ref()].
+collect_matching(EventClass) ->
+    Refs = walk_collect(EventClass, EventClass, sets:new([{version, 2}]), [], 0),
+    lists:reverse(Refs).
+
+-spec walk_collect(
+    announcement_class(), announcement_class(), sets:set(sub_ref()), [sub_ref()], non_neg_integer()
+) -> [sub_ref()].
+walk_collect(_CurrentClass, EventClass, _Seen, Acc, Depth) when
     Depth > ?MAX_HIERARCHY_DEPTH
 ->
-    %% Runs in the *announcing* caller's process (announce/2 is caller-side), not
-    %% the bus process, so the `domain` metadata set in init/1 does not apply —
-    %% set it explicitly, matching bad_subscribe_args/3.
+    %% Runs in the *announcing* caller's process (dispatch is caller-side), not the
+    %% bus process, so the `domain` metadata set in init/1 does not apply — set it
+    %% explicitly, matching bad_subscribe_args/3.
     ?LOG_WARNING(#{
         event => announcement_mro_walk_truncated,
         reason => max_depth_exceeded,
@@ -259,22 +377,19 @@ walk_and_deliver(_CurrentClass, EventClass, _Event, Delivered, Depth) when
         max_depth => ?MAX_HIERARCHY_DEPTH,
         domain => [beamtalk, announcements]
     }),
-    Delivered;
-walk_and_deliver(CurrentClass, EventClass, Event, Delivered, Depth) ->
-    %% Deliver to every subscription registered against `CurrentClass`, skipping
-    %% any SubRef already delivered to on this walk (per-subscription de-dup).
+    Acc;
+walk_collect(CurrentClass, EventClass, Seen, Acc, Depth) ->
+    %% Gather every subscription registered against `CurrentClass`, skipping any
+    %% SubRef already seen on this walk (per-subscription de-dup).
     IndexRows = ets:match_object(?BY_CLASS_TABLE, {{CurrentClass, '_'}}),
-    Delivered1 = lists:foldl(
-        fun({{_Class, SubRef}}, Acc) ->
-            case sets:is_element(SubRef, Acc) of
-                true ->
-                    Acc;
-                false ->
-                    deliver(SubRef, EventClass, Event),
-                    sets:add_element(SubRef, Acc)
+    {Seen1, Acc1} = lists:foldl(
+        fun({{_Class, SubRef}}, {SeenAcc, RefAcc}) ->
+            case sets:is_element(SubRef, SeenAcc) of
+                true -> {SeenAcc, RefAcc};
+                false -> {sets:add_element(SubRef, SeenAcc), [SubRef | RefAcc]}
             end
         end,
-        Delivered,
+        {Seen, Acc},
         IndexRows
     ),
     %% Walk to the superclass, reading the live metadata at announce time. A
@@ -282,23 +397,26 @@ walk_and_deliver(CurrentClass, EventClass, Event, Delivered, Depth) ->
     %% mid-walk); the root (`{ok, none}`) ends it normally.
     case beamtalk_class_metadata:lookup_superclass(CurrentClass) of
         {ok, none} ->
-            Delivered1;
+            Acc1;
         {ok, Super} ->
-            walk_and_deliver(Super, EventClass, Event, Delivered1, Depth + 1);
+            walk_collect(Super, EventClass, Seen1, Acc1, Depth + 1);
         not_found ->
-            Delivered1
+            Acc1
     end.
 
 -doc """
-Deliver `Event` to one subscription if it is still live and its subscriber
-process is alive. Skips silently otherwise (the row may have been unsubscribed
-or the subscriber may have died between the index read and here — a race that is
-harmless: a missed delivery to a process that is gone). Caller-side; no bus call.
+Deliver `Event` to one subscription (async path) if it is still live and its
+subscriber process is alive. A `doOnce` subscription is consumed atomically via
+`claim_row/1` so it fires at most once even under concurrent announcers; a
+non-once subscription is read without removal. Skips silently when the row is
+gone (unsubscribed, already consumed by a racing once-only delivery, or the
+subscriber died between the index read and here — all harmless). Caller-side; no
+bus call.
 """.
 -spec deliver(sub_ref(), announcement_class(), term()) -> ok.
 deliver(SubRef, EventClass, Event) ->
-    case ets:lookup(?SUBS_TABLE, SubRef) of
-        [{SubRef, _Class, SubscriberPid, Handler, _Once}] ->
+    case claim_row(SubRef) of
+        {ok, _Class, SubscriberPid, Handler, _Once} ->
             case is_process_alive(SubscriberPid) of
                 true ->
                     SubscriberPid ! {beamtalk_announcement, SubRef, EventClass, Handler, Event},
@@ -306,9 +424,208 @@ deliver(SubRef, EventClass, Event) ->
                 false ->
                     ok
             end;
-        [] ->
+        not_found ->
             ok
     end.
+
+-doc """
+Read a subscription row for delivery, consuming it if it is a `doOnce`
+subscription. For a once-only row (`OnceFlag = true`) the read is an atomic
+`ets:take/2` on the unique `SubRef`: exactly one concurrent caller gets the row
+and delivers, every other gets `not_found` and skips — so the subscription fires
+at most once. The by-class index entry is removed alongside the consumed row so no
+stale index entry lingers. A non-once row is read with `ets:lookup/2` (left in
+place). Returns `not_found` for an unknown / already-consumed / unsubscribed ref.
+""".
+-spec claim_row(sub_ref()) ->
+    {ok, announcement_class(), pid(), handler(), boolean()} | not_found.
+claim_row(SubRef) ->
+    case ets:lookup(?SUBS_TABLE, SubRef) of
+        [{SubRef, Class, Pid, Handler, false}] ->
+            {ok, Class, Pid, Handler, false};
+        [{SubRef, _Class, _Pid, _Handler, true}] ->
+            %% doOnce — atomically consume on the unique key. Whichever concurrent
+            %% caller wins the `take` delivers; the rest get `[]` and skip.
+            case ets:take(?SUBS_TABLE, SubRef) of
+                [{SubRef, Class, Pid, Handler, true}] ->
+                    true = ets:delete(?BY_CLASS_TABLE, {Class, SubRef}),
+                    {ok, Class, Pid, Handler, true};
+                [] ->
+                    not_found
+            end;
+        [] ->
+            not_found
+    end.
+
+%%====================================================================
+%% Internal: synchronous gather (announceAndWait)
+%%====================================================================
+
+-doc """
+Spawn one monitored transient process to run `Handler` for the synchronous path,
+recording it in the `Pending` map keyed by its monitor `Ref`. The value is
+`{ReplyRef, HandlerPid, SubscriberPid}`: `ReplyRef` is a fresh reference minted in
+the caller and closed over by the spawned process, which — on a clean run of
+`run_handler/2` — sends `{handler_ack, ReplyRef}` back to the caller. If the
+handler raises, the process exits abnormally and no ack is sent; the monitor
+`DOWN` (keyed by the same `MonRef`) carries the reason and `gather_replies/3`
+treats it as the isolated-crash signal. Two refs are needed because the child
+cannot know its own monitor ref; `gather_replies/3` correlates the ack's
+`ReplyRef` back to the monitor `Ref`. `HandlerPid` is kept so a timed-out handler
+can be killed; `SubscriberPid` for the crash/timeout diagnostic log. The handler
+runs under `spawn_monitor` (monitored, **not** linked), so neither its crash nor a
+kill signal can reach the caller.
+""".
+-spec spawn_handler(announcement_class(), term(), handler(), pid(), Pending) -> Pending when
+    Pending :: #{reference() => {reference(), pid(), pid()}}.
+spawn_handler(_EventClass, Event, Handler, SubscriberPid, Pending) ->
+    Caller = self(),
+    ReplyRef = make_ref(),
+    {HandlerPid, MonRef} = spawn_monitor(fun() ->
+        ok = run_handler(Handler, Event),
+        Caller ! {handler_ack, ReplyRef},
+        ok
+    end),
+    Pending#{MonRef => {ReplyRef, HandlerPid, SubscriberPid}}.
+
+-doc """
+Run one subscription's stored handler for the synchronous path, returning `ok` on
+completion. Handler forms:
+
+- a `fun/1` (a block taking the event) is applied to `Event`;
+- a `fun/0` (a no-arg block) is applied with no args;
+- `{send, Selector, Receiver}` (the `when:send:to:` form) is dispatched via
+  `beamtalk_message_dispatch:send(Receiver, Selector, [Event])`;
+- any other opaque term is a no-op success — the runtime layer does not interpret
+  arbitrary stdlib handler terms in the sync path (the async path delivers them as
+  a message to the subscriber instead).
+
+Runs inside the transient `spawn_monitor` process; any exception it raises exits
+that process and surfaces to the caller as a monitor `DOWN`, isolated from siblings
+and the announcer (`gather_replies/3`).
+""".
+-spec run_handler(handler(), term()) -> ok.
+run_handler(Handler, Event) when is_function(Handler, 1) ->
+    _ = Handler(Event),
+    ok;
+run_handler(Handler, _Event) when is_function(Handler, 0) ->
+    _ = Handler(),
+    ok;
+run_handler({send, Selector, Receiver}, Event) when is_atom(Selector) ->
+    _ = beamtalk_message_dispatch:send(Receiver, Selector, [Event]),
+    ok;
+run_handler(_Handler, _Event) ->
+    ok.
+
+-doc """
+Gather replies from every spawned handler, returning `ok` once each has acked,
+crashed, or timed out. `Pending` maps each handler's monitor `MonRef` to its
+`{ReplyRef, HandlerPid, SubscriberPid}`. The loop blocks on `Timeout`; on timeout
+every still-pending handler is killed (it ran longer than allowed), demonitored,
+and logged, then the call returns — so a slow handler can never wedge the caller. A
+handler crash (an abnormal monitor `DOWN`) is logged and dropped — never re-raised
+— so siblings and the announcer are unaffected.
+""".
+-spec gather_replies(
+    #{reference() => {reference(), pid(), pid()}}, announcement_class(), timeout()
+) -> ok.
+gather_replies(Pending, _EventClass, _Timeout) when map_size(Pending) =:= 0 ->
+    ok;
+gather_replies(Pending, EventClass, Timeout) ->
+    receive
+        {handler_ack, ReplyRef} ->
+            %% Correlate the ack's ReplyRef back to its monitor ref. An ack from a
+            %% no-longer-pending handler (e.g. one already counted as timed out) is
+            %% ignored.
+            case find_by_reply_ref(ReplyRef, Pending) of
+                {ok, MonRef} ->
+                    erlang:demonitor(MonRef, [flush]),
+                    gather_replies(maps:remove(MonRef, Pending), EventClass, Timeout);
+                error ->
+                    gather_replies(Pending, EventClass, Timeout)
+            end;
+        {'DOWN', MonRef, process, _Pid, Reason} when is_map_key(MonRef, Pending) ->
+            #{MonRef := {_ReplyRef, _HandlerPid, SubscriberPid}} = Pending,
+            %% `normal` is a clean exit that lost the race with its own ack (or a
+            %% handler that returned without our ack ever mattering); only abnormal
+            %% reasons are an isolated crash worth logging.
+            case Reason of
+                normal -> ok;
+                _ -> log_handler_crash(EventClass, SubscriberPid, Reason)
+            end,
+            gather_replies(maps:remove(MonRef, Pending), EventClass, Timeout)
+    after Timeout ->
+        %% Per-handler timeout: eject every still-pending handler so a slow or
+        %% wedged handler cannot block the caller forever. Kill the lingering
+        %% handler process (it is monitored, not linked, so the kill cannot reach
+        %% the caller), demonitor (flushing its `DOWN`), and flush any
+        %% already-queued `{handler_ack, ReplyRef}` so a handler that completed
+        %% just as the timeout fired leaves no stale message in the caller's
+        %% mailbox.
+        maps:foreach(
+            fun(MonRef, {ReplyRef, HandlerPid, SubscriberPid}) ->
+                exit(HandlerPid, kill),
+                _ = erlang:demonitor(MonRef, [flush]),
+                flush_ack(ReplyRef),
+                log_handler_timeout(EventClass, SubscriberPid, Timeout)
+            end,
+            Pending
+        ),
+        ok
+    end.
+
+-doc """
+Remove a single already-queued `{handler_ack, ReplyRef}` from the caller's
+mailbox if present (non-blocking). Called when a handler times out, so a handler
+that acked just as the timeout fired does not leave a stale message behind.
+`ReplyRef` is unique per spawned handler, so this is selective.
+""".
+-spec flush_ack(reference()) -> ok.
+flush_ack(ReplyRef) ->
+    receive
+        {handler_ack, ReplyRef} -> ok
+    after 0 -> ok
+    end.
+
+-doc "Find the monitor ref in `Pending` whose value carries `ReplyRef`.".
+-spec find_by_reply_ref(reference(), #{reference() => {reference(), pid(), pid()}}) ->
+    {ok, reference()} | error.
+find_by_reply_ref(ReplyRef, Pending) ->
+    maps:fold(
+        fun
+            (MonRef, {RR, _HandlerPid, _SubscriberPid}, error) when RR =:= ReplyRef ->
+                {ok, MonRef};
+            (_MonRef, _V, Acc) ->
+                Acc
+        end,
+        error,
+        Pending
+    ).
+
+-doc "Log an isolated handler crash on the synchronous path (never re-raised).".
+-spec log_handler_crash(announcement_class(), pid(), term()) -> ok.
+log_handler_crash(EventClass, SubscriberPid, Reason) ->
+    %% Caller-side process, not the bus — set `domain` explicitly (ADR 0093 §1).
+    ?LOG_ERROR(#{
+        event => announcement_handler_crashed,
+        event_class => EventClass,
+        subscriber => SubscriberPid,
+        reason => Reason,
+        domain => [beamtalk, announcements]
+    }),
+    ok.
+
+-doc "Log a handler that exceeded the per-handler timeout on the synchronous path.".
+-spec log_handler_timeout(announcement_class(), pid(), timeout()) -> ok.
+log_handler_timeout(EventClass, SubscriberPid, Timeout) ->
+    ?LOG_WARNING(#{
+        event => announcement_handler_timeout,
+        event_class => EventClass,
+        subscriber => SubscriberPid,
+        timeout_ms => Timeout,
+        domain => [beamtalk, announcements]
+    }),
+    ok.
 
 %%====================================================================
 %% API — introspection
