@@ -2210,6 +2210,76 @@ Errors are surfaced as `Result` values (or raised as `#beamtalk_error{}` on dire
 
 See [ADR 0079](ADR/0079-named-actor-registration.md) for the full design and exposure table.
 
+### Introspecting the Live Supervision Tree (ADR 0092)
+
+Where supervision *syntax* declares a tree, **`Workspace processes`** lets you
+walk the *live* one — the dynamic counterpart to `Workspace actors`, and the
+process-structure twin of `SystemNavigation`. It returns a navigable
+`SupervisionTree` snapshot of the running OTP supervision tree, built as a thin
+wrapper over `supervisor:which_children` (no new bookkeeping process).
+
+```beamtalk
+tree := Workspace processes        // == ProcessNavigation default tree
+tree root                          // => the snapshot root SupervisionNode
+tree size                          // => total node count
+tree do: [:node | Transcript showLine: node printString]
+tree select: [:node | node isSupervisor]
+tree findClass: Counter            // => every running Counter as SupervisionNodes
+tree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)
+```
+
+Each `SupervisionNode` is an immutable record:
+
+```beamtalk
+node pid               // => a Pid | nil   (nil for a child mid-restart)
+node registeredName    // => Symbol | nil
+node kind              // => #beamtalkSupervisor | #beamtalkActor
+                       //    | #otpSupervisor | #otpProcess | #restarting
+node behaviourClass    // => Class | nil   (nil for foreign OTP processes)
+node childCount        // => Integer       (live children; supervisors only)
+node strategy          // => Symbol | nil  (#oneForOne … ; supervisors only)
+node restartIntensity  // => Dictionary | nil  (configured #{#maxRestarts, #window})
+node children          // => List(SupervisionNode)
+node parent            // => SupervisionNode | nil
+node isSupervisor      // => Boolean
+node isBeamtalk        // => Boolean
+node status            // => Dictionary | nil   (LAZY — see below)
+```
+
+The `kind` field drives rendering: a Beamtalk class badge for `#beamtalkActor` /
+`#beamtalkSupervisor` (with `behaviourClass` populated), a foreign-process badge
+for `#otpSupervisor` / `#otpProcess`. A child OTP is currently restarting carries
+`kind => #restarting` and `pid => nil` — the snapshot never crashes on a process
+caught mid-restart.
+
+**Snapshot semantics.** Construction freezes the tree once; iterating it never
+re-enters OTP, so a walk is internally consistent and can never deadlock or block
+on a busy process. Construction itself is *not* atomic, so the snapshot is a
+best-effort point-in-time view — re-call `Workspace processes` to refresh. A node
+whose pid has since died is detected lazily: `node status` returns `nil` rather
+than raising.
+
+**Lazy state.** `node status` is *not* captured at snapshot time. Calling it
+issues a timeout-guarded `sys:get_status` against the node's pid *then* —
+returning a `Dictionary` for an alive, `sys`-compliant process, or `nil` for one
+that is dead, timed out, or not `sys`-compliant.
+
+**Scopes and scale.** `ProcessNavigation default` (the `Workspace processes`
+alias) filters runtime plumbing; `ProcessNavigation system` shows everything,
+including runtime internals — a privileged view (ADR 0091). A `from:` constructor
+roots a walk at a `Supervisor` handle or a `Pid`, returning a `Result` (the root
+may be dead). A `simple_one_for_one` `DynamicSupervisor` with more children than
+the cap is reported `truncated` with its `childCount` instead of materialising
+every child; opt into full expansion with `ProcessNavigation from: aSup limit: n`.
+
+```beamtalk
+ProcessNavigation system tree size                 // everything, incl. infra
+(ProcessNavigation from: aSup) unwrap tree         // a rooted subtree
+(ProcessNavigation from: aStoppedSup)              // => Result error: (beamtalk_error stale_handle)
+```
+
+See [ADR 0092](ADR/0092-supervision-tree-introspection.md) for the full design.
+
 ---
 
 ## Named Actor Registration (ADR 0079)

@@ -1,0 +1,121 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the supervision-tree introspection API (ADR 0092, BT-2433).
+//
+// These require E2E because Workspace processes / ProcessNavigation walk the
+// live OTP supervision tree in the running REPL. BUnit runs in compiled code
+// without OTP process registration and cannot drive supervise → snapshot →
+// inspect across REPL turns with workspace variable persistence.
+//
+// ADR: docs/ADR/0092-supervision-tree-introspection.md
+
+// @load tests/repl-protocol/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/e2e_app_supervisor.bt
+
+// ===========================================================================
+// SETUP — start a supervisor with a Counter child
+// ===========================================================================
+
+app := (E2EAppSupervisor supervise) unwrap
+// => #Supervisor<E2EAppSupervisor,_>
+
+// ===========================================================================
+// WORKSPACE PROCESSES — returns a navigable SupervisionTree
+// ===========================================================================
+
+tree := Workspace processes
+// => _
+
+tree class
+// => SupervisionTree
+
+// The snapshot is non-empty: the app supervisor and its Counter child are present.
+tree isEmpty
+// => false
+
+// There is a root node (a top-level supervisor).
+tree root isNil
+// => false
+
+// ===========================================================================
+// FINDCLASS — locate the supervised Counter actor
+// ===========================================================================
+
+counters := tree findClass: Counter
+// => _
+
+counters isEmpty
+// => false
+
+// The Counter node is classified as a Beamtalk actor.
+counters first kind
+// => beamtalkActor
+
+counters first isBeamtalk
+// => true
+
+counters first isSupervisor
+// => false
+
+// ===========================================================================
+// NODESOFKIND — the supervisor node is present and classified
+// ===========================================================================
+
+(tree nodesOfKind: #beamtalkSupervisor) isEmpty
+// => false
+
+// ===========================================================================
+// WALK — do: visits nodes and returns the tree (chainable)
+// ===========================================================================
+
+(tree do: [:n | n kind]) class
+// => SupervisionTree
+
+// nodes exposes the flat record list.
+tree nodes isEmpty
+// => false
+
+// ===========================================================================
+// NODE NAVIGATION — parent / children adjacency
+// ===========================================================================
+
+// The supervised Counter's parent is the E2EAppSupervisor node.
+counters first parent isNil
+// => false
+
+counters first parent isSupervisor
+// => true
+
+// ===========================================================================
+// LAZY STATUS — sys:get_status fetched at call time for a live sys process
+// ===========================================================================
+
+// The Counter actor is a sys-compliant gen_server, so status returns a map.
+counters first status isNil
+// => false
+
+// ===========================================================================
+// PROCESSNAVIGATION — default mirrors Workspace processes; system is a superset
+// ===========================================================================
+
+ProcessNavigation default tree class
+// => SupervisionTree
+
+// The privileged system scope includes the runtime internals default filters out.
+ProcessNavigation system tree size >= Workspace processes size
+// => true
+
+// ===========================================================================
+// SERIALISABLE FORM — the cross-surface wire shape (BT-2431)
+// ===========================================================================
+
+(Workspace processes asDictionaries) isEmpty
+// => false
+
+// ===========================================================================
+// CLEANUP
+// ===========================================================================
+
+app stop
+// => _

@@ -38,11 +38,14 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:flush) == :execute
       assert Facade.capability(:reload) == :execute
 
-      for read <- ~w(info inspect bindings actors sessions complete
+      for read <- ~w(info inspect bindings actors processes sessions complete
                      subscribe_transcript subscribe_bindings subscribe_actors
                      subscribe_classes)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
       end
+
+      # ADR 0092: the privileged `system`-scope supervision view is execute-gated.
+      assert Facade.capability(:processes_system) == :execute
 
       assert Facade.capability(:kill) == :admin
       assert Facade.capability(:rotate_cookie) == :admin

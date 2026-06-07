@@ -34,9 +34,9 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Should have exactly 7 children: xref, bootstrap, stdlib, object_instances,
-    %% subprocess_sup, reactive_subprocess_sup, trace_store
-    ?assertEqual(7, length(ChildSpecs)).
+    %% Should have exactly 8 children: xref, bootstrap, announcements, stdlib,
+    %% object_instances, subprocess_sup, reactive_subprocess_sup, trace_store
+    ?assertEqual(8, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
@@ -46,6 +46,7 @@ children_ids_test() ->
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assert(lists:member(beamtalk_xref, Ids)),
     ?assert(lists:member(beamtalk_bootstrap, Ids)),
+    ?assert(lists:member(beamtalk_announcements, Ids)),
     ?assert(lists:member(beamtalk_stdlib, Ids)),
     ?assert(lists:member(beamtalk_object_instances, Ids)),
     ?assert(lists:member(beamtalk_subprocess_sup, Ids)),
@@ -56,11 +57,11 @@ children_ids_test() ->
 children_are_workers_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% xref (worker), bootstrap, stdlib, object_instances are workers; subprocess_sup
-    %% and reactive_subprocess_sup are supervisors; trace_store is worker.
+    %% xref (worker), bootstrap, announcements, stdlib, object_instances are workers;
+    %% subprocess_sup and reactive_subprocess_sup are supervisors; trace_store is worker.
     Types = [maps:get(type, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
-        [worker, worker, worker, worker, supervisor, supervisor, worker],
+        [worker, worker, worker, worker, worker, supervisor, supervisor, worker],
         Types
     ).
 
@@ -70,7 +71,7 @@ children_are_permanent_test() ->
     %% All children should have permanent restart
     RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
-        lists:duplicate(7, permanent),
+        lists:duplicate(8, permanent),
         RestartTypes
     ).
 
@@ -82,13 +83,14 @@ children_are_permanent_test() ->
 children_ordered_correctly_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Verify ordering: xref -> bootstrap -> stdlib -> instances -> subprocess_sup
-    %% -> reactive_subprocess_sup -> trace_store
+    %% Verify ordering: xref -> bootstrap -> announcements -> stdlib -> instances
+    %% -> subprocess_sup -> reactive_subprocess_sup -> trace_store
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
         [
             beamtalk_xref,
             beamtalk_bootstrap,
+            beamtalk_announcements,
             beamtalk_stdlib,
             beamtalk_object_instances,
             beamtalk_subprocess_sup,
@@ -118,6 +120,7 @@ bootstrap_child_spec_test() ->
     [
         _XrefSpec,
         BootstrapSpec,
+        _AnnouncementsSpec,
         _StdlibSpec,
         _InstancesSpec,
         _SubprocessSupSpec,
@@ -137,6 +140,7 @@ instances_child_spec_test() ->
     [
         _XrefSpec,
         _BootstrapSpec,
+        _AnnouncementsSpec,
         _StdlibSpec,
         InstancesSpec,
         _SubprocessSupSpec,
@@ -156,6 +160,7 @@ stdlib_child_spec_test() ->
     [
         _XrefSpec,
         _BootstrapSpec,
+        _AnnouncementsSpec,
         StdlibSpec,
         _InstancesSpec,
         _SubprocessSupSpec,
@@ -175,6 +180,7 @@ subprocess_sup_child_spec_test() ->
     [
         _XrefSpec,
         _BootstrapSpec,
+        _AnnouncementsSpec,
         _StdlibSpec,
         _InstancesSpec,
         SubprocessSupSpec,
@@ -194,6 +200,7 @@ reactive_subprocess_sup_child_spec_test() ->
     [
         _XrefSpec,
         _BootstrapSpec,
+        _AnnouncementsSpec,
         _StdlibSpec,
         _InstancesSpec,
         _SubprocessSupSpec,
@@ -213,7 +220,7 @@ reactive_subprocess_sup_child_spec_test() ->
 
 init_returns_proper_format_test() ->
     Result = beamtalk_runtime_sup:init([]),
-    ?assertMatch({ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _]}}, Result).
+    ?assertMatch({ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _]}}, Result).
 
 %%% Behavioral tests
 
@@ -247,6 +254,7 @@ all_children_alive_test() ->
         ExpectedIds = [
             beamtalk_xref,
             beamtalk_bootstrap,
+            beamtalk_announcements,
             beamtalk_stdlib,
             beamtalk_object_instances,
             beamtalk_subprocess_sup,

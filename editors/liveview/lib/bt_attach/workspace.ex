@@ -187,6 +187,27 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  @doc """
+  Snapshot the live supervision tree (ADR 0092) as a list of node maps.
+
+  `scope` is `"default"` (the workspace tree with runtime plumbing filtered — the
+  safe Read view) or `"system"` (everything, including runtime internals — the
+  privileged whole-node view; RBAC gates the `processes_system` op to Owners).
+  Surfaced through the shared eval seam so the structured node data is identical
+  to every other surface. Returns `{:ok, nodes}` (a list of node maps) or
+  `{:error, reason}`.
+  """
+  @spec supervision_tree(pid(), String.t()) :: {:ok, term()} | {:error, term()}
+  def supervision_tree(session_pid, scope)
+      when is_pid(session_pid) and scope in ["default", "system"] do
+    expression = "ProcessNavigation #{scope} tree asDictionaries"
+
+    case eval(session_pid, expression) do
+      {:ok, value, _output, _warnings} -> {:ok, value}
+      {:error, reason, _output, _warnings} -> {:error, reason}
+    end
+  end
+
   # Build the protocol request as a plain map, decode it to a `protocol_msg()`
   # on the workspace node (so we don't depend on the record's `.hrl`), then
   # dispatch through the term-returning op layer. `dispatch/4` returns the

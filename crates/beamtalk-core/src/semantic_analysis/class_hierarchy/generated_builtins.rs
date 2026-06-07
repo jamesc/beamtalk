@@ -62,6 +62,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Package"
             | "Pid"
             | "Port"
+            | "ProcessNavigation"
             | "ProtoObject"
             | "Protocol"
             | "Queue"
@@ -78,7 +79,9 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Stream"
             | "String"
             | "Subprocess"
+            | "SupervisionNode"
             | "SupervisionSpec"
+            | "SupervisionTree"
             | "Supervisor"
             | "Symbol"
             | "System"
@@ -1846,6 +1849,39 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "ProcessNavigation".into(),
+        ClassInfo {
+            name: "ProcessNavigation".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            state: vec!["nodes".into()],
+            state_types: HashMap::from([("nodes".into(), "List(SupervisionNode)".into())]),
+            state_has_default: HashMap::from([("nodes".into(), true)]),
+            methods: vec![
+                MethodInfo { selector: "tree".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionTree".into()), param_types: vec![], doc: Some("The navigable `SupervisionTree` snapshot for this navigation.\n\n## Examples\n```beamtalk\nProcessNavigation default tree   // => a SupervisionTree\n```".into()) },
+                MethodInfo { selector: "nodes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SupervisionNode)".into()), param_types: vec![], doc: Some("Returns the `nodes` field value. Default: `...`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withNodes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ProcessNavigation".into()), param_types: vec![Some("List(SupervisionNode)".into())], doc: Some("Returns a new `ProcessNavigation` with `nodes` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "default".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ProcessNavigation".into()), param_types: vec![], doc: Some("A navigation over the workspace application tree, with runtime plumbing\nfiltered out (the `default` scope). Cannot fail — it snapshots the live\ntree — so it returns a `ProcessNavigation` directly and chains fluently.\n\n## Examples\n```beamtalk\nProcessNavigation default tree root\n```".into()) },
+                MethodInfo { selector: "system".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ProcessNavigation".into()), param_types: vec![], doc: Some("A navigation over *everything*, including runtime infrastructure and\nforeign processes (the `system` scope). Privileged (ADR 0091). Cannot fail.\n\n## Examples\n```beamtalk\nProcessNavigation system tree size\n```".into()) },
+                MethodInfo { selector: "from:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Result(ProcessNavigation, Error)".into()), param_types: vec![Some("Supervisor | Pid".into())], doc: Some("A navigation over the subtree rooted at `aRoot` — a `Supervisor` handle or\na raw `Pid`.\n\nReturns a `Result`: the root is user-supplied and may already be dead. The\n`:: Supervisor | Pid` annotation lets the type checker reject a wrong-type\nargument statically, so `ProcessNavigation from: 42` never reaches runtime;\nthe `Result error: (beamtalk_error type_error)` variant remains the\ndefensive runtime fallback for untyped/FFI input. A dead root surfaces as\n`Result error: (beamtalk_error stale_handle)`. A pid that is simply not a\nsupervisor is **not** an error — it yields `Result ok:` with a single-node\ntree.\n\n## Examples\n```beamtalk\n(ProcessNavigation from: aSup) unwrap tree\n(ProcessNavigation from: aSup) ifOk: [:nav | nav tree] ifError: [:e | nil]\n```".into()) },
+                MethodInfo { selector: "nodes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ProcessNavigation".into()), param_types: vec![Some("List(SupervisionNode)".into())], doc: Some("Creates a new `ProcessNavigation`. Args: nodes (default: ...).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "ProtoObject".into(),
         ClassInfo {
             name: "ProtoObject".into(),
@@ -2448,6 +2484,53 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "SupervisionNode".into(),
+        ClassInfo {
+            name: "SupervisionNode".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            state: vec!["pid".into(), "registeredName".into(), "kind".into(), "behaviourClass".into(), "childCount".into()],
+            state_types: HashMap::from([("pid".into(), "Pid | Nil".into()), ("registeredName".into(), "Symbol | Nil".into()), ("kind".into(), "Symbol".into()), ("behaviourClass".into(), "Class | Nil".into()), ("childCount".into(), "Integer".into())]),
+            state_has_default: HashMap::from([("pid".into(), true), ("registeredName".into(), true), ("kind".into(), true), ("behaviourClass".into(), true), ("childCount".into(), true)]),
+            methods: vec![
+                MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this node is a supervisor (Beamtalk or foreign).\n\n## Examples\n```beamtalk\nnode isSupervisor   // => true\n```".into()) },
+                MethodInfo { selector: "isBeamtalk".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this node is a Beamtalk process (actor or supervisor) — i.e. its\n`kind` is one of the `#beamtalk*` kinds. Foreign OTP processes and\nrestarting children answer `false`.\n\n## Examples\n```beamtalk\nnode isBeamtalk   // => true\n```".into()) },
+                MethodInfo { selector: "children".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SupervisionNode)".into()), param_types: vec![], doc: Some("The snapshot children of this node (supervisors only; `#()` otherwise).\n\nResolved from the shared sibling set captured at snapshot time, so it\nreflects the frozen tree — re-snapshot to refresh. Returned children are\nthemselves navigable (`node children first parent`).\n\n## Examples\n```beamtalk\nnode children   // => #(a SupervisionNode, ...)\n```".into()) },
+                MethodInfo { selector: "parent".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode | Nil".into()), param_types: vec![], doc: Some("The snapshot parent of this node, or `nil` for a root node or a node\ncaught mid-restart.\n\n## Examples\n```beamtalk\nnode parent   // => a SupervisionNode | nil\n```".into()) },
+                MethodInfo { selector: "parentPid".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Pid | Nil".into()), param_types: vec![], doc: Some("The pid of this node's parent supervisor, or `nil` for a root node — the\nO(1) adjacency key, without materialising the full parent node (`parent`).\n\n## Examples\n```beamtalk\nnode parentPid   // => a Pid | nil\n```".into()) },
+                MethodInfo { selector: "strategy".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol | Nil".into()), param_types: vec![], doc: Some("The configured OTP restart strategy (`#oneForOne`, `#simpleOneForOne`, …)\nfor a Beamtalk supervisor node, or `nil` for actors and foreign processes.\n\n## Examples\n```beamtalk\nnode strategy   // => #oneForOne\n```".into()) },
+                MethodInfo { selector: "restartIntensity".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Dictionary | Nil".into()), param_types: vec![], doc: Some("The configured restart *budget* — `#{#maxRestarts => n, #window => secs}` —\nfor a Beamtalk supervisor node, or `nil` otherwise. This is the public,\nstable configured intensity; a per-child restart *count* is deliberately\nout of scope (ADR 0092 §3).\n\n## Examples\n```beamtalk\nnode restartIntensity   // => #{#maxRestarts => 10, #window => 60}\n```".into()) },
+                MethodInfo { selector: "truncated".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this supervisor's children were truncated by the snapshot child cap\n(a large `simpleOneForOne` pool, ADR 0092 §Constraints 1). When `true`,\n`children` is empty but `childCount` still reports the live total.\n\n## Examples\n```beamtalk\nnode truncated   // => false\n```".into()) },
+                MethodInfo { selector: "status".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Dictionary | Nil".into()), param_types: vec![], doc: Some("Lazily fetch this node's live OTP status (ADR 0092 §5).\n\nIssues a timeout-guarded `sys:get_status` against the node's pid *at call\ntime* (never at snapshot time). Returns a `Dictionary` for an alive,\n`sys`-compliant process; returns `nil` — not an error — for a process that\nhas since died, timed out, or is not `sys`-compliant. This is the liveness\ncheck: a snapshot is a *past* truth, `status` is the *now*.\n\n## Examples\n```beamtalk\nnode status   // => #{#module => ..., #sysState => #running} | nil\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable description, e.g. `#SupervisionNode<#beamtalkActor Counter\n#Pid<0.132.0>>` or, for a supervisor, `#SupervisionNode<#beamtalkSupervisor\nAppSup #Pid<0.200.0> children: 3>`.\n\n## Examples\n```beamtalk\nnode printString   // => \"#SupervisionNode<#beamtalkActor Counter #Pid<0.132.0>>\"\n```".into()) },
+                MethodInfo { selector: "pid".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Pid | Nil".into()), param_types: vec![], doc: Some("Returns the `pid` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withPid:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode".into()), param_types: vec![Some("Pid | Nil".into())], doc: Some("Returns a new `SupervisionNode` with `pid` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "registeredName".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol | Nil".into()), param_types: vec![], doc: Some("Returns the `registeredName` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withRegisteredName:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode".into()), param_types: vec![Some("Symbol | Nil".into())], doc: Some("Returns a new `SupervisionNode` with `registeredName` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "kind".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Returns the `kind` field value. Default: `#otpProcess`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withKind:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode".into()), param_types: vec![Some("Symbol".into())], doc: Some("Returns a new `SupervisionNode` with `kind` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "behaviourClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Class | Nil".into()), param_types: vec![], doc: Some("Returns the `behaviourClass` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withBehaviourClass:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode".into()), param_types: vec![Some("Class | Nil".into())], doc: Some("Returns a new `SupervisionNode` with `behaviourClass` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "childCount".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Returns the `childCount` field value. Default: `0`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withChildCount:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode".into()), param_types: vec![Some("Integer".into())], doc: Some("Returns a new `SupervisionNode` with `childCount` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "pid:registeredName:kind:behaviourClass:childCount:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "SupervisionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode".into()), param_types: vec![Some("Pid | Nil".into()), Some("Symbol | Nil".into()), Some("Symbol".into()), Some("Class | Nil".into()), Some("Integer".into())], doc: Some("Creates a new `SupervisionNode`. Args: pid (default: nil), registeredName (default: nil), kind (default: #otpProcess), behaviourClass (default: nil), childCount (default: 0).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "SupervisionSpec".into(),
         ClassInfo {
             name: "SupervisionSpec".into(),
@@ -2488,6 +2571,48 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             ],
             class_methods: vec![
                 MethodInfo { selector: "id:actorClass:restart:args:shutdown:classMethod:name:".into(), arity: 7, kind: MethodKind::Primary, defined_in: "SupervisionSpec".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![Some("Symbol | Nil".into()), Some("Actor class | Nil".into()), Some("Symbol".into()), Some("Object | Nil".into()), Some("Integer | Nil".into()), Some("Symbol | Nil".into()), Some("Symbol | Nil".into())], doc: Some("Creates a new `SupervisionSpec`. Args: id (default: nil), actorClass (default: nil), restart (default: #temporary), args (default: nil), shutdown (default: nil), classMethod (default: nil), name (default: nil).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "SupervisionTree".into(),
+        ClassInfo {
+            name: "SupervisionTree".into(),
+            superclass: Some("Value".into()),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            state: vec!["flatNodes".into()],
+            state_types: HashMap::from([("flatNodes".into(), "List(SupervisionNode)".into())]),
+            state_has_default: HashMap::from([("flatNodes".into(), true)]),
+            methods: vec![
+                MethodInfo { selector: "nodes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SupervisionNode)".into()), param_types: vec![], doc: Some("The flat list of nodes, each enriched so parent/child navigation works.\n\nThis *is* the flat record API the ADR exposes; `root` is the navigable\nhead layered on top.\n\n## Examples\n```beamtalk\ntree nodes   // => #(a SupervisionNode, ...)\n```".into()) },
+                MethodInfo { selector: "root".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode | Nil".into()), param_types: vec![], doc: Some("The snapshot root — the first node with no parent — or `nil` for an empty\nsnapshot.\n\nNote: the `default` / `system` snapshot can be a *forest* (the app root,\nworkspace-attached supervisors, and standalone `supervise`d trees are each\nparentless). `root` returns the first such root; iterate `nodes` (or\n`select: [:n | n parentPid isNil]`) to reach every root in a forest.\n\n## Examples\n```beamtalk\ntree root   // => a SupervisionNode | nil\n```".into()) },
+                MethodInfo { selector: "size".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Total number of nodes in the snapshot.\n\n## Examples\n```beamtalk\ntree size   // => 6\n```".into()) },
+                MethodInfo { selector: "isEmpty".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether the snapshot is empty.\n\n## Examples\n```beamtalk\ntree isEmpty   // => false\n```".into()) },
+                MethodInfo { selector: "do:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionTree".into()), param_types: vec![Some("Block(SupervisionNode, Object)".into())], doc: Some("Pre-order walk: evaluate `aBlock` for every node in the snapshot.\n\n## Examples\n```beamtalk\ntree do: [:node | Transcript showLine: node printString]\n```".into()) },
+                MethodInfo { selector: "select:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SupervisionNode)".into()), param_types: vec![Some("Block(SupervisionNode, Boolean)".into())], doc: Some("The nodes for which `aBlock` answers `true`.\n\n## Examples\n```beamtalk\ntree select: [:node | node isSupervisor]\n```".into()) },
+                MethodInfo { selector: "detect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionNode".into()), param_types: vec![Some("Block(SupervisionNode, Boolean)".into())], doc: Some("The first node for which `aBlock` answers `true`. Raises if none match —\nuse `detect:ifNone:` for a default.\n\n## Examples\n```beamtalk\ntree detect: [:node | node registeredName == #DatabasePool]\n```".into()) },
+                MethodInfo { selector: "detect:ifNone:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("Block(SupervisionNode, Boolean)".into()), Some("Block(Object)".into())], doc: Some("The first node for which `aBlock` answers `true`, or the value of\n`noneBlock` if none match.\n\n## Examples\n```beamtalk\ntree detect: [:n | n isSupervisor] ifNone: [nil]\n```".into()) },
+                MethodInfo { selector: "collect:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![Some("Block(SupervisionNode, Object)".into())], doc: Some("Collect the result of applying `aBlock` to every node.\n\n## Examples\n```beamtalk\ntree collect: [:node | node registeredName]\n```".into()) },
+                MethodInfo { selector: "nodesOfKind:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SupervisionNode)".into()), param_types: vec![Some("Symbol".into())], doc: Some("The nodes whose `kind` equals `aKind` (e.g. `#beamtalkActor`,\n`#otpProcess`).\n\n## Examples\n```beamtalk\ntree nodesOfKind: #beamtalkActor   // => List(SupervisionNode)\n```".into()) },
+                MethodInfo { selector: "findClass:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SupervisionNode)".into()), param_types: vec![Some("Class".into())], doc: Some("The nodes backed by the Beamtalk class `aClass` — every running instance of\nthat class in the supervision tree.\n\n## Examples\n```beamtalk\ntree findClass: Counter   // => List(SupervisionNode) for Counter actors\n```".into()) },
+                MethodInfo { selector: "asDictionaries".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Dictionary)".into()), param_types: vec![], doc: Some("A serialisable form of the snapshot — one `Dictionary` per node carrying\nits identity, kind, class, child count, and parent linkage (adjacency).\n\nThis is the cross-surface wire form (ADR 0092 Implementation §5): the MCP\nand LiveView/browser surfaces render this structure so every surface shows\nequivalent data. Pids are rendered as Strings (JSON-stable); `parentPid`\nreconstructs the tree.\n\n## Examples\n```beamtalk\nProcessNavigation default tree asDictionaries\n// => #(#{#pid => \"<0.200.0>\", #kind => #beamtalkSupervisor, ...}, ...)\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable summary, e.g. `#SupervisionTree<6 nodes, root: #AppSup>` or\n`#SupervisionTree<empty>`.\n\n## Examples\n```beamtalk\nWorkspace processes printString   // => \"#SupervisionTree<3 nodes, root: #AppSup>\"\n```".into()) },
+                MethodInfo { selector: "flatNodes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SupervisionNode)".into()), param_types: vec![], doc: Some("Returns the `flatNodes` field value. Default: `...`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withFlatNodes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionTree".into()), param_types: vec![Some("List(SupervisionNode)".into())], doc: Some("Returns a new `SupervisionTree` with `flatNodes` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "flatNodes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SupervisionTree".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionTree".into()), param_types: vec![Some("List(SupervisionNode)".into())], doc: Some("Creates a new `SupervisionTree`. Args: flatNodes (default: ...).\n\n*(compiler-generated)*".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],
@@ -3170,6 +3295,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             state_has_default: HashMap::new(),
             methods: vec![
                 MethodInfo { selector: "actors".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Actor)".into()), param_types: vec![], doc: Some("Return a list of all live actors as object references.\n\n## Examples\n```beamtalk\nWorkspace actors\n```".into()) },
+                MethodInfo { selector: "processes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionTree".into()), param_types: vec![], doc: Some("Return a navigable snapshot of the live supervision tree (ADR 0092).\n\nThe dynamic counterpart of `Workspace actors`: a `SupervisionTree` over the\nworkspace application tree with runtime plumbing filtered out (the\n`default` scope, `== ProcessNavigation default tree`). Walk it (`do:`,\n`select:`, `findClass:`), reach the head (`root`), or take the flat record\nlist (`nodes`). The snapshot is best-effort point-in-time — re-call to\nrefresh.\n\nThe `default`-scope reach is an ADR-0091 Read op, scoped exactly like\n`actors`. For the privileged whole-node view use `ProcessNavigation system\ntree`.\n\n## Examples\n```beamtalk\nWorkspace processes root                  // => the snapshot root SupervisionNode\nWorkspace processes do: [:n | Transcript showLine: n printString]\nWorkspace processes findClass: Counter    // => List(SupervisionNode)\nWorkspace processes nodes                 // => the flat List(SupervisionNode)\n```".into()) },
                 MethodInfo { selector: "actorAt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![Some("String".into())], doc: Some("Look up a specific actor by pid string.\n\n## Examples\n```beamtalk\nWorkspace actorAt: \"<0.132.0>\"\n```".into()) },
                 MethodInfo { selector: "actorsOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Actor)".into()), param_types: vec![Some("Class".into())], doc: Some("Return all actors of a given class.\n\n## Examples\n```beamtalk\nWorkspace actorsOf: Counter\n```".into()) },
                 MethodInfo { selector: "classes".into(), arity: 0, kind: MethodKind::Primary, defined_in: "WorkspaceInterface".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Behaviour)".into()), param_types: vec![], doc: Some("Return a list of loaded user classes with source file info.\n\n## Examples\n```beamtalk\nWorkspace classes\n```".into()) },

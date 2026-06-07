@@ -1326,6 +1326,42 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "integration test"]
+    async fn test_supervision_tree() -> Result<(), Box<dyn std::error::Error>> {
+        // ADR 0092 (BT-2431): the supervision-tree snapshot the `supervision_tree`
+        // MCP tool surfaces, driven through the shared eval seam.
+        let (port, cookie) = test_port_and_cookie()?;
+        let client = ReplClient::connect(port, &cookie, None).await?;
+
+        // The default-scope serialised tree round-trips without error (it is a
+        // possibly-empty List, never an error).
+        let resp = client
+            .evaluate_with_options("ProcessNavigation default tree asDictionaries", false)
+            .await
+            .unwrap();
+        assert!(
+            !resp.is_error(),
+            "supervision_tree (default) should succeed: {:?}",
+            resp.error
+        );
+
+        // The privileged `system` scope is a superset of `default` — it includes
+        // the runtime internals `default` filters out.
+        let resp = client
+            .evaluate_with_options(
+                "ProcessNavigation system tree size >= ProcessNavigation default tree size",
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(!resp.is_error());
+        assert_eq!(resp.value_string(), "true");
+
+        client.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "integration test"]
     async fn test_complete() -> Result<(), Box<dyn std::error::Error>> {
         let (port, cookie) = test_port_and_cookie()?;
         let client = ReplClient::connect(port, &cookie, None).await?;

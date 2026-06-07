@@ -82,6 +82,7 @@ not change op output:
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
 | `actors` | -- | `via Workspace actors` | `list_actors` | -- | List running actors |
+| `processes` | -- | `via Workspace processes` | `supervision_tree` | -- | Snapshot the live supervision tree (ADR 0092): a flat list of node records (pid, registeredName, kind, class, childCount, isSupervisor, parentPid for adjacency), serialised by `SupervisionTree asDictionaries` so every surface shows equivalent data. The MCP `supervision_tree` tool and the LiveView IDE `processes` op both surface the **`default`** scope (workspace tree, runtime plumbing filtered — a Read op, scoped like `actors`, ADR 0091 / BT-2432). The **`system`** scope (everything, incl. runtime internals) is privileged: reachable via the MCP tool's `scope:"system"` arg and the LiveView `processes_system` op, gated to the Owner (`:execute`) role — never exposed to an unprivileged caller. |
 | `inspect` | -- | `surface-specific: agent-only typed introspection` | `inspect` | -- | Inspect actor state. Locked: structured-JSON view is for agents; humans use `Transcript show: actorRef` or send messages directly |
 | `kill` | -- | `via anActor stop` | -- | -- | Terminate an actor; MCP can `evaluate` the same send |
 

@@ -31,6 +31,28 @@ sealed typed Object subclass: WorkspaceInterface
   actors -> List(Actor) =>
     (Erlang beamtalk_workspace_interface_primitives) actors
 
+  /// Return a navigable snapshot of the live supervision tree (ADR 0092).
+  ///
+  /// The dynamic counterpart of `Workspace actors`: a `SupervisionTree` over the
+  /// workspace application tree with runtime plumbing filtered out (the
+  /// `default` scope, `== ProcessNavigation default tree`). Walk it (`do:`,
+  /// `select:`, `findClass:`), reach the head (`root`), or take the flat record
+  /// list (`nodes`). The snapshot is best-effort point-in-time — re-call to
+  /// refresh.
+  ///
+  /// The `default`-scope reach is an ADR-0091 Read op, scoped exactly like
+  /// `actors`. For the privileged whole-node view use `ProcessNavigation system
+  /// tree`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace processes root                  // => the snapshot root SupervisionNode
+  /// Workspace processes do: [:n | Transcript showLine: n printString]
+  /// Workspace processes findClass: Counter    // => List(SupervisionNode)
+  /// Workspace processes nodes                 // => the flat List(SupervisionNode)
+  /// ```
+  processes -> SupervisionTree => ProcessNavigation default tree
+
   /// Look up a specific actor by pid string.
   ///
   /// ## Examples
