@@ -145,13 +145,20 @@ gen_server is not in the dispatch path.**
 - **`pg`'s role is *subscriber-group registry for `SystemAnnouncer`*, not a
   message transport.** `pg` has no send primitive — you `pg:get_members/1` and
   send yourself. For the singleton system bus we register subscribers in a `pg`
-  group so that *membership is cluster-wide for free*; v1 still delivers
-  **locally only** (the announcing node sends to local members). Genuine
-  cross-node *delivery* (ordering, partition handling, remote handler
-  execution) is the package's job (Layer 3) — not "free." Per-instance
-  `Announcer`s use the ETS table directly (no `pg` group), so there is no
-  dynamic-atom pressure; where a `pg` group is needed it is keyed by a
-  `{beamtalk_announcer, Ref}` tuple, never a minted atom.
+  group so that *membership is cluster-wide for free*. **Delivery to any
+  connected node is also free, and is in scope for v1** — `pg` membership spans
+  connected nodes, `erlang:monitor/2` works cross-node, and `Pid ! Msg` is
+  location-transparent, so a subscriber on another node (e.g. an ADR-0091
+  LiveView IDE process on the Phoenix node, which is connected to the workspace
+  node over Erlang distribution) subscribes, is monitored, and receives events
+  with no extra mechanism. What is *not* free — and is deferred to the package
+  (Layer 3) — is delivery across the **absence** of a connection: netsplit /
+  partition tolerance, buffering and replay for a reconnecting subscriber, and
+  multi-node *workspace clusters*. Single-cluster cross-node delivery to live,
+  connected nodes needs none of that. Per-instance `Announcer`s use the ETS
+  table directly (no `pg` group), so there is no dynamic-atom pressure; where a
+  `pg` group is needed it is keyed by a `{beamtalk_announcer, Ref}` tuple, never
+  a minted atom.
 - **Typed dispatch with MRO matching.** On `announce: anEvent` the matcher
   walks the event's superclass chain (ETS metadata reads) and delivers to
   subscribers of the event class *or any ancestor* (subscribe to `UIEvent`,
@@ -257,7 +264,11 @@ op list; this ADR fixes the requirement.
 
 `beamtalk-announcements` shrinks to the genuinely-optional:
 
-- **Distributed cross-node delivery** beyond what single-node `pg` gives.
+- **Hardened distributed delivery** beyond live connected nodes: netsplit /
+  partition tolerance, buffering + replay for reconnecting subscribers, and
+  multi-node *workspace clusters*. (Plain cross-node delivery to a *connected*
+  node — including the ADR-0091 LiveView front — is already handled by the core
+  bus over Erlang distribution; see Layer 1.)
 - **`RecordingAnnouncer`** — the test double that records `announce:` calls
   without dispatching.
 - **`telemetry` / OpenTelemetry bridge** — re-emit announcements as telemetry
@@ -363,7 +374,7 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
 
 **(c) Layered — runtime bus + stdlib veneer + package extras (chosen).**
 - 🎩 **Smalltalk purist:** "Typed Observer + `SystemAnnouncer` are in the image where they belong."
-- ⚙️ **BEAM veteran:** "Built on `pg`, no new bottleneck, distribution is free later; the heavy/optional parts stay out of the kernel."
+- ⚙️ **BEAM veteran:** "Built on `pg`, no new bottleneck; connected-node delivery is free now (the LiveView front is just another node on the dist mesh), and the heavy partition/replay parts stay out of the kernel."
 - 🏭 **Operator:** "Monitored, isolated, inspectable; ops bridge is opt-in."
 - 🎨 **Language designer:** "Each concern at the right altitude; the package line falls exactly on what's optional."
 - *Tension:* three layers is more moving parts than 'one package' — justified only because the system-publisher requirement is real (five consumers).
@@ -375,10 +386,13 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
   announcing process off `read_concurrency` ETS, so there is no central
   dispatch mailbox to deadlock (`announceAndWait:` reentrancy) or bottleneck.
   This is the `beamtalk_xref` / `beamtalk_trace_store` pattern.
-- **`pg` for `SystemAnnouncer` membership only:** gives cluster-wide
-  *membership* for the shared bus at no extra cost — but `pg` has no send
-  primitive, so it is a registry, not a transport, and v1 delivery is local.
-  Per-instance announcers don't use `pg`.
+- **`pg` for `SystemAnnouncer` membership:** gives cluster-wide *membership* for
+  the shared bus at no extra cost — `pg` has no send primitive, so it is a
+  registry, not a transport, but combined with location-transparent `Pid ! Msg`
+  and cross-node monitors it delivers to any *connected* node in v1 (the
+  ADR-0091 LiveView front gets live updates for free over the existing dist
+  link). Only partition tolerance / replay / multi-workspace-cluster fall to the
+  package. Per-instance announcers don't use `pg`.
 - **Central dispatch gen_server (rejected):** the obvious "announce → call the
   bus → it sends to everyone" design self-deadlocks on reentrant
   `announceAndWait:` and serialises all events through one mailbox.
@@ -410,8 +424,11 @@ exists to stop.
   to deadlock or bottleneck; crash-survivable via ETS heir; monitored + isolated
   by construction; hot-reload-safe (process-rooted subs). Clean `telemetry`
   boundary preserved (§4).
-- `pg` gives `SystemAnnouncer` cluster-wide *membership* for free, leaving only
-  cross-node *delivery* (the genuinely hard part) to the package.
+- `pg` membership + location-transparent send + cross-node monitors give
+  `SystemAnnouncer` free delivery to any *connected* node in v1 — the ADR-0091
+  LiveView front (a separate node over Erlang distribution) gets live updates
+  with no package. Only partition tolerance / replay / multi-workspace-cluster
+  fall to the package.
 
 ### Negative
 - Three layers to build and document vs BT-2193's single package.
