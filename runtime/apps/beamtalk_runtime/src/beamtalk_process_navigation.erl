@@ -510,11 +510,15 @@ already reached. No deny-list is applied at root selection — filtering is a
 """.
 -spec system_root_pids() -> [pid()].
 system_root_pids() ->
-    NamedTops = [
-        Pid
-     || Name <- [beamtalk_runtime_sup, beamtalk_workspace_sup],
-        is_pid(Pid = erlang:whereis(Name))
-    ],
+    NamedTops = lists:filtermap(
+        fun(Name) ->
+            case erlang:whereis(Name) of
+                Pid when is_pid(Pid) -> {true, Pid};
+                _ -> false
+            end
+        end,
+        [beamtalk_runtime_sup, beamtalk_workspace_sup]
+    ),
     RootSup =
         case beamtalk_supervisor:get_root() of
             Tuple when is_tuple(Tuple), is_pid(element(4, Tuple)) ->

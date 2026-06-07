@@ -79,12 +79,11 @@ is NOT in the dispatch path):
 - **Crash-survivable tables.** Both ETS tables are created with
   `{heir, SupervisorPid, ...}` so they survive a bus crash (the
   `beamtalk_trace_store` pattern). On restart the gen_server re-arms monitors
-  from the surviving rows. The full crash→restart dead-pid prune is BT-2442;
-  Phase 1 re-arms and keeps the data.
+  from the surviving rows and eagerly prunes any subscriber that died during the
+  crash→restart gap via `is_process_alive/1` (BT-2442).
 
-Out of scope here (later issues): the heir crash re-arm dead-pid prune (BT-2442)
-and the stdlib typed veneer classes — `Announcer` / `Announcement` /
-`Subscription` (BT-2444).
+Out of scope here (later issues): the stdlib typed veneer classes — `Announcer` /
+`Announcement` / `Subscription` (BT-2444).
 
 See also: docs/ADR/0093-announcements-event-substrate.md §1
 """.
@@ -677,14 +676,19 @@ init([]) ->
     SupPid = find_supervisor(),
     ensure_tables(SupPid),
 
-    %% Re-arm monitors for any subscriptions that survived a crash via heir.
+    %% Re-arm monitors for subscriptions that survived a crash via heir;
+    %% prune any subscriber that died during the crash→restart gap (BT-2442).
+    RowsBefore = ets:info(?SUBS_TABLE, size),
     Monitors = rearm_monitors(),
+    RowsAfter = ets:info(?SUBS_TABLE, size),
+    Pruned = RowsBefore - RowsAfter,
 
     ?LOG_INFO(#{
         event => announcements_started,
         tables => [?SUBS_TABLE, ?BY_CLASS_TABLE],
         pg_scope => ?PG_SCOPE,
-        rearmed_subscribers => maps:size(Monitors)
+        rearmed_subscribers => maps:size(Monitors),
+        pruned_dead_subscribers => Pruned
     }),
     {ok, #state{monitors = Monitors}}.
 
@@ -805,23 +809,28 @@ ensure_table(Name, Opts) ->
 -doc """
 Re-arm one monitor per distinct subscriber pid found in the surviving primary
 table (after a crash→restart with heir-preserved rows). Returns the monitor
-bookkeeping map. A pid that died during the crash→restart gap is still monitored
-here; its `DOWN` fires immediately (`erlang:monitor/2` of a dead pid sends an
-instant `DOWN`), so the stale row is pruned via the normal `DOWN` path. The
-eager `is_process_alive/1` prune of such rows is BT-2442; Phase 1 relies on the
-immediate `DOWN`.
+bookkeeping map. A pid that died during the crash→restart gap is pruned eagerly
+via `is_process_alive/1` — its rows are removed from both tables immediately so
+no stale pids accumulate (BT-2442). Live pids get a fresh `erlang:monitor/2`.
 """.
 -spec rearm_monitors() -> #{pid() => {reference(), pos_integer()}}.
 rearm_monitors() ->
     Rows = ets:tab2list(?SUBS_TABLE),
     lists:foldl(
-        fun({_SubRef, _Class, SubscriberPid, _Handler, _Once}, Acc) ->
-            case Acc of
-                #{SubscriberPid := {MonRef, Count}} ->
-                    Acc#{SubscriberPid => {MonRef, Count + 1}};
-                _ ->
-                    MonRef = erlang:monitor(process, SubscriberPid),
-                    Acc#{SubscriberPid => {MonRef, 1}}
+        fun({SubRef, Class, SubscriberPid, _Handler, _Once}, Acc) ->
+            case is_process_alive(SubscriberPid) of
+                false ->
+                    %% Dead during the crash→restart gap — prune immediately.
+                    remove_subscription(SubRef, Class),
+                    Acc;
+                true ->
+                    case Acc of
+                        #{SubscriberPid := {MonRef, Count}} ->
+                            Acc#{SubscriberPid => {MonRef, Count + 1}};
+                        _ ->
+                            MonRef = erlang:monitor(process, SubscriberPid),
+                            Acc#{SubscriberPid => {MonRef, 1}}
+                    end
             end
         end,
         #{},
