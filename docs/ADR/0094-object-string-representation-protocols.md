@@ -151,12 +151,14 @@ This deliberately keeps the breaking change out of this ADR — see Alternatives
 The `a`/`an` prefix is **removed entirely**. No vowel logic is needed because the
 prefix is gone.
 
-| Class kind | Default `printString` | Rationale |
-|---|---|---|
-| **Value** | `ClassName(field: value, ...)` | immutable `field:` data — show the data |
-| **Object** (platform wrapper) | `ClassName<id>` when a runtime handle exists, else `ClassName` | no Beamtalk-visible fields; the useful identity is the underlying Erlang handle (pid/port/ref/ETS table/fd) |
-| **Actor** | `ClassName<pid>` | state is behind the message boundary — show identity, never internal state |
-| **Supervisor** | `Supervisor<ClassName, pid>` / `DynamicSupervisor<ClassName, pid>` | follows actor rule; ancestry determines prefix |
+Three visually distinct forms, one per category of thing:
+
+| Class kind | Default `printString` | Form | Rationale |
+|---|---|---|---|
+| **Value** | `ClassName(field: value, ...)` | class-headed, **labelled** fields | immutable `field:` data — show the data |
+| **Actor** | `Actor(ClassName, pid)` | kind-headed, **positional** | a live process; the *kind* matters, state is behind the message boundary |
+| **Supervisor** | `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` | kind-headed, **positional** | a supervising process; ancestry determines the kind head |
+| **Object** (plain reference) | `ClassName`, or a class-defined form | bare label | no Beamtalk-visible fields and not a process; per-class override where a handle is meaningful |
 
 Examples:
 
@@ -166,39 +168,54 @@ Point new                   // => Point(x: 0, y: 0)
 Message sender: "Alice" text: "Hi"   // => Message(sender: "Alice", text: "Hi")
 Point new: #{}              // (no fields) => Point()
 
-counter := Counter spawn    // => Counter<0.123.0>
-ctr := AtomicCounter new: #requests   // => AtomicCounter<requests>
-sup := MySup startLink      // => Supervisor<MySup, 0.200.0>
+counter := Counter spawn    // => Actor(Counter, 0.123.0)
+sup := MySup startLink      // => Supervisor(MySup, 0.200.0)
+pool := MyPool startLink    // => DynamicSupervisor(MyPool, 0.201.0)
 ```
 
-The opaque `ClassName<id>` shape for actors and supervisors **replaces the
-existing `#Actor<ClassName,PID>` / `#Supervisor<ClassName,PID>` format** used by
-`beamtalk_repl_json.erl`. The existing `#` prefix was borrowed from Erlang term
-printing (`#Port<0.5>`, `#Ref<0.1.2.3>`) but was applied inconsistently — actor
-`printString` returned `"a Counter"` while the REPL rendered `#Actor<Counter,_>`,
-meaning the same object had two different representations depending on context.
-This ADR unifies them: `printString` and the REPL formatter produce the same
-`Counter<0.123.0>` output. The hard-coded REPL formatting paths for
-`#beamtalk_object{}` tuples and `{beamtalk_supervisor,...}` tuples are replaced
-by dispatching `printString` consistently.
+**Why the `Kind(Class, pid)` family.** The three categories — data, live process,
+plain reference — read as three distinct shapes:
+- **Value**: class-headed with **labelled** fields — `Point(x: 3, y: 4)`.
+- **Process** (Actor/Supervisor): **kind-headed** with **positional** args —
+  `Actor(Counter, 0.123.0)`. The kind (`Actor`/`Supervisor`/`DynamicSupervisor`) is
+  foregrounded so a live process is *immediately* recognisable as one, not mistaken
+  for data or a version string. This generalises the format supervisors already use
+  (`#Supervisor<MySup, 0.200.0>`) into one consistent family for everything that is
+  a process.
+- **Plain reference**: bare `ClassName`, or whatever the class defines.
 
-**Decision on `#` prefix (resolved):** User-defined actors and Object wrappers use
-**no `#` prefix** — `Counter<0.123.0>`, not `#Counter<0.123.0>`. The `#` is an
-Erlang marker reserved for *built-in* opaque terms; the bare platform primitives
-(`Pid`, `Port`, `Reference`) keep their Erlang-native `#Pid<0.123.0>` /
-`#Port<0.5>` rendering as-is, but Beamtalk's own classes read in Beamtalk's idiom
-without the foreign sigil. `Counter<0.123.0>` is judged the clearest and most
-consistent default for user classes. The known consequence: a domain actor and its
-raw underlying pid render differently (`Counter<0.123.0>` vs `#Pid<0.123.0>`) —
-this is acceptable and arguably *useful*, since they are genuinely different things
-(a typed actor proxy vs. a raw process handle).
+A live actor is categorically different from a reference-Object handle (a process
+with a mailbox and lifecycle vs. a synchronous wrapper around an external Erlang
+resource), so it earns a distinct, self-labelling shape rather than sharing a
+generic `ClassName<id>` form with handles.
 
-**`<id>` resolution for Object wrappers:** the identity shown is the wrapper's most
-meaningful handle, resolved per-class: `AtomicCounter` shows its ETS table
-name/key, `Supervisor` its pid, a registered actor its registered name. Classes
-with no meaningful handle render as the bare `ClassName`. The example deliberately
-uses `AtomicCounter` rather than a scoped resource like `FileHandle` (which should
-not escape its `File open:do:` block and so should not normally appear at the REPL).
+**Distinguishing Value from process forms.** Both are `Word(...)`, but: Value forms
+carry `field:` **labels** (`Point(x: 3, y: 4)`) while process forms are
+**positional** (`Actor(Counter, 0.123.0)`); and the process heads
+(`Actor`/`Supervisor`/`DynamicSupervisor`) are **reserved kind words** that no
+user Value class may shadow. The combination makes the two unambiguous.
+
+**Rejected delimiters.** `Counter@0.123.0` (Erlang `node@host` style) was rejected
+— a bare `Class@x.y.z` reads as a *version* (`Counter@0.1.0`), obscuring that it is
+a live actor. `Counter<0.123.0>` was rejected because `<`/`>` are comparison
+operators and the bare angle form doesn't signal "actor" strongly enough. The
+existing `#`-prefixed `#Actor<...>` was preferred over `@` but still loses to the
+`Kind(...)` family, which drops the foreign `#` Erlang sigil and uses Beamtalk's
+native `()`.
+
+**`#` on raw primitives unchanged.** The bare platform primitives keep their
+Erlang-native rendering (`#Pid<0.123.0>`, `#Port<0.5>`, `#Ref<0.1.2.3>`) — these
+*are* Erlang terms, so the `#…<>` form is correct for them. The consequence: a
+domain actor and its raw underlying pid render differently
+(`Actor(Counter, 0.123.0)` vs `#Pid<0.123.0>`), which is *useful* — they are
+genuinely different things (a typed actor vs. a raw process handle).
+
+**Replaces the existing REPL format.** This supersedes the hard-coded
+`#Actor<ClassName,PID>` / `#Supervisor<ClassName,PID>` paths in
+`beamtalk_repl_json.erl` (~123 test assertions). Those paths are replaced by
+`printString` dispatch (with the timeout-fallback in Critical Risks), so the REPL
+and `printString` produce identical output — fixing today's split where actor
+`printString` returned `"a Counter"` while the REPL rendered `#Actor<Counter,_>`.
 
 ### 3. Structural format: `ClassName(field: value, ...)`
 
@@ -273,7 +290,7 @@ via the `Document`/typed-leaf API.
 | **Smalltalk (Pharo/Squeak)** | `printString` / `printOn:` → `a Foo` by default; library classes override heavily | `displayString` / `displayNb` | `inspect` **opens an Inspector window** (side-effecting) | We keep `inspect` as the *action* (faithful to Pharo), but make the default *string* useful instead of `a Foo`. |
 | **Elixir** | `inspect/1` / `Inspect` protocol → `%Struct{...}`, derivable, bounded (`:limit`) | `to_string/1` / `String.Chars` | `IO.inspect/2` (prints + returns value for pipelining) | Structural-by-default, bounded recursion, the Debug/Display split. We map `Inspect`→`printString`, `String.Chars`→`displayString`. |
 | **Rust** | `Debug` (`{:?}`), `#[derive(Debug)]` → `Point { x: 3, y: 4 }` | `Display` (`{}`), hand-written | `dbg!()` macro | The clean two-trait split: derive Debug, hand-write Display. This is the core of our model. |
-| **Erlang** | `~p` → `#rec{}`, `<0.1.0>`, `#Port<...>` | `~s` (iolist) | `observer` / `recon` | The `ClassName<id>` opaque shape for handles/processes. |
+| **Erlang** | `~p` → `#rec{}`, `<0.1.0>`, `#Port<...>` | `~s` (iolist) | `observer` / `recon` | The `#…<>` form for raw handles; the `Kind(Class, pid)` shape generalises Erlang's habit of tagging opaque terms by kind. |
 | **Gleam** | `string.inspect` → `Point(3, 4)` | `to_string` per-type | — | Confirms `ClassName(...)` reads naturally on the BEAM. |
 
 **Net:** we adopt Rust's two-trait conceptual split, Elixir's structural-default +
@@ -292,8 +309,8 @@ bounded recursion, Erlang's handle notation for opaque instances, and Smalltalk'
   later become a faithful Pharo-style Inspector action — deferred to the LiveView
   follow-up ADR.) The departure is justified: `a Foo` is the single most-criticised
   default in the family.
-- **Erlang/BEAM developer:** `Counter<0.123.0>` / `AtomicCounter<requests>` read
-  close to native BEAM term printing, while raw primitives keep their exact Erlang
+- **Erlang/BEAM developer:** `Actor(Counter, 0.123.0)` / `Supervisor(MySup, …)`
+  clearly tag live processes by kind, while raw primitives keep their exact Erlang
   form (`#Pid<0.123.0>`). Structural `ClassName(...)` is unsurprising next to `~p`.
 - **Operator:** Actor instances never trigger a state-reading call for display —
   no deadlock/race risk from logging or inspecting a live actor. Bounded
@@ -356,7 +373,7 @@ interesting). Three further alternatives deserve explicit treatment:
 ### Minimal fix: just repoint `printString` to the existing structural logic
 The narrowest change that solves the *stated* problem: override `Value`
 `printString` to call the structural logic that already exists in `Value inspect`,
-and override `Actor` `printString` to produce `ClassName<pid>`. Two method
+and override `Actor` `printString` to produce `Actor(ClassName, pid)`. Two method
 overrides plus a handful of test updates. No new shared renderer, no `displayString`
 re-documentation, no `inspect` contract change, no `Printable` impact.
 
@@ -367,7 +384,7 @@ re-documentation, no `inspect` contract change, no `Printable` impact.
   second goal), leaves `inspect` as a misleadingly-named string method, and
   leaves the `#Actor<...>` REPL path inconsistent with `printString`.
 - **Disposition: adopted.** This ADR *is* the non-breaking core (structural
-  `printString` for `Value`, `ClassName<pid>` for actors, drop `a`/`an`, unify the
+  `printString` for `Value`, `Actor(Class, pid)` for actors, drop `a`/`an`, unify the
   REPL paths). The `inspect` contract change is **split out to a separate
   follow-up ADR** designed against the LiveView surface — `inspect` is barely used
   today and its right shape depends on the live UI, so deferring it costs nothing
@@ -386,18 +403,24 @@ untouched. Tooling dispatches `Inspectable`.
   become the tooling verb; but worth revisiting if the `inspect` migration is
   deferred.
 
-### Keep the `#` sigil on actors (`#Counter<0.123.0>`)
-Match the existing `#Pid<...>`/`#Port<...>`/`#Actor<...>` family exactly.
+### Actor format: alternatives to `Actor(Class, pid)`
+Three other shapes for the live-process form were weighed:
 
-- **Pro:** visual consistency with raw pids and the current REPL format; the `#`
-  syntactically insulates the token (a raw `Pid` and its owning `Actor` would read
-  alike).
-- **Con:** `#` is Beamtalk's symbol sigil, so `#Counter<...>` reads as a symbol;
-  imports an Erlang-term convention onto user classes.
-- **Disposition:** **rejected.** `Counter<0.123.0>` (no prefix) is the decided
-  format — the `#` is reserved for built-in Erlang terms, and Beamtalk's own
-  classes read more clearly without it. The resulting `Counter<0.123.0>` vs
-  `#Pid<0.123.0>` distinction is intentional (typed actor proxy vs. raw handle).
+- **`Counter<0.123.0>`** (bare class-headed, angle brackets). *Rejected:* `<`/`>`
+  are comparison operators, and the bare angle form doesn't signal "this is an
+  actor" — it reads like a generic/parametric instance.
+- **`Counter@0.123.0`** (Erlang `node@host` style). *Rejected:* `Class@x.y.z` reads
+  as a **version string** (`Counter@0.1.0`), actively obscuring that it is a live
+  process. This was the deciding objection.
+- **`#Actor<Counter, 0.123.0>`** (keep today's `#`-prefixed format). *Rejected, but
+  preferred over the two above:* it at least carries the `Actor` kind label. Loses
+  to `Actor(Counter, 0.123.0)` only because the latter drops the foreign `#` Erlang
+  sigil and uses Beamtalk's native `()`.
+
+**Decision:** `Actor(Class, pid)` — kind-headed, positional, native brackets. The
+kind label is what makes a live process recognisable; the `()` keeps it in
+Beamtalk's idiom; raw primitives keep their `#Pid<…>` Erlang form, so an actor and
+its raw pid read distinctly (intended).
 
 ## Consequences
 
@@ -406,8 +429,8 @@ Match the existing `#Pid<...>`/`#Port<...>`/`#Actor<...>` family exactly.
 - The `a Foo` wart — and its ungrammatical `a Integer` form — is gone.
 - Clear, documented contract: `printString` = Debug, `displayString` = Display
   (the interpolation hook). (`inspect` = open tooling, once the follow-up lands.)
-- Actors and platform wrappers print safely (no state reads) and legibly
-  (`ClassName<id>`), unifying the existing `Pid`/`Port` precedent.
+- Actors and supervisors print safely (no state reads) and legibly as a consistent
+  `Kind(Class, pid)` family, recognisable at a glance as live processes.
 - Leaves `inspect` cleanly positioned to become the editor/LSP inspector hook in
   the LiveView follow-up ADR, with structural recursion already decoupled from it.
 
@@ -448,7 +471,9 @@ deferred independently.
    - Repoint `Object.bt:92` from `"a " ++ ...` to `self class name asString` (bare
      class name, no article).
    - Update `beamtalk_object_ops.erl` `printString`/`displayString` clauses to
-     produce `ClassName<pid>` for actors, `ClassName` for objects.
+     produce `Actor(ClassName, pid)` for actors,
+     `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` for
+     supervisors, and bare `ClassName` for plain objects.
    - **Remove the hard-coded REPL formatting paths** in
      `beamtalk_repl_json.erl` (`#Actor<...>`, `#Supervisor<...>`) and replace
      them with `printString` dispatch, so actor formatting is unified.
@@ -496,16 +521,16 @@ runtime crashes:
    means contacting the actor process, which can block or fail if the actor is
    busy/dead/mid-call. **Decision:** the display path attempts `printString`
    dispatch with a short timeout, and falls back to a tuple-derived
-   `ClassName<pid>` (read directly from the `#beamtalk_object{}` tuple, no message
-   round-trip) on timeout/error/dead-process. Consequences:
+   `Actor(ClassName, pid)` (read directly from the `#beamtalk_object{}` tuple, no
+   message round-trip) on timeout/error/dead-process. Consequences:
    - **Default actors** (no `printString` override): the dispatch result *is*
-     `ClassName<pid>`, byte-identical to the fallback — so the fast path and the
-     dispatch path show the same thing. In practice the implementation can skip
+     `Actor(ClassName, pid)`, byte-identical to the fallback — so the fast path and
+     the dispatch path show the same thing. In practice the implementation can skip
      dispatch entirely for un-overridden actors.
    - **Custom-`printString` actors:** the override is honoured when the actor is
      responsive (the normal case); only an unresponsive actor degrades to
-     `ClassName<pid>` — and reading its custom state was unsafe in exactly that
-     case anyway.
+     `Actor(ClassName, pid)` — and reading its custom state was unsafe in exactly
+     that case anyway.
    - The REPL therefore never hangs on a wedged actor, and never silently shows
      stale/empty state.
 4. **Canonical renderer.** Exactly one of `beamtalk_primitive:print_string`,
