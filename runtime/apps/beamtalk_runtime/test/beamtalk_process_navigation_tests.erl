@@ -17,6 +17,13 @@ Phase 1 (BT-2426) coverage:
   calling `process_info` on the `restarting` atom
 - a worker pid (not a supervisor) walked without crashing
 - the infra deny-list contents and `is_infra/1` predicate
+
+Phase 2 (BT-2428) coverage:
+- foreign supervisor `#otpSupervisor` / foreign worker `#otpProcess`
+- the dynamic-supervisor child cap (truncation marker + opt-in full expansion)
+- `from/1,2` accepting a pid and a Supervisor handle, a non-supervisor pid
+  yielding a single-node result, and structured `stale_handle` / `type_error`
+- lazy guarded `status/1` (nil for a dead pid, a map for a live sys process)
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -111,6 +118,12 @@ fake_sup_loop(Children) ->
     receive
         {'$gen_call', From, which_children} ->
             gen_server:reply(From, Children),
+            fake_sup_loop(Children);
+        {'$gen_call', From, count_children} ->
+            Active = length([P || {_Id, P, _T, _M} <- Children, is_pid(P)]),
+            gen_server:reply(From, [
+                {specs, length(Children)}, {active, Active}, {supervisors, 0}, {workers, Active}
+            ]),
             fake_sup_loop(Children);
         stop ->
             ok
@@ -275,4 +288,144 @@ worker_root_does_not_crash_test() ->
         ?assertEqual(0, maps:get(childCount, Node))
     after
         WorkerPid ! stop
+    end.
+
+%%====================================================================
+%% Tests: foreign classification (BT-2428)
+%%====================================================================
+
+foreign_supervisor_and_worker_classified_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    %% A raw OTP supervisor (no Beamtalk class) with a plain worker child.
+    SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
+    try
+        Nodes = beamtalk_process_navigation:snapshot_from_pids([SupPid], system),
+        [Root | _] = Nodes,
+        %% Foreign supervisor: #otpSupervisor, no Beamtalk class, no strategy.
+        ?assertEqual(otpSupervisor, maps:get(kind, Root)),
+        ?assertEqual(nil, maps:get(behaviourClass, Root)),
+        ?assertEqual(nil, maps:get(strategy, Root)),
+        ?assertEqual(nil, maps:get(restartIntensity, Root)),
+        ?assertEqual(false, maps:get(truncated, Root)),
+        %% Foreign worker: #otpProcess.
+        [Worker] = [N || N <- Nodes, maps:get(parent_pid, N) =:= SupPid],
+        ?assertEqual(otpProcess, maps:get(kind, Worker))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% Tests: dynamic-supervisor child cap (BT-2428)
+%%====================================================================
+
+child_cap_truncates_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    SupPid = start_supervisor([
+        worker_spec(w1, start_worker, [Self]),
+        worker_spec(w2, start_worker, [Self])
+    ]),
+    try
+        %% Limit 1 with 2 live children: the supervisor is reported truncated and
+        %% its children are NOT materialised — only the root node appears.
+        Nodes = beamtalk_process_navigation:snapshot_from_pids([SupPid], system, 1),
+        ?assertEqual(1, length(Nodes)),
+        [Root] = Nodes,
+        ?assertEqual(true, maps:get(truncated, Root)),
+        ?assertEqual(2, maps:get(childCount, Root)),
+        %% A generous limit fully materialises the children (opt-in expansion).
+        Full = beamtalk_process_navigation:snapshot_from_pids([SupPid], system, 100),
+        ?assertEqual(3, length(Full)),
+        [FullRoot | _] = Full,
+        ?assertEqual(false, maps:get(truncated, FullRoot))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%%====================================================================
+%% Tests: from/1,2 (BT-2428)
+%%====================================================================
+
+from_accepts_pid_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
+    try
+        ?assertMatch({ok, [_ | _]}, beamtalk_process_navigation:from(SupPid))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+from_accepts_supervisor_handle_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
+    Handle = {beamtalk_supervisor, 'FakeSup', fake_mod, SupPid},
+    try
+        {ok, Nodes} = beamtalk_process_navigation:from(Handle),
+        ?assertEqual(SupPid, maps:get(pid, hd(Nodes)))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+from_non_supervisor_pid_is_single_node_test() ->
+    Self = self(),
+    {ok, WorkerPid} = start_worker(Self),
+    receive
+        {worker_ready, _} -> ok
+    after 1000 -> error(worker_not_ready)
+    end,
+    try
+        {ok, Nodes} = beamtalk_process_navigation:from(WorkerPid),
+        ?assertEqual(1, length(Nodes)),
+        ?assertEqual(otpProcess, maps:get(kind, hd(Nodes)))
+    after
+        WorkerPid ! stop
+    end.
+
+from_dead_supervisor_is_stale_handle_test() ->
+    DeadPid = spawn(fun() -> ok end),
+    %% Ensure it is dead before the call.
+    _ = sys_wait_dead(DeadPid),
+    {error, Err} = beamtalk_process_navigation:from(DeadPid),
+    ?assertEqual(stale_handle, Err#beamtalk_error.kind),
+    ?assertEqual('ProcessNavigation', Err#beamtalk_error.class).
+
+from_wrong_type_is_type_error_test() ->
+    {error, Err} = beamtalk_process_navigation:from(42),
+    ?assertEqual(type_error, Err#beamtalk_error.kind),
+    ?assertEqual('ProcessNavigation', Err#beamtalk_error.class).
+
+sys_wait_dead(Pid) ->
+    case erlang:is_process_alive(Pid) of
+        false ->
+            ok;
+        true ->
+            timer:sleep(5),
+            sys_wait_dead(Pid)
+    end.
+
+%%====================================================================
+%% Tests: lazy guarded status (BT-2428)
+%%====================================================================
+
+status_nil_for_dead_pid_test() ->
+    DeadPid = spawn(fun() -> ok end),
+    _ = sys_wait_dead(DeadPid),
+    ?assertEqual(nil, beamtalk_process_navigation:status(DeadPid)).
+
+status_nil_for_non_pid_test() ->
+    ?assertEqual(nil, beamtalk_process_navigation:status(not_a_pid)).
+
+status_map_for_live_sys_process_test() ->
+    %% A supervisor is a `sys`-compliant gen_server, so get_status returns a map.
+    SupPid = start_supervisor([]),
+    try
+        Status = beamtalk_process_navigation:status(SupPid),
+        ?assert(is_map(Status)),
+        ?assertEqual(running, maps:get(sysState, Status)),
+        ?assert(maps:is_key(module, Status))
+    after
+        gen_server:stop(SupPid)
     end.

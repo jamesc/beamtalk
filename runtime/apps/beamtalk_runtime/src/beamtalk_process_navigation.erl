@@ -30,25 +30,39 @@ stdlib class — BT-2427 — needs no wrapping layer):
 
 ```
 #{
-  '$beamtalk_class' => 'SupervisionNode',
-  pid             => pid() | nil,        % nil for a child mid-restart
-  registeredName  => atom() | nil,
-  kind            => beamtalkSupervisor | beamtalkActor
-                   | otpSupervisor | otpProcess | restarting,
-  behaviourClass  => beamtalk_object() | nil,  % the Beamtalk class object, nil for foreign
-  childCount      => non_neg_integer(),  % live children (supervisors only)
-  parent_pid      => pid() | nil         % adjacency for tree reconstruction (BT-2429)
+  '$beamtalk_class'  => 'SupervisionNode',
+  pid              => pid() | nil,        % nil for a child mid-restart
+  registeredName   => atom() | nil,
+  kind             => beamtalkSupervisor | beamtalkActor
+                    | otpSupervisor | otpProcess | restarting,
+  behaviourClass   => beamtalk_object() | nil,  % the Beamtalk class object, nil for foreign
+  childCount       => non_neg_integer(),  % live children (supervisors only)
+  strategy         => atom() | nil,       % #oneForOne … ; Beamtalk supervisors only
+  restartIntensity => #{maxRestarts, window} | nil,  % configured budget; supervisors only
+  truncated        => boolean(),          % true when children exceeded the cap
+  parent_pid       => pid() | nil         % adjacency for tree reconstruction (BT-2429)
 }
 ```
 
 ## Scope (ADR 0092 §6)
 
-Phase 1 implements the `default` scope only: it roots the walk at the
-workspace application tree (the OTP application root supervisor plus any
-supervisors attached via `Workspace startSupervisor:`) and filters runtime
-plumbing via the centralised infra deny-list (`infra_deny_list/0`). Foreign
-classification, the `system` scope, the dynamic-supervisor child cap, `from:`,
-and the lazy guarded `status` fetch land in Phase 2 (BT-2428).
+The `default` scope roots the walk at the workspace application tree (the OTP
+application root supervisor, supervisors attached via `Workspace
+startSupervisor:`, and standalone Beamtalk supervisors started via `supervise`)
+and filters runtime plumbing via the centralised infra deny-list
+(`infra_deny_list/0`). The `system` scope additionally roots at the runtime and
+workspace top supervisors and applies no deny-list, so it spans every process
+kind including runtime internals — a privileged view (ADR 0091).
+
+## Foreign processes, cap, `from:`, lazy status (ADR 0092 §1, §3, §5)
+
+Non-Beamtalk pids are first-class nodes: an OTP supervisor (recognised by its
+`'$initial_call'`) is `#otpSupervisor`, anything else `#otpProcess`, both with
+`behaviourClass => nil`. A supervisor with more live children than the cap is
+not materialised child-by-child — it reports `childCount` + `truncated => true`.
+`from/1,2` roots a walk at a user-supplied `Supervisor` handle or raw `Pid`,
+returning a structured error for a dead root. `status/1` is the lazy,
+timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 
 ## References
 
@@ -59,7 +73,14 @@ and the lazy guarded `status` fetch land in Phase 2 (BT-2428).
 
 -export([
     default_snapshot/0,
+    default_snapshot/1,
+    system_snapshot/0,
+    system_snapshot/1,
     snapshot_from_pids/2,
+    snapshot_from_pids/3,
+    from/1,
+    from/2,
+    status/1,
     infra_deny_list/0,
     is_infra/1
 ]).
@@ -67,13 +88,28 @@ and the lazy guarded `status` fetch land in Phase 2 (BT-2428).
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
-%% Bounded timeout (ms) for the guarded `which_children` call. The standard
-%% `supervisor:which_children/1` blocks with `infinity`; the snapshot must never
-%% wedge on a busy or stuck supervisor, so the walk uses a bounded call and
-%% treats a timeout as "no children" (best-effort, ADR 0092 §4).
+%% Bounded timeout (ms) for the guarded `which_children` / `count_children`
+%% calls. The standard `supervisor:*` calls block with `infinity`; the snapshot
+%% must never wedge on a busy or stuck supervisor, so the walk uses bounded calls
+%% and treats a timeout as "no children" (best-effort, ADR 0092 §4).
 -define(WHICH_CHILDREN_TIMEOUT, 5000).
 
-%% A scope selector. Phase 1 implements `default`; `system` lands in BT-2428.
+%% Bounded timeout (ms) for the lazy `sys:get_status/1` fetch. A busy, wedged, or
+%% non-`sys`-compliant process must yield `nil`, never block the caller
+%% (ADR 0092 §5).
+-define(STATUS_TIMEOUT, 2000).
+
+%% Per-supervisor child-expansion cap (ADR 0092 §Constraints 1). A supervisor
+%% with more than this many live children — typically a `simple_one_for_one`
+%% `DynamicSupervisor` (connection pool, per-request worker farm) — is NOT
+%% materialised child-by-child (which would copy the whole child list out of the
+%% supervisor and `process_info` every pid, a real performance cliff). Instead
+%% the node reports `childCount` (from the cheap `count_children`) plus a
+%% `truncated => true` marker. Full expansion is opt-in via a higher `Limit`.
+-define(DEFAULT_CHILD_LIMIT, 200).
+
+%% A scope selector: `default` filters runtime plumbing via the infra deny-list;
+%% `system` shows everything, including runtime infrastructure (ADR 0092 §6).
 -type scope() :: default | system.
 %% A `SupervisionNode` value record (tagged map). The exact `'$beamtalk_class'`
 %% field lets the Beamtalk type checker infer FFI results as `SupervisionNode`
@@ -86,6 +122,9 @@ and the lazy guarded `status` fetch land in Phase 2 (BT-2428).
     kind := atom(),
     behaviourClass := beamtalk_object() | nil,
     childCount := non_neg_integer(),
+    strategy := atom() | nil,
+    restartIntensity := #{maxRestarts := term(), window := term()} | nil,
+    truncated := boolean(),
     parent_pid := pid() | nil
 }.
 
@@ -110,25 +149,129 @@ partial subtree rather than raising.
 """.
 -spec default_snapshot() -> [node_map()].
 default_snapshot() ->
-    snapshot_from_pids(default_root_pids(), default).
+    default_snapshot(?DEFAULT_CHILD_LIMIT).
 
 -doc """
-Walk the given root pids under `Scope`, returning the flat node list.
+Return the flat `default`-scope snapshot with an explicit per-supervisor child
+cap (`Limit`). See `default_snapshot/0`.
+""".
+-spec default_snapshot(non_neg_integer()) -> [node_map()].
+default_snapshot(Limit) ->
+    snapshot_from_pids(default_root_pids(), default, Limit).
 
-The shared snapshot engine behind `default_snapshot/0`; also the seam reused by
-`from:` (BT-2428) and by tests that need to root the walk at a specific
-supervisor. Each root is classified and walked recursively via
-`supervisor:which_children/1`. Under the `default` scope, nodes whose
-registered name is in the infra deny-list are excluded along with their
-subtree; under `system` nothing is filtered.
+-doc """
+Return the flat `system`-scope supervision snapshot — everything, including
+runtime infrastructure (ADR 0092 §6).
 
-Cycles and shared children are visited once (pids are de-duplicated).
+Roots at the runtime top supervisor, the workspace supervisor, the application
+root, and every registered supervisor, applying no deny-list. This is the
+privileged view (ADR 0091): it exposes the whole-node process map (runtime
+internals, foreign processes). `default`'s node set is a subset of `system`'s.
+""".
+-spec system_snapshot() -> [node_map()].
+system_snapshot() ->
+    system_snapshot(?DEFAULT_CHILD_LIMIT).
+
+-doc """
+Return the flat `system`-scope snapshot with an explicit per-supervisor child
+cap (`Limit`). See `system_snapshot/0`.
+""".
+-spec system_snapshot(non_neg_integer()) -> [node_map()].
+system_snapshot(Limit) ->
+    snapshot_from_pids(system_root_pids(), system, Limit).
+
+-doc """
+Root a snapshot at a user-supplied `Root` — a Beamtalk `Supervisor` handle
+(`{beamtalk_supervisor, _, _, Pid}`, pid in tuple position 4) or a raw `Pid`
+(ADR 0092 §1).
+
+Returns `{ok, [node_map()]}` rooted at `Root` (walked with `system` semantics —
+no deny-list, since the root is explicit). A `Root` that is the right type but a
+dead process yields `{error, #beamtalk_error{kind = stale_handle}}`; a wrong-type
+`Root` (defensive runtime fallback for untyped/FFI input — the type checker
+rejects it statically) yields `{error, #beamtalk_error{kind = type_error}}`. A
+pid that is simply not a supervisor (a plain worker, or one that errors on
+`which_children`) is **not** an error — it returns `{ok, [SingleNode]}`.
+""".
+-spec from(term()) -> {ok, [node_map()]} | {error, #beamtalk_error{}}.
+from(Root) ->
+    from(Root, ?DEFAULT_CHILD_LIMIT).
+
+-doc """
+Root a snapshot at `Root` with an explicit per-supervisor child cap (`Limit`).
+The opt-in full expansion of a large dynamic supervisor: `from(aSup, N)` with a
+high `N`. See `from/1`.
+""".
+-spec from(term(), non_neg_integer()) -> {ok, [node_map()]} | {error, #beamtalk_error{}}.
+from(Root, Limit) ->
+    case root_pid(Root) of
+        {ok, Pid} ->
+            case erlang:is_process_alive(Pid) of
+                true ->
+                    {ok, snapshot_from_pids([Pid], system, Limit)};
+                false ->
+                    {error, from_error(stale_handle, <<"the root process is not alive">>)}
+            end;
+        error ->
+            {error,
+                from_error(
+                    type_error,
+                    <<"from: expects a Supervisor handle or a Pid">>
+                )}
+    end.
+
+-doc """
+Lazily fetch the OTP status report for a node's pid (ADR 0092 §5).
+
+Issues a timeout-guarded `sys:get_status/1` *at call time* (never during
+snapshotting). Returns a `Dictionary` (`#{module, sysState}`) for an alive,
+`sys`-compliant process; returns `nil` — logged at debug, never raised — for a
+process that is dead, timed out, or not `sys`-compliant.
+""".
+-spec status(term()) -> map() | nil.
+status(Pid) when is_pid(Pid) ->
+    try sys:get_status(Pid, ?STATUS_TIMEOUT) of
+        {status, _Pid, {module, Mod}, _Data} ->
+            #{module => Mod, sysState => running}
+    catch
+        Class:Reason ->
+            ?LOG_DEBUG("process navigation: status fetch failed", #{
+                pid => Pid,
+                error_class => Class,
+                reason => Reason,
+                domain => [beamtalk, runtime]
+            }),
+            nil
+    end;
+status(_) ->
+    nil.
+
+-doc """
+Walk the given root pids under `Scope`, returning the flat node list (default
+child cap). See `snapshot_from_pids/3`.
 """.
 -spec snapshot_from_pids([pid()], scope()) -> [node_map()].
 snapshot_from_pids(RootPids, Scope) ->
+    snapshot_from_pids(RootPids, Scope, ?DEFAULT_CHILD_LIMIT).
+
+-doc """
+Walk the given root pids under `Scope` with per-supervisor child cap `Limit`,
+returning the flat node list.
+
+The shared snapshot engine behind `default_snapshot/0` and `system_snapshot/0`;
+also the seam reused by `from/2` and by tests that root the walk at a specific
+supervisor. Each root is classified and walked recursively. Under `default`,
+nodes whose registered name is in the infra deny-list are excluded along with
+their subtree; under `system` nothing is filtered. A supervisor with more than
+`Limit` live children is reported truncated (its children are not materialised).
+
+Cycles and shared children are visited once (pids are de-duplicated).
+""".
+-spec snapshot_from_pids([pid()], scope(), non_neg_integer()) -> [node_map()].
+snapshot_from_pids(RootPids, Scope, Limit) ->
     {AccRev, _Visited} = lists:foldl(
         fun(Pid, {Acc, Visited}) ->
-            walk(Pid, nil, Scope, Acc, Visited)
+            walk(Pid, nil, Scope, Limit, Acc, Visited)
         end,
         {[], sets:new([{version, 2}])},
         RootPids
@@ -242,6 +385,51 @@ registered_beamtalk_supervisor_pids() ->
         erlang:registered()
     ).
 
+-doc """
+The `system`-scope root pids: the runtime and workspace top supervisors, the
+application root, and every registered supervisor (foreign or Beamtalk).
+
+The infra top supervisors are walked first so their whole subtrees (runtime
+internals) are captured; registered standalone supervisors then add anything not
+already reached. No deny-list is applied at root selection — filtering is a
+`default`-only concern handled during the walk.
+""".
+-spec system_root_pids() -> [pid()].
+system_root_pids() ->
+    NamedTops = [
+        Pid
+     || Name <- [beamtalk_runtime_sup, beamtalk_workspace_sup],
+        is_pid(Pid = erlang:whereis(Name))
+    ],
+    RootSup =
+        case beamtalk_supervisor:get_root() of
+            Tuple when is_tuple(Tuple), is_pid(element(4, Tuple)) ->
+                [element(4, Tuple)];
+            _ ->
+                []
+        end,
+    NamedTops ++ RootSup ++ registered_supervisor_pids().
+
+%% Pids of all registered supervisors (foreign or Beamtalk) — used as `system`
+%% roots so standalone supervisors not under a tracked top supervisor are still
+%% reached. The visited-set dedups any already captured under a top supervisor.
+-spec registered_supervisor_pids() -> [pid()].
+registered_supervisor_pids() ->
+    lists:filtermap(
+        fun(Name) ->
+            case erlang:whereis(Name) of
+                Pid when is_pid(Pid) ->
+                    case looks_like_supervisor(Pid) of
+                        true -> {true, Pid};
+                        false -> false
+                    end;
+                _ ->
+                    false
+            end
+        end,
+        erlang:registered()
+    ).
+
 -spec workspace_user_supervisor_pids() -> [pid()].
 workspace_user_supervisor_pids() ->
     case erlang:whereis(beamtalk_workspace_sup) of
@@ -275,69 +463,104 @@ safe_children_pids(SupRef, Filter) ->
 %%% The walk
 %%% ============================================================================
 
--spec walk(pid(), pid() | nil, scope(), [node_map()], sets:set(pid())) ->
+-spec walk(pid(), pid() | nil, scope(), non_neg_integer(), [node_map()], sets:set(pid())) ->
     {[node_map()], sets:set(pid())}.
-walk(Pid, ParentPid, Scope, Acc, Visited) when is_pid(Pid) ->
-    case sets:is_element(Pid, Visited) of
+walk(Pid, ParentPid, Scope, Limit, Acc, Visited) when is_pid(Pid) ->
+    case skip_pid(Pid, Scope, Visited) of
         true ->
             {Acc, Visited};
         false ->
-            case Scope =:= default andalso is_infra(Pid) of
-                true ->
-                    %% Deny-listed plumbing: skip this node and its whole subtree.
-                    {Acc, Visited};
-                false ->
-                    Visited1 = sets:add_element(Pid, Visited),
-                    {Kind, BClass} = classify(Pid, undefined, undefined),
-                    Children = safe_which_children(Pid),
-                    Node = build_node(Pid, ParentPid, Kind, BClass, child_count(Children)),
-                    walk_children(Children, Pid, Scope, [Node | Acc], Visited1)
-            end
+            Visited1 = sets:add_element(Pid, Visited),
+            {Kind, BClass} = classify(Pid, undefined, undefined),
+            emit_node(Pid, ParentPid, Kind, BClass, Scope, Limit, Acc, Visited1)
     end.
 
--spec walk_children([tuple()], pid(), scope(), [node_map()], sets:set(pid())) ->
+%% A pid is skipped when already visited, or — under `default` — when it is
+%% deny-listed infra (which prunes its whole subtree).
+-spec skip_pid(pid(), scope(), sets:set(pid())) -> boolean().
+skip_pid(Pid, Scope, Visited) ->
+    sets:is_element(Pid, Visited) orelse (Scope =:= default andalso is_infra(Pid)).
+
+-spec walk_children([tuple()], pid(), scope(), non_neg_integer(), [node_map()], sets:set(pid())) ->
     {[node_map()], sets:set(pid())}.
-walk_children(Children, ParentPid, Scope, Acc, Visited) ->
+walk_children(Children, ParentPid, Scope, Limit, Acc, Visited) ->
     lists:foldl(
         fun(ChildTuple, {A, V}) ->
-            walk_child(ChildTuple, ParentPid, Scope, A, V)
+            walk_child(ChildTuple, ParentPid, Scope, Limit, A, V)
         end,
         {Acc, Visited},
         Children
     ).
 
--spec walk_child(tuple(), pid(), scope(), [node_map()], sets:set(pid())) ->
+-spec walk_child(tuple(), pid(), scope(), non_neg_integer(), [node_map()], sets:set(pid())) ->
     {[node_map()], sets:set(pid())}.
 %% A child OTP is currently restarting (ADR 0092 §3): the pid slot is the literal
 %% atom `restarting`, NOT a pid. Produce a first-class `#restarting` node with
 %% `pid => nil` — never call process_info on the atom.
-walk_child({Id, restarting, _Type, _Mods}, ParentPid, _Scope, Acc, Visited) ->
+walk_child({Id, restarting, _Type, _Mods}, ParentPid, _Scope, _Limit, Acc, Visited) ->
     Node = build_restarting_node(Id, ParentPid),
     {[Node | Acc], Visited};
 %% A child whose spec exists but is not currently running (pid `undefined`):
 %% there is no process to introspect, so it is omitted from the snapshot.
-walk_child({_Id, undefined, _Type, _Mods}, _ParentPid, _Scope, Acc, Visited) ->
+walk_child({_Id, undefined, _Type, _Mods}, _ParentPid, _Scope, _Limit, Acc, Visited) ->
     {Acc, Visited};
-walk_child({Id, ChildPid, Type, _Mods}, ParentPid, Scope, Acc, Visited) when is_pid(ChildPid) ->
-    case sets:is_element(ChildPid, Visited) of
+walk_child({Id, ChildPid, Type, _Mods}, ParentPid, Scope, Limit, Acc, Visited) when
+    is_pid(ChildPid)
+->
+    case skip_pid(ChildPid, Scope, Visited) of
         true ->
             {Acc, Visited};
         false ->
-            case Scope =:= default andalso is_infra(ChildPid) of
-                true ->
-                    {Acc, Visited};
-                false ->
-                    Visited1 = sets:add_element(ChildPid, Visited),
-                    {Kind, BClass} = classify(ChildPid, Id, Type),
-                    GrandChildren = safe_which_children(ChildPid),
-                    Node = build_node(
-                        ChildPid, ParentPid, Kind, BClass, child_count(GrandChildren)
-                    ),
-                    walk_children(GrandChildren, ChildPid, Scope, [Node | Acc], Visited1)
-            end
+            Visited1 = sets:add_element(ChildPid, Visited),
+            {Kind, BClass} = classify(ChildPid, Id, Type),
+            emit_node(ChildPid, ParentPid, Kind, BClass, Scope, Limit, Acc, Visited1)
     end;
-walk_child(_Other, _ParentPid, _Scope, Acc, Visited) ->
+walk_child(_Other, _ParentPid, _Scope, _Limit, Acc, Visited) ->
     {Acc, Visited}.
+
+%% Emit a node for `Pid` and recurse into its children when it is a supervisor.
+%% Non-supervisor leaves emit a single node. A supervisor reports `childCount`
+%% from the cheap `count_children` and, for a Beamtalk supervisor, its `strategy`
+%% and `restartIntensity`; if its live child count exceeds `Limit` it is reported
+%% truncated (children are NOT materialised — ADR 0092 §Constraints 1), otherwise
+%% its children are walked.
+-spec emit_node(
+    pid(),
+    pid() | nil,
+    atom(),
+    beamtalk_object() | nil,
+    scope(),
+    non_neg_integer(),
+    [node_map()],
+    sets:set(pid())
+) ->
+    {[node_map()], sets:set(pid())}.
+emit_node(Pid, ParentPid, Kind, BClass, Scope, Limit, Acc, Visited) ->
+    case is_supervisor_kind(Kind) of
+        false ->
+            {[leaf_node(Pid, ParentPid, Kind, BClass) | Acc], Visited};
+        true ->
+            Active = safe_count_children(Pid),
+            {Strategy, RestartIntensity} = supervisor_config(Kind, BClass),
+            case Active > Limit of
+                true ->
+                    Node = supervisor_node(
+                        Pid, ParentPid, Kind, BClass, Active, Strategy, RestartIntensity, true
+                    ),
+                    {[Node | Acc], Visited};
+                false ->
+                    Children = safe_which_children(Pid),
+                    Node = supervisor_node(
+                        Pid, ParentPid, Kind, BClass, Active, Strategy, RestartIntensity, false
+                    ),
+                    walk_children(Children, Pid, Scope, Limit, [Node | Acc], Visited)
+            end
+    end.
+
+-spec is_supervisor_kind(atom()) -> boolean().
+is_supervisor_kind(beamtalkSupervisor) -> true;
+is_supervisor_kind(otpSupervisor) -> true;
+is_supervisor_kind(_) -> false.
 
 %%% ============================================================================
 %%% Classification (ADR 0092 §7)
@@ -436,9 +659,37 @@ looks_like_supervisor(Pid) when is_pid(Pid) ->
 %%% Node construction
 %%% ============================================================================
 
--spec build_node(pid(), pid() | nil, atom(), beamtalk_object() | nil, non_neg_integer()) ->
+%% A non-supervisor node (worker / foreign process): no children, no strategy.
+-spec leaf_node(pid(), pid() | nil, atom(), beamtalk_object() | nil) -> node_map().
+leaf_node(Pid, ParentPid, Kind, BClass) ->
+    #{
+        '$beamtalk_class' => 'SupervisionNode',
+        pid => Pid,
+        registeredName => registered_name(Pid),
+        kind => Kind,
+        behaviourClass => BClass,
+        childCount => 0,
+        strategy => nil,
+        restartIntensity => nil,
+        truncated => false,
+        parent_pid => ParentPid
+    }.
+
+%% A supervisor node, carrying its live child count, configured strategy /
+%% restart budget (Beamtalk supervisors only; `nil` for foreign), and the
+%% truncation marker.
+-spec supervisor_node(
+    pid(),
+    pid() | nil,
+    atom(),
+    beamtalk_object() | nil,
+    non_neg_integer(),
+    atom() | nil,
+    map() | nil,
+    boolean()
+) ->
     node_map().
-build_node(Pid, ParentPid, Kind, BClass, ChildCount) ->
+supervisor_node(Pid, ParentPid, Kind, BClass, ChildCount, Strategy, RestartIntensity, Truncated) ->
     #{
         '$beamtalk_class' => 'SupervisionNode',
         pid => Pid,
@@ -446,6 +697,9 @@ build_node(Pid, ParentPid, Kind, BClass, ChildCount) ->
         kind => Kind,
         behaviourClass => BClass,
         childCount => ChildCount,
+        strategy => Strategy,
+        restartIntensity => RestartIntensity,
+        truncated => Truncated,
         parent_pid => ParentPid
     }.
 
@@ -465,17 +719,97 @@ build_restarting_node(Id, ParentPid) ->
         kind => restarting,
         behaviourClass => BClass,
         childCount => 0,
+        strategy => nil,
+        restartIntensity => nil,
+        truncated => false,
         parent_pid => ParentPid
     }.
+
+%% Resolve a supervisor's configured `{Strategy, RestartIntensity}` from its
+%% Beamtalk class (public, stable: ADR 0092 §3). A `DynamicSupervisor` is always
+%% `simpleOneForOne`; a static `Supervisor` reports its class-side `strategy`.
+%% `restartIntensity` is the configured `#{maxRestarts, window}` budget — never
+%% a per-child restart *count* (deliberately out of scope, ADR §3). Foreign
+%% supervisors (no Beamtalk class) report `{nil, nil}`.
+-spec supervisor_config(atom(), beamtalk_object() | nil) -> {atom() | nil, map() | nil}.
+supervisor_config(beamtalkSupervisor, BClass) when is_tuple(BClass) ->
+    ClassPid = element(4, BClass),
+    {supervisor_strategy(ClassPid), supervisor_restart_intensity(ClassPid)};
+supervisor_config(_Kind, _BClass) ->
+    {nil, nil}.
+
+-spec supervisor_strategy(pid()) -> atom() | nil.
+supervisor_strategy(ClassPid) ->
+    try
+        ClassName = beamtalk_object_class:class_name(ClassPid),
+        case beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor') of
+            true ->
+                simpleOneForOne;
+            false ->
+                case beamtalk_object_class:class_send(ClassPid, strategy, []) of
+                    S when is_atom(S) -> S;
+                    _ -> nil
+                end
+        end
+    catch
+        _:_ -> nil
+    end.
+
+-spec supervisor_restart_intensity(pid()) -> map() | nil.
+supervisor_restart_intensity(ClassPid) ->
+    try
+        Max = beamtalk_object_class:class_send(ClassPid, maxRestarts, []),
+        Window = beamtalk_object_class:class_send(ClassPid, restartWindow, []),
+        #{maxRestarts => Max, window => Window}
+    catch
+        _:_ -> nil
+    end.
+
+%%% ============================================================================
+%%% Roots / `from:` helpers
+%%% ============================================================================
+
+%% Extract the root pid from a `from:` argument — a raw pid or a Beamtalk
+%% `Supervisor` handle (`{beamtalk_supervisor, _, _, Pid}`). Anything else is a
+%% type error (the type checker rejects it statically; this is the runtime
+%% defence for untyped/FFI input).
+-spec root_pid(term()) -> {ok, pid()} | error.
+root_pid(Pid) when is_pid(Pid) ->
+    {ok, Pid};
+root_pid({beamtalk_supervisor, _Class, _Module, Pid}) when is_pid(Pid) ->
+    {ok, Pid};
+root_pid(_) ->
+    error.
+
+%% Build the structured `#beamtalk_error{}` returned by `from/1,2` for a dead
+%% root (`stale_handle`) or a wrong-type root (`type_error`).
+-spec from_error(atom(), binary()) -> #beamtalk_error{}.
+from_error(Kind, Hint) ->
+    beamtalk_error:new(Kind, 'ProcessNavigation', 'from:', Hint).
 
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
 
-%% Live child count from a `which_children` result (children with a real pid).
--spec child_count([tuple()]) -> non_neg_integer().
-child_count(Children) ->
-    length([P || {_Id, P, _Type, _Mods} <- Children, is_pid(P)]).
+%% Guarded `count_children`: the cheap live-child count (does not copy the child
+%% list out of the supervisor). Returns the `active` count, or `0` on any
+%% failure. Probes the process dictionary first so a non-supervisor is never
+%% sent the call.
+-spec safe_count_children(pid()) -> non_neg_integer().
+safe_count_children(Pid) ->
+    case looks_like_supervisor(Pid) of
+        false ->
+            0;
+        true ->
+            try gen_server:call(Pid, count_children, ?WHICH_CHILDREN_TIMEOUT) of
+                Counts when is_list(Counts) ->
+                    proplists:get_value(active, Counts, 0);
+                _ ->
+                    0
+            catch
+                _:_ -> 0
+            end
+    end.
 
 %% Guarded `which_children`: returns the child list for a supervisor, or `[]`
 %% for a worker pid, a dead/wedged supervisor, or any other failure
