@@ -681,14 +681,14 @@ init([]) ->
     RowsBefore = ets:info(?SUBS_TABLE, size),
     Monitors = rearm_monitors(),
     RowsAfter = ets:info(?SUBS_TABLE, size),
-    Pruned = RowsBefore - RowsAfter,
+    PrunedSubscriptions = RowsBefore - RowsAfter,
 
     ?LOG_INFO(#{
         event => announcements_started,
         tables => [?SUBS_TABLE, ?BY_CLASS_TABLE],
         pg_scope => ?PG_SCOPE,
         rearmed_subscribers => maps:size(Monitors),
-        pruned_dead_subscribers => Pruned
+        pruned_dead_subscriptions => PrunedSubscriptions
     }),
     {ok, #state{monitors = Monitors}}.
 
