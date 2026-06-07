@@ -233,14 +233,24 @@ node kind            // => one of #beamtalkSupervisor #beamtalkActor
 node behaviourClass  // => Class | nil   (the Beamtalk class, nil for foreign)
 node strategy        // => Symbol | nil  (#oneForOne … ; supervisors only)
 node childCount      // => Integer       (live children; supervisors only)
-node restartIntensity // => Dictionary | nil  (configured #{maxRestarts, window};
-                     //   supervisors only — see note on restart *counts* below)
-node children        // => List(SupervisionNode)   (snapshot children)
+node maxRestarts     // => Integer | nil (configured budget; supervisors only)
+node restartWindow   // => Integer | nil (configured window, seconds; supervisors only)
+node restartIntensity // => Dictionary | nil  (convenience: #{maxRestarts, restartWindow})
+node childNodes      // => List(SupervisionNode)   (snapshot children)
 node parent          // => SupervisionNode | nil
 node isSupervisor    // => Boolean
 node isBeamtalk      // => Boolean        (kind is one of the #beamtalk* kinds)
 node status          // => Dictionary | nil   (LAZY — see §5)
+node asSupervisor    // => Supervisor | nil    (live handle; see §3a)
 ```
+
+The accessor names and shapes are **deliberately identical to the live
+`Supervisor`'s** so a supervisor reads the same whether you hold it or
+discovered it in a snapshot (see §3a). `childNodes` is the one structural
+exception — it returns child *records* (snapshot navigation), as distinct from
+the live `Supervisor children` which returns child *ids* and the class-side
+`Supervisor class children` which returns child *classes*. Naming it
+`childNodes` keeps `children` from meaning three different things.
 
 `kind` is the load-bearing field: it tells a renderer whether to draw a
 Beamtalk class badge (`#beamtalkActor`/`#beamtalkSupervisor`, `behaviourClass`
@@ -286,6 +296,51 @@ bolted onto this snapshot. The `SupervisionNode` record leaves room to add
 `restartCount` then without a breaking change. The acceptance criterion
 "restart history" is answered as: *budget now; history is a separate,
 deliberately-deferred feature with a documented reason.*
+
+### 3a. API consistency with the live `Supervisor`
+
+A `SupervisionNode` and a live `Supervisor` (the object you get from
+`MySup supervise unwrap`) describe the *same domain thing* — a supervisor, its
+strategy, its restart budget, its children — so their **read** surfaces are
+kept name- and shape-identical. The split is by *role*, not by vocabulary:
+
+| Concept | live `Supervisor` (control + self-inspect) | `SupervisionNode` (snapshot fact) |
+|---|---|---|
+| strategy | `strategy` (class-side config) | `strategy` |
+| restart budget | `maxRestarts`, `restartWindow` | `maxRestarts`, `restartWindow` (+ `restartIntensity` dict) |
+| running child count | `childCount` | `childCount` |
+| is it a supervisor | `isSupervisor` | `isSupervisor` |
+| children | `children` → child **ids** (`List(Symbol)`) | `childNodes` → child **records** |
+
+Two alignment changes to the **shipped** live `Supervisor`
+(`stdlib/src/Supervisor.bt`) fall out of this and are part of this ADR's scope:
+
+- **Add `childCount` as the canonical name** for the running-children count;
+  keep the existing `count` (`Supervisor.bt:135`) as a thin deprecated alias so
+  current call sites and tests keep working. (`count` reads as "my own count"
+  on a non-collection; `childCount` is unambiguous and matches the node.)
+- No change to `maxRestarts`/`restartWindow`/`strategy`/`children` — the node
+  was aligned to *them*, not the reverse.
+
+**Read vs mutate — the rule that makes the split safe.** A snapshot is a frozen
+*past* truth and is **read-only**: there are no `terminate:` / `stop` /
+`supervise` methods on `SupervisionNode`. To *act* on something you discovered
+by walking, cross back to the live object:
+
+```beamtalk
+sup := node asSupervisor                    // live handle, or nil for foreign/dead
+sup ifNotNil: [:s | s terminate: Worker]    // control goes through the live object
+
+// foreign OTP nodes have no Beamtalk Supervisor — re-root the navigator instead:
+deeper := (ProcessNavigation from: node pid) unwrap tree
+```
+
+`node asSupervisor` returns the registered live `Supervisor` for a
+`#beamtalkSupervisor` node (looked up by `registeredName` via
+`Supervisor current`), and `nil` for foreign processes, dead pids, or
+`#restarting` nodes. This is the only node→live bridge; all mutation stays on
+the live object (ADR 0080 family), all discovery stays on the navigator, all
+frozen facts stay on the node.
 
 ### 4. Snapshot semantics
 
