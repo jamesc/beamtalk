@@ -1,0 +1,181 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2427: Tests for the SupervisionNode value class (ADR 0092 Phase 1).
+//
+// SupervisionNode records are minted by the runtime shim
+// (beamtalk_process_navigation) and surfaced via `Workspace processes`. The
+// end-to-end `Workspace processes` path needs a live workspace tree and is
+// covered by the REPL e2e suite (BT-2433); here we exercise the value class
+// directly via its auto-generated keyword constructor.
+
+TestCase subclass: SupervisionNodeTest
+
+  // === Accessors return the stored field values ===
+  testKindAccessor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: #db
+      kind: #beamtalkSupervisor
+      behaviourClass: nil
+      childCount: 3
+    self assert: node kind equals: #beamtalkSupervisor
+
+  testRegisteredNameAccessor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: #db
+      kind: #beamtalkSupervisor
+      behaviourClass: nil
+      childCount: 3
+    self assert: node registeredName equals: #db
+
+  testChildCountAccessor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: #db
+      kind: #beamtalkSupervisor
+      behaviourClass: nil
+      childCount: 3
+    self assert: node childCount equals: 3
+
+  testBehaviourClassAccessor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkActor
+      behaviourClass: Counter
+      childCount: 0
+    self assert: node behaviourClass equals: Counter
+
+  testPidAccessorNilForRestarting =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #restarting
+      behaviourClass: nil
+      childCount: 0
+    self assert: node pid equals: nil
+
+  // === Accessor types ===
+  testKindIsSymbol =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #otpProcess
+      behaviourClass: nil
+      childCount: 0
+    self assert: (node kind isKindOf: Symbol) equals: true
+
+  testChildCountIsInteger =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #otpProcess
+      behaviourClass: nil
+      childCount: 0
+    self assert: (node childCount isKindOf: Integer) equals: true
+
+  // === isSupervisor: true for both supervisor kinds ===
+  testIsSupervisorBeamtalkSupervisor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkSupervisor
+      behaviourClass: nil
+      childCount: 0
+    self assert: node isSupervisor equals: true
+
+  testIsSupervisorOtpSupervisor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #otpSupervisor
+      behaviourClass: nil
+      childCount: 0
+    self assert: node isSupervisor equals: true
+
+  testIsSupervisorFalseForActor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkActor
+      behaviourClass: nil
+      childCount: 0
+    self assert: node isSupervisor equals: false
+
+  // === isBeamtalk: true only for the #beamtalk* kinds ===
+  testIsBeamtalkActor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkActor
+      behaviourClass: nil
+      childCount: 0
+    self assert: node isBeamtalk equals: true
+
+  testIsBeamtalkSupervisor =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkSupervisor
+      behaviourClass: nil
+      childCount: 0
+    self assert: node isBeamtalk equals: true
+
+  testIsBeamtalkFalseForForeign =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #otpProcess
+      behaviourClass: nil
+      childCount: 0
+    self assert: node isBeamtalk equals: false
+
+  testIsBeamtalkFalseForRestarting =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #restarting
+      behaviourClass: nil
+      childCount: 0
+    self assert: node isBeamtalk equals: false
+
+  // === printString shape ===
+  testPrintStringStartsWithTag =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkActor
+      behaviourClass: Counter
+      childCount: 0
+    self assert: (node printString startsWith: "#SupervisionNode<") equals: true
+
+  testPrintStringIncludesKindAndClass =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #beamtalkActor
+      behaviourClass: Counter
+      childCount: 0
+    str := node printString
+    self assert: (str includesSubstring: "#beamtalkActor") equals: true
+    self assert: (str includesSubstring: "Counter") equals: true
+
+  testPrintStringSupervisorShowsChildCount =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: #appSup
+      kind: #beamtalkSupervisor
+      behaviourClass: nil
+      childCount: 3
+    self assert: (node printString includesSubstring: "children: 3") equals: true
+
+  testPrintStringRestartingShowsRestarting =>
+    node := SupervisionNode
+      pid: nil
+      registeredName: nil
+      kind: #restarting
+      behaviourClass: nil
+      childCount: 0
+    self assert: (node printString includesSubstring: "restarting") equals: true

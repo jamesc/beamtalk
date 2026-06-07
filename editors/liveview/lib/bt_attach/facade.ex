@@ -43,6 +43,17 @@ defmodule BtAttach.Facade do
     inspect: :read,
     bindings: :read,
     actors: :read,
+    # ADR 0092: the `default`-scope supervision-tree snapshot
+    # (`Workspace processes`) is a Read op, scoped exactly like `actors` — it
+    # adds supervision structure but no new power, safe for the Observer role.
+    processes: :read,
+    # ADR 0092: the `system`-scope snapshot (`ProcessNavigation system`) is NOT
+    # a plain Observer read. It exposes the whole-node process map (runtime
+    # internals, other sessions' supervisors, foreign processes) and is a
+    # lateral-movement aid in the compromised-Phoenix scenario ADR 0091 flags,
+    # so it is gated to a privileged (`:execute`-holding, i.e. Owner) role: it
+    # grants no reconnaissance a code-running caller couldn't already perform.
+    processes_system: :execute,
     sessions: :read,
     complete: :read,
     changes: :read,
@@ -110,6 +121,16 @@ defmodule BtAttach.Facade do
   defp invoke(:inspect, %{term: term}, _ctx), do: client().inspect_value(term)
   defp invoke(:bindings, %{session_pid: pid}, _ctx), do: client().list_bindings(pid)
   defp invoke(:changes, _params, _ctx), do: client().change_history()
+
+  # ADR 0092: the supervision-tree snapshot. `processes` is the default-scope
+  # Read view (runtime plumbing filtered); `processes_system` is the privileged
+  # whole-node view, gated to Owners by the :execute capability above.
+  defp invoke(:processes, %{session_pid: pid}, _ctx),
+    do: client().supervision_tree(pid, "default")
+
+  defp invoke(:processes_system, %{session_pid: pid}, _ctx),
+    do: client().supervision_tree(pid, "system")
+
   defp invoke(:flush, _params, _ctx), do: client().flush()
 
   defp invoke(:save, %{class: class, selector: selector, source: source}, _ctx),

@@ -20,8 +20,10 @@ defmodule BtAttach.RbacTest do
   }
 
   # Execute + admin ops Observer must never reach; read ops Observer may.
-  @execute_admin_ops ~w(eval load_source save flush reload kill rotate_cookie)a
-  @read_ops ~w(info inspect bindings actors sessions complete subscribe_transcript)a
+  # `processes` (default-scope supervision tree, ADR 0092) is a read op like
+  # `actors`; `processes_system` is the privileged whole-node view (execute).
+  @execute_admin_ops ~w(eval load_source save flush reload kill rotate_cookie processes_system)a
+  @read_ops ~w(info inspect bindings actors processes sessions complete subscribe_transcript)a
 
   describe "role_for/2 — claim → role (fail closed)" do
     test "owner group → :owner (owner takes precedence)" do
@@ -68,6 +70,17 @@ defmodule BtAttach.RbacTest do
 
     test "an unknown op is never authorized, even for Owner" do
       assert Rbac.authorize(:owner, :os_cmd) == {:error, :unauthorized}
+    end
+
+    # ADR 0092 §6: the supervision-tree introspection asymmetry.
+    test "Observer may reach default `processes` but is denied `system`" do
+      assert Rbac.authorize(:observer, :processes) == :ok
+      assert Rbac.authorize(:observer, :processes_system) == {:error, :unauthorized}
+    end
+
+    test "Owner may reach both `processes` and the privileged `system` view" do
+      assert Rbac.authorize(:owner, :processes) == :ok
+      assert Rbac.authorize(:owner, :processes_system) == :ok
     end
   end
 

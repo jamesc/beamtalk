@@ -1,0 +1,174 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SupervisionNode — an immutable snapshot record for one process in the live
+/// supervision tree (ADR 0092).
+///
+/// A `SupervisionNode` is a frozen, point-in-time view of a single process: its
+/// pid, registered name, kind, Beamtalk class (if any), and live child count.
+/// Nodes are minted by the runtime shim (`beamtalk_process_navigation`) when you
+/// take a snapshot via `Workspace processes`, and never mutate — to observe
+/// change, take a new snapshot.
+///
+/// The `kind` field is load-bearing: it tells a renderer whether to draw a
+/// Beamtalk class badge (`#beamtalkActor` / `#beamtalkSupervisor`, with
+/// `behaviourClass` populated) or a foreign-process badge (`#otpSupervisor` /
+/// `#otpProcess`, `behaviourClass` is `nil`). A child OTP is currently
+/// restarting carries `kind => #restarting` and `pid => nil` — the snapshot
+/// never crashes on a process caught mid-restart.
+///
+/// The richer accessors — `children`, `parent`, `strategy`, `restartIntensity`,
+/// and the lazy `status` — land with the tree object (BT-2429); this record is
+/// deliberately left extensible.
+///
+/// ## Examples
+/// ```beamtalk
+/// node := Workspace processes root
+/// node kind            // => #beamtalkActor
+/// node pid             // => a Pid
+/// node behaviourClass  // => Counter   (the Beamtalk class, or nil for foreign)
+/// node isSupervisor    // => false
+/// node isBeamtalk      // => true
+/// ```
+typed Value subclass: SupervisionNode
+  /// The process id, or `nil` for a child caught mid-restart (`#restarting`).
+  field: pid :: Pid | Nil = nil
+  /// The process's registered name, or `nil` if it is anonymous.
+  field: registeredName :: Symbol | Nil = nil
+  /// The node kind: one of `#beamtalkSupervisor`, `#beamtalkActor`,
+  /// `#otpSupervisor`, `#otpProcess`, or `#restarting`.
+  field: kind :: Symbol = #otpProcess
+  /// The Beamtalk class object backing this process, or `nil` for a foreign
+  /// (non-Beamtalk) process.
+  field: behaviourClass :: Class | Nil = nil
+  /// The number of live children (supervisors only; `0` for workers).
+  field: childCount :: Integer = 0
+
+  /// Whether this node is a supervisor (Beamtalk or foreign).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node isSupervisor   // => true
+  /// ```
+  isSupervisor -> Boolean =>
+    (self kind == #beamtalkSupervisor) or: [self kind == #otpSupervisor]
+
+  /// Whether this node is a Beamtalk process (actor or supervisor) — i.e. its
+  /// `kind` is one of the `#beamtalk*` kinds. Foreign OTP processes and
+  /// restarting children answer `false`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node isBeamtalk   // => true
+  /// ```
+  isBeamtalk -> Boolean =>
+    (self kind == #beamtalkActor) or: [self kind == #beamtalkSupervisor]
+
+  /// The snapshot children of this node (supervisors only; `#()` otherwise).
+  ///
+  /// Resolved from the shared sibling set captured at snapshot time, so it
+  /// reflects the frozen tree — re-snapshot to refresh. Returned children are
+  /// themselves navigable (`node children first parent`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node children   // => #(a SupervisionNode, ...)
+  /// ```
+  children -> List(SupervisionNode) =>
+    (Erlang beamtalk_process_navigation) childrenOf: self
+
+  /// The snapshot parent of this node, or `nil` for a root node or a node
+  /// caught mid-restart.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node parent   // => a SupervisionNode | nil
+  /// ```
+  parent -> SupervisionNode | Nil =>
+    (Erlang beamtalk_process_navigation) parentOf: self
+
+  /// The pid of this node's parent supervisor, or `nil` for a root node — the
+  /// O(1) adjacency key, without materialising the full parent node (`parent`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node parentPid   // => a Pid | nil
+  /// ```
+  parentPid -> Pid | Nil =>
+    (Erlang beamtalk_process_navigation) parentPidOf: self
+
+  /// The configured OTP restart strategy (`#oneForOne`, `#simpleOneForOne`, …)
+  /// for a Beamtalk supervisor node, or `nil` for actors and foreign processes.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node strategy   // => #oneForOne
+  /// ```
+  strategy -> Symbol | Nil =>
+    (Erlang beamtalk_process_navigation) strategyOf: self
+
+  /// The configured restart *budget* — `#{#maxRestarts => n, #window => secs}` —
+  /// for a Beamtalk supervisor node, or `nil` otherwise. This is the public,
+  /// stable configured intensity; a per-child restart *count* is deliberately
+  /// out of scope (ADR 0092 §3).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node restartIntensity   // => #{#maxRestarts => 10, #window => 60}
+  /// ```
+  restartIntensity -> Dictionary | Nil =>
+    (Erlang beamtalk_process_navigation) restartIntensityOf: self
+
+  /// Whether this supervisor's children were truncated by the snapshot child cap
+  /// (a large `simpleOneForOne` pool, ADR 0092 §Constraints 1). When `true`,
+  /// `children` is empty but `childCount` still reports the live total.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node truncated   // => false
+  /// ```
+  truncated -> Boolean => (Erlang beamtalk_process_navigation) truncatedOf: self
+
+  /// Lazily fetch this node's live OTP status (ADR 0092 §5).
+  ///
+  /// Issues a timeout-guarded `sys:get_status` against the node's pid *at call
+  /// time* (never at snapshot time). Returns a `Dictionary` for an alive,
+  /// `sys`-compliant process; returns `nil` — not an error — for a process that
+  /// has since died, timed out, or is not `sys`-compliant. This is the liveness
+  /// check: a snapshot is a *past* truth, `status` is the *now*.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node status   // => #{#module => ..., #sysState => #running} | nil
+  /// ```
+  status -> Dictionary | Nil =>
+    (Erlang beamtalk_process_navigation) status: self pid
+
+  /// Human-readable description, e.g. `#SupervisionNode<#beamtalkActor Counter
+  /// #Pid<0.132.0>>` or, for a supervisor, `#SupervisionNode<#beamtalkSupervisor
+  /// AppSup #Pid<0.200.0> children: 3>`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node printString   // => "#SupervisionNode<#beamtalkActor Counter #Pid<0.132.0>>"
+  /// ```
+  printString -> String =>
+    identifier := self behaviourClass isNil ifTrue: [
+      self registeredName isNil ifTrue: [
+        ""
+      ] ifFalse: [self registeredName asString]
+    ] ifFalse: [self behaviourClass name asString]
+    namePart := identifier isEmpty ifTrue: [""] ifFalse: [identifier ++ " "]
+    pidPart := self pid isNil ifTrue: [
+      "restarting"
+    ] ifFalse: [self pid printString]
+    childrenPart := self isSupervisor ifTrue: [
+      " children: " ++ self childCount asString
+    ] ifFalse: [""]
+    "#SupervisionNode<"
+      ++ self kind printString
+      ++ " "
+      ++ namePart
+      ++ pidPart
+      ++ childrenPart
+      ++ ">"
