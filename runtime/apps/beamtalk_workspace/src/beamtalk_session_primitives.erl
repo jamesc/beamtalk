@@ -391,7 +391,11 @@ view_size(View) ->
 -spec fetch_meta(pid()) -> map().
 fetch_meta(Pid) ->
     try beamtalk_repl_shell:get_session_meta(Pid, ?SESSION_ID_LOOKUP_TIMEOUT) of
-        {ok, _Id, Meta} -> Meta
+        {ok, _Id, Meta} when is_map(Meta) -> Meta;
+        %% Non-`{ok, _, _}` reply (e.g. `{error, unknown_request}` from an older
+        %% shell during hot-code overlap) — degrade to an empty map rather than
+        %% crash withId/1 with a try_clause.
+        _ -> #{}
     catch
         exit:_ -> #{}
     end.
@@ -430,7 +434,13 @@ make_session(Id, Pid, Meta) when is_map(Meta) ->
 -spec mint_live_session(tuple()) -> {true, session()} | false.
 mint_live_session({_ChildId, Pid, _Type, _Modules}) when is_pid(Pid) ->
     try beamtalk_repl_shell:get_session_meta(Pid, ?SESSION_ID_LOOKUP_TIMEOUT) of
-        {ok, Id, Meta} -> {true, make_session(Id, Pid, Meta)}
+        {ok, Id, Meta} when is_binary(Id), is_map(Meta) ->
+            {true, make_session(Id, Pid, Meta)};
+        %% Non-`{ok, _, _}` reply (e.g. `{error, unknown_request}` from an older
+        %% shell during hot-code overlap) — skip rather than crash the enumeration
+        %% with a try_clause.
+        _ ->
+            false
     catch
         %% Shell exited (noproc), or did not reply within the bounded timeout
         %% (wedged in another call) — skip rather than mint a dead PID or stall

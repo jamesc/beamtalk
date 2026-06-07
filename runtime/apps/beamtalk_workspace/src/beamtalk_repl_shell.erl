@@ -154,12 +154,16 @@ Used by `beamtalk_session_primitives` when minting `Session` values so the kind
 and other debug fields travel with the id without a second round-trip. Like
 `get_session_id/1` it is answered in any worker state. `get_session_meta/2`
 takes an explicit `Timeout` so enumeration can bound the per-shell wait.
+
+The `{error, unknown_request}` arm covers hot-code overlap: an older shell whose
+code predates this call falls through to the catch-all `handle_call/3` clause,
+so callers must degrade gracefully rather than assume `{ok, _, _}`.
 """.
--spec get_session_meta(pid()) -> {ok, binary(), map()}.
+-spec get_session_meta(pid()) -> {ok, binary(), map()} | {error, term()}.
 get_session_meta(SessionPid) ->
     gen_server:call(SessionPid, get_session_meta).
 
--spec get_session_meta(pid(), timeout()) -> {ok, binary(), map()}.
+-spec get_session_meta(pid(), timeout()) -> {ok, binary(), map()} | {error, term()}.
 get_session_meta(SessionPid, Timeout) ->
     gen_server:call(SessionPid, get_session_meta, Timeout).
 

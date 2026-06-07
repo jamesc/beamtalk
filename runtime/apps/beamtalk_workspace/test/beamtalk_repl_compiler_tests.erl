@@ -108,8 +108,9 @@ known_vars_includes_singletons_test() ->
 known_vars_singletons_match_config_test() ->
     KnownVars = beamtalk_repl_compiler:known_vars(#{}),
     ConfigNames = [atom_to_binary(N, utf8) || N <- beamtalk_workspace_config:binding_names()],
-    [?assert(lists:member(N, KnownVars)) || N <- ConfigNames],
-    ok.
+    %% Bidirectional parity: with no user bindings, known_vars/1 returns exactly
+    %% the (sorted, deduped) config singletons — extra names would also fail.
+    ?assertEqual(lists:usort(ConfigNames), KnownVars).
 
 %% User variable bindings (session locals + bind:as: globals) are included.
 known_vars_includes_user_bindings_test() ->
