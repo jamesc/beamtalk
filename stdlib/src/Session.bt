@@ -100,3 +100,36 @@ sealed typed Object subclass: Session
   /// Session current id                            // => "user-repl-abc-123"
   /// ```
   id -> String => (Erlang beamtalk_session_primitives) idOf: self
+
+  /// Originating client surface for this session: `"repl"`, `"mcp"`, `"lsp"`,
+  /// `"liveview"`, `"ide"`, `"attach"`, or `"unknown"`. Immutable for the
+  /// session's lifetime. Read-only and **not** liveness-checked — a dead
+  /// session still reports where it came from, which is exactly when you want
+  /// it for debugging.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current kind                          // => "repl"
+  /// ```
+  kind -> String => (Erlang beamtalk_session_primitives) kindOf: self
+
+  /// Full origin/debug metadata as a Dictionary: `id` plus `kind` and, where
+  /// known, `peer` (remote host:port), `node` (calling node), `user`, and
+  /// `connected_at`. The primary "what is this session?" introspection tool.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current info                          // => #{#id => "...", #kind => "repl", ...}
+  /// ```
+  info -> Dictionary => (Erlang beamtalk_session_primitives) infoFor: self
+
+  /// Developer display: `a Session(<kind>: <id>)`, e.g.
+  /// `a Session(repl: session_123_ab)`. Not liveness-checked, so printing a
+  /// list of sessions (`Workspace sessions`) never raises if one has died.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Session current printString                   // => "a Session(repl: session_123_ab)"
+  /// ```
+  printString -> String =>
+    (Erlang beamtalk_session_primitives) printStringFor: self

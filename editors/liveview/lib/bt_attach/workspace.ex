@@ -79,7 +79,20 @@ defmodule BtAttach.Workspace do
   Returns the remote session pid, or `{:error, reason}`.
   """
   def start_session(session_id) when is_binary(session_id) do
-    case rpc(:beamtalk_session_sup, :start_session, [session_id]) do
+    start_session(session_id, %{kind: "liveview"})
+  end
+
+  @doc """
+  Create a fresh session carrying origin/debug metadata.
+
+  `meta` is a map surfaced by `Workspace sessions` / `Session info` on the
+  workspace side; the LiveView passes `kind: "liveview"` plus, where known, the
+  Phoenix `node` and authenticated `user`, so an operator can see which front
+  (and which user) opened a session. The `kind` is normalised on the workspace
+  side, so an unexpected value is harmless.
+  """
+  def start_session(session_id, meta) when is_binary(session_id) and is_map(meta) do
+    case rpc(:beamtalk_session_sup, :start_session, [session_id, meta]) do
       {:ok, pid} when is_pid(pid) -> pid
       {:badrpc, reason} -> {:error, {:unreachable, reason}}
       other -> {:error, other}

@@ -133,6 +133,31 @@ Beamtalk version
 // => NO-WARNING: Unresolved class
 
 // ===========================================================================
+// SESSION ORIGIN METADATA (kind / info / printString)
+// ===========================================================================
+//
+// A Session carries the originating client surface so `Workspace sessions`
+// shows where each session came from instead of an opaque `a Session`. The
+// e2e harness authenticates as `client: repl`, so the current session reports
+// kind "repl".
+
+// The current session knows which client surface opened it.
+Session current kind
+// => repl
+
+// printString surfaces kind + id: `a Session(repl: <id>)` (id is dynamic).
+Session current printString
+// => a Session(repl: _)
+
+// info exposes the full debug metadata as a Dictionary (includes the kind).
+(Session current info) at: #kind
+// => repl
+
+// `Workspace sessions` lists Session values, each rendering with its kind.
+Workspace sessions printString
+// => _a Session(repl: _
+
+// ===========================================================================
 // UNDEFINED VARIABLE STILL RAISED FOR GENUINELY UNKNOWN NAMES
 // ===========================================================================
 

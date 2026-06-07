@@ -25,6 +25,7 @@ bindings while sharing access to actors and loaded modules.
 %% Public API
 -export([
     start_link/1,
+    start_link/2,
     stop/1,
     eval/2,
     eval_async/3,
@@ -33,6 +34,8 @@ bindings while sharing access to actors and loaded modules.
     get_bindings/1,
     get_session_id/1,
     get_session_id/2,
+    get_session_meta/1,
+    get_session_meta/2,
     clear_bindings/1,
     enqueue_mutation/2,
     load_file/2,
@@ -56,10 +59,20 @@ bindings while sharing access to actors and loaded modules.
 
 %%% Public API
 
--doc "Start a REPL shell session.".
+-doc "Start a REPL shell session (origin metadata defaults to `kind => unknown`).".
 -spec start_link(binary()) -> {ok, pid()} | {error, term()}.
 start_link(SessionId) ->
-    gen_server:start_link(?MODULE, SessionId, []).
+    start_link(SessionId, #{}).
+
+-doc """
+Start a REPL shell session carrying session origin/debug metadata.
+
+`Meta` is the map recorded in the REPL state's `client_meta` (always normalised
+to include a `kind` key) and surfaced by `Workspace sessions` / `Session info`.
+""".
+-spec start_link(binary(), map()) -> {ok, pid()} | {error, term()}.
+start_link(SessionId, Meta) when is_map(Meta) ->
+    gen_server:start_link(?MODULE, {SessionId, Meta}, []).
 
 -doc "Stop a REPL shell session.".
 -spec stop(pid()) -> ok.
@@ -133,6 +146,23 @@ get_session_id(SessionPid) ->
 get_session_id(SessionPid, Timeout) ->
     gen_server:call(SessionPid, get_session_id, Timeout).
 
+-doc """
+Get this shell's `{id, meta}` in one call (id plus the origin/debug metadata
+map, which always includes `kind`).
+
+Used by `beamtalk_session_primitives` when minting `Session` values so the kind
+and other debug fields travel with the id without a second round-trip. Like
+`get_session_id/1` it is answered in any worker state. `get_session_meta/2`
+takes an explicit `Timeout` so enumeration can bound the per-shell wait.
+""".
+-spec get_session_meta(pid()) -> {ok, binary(), map()}.
+get_session_meta(SessionPid) ->
+    gen_server:call(SessionPid, get_session_meta).
+
+-spec get_session_meta(pid(), timeout()) -> {ok, binary(), map()}.
+get_session_meta(SessionPid, Timeout) ->
+    gen_server:call(SessionPid, get_session_meta, Timeout).
+
 -doc "Clear all variable bindings for this session.".
 -spec clear_bindings(pid()) -> ok.
 clear_bindings(SessionPid) ->
@@ -189,7 +219,13 @@ remove_from_tracker(SessionPid, Module) ->
 
 %%% gen_server callbacks
 
-init(SessionId) ->
+init(SessionId) when is_binary(SessionId) ->
+    %% Backward-compatible init for the bare-id arg shape: an in-flight start
+    %% across a hot-code reload (old `start_link/1` MFA reaching new code) lands
+    %% here. Mirrors the 2-tuple compat clause in `seed_session_context_from/1`
+    %% — default to empty origin metadata (→ `kind => unknown`).
+    init({SessionId, #{}});
+init({SessionId, Meta}) when is_map(Meta) ->
     %% Create session-specific REPL state
     %% We use undefined for listen_socket and port since session doesn't own TCP connection
     %%
@@ -197,7 +233,7 @@ init(SessionId) ->
     %% only session locals. Workspace globals (singletons + bind:as: names) are no
     %% longer eagerly injected here; a free identifier that misses the locals map is
     %% resolved lazily at eval time via beamtalk_workspace:resolve_name/2.
-    State0c = beamtalk_repl_state:new(undefined, 0),
+    State0c = beamtalk_repl_state:new(undefined, 0, #{client_meta => Meta}),
 
     %% Get workspace-wide actor registry
     %% The registry is registered globally in the workspace
@@ -225,19 +261,21 @@ init(SessionId) ->
 handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
     %% Spawn eval in a monitored worker process so it can be interrupted (BT-666)
     Self = self(),
+    SessionMeta = beamtalk_repl_state:get_client_meta(State),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
         %% BT-2365 (ADR 0081): seed the worker process context so primitives that
         %% read it (Session current / Workspace currentSession) see this session.
-        seed_session_context(Self, SessionId),
+        seed_session_context(Self, SessionId, SessionMeta),
         Result = beamtalk_repl_eval:do_eval(Expression, State),
         Self ! {eval_result, self(), Result}
     end),
     {noreply, {SessionId, State, {WorkerPid, MonRef, From}}};
 handle_call({eval_trace, Expression}, From, {SessionId, State, undefined}) ->
     Self = self(),
+    SessionMeta = beamtalk_repl_state:get_client_meta(State),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
         %% BT-2365 (ADR 0081): seed worker process context (same as the eval path).
-        seed_session_context(Self, SessionId),
+        seed_session_context(Self, SessionId, SessionMeta),
         Result = beamtalk_repl_eval:do_eval_trace(Expression, State),
         Self ! {eval_result, self(), Result}
     end),
@@ -293,6 +331,12 @@ handle_call(get_session_id, _From, {SessionId, State, Worker}) ->
     %% BT-2368 (ADR 0081 Phase 7): answered in any worker state so
     %% liveSessions/0 enumeration never blocks on a mid-eval shell.
     {reply, {ok, SessionId}, {SessionId, State, Worker}};
+handle_call(get_session_meta, _From, {SessionId, State, Worker}) ->
+    %% id + origin/debug metadata in one call, for Session-value minting.
+    %% Answered in any worker state (same non-blocking discipline as
+    %% get_session_id) so enumeration never stalls on a mid-eval shell.
+    Meta = beamtalk_repl_state:get_client_meta(State),
+    {reply, {ok, SessionId, Meta}, {SessionId, State, Worker}};
 handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% BT-2365 (ADR 0081 Phase 1): clear only the session locals. Workspace globals
     %% (singletons + bind:as: names) are no longer copied into the session map, so
@@ -383,10 +427,11 @@ handle_call(_Request, _From, State) ->
 -doc "BT-696: Async eval with streaming subscriber".
 handle_cast({eval_async, Expression, Subscriber}, {SessionId, State, undefined}) ->
     Self = self(),
+    SessionMeta = beamtalk_repl_state:get_client_meta(State),
     {WorkerPid, MonRef} = spawn_monitor(fun() ->
         %% BT-2365 (ADR 0081): seed worker process context on the streaming path too
         %% so Session current behaves identically to the synchronous eval path.
-        seed_session_context(Self, SessionId),
+        seed_session_context(Self, SessionId, SessionMeta),
         Result = beamtalk_repl_eval:do_eval(Expression, State, Subscriber),
         Self ! {eval_result, self(), Result}
     end),
@@ -510,10 +555,13 @@ undefined` (e.g. eval outside a shell-spawned worker) returns nil.
 Seeded on BOTH spawn paths (synchronous eval/eval_trace and streaming
 eval_async) so Session current behaves consistently regardless of eval mode.
 """.
--spec seed_session_context(pid(), binary()) -> ok.
-seed_session_context(ShellPid, SessionId) ->
+-spec seed_session_context(pid(), binary(), map()) -> ok.
+seed_session_context(ShellPid, SessionId, Meta) ->
     put(beamtalk_session_pid, ShellPid),
     put(beamtalk_session_id, SessionId),
+    %% Origin/debug metadata so `Session current` mints a fully-populated value
+    %% (kind, peer, …) without a round-trip back to the shell.
+    put(beamtalk_session_meta, Meta),
     ok.
 
 -doc """

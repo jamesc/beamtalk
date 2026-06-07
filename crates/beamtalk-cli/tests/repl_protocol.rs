@@ -577,10 +577,13 @@ impl ReplClient {
             }
         }
 
-        // Send cookie auth handshake (uses the same E2E_COOKIE passed via -setcookie)
+        // Send cookie auth handshake (uses the same E2E_COOKIE passed via -setcookie).
+        // `client: repl` mirrors the real CLI repl client so sessions created here
+        // carry the same origin metadata (`Session current kind` => "repl").
         let auth_msg = serde_json::json!({
             "type": "auth",
-            "cookie": E2E_COOKIE
+            "cookie": E2E_COOKIE,
+            "client": "repl"
         });
         ws.send(tungstenite::Message::Text(auth_msg.to_string().into()))
             .map_err(std::io::Error::other)?;
