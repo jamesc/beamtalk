@@ -905,8 +905,7 @@ heir_crash_survival_test_() ->
             %% races) and orphan the heir'd tables onto the real supervisor,
             %% destabilising sibling children. Exercised in the standalone EUnit
             %% context where no supervisor owns the bus.
-            {"heir crash-survival (skipped: live runtime supervises the bus)",
-                ?_test(ok)};
+            {"heir crash-survival (skipped: live runtime supervises the bus)", ?_test(ok)};
         undefined ->
             heir_crash_survival_impl()
     end.
@@ -1005,8 +1004,7 @@ heir_rearm_monitor_fires_on_later_death_test_() ->
         Sup when is_pid(Sup) ->
             %% See heir_crash_survival_test_/0 — skipped under the live runtime;
             %% exercised in the standalone EUnit context.
-            {"heir re-arm monitor (skipped: live runtime supervises the bus)",
-                ?_test(ok)};
+            {"heir re-arm monitor (skipped: live runtime supervises the bus)", ?_test(ok)};
         undefined ->
             heir_rearm_monitor_fires_on_later_death_impl()
     end.
