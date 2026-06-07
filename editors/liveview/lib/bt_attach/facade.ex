@@ -130,6 +130,7 @@ defmodule BtAttach.Facade do
 
   defp invoke(:processes_system, %{session_pid: pid}, _ctx),
     do: client().supervision_tree(pid, "system")
+
   defp invoke(:flush, _params, _ctx), do: client().flush()
 
   defp invoke(:save, %{class: class, selector: selector, source: source}, _ctx),
