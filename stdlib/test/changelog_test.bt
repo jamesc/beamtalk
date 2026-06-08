@@ -186,10 +186,10 @@ TestCase subclass: ChangeLogTest
     self assert: self newClassEntry printString equals: "DoubleCounter (new-class)"
 
   testEmptyLogPrintString =>
-    self assert: self emptyLog printString equals: "a ChangeLog with 0 entries"
+    self assert: self emptyLog printString equals: "ChangeLog with 0 entries"
 
   testMixedLogPrintStringCountsActive =>
-    self assert: self mixedLog printString equals: "a ChangeLog with 2 entries"
+    self assert: self mixedLog printString equals: "ChangeLog with 2 entries"
 
   // --- WorkspaceInterface facade: `changes` selector exists ---
   testWorkspaceIncludesSelectorChanges =>

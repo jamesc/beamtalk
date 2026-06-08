@@ -81,13 +81,13 @@ format_result_binary_empty_test() ->
 %%% ============================================================================
 
 format_result_block_arity0_test() ->
-    ?assertEqual(<<"a Block/0">>, beamtalk_stdlib_test:format_result(fun() -> ok end)).
+    ?assertEqual(<<"Block/0">>, beamtalk_stdlib_test:format_result(fun() -> ok end)).
 
 format_result_block_arity1_test() ->
-    ?assertEqual(<<"a Block/1">>, beamtalk_stdlib_test:format_result(fun(_X) -> ok end)).
+    ?assertEqual(<<"Block/1">>, beamtalk_stdlib_test:format_result(fun(_X) -> ok end)).
 
 format_result_block_arity2_test() ->
-    ?assertEqual(<<"a Block/2">>, beamtalk_stdlib_test:format_result(fun(_, _) -> ok end)).
+    ?assertEqual(<<"Block/2">>, beamtalk_stdlib_test:format_result(fun(_, _) -> ok end)).
 
 %%% ============================================================================
 %%% format_result/1 — PID

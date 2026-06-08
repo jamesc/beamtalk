@@ -112,9 +112,9 @@ typed Collection(E) subclass: Bag(E)
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Bag new printString   // => "a Bag"
+  /// Bag new printString   // => "Bag"
   /// ```
-  printString -> String => "a Bag"
+  printString -> String => "Bag"
 
   /// Override inspect to use printString rather than the field-based
   /// format defined in Value. Bag's internal counts dictionary is opaque.

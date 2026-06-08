@@ -187,7 +187,7 @@ as_string_padding_test() ->
 print_string_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
     Result = beamtalk_datetime:'printString'(DT),
-    ?assertMatch(<<"a DateTime(", _/binary>>, Result).
+    ?assertMatch(<<"DateTime(", _/binary>>, Result).
 
 %%% ============================================================================
 %%% Arithmetic

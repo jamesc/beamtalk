@@ -142,7 +142,7 @@ print_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
 print_string(#beamtalk_object{class = ClassName}) ->
     case beamtalk_class_registry:is_class_name(ClassName) of
         true -> beamtalk_class_registry:class_display_name(ClassName);
-        false -> iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)])
+        false -> atom_to_binary(ClassName, utf8)
     end;
 print_string(X) when is_map(X) -> print_string_map(X);
 print_string(#beamtalk_error{} = Error) ->
@@ -229,7 +229,7 @@ display_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
 display_string(#beamtalk_object{class = ClassName}) ->
     case beamtalk_class_registry:is_class_name(ClassName) of
         true -> beamtalk_class_registry:class_display_name(ClassName);
-        false -> iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8)])
+        false -> atom_to_binary(ClassName, utf8)
     end;
 display_string(X) when is_map(X) ->
     beamtalk_tagged_map:format_for_display(X);

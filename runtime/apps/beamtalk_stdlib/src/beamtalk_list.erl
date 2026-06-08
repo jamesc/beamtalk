@@ -331,4 +331,4 @@ describe_value(V) when is_function(V) ->
     iolist_to_binary(io_lib:format("a ~p-argument block", [A]));
 describe_value(V) ->
     ClassName = beamtalk_primitive:class_of(V),
-    <<"a ", (atom_to_binary(ClassName))/binary>>.
+    atom_to_binary(ClassName).

@@ -1259,12 +1259,12 @@ mod tests {
     #[serial(color)]
     fn format_value_block() {
         let _guard = ColorGuard::disabled();
-        // Blocks are formatted as "a Block/N" by the backend
-        let value = serde_json::json!("a Block/1");
-        assert_eq!(format_value(&value), "a Block/1");
+        // Blocks are formatted as "Block/N" by the backend
+        let value = serde_json::json!("Block/1");
+        assert_eq!(format_value(&value), "Block/1");
 
-        let value2 = serde_json::json!("a Block/2");
-        assert_eq!(format_value(&value2), "a Block/2");
+        let value2 = serde_json::json!("Block/2");
+        assert_eq!(format_value(&value2), "Block/2");
     }
 
     #[test]

@@ -211,7 +211,7 @@ format_result(V) when is_binary(V) ->
     V;
 format_result(V) when is_function(V) ->
     {arity, A} = erlang:fun_info(V, arity),
-    iolist_to_binary([<<"a Block/">>, integer_to_binary(A)]);
+    iolist_to_binary([<<"Block/">>, integer_to_binary(A)]);
 format_result(V) when is_pid(V) ->
     S = pid_to_list(V),
     I = lists:sublist(S, 2, length(S) - 2),

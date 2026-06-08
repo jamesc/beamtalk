@@ -178,7 +178,7 @@ second(#{second := V}) -> V.
 -doc "Human-readable representation.".
 -spec 'printString'(t()) -> binary().
 'printString'(Self) ->
-    iolist_to_binary([<<"a DateTime(">>, 'asString'(Self), <<")">>]).
+    iolist_to_binary([<<"DateTime(">>, 'asString'(Self), <<")">>]).
 
 %%% ============================================================================
 %%% Instance Methods — Arithmetic

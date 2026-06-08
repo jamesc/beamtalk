@@ -306,7 +306,7 @@ term_to_json(Value) when is_pid(Value) ->
     end;
 term_to_json(Value) when is_function(Value) ->
     {arity, Arity} = erlang:fun_info(Value, arity),
-    iolist_to_binary([<<"a Block/">>, integer_to_binary(Arity)]);
+    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]);
 term_to_json(Value) when is_map(Value) ->
     %% For tagged value objects (user-defined classes), dispatch Beamtalk printString
     %% so that class overrides (e.g. TestResult) are used. Untagged maps fall back

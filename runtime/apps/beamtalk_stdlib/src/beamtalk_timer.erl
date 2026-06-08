@@ -133,8 +133,8 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 -spec 'printString'(t()) -> binary().
 'printString'(#{'$beamtalk_class' := 'Timer', pid := Pid} = _Self) ->
     case erlang:is_process_alive(Pid) of
-        true -> <<"a Timer(active)">>;
-        false -> <<"a Timer(inactive)">>
+        true -> <<"Timer(active)">>;
+        false -> <<"Timer(inactive)">>
     end.
 
 %%% ============================================================================

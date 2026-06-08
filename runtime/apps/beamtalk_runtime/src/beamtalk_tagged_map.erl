@@ -151,7 +151,7 @@ user_field_keys(State) when is_map(State) ->
 Formats a tagged map for transcript/REPL display.
 
 Dispatches `displayString` to the value class so user-defined
-display methods are honoured. Falls back to `"a ClassName"` if
+display methods are honoured. Falls back to the bare class name if
 dispatch fails.
 """.
 -spec format_for_display(map()) -> binary().

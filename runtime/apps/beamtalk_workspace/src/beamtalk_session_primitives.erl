@@ -256,7 +256,7 @@ raises just because one session died mid-enumeration.
 printStringFor(Session) ->
     {Id, Meta} = session_meta(Session, 'printString'),
     Kind = maps:get(kind, Meta, <<"unknown">>),
-    iolist_to_binary([<<"a Session(">>, Kind, <<": ">>, Id, <<")">>]).
+    iolist_to_binary([<<"Session(">>, Kind, <<": ">>, Id, <<")">>]).
 
 %%% ============================================================================
 %%% Workspace-globals view (not a Session method)

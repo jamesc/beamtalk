@@ -96,22 +96,19 @@ dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
 
 dispatch('printString', [], Self, State) ->
     DisplayName = class_display_name(Self, State),
-    Str = iolist_to_binary([<<"a ">>, DisplayName]),
-    {reply, Str, State};
+    {reply, DisplayName, State};
 dispatch('displayString', [], Self, State) ->
     %% displayString for actors delegates to printString — same result.
     DisplayName = class_display_name(Self, State),
-    Str = iolist_to_binary([<<"a ">>, DisplayName]),
-    {reply, Str, State};
+    {reply, DisplayName, State};
 dispatch(inspect, [], Self, State) ->
     %% BT-753: For class objects (State is #{}), use Self for identity.
     %% BT-1167: For actor instances, produce ClassName(field: inspect(value), ...) format.
     case map_size(State) =:= 0 of
         true ->
-            %% Class objects — keep legacy "a ClassName" format.
+            %% Class objects — bare class name (ADR 0094).
             DisplayName = class_display_name(Self, State),
-            Str = iolist_to_binary([<<"a ">>, DisplayName]),
-            {reply, Str, State};
+            {reply, DisplayName, State};
         false ->
             ClassName = class_display_name(Self, State),
             %% Sort field names for deterministic output (map key order is unstable).
