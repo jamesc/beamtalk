@@ -30,7 +30,7 @@ cls := Beamtalk classNamed: #Point
 // => Point
 
 cls new
-// => a Point
+// => Point
 
 // ---------------------------------------------------------------------------
 // Dynamic new: with initialization arguments
@@ -45,7 +45,7 @@ cls := Beamtalk classNamed: #Point
 // => Point
 
 p := cls new
-// => a Point
+// => Point
 
 p getX
 // => 0

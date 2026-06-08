@@ -24,7 +24,7 @@
 
 // Create a Hanoi instance
 h := Hanoi new
-// => a Hanoi
+// => Hanoi
 
 // ===========================================================================
 // BASE CASE (n=1)

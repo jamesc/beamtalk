@@ -145,9 +145,9 @@ Beamtalk version
 Session current kind
 // => repl
 
-// printString surfaces kind + id: `a Session(repl: <id>)` (id is dynamic).
+// printString surfaces kind + id: `Session(repl: <id>)` (id is dynamic).
 Session current printString
-// => a Session(repl: _)
+// => Session(repl: _)
 
 // info exposes the full debug metadata as a Dictionary (includes the kind).
 (Session current info) at: #kind
@@ -155,7 +155,7 @@ Session current printString
 
 // `Workspace sessions` lists Session values, each rendering with its kind.
 Workspace sessions printString
-// => _a Session(repl: _
+// => _Session(repl: _
 
 // ===========================================================================
 // UNDEFINED VARIABLE STILL RAISED FOR GENUINELY UNKNOWN NAMES

@@ -94,7 +94,7 @@ capv := Object classBuilder name: #CapstonePoint; superclass: Object; fields: #{
 // => CapstonePoint
 
 p := capv new
-// => a CapstonePoint
+// => CapstonePoint
 
 p class
 // => CapstonePoint
@@ -104,7 +104,7 @@ p class
 
 // new: seeds fields from the init map; the others keep their defaults.
 p2 := capv new: #{#x => 3, #y => 4}
-// => a CapstonePoint
+// => CapstonePoint
 
 (p2 fieldAt: #x)
 // => 3
@@ -180,7 +180,7 @@ Object classBuilder name: #CapstoneNav; superclass: Object; classMethods: #{ #sh
 // => CapstoneNav
 
 nav := SystemNavigation default
-// => a SystemNavigation
+// => SystemNavigation
 
 results := nav collectMethodsMatching: (Regex from: "shoutClass") unwrap in: CapstoneNav class into: List new
 // => _

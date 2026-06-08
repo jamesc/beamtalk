@@ -61,7 +61,7 @@ myVar := #increment
 count := 0
 // => 0
 myBlock := [count := count + 1]
-// => a Block/1
+// => Block/1
 
 // --- BT-665: New local definitions in stored closures ---
 
