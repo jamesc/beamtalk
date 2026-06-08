@@ -3543,7 +3543,7 @@ Announcements (typed domain events you subscribe to in app logic):
 > turn evaluates in a fresh worker process, so a subscription made at one prompt
 > is gone by the next; subscribe, announce, and observe within a single
 > expression (or from a long-lived actor) when you need a subscription to persist.
-
+>
 > **v1 scope.** In v1 all per-instance announcers share one class-keyed runtime
 > bus, so a subscription matches by event *class*, not by announcer;
 > `SystemAnnouncer` is the canonical multi-subscriber bus. True per-instance
