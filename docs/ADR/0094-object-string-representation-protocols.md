@@ -1,7 +1,26 @@
 # ADR 0094: Object String Representation Protocols (printString / displayString / inspect)
 
 ## Status
-Proposed (2026-06-07)
+Accepted (2026-06-08)
+
+## Implementation Tracking
+
+**Epic:** BT-2458 — Object String Representation Protocols (ADR 0094)
+
+**Issues:**
+
+| # | Issue | Phase | Size |
+|---|---|---|---|
+| 1 | BT-2459 — Shared structural renderer runtime primitive | 1 (Foundation) | M |
+| 2 | BT-2460 — Repoint `Value` printString to renderer; decouple recursion from `inspect` | 2 (Core) | M |
+| 3 | BT-2461 — Drop the `a`/`an` prefix: default `Object` printString to bare class name | 2 (Core) | S |
+| 4 | BT-2462 — Actor/Supervisor `Kind(Class, pid)` + remove hard-coded REPL paths (timeout fallback) | 2 (Core) | M |
+| 5 | BT-2463 — E2E btscript test + interpolation hook | 3 (Validation) | S |
+| 6 | BT-2464 — Document `printString`/`displayString` contract + surface parity | 3 (Docs) | M |
+
+**Deferred follow-up (`inspect` as tooling/action verb):** BT-2397.
+
+**Status:** Planned
 
 ## Context
 
@@ -566,7 +585,7 @@ runtime crashes:
   delete the override and accept the derived default.
 
 ## References
-- Related issues: BT-XXX (to be created via `/plan-adr`)
+- Related issues: BT-2458 (Epic); BT-2459, BT-2460, BT-2461, BT-2462, BT-2463, BT-2464
 - **Follow-up ADR (to be written):** `inspect` as a tooling/action verb, designed
   against the LiveView live-tooling surface. Owns the breaking `inspect`
   return-type change, the 14 `inspect -> String` migrations, the gradual-typing
