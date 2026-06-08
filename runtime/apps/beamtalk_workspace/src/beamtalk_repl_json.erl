@@ -17,6 +17,11 @@ Uses OTP `json` module (OTP 27+) for encoding/decoding.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
+%% ADR 0094, Critical Risk #3: short timeout for the printString dispatch on a
+%% live actor before falling back to the tuple-derived label. Kept small so the
+%% REPL never visibly stalls on a wedged actor.
+-define(ACTOR_PRINT_TIMEOUT_MS, 250).
+
 -export([
     format_response/1,
     format_error/1,
@@ -330,50 +335,29 @@ term_to_json(#beamtalk_error{} = Error) ->
     iolist_to_binary(beamtalk_error:format(Error));
 term_to_json(Value) when is_tuple(Value) ->
     case Value of
-        {beamtalk_supervisor, Class, _Module, Pid} ->
-            %% ADR 0059: Supervisor instances display as #Supervisor<Class, Pid>
-            %% or #DynamicSupervisor<Class, Pid> depending on ancestry.
-            ClassBin = atom_to_binary(Class, utf8),
-            PidStr = pid_to_list(Pid),
-            Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-            Prefix =
-                try beamtalk_runtime_api:inherits_from(Class, 'DynamicSupervisor') of
-                    true -> <<"#DynamicSupervisor<">>;
-                    _ -> <<"#Supervisor<">>
-                catch
-                    _:_ -> <<"#Supervisor<">>
-                end,
-            iolist_to_binary([Prefix, ClassBin, <<",">>, Inner, <<">">>]);
+        {beamtalk_supervisor, _Class, _Module, _Pid} = Sup ->
+            %% ADR 0094: Supervisor instances render kind-headed and positional —
+            %% Supervisor(Class, pid) / DynamicSupervisor(Class, pid) by ancestry.
+            %% Supervisors dispatch in-process (no gen_server:call), so a direct
+            %% tuple-derived label is both safe and canonical.
+            beamtalk_runtime_api:process_label(Sup);
         #beamtalk_object{class = 'Metaclass', pid = Pid} ->
             %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
             ClassName = beamtalk_runtime_api:class_name(Pid),
             iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
-        #beamtalk_object{class = Class, pid = Pid} ->
+        #beamtalk_object{class = Class} = Obj ->
             case beamtalk_runtime_api:is_class_name(Class) of
                 true ->
+                    %% Class object — bare class name (ADR 0094).
                     beamtalk_runtime_api:class_display_name(Class);
                 false ->
-                    ClassBin = atom_to_binary(Class, utf8),
-                    %% ADR 0079: name-resolving proxies carry `{registered, Name}`
-                    %% in the identity slot instead of a pid. Show the name so the
-                    %% proxy is operator-legible in REPL output.
-                    Inner =
-                        case Pid of
-                            {registered, Name} when is_atom(Name) ->
-                                iolist_to_binary([
-                                    <<"registered,">>, atom_to_binary(Name, utf8)
-                                ]);
-                            _ when is_pid(Pid) ->
-                                PidStr = pid_to_list(Pid),
-                                list_to_binary(
-                                    lists:sublist(PidStr, 2, length(PidStr) - 2)
-                                );
-                            _ ->
-                                %% Defensive catch-all: never crash the REPL
-                                %% formatter on a malformed identity slot.
-                                iolist_to_binary(io_lib:format("~tp", [Pid]))
-                        end,
-                    iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])
+                    %% ADR 0094 / Critical Risk #3: live actor instance. Attempt a
+                    %% printString dispatch with a short timeout so custom overrides
+                    %% are honoured, and fall back to the tuple-derived
+                    %% `Actor(ClassName, pid)` label (no message round-trip) on
+                    %% timeout/error/dead-process. The REPL never hangs on a wedged
+                    %% actor.
+                    actor_label_with_fallback(Obj, Class)
             end;
         {future_timeout, {beamtalk_future, Pid}} when is_pid(Pid) ->
             PidStr = pid_to_list(Pid),
@@ -411,6 +395,52 @@ term_to_json_future_pid(Pid) ->
             end;
         false ->
             iolist_to_binary(<<"#Future<completed>">>)
+    end.
+
+-doc """
+Render a live actor instance for REPL display (ADR 0094, Critical Risk #3).
+
+Attempts a `printString` dispatch with a short timeout so a custom override is
+honoured when the actor is responsive, and falls back to the tuple-derived
+`Actor(ClassName, pid)` label (read directly from the `#beamtalk_object{}`
+tuple, no message round-trip) on timeout / error / dead-process. The REPL
+therefore never hangs on a wedged actor and never shows stale state.
+""".
+-spec actor_label_with_fallback(#beamtalk_object{}, atom()) -> binary().
+actor_label_with_fallback(#beamtalk_object{pid = Pid} = Obj, _Class) when is_pid(Pid) ->
+    %% is_process_alive/1 raises badarg for remote pids, so probe defensively —
+    %% a non-local or otherwise unreachable actor degrades to the tuple label.
+    case is_local_process_alive(Pid) of
+        false ->
+            %% Dead/unreachable actor — never message it; use the tuple-derived label.
+            beamtalk_runtime_api:process_label(Obj);
+        true ->
+            try
+                beamtalk_runtime_api:message_send(Obj, 'printString', [], ?ACTOR_PRINT_TIMEOUT_MS)
+            of
+                Result when is_binary(Result) ->
+                    Result;
+                _ ->
+                    %% Non-binary override result — fall back to the canonical label.
+                    beamtalk_runtime_api:process_label(Obj)
+            catch
+                _:_ ->
+                    %% Timeout / error / mid-call — degrade to the tuple-derived label.
+                    beamtalk_runtime_api:process_label(Obj)
+            end
+    end;
+actor_label_with_fallback(Obj, _Class) ->
+    %% Name-resolving proxy ({registered, Name}) or malformed identity slot:
+    %% no live pid to message, so use the tuple-derived label directly.
+    beamtalk_runtime_api:process_label(Obj).
+
+-doc "Liveness probe that treats remote/unreachable pids as not alive (never raises).".
+-spec is_local_process_alive(pid()) -> boolean().
+is_local_process_alive(Pid) ->
+    try
+        is_process_alive(Pid)
+    catch
+        _:_ -> false
     end.
 
 %%% Error Formatting

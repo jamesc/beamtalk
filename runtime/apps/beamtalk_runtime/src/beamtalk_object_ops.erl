@@ -27,7 +27,7 @@ rather than being duplicated in every class's generated code.
 
 | Selector      | Args | Description                                       |
 |---------------|------|---------------------------------------------------|
-| `printString`   | []   | Class objects: bare class name; instances: `ClassName(field: value, ...)` |
+| `printString`   | []   | Class objects: bare class name; instances: `ClassName(field: value, ...)`; actors: `Actor(Counter, 0.123.0)` |
 | `displayString` | []   | Delegates to `printString`                        |
 | `inspect`       | []   | Delegates to `printString` (ADR 0094)             |
 
@@ -95,13 +95,14 @@ dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
 %% --- Display methods ---
 
 dispatch('printString', [], Self, State) ->
-    %% ADR 0094 (Critical Risk #4): value instances render structurally via the
-    %% canonical renderer; class objects (State is #{}) and actor/supervisor
-    %% references keep the bare class name (actor structural form is BT-2462).
-    {reply, print_string_for(Self, State), State};
+    %% ADR 0094: class objects render as a bare class name; value instances
+    %% render structurally via the canonical renderer (Critical Risk #4); live
+    %% actor/supervisor references render kind-headed (`Actor(ClassName, pid)`,
+    %% BT-2462). See print_string_label/2.
+    {reply, print_string_label(Self, State), State};
 dispatch('displayString', [], Self, State) ->
-    %% displayString delegates to printString — same result.
-    {reply, print_string_for(Self, State), State};
+    %% ADR 0094: displayString delegates to printString — same result.
+    {reply, print_string_label(Self, State), State};
 dispatch(inspect, [], Self, State) ->
     %% ADR 0094 (Critical Risk #4): inspect renders structurally via the canonical
     %% renderer for any instance with fields (values and actors alike, BT-1167);
@@ -206,28 +207,35 @@ has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
 
 -doc """
-Compute the `printString` for an object dispatched through Object.
+Compute the `printString`/`displayString` label for an object dispatched
+through Object (ADR 0094).
 
-Value/plain-object instances with user fields render structurally as
-`ClassName(field: value, ...)` via the canonical renderer
-(`beamtalk_object_printer`), guaranteeing byte-identical output with the
-compiled stdlib path (Critical Risk #4).
-
-Two cases keep the bare class name:
-- **Class objects** (dispatched via chain fallthrough with an empty State).
-- **Actor/Supervisor references** (`Self` is a live `#beamtalk_object{}`):
-  structural rendering for those is out of scope here (ADR 0094 issue #4 /
-  BT-2462), and field recursion across a live actor's gen_server state would
-  risk re-entrancy.
+Three cases:
+- **Class objects** render as a bare class name.
+- **Live actor/supervisor references** (`Self` is a `#beamtalk_object{}` that
+  is not a class object) render kind-headed and positional
+  (`Actor(ClassName, pid)` / `Supervisor(ClassName, pid)` /
+  `DynamicSupervisor(ClassName, pid)`, BT-2462), derived directly from the
+  `#beamtalk_object{}` tuple — no message round-trip, no re-entrancy risk.
+- **Value/plain-object instances** with user fields render structurally as
+  `ClassName(field: value, ...)` via the canonical renderer
+  (`beamtalk_object_printer`), guaranteeing byte-identical output with the
+  compiled stdlib path (Critical Risk #4). Empty-state dispatch (class objects
+  reached via chain fallthrough) keeps the bare class name.
 """.
--spec print_string_for(term(), map()) -> binary().
-print_string_for(#beamtalk_object{pid = Pid} = Self, State) when is_pid(Pid) ->
-    %% Actor/Supervisor reference — bare class name (BT-2462 owns structural form).
-    class_display_name(Self, State);
-print_string_for(Self, State) ->
+-spec print_string_label(term(), map()) -> binary().
+print_string_label(#beamtalk_object{} = Self, State) ->
+    case beamtalk_class_registry:is_class_object(Self) of
+        true ->
+            class_display_name(Self, State);
+        false ->
+            %% Live actor instance — kind-headed positional label (BT-2462).
+            beamtalk_primitive:process_label(Self)
+    end;
+print_string_label(Self, State) ->
     case map_size(State) =:= 0 of
         true ->
-            %% Class objects — bare class name (ADR 0094).
+            %% Class objects (chain fallthrough, empty State) — bare class name.
             class_display_name(Self, State);
         false ->
             %% Value/object instances — structural form via canonical renderer.

@@ -18,7 +18,7 @@
 // ===========================================================================
 
 app := (E2EAppSupervisor supervise) unwrap
-// => #Supervisor<E2EAppSupervisor,_>
+// => Supervisor(E2EAppSupervisor, _)
 
 // ===========================================================================
 // WORKSPACE PROCESSES — returns a navigable SupervisionTree

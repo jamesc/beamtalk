@@ -37,7 +37,7 @@ InlineCounter >> getValue => self.value
 // ---------------------------------------------------------------------------
 
 c := InlineCounter spawn
-// => #Actor<InlineCounter,_>
+// => Actor(InlineCounter, _)
 
 c increment
 // => 1
@@ -56,7 +56,7 @@ InlineCounter >> increment => self.value := self.value + 10
 // => _
 
 c2 := InlineCounter spawn
-// => #Actor<InlineCounter,_>
+// => Actor(InlineCounter, _)
 
 c2 increment
 // => 10

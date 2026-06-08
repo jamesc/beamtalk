@@ -97,7 +97,7 @@ actorCls := Beamtalk classNamed: #Counter
 // => Counter
 
 c := actorCls spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c increment
 // => 1

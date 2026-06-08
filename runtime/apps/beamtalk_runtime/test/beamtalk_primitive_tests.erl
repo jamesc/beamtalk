@@ -1267,13 +1267,16 @@ print_string_beamtalk_object_instance_test_() ->
             ok
         end,
         fun(_) -> ok end, fun() ->
-            %% Non-class beamtalk_object prints as bare class name
+            %% ADR 0094: a non-class beamtalk_object is a live actor instance and
+            %% prints kind-headed as Actor(ClassName, pid).
             Obj = #beamtalk_object{
                 class = 'UnknownNonClass999',
                 class_mod = 'nonexistent_module',
                 pid = self()
             },
-            ?assertEqual(<<"UnknownNonClass999">>, beamtalk_primitive:print_string(Obj))
+            ?assertMatch(
+                <<"Actor(UnknownNonClass999, ", _/binary>>, beamtalk_primitive:print_string(Obj)
+            )
         end}.
 
 print_string_class_object_test_() ->
@@ -1340,13 +1343,17 @@ display_string_beamtalk_object_instance_test_() ->
             ok
         end,
         fun(_) -> ok end, fun() ->
-            %% Non-class beamtalk_object displays as bare class name
+            %% ADR 0094: a non-class beamtalk_object is a live actor instance and
+            %% displays kind-headed as Actor(ClassName, pid).
             Obj = #beamtalk_object{
                 class = 'UnknownNonClass999',
                 class_mod = 'nonexistent_module',
                 pid = self()
             },
-            ?assertEqual(<<"UnknownNonClass999">>, beamtalk_primitive:display_string(Obj))
+            ?assertMatch(
+                <<"Actor(UnknownNonClass999, ", _/binary>>,
+                beamtalk_primitive:display_string(Obj)
+            )
         end}.
 
 display_string_class_object_test_() ->
@@ -1842,3 +1849,38 @@ responds_to_beamtalk_object_non_class_test_() ->
             Result = beamtalk_primitive:responds_to(Obj, 'class'),
             ?assert(is_boolean(Result))
         end}.
+
+%%% ============================================================================
+%%% BT-2462 / ADR 0094: process_label/1 — kind-headed positional labels
+%%% ============================================================================
+
+process_label_actor_pid_test() ->
+    %% A live actor instance renders Actor(ClassName, X.Y.Z) directly from the
+    %% tuple, with the pid in the inner X.Y.Z form (no #Pid< wrapper).
+    Pid = self(),
+    Obj = #beamtalk_object{class = 'Counter', class_mod = bt@counter, pid = Pid},
+    Result = beamtalk_primitive:process_label(Obj),
+    ?assertMatch(<<"Actor(Counter, ", _/binary>>, Result),
+    ?assert(binary:match(Result, <<"#Pid<">>) =:= nomatch),
+    %% Inner pid form equals erlang's stripped pid_to_list output.
+    PidStr = erlang:pid_to_list(Pid),
+    Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
+    Expected = iolist_to_binary([<<"Actor(Counter, ">>, Inner, <<")">>]),
+    ?assertEqual(Expected, Result).
+
+process_label_actor_registered_proxy_test() ->
+    %% ADR 0079 name-resolving proxy: identity slot is {registered, Name}.
+    Obj = #beamtalk_object{
+        class = 'Greeter', class_mod = bt@greeter, pid = {registered, my_greeter}
+    },
+    Result = beamtalk_primitive:process_label(Obj),
+    ?assertEqual(<<"Actor(Greeter, registered, my_greeter)">>, Result).
+
+process_label_supervisor_test() ->
+    %% A supervisor tuple with a class that does not inherit DynamicSupervisor
+    %% renders Supervisor(ClassName, X.Y.Z).
+    Pid = self(),
+    Sup = {beamtalk_supervisor, 'MySup', some_module, Pid},
+    Result = beamtalk_primitive:process_label(Sup),
+    ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result),
+    ?assert(binary:match(Result, <<"DynamicSupervisor">>) =:= nomatch).

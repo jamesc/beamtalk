@@ -769,10 +769,12 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `all_instances/1` | `beamtalk_object_instances:all/1` |
 | `dispatch_lookup/5` | `beamtalk_dispatch:lookup/5` |
 | `message_send/3` | `beamtalk_message_dispatch:send/3` |
+| `message_send/4` | `beamtalk_message_dispatch:send/4` |
 | `field_names/1` | `beamtalk_reflection:field_names/1` |
 | `tagged_map_class_of/1` | `beamtalk_tagged_map:class_of/1` |
 | `is_tagged/1` | `beamtalk_tagged_map:is_tagged/1` |
 | `print_string/1` | `beamtalk_primitive:print_string/1` |
+| `process_label/1` | `beamtalk_primitive:process_label/1` |
 | `primitive_class_of/1` | `beamtalk_primitive:class_of/1` |
 | `trigger_code_change/2` | `beamtalk_hot_reload:trigger_code_change/2` |
 | `trigger_code_change/3` | `beamtalk_hot_reload:trigger_code_change/3` |

@@ -177,13 +177,15 @@ cycle_guard_self_referencing_map_test() ->
 %%% ============================================================================
 
 actor_reference_in_field_test() ->
-    %% Actor references use printString (opaque).
+    %% Actor references render via printString. BT-2462 makes a live actor ref
+    %% render kind-headed and positional as `Actor(ClassName, pid)`, so a Value
+    %% holding one recurses to that form. The pid is dynamic, so assert the
+    %% stable prefix and closing parens around it.
     Obj = #beamtalk_object{class = 'Counter', class_mod = counter, pid = self()},
     Fields = [{target, Obj}],
     Result = beamtalk_object_printer:structural('Holder', Fields),
-    %% Bare class name (ADR 0094 dropped the "a"/"an" article prefix);
-    %% BT-2462 will later make actor refs render as Actor(Counter, pid).
-    ?assertMatch(<<"Holder(target: Counter)">>, Result).
+    ?assertMatch(<<"Holder(target: Actor(Counter, ", _/binary>>, Result),
+    ?assertEqual(<<"))">>, binary:part(Result, byte_size(Result) - 2, 2)).
 
 %%% ============================================================================
 %%% Nil and boolean field values

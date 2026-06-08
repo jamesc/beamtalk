@@ -26,7 +26,7 @@
 
 // Create an account
 acct := Account spawn
-// => #Actor<Account,_>
+// => Actor(Account, _)
 
 // Initial balance is zero
 acct balance
@@ -101,21 +101,21 @@ txn getStatus
 
 // Create a bank
 bank := Bank spawn
-// => #Actor<Bank,_>
+// => Actor(Bank, _)
 
 // Open accounts (spawns Account actors)
 bank openAccount: "Alice"
-// => #Actor<Account,_>
+// => Actor(Account, _)
 
 bank openAccount: "Bob"
-// => #Actor<Account,_>
+// => Actor(Account, _)
 
 // Look up an account
 alice := bank accountFor: "Alice"
-// => #Actor<Account,_>
+// => Actor(Account, _)
 
 bob := bank accountFor: "Bob"
-// => #Actor<Account,_>
+// => Actor(Account, _)
 
 // Verify owner names
 alice getOwner
@@ -142,7 +142,7 @@ bob deposit: 500
 
 // Create transfer agent
 agent := TransferAgent spawn
-// => #Actor<TransferAgent,_>
+// => Actor(TransferAgent, _)
 
 // Transfer 250 from Alice to Bob
 agent transfer: 250 from: alice to: bob

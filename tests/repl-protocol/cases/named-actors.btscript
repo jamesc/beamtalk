@@ -31,7 +31,7 @@ res1 isOk
 // => true
 
 c := res1 unwrap
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c registeredName
 // => bt1991Counter
@@ -66,7 +66,7 @@ counterLookup isOk
 
 // The proxy re-resolves the name on every send, so it sees current state
 proxy := counterLookup unwrap
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 proxy getValue
 // => 1
@@ -98,7 +98,7 @@ dup error kind
 
 // Register a greeter under a different name
 g := (E2ENamedGreeter spawnAs: #bt1991Greeter) unwrap
-// => #Actor<E2ENamedGreeter,_>
+// => Actor(E2ENamedGreeter, _)
 
 // Looking up the greeter name through Counter (wrong class) fails
 wrong := Counter named: #bt1991Greeter
@@ -128,7 +128,7 @@ missing error kind
 // ===========================================================================
 
 anon := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // A freshly-spawned actor has no name until registerAs: sets one.
 anon registeredName
@@ -201,10 +201,10 @@ anon isRegistered
 // Sending through a stale name proxy raises no_such_process. Look up a
 // proxy *before* unregistering a second actor, then unregister and send.
 temp := (Counter spawnAs: #bt1991Temp) unwrap
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 tempProxy := (Counter named: #bt1991Temp) unwrap
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 temp unregister
 // => ok
@@ -228,7 +228,7 @@ c stop
 // => ok
 
 sup := (E2ENamedSupervisor supervise) unwrap
-// => #Supervisor<E2ENamedSupervisor,_>
+// => Supervisor(E2ENamedSupervisor, _)
 
 // The supervisor started its Counter child and registered the name.
 sup count
@@ -240,7 +240,7 @@ sup count
 // Acquire a name-resolving proxy from *outside* the supervision tree —
 // this is the primary cross-tree access motivation from ADR 0079.
 supProxy := (Counter named: #bt1991SupCounter) unwrap
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 supProxy increment
 // => 1

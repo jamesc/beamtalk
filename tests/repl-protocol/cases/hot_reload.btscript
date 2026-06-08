@@ -23,7 +23,7 @@
 // => Loaded: HotCounter
 
 hc := HotCounter spawn
-// => #Actor<HotCounter,_>
+// => Actor(HotCounter, _)
 
 // Use the initial increment (adds 1)
 hc increment
@@ -71,7 +71,7 @@ LiveActor >> getCount => self.count
 // => _
 
 la := LiveActor spawn
-// => #Actor<LiveActor,_>
+// => Actor(LiveActor, _)
 
 la bump
 // => 1
