@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Field-less Value used by object_string_representation.btscript (BT-2463 /
+// ADR 0094). A Value with no fields must render structurally as `Foo()`.
+
+Value subclass: Foo

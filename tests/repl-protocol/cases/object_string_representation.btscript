@@ -1,0 +1,112 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for object string representation (ADR 0094, Phase 3 / BT-2463).
+//
+// These tests require E2E because the feature is the *live REPL default
+// display* of fresh domain objects: the REPL renders results by dispatching
+// `printString`, and actor/supervisor instances flow through the unified
+// printString path (no hard-coded REPL formatting). BUnit can compile and
+// dispatch printString, but only the live REPL exercises the actual default
+// descriptor a developer sees, including the actor/supervisor process forms
+// and the string-interpolation `displayString` hook.
+//
+// Covers all four representation kinds plus the displayString interpolation
+// hook:
+//   - Value:        ClassName(field: value, ...)   (labelled fields)
+//   - Actor:        Actor(ClassName, <pid>)        (kind-headed, positional)
+//   - Supervisor:   Supervisor(ClassName, <pid>) / DynamicSupervisor(...)
+//   - Object/class: bare ClassName (no `a`/`an` article)
+//   - Interpolation: "{Point new}" yields the string "Point(x: 0, y: 0)"
+//                    (displayString defaults to printString; the REPL shows a
+//                    top-level String result unquoted)
+//   - Raw primitive: a raw pid still renders #Pid<...>, distinct from Actor(...)
+
+// @load tests/repl-protocol/fixtures/point.bt
+// @load tests/repl-protocol/fixtures/object_repr_foo.bt
+// @load tests/repl-protocol/fixtures/object_repr_line.bt
+// @load tests/repl-protocol/fixtures/counter.bt
+// @load tests/repl-protocol/fixtures/e2e_app_supervisor.bt
+// @load tests/repl-protocol/fixtures/e2e_worker_pool.bt
+
+// ===========================================================================
+// VALUE — structural, labelled fields
+// ===========================================================================
+
+// Keyword constructor renders its labelled fields.
+Point x: 3 y: 4
+// => Point(x: 3, y: 4)
+
+// `new` uses field defaults.
+Point new
+// => Point(x: 0, y: 0)
+
+// A field-less Value renders as the bare structural form `Foo()`.
+Foo new
+// => Foo()
+
+// ===========================================================================
+// NESTED VALUE — bounded recursion expands in full (ADR 0094 section 4)
+// ===========================================================================
+
+// A Line of two Points expands fully (each field via its own printString).
+Line from: (Point x: 0 y: 0) to: (Point x: 3 y: 4)
+// => Line(from: Point(x: 0, y: 0), to: Point(x: 3, y: 4))
+
+// ===========================================================================
+// ACTOR — kind-headed, positional, pid pattern-matched
+// ===========================================================================
+
+c := Counter spawn
+// => Actor(Counter, _)
+
+// ===========================================================================
+// SUPERVISOR / DYNAMIC SUPERVISOR — kind head from ancestry
+// ===========================================================================
+
+app := (E2EAppSupervisor supervise) unwrap
+// => Supervisor(E2EAppSupervisor, _)
+
+pool := (E2EWorkerPool supervise) unwrap
+// => DynamicSupervisor(E2EWorkerPool, _)
+
+// ===========================================================================
+// PLAIN OBJECT / CLASS — bare ClassName, no article
+// ===========================================================================
+
+// A class object renders as its bare name (no `a`/`an`).
+Point
+// => Point
+
+// An actor class object also renders bare — the bare-name form is the class
+// object itself, independent of the class kind.
+Counter
+// => Counter
+
+// ===========================================================================
+// INTERPOLATION — displayString defaults to printString (Impl step 3)
+// ===========================================================================
+
+// String interpolation pulls `displayString`, which defaults to
+// `printString`, so an embedded Value renders structurally inside the string.
+// (The REPL displays a top-level String result unquoted.)
+"{Point new}"
+// => Point(x: 0, y: 0)
+
+"point is {Point x: 3 y: 4}"
+// => point is Point(x: 3, y: 4)
+
+// ===========================================================================
+// RAW PRIMITIVE SANITY — a raw pid renders #Pid<...>, distinct from Actor(...)
+// ===========================================================================
+
+// An actor's raw underlying Pid is a genuine `Pid` primitive (distinct from
+// the typed actor wrapper). Its `printString` keeps the Erlang-native
+// `#Pid<...>` rendering — visibly different from the `Actor(Counter, <pid>)`
+// form above — confirming a typed actor and a raw process handle are different
+// things.
+c pid class
+// => Pid
+
+c pid printString
+// => #Pid<_>
