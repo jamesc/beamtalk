@@ -63,6 +63,24 @@ Response:
 - Capability discovery via `describe` operation
 - Legacy format auto-detection for backward compatibility
 
+**Source of the server-initiated pushes — two mechanisms (ADR 0093 §5).** This
+WebSocket boundary carries two kinds of server-initiated push, and they have
+**different** sources:
+
+- **Discrete, typed lifecycle events** (actor spawned/stopped, class
+  loaded/removed, and any future `{future_resolved}`-style notification a tool
+  wants to observe) are produced by the workspace handler subscribing to the
+  shared typed event bus from **ADR 0093** — `SystemAnnouncer current` emits
+  `ActorSpawned` / `ActorStopped` / `ClassLoaded` / `ClassRemoved` `Announcement`
+  subclasses, which the handler forwards as WebSocket pushes. The workspace does
+  **not** build a bespoke per-event subscribe/broadcast channel for these.
+- **Transcript line output** stays on its **own dedicated direct-push channel**
+  (`beamtalk_transcript_stream`, governed by this ADR and ADR 0017). Per ADR 0093
+  §5 it is a high-volume ordered byte/line *stream*, not a discrete typed domain
+  event, so it deliberately does **not** route through the announcements bus —
+  routing it there would add a hop, force per-line MRO matching, and make the
+  typed bus a throughput bottleneck.
+
 **Evolution:** The REPL protocol originally used raw TCP with newline-delimited JSON. ADR 0020 migrated to WebSocket for browser compatibility and cookie authentication. The operation semantics are unchanged.
 
 ### 2. Workspace ↔ Compiler: OTP Port + ETF
@@ -116,7 +134,7 @@ gen_server:cast(ActorPid, {increment, [], FuturePid}).
 - Location transparency — the same message protocol works for local and distributed (cross-node) actor communication
 - `doesNotUnderstand:args:` handler enables proxy and delegation patterns (Smalltalk DNU)
 
-**Future resolution** is a sub-protocol within this boundary. Futures are lightweight BEAM processes that transition through `pending → resolved | rejected` states. Waiters register via `{await, Pid}` messages and receive `{future_resolved, FuturePid, Value}` or `{future_rejected, FuturePid, Reason}` notifications. Futures self-terminate after 5 minutes of inactivity.
+**Future resolution** is a sub-protocol within this boundary. Futures are lightweight BEAM processes that transition through `pending → resolved | rejected` states. Waiters register via `{await, Pid}` messages and receive `{future_resolved, FuturePid, Value}` or `{future_rejected, FuturePid, Reason}` notifications. Futures self-terminate after 5 minutes of inactivity. This direct waiter-registration protocol is point-to-point and stays as-is; a *tool* that instead wants to **observe** future resolutions as discrete events (e.g. an IDE timeline pane) does so by subscribing to `SystemAnnouncer` (ADR 0093), not by adding another bespoke broadcast channel here.
 
 ## Prior Art
 
@@ -246,6 +264,7 @@ No code changes are required.
   - [ADR 0022](0022-embedded-compiler-via-otp-port.md) — Embedded Compiler via OTP Port
   - [ADR 0029](0029-streaming-eval-output.md) — Streaming Eval Output
   - [ADR 0043](0043-sync-by-default-actor-messaging.md) — Sync-by-Default Actor Messaging
+  - [ADR 0093](0093-announcements-event-substrate.md) — Announcements (Typed Event Substrate): source of the discrete actor/class/future lifecycle pushes (`SystemAnnouncer`); Transcript line streaming stays on `beamtalk_transcript_stream` per §5
 - Documentation:
   - `docs/repl-protocol.md` — REPL protocol specification
   - `docs/internal/beamtalk-protocols.md` — Internal protocol details (actor messaging, future resolution)
