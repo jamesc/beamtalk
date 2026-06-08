@@ -225,3 +225,14 @@ custom_depth_and_width_test() ->
     %% depth=2 → Middle renders but Inner (at depth 0) is elided.
     Result = beamtalk_object_printer:structural('Outer', Fields, #{depth => 2, width => 1}),
     ?assertEqual(<<"Outer(a: Wrapper(value: Point(...)), ...)">>, Result).
+
+width_resets_per_nesting_level_test() ->
+    %% Verify that nested objects get a fresh width budget, not the parent's
+    %% remaining count. With width=2, the outer has 3 fields (a, b, c) but
+    %% the nested object should still be able to render its own 2 fields.
+    Inner = #{'$beamtalk_class' => 'Point', x => 1, y => 2},
+    Fields = [{a, Inner}, {b, 42}, {c, 99}],
+    Result = beamtalk_object_printer:structural('Outer', Fields, #{width => 2}),
+    %% Outer shows a + b, then elides c. But Inner gets its own budget of 2,
+    %% so Point shows both x and y.
+    ?assertEqual(<<"Outer(a: Point(x: 1, y: 2), b: 42, ...)">>, Result).

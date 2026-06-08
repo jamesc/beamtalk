@@ -125,7 +125,8 @@ render_structural(ClassName, _Fields, 0, _Width, _Length, Seen) ->
 render_structural(ClassName, Fields, Depth, Width, Length, Seen) ->
     ClassBin = atom_to_binary(ClassName, utf8),
     SortedFields = lists:sort(Fields),
-    {FieldIoList, Seen2} = render_fields(SortedFields, Depth - 1, Width, Length, Seen, []),
+    %% Each nested level gets a fresh width budget (Width is the per-level cap).
+    {FieldIoList, Seen2} = render_fields(SortedFields, Depth - 1, Width, Width, Length, Seen, []),
     Result = iolist_to_binary([ClassBin, <<"(">>, FieldIoList, <<")">>]),
     {maybe_truncate(Result, Length), Seen2}.
 
@@ -134,20 +135,22 @@ render_structural(ClassName, Fields, Depth, Width, Length, Seen) ->
     non_neg_integer(),
     non_neg_integer(),
     non_neg_integer(),
+    non_neg_integer(),
     map(),
     list()
 ) ->
     {iolist(), map()}.
-render_fields([], _Depth, _Width, _Length, Seen, Acc) ->
+render_fields([], _Depth, _MaxWidth, _Remaining, _Length, Seen, Acc) ->
     {lists:join(<<", ">>, lists:reverse(Acc)), Seen};
-render_fields(_Fields, _Depth, 0, _Length, Seen, Acc) ->
+render_fields(_Fields, _Depth, _MaxWidth, 0, _Length, Seen, Acc) ->
     %% Width exhausted: append elision marker.
     {lists:join(<<", ">>, lists:reverse([?ELISION | Acc])), Seen};
-render_fields([{Name, Value} | Rest], Depth, Width, Length, Seen, Acc) ->
+render_fields([{Name, Value} | Rest], Depth, MaxWidth, Remaining, Length, Seen, Acc) ->
     NameBin = atom_to_binary(Name, utf8),
-    {ValueBin, Seen2} = render_value(Value, Depth, Width, Length, Seen),
+    %% Nested values get the full MaxWidth budget, not the parent's remaining count.
+    {ValueBin, Seen2} = render_value(Value, Depth, MaxWidth, Length, Seen),
     FieldBin = iolist_to_binary([NameBin, <<": ">>, ValueBin]),
-    render_fields(Rest, Depth, Width - 1, Length, Seen2, [FieldBin | Acc]).
+    render_fields(Rest, Depth, MaxWidth, Remaining - 1, Length, Seen2, [FieldBin | Acc]).
 
 -spec render_value(
     term(),
@@ -163,7 +166,12 @@ render_value(Value, Depth, Width, Length, Seen) when is_map(Value) ->
             %% Plain map — use printString.
             {beamtalk_primitive:print_string(Value), Seen};
         ClassName ->
-            %% Check cycle guard: use identity of the map reference.
+            %% Cycle guard: phash2 hashes by *value* (structural equality).
+            %% For immutable Values, structurally equal maps produce identical
+            %% output, so eliding a duplicate is correct. Hash collisions between
+            %% genuinely different maps are possible (~1 in 2^27) but benign —
+            %% the worst case is eliding a field that would have rendered differently.
+            %% True cycles cannot occur with immutable Values (ADR 0042).
             Id = erlang:phash2(Value),
             case maps:is_key(Id, Seen) of
                 true ->
