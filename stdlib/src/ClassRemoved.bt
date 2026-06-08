@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ClassRemoved — system event announced when a class is removed (ADR 0093).
+///
+/// Published on `SystemAnnouncer current` from `beamtalk_object_class`'s
+/// `terminate/2` when a class process shuts down (e.g. `removeFromSystem`). The
+/// event carries only the class name, so it is independent of the metadata-row
+/// deletion order.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: ClassRemoved do: [:e |
+///   Transcript showLine: e className asString
+/// ]
+/// ```
+sealed typed Announcement subclass: ClassRemoved
+  field: className :: Symbol = #unknown

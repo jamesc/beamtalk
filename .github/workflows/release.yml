@@ -337,6 +337,49 @@ jobs:
             ${{ steps.package.outputs.archive }}.sha256
           retention-days: 7
 
+  # ─── Notify beamtalk-uat acceptance gate (BT-2449) ──────────────────────
+  # After every platform's release archive is built and uploaded, fire a
+  # repository_dispatch into jamesc/beamtalk-uat so the UAT gate (BT-2253)
+  # runs against this exact published version. The consumer (BT-2451) listens
+  # for the event-type `beamtalk-release` and reads `version` + `tag` from the
+  # client-payload.
+  #
+  # Guarded by `github.event_name == 'release'` — the same condition that gates
+  # the real "Upload release asset" steps above — so dry-run / artifact-only
+  # invocations (workflow_dispatch) no-op cleanly and never dispatch.
+  notify-uat:
+    needs: [linux-x86_64, macos-x86_64, macos-arm64, windows-x86_64]
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # Re-resolve version/tag here (each build job computes these in its own
+      # runner; this is a separate job, so derive them the same way).
+      - name: Determine version
+        id: version
+        run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
+
+      - name: Dispatch UAT gate
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          # UAT_DISPATCH_TOKEN: a PAT / fine-grained token with
+          # `contents: write` (i.e. repository_dispatch) scope on
+          # jamesc/beamtalk-uat. It must be provisioned separately as a repo
+          # secret in this repo's settings — it is NOT GITHUB_TOKEN, which
+          # cannot dispatch across repositories.
+          token: ${{ secrets.UAT_DISPATCH_TOKEN }}
+          repository: jamesc/beamtalk-uat
+          event-type: beamtalk-release
+          client-payload: |
+            {
+              "version": "${{ steps.version.outputs.version }}",
+              "tag": "${{ steps.version.outputs.tag }}"
+            }
+
   # ─── VS Code extension (delegated to release-vscode.yml) ────────────────
   vscode-extension:
     uses: ./.github/workflows/release-vscode.yml

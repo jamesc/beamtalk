@@ -1362,6 +1362,40 @@ startChild_arity1_success_test() ->
         gen_server:stop(SupPid)
     end.
 
+startChild_announces_child_added_test() ->
+    %% BT-2445 / ADR 0093 §2: a successful startChild/1 publishes a
+    %% SupervisionChildAdded system announcement carrying the supervisor and
+    %% child class. Subscribe a fun handler on the bus, start a child, and assert
+    %% delivery with the right payload.
+    case whereis(beamtalk_announcements) of
+        undefined -> {ok, _} = beamtalk_announcements:start_link();
+        _ -> ok
+    end,
+    Collector = self(),
+    Handler = fun(Event) -> Collector ! {child_added, Event} end,
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'SupervisionChildAdded', self(), Handler, false
+    ),
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT2445DynWorker'),
+    set_child_class(ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT2445DynSup', ?MODULE, SupPid},
+        {ok, _Child} = beamtalk_supervisor:startChild(Self),
+        receive
+            {child_added, Event} ->
+                ?assertEqual('SupervisionChildAdded', maps:get('$beamtalk_class', Event)),
+                ?assertEqual('BT2445DynSup', maps:get(supervisor, Event)),
+                ?assertEqual('BT2445DynWorker', maps:get(childClass, Event))
+        after 1000 ->
+            ?assert(false)
+        end
+    after
+        beamtalk_announcements:unsubscribe(SubRef),
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
 startChild_arity2_success_test() ->
     %% BT-1980 / BT-1997: startChild/2 appends [Args] to the simple_one_for_one
     %% template. The template MFA is {?MODULE, start_worker, []}; with

@@ -131,6 +131,14 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     ensure_started/0
 ]).
 
+%% System emit points (ADR 0093 §2 — runtime publishes well-known system events
+%% on the singleton SystemAnnouncer). Called from runtime modules (e.g.
+%% beamtalk_object_class, beamtalk_actor, beamtalk_supervisor) at the triggering
+%% action, after the action's metadata writes commit.
+-export([
+    system_announce/2
+]).
+
 %% gen_server callbacks
 -export([
     init/1,
@@ -1052,14 +1060,24 @@ the event's `$beamtalk_class` key and dispatches.
 -spec 'announceOn'(announcer(), term()) -> nil.
 'announceOn'(_Announcer, Event) ->
     ensure_started(),
-    EventClass = event_class(Event),
-    %% For the stdlib veneer, invoke handlers caller-side rather than sending raw
-    %% messages to subscriber mailboxes: the raw `announce/2` sends
-    %% `{beamtalk_announcement, ...}` which requires a Beamtalk actor message loop
-    %% to process, but a veneer handler is a Block/{send,...} tuple. Each handler
-    %% runs in its own transient process (fire-and-forget) so a slow or crashing
-    %% handler never blocks the publisher or its siblings — async semantics
-    %% (ADR 0093 §1), mirroring the sync path's spawn_monitor minus the gather.
+    dispatch_veneer_async(event_class(Event), Event),
+    nil.
+
+-doc """
+Dispatch `Event` (an announcement payload map) asynchronously to every veneer
+subscriber of `EventClass` *or any of its ancestors* (MRO match).
+
+For the stdlib veneer, handlers are invoked caller-side rather than by sending
+raw `{beamtalk_announcement, ...}` messages to subscriber mailboxes: the raw
+`announce/2` requires a Beamtalk actor message loop to process, but a veneer
+handler is a Block / `{send, ...}` tuple. Each handler runs in its own transient
+process (fire-and-forget) so a slow or crashing handler never blocks the
+publisher or its siblings — async semantics (ADR 0093 §1), mirroring the sync
+path's `spawn_monitor` minus the gather. Shared by `announceOn/2` (per-instance
+announcers) and `system_announce/2` (the system bus).
+""".
+-spec dispatch_veneer_async(announcement_class(), term()) -> ok.
+dispatch_veneer_async(EventClass, Event) ->
     lists:foreach(
         fun(SubRef) ->
             case claim_row(SubRef) of
@@ -1083,7 +1101,26 @@ the event's `$beamtalk_class` key and dispatches.
         end,
         collect_matching(EventClass)
     ),
-    nil.
+    ok.
+
+-doc """
+Announce a well-known system event on the singleton `SystemAnnouncer` (ADR 0093
+§2). `EventClass` is the announcement subclass atom (e.g. `'ClassLoaded'`) and
+`Fields` is a map of its `field:` slots (e.g. `#{className => 'Counter'}`). Builds
+the immutable event payload — a tagged `Value` map of the same shape the stdlib
+keyword constructor produces — and dispatches it to system-bus subscribers via
+the async veneer path.
+
+Async-only and fault-isolated: callers in the runtime invoke this *after* the
+triggering action's metadata writes commit, and it never blocks or fails the
+caller (the dispatch is fire-and-forget per subscriber). A bus that is not yet
+started is started on demand via `ensure_started/0`. Returns `ok`.
+""".
+-spec system_announce(announcement_class(), map()) -> ok.
+system_announce(EventClass, Fields) when is_atom(EventClass), is_map(Fields) ->
+    ensure_started(),
+    Event = Fields#{'$beamtalk_class' => EventClass},
+    dispatch_veneer_async(EventClass, Event).
 
 -doc """
 Announce an event synchronously on a specific announcer (default 5s timeout).

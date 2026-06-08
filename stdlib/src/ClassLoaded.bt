@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ClassLoaded — system event announced when a class is loaded or redefined (ADR 0093).
+///
+/// Published on `SystemAnnouncer current` from `beamtalk_object_class` *after*
+/// the class's `beamtalk_class_metadata` row is written (announce-after-commit,
+/// ADR 0093 §2), so any subscriber that reads the class hierarchy sees a
+/// consistent view. Fires both on first load and on hot redefinition.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: ClassLoaded do: [:e |
+///   Transcript showLine: e className asString
+/// ]
+/// ```
+sealed typed Announcement subclass: ClassLoaded
+  field: className :: Symbol = #unknown
