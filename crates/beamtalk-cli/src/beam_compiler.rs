@@ -1014,43 +1014,74 @@ struct TypeCacheEntry {
     specs_line: String,
 }
 
-/// Manages the `_build/type_cache/` directory for incremental spec extraction.
+/// Manages the type-spec cache for incremental spec extraction.
 ///
-/// Each Erlang module gets a JSON file `<module>.json` containing the cached
-/// protocol line and the `.beam` file's mtime. On cache hit (matching mtime),
-/// the protocol line is replayed into the `NativeTypeRegistry` without spawning
-/// a BEAM node.
+/// Each Erlang module gets a JSON file `<module>_<pathhash>.json` containing
+/// the cached protocol line and the `.beam` file's mtime. On cache hit
+/// (matching mtime), the protocol line is replayed into the
+/// `NativeTypeRegistry` without spawning a BEAM node.
+///
+/// # Tiers (BT-2470)
+///
+/// The cache has two tiers:
+///
+/// * `local_dir` — the project-local `_build/type_cache/`. Always written, so
+///   on-disk consumers ([`load_type_cache_registry`] for `beamtalk lint`, and
+///   the LSP's `load_type_cache`) keep finding every module's specs unchanged.
+/// * `shared_dir` — an optional shared, OTP-version-keyed tier (see
+///   [`shared_otp_cache_dir`]). It survives `_build/` wipes and is reused
+///   across projects and sessions, so a freshly cloned workspace does not pay
+///   the cost of re-extracting hundreds of OTP modules. Only used for OTP
+///   extraction; dependency extraction passes `None`.
+///
+/// On a `local` miss the `shared` tier is consulted; a shared hit is mirrored
+/// back into the `local` tier so the on-disk consumers above see it. Writes go
+/// to both tiers.
 #[derive(Debug)]
 struct TypeCache {
-    cache_dir: Utf8PathBuf,
+    local_dir: Utf8PathBuf,
+    shared_dir: Option<Utf8PathBuf>,
 }
 
 impl TypeCache {
-    /// Creates a new type cache rooted at the given directory.
-    ///
-    /// The directory is created lazily on first write.
-    pub fn new(cache_dir: Utf8PathBuf) -> Self {
-        Self { cache_dir }
+    /// Creates a single-tier type cache rooted at the given (project-local)
+    /// directory. The directory is created lazily on first write.
+    pub fn new(local_dir: Utf8PathBuf) -> Self {
+        Self {
+            local_dir,
+            shared_dir: None,
+        }
     }
 
-    /// Returns the cache file path for a given Erlang module name and beam path.
+    /// Creates a two-tier cache: a project-local tier plus a shared,
+    /// OTP-version-keyed tier (BT-2470).
+    pub fn with_shared(local_dir: Utf8PathBuf, shared_dir: Utf8PathBuf) -> Self {
+        Self {
+            local_dir,
+            shared_dir: Some(shared_dir),
+        }
+    }
+
+    /// Returns the cache file path for a given Erlang module name and beam path
+    /// within `base`.
     ///
     /// The cache key incorporates a hash of the beam file's absolute path to
     /// prevent collisions when different projects have same-named `.beam` files
     /// (e.g., two projects both containing `my_app.beam` in the global stub cache).
-    fn cache_path(&self, module_name: &str, beam_path: &Utf8Path) -> Utf8PathBuf {
+    fn entry_path(base: &Utf8Path, module_name: &str, beam_path: &Utf8Path) -> Utf8PathBuf {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         beam_path.as_str().hash(&mut hasher);
         let path_hash = hasher.finish();
-        self.cache_dir
-            .join(format!("{module_name}_{path_hash:016x}.json"))
+        base.join(format!("{module_name}_{path_hash:016x}.json"))
     }
 
     /// Checks if the cache entry for `module_name` at `beam_path` is still valid.
     ///
     /// Returns `Some(specs_line)` if the cache is fresh (`.beam` mtime matches),
-    /// or `None` if the cache is stale or missing.
+    /// or `None` if the cache is stale or missing. The local tier is checked
+    /// first; on a miss the shared tier is consulted and any shared hit is
+    /// mirrored back into the local tier.
     fn lookup(
         &self,
         module_name: &str,
@@ -1058,7 +1089,77 @@ impl TypeCache {
         beam_mtime_secs: u64,
         beam_mtime_nanos: u32,
     ) -> Option<String> {
-        let path = self.cache_path(module_name, beam_path);
+        if let Some(line) = Self::read_fresh(
+            &self.local_dir,
+            module_name,
+            beam_path,
+            beam_mtime_secs,
+            beam_mtime_nanos,
+        ) {
+            return Some(line);
+        }
+        if let Some(shared) = &self.shared_dir {
+            if let Some(line) = Self::read_fresh(
+                shared,
+                module_name,
+                beam_path,
+                beam_mtime_secs,
+                beam_mtime_nanos,
+            ) {
+                // Mirror into the local tier so on-disk consumers (LSP, lint)
+                // find OTP specs in `_build/type_cache/` exactly as before.
+                Self::write_entry(
+                    &self.local_dir,
+                    module_name,
+                    beam_path,
+                    beam_mtime_secs,
+                    beam_mtime_nanos,
+                    &line,
+                );
+                return Some(line);
+            }
+        }
+        None
+    }
+
+    /// Writes a cache entry for the given module to both tiers.
+    fn store(
+        &self,
+        module_name: &str,
+        beam_path: &Utf8Path,
+        beam_mtime_secs: u64,
+        beam_mtime_nanos: u32,
+        specs_line: &str,
+    ) {
+        Self::write_entry(
+            &self.local_dir,
+            module_name,
+            beam_path,
+            beam_mtime_secs,
+            beam_mtime_nanos,
+            specs_line,
+        );
+        if let Some(shared) = &self.shared_dir {
+            Self::write_entry(
+                shared,
+                module_name,
+                beam_path,
+                beam_mtime_secs,
+                beam_mtime_nanos,
+                specs_line,
+            );
+        }
+    }
+
+    /// Reads a fresh cache entry from `base`, or `None` if missing/stale.
+    fn read_fresh(
+        base: &Utf8Path,
+        module_name: &str,
+        beam_path: &Utf8Path,
+        beam_mtime_secs: u64,
+        beam_mtime_nanos: u32,
+    ) -> Option<String> {
+        let path = Self::entry_path(base, module_name, beam_path);
         let content = std::fs::read_to_string(path.as_std_path()).ok()?;
         let entry: TypeCacheEntry = serde_json::from_str(&content).ok()?;
         if entry.beam_mtime_secs == beam_mtime_secs && entry.beam_mtime_nanos == beam_mtime_nanos {
@@ -1068,17 +1169,19 @@ impl TypeCache {
         }
     }
 
-    /// Writes a cache entry for the given module.
-    fn store(
-        &self,
+    /// Writes a single cache entry into `base`, creating the directory if
+    /// needed. The write is atomic (temp file + rename) so concurrent builds
+    /// sharing the OTP tier never observe a half-written entry (BT-2470).
+    fn write_entry(
+        base: &Utf8Path,
         module_name: &str,
         beam_path: &Utf8Path,
         beam_mtime_secs: u64,
         beam_mtime_nanos: u32,
         specs_line: &str,
     ) {
-        if let Err(e) = std::fs::create_dir_all(self.cache_dir.as_std_path()) {
-            debug!("Failed to create type cache dir: {e}");
+        if let Err(e) = std::fs::create_dir_all(base.as_std_path()) {
+            debug!("Failed to create type cache dir {base}: {e}");
             return;
         }
         // BT-2139: persist an absolute (canonicalised) path so freshness
@@ -1112,16 +1215,75 @@ impl TypeCache {
             beam_path: canonical_beam_path,
             specs_line: specs_line.to_string(),
         };
-        let path = self.cache_path(module_name, beam_path);
-        match serde_json::to_string(&entry) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(path.as_std_path(), json) {
-                    debug!("Failed to write type cache for {module_name}: {e}");
-                }
+        let path = Self::entry_path(base, module_name, beam_path);
+        let json = match serde_json::to_string(&entry) {
+            Ok(json) => json,
+            Err(e) => {
+                debug!("Failed to serialize type cache for {module_name}: {e}");
+                return;
             }
-            Err(e) => debug!("Failed to serialize type cache for {module_name}: {e}"),
+        };
+        // Atomic publish: write to a unique temp file then rename into place.
+        // The temp name includes the pid so concurrent writers don't clash.
+        let tmp = base.join(format!(
+            "{module_name}_{:016x}.{}.tmp",
+            {
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                beam_path.as_str().hash(&mut h);
+                h.finish()
+            },
+            std::process::id()
+        ));
+        if let Err(e) = std::fs::write(tmp.as_std_path(), &json) {
+            debug!("Failed to write type cache temp for {module_name}: {e}");
+            return;
+        }
+        if let Err(e) = std::fs::rename(tmp.as_std_path(), path.as_std_path()) {
+            debug!("Failed to publish type cache for {module_name}: {e}");
+            let _ = std::fs::remove_file(tmp.as_std_path());
         }
     }
+}
+
+/// Returns the shared, OTP-version-keyed type-spec cache directory for the
+/// given OTP version string, or `None` if no suitable base directory can be
+/// determined (BT-2470).
+///
+/// The OTP portion of the FFI type cache (stdlib, kernel, erts, crypto, …)
+/// only changes when the OTP/ERTS version changes — it is not project-specific.
+/// Caching it outside `_build/` lets a freshly cloned workspace (where
+/// `_build/type_cache/` does not yet exist) reuse a previous extraction instead
+/// of re-reading hundreds of `.beam` files on startup.
+///
+/// Base directory resolution, in priority order:
+/// 1. `BEAMTALK_CACHE_DIR` environment variable (explicit override, used by
+///    tests and CI cache mounts).
+/// 2. The platform cache directory ([`dirs::cache_dir`], which honours
+///    `XDG_CACHE_HOME` on Linux).
+///
+/// The version string is sanitised for filesystem safety, so an OTP upgrade
+/// (new version key) lands in a fresh sub-directory and never reuses
+/// stale-version entries.
+pub fn shared_otp_cache_dir(otp_version: &str) -> Option<Utf8PathBuf> {
+    let base = std::env::var_os("BEAMTALK_CACHE_DIR")
+        .map(std::path::PathBuf::from)
+        .or_else(dirs::cache_dir)?;
+    let base = Utf8PathBuf::from_path_buf(base).ok()?;
+    let version_key: String = otp_version
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if version_key.is_empty() {
+        return None;
+    }
+    Some(base.join("beamtalk").join("otp-specs").join(version_key))
 }
 
 /// Extracts type specs from `.beam` files and populates a `NativeTypeRegistry`.
@@ -1149,16 +1311,48 @@ impl TypeCache {
 /// # Errors
 ///
 /// Returns an error if the build worker cannot be started (runtime not compiled).
-#[instrument(skip_all, fields(beam_count = beam_files.len()))]
 pub fn extract_beam_specs(
     beam_files: &[Utf8PathBuf],
     cache_dir: &Utf8Path,
+) -> Result<NativeTypeRegistry> {
+    extract_beam_specs_with_cache(beam_files, &TypeCache::new(cache_dir.to_path_buf()))
+}
+
+/// Like [`extract_beam_specs`], but adds a shared, OTP-version-keyed cache tier
+/// (BT-2470) in front of the project-local `local_cache_dir`.
+///
+/// On a fresh `_build/` (e.g. a newly cloned workspace) the local tier misses
+/// for every OTP module, but a warm shared tier — populated by a previous build
+/// in any project — supplies the specs without re-reading hundreds of `.beam`
+/// files. Shared hits are mirrored into the local tier so the LSP and
+/// `beamtalk lint` keep loading OTP specs from `_build/type_cache/` unchanged.
+///
+/// Passing `shared_cache_dir = None` is equivalent to [`extract_beam_specs`].
+///
+/// # Errors
+///
+/// Returns an error if the build worker cannot be started (runtime not compiled).
+pub fn extract_beam_specs_tiered(
+    beam_files: &[Utf8PathBuf],
+    local_cache_dir: &Utf8Path,
+    shared_cache_dir: Option<&Utf8Path>,
+) -> Result<NativeTypeRegistry> {
+    let cache = match shared_cache_dir {
+        Some(shared) => TypeCache::with_shared(local_cache_dir.to_path_buf(), shared.to_path_buf()),
+        None => TypeCache::new(local_cache_dir.to_path_buf()),
+    };
+    extract_beam_specs_with_cache(beam_files, &cache)
+}
+
+#[instrument(skip_all, fields(beam_count = beam_files.len()))]
+fn extract_beam_specs_with_cache(
+    beam_files: &[Utf8PathBuf],
+    cache: &TypeCache,
 ) -> Result<NativeTypeRegistry> {
     if beam_files.is_empty() {
         return Ok(NativeTypeRegistry::new());
     }
 
-    let cache = TypeCache::new(cache_dir.to_path_buf());
     let mut registry = NativeTypeRegistry::new();
 
     // Phase 1: Check cache, partition into hits and misses.
@@ -1551,16 +1745,28 @@ fn read_specs_protocol(
     Ok(results)
 }
 
-/// Discovers `.beam` files on the OTP code path.
+/// Result of probing the OTP installation for spec extraction (BT-2470).
+#[derive(Debug, Default, Clone)]
+pub struct OtpDiscovery {
+    /// OTP version key (`<otp_release>-<erts_version>`, e.g. `27-15.0.1`) used
+    /// to key the shared type-spec cache. `None` if the probe could not report
+    /// it, in which case the shared cache tier is skipped.
+    pub version: Option<String>,
+    /// Absolute paths to all `.beam` files in the common OTP library ebins.
+    pub beam_files: Vec<Utf8PathBuf>,
+}
+
+/// Discovers `.beam` files on the OTP code path and the OTP version.
 ///
 /// Returns absolute paths to all `.beam` files in common OTP library ebin
-/// directories (`stdlib`, `kernel`, etc.). Used to find modules available
-/// for spec extraction.
+/// directories (`stdlib`, `kernel`, etc.) plus an OTP/ERTS version key. Used to
+/// find modules available for spec extraction and to key the shared type-spec
+/// cache.
 ///
 /// # Errors
 ///
 /// Returns an error if `erl` cannot be invoked to discover the OTP lib directory.
-pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
+pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
     // Apps we want type specs from. `erts` is included so `erlang.beam`
     // (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets covered — its specs
     // are on disk even though `code:which(erlang)` returns `preloaded`. BT-2159.
@@ -1574,8 +1780,11 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
     ];
 
     let apps_atom_list = COMMON_APPS.join(",");
+    // The probe prints one `otp-version:<release>-<erts>` line (the shared
+    // cache key, BT-2470) followed by one ebin directory per discovered app.
     let probe = format!(
-        "lists:foreach(fun(App) -> case code:lib_dir(App) of {{error,_}} -> ok; Dir -> io:format(\"~s~n\", [filename:join(Dir, \"ebin\")]) end end, [{apps_atom_list}]), halt()."
+        "io:format(\"otp-version:~s-~s~n\", [erlang:system_info(otp_release), erlang:system_info(version)]), \
+         lists:foreach(fun(App) -> case code:lib_dir(App) of {{error,_}} -> ok; Dir -> io:format(\"~s~n\", [filename:join(Dir, \"ebin\")]) end end, [{apps_atom_list}]), halt()."
     );
 
     let output = Command::new("erl")
@@ -1596,13 +1805,21 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
             output.status,
             stderr_msg.trim()
         );
-        return Ok(Vec::new());
+        return Ok(OtpDiscovery::default());
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut version = None;
     let mut beam_files = Vec::new();
     for line in stdout.lines() {
-        let ebin_dir = std::path::Path::new(line.trim());
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("otp-version:") {
+            if !v.is_empty() {
+                version = Some(v.to_string());
+            }
+            continue;
+        }
+        let ebin_dir = std::path::Path::new(line);
         if !ebin_dir.is_dir() {
             continue;
         }
@@ -1618,8 +1835,15 @@ pub fn discover_otp_beam_files() -> Result<Vec<Utf8PathBuf>> {
         }
     }
 
-    debug!(count = beam_files.len(), "Discovered OTP .beam files");
-    Ok(beam_files)
+    debug!(
+        count = beam_files.len(),
+        version = ?version,
+        "Discovered OTP .beam files"
+    );
+    Ok(OtpDiscovery {
+        version,
+        beam_files,
+    })
 }
 
 /// Discover `.beam` files from project dependency directories.
@@ -2211,18 +2435,95 @@ end
         );
     }
 
+    /// BT-2470: a fresh project (empty local tier) resolves OTP specs via the
+    /// shared tier, and the shared hit is mirrored into the local tier so the
+    /// LSP and `beamtalk lint` keep finding specs in `_build/type_cache/`.
+    #[test]
+    fn type_cache_shared_tier_serves_and_mirrors_to_local() {
+        let temp = TempDir::new().unwrap();
+        let shared = Utf8PathBuf::from_path_buf(temp.path().join("shared")).unwrap();
+        let beam = Utf8Path::new("/usr/lib/erlang/lib/stdlib/ebin/lists.beam");
+
+        // A prior build in some project populates both its local tier and the
+        // shared tier.
+        let producer_local = Utf8PathBuf::from_path_buf(temp.path().join("producer")).unwrap();
+        let producer = TypeCache::with_shared(producer_local, shared.clone());
+        producer.store("lists", beam, 200, 5, "specs_for_lists");
+
+        // A freshly cloned workspace has an empty local tier but the same shared
+        // tier — the lookup still succeeds.
+        let fresh_local = Utf8PathBuf::from_path_buf(temp.path().join("fresh")).unwrap();
+        let consumer = TypeCache::with_shared(fresh_local.clone(), shared);
+        assert_eq!(
+            consumer.lookup("lists", beam, 200, 5),
+            Some("specs_for_lists".to_string()),
+            "shared tier should serve a fresh project's local miss"
+        );
+
+        // The shared hit was mirrored into the fresh local tier: a local-only
+        // cache (no shared tier) now finds it too.
+        let local_only = TypeCache::new(fresh_local);
+        assert_eq!(
+            local_only.lookup("lists", beam, 200, 5),
+            Some("specs_for_lists".to_string()),
+            "shared hit should be mirrored into the local tier for the LSP/lint"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(beamtalk_cache_env)]
+    fn shared_otp_cache_dir_uses_env_override_and_sanitises_version() {
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().to_string_lossy().to_string();
+        // SAFETY: serialised via #[serial]; the var is removed before returning.
+        unsafe {
+            std::env::set_var("BEAMTALK_CACHE_DIR", &base);
+        }
+        let dir = shared_otp_cache_dir("27/15.0:weird");
+        // SAFETY: serialised via #[serial]; restores the unset state.
+        unsafe {
+            std::env::remove_var("BEAMTALK_CACHE_DIR");
+        }
+        let dir = dir.expect("shared cache dir should resolve under the override");
+        assert!(
+            dir.starts_with(&base),
+            "shared cache dir should honour BEAMTALK_CACHE_DIR: {dir}"
+        );
+        assert!(
+            dir.as_str().ends_with("beamtalk/otp-specs/27-15.0-weird"),
+            "version key should be filesystem-sanitised: {dir}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(beamtalk_cache_env)]
+    fn shared_otp_cache_dir_rejects_empty_version() {
+        let temp = TempDir::new().unwrap();
+        // SAFETY: serialised via #[serial]; the var is removed before returning.
+        unsafe {
+            std::env::set_var("BEAMTALK_CACHE_DIR", temp.path());
+        }
+        let dir = shared_otp_cache_dir("");
+        // SAFETY: serialised via #[serial]; restores the unset state.
+        unsafe {
+            std::env::remove_var("BEAMTALK_CACHE_DIR");
+        }
+        assert!(dir.is_none(), "empty version must not yield a cache dir");
+    }
+
     /// BT-2159: `erts` must be in the OTP discovery set so `erlang.beam`
     /// (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets spec extraction.
     /// `code:which(erlang)` returns `preloaded`, but the `.beam` exists in
     /// `<erts-app>/ebin/erlang.beam` with full abstract code.
     #[test]
     fn discover_otp_beam_files_includes_erts() {
-        let Ok(beams) = discover_otp_beam_files() else {
+        let Ok(discovery) = discover_otp_beam_files() else {
             // Skip only when `erl` cannot be spawned (test env without Erlang).
             // A successful probe that returns zero beams is a real failure and
             // is caught by the assert below.
             return;
         };
+        let beams = &discovery.beam_files;
         let has_erlang = beams
             .iter()
             .any(|p| p.file_stem().is_some_and(|s| s == "erlang"));
@@ -2231,6 +2532,12 @@ end
             "discover_otp_beam_files must include erts/ebin/erlang.beam so BIF specs reach NativeTypeRegistry (BT-2159). Got {} beams: {:?}",
             beams.len(),
             beams
+        );
+        // BT-2470: a successful probe must also report the OTP version key
+        // used to scope the shared type-spec cache.
+        assert!(
+            discovery.version.is_some(),
+            "discover_otp_beam_files must report an OTP version key for the shared cache"
         );
     }
 
