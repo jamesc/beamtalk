@@ -60,29 +60,18 @@ write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
     {Value, NewState}.
 
 -doc """
-Generates an inspect string for an object: "ClassName (field1: val1, field2: val2)".
+Generates a structural string for an object: `ClassName(field1: val1, field2: val2)`.
+
+ADR 0094 (Critical Risk #4): delegates to the canonical structural renderer
+(`beamtalk_object_printer`) so every value/object formatter produces
+byte-identical output. There are no independent formatters left.
 
 BT-446: Extracted from beamtalk_object_ops:dispatch/4 so that compiled
 Object modules can call it from generated dispatch/4 code.
 """.
 -spec inspect_string(map()) -> binary().
 inspect_string(State) when is_map(State) ->
-    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
-    UserFields = field_names(State),
-    FieldStrs = [
-        iolist_to_binary([
-            format_key(K),
-            <<": ">>,
-            beamtalk_primitive:print_string(maps:get(K, State))
-        ])
-     || K <- UserFields
-    ],
-    FieldsPart =
-        case FieldStrs of
-            [] -> <<"">>;
-            _ -> iolist_to_binary([<<" (">>, lists:join(<<", ">>, FieldStrs), <<")">>])
-        end,
-    iolist_to_binary([atom_to_binary(ClassName, utf8), FieldsPart]).
+    beamtalk_object_printer:structural_from_state(State).
 
 -doc """
 Read the beamtalk_source file path from a compiled module's attributes.
@@ -104,7 +93,3 @@ source_file_from_module(ModuleName) ->
     catch
         error:badarg -> nil
     end.
-
--doc "Format a field key as binary.".
--spec format_key(atom()) -> binary().
-format_key(K) when is_atom(K) -> atom_to_binary(K, utf8).
