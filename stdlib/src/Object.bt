@@ -80,10 +80,20 @@ ProtoObject subclass: Object
   ifNotNil: notNilBlock :: Block ifNil: _nilBlock :: Block =>
     notNilBlock value: self
 
-  /// Return a developer-readable string representation.
+  /// Return the developer-readable (Debug) string representation.
   ///
-  /// Default implementation returns the bare class name. Subclasses such as
-  /// Integer, String, and List override this to return richer output.
+  /// `printString` is the **Debug** protocol (ADR 0094): the self-describing,
+  /// structural form used by the REPL, logs, and by any *other* `printString`
+  /// that nests this object. It is the REPL default — evaluating an expression
+  /// shows its `printString`.
+  ///
+  /// This default returns the **bare class name** (no `a`/`an` article — the
+  /// old `"a ClassName"` form was dropped in ADR 0094). `Value` overrides it
+  /// with the structural `ClassName(field: value, ...)` form, actors render as
+  /// `Actor(ClassName, pid)`, supervisors as `Supervisor(ClassName, pid)` /
+  /// `DynamicSupervisor(ClassName, pid)`, and primitive types (Integer, String,
+  /// List, …) override it with their own richer output. Authors rarely override
+  /// `printString` directly — the default is derived.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -91,11 +101,22 @@ ProtoObject subclass: Object
   /// ```
   printString -> String => self class name asString
 
-  /// Return a user-facing string representation for display purposes.
+  /// Return the user-facing (Display) string representation.
   ///
-  /// Default implementation delegates to `printString`. Subclasses such as
-  /// String and Symbol override this to return a more readable form without
-  /// developer annotations (e.g. no surrounding quotes or `#` prefix).
+  /// `displayString` is the **Display** protocol (ADR 0094): the human-facing
+  /// form. It is the hook the **language** pulls during string interpolation —
+  /// every `{...}` segment renders via the value's `displayString`. Developers
+  /// rarely call it directly; they **override** it when a value has a natural
+  /// human rendering (e.g. `Money` → `$10.50`, where `printString` would still
+  /// show the Debug form).
+  ///
+  /// It **defaults to `printString`**, so most types need no override. `String`
+  /// and `Symbol` demonstrate the split: `"hi" printString` → `"\"hi\""`
+  /// (quoted, Debug) while `"hi" displayString` → `"hi"` (plain, Display);
+  /// likewise `#foo` drops its `#` prefix under `displayString`.
+  ///
+  /// `displayString` is **not** part of the `Printable` protocol (deferred per
+  /// ADR 0094 §5).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -104,6 +125,12 @@ ProtoObject subclass: Object
   displayString -> String => self printString
 
   /// Inspect the receiver.
+  ///
+  /// Unchanged by ADR 0094: `inspect` still returns a `String` and delegates to
+  /// `printString`, so it shares the structural Debug form with a single source
+  /// of truth. Its planned redesign into a rich, navigable tooling/action verb
+  /// is deferred to a follow-up ADR designed against the LiveView surface
+  /// (BT-2397).
   ///
   /// ## Examples
   /// ```beamtalk
