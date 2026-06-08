@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ActorSpawned — system event announced when a Beamtalk actor starts (ADR 0093).
+///
+/// Published on `SystemAnnouncer current` from the actor process's `init/1`,
+/// after the actor is live. Tools (IDE panes, the VSCode sidebar, the remote
+/// workspace front) subscribe once and react to actor lifecycle without wiring a
+/// bespoke registry-notification channel.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: ActorSpawned do: [:e |
+///   Transcript showLine: e actorClass asString
+/// ]
+/// Counter spawn   // subscription fires: prints "Counter"
+/// ```
+sealed typed Announcement subclass: ActorSpawned
+  field: actorClass :: Symbol = #unknown
+  field: pid :: Pid | Nil = nil

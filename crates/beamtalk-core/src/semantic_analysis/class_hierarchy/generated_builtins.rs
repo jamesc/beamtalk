@@ -19,6 +19,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
     matches!(
         name,
         "Actor"
+            | "ActorSpawned"
+            | "ActorStopped"
             | "Announcement"
             | "Announcer"
             | "Array"
@@ -28,6 +30,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "BeamtalkInterface"
             | "Behaviour"
             | "Binary"
+            | "BindingChanged"
             | "BindingsView"
             | "Block"
             | "Boolean"
@@ -36,6 +39,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Character"
             | "Class"
             | "ClassBuilder"
+            | "ClassLoaded"
+            | "ClassRemoved"
             | "Collection"
             | "CompiledMethod"
             | "DateTime"
@@ -82,6 +87,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "String"
             | "Subprocess"
             | "Subscription"
+            | "SupervisionChildAdded"
+            | "SupervisionChildCrashed"
             | "SupervisionNode"
             | "SupervisionSpec"
             | "SupervisionTree"
@@ -158,6 +165,54 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isSupervisor".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this class is a supervisor.\n\nReturns `false` for Actor subclasses. Supervisor and DynamicSupervisor\nsubclasses override this to return `true`. Used by `SupervisionSpec childSpec`\nto determine OTP `type` (`#worker` vs `#supervisor`) and `shutdown` timeout.\n\n## Examples\n```beamtalk\nCounter isSupervisor   // => false\nWebApp isSupervisor    // => true (if WebApp subclasses Supervisor)\n```".into()) },
                 MethodInfo { selector: "supervisionSpec".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Actor".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SupervisionSpec".into()), param_types: vec![], doc: Some("Return a SupervisionSpec for this actor class with default settings.\n\nCreates a SupervisionSpec with `actorClass` set to the receiver and\n`restart` set from `supervisionPolicy`. Use the fluent `with*:` API to\noverride per-child settings:\n\n## Examples\n```beamtalk\nDatabasePool supervisionSpec\n    // => SupervisionSpec with actorClass: DatabasePool, restart: #temporary\n\nDatabasePool supervisionSpec withId: #primary withArgs: #{#role => #primary}\n```".into()) },
             ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "ActorSpawned".into(),
+        ClassInfo {
+            name: "ActorSpawned".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["actorClass".into(), "pid".into()],
+            state_types: HashMap::from([("actorClass".into(), "Symbol".into()), ("pid".into(), "Pid | Nil".into())]),
+            state_has_default: HashMap::from([("actorClass".into(), true), ("pid".into(), true)]),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "ActorStopped".into(),
+        ClassInfo {
+            name: "ActorStopped".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["actorClass".into(), "pid".into(), "reason".into()],
+            state_types: HashMap::from([("actorClass".into(), "Symbol".into()), ("pid".into(), "Pid | Nil".into()), ("reason".into(), "Symbol".into())]),
+            state_has_default: HashMap::from([("actorClass".into(), true), ("pid".into(), true), ("reason".into(), true)]),
+            methods: vec![],
+            class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],
@@ -503,6 +558,30 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "BindingChanged".into(),
+        ClassInfo {
+            name: "BindingChanged".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["name".into(), "value".into()],
+            state_types: HashMap::from([("name".into(), "Symbol".into()), ("value".into(), "Object | Nil".into())]),
+            state_has_default: HashMap::from([("name".into(), true), ("value".into(), true)]),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "BindingsView".into(),
         ClassInfo {
             name: "BindingsView".into(),
@@ -825,6 +904,54 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "native:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![Some("Symbol".into())], doc: Some("Set the backing Erlang module for a native Actor class.\n\nWhen set, the `register` call will link this Beamtalk class to the\nnamed Erlang module, enabling `self delegate` dispatch.\n\n## Examples\n```beamtalk\nbuilder native: #beamtalk_subprocess\n```".into()) },
                 MethodInfo { selector: "register".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ClassBuilder".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Register the class with the runtime and return the new class object.\nStops the builder process after registration — the builder is\nsingle-use and should not be retained.\n\nCalled from compiled module init, wires the BEAM module's pre-compiled\nmethods into the class gen_server. If the class already exists (hot\nreload), updates the existing gen_server state via `update_class/2`\nrather than failing.".into()) },
             ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "ClassLoaded".into(),
+        ClassInfo {
+            name: "ClassLoaded".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["className".into()],
+            state_types: HashMap::from([("className".into(), "Symbol".into())]),
+            state_has_default: HashMap::from([("className".into(), true)]),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "ClassRemoved".into(),
+        ClassInfo {
+            name: "ClassRemoved".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["className".into()],
+            state_types: HashMap::from([("className".into(), "Symbol".into())]),
+            state_has_default: HashMap::from([("className".into(), true)]),
+            methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
@@ -2564,6 +2691,54 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "unsubscribe".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subscription".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Remove exactly this subscription (the SubRef's row) from the bus.\nIdempotent — unsubscribing an already-removed subscription is a no-op.\n\n## Examples\n```beamtalk\nsub unsubscribe   // => nil\n```".into()) },
                 MethodInfo { selector: "isActive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subscription".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this subscription is still active (the SubRef row exists in ETS).\nReturns `false` after `unsubscribe` or after the subscriber process died.\n\n## Examples\n```beamtalk\nsub isActive   // => true\nsub unsubscribe\nsub isActive   // => false\n```".into()) },
             ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "SupervisionChildAdded".into(),
+        ClassInfo {
+            name: "SupervisionChildAdded".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["supervisor".into(), "childClass".into(), "childPid".into()],
+            state_types: HashMap::from([("supervisor".into(), "Symbol".into()), ("childClass".into(), "Symbol".into()), ("childPid".into(), "Pid | Nil".into())]),
+            state_has_default: HashMap::from([("supervisor".into(), true), ("childClass".into(), true), ("childPid".into(), true)]),
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "SupervisionChildCrashed".into(),
+        ClassInfo {
+            name: "SupervisionChildCrashed".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["supervisor".into(), "childClass".into(), "childPid".into(), "reason".into()],
+            state_types: HashMap::from([("supervisor".into(), "Symbol".into()), ("childClass".into(), "Symbol".into()), ("childPid".into(), "Pid | Nil".into()), ("reason".into(), "Symbol".into())]),
+            state_has_default: HashMap::from([("supervisor".into(), true), ("childClass".into(), true), ("childPid".into(), true), ("reason".into(), true)]),
+            methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],

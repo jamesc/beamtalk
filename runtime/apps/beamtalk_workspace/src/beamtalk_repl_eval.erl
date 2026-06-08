@@ -610,10 +610,38 @@ process_eval_result(Result, Expression, CleanBindings, State) ->
     case extract_assignment(Expression) of
         {ok, VarName} ->
             NewBindings = CleanBindings#{VarName => Result},
+            %% ADR 0093 §2 (BT-2445): a workspace assignment (`x := ...`) is a
+            %% BindingChanged system event. Announced after the new binding map is
+            %% built; best-effort and fault-isolated (see announce_binding_changed/2).
+            announce_binding_changed(VarName, Result),
             {ok, Result, beamtalk_repl_state:set_bindings(NewBindings, State)};
         none ->
             {ok, Result, beamtalk_repl_state:set_bindings(CleanBindings, State)}
     end.
+
+-doc """
+Announce `BindingChanged` on the `SystemAnnouncer` bus after a workspace variable
+is assigned (ADR 0093 §2, BT-2445).
+
+Guarded by a `whereis` check (the announcements worker may be absent on a
+minimal runtime) and wrapped in try/catch: announcing is a best-effort
+observability side effect and must never fail or delay the eval reply.
+""".
+-spec announce_binding_changed(atom(), term()) -> ok.
+announce_binding_changed(VarName, Value) ->
+    case erlang:whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _Pid ->
+            try
+                beamtalk_announcements:system_announce('BindingChanged', #{
+                    name => VarName, value => Value
+                })
+            catch
+                _:_ -> ok
+            end
+    end,
+    ok.
 
 -doc "Purge eval module if no living actors reference it.".
 -spec cleanup_module(atom(), pid() | undefined) -> ok.

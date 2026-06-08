@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SupervisionChildAdded — system event announced when a supervisor starts a
+/// child (ADR 0093, consumer ADR 0092).
+///
+/// Published on `SystemAnnouncer current` from `beamtalk_supervisor` after a
+/// DynamicSupervisor successfully starts a child via `startChild` / `startChild:`.
+/// Tooling subscribes to keep a live view of the supervision tree without a
+/// bespoke delta channel.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: SupervisionChildAdded do: [:e |
+///   Transcript showLine: e childClass asString
+/// ]
+/// ```
+sealed typed Announcement subclass: SupervisionChildAdded
+  field: supervisor :: Symbol = #unknown
+  field: childClass :: Symbol = #unknown
+  field: childPid :: Pid | Nil = nil

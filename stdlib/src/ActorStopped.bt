@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ActorStopped — system event announced when a Beamtalk actor terminates (ADR 0093).
+///
+/// Published on `SystemAnnouncer current` from the actor process's `terminate/2`.
+/// The `reason` field distinguishes a normal shutdown from a crash, mirroring the
+/// lifecycle telemetry stop event (ADR 0069 §4 — an actor stop can legitimately
+/// produce both a telemetry counter and an announcement).
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: ActorStopped do: [:e |
+///   Transcript showLine: e actorClass asString
+/// ]
+/// ```
+sealed typed Announcement subclass: ActorStopped
+  field: actorClass :: Symbol = #unknown
+  field: pid :: Pid | Nil = nil
+  field: reason :: Symbol = #normal

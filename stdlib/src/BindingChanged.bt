@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// BindingChanged — system event announced when a workspace binding changes (ADR 0093).
+///
+/// Published on `SystemAnnouncer current` when a workspace variable binding is
+/// created or updated (e.g. `x := 5` in the REPL). The remote workspace front
+/// (ADR 0091) subscribes to keep its bindings pane live.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: BindingChanged do: [:e |
+///   Transcript showLine: e name asString
+/// ]
+/// ```
+sealed typed Announcement subclass: BindingChanged
+  field: name :: Symbol = #unknown
+  field: value :: Object | Nil = nil

@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for system Announcement subclasses + runtime emit points (BT-2445).
+//
+// Each test subscribes to a well-known system event on `SystemAnnouncer current`,
+// performs the triggering action, and asserts the event was received. Handlers
+// run in transient processes, so cross-process state is captured via Ets.
+
+TestCase subclass: SystemAnnouncementsTest
+
+  // --- The system event classes exist and are Announcements ---
+  testEventClassesAreAnnouncements =>
+    self assert: (ActorSpawned new isKindOf: Announcement) equals: true
+    self assert: (ActorStopped new isKindOf: Announcement) equals: true
+    self assert: (ClassLoaded new isKindOf: Announcement) equals: true
+    self assert: (ClassRemoved new isKindOf: Announcement) equals: true
+    self assert: (BindingChanged new isKindOf: Announcement) equals: true
+    self assert: (SupervisionChildAdded new isKindOf: Announcement) equals: true
+    self assert: (SupervisionChildCrashed new isKindOf: Announcement) equals: true
+
+  // --- ActorSpawned fires when an actor is spawned ---
+  testActorSpawnedFiresOnSpawn =>
+    table := Ets new: #sysActorSpawned type: #set
+    // Filter to Counter: the SystemAnnouncer is a global singleton, so under
+    // parallel test execution other actors may spawn concurrently. Recording
+    // only Counter events keeps the assertion deterministic.
+    sub := SystemAnnouncer current when: ActorSpawned do: [:e |
+      e actorClass =:= #Counter ifTrue: [table at: #class put: e actorClass]
+    ]
+    Counter spawn
+    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #class) equals: #Counter
+    sub unsubscribe
+    table delete
+
+  // --- ActorStopped fires when an actor stops ---
+  testActorStoppedFiresOnStop =>
+    table := Ets new: #sysActorStopped type: #set
+    // Filter to Counter — see testActorSpawnedFiresOnSpawn (global singleton bus).
+    // Record only a graceful Counter stop (reason #normal); any concurrent
+    // foreign or abnormal stop on the global bus is ignored.
+    sub := SystemAnnouncer current
+      when: ActorStopped
+      do: [:e |
+        (e actorClass =:= #Counter and: [e reason =:= #normal])
+          ifTrue: [
+            table at: #class put: e actorClass
+            table at: #reason put: e reason
+          ]
+      ]
+    counter := Counter spawn
+    counter stop
+    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]
+    self assert: (table at: #class) equals: #Counter
+    self assert: (table at: #reason) equals: #normal
+    sub unsubscribe
+    table delete

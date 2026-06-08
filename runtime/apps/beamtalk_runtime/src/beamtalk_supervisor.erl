@@ -437,6 +437,7 @@ startChild(Self) ->
                     child_pid => ChildPid,
                     domain => [beamtalk, runtime]
                 }),
+                announce_child_added(SupClass, ChildClass, ChildPid),
                 {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
             {error, Reason} ->
                 ?LOG_ERROR("DynamicSupervisor child start failed", #{
@@ -445,6 +446,7 @@ startChild(Self) ->
                     reason => Reason,
                     domain => [beamtalk, runtime]
                 }),
+                announce_child_crashed(SupClass, ChildClass, Reason),
                 Error = beamtalk_error:new(
                     child_start_failed,
                     SupClass,
@@ -492,6 +494,7 @@ startChild(Self, Args) ->
                     child_pid => ChildPid,
                     domain => [beamtalk, runtime]
                 }),
+                announce_child_added(SupClass, ChildClass, ChildPid),
                 {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
             {error, Reason} ->
                 ?LOG_ERROR("DynamicSupervisor child start failed", #{
@@ -500,6 +503,7 @@ startChild(Self, Args) ->
                     reason => Reason,
                     domain => [beamtalk, runtime]
                 }),
+                announce_child_crashed(SupClass, ChildClass, Reason),
                 Error = beamtalk_error:new(
                     child_start_failed,
                     SupClass,
@@ -955,6 +959,65 @@ wrap_child(ChildClass, ChildModule, ChildPid) ->
         true -> {beamtalk_supervisor, ChildClass, ChildModule, ChildPid};
         false -> {beamtalk_object, ChildClass, ChildModule, ChildPid}
     end.
+
+-doc """
+Announce `SupervisionChildAdded` on the `SystemAnnouncer` bus after a
+DynamicSupervisor successfully starts a child (ADR 0093 §2 / ADR 0092, BT-2445).
+Best-effort and fault-isolated — see `announce_supervision/2`.
+""".
+-spec announce_child_added(atom(), atom(), pid()) -> ok.
+announce_child_added(SupClass, ChildClass, ChildPid) ->
+    announce_supervision('SupervisionChildAdded', #{
+        supervisor => SupClass, childClass => ChildClass, childPid => ChildPid
+    }).
+
+-doc """
+Announce `SupervisionChildCrashed` on the `SystemAnnouncer` bus when a
+DynamicSupervisor child fails to start (ADR 0093 §2 / ADR 0092, BT-2445). The
+arbitrary OTP failure `Reason` is normalised to a Symbol for the typed event
+payload. Best-effort and fault-isolated — see `announce_supervision/2`.
+""".
+-spec announce_child_crashed(atom(), atom(), term()) -> ok.
+announce_child_crashed(SupClass, ChildClass, Reason) ->
+    announce_supervision('SupervisionChildCrashed', #{
+        supervisor => SupClass,
+        childClass => ChildClass,
+        childPid => nil,
+        reason => normalize_crash_reason(Reason)
+    }).
+
+-doc """
+Normalise an OTP `supervisor:start_child/2` failure reason to a stable Symbol
+for the `SupervisionChildCrashed` event payload (BT-2445): a leading atom is
+kept (e.g. `already_present`), anything else collapses to `child_start_failed`.
+Keeps the typed `reason :: Symbol` field flat (the full reason is in the returned
+`#beamtalk_error{}` for diagnostics).
+""".
+-spec normalize_crash_reason(term()) -> atom().
+normalize_crash_reason(Reason) when is_atom(Reason) -> Reason;
+normalize_crash_reason({Reason, _}) when is_atom(Reason) -> Reason;
+normalize_crash_reason(_Reason) -> child_start_failed.
+
+-doc """
+Emit a supervision-lifecycle system event on the `SystemAnnouncer` bus.
+
+Guarded by a `whereis` check (the announcements worker starts after bootstrap)
+and wrapped in try/catch: announcing is a best-effort observability side effect
+and must never fail or delay the supervision operation.
+""".
+-spec announce_supervision(atom(), map()) -> ok.
+announce_supervision(EventClass, Fields) ->
+    case erlang:whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _Pid ->
+            try
+                beamtalk_announcements:system_announce(EventClass, Fields)
+            catch
+                _:_ -> ok
+            end
+    end,
+    ok.
 
 -doc """
 Execute Fun(), catching raw OTP process exits that indicate a stale
