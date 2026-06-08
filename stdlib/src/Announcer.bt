@@ -1,0 +1,124 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Announcer — a typed pub/sub dispatcher handle (ADR 0093 Layer 2).
+///
+/// An `Announcer` is an opaque handle, similar to how `Pid` is an opaque handle
+/// to a process. The underlying announcer is an Erlang `reference()` carried as
+/// the object's native boxing, reached via FFI; equality is by identity
+/// (`=:=`), like `Pid`. `Announcer new` mints a fresh handle.
+///
+/// Subscriptions are managed via the `when:do:` / `when:send:to:` /
+/// `when:doOnce:` protocol and announced to via `announce:` (async) or
+/// `announceAndWait:` (sync).
+///
+/// There is deliberately no per-announcer process — the subscriber set lives in
+/// the shared runtime ETS table and dispatch runs caller-side off concurrent
+/// ETS reads (no central mailbox to deadlock or bottleneck). Per ADR 0093 the
+/// table is keyed by a unique subscription ref and matched on the event's
+/// *class* (MRO), not by announcer: in v1 all announcers share one class-keyed
+/// bus, so the handle is an identity token rather than an isolated namespace.
+/// True per-instance subscription isolation is tracked as follow-up work.
+///
+/// ## Examples
+/// ```beamtalk
+/// a := Announcer new
+/// sub := a when: PriceChanged do: [:e | e newPrice printNl]
+/// a announce: (PriceChanged newPrice: 42)    // prints "42"
+/// sub unsubscribe
+/// ```
+typed Object subclass: Announcer
+
+  /// Create a new Announcer handle (mints a fresh runtime ref via FFI).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// a := Announcer new
+  /// a class   // => Announcer
+  /// ```
+  class new -> Announcer => (Erlang beamtalk_announcements) newAnnouncer
+
+  /// Subscribe: deliver announcements of `aClass` (or any subclass, via MRO
+  /// matching) to the calling process by evaluating `aBlock` with the event.
+  ///
+  /// Returns a `Subscription` token for later unsubscription. Each call mints
+  /// a distinct subscription — re-subscribing never silently replaces.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// sub := announcer when: PriceChanged do: [:e | e newPrice printNl]
+  /// sub isActive   // => true
+  /// ```
+  when: aClass :: Class do: aBlock :: Block -> Subscription =>
+    (Erlang beamtalk_announcements)
+      whenDo: self
+      class: aClass
+      handler: aBlock
+
+  /// Subscribe: when an announcement of `aClass` arrives, send `sel` to
+  /// `receiver` with the event as the sole argument.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer when: PriceChanged send: #handlePrice: to: handler
+  /// ```
+  when: aClass :: Class send: sel :: Symbol to: receiver :: Object -> Subscription =>
+    (Erlang beamtalk_announcements)
+      whenSendTo: self
+      class: aClass
+      selector: sel
+      receiver: receiver
+
+  /// Subscribe once: deliver exactly one announcement of `aClass`, then
+  /// auto-unsubscribe. Consumed atomically under concurrent announcers.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer when: PriceChanged doOnce: [:e | e newPrice printNl]
+  /// ```
+  when: aClass :: Class doOnce: aBlock :: Block -> Subscription =>
+    (Erlang beamtalk_announcements)
+      whenDoOnce: self
+      class: aClass
+      handler: aBlock
+
+  /// Announce an event asynchronously (fire-and-forget). Delivers to every
+  /// subscriber of the event's class or any ancestor (MRO matching).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer announce: (PriceChanged newPrice: 42)
+  /// ```
+  announce: anEvent :: Announcement -> Nil =>
+    (Erlang beamtalk_announcements) announceOn: self event: anEvent
+
+  /// Announce an event synchronously — wait for every handler to complete,
+  /// with per-handler fault isolation and a default 5s timeout.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer announceAndWait: (PriceChanged newPrice: 42)
+  /// ```
+  announceAndWait: anEvent :: Announcement -> Nil =>
+    (Erlang beamtalk_announcements) announceAndWaitOn: self event: anEvent
+
+  /// Announce an event synchronously with a custom per-handler timeout (ms).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer announceAndWait: event timeout: 10000
+  /// ```
+  announceAndWait: anEvent :: Announcement timeout: ms :: Integer -> Nil =>
+    (Erlang beamtalk_announcements)
+      announceAndWaitOn: self
+      event: anEvent
+      timeout: ms
+
+  /// Remove all subscriptions held by `receiver` on this announcer.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer unsubscribe: self
+  /// ```
+  unsubscribe: receiver :: Object -> Nil =>
+    (Erlang beamtalk_announcements) unsubscribeReceiver: self receiver: receiver

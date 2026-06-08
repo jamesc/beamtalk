@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture: an Announcement subclass used for MRO matching tests.
+
+Announcement subclass: ParentEvent

@@ -1,0 +1,44 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SystemAnnouncer — the singleton system event bus (ADR 0093 Layer 2).
+///
+/// `SystemAnnouncer current` is the shared bus the runtime emits onto and
+/// tools/IDE panes subscribe to. System facilities publish well-known discrete
+/// `Announcement` subclasses (e.g. `ActorSpawned`, `ClassLoaded`); a tool
+/// subscribes once and filters by event class.
+///
+/// `SystemAnnouncer` is async-only: `announceAndWait:` raises
+/// `(UnsupportedOperation announceAndWait:)` at runtime because the system
+/// bus can have many subscribers and `spawn_monitor`-per-handler would be an
+/// unbounded process storm under rapid system events. Sync gather is for
+/// per-instance announcers with a known, small subscriber set.
+///
+/// ## Examples
+/// ```beamtalk
+/// sub := SystemAnnouncer current when: ActorSpawned do: [:e |
+///   Transcript showLine: e actorClass name
+/// ]
+/// Counter spawn   // subscription fires: prints "Counter"
+/// sub unsubscribe
+/// ```
+sealed Announcer subclass: SystemAnnouncer
+
+  /// The singleton system announcer instance.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemAnnouncer current class   // => SystemAnnouncer
+  /// ```
+  class current -> SystemAnnouncer =>
+    (Erlang beamtalk_announcements) systemAnnouncer
+
+  /// PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.
+  /// The system bus is async-only (ADR 0093 §1).
+  announceAndWait: anEvent :: Announcement -> Nil =>
+    (Erlang beamtalk_announcements) systemAnnounceAndWaitError: anEvent
+
+  /// PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.
+  /// The system bus is async-only (ADR 0093 §1).
+  announceAndWait: anEvent :: Announcement timeout: _ms :: Integer -> Nil =>
+    (Erlang beamtalk_announcements) systemAnnounceAndWaitError: anEvent
