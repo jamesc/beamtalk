@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Nested Value used by object_string_representation.btscript (BT-2463 /
+// ADR 0094 section 4). A Line holds two Point values; its structural
+// `printString` must expand the nested Points in full:
+//   Line(from: Point(x: 0, y: 0), to: Point(x: 3, y: 4))
+//
+// Depends on Point (tests/repl-protocol/fixtures/point.bt), loaded alongside.
+
+Value subclass: Line
+  field: from = nil
+  field: to = nil
