@@ -1389,14 +1389,39 @@ Protocol conformance issues are **warnings, never errors**:
 | Missing method for protocol | Warning |
 | Namespace collision (class + protocol same name) | Error (structural) |
 
+### Two-Protocol String Model (Debug / Display)
+
+Beamtalk follows a **two-string-protocol** model (ADR 0094), mirroring Rust's `Debug` / `Display` split:
+
+- **`printString` = Debug.** The self-describing, structural representation used by the REPL, logs, and any *other* `printString` that nests this object. It is the **REPL default** — evaluating an expression shows its `printString`. It is *derived* by default, so you rarely override it.
+- **`displayString` = Display.** The human-facing representation. It is the hook the **language** pulls during **string interpolation** — every `{...}` segment renders its value via `displayString`. It **defaults to `printString`**; you *override* it when a value has a natural human form (e.g. `Money` → `$10.50`).
+- **`inspect`** is **unchanged** — it still returns a `String` and delegates to `printString`. Its redesign into a rich, navigable tooling/action verb is deferred to a follow-up ADR designed against the LiveView surface ([BT-2397](https://linear.app/beamtalk/issue/BT-2397)).
+
+`String` demonstrates the Debug/Display split directly: `"hi" printString` → `"\"hi\""` (quoted, Debug) while `"hi" displayString` → `hi` (plain, Display).
+
+#### Default `printString` forms by class kind
+
+The `a`/`an` article prefix (the old `a Point` / ungrammatical `a Integer` default) is **removed entirely**. The default `printString` now takes one of four visually distinct forms, one per kind of thing:
+
+| Class kind | Default `printString` | Example |
+|------------|-----------------------|---------|
+| **Value** (immutable data) | `ClassName(field: value, ...)` — class-headed, **labelled** fields, in sorted field order | `Point(x: 3, y: 4)`; no fields → `Point()` |
+| **Actor** (live process) | `Actor(ClassName, pid)` — kind-headed, **positional** | `Actor(Counter, 0.123.0)` |
+| **Supervisor** (supervising process) | `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` | `Supervisor(WebApp, 0.200.0)` |
+| **Object** (plain reference) | bare `ClassName`, or a class-defined form | `FileHandle`, or e.g. `#Pid<0.123.0>` for raw primitives |
+
+Value forms carry `field:` **labels** while process forms are **positional**; the process heads (`Actor` / `Supervisor` / `DynamicSupervisor`) are **reserved kind words** no user Value class may shadow, so the two shapes are unambiguous. Raw platform primitives (`Pid`, `Port`, `Reference`, `Tuple`) keep their Erlang-native `#Pid<…>` / `#Port<…>` rendering — they *are* Erlang terms.
+
+Nested `Value` fields expand recursively (so `Line(from: Point(x: 0, y: 0), to: Point(x: 3, y: 4))` shows in full), each rendered via its own `printString` (Debug form — strings stay quoted), bounded by depth (default 5), width, and total-length caps with a cycle guard; truncated positions render as `...`.
+
 ### Printable Protocol and Display Methods
 
 The `Printable` protocol is the standard contract for objects that can represent themselves as strings. It requires two methods:
 
 - **`asString`** — a human-readable representation (for end-user display)
-- **`printString`** — a developer-oriented representation (for debugging, logging, and REPL display)
+- **`printString`** — a developer-oriented (Debug) representation (for debugging, logging, and REPL display)
 
-Most stdlib classes conform automatically because `Object` provides a default `printString` (`"a ClassName"`) and most subclasses implement `asString`. Custom classes only need to implement these two methods to conform:
+Most stdlib classes conform automatically because `Object` provides a default `printString` (the bare class name, or the structural `ClassName(field: value, ...)` form for `Value` subclasses) and most subclasses implement `asString`. Custom classes only need to implement these two methods to conform:
 
 ```beamtalk
 Value subclass: Point
@@ -1410,14 +1435,16 @@ Value subclass: Point
   printString -> String => "Point({self.x}, {self.y})"
 ```
 
+`displayString` is **not** part of `Printable` (deferred per ADR 0094 §5), and `inspect` is not part of any protocol — so the two-protocol changes leave protocol conformance unaffected.
+
 The related display methods on `Object` are:
 
 | Method | Behaviour |
 |--------|-----------|
-| `asString` | Human-readable string (override per class) |
-| `printString` | Developer-readable string (REPL/inspector uses this) |
-| `displayString` | User-facing display; defaults to `printString` |
-| `inspect` | Inspection; defaults to `printString` |
+| `asString` | Human-readable string conversion (override per class) |
+| `printString` | **Debug** representation — self-describing, structural; the REPL default and what nested rendering uses |
+| `displayString` | **Display** representation — the string-interpolation `{...}` hook; defaults to `printString`, override for a natural human form |
+| `inspect` | Returns a `String`, delegates to `printString` (unchanged; rich-inspector redesign deferred to [BT-2397](https://linear.app/beamtalk/issue/BT-2397)) |
 | `show: value` | Write `value` to Transcript (nil-safe, returns `self`) |
 | `showCr: value` | Write `value` to Transcript followed by newline (nil-safe, returns `self`) |
 
@@ -1728,7 +1755,7 @@ Actor sends behave identically in REPL and compiled code — both return values 
 
 ```text
 > c := Counter spawn
-#Actor<Counter,_>
+Actor(Counter, _)
 
 > c increment
 1
@@ -1939,7 +1966,7 @@ Start the supervisor with `supervise`. It registers under its class name so it c
 ```beamtalk
 // Boot-style: crash on failure (application boot, test setup, REPL exploration)
 app := (WebApp supervise) unwrap
-// => #Supervisor<WebApp,_>
+// => Supervisor(WebApp, _)
 
 // Idempotent — second call also returns a successful Result wrapping the
 // already-running supervisor, without restarting
@@ -1954,7 +1981,7 @@ app := (WebApp supervise) unwrap
 // Find the running instance by class name (no reference needed — returns the
 // bare supervisor or nil, unchanged from pre-ADR-0080 semantics)
 WebApp current
-// => #Supervisor<WebApp,_>
+// => Supervisor(WebApp, _)
 ```
 
 Inspect and manage children:
@@ -1962,7 +1989,7 @@ Inspect and manage children:
 ```beamtalk
 app count                                 // => 3  (number of running children)
 app children                              // => ["DatabasePool","HTTPRouter","MetricsCollector"]  (child ids)
-(app which: DatabasePool) unwrap           // => #Actor<DatabasePool,_>  (running child instance)
+(app which: DatabasePool) unwrap           // => Actor(DatabasePool, _)  (running child instance)
 (app terminate: HTTPRouter) unwrap        // gracefully stop a single child; Result(Nil, Error)
 app stop                                  // stop the supervisor and all children (unchanged — Nil)
 
@@ -2041,12 +2068,12 @@ DynamicSupervisor(Worker) subclass: WorkerPool
 
 ```beamtalk
 pool := (WorkerPool supervise) unwrap
-// => #DynamicSupervisor<WorkerPool,_>
+// => DynamicSupervisor(WorkerPool, _)
 
 // Start children dynamically — startChild returns Result(C, Error) where C is
 // the DynamicSupervisor's child class parameter (Worker here)
-w1 := pool startChild unwrap        // => #Actor<Worker,_>
-w2 := pool startChild unwrap        // => #Actor<Worker,_>
+w1 := pool startChild unwrap        // => Actor(Worker, _)
+w2 := pool startChild unwrap        // => Actor(Worker, _)
 pool count                          // => 2
 
 // Recoverable variant — useful when a failing init should not abort the caller
@@ -2077,7 +2104,7 @@ Nested supervisor children are identified by `isSupervisor => true` and started 
 ```beamtalk
 root := (AppRoot supervise) unwrap
 root count                          // => 3
-(root which: DatabaseSupervisor) unwrap  // => #Supervisor<DatabaseSupervisor,_>
+(root which: DatabaseSupervisor) unwrap  // => Supervisor(DatabaseSupervisor, _)
 ```
 
 ### Lifecycle API returns Result (ADR 0080)

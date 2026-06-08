@@ -35,6 +35,10 @@ Object subclass: Value
 
   /// Create a new instance of the receiver class.
   ///
+  /// A fresh value is self-describing at the REPL: its `printString` is the
+  /// structural `ClassName(field: value, ...)` form (ADR 0094), so `Point new`
+  /// shows its default field values rather than the old opaque `a Point`.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// Point new              // => Point(x: 0, y: 0)

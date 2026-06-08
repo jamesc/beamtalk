@@ -6,11 +6,17 @@
 /// conforms to Printable via structural protocol conformance (ADR 0068).
 ///
 /// - `asString` returns a human-readable string representation.
-/// - `printString` returns a developer-oriented representation (suitable for
-///   debugging, logging, and REPL display).
+/// - `printString` returns a developer-oriented (Debug) representation
+///   (suitable for debugging, logging, and REPL display).
 ///
 /// Most stdlib classes conform automatically since `Object` provides a default
 /// `printString` and many subclasses override `asString`.
+///
+/// The two required members are unchanged by ADR 0094 — both still return
+/// `String`, so protocol conformance is unaffected. `displayString` (the
+/// Display/interpolation hook) is deliberately **not** part of `Printable`;
+/// whether to add it is deferred (ADR 0094 §5). `inspect` is likewise not part
+/// of any protocol.
 Protocol define: Printable
   asString -> String
   printString -> String

@@ -71,8 +71,8 @@ not change op output:
 |---------|---------------|-------------------|----------|----------------|-------|
 | *(via `eval`: `Session current clear`)* | -- | `:clear` (via `Session current clear`) | *(via `evaluate`)* | -- | Clear session locals. ADR 0081 / BT-2367 added the first-class `Session` object; **BT-2369 (ADR 0081 Phase 6) removed the `clear` protocol op and the MCP `clear` tool** — `Session current clear` is the object-side accessor, reachable via `eval`/`evaluate` on every surface. The `:clear` CLI meta-command is retained as a shortcut that now evaluates `Session current clear`. |
 | *(via `eval`: `Session current bindings`)* | -- | `:bindings` / `:b` (via `Session current bindings keys`) | *(via `evaluate`)* | -- | View session locals. ADR 0081 / BT-2367 added `Session current bindings`, returning a live `BindingsView` (Dictionary protocol: `at:`, `at:put:`, `removeKey:`, `includesKey:`, `keys`, `values`, `size`, `do:`). **BT-2369 (ADR 0081 Phase 6) removed the `bindings` protocol op and the MCP `get_bindings` tool** — read via `eval`/`evaluate` (`Session current bindings keys`) on every surface. The `:bindings` / `:b` CLI meta-command is retained as a shortcut that now evaluates `Session current bindings keys` (it lists binding *names*; the old op also showed values). Note the object accessor returns session-locals only — workspace globals are a separate layer reached via `Workspace globals` (also a `BindingsView`). |
-| *(via `eval`: `Session current kind` / `info` / `printString`)* | -- | *(via `eval`)* | *(via `evaluate`)* | *(via `executeCommand: evaluate`)* | Session origin/debug metadata. `Session kind` returns the originating client surface (`repl`/`mcp`/`lsp`/`liveview`/`ide`/`attach`, or `unknown`); `Session info` returns the full Dictionary (`id`, `kind`, and where known `peer`, `node`, `user`, `connected_at`); `Session printString` renders `a Session(<kind>: <id>)`. Object-side accessors reachable via `eval`/`evaluate` on every surface — not surface-specific. The surface is declared in the `client` field of the transport auth handshake (see `docs/repl-protocol.md`); the CLI sends `repl`, MCP `mcp`, LSP `lsp`, LiveView `liveview`. Read-only and not liveness-checked, so `Workspace sessions` renders each entry with its kind even if a session has died. |
-| `sessions` | -- | `surface-specific: transport handshake` | -- | -- | List active REPL sessions, each rendering via `Session printString` (e.g. `a Session(repl: <id>)`) |
+| *(via `eval`: `Session current kind` / `info` / `printString`)* | -- | *(via `eval`)* | *(via `evaluate`)* | *(via `executeCommand: evaluate`)* | Session origin/debug metadata. `Session kind` returns the originating client surface (`repl`/`mcp`/`lsp`/`liveview`/`ide`/`attach`, or `unknown`); `Session info` returns the full Dictionary (`id`, `kind`, and where known `peer`, `node`, `user`, `connected_at`); `Session printString` renders `Session(<kind>: <id>)`. Object-side accessors reachable via `eval`/`evaluate` on every surface — not surface-specific. The surface is declared in the `client` field of the transport auth handshake (see `docs/repl-protocol.md`); the CLI sends `repl`, MCP `mcp`, LSP `lsp`, LiveView `liveview`. Read-only and not liveness-checked, so `Workspace sessions` renders each entry with its kind even if a session has died. |
+| `sessions` | -- | `surface-specific: transport handshake` | -- | -- | List active REPL sessions, each rendering via `Session printString` (e.g. `Session(repl: <id>)`) |
 | `clone` | -- | `surface-specific: transport handshake` | -- | -- | Create a new session |
 | `close` | -- | `:exit` / `:quit` / `:q` | -- | -- | Close session; `:exit` exits the CLI REPL |
 | `interrupt` | -- | `:interrupt` / `:int` | `interrupt` | -- | Cancel a running evaluation; out-of-band by definition (BT-2090) |
@@ -210,6 +210,40 @@ These LSP capabilities are editor-specific and have no direct REPL op.
 | `textDocument/didClose` | `surface-specific: editor document lifecycle` |
 | `textDocument/didSave` | `surface-specific: editor document lifecycle` |
 | `workspace/applyEdit` | Server-initiated edit emitted on `flush_completed` runtime push (ADR 0082 Phase 3, BT-2289). For each flushed file open in the editor, the LSP issues a whole-document `TextEdit` so the buffer realigns with the new on-disk content. Closed files are skipped — VSCode reads them fresh on next `did_open`. |
+
+## Cross-Surface Behaviours
+
+Some behaviours are not discrete *ops* but **display contracts** that every
+surface inherits. They are recorded here because their output must stay
+consistent wherever a Beamtalk value is rendered as text.
+
+### Object string representation (`printString` / `displayString`)
+
+ADR 0094 defines a two-protocol model that governs how any value renders as
+text across surfaces:
+
+- **`printString` (Debug)** is the canonical **structural** form and the source
+  of truth for object display. The same `printString` output appears wherever a
+  value is shown as a developer-facing string: the **REPL** result line, **log
+  lines** (runtime logging, `Transcript show:`), **LSP hovers / tooling** that
+  echo a value, and any nested rendering inside another `printString`. Default
+  forms: `ClassName(field: value, ...)` for `Value`, `Actor(ClassName, pid)` /
+  `Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` for live
+  processes, bare `ClassName` for plain objects. The old `a ClassName` article
+  form is gone. This is **not surface-specific** — REPL, logs, and tooling must
+  show the same text for the same value.
+- **`displayString` (Display)** is the **string-interpolation hook**: every
+  `{...}` segment in a string literal renders its value via `displayString`
+  (defaults to `printString`). Because interpolation is a language feature, this
+  is identical on every surface that evaluates source.
+- The runtime keeps **two implementations in lockstep** — the compiled stdlib
+  (`Value.bt`, `Object.bt`) and the runtime fallback (`beamtalk_object_ops`,
+  `beamtalk_primitive`, `beamtalk_reflection`) — both delegating to one shared
+  structural renderer so output is byte-identical regardless of dispatch path.
+
+`inspect` is unchanged (returns a `String`, delegates to `printString`); the
+richer navigable-inspector surface is deferred to
+[BT-2397](https://linear.app/beamtalk/issue/BT-2397).
 
 ## Drift Check (CI)
 
