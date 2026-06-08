@@ -60,7 +60,7 @@ write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
     {Value, NewState}.
 
 -doc """
-Generates an inspect string for an object: "ClassName(field1: val1, field2: val2)".
+Generates an inspect string for an object: "ClassName (field1: val1, field2: val2)".
 
 BT-446: Extracted from beamtalk_object_ops:dispatch/4 so that compiled
 Object modules can call it from generated dispatch/4 code.

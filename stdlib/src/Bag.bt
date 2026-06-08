@@ -20,7 +20,7 @@ typed Collection(E) subclass: Bag(E)
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Bag withAll: #(1, 2, 1, 3)   // => a Bag
+  /// Bag withAll: #(1, 2, 1, 3)   // => Bag
   /// ```
   class withAll: list :: List(E) -> Bag(E) =>
     list inject: Bag new into: [:bag :elem | bag add: elem]

@@ -245,8 +245,8 @@ infoFor(Session) ->
     Meta#{id => Id}.
 
 -doc """
-Render a `Session` for display as `a Session(<kind>: <id>)`, e.g.
-`a Session(repl: session_123_ab)`.
+Render a `Session` for display as `Session(<kind>: <id>)`, e.g.
+`Session(repl: session_123_ab)`.
 
 Backs `Session>>printString`. Reads the embedded id/kind directly with no
 liveness check so printing a list of sessions (`Workspace sessions`) never
