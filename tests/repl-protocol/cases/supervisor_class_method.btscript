@@ -18,7 +18,7 @@
 
 // Start the supervisor which routes through the class method
 cmSup := (E2EClassMethodSupervisor supervise) unwrap
-// => #Supervisor<E2EClassMethodSupervisor,_>
+// => Supervisor(E2EClassMethodSupervisor, _)
 
 // The supervisor has one child
 cmSup count
@@ -26,7 +26,7 @@ cmSup count
 
 // The child was started via the class method which transforms args
 cmChild := (cmSup which: E2EClassMethodActor) unwrap
-// => #Actor<E2EClassMethodActor,_>
+// => Actor(E2EClassMethodActor, _)
 
 // The class method combined #test + 99 into "test:99"
 cmChild label

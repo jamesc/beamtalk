@@ -1133,7 +1133,7 @@ mod tests {
     fn test_generate_eunit_wrapper_pattern() {
         let cases = vec![TestCase {
             expression: "Counter spawn".to_string(),
-            expected: Expected::Value("#Actor<Counter,_>".to_string()),
+            expected: Expected::Value("Actor(Counter, _)".to_string()),
             line: 1,
         }];
         let eval_modules = vec!["test_spawn_0".to_string()];

@@ -1,6 +1,8 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
+%%% **DDD Context:** Object System Context
+
 -module(beamtalk_object_ops_tests).
 
 -moduledoc """
@@ -111,9 +113,11 @@ object_display_test_() ->
     ]}.
 
 test_print_string() ->
+    %% ADR 0094 (Critical Risk #4): a value-instance State (Self is not an
+    %% actor reference) renders structurally via the canonical renderer.
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], self_ref(), State),
-    ?assertEqual(<<"Counter">>, Str).
+    ?assertEqual(<<"Counter(value: 0)">>, Str).
 
 test_inspect() ->
     State = counter_state(),
@@ -234,9 +238,11 @@ display_string_test_() ->
     ]}.
 
 test_display_string() ->
+    %% displayString delegates to printString: value-instance State renders
+    %% structurally (ADR 0094).
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch('displayString', [], self_ref(), State),
-    ?assertEqual(<<"Counter">>, Str).
+    ?assertEqual(<<"Counter(value: 0)">>, Str).
 
 %%% ============================================================================
 %%% inspect on class objects (empty state) Tests

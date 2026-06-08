@@ -61,7 +61,7 @@ Workspace load: "tests/repl-protocol/fixtures/reload_counter.bt"
 
 // After reload, Counter still works
 c := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c increment
 // => 1

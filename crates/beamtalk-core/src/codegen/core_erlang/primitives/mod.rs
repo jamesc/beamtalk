@@ -92,6 +92,7 @@ const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("Dictionary", dictionary::generate_dictionary_bif),
     ("ProtoObject", value_types::generate_proto_object_bif),
     ("Object", value_types::generate_object_bif),
+    ("Value", value_types::generate_value_bif),
     ("Set", value_types::generate_set_bif),
     ("CompiledMethod", reflection::generate_compiled_method_bif),
     ("Character", character::generate_character_bif),

@@ -45,7 +45,8 @@ See also: ADR 0094 sections 3, 4, 6; Critical Risks #1, #4
 
 -export([
     structural/2,
-    structural/3
+    structural/3,
+    structural_from_state/1
 ]).
 
 -include("beamtalk.hrl").
@@ -98,6 +99,23 @@ structural(ClassName, Fields, Opts) ->
     Seen = #{},
     {Result, _SeenOut} = render_structural(ClassName, Fields, Depth, Width, Length, Seen),
     Result.
+
+-doc """
+Render `ClassName(field: value, ...)` directly from a Beamtalk object's
+state map (a tagged map).
+
+This is the canonical entry point used by both the compiled stdlib
+(`Value.bt` `printString`) and the runtime fallbacks (`beamtalk_object_ops`,
+`beamtalk_reflection`). The class name and user fields are extracted from the
+tagged map, guaranteeing byte-identical output across every caller (ADR 0094,
+Critical Risk #4). Uses default bounds.
+""".
+-spec structural_from_state(map()) -> binary().
+structural_from_state(State) when is_map(State) ->
+    ClassName = beamtalk_tagged_map:class_of(State, 'Object'),
+    UserKeys = beamtalk_tagged_map:user_field_keys(State),
+    Fields = [{K, maps:get(K, State)} || K <- UserKeys],
+    structural(ClassName, Fields).
 
 %%% ============================================================================
 %%% Internal rendering

@@ -104,7 +104,7 @@ Calculator add: 3 to: 7
 // ===========================================================================
 // Spawn a counter actor for metaclass operations
 c := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // :load — METACLASS OPERATIONS ON LOADED CLASSES
 // ===========================================================================
@@ -138,7 +138,7 @@ p respondsTo: #getX
 
 // Counter should still work after reload
 c2 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c2 increment
 // => 1

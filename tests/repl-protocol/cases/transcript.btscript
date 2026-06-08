@@ -21,15 +21,15 @@
 
 // show: with an integer
 Transcript show: 42
-// => #Actor<TranscriptStream,_>
+// => Actor(TranscriptStream, _)
 
 // show: with a boolean
 Transcript show: true
-// => #Actor<TranscriptStream,_>
+// => Actor(TranscriptStream, _)
 
 // show: with nil
 Transcript show: nil
-// => #Actor<TranscriptStream,_>
+// => Actor(TranscriptStream, _)
 
 // ===========================================================================
 // RETURN VALUE IS SELF (BT-540) — return-type checks
@@ -38,13 +38,13 @@ Transcript show: nil
 // Command methods return self (the Transcript actor), not nil
 // This follows Smalltalk convention and Command-Query Separation
 t := Transcript show: "test"
-// => #Actor<TranscriptStream,_>
+// => Actor(TranscriptStream, _)
 
 t class
 // => TranscriptStream
 
 t2 := Transcript cr
-// => #Actor<TranscriptStream,_>
+// => Actor(TranscriptStream, _)
 
 t2 class
 // => TranscriptStream

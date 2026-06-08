@@ -303,7 +303,7 @@ sealed typed Object subclass: WorkspaceInterface
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace supervisor                  // => #Supervisor<AppSup, <0.200.0>>
+  /// Workspace supervisor                  // => Supervisor(AppSup, 0.200.0)
   /// Workspace supervisor children         // => #(#DatabasePool #HTTPRouter)
   /// ```
   supervisor -> Object =>
@@ -317,8 +317,8 @@ sealed typed Object subclass: WorkspaceInterface
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>
-  /// Workspace startSupervisor: MySup      // => #Supervisor<MySup, <0.200.0>>  (idempotent)
+  /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)
+  /// Workspace startSupervisor: MySup      // => Supervisor(MySup, 0.200.0)  (idempotent)
   /// ```
   startSupervisor: aClass :: Class -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) startSupervisor: aClass
@@ -345,7 +345,7 @@ sealed typed Object subclass: WorkspaceInterface
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace supervisors                 // => #(#Supervisor<MySup, <0.200.0>>)
+  /// Workspace supervisors                 // => #(Supervisor(MySup, 0.200.0))
   /// ```
   supervisors -> List =>
     (Erlang beamtalk_workspace_interface_primitives) supervisors

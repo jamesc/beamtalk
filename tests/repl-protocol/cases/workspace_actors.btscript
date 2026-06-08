@@ -58,7 +58,7 @@ beforeCount := allActors size
 
 // Spawn a counter actor
 c := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // Workspace actors now has more actors (depends on prior tests, keep wildcard)
 actors := Workspace actors
@@ -80,7 +80,7 @@ countersBeforeSize := countersBefore size
 
 // Spawn a second counter
 c2 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // actorsOf: Counter now returns one more (depends on prior tests, keep wildcard)
 countersAfter := Workspace actorsOf: Counter
@@ -106,7 +106,7 @@ counterRefs := Workspace actorsOf: Counter
 
 // Get last element and send it a message
 lastCounter := counterRefs last
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // Actor ordering depends on map internals — only verify the actor responds
 lastCounter getValue
@@ -135,7 +135,7 @@ freshActors size > 0
 
 // Also verify actorAt: can look up an actor by pid string and return a functional actor
 firstActor := freshActors first
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 firstActor respondsTo: #getValue
 // => true
@@ -154,7 +154,7 @@ c isAlive
 
 // Spawn a fresh actor for lifecycle testing
 lc := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // Actor is alive before stop
 lc isAlive
@@ -178,7 +178,7 @@ lc stop
 
 // Spawn a fresh actor for kill testing
 kc := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // Actor is alive before kill
 kc isAlive
@@ -205,10 +205,10 @@ kc isAlive
 
 // Spawn fresh actors and verify stop works on actor returned from Workspace
 wa1 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 wa2 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 // Get actors of Counter and stop each one that we just spawned
 wa1 isAlive

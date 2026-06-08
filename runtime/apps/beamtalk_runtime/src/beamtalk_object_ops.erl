@@ -25,11 +25,11 @@ rather than being duplicated in every class's generated code.
 
 ## Display Methods
 
-| Selector      | Args | Description                              |
-|---------------|------|------------------------------------------|
-| `printString`   | []   | Developer representation (e.g. `a Counter`)  |
-| `displayString` | []   | User-facing representation (same for actors) |
-| `inspect`       | []   | Detailed inspection string                   |
+| Selector      | Args | Description                                       |
+|---------------|------|---------------------------------------------------|
+| `printString`   | []   | Class objects: bare class name; instances: `ClassName(field: value, ...)`; actors: `Actor(Counter, 0.123.0)` |
+| `displayString` | []   | Delegates to `printString`                        |
+| `inspect`       | []   | Delegates to `printString` (ADR 0094)             |
 
 ## Utility Methods
 
@@ -95,35 +95,25 @@ dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
 %% --- Display methods ---
 
 dispatch('printString', [], Self, State) ->
-    DisplayName = class_display_name(Self, State),
-    {reply, DisplayName, State};
+    %% ADR 0094: class objects render as a bare class name; value instances
+    %% render structurally via the canonical renderer (Critical Risk #4); live
+    %% actor/supervisor references render kind-headed (`Actor(ClassName, pid)`,
+    %% BT-2462). See print_string_label/2.
+    {reply, print_string_label(Self, State), State};
 dispatch('displayString', [], Self, State) ->
-    %% displayString for actors delegates to printString — same result.
-    DisplayName = class_display_name(Self, State),
-    {reply, DisplayName, State};
+    %% ADR 0094: displayString delegates to printString — same result.
+    {reply, print_string_label(Self, State), State};
 dispatch(inspect, [], Self, State) ->
-    %% BT-753: For class objects (State is #{}), use Self for identity.
-    %% BT-1167: For actor instances, produce ClassName(field: inspect(value), ...) format.
+    %% ADR 0094 (Critical Risk #4): inspect renders structurally via the canonical
+    %% renderer for any instance with fields (values and actors alike, BT-1167);
+    %% class objects (State is #{}) keep the bare class name. There is no
+    %% independent inspect formatter — both this path and `printString` route
+    %% through `beamtalk_object_printer`.
     case map_size(State) =:= 0 of
         true ->
-            %% Class objects — bare class name (ADR 0094).
-            DisplayName = class_display_name(Self, State),
-            {reply, DisplayName, State};
+            {reply, class_display_name(Self, State), State};
         false ->
-            ClassName = class_display_name(Self, State),
-            %% Sort field names for deterministic output (map key order is unstable).
-            UserFields = lists:sort(beamtalk_reflection:field_names(State)),
-            SelfPid = actor_pid(Self),
-            FieldStrs = [
-                iolist_to_binary([
-                    atom_to_binary(K, utf8),
-                    <<": ">>,
-                    inspect_field(maps:get(K, State), SelfPid)
-                ])
-             || K <- UserFields
-            ],
-            Str = iolist_to_binary([ClassName, <<"(">>, lists:join(<<", ">>, FieldStrs), <<")">>]),
-            {reply, Str, State}
+            {reply, beamtalk_object_printer:structural_from_state(State), State}
     end;
 %% --- Utility methods ---
 
@@ -216,6 +206,42 @@ has_method(notNil) -> true;
 has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
 
+-doc """
+Compute the `printString`/`displayString` label for an object dispatched
+through Object (ADR 0094).
+
+Three cases:
+- **Class objects** render as a bare class name.
+- **Live actor/supervisor references** (`Self` is a `#beamtalk_object{}` that
+  is not a class object) render kind-headed and positional
+  (`Actor(ClassName, pid)` / `Supervisor(ClassName, pid)` /
+  `DynamicSupervisor(ClassName, pid)`, BT-2462), derived directly from the
+  `#beamtalk_object{}` tuple — no message round-trip, no re-entrancy risk.
+- **Value/plain-object instances** with user fields render structurally as
+  `ClassName(field: value, ...)` via the canonical renderer
+  (`beamtalk_object_printer`), guaranteeing byte-identical output with the
+  compiled stdlib path (Critical Risk #4). Empty-state dispatch (class objects
+  reached via chain fallthrough) keeps the bare class name.
+""".
+-spec print_string_label(term(), map()) -> binary().
+print_string_label(#beamtalk_object{} = Self, State) ->
+    case beamtalk_class_registry:is_class_object(Self) of
+        true ->
+            class_display_name(Self, State);
+        false ->
+            %% Live actor instance — kind-headed positional label (BT-2462).
+            beamtalk_primitive:process_label(Self)
+    end;
+print_string_label(Self, State) ->
+    case map_size(State) =:= 0 of
+        true ->
+            %% Class objects (chain fallthrough, empty State) — bare class name.
+            class_display_name(Self, State);
+        false ->
+            %% Value/object instances — structural form via canonical renderer.
+            beamtalk_object_printer:structural_from_state(State)
+    end.
+
 -doc "Return a display-friendly class name binary, stripping the \" class\" suffix.".
 -spec class_display_name(term(), map()) -> binary().
 class_display_name(Self, State) ->
@@ -256,23 +282,6 @@ class_name_for_responds_to(Self, State) when is_record(Self, beamtalk_object) ->
     end;
 class_name_for_responds_to(_Self, State) ->
     beamtalk_tagged_map:class_of(State).
-
--doc "Extract the pid from Self if it is an actor reference, else undefined.".
--spec actor_pid(term()) -> pid() | undefined.
-actor_pid(#beamtalk_object{pid = Pid}) when is_pid(Pid) -> Pid;
-actor_pid(_) -> undefined.
-
--doc """
-Inspect a field value, guarding against actor self-references that
-would deadlock (the gen_server is already mid-call for inspect).
-Any actor reference whose pid matches SelfPid uses printString instead.
-""".
--spec inspect_field(term(), pid() | undefined) -> binary().
-inspect_field(#beamtalk_object{pid = Pid} = V, SelfPid) when Pid =:= SelfPid ->
-    %% Self-reference: avoid re-entering the same gen_server.
-    beamtalk_primitive:print_string(V);
-inspect_field(V, _SelfPid) ->
-    beamtalk_primitive:send(V, inspect, []).
 
 normalize_dispatch_result({error, Error}, State) ->
     {error, Error, State};

@@ -138,7 +138,7 @@ user_field_keys_filters_registry_pid_test() ->
 
 format_for_display_tagged_test() ->
     Map = #{'$beamtalk_class' => 'Counter', value => 0},
-    ?assertEqual(<<"Counter">>, beamtalk_tagged_map:format_for_display(Map)).
+    ?assertEqual(<<"Counter(value: 0)">>, beamtalk_tagged_map:format_for_display(Map)).
 
 format_for_display_plain_map_test() ->
     Map = #{a => 1},

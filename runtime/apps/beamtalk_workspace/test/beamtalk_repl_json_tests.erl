@@ -292,6 +292,43 @@ term_to_json_pid_dead_test() ->
     Result = beamtalk_repl_json:term_to_json(Pid),
     ?assertMatch(<<"#Dead<", _/binary>>, Result).
 
+%%% ADR 0094 / Critical Risk #3: actor & supervisor kind-headed labels.
+
+term_to_json_dead_actor_fallback_test() ->
+    %% A dead actor instance must render via the tuple-derived fallback —
+    %% Actor(ClassName, pid) — without hanging or crashing the REPL formatter.
+    Pid = spawn(fun() -> ok end),
+    MRef = monitor(process, Pid),
+    receive
+        {'DOWN', MRef, process, Pid, _} -> ok
+    end,
+    Obj = {beamtalk_object, 'WedgedCounter', bt@wedged, Pid},
+    Result = beamtalk_repl_json:term_to_json(Obj),
+    ?assertMatch(<<"Actor(WedgedCounter, ", _/binary>>, Result),
+    ?assert(binary:match(Result, <<"#Actor<">>) =:= nomatch).
+
+term_to_json_unresponsive_actor_fallback_test() ->
+    %% A live but unresponsive actor (never replies to gen_server:call) must
+    %% degrade to the tuple-derived label after the short timeout, not hang.
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Obj = {beamtalk_object, 'WedgedCounter', bt@wedged, Pid},
+    Result = beamtalk_repl_json:term_to_json(Obj),
+    ?assertMatch(<<"Actor(WedgedCounter, ", _/binary>>, Result),
+    Pid ! stop.
+
+term_to_json_supervisor_label_test() ->
+    %% A supervisor tuple renders Supervisor(ClassName, pid) directly (no
+    %% gen_server round-trip) — see ADR 0094.
+    Pid = self(),
+    Sup = {beamtalk_supervisor, 'MySup', some_module, Pid},
+    Result = beamtalk_repl_json:term_to_json(Sup),
+    ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result),
+    ?assert(binary:match(Result, <<"#Supervisor<">>) =:= nomatch).
+
 term_to_json_function_test() ->
     F = fun(X) -> X end,
     Result = beamtalk_repl_json:term_to_json(F),
@@ -745,9 +782,12 @@ term_to_json_beamtalk_object_tuple_test() ->
             _ -> ok
         end
     end),
+    %% ADR 0094: actor instances render kind-headed Actor(ClassName, pid).
+    %% The pid is unresponsive (not a gen_server), so the formatter degrades to
+    %% the tuple-derived fallback after the short timeout.
     Result = beamtalk_repl_json:term_to_json({beamtalk_object, 'Counter', counter, Pid}),
-    ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
+    ?assertMatch(<<"Actor(Counter, ", _/binary>>, Result),
+    ?assert(binary:match(Result, <<"#Actor<">>) =:= nomatch),
     exit(Pid, kill).
 
 term_to_json_beamtalk_object_registered_proxy_test() ->
@@ -756,23 +796,23 @@ term_to_json_beamtalk_object_registered_proxy_test() ->
     %% `pid_to_list/1` on the tuple (which would crash and tear down the
     %% REPL WebSocket). Instead, render the name so the proxy is
     %% operator-legible in REPL output.
+    %% ADR 0094: rendered kind-headed as Actor(ClassName, registered, Name).
     Result = beamtalk_repl_json:term_to_json(
         {beamtalk_object, 'Counter', counter, {registered, my_counter}}
     ),
-    ?assert(binary:match(Result, <<"#Actor<">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"Counter">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"registered,my_counter">>) =/= nomatch).
+    ?assertEqual(<<"Actor(Counter, registered, my_counter)">>, Result).
 
 term_to_json_supervisor_tuple_test() ->
-    %% ADR 0059: Supervisor instances display as #Supervisor<Class,pid>.
+    %% ADR 0094: Supervisor instances render kind-headed as
+    %% Supervisor(ClassName, pid) / DynamicSupervisor(ClassName, pid).
     Pid = spawn(fun() ->
         receive
             _ -> ok
         end
     end),
     Result = beamtalk_repl_json:term_to_json({beamtalk_supervisor, 'WebApp', bt_webapp, Pid}),
-    ?assert(binary:match(Result, <<"#Supervisor<">>) =/= nomatch),
-    ?assert(binary:match(Result, <<"WebApp">>) =/= nomatch),
+    ?assertMatch(<<"Supervisor(WebApp, ", _/binary>>, Result),
+    ?assert(binary:match(Result, <<"#Supervisor<">>) =:= nomatch),
     exit(Pid, kill).
 
 term_to_json_future_timeout_test() ->
@@ -1084,7 +1124,7 @@ term_to_json_beamtalk_class_object_test() ->
         end
     end),
     Result = beamtalk_repl_json:term_to_json({beamtalk_object, 'TestClassName', some_module, Pid}),
-    %% Should either be a class display name or #Actor<...> format
+    %% Should either be a class display name or Actor(...) format (ADR 0094)
     ?assert(is_binary(Result)),
     exit(Pid, kill).
 

@@ -332,7 +332,7 @@ Depth is threaded through for cycle detection in continue_to_superclass.
 """.
 -spec invoke_method(class_name(), pid(), selector(), args(), bt_self(), state(), non_neg_integer()) ->
     dispatch_result().
-invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
+invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
     %% Get the module name for this class
     case beamtalk_object_class:module_name(ClassPid) of
         undefined ->
@@ -351,16 +351,30 @@ invoke_method(_ClassName, ClassPid, Selector, Args, Self, State, Depth) ->
                     %% Module exists but lacks dispatch/4 — continue to superclass (BT-427)
                     continue_to_superclass(Selector, Args, Self, State, ClassPid, Depth);
                 true ->
-                    %% Intercept displayString/inspect for actor instances to avoid
-                    %% deadlock. Both compiled Object methods send a message back to
-                    %% Self (displayString calls self printString, inspect delegates
-                    %% to self printString), which produces a second gen_server:call
-                    %% on the same actor process → deadlock.
-                    %% beamtalk_object_ops handles these without any self-sends.
-                    %% Note: printString does NOT deadlock (uses class_of_object → metaclass).
+                    %% Intercept printString/displayString/inspect for actor
+                    %% instances and route them to beamtalk_object_ops — but only
+                    %% when the method resolved to the base `Object` class (i.e. the
+                    %% actor did NOT override it). A user subclass override is found
+                    %% earlier in the walk (MethodOwner =/= 'Object') and must be
+                    %% honoured.
+                    %%
+                    %% ADR 0094: a default actor's printString/displayString must
+                    %% render the kind-headed `Actor(ClassName, pid)` label, which
+                    %% only beamtalk_object_ops produces — the compiled Object
+                    %% methods return a bare class name. Routing here unifies all
+                    %% three display selectors onto the runtime renderer.
+                    %%
+                    %% This also avoids the displayString/inspect deadlock: the
+                    %% compiled Object methods send a message back to Self
+                    %% (displayString calls self printString, inspect delegates to
+                    %% self printString), producing a second gen_server:call on the
+                    %% same actor process. beamtalk_object_ops derives the label
+                    %% directly from the tuple with no self-sends.
                     case
-                        is_actor_instance(Self) andalso
-                            (Selector =:= 'displayString' orelse Selector =:= inspect)
+                        MethodOwner =:= 'Object' andalso
+                            is_actor_instance(Self) andalso
+                            (Selector =:= 'printString' orelse
+                                Selector =:= 'displayString' orelse Selector =:= inspect)
                     of
                         true ->
                             %% beamtalk_object_ops:dispatch is known-safe, but wrap it
