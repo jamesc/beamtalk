@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SupervisionChildCrashed — system event announced when a supervised child
+/// fails to start or crashes (ADR 0093, consumer ADR 0092).
+///
+/// Published on `SystemAnnouncer current` from `beamtalk_supervisor` when a
+/// DynamicSupervisor child start fails. The `reason` field carries the failure
+/// cause. Tooling subscribes to surface supervision-tree faults live.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: SupervisionChildCrashed do: [:e |
+///   Transcript showLine: e childClass asString
+/// ]
+/// ```
+sealed typed Announcement subclass: SupervisionChildCrashed
+  field: supervisor :: Symbol = #unknown
+  field: childClass :: Symbol = #unknown
+  field: childPid :: Pid | Nil = nil
+  field: reason :: Symbol = #unknown

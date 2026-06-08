@@ -1181,6 +1181,14 @@ no duration/span needed. Gracefully degrades when telemetry is not loaded.
 """.
 -spec maybe_execute_telemetry(list(), map(), map()) -> ok.
 maybe_execute_telemetry(EventName, Measurements, Metadata) ->
+    %% ADR 0093 §2 (BT-2445): the lifecycle start/stop telemetry call is the one
+    %% universal hook every actor-spawn path runs through — generated `init/1`
+    %% emits `[beamtalk, actor, lifecycle, start]` (codegen) and `terminate/2`
+    %% emits `[..., stop]`. Mirror those into ActorSpawned/ActorStopped system
+    %% announcements here so the announce is published from every spawn/stop path
+    %% without a codegen change (ADR 0069 §4: a spawn can produce both a telemetry
+    %% counter and an announcement). Best-effort and fault-isolated.
+    maybe_announce_lifecycle(EventName, Metadata),
     case erlang:function_exported(telemetry, execute, 3) of
         true ->
             telemetry:execute(EventName, Measurements, Metadata);
@@ -1668,6 +1676,66 @@ terminate(Reason, State) ->
     ok.
 
 %%% Helper Functions
+
+-doc """
+Normalise an OTP terminate reason to a stable Symbol for the `ActorStopped`
+event payload (BT-2445): `normal`/`shutdown` are clean stops, anything else is a
+`crashed`. Keeps the typed `reason :: Symbol` field flat (the raw reason term is
+still available in the telemetry stop event for diagnostics).
+""".
+-spec normalize_stop_reason(term()) -> normal | shutdown | crashed.
+normalize_stop_reason(normal) -> normal;
+normalize_stop_reason(shutdown) -> shutdown;
+normalize_stop_reason({shutdown, _}) -> shutdown;
+normalize_stop_reason(_Other) -> crashed.
+
+-doc """
+Mirror a lifecycle telemetry event into an ActorSpawned/ActorStopped system
+announcement (ADR 0093 §2, BT-2445).
+
+Matches only the two lifecycle telemetry event names that every actor
+spawn/stop path emits — `[beamtalk, actor, lifecycle, start]` and `[..., stop]`
+— and ignores all other telemetry (`kill`, dispatch spans, …). The actor class,
+pid, and (for stop) terminate reason are read from the telemetry `Metadata` map.
+Best-effort and fault-isolated via `do_announce_actor_lifecycle/2`.
+""".
+-spec maybe_announce_lifecycle(list(), map()) -> ok.
+maybe_announce_lifecycle([beamtalk, actor, lifecycle, start], Metadata) ->
+    Class = maps:get(class, Metadata, unknown),
+    Pid = maps:get(pid, Metadata, self()),
+    do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid});
+maybe_announce_lifecycle([beamtalk, actor, lifecycle, stop], Metadata) ->
+    Class = maps:get(class, Metadata, unknown),
+    Pid = maps:get(pid, Metadata, self()),
+    Reason = normalize_stop_reason(maps:get(reason, Metadata, normal)),
+    do_announce_actor_lifecycle('ActorStopped', #{
+        actorClass => Class, pid => Pid, reason => Reason
+    });
+maybe_announce_lifecycle(_EventName, _Metadata) ->
+    ok.
+
+-doc """
+Publish an actor-lifecycle system event on the `SystemAnnouncer` bus.
+
+Guarded by a `whereis` check so a spawn/stop never *starts* the bus (it is a
+supervised worker brought up at boot, ADR 0093 §1; only when it is already
+running is there any subscriber to deliver to), and wrapped in try/catch:
+announcing is a best-effort observability side effect that must never fail or
+delay actor start/teardown.
+""".
+-spec do_announce_actor_lifecycle(atom(), map()) -> ok.
+do_announce_actor_lifecycle(EventClass, Fields) ->
+    case erlang:whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _Pid ->
+            try
+                beamtalk_announcements:system_announce(EventClass, Fields)
+            catch
+                _:_ -> ok
+            end
+    end,
+    ok.
 
 -doc "Log dispatch completion with timing and state mutation info.".
 -spec log_dispatch_complete(map(), map(), atom(), atom(), integer()) -> ok.

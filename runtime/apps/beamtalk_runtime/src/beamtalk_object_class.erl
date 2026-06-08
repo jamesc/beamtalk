@@ -549,6 +549,12 @@ init({ClassName, ClassInfo}) ->
     MethodXref = maps:get(method_xref, ClassInfo, []),
     register_xref(ClassName, MethodXref),
 
+    %% ADR 0093 §2 (BT-2445): Announce ClassLoaded on the system bus *after* the
+    %% metadata row is written (line above), so any subscriber that reads the
+    %% class hierarchy during dispatch sees a consistent view (announce-after-
+    %% commit). Fire-and-forget; never fails class creation.
+    announce_class_lifecycle('ClassLoaded', ClassName),
+
     {ok, State}.
 
 -doc """
@@ -597,6 +603,32 @@ refresh_xref(ClassName, MethodXref) ->
             ok = beamtalk_xref:purge_class(ClassName),
             register_xref(ClassName, MethodXref)
     end.
+
+-doc """
+Announce a class-lifecycle system event (`'ClassLoaded'` | `'ClassRemoved'`) on
+the `SystemAnnouncer` bus (ADR 0093 §2, BT-2445).
+
+The announcements bus is a `beamtalk_runtime_sup` worker started *after*
+`beamtalk_bootstrap`, so during early stdlib bootstrap (and on a minimal
+embedded runtime) it may not be running yet. The whole call is therefore wrapped
+in try/catch and a `whereis` guard: announcing is a best-effort observability
+side effect and must never fail or delay class load/teardown. The
+`beamtalk_announcements:system_announce/2` entry point builds the typed event
+payload and dispatches it caller-side, fire-and-forget.
+""".
+-spec announce_class_lifecycle('ClassLoaded' | 'ClassRemoved', class_name()) -> ok.
+announce_class_lifecycle(EventClass, ClassName) ->
+    case erlang:whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _Pid ->
+            try
+                beamtalk_announcements:system_announce(EventClass, #{className => ClassName})
+            catch
+                _:_ -> ok
+            end
+    end,
+    ok.
 
 -doc """
 Re-index a single hot-patched method in `beamtalk_xref` (ADR 0087 Phase 4,
@@ -905,6 +937,10 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
             %% register_class/2 only inserts (the old-generation sweep is Phase 4),
             %% so a plain re-register would leave stale rows behind.
             refresh_xref(ClassName, maps:get(method_xref, ClassInfo, [])),
+            %% ADR 0093 §2 (BT-2445): hot redefinition is also a ClassLoaded —
+            %% announced from the handle_call reply path after the refreshed
+            %% metadata is committed.
+            announce_class_lifecycle('ClassLoaded', ClassName),
             {reply, {ok, NewState#class_state.fields}, NewState}
     end;
 handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
@@ -1002,6 +1038,10 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, #class_state{name = ClassName}) ->
+    %% ADR 0093 §2 (BT-2445): Announce ClassRemoved on the system bus as the class
+    %% process shuts down (e.g. removeFromSystem). The event carries only the
+    %% class name, so it is independent of the metadata-row deletion below.
+    announce_class_lifecycle('ClassRemoved', ClassName),
     %% BT-785: Clean up ETS hierarchy entry and pg group membership on shutdown.
     %% This runs when removeFromSystem stops the gen_server (gen_server:stop/1),
     %% ensuring the class is fully removed from the runtime registries.
