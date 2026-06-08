@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// SubscriptionNode — an immutable snapshot record for one live subscription on
+/// the announcements bus (ADR 0093 §7).
+///
+/// A `SubscriptionNode` is a frozen, point-in-time view of a single subscription:
+/// the event class it listens for, the announcer it lives on, the subscriber
+/// process, the handler kind, and whether it is a one-shot. Nodes are minted by
+/// the runtime shim (`beamtalk_announcements`) when you take a snapshot via
+/// `Announcer subscriptions` / `AnnouncementNavigation subscriptions`, and never
+/// mutate — to observe change, take a new snapshot.
+///
+/// The **read-vs-mutate rule** (ADR 0092 §3a, applied identically): a
+/// `SubscriptionNode` is a frozen fact and read-only. To *act* on a
+/// subscription you cross back to the live `Subscription` token (`unsubscribe`)
+/// or the `Announcer`. This keeps the Object/Value split consistent across all
+/// three navigators — navigators (`SystemNavigation`, `ProcessNavigation`,
+/// `AnnouncementNavigation`) and live handles (`Announcer`, `Subscription`) are
+/// `Object`; snapshot records (`SupervisionNode`, `SubscriptionNode`) are
+/// `Value`.
+///
+/// ## Examples
+/// ```beamtalk
+/// node := (AnnouncementNavigation default subscribersOf: PriceChanged) first
+/// node announcementClass   // => PriceChanged
+/// node subscriber          // => a Pid
+/// node handlerKind         // => #do
+/// node once                // => false
+/// ```
+sealed typed Value subclass: SubscriptionNode
+  /// The subscribed-to event type (the class object), or `nil` if that class is
+  /// no longer loaded.
+  field: announcementClass :: Class | Nil = nil
+  /// The announcer this subscription lives on — the bus it was read from.
+  field: announcer :: Announcer | Nil = nil
+  /// The live handler process (the subscriber pid).
+  field: subscriber :: Pid | Nil = nil
+  /// The handler kind: one of `#do` (block), `#send` (selector/receiver), or
+  /// `#doOnce` (one-shot block).
+  field: handlerKind :: Symbol = #do
+  /// Whether this is a one-shot subscription (auto-removed on first delivery).
+  field: once :: Boolean = false
+
+  /// Whether this is a `when:send:to:` subscription (its handler dispatches a
+  /// selector to a receiver, rather than evaluating a block).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node isSend   // => false
+  /// ```
+  isSend -> Boolean => self handlerKind == #send
+
+  /// Human-readable description, e.g.
+  /// `#SubscriptionNode<PriceChanged #do #Pid<0.132.0>>` or, for a one-shot,
+  /// `#SubscriptionNode<ActorSpawned #doOnce #Pid<0.200.0>>`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// node printString
+  ///   // => "#SubscriptionNode<PriceChanged #do #Pid<0.132.0>>"
+  /// ```
+  printString -> String =>
+    classPart := self announcementClass isNil ifTrue: [
+      "?"
+    ] ifFalse: [self announcementClass name asString]
+    subscriberPart := self subscriber isNil ifTrue: [
+      "?"
+    ] ifFalse: [self subscriber printString]
+    "#SubscriptionNode<"
+      ++ classPart
+      ++ " "
+      ++ self handlerKind printString
+      ++ " "
+      ++ subscriberPart
+      ++ ">"

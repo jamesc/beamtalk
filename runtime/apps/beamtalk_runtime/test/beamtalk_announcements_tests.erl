@@ -885,6 +885,120 @@ do_once_sync_path_test_() ->
     end}.
 
 %%====================================================================
+%% Introspection / navigation veneer (BT-2444)
+%%
+%% Placed before the destructive heir tests (which kill and restart the bus) so
+%% they run against a healthy, table-backed gen_server.
+%%====================================================================
+
+%% `subscriptionNodes/1` returns one SubscriptionNode value map per live row,
+%% each stamped with the supplied announcer and carrying the subscriber pid,
+%% handler kind, and once flag.
+subscription_nodes_snapshot_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
+                try
+                    {ok, _SubRef} = beamtalk_announcements:subscribe('E', Sub, h1, false),
+                    Nodes = beamtalk_announcements:'subscriptionNodes'(Announcer),
+                    ?assertEqual(1, length(Nodes)),
+                    [Node] = Nodes,
+                    ?assertMatch(#{'$beamtalk_class' := 'SubscriptionNode'}, Node),
+                    ?assertEqual(Announcer, maps:get(announcer, Node)),
+                    ?assertEqual(Sub, maps:get(subscriber, Node)),
+                    ?assertEqual(do, maps:get(handlerKind, Node)),
+                    ?assertEqual(false, maps:get(once, Node))
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%% `subscriptionNodesFor/2` filters to exactly the requested class, and the
+%% handler kind reflects the stored handler term (`{send, _, _}` => send;
+%% once flag => doOnce).
+subscription_nodes_for_class_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
+                try
+                    {ok, _R1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
+                    {ok, _R2} = beamtalk_announcements:subscribe(
+                        'E', Sub, {send, 'sel:', Sub}, false
+                    ),
+                    {ok, _R3} = beamtalk_announcements:subscribe('E', Sub, h3, true),
+                    {ok, _R4} = beamtalk_announcements:subscribe('Other', Sub, h4, false),
+
+                    EForSub = beamtalk_announcements:'subscriptionNodesFor'(Announcer, 'E'),
+                    ?assertEqual(3, length(EForSub)),
+                    Kinds = lists:sort([maps:get(handlerKind, N) || N <- EForSub]),
+                    ?assertEqual([do, doOnce, send], Kinds),
+
+                    OtherForSub = beamtalk_announcements:'subscriptionNodesFor'(
+                        Announcer, 'Other'
+                    ),
+                    ?assertEqual(1, length(OtherForSub)),
+
+                    ?assertEqual(
+                        [],
+                        beamtalk_announcements:'subscriptionNodesFor'(Announcer, 'Nonexistent')
+                    )
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%% `subscriptionCountAll/0` mirrors `subscription_count/0`; `announcedClasses/0`
+%% returns class objects for the distinct subscribed classes (here `nil`, since
+%% the synthetic test classes are not loaded in the registry) without crashing.
+subscription_count_and_announced_classes_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                try
+                    ?assertEqual(0, beamtalk_announcements:'subscriptionCountAll'()),
+                    {ok, _R1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
+                    {ok, _R2} = beamtalk_announcements:subscribe('F', Sub, h2, false),
+                    ?assertEqual(2, beamtalk_announcements:'subscriptionCountAll'()),
+                    %% Distinct subscribed classes; unloaded test classes resolve
+                    %% to `nil` and are dropped, so the list is empty but the read
+                    %% must not crash.
+                    ?assert(is_list(beamtalk_announcements:'announcedClasses'()))
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%% Empty-bus reads are safe before any subscription.
+introspection_empty_bus_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
+                ?assertEqual([], beamtalk_announcements:'subscriptionNodes'(Announcer)),
+                ?assertEqual(
+                    [], beamtalk_announcements:'subscriptionNodesFor'(Announcer, 'E')
+                ),
+                ?assertEqual([], beamtalk_announcements:'announcedClasses'()),
+                ?assertEqual(0, beamtalk_announcements:'subscriptionCountAll'())
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Heir crash-survival: live subscriptions survive, dead-in-gap pruned (BT-2442)
 %%====================================================================
 

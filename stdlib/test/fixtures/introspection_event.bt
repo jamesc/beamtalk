@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test fixture: a dedicated Announcement subclass for the announcements
+// introspection tests (BT-2444). Kept distinct from `TestEvent` so the shared
+// global bus's exact-count assertions are isolated from other test files that
+// subscribe to `TestEvent`.
+
+Announcement subclass: IntrospectionEvent
+  field: payload :: Integer = 0

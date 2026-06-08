@@ -22,6 +22,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ActorSpawned"
             | "ActorStopped"
             | "Announcement"
+            | "AnnouncementNavigation"
             | "Announcer"
             | "Array"
             | "AtomicCounter"
@@ -87,6 +88,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "String"
             | "Subprocess"
             | "Subscription"
+            | "SubscriptionNode"
             | "SupervisionChildAdded"
             | "SupervisionChildCrashed"
             | "SupervisionNode"
@@ -245,6 +247,37 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "AnnouncementNavigation".into(),
+        ClassInfo {
+            name: "AnnouncementNavigation".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "subscriptions".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AnnouncementNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SubscriptionNode)".into()), param_types: vec![], doc: Some("A read-only snapshot of every live subscription on the bus, as immutable\n`SubscriptionNode` records. Re-call to refresh.\n\n## Examples\n```beamtalk\nAnnouncementNavigation default subscriptions   // => [a SubscriptionNode, ...]\n```".into()) },
+                MethodInfo { selector: "subscribersOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AnnouncementNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SubscriptionNode)".into()), param_types: vec![Some("Class".into())], doc: Some("A read-only snapshot of the subscriptions to exactly `aClass`, as\n`SubscriptionNode` records. Matches exactly `aClass` (not subclasses) — the\nas-subscribed key, mirroring `when:do:`. The IDE's \"event wiring\" pane\n(ADR 0017/0091) groups this by `announcementClass`.\n\n## Examples\n```beamtalk\nAnnouncementNavigation default subscribersOf: ActorSpawned\n```".into()) },
+                MethodInfo { selector: "announcedClasses".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AnnouncementNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(Class)".into()), param_types: vec![], doc: Some("The distinct event classes currently subscribed to on the bus — the event\ntypes in active use, as class objects (ADR 0093 §7). Classes with live\nsubscriptions appear once each; the order is unspecified.\n\n## Examples\n```beamtalk\nAnnouncementNavigation default announcedClasses   // => [ActorSpawned, PriceChanged]\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "default".into(), arity: 0, kind: MethodKind::Primary, defined_in: "AnnouncementNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("AnnouncementNavigation".into()), param_types: vec![], doc: Some("A navigation over the singleton system bus (`SystemAnnouncer current`) —\nthe `default` scope, the one feed for everything the system emits.\n\n## Examples\n```beamtalk\nAnnouncementNavigation default subscriptions\n```".into()) },
+                MethodInfo { selector: "of:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "AnnouncementNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("AnnouncementNavigation".into()), param_types: vec![Some("Announcer".into())], doc: Some("A navigation over a specific `anAnnouncer`.\n\nIn v1 every announcer shares one bus, so this is equivalent to `default`;\nthe argument is accepted (and type-checked as an `Announcer`) so callers\nwritten against the eventual per-instance scoping keep working unchanged.\n\n## Examples\n```beamtalk\nAnnouncementNavigation of: (Announcer new)\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "Announcer".into(),
         ClassInfo {
             name: "Announcer".into(),
@@ -267,6 +300,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "announceAndWait:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Announcement".into())], doc: Some("Announce an event synchronously — wait for every handler to complete,\nwith per-handler fault isolation and a default 5s timeout.\n\n## Examples\n```beamtalk\nannouncer announceAndWait: (PriceChanged newPrice: 42)\n```".into()) },
                 MethodInfo { selector: "announceAndWait:timeout:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Announcement".into()), Some("Integer".into())], doc: Some("Announce an event synchronously with a custom per-handler timeout (ms).\n\n## Examples\n```beamtalk\nannouncer announceAndWait: event timeout: 10000\n```".into()) },
                 MethodInfo { selector: "unsubscribe:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Object".into())], doc: Some("Remove all subscriptions held by `receiver` on this announcer.\n\n## Examples\n```beamtalk\nannouncer unsubscribe: self\n```".into()) },
+                MethodInfo { selector: "subscriptions".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SubscriptionNode)".into()), param_types: vec![], doc: Some("A read-only snapshot of this announcer's live subscriptions as immutable\n`SubscriptionNode` records (ADR 0093 §7 — object-knows-itself). Reads its\nown ETS rows; to *act* on a subscription, cross back to the live\n`Subscription` token or `unsubscribe:`. Re-call to refresh.\n\nIn v1 every announcer shares one class-keyed bus, so this reports the whole\nbus; per-instance isolation is tracked as follow-up work.\n\n## Examples\n```beamtalk\nannouncer when: PriceChanged do: [:e | e printNl]\nannouncer subscriptions size   // => 1\n```".into()) },
+                MethodInfo { selector: "subscribersOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(SubscriptionNode)".into()), param_types: vec![Some("Class".into())], doc: Some("A read-only snapshot of the subscriptions to exactly `aClass` on this\nannouncer, as `SubscriptionNode` records (ADR 0093 §7). Matches exactly\n`aClass` (not subclasses) — the as-subscribed key, mirroring `when:do:`.\n\n## Examples\n```beamtalk\nannouncer when: PriceChanged do: [:e | e printNl]\n(announcer subscribersOf: PriceChanged) size   // => 1\n```".into()) },
+                MethodInfo { selector: "subscriptionCount".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("The total number of live subscriptions on this announcer (ADR 0093 §7).\nA cheap direct ETS read — the size of `subscriptions` without materialising\nthe snapshot records.\n\n## Examples\n```beamtalk\nannouncer when: PriceChanged do: [:e | e printNl]\nannouncer subscriptionCount   // => 1\n```".into()) },
             ],
             class_methods: vec![
                 MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Announcer".into()), param_types: vec![], doc: Some("Create a new Announcer handle (mints a fresh runtime ref via FFI).\n\n## Examples\n```beamtalk\na := Announcer new\na class   // => Announcer\n```".into()) },
@@ -2692,6 +2728,45 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isActive".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Subscription".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this subscription is still active (the SubRef row exists in ETS).\nReturns `false` after `unsubscribe` or after the subscriber process died.\n\n## Examples\n```beamtalk\nsub isActive   // => true\nsub unsubscribe\nsub isActive   // => false\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "SubscriptionNode".into(),
+        ClassInfo {
+            name: "SubscriptionNode".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            state: vec!["announcementClass".into(), "announcer".into(), "subscriber".into(), "handlerKind".into(), "once".into()],
+            state_types: HashMap::from([("announcementClass".into(), "Class | Nil".into()), ("announcer".into(), "Announcer | Nil".into()), ("subscriber".into(), "Pid | Nil".into()), ("handlerKind".into(), "Symbol".into()), ("once".into(), "Boolean".into())]),
+            state_has_default: HashMap::from([("announcementClass".into(), true), ("announcer".into(), true), ("subscriber".into(), true), ("handlerKind".into(), true), ("once".into(), true)]),
+            methods: vec![
+                MethodInfo { selector: "isSend".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this is a `when:send:to:` subscription (its handler dispatches a\nselector to a receiver, rather than evaluating a block).\n\n## Examples\n```beamtalk\nnode isSend   // => false\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable description, e.g.\n`#SubscriptionNode<PriceChanged #do #Pid<0.132.0>>` or, for a one-shot,\n`#SubscriptionNode<ActorSpawned #doOnce #Pid<0.200.0>>`.\n\n## Examples\n```beamtalk\nnode printString\n  // => \"#SubscriptionNode<PriceChanged #do #Pid<0.132.0>>\"\n```".into()) },
+                MethodInfo { selector: "announcementClass".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Class | Nil".into()), param_types: vec![], doc: Some("Returns the `announcementClass` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withAnnouncementClass:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SubscriptionNode".into()), param_types: vec![Some("Class | Nil".into())], doc: Some("Returns a new `SubscriptionNode` with `announcementClass` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "announcer".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Announcer | Nil".into()), param_types: vec![], doc: Some("Returns the `announcer` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withAnnouncer:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SubscriptionNode".into()), param_types: vec![Some("Announcer | Nil".into())], doc: Some("Returns a new `SubscriptionNode` with `announcer` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "subscriber".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Pid | Nil".into()), param_types: vec![], doc: Some("Returns the `subscriber` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withSubscriber:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SubscriptionNode".into()), param_types: vec![Some("Pid | Nil".into())], doc: Some("Returns a new `SubscriptionNode` with `subscriber` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "handlerKind".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Returns the `handlerKind` field value. Default: `#do`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withHandlerKind:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SubscriptionNode".into()), param_types: vec![Some("Symbol".into())], doc: Some("Returns a new `SubscriptionNode` with `handlerKind` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "once".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Returns the `once` field value. Default: `false`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withOnce:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SubscriptionNode".into()), param_types: vec![Some("Boolean".into())], doc: Some("Returns a new `SubscriptionNode` with `once` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "announcementClass:announcer:subscriber:handlerKind:once:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "SubscriptionNode".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("SubscriptionNode".into()), param_types: vec![Some("Class | Nil".into()), Some("Announcer | Nil".into()), Some("Pid | Nil".into()), Some("Symbol".into()), Some("Boolean".into())], doc: Some("Creates a new `SubscriptionNode`. Args: announcementClass (default: nil), announcer (default: nil), subscriber (default: nil), handlerKind (default: #do), once (default: false).\n\n*(compiler-generated)*".into()) },
+            ],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],

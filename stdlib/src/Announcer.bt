@@ -122,3 +122,43 @@ typed Object subclass: Announcer
   /// ```
   unsubscribe: receiver :: Object -> Nil =>
     (Erlang beamtalk_announcements) unsubscribeReceiver: self receiver: receiver
+
+  /// A read-only snapshot of this announcer's live subscriptions as immutable
+  /// `SubscriptionNode` records (ADR 0093 §7 — object-knows-itself). Reads its
+  /// own ETS rows; to *act* on a subscription, cross back to the live
+  /// `Subscription` token or `unsubscribe:`. Re-call to refresh.
+  ///
+  /// In v1 every announcer shares one class-keyed bus, so this reports the whole
+  /// bus; per-instance isolation is tracked as follow-up work.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer when: PriceChanged do: [:e | e printNl]
+  /// announcer subscriptions size   // => 1
+  /// ```
+  subscriptions -> List(SubscriptionNode) =>
+    (Erlang beamtalk_announcements) subscriptionNodes: self
+
+  /// A read-only snapshot of the subscriptions to exactly `aClass` on this
+  /// announcer, as `SubscriptionNode` records (ADR 0093 §7). Matches exactly
+  /// `aClass` (not subclasses) — the as-subscribed key, mirroring `when:do:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer when: PriceChanged do: [:e | e printNl]
+  /// (announcer subscribersOf: PriceChanged) size   // => 1
+  /// ```
+  subscribersOf: aClass :: Class -> List(SubscriptionNode) =>
+    (Erlang beamtalk_announcements) subscriptionNodesFor: self class: aClass
+
+  /// The total number of live subscriptions on this announcer (ADR 0093 §7).
+  /// A cheap direct ETS read — the size of `subscriptions` without materialising
+  /// the snapshot records.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// announcer when: PriceChanged do: [:e | e printNl]
+  /// announcer subscriptionCount   // => 1
+  /// ```
+  subscriptionCount -> Integer =>
+    (Erlang beamtalk_announcements) subscriptionCountAll
