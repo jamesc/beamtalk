@@ -1,7 +1,7 @@
 # ADR 0093: Announcements — Typed Event Substrate (Runtime Bus + stdlib Veneer)
 
 ## Status
-Accepted (2026-06-07)
+Implemented (2026-06-08)
 
 ## Context
 
@@ -680,7 +680,7 @@ events), **package** (re-scoped), **docs/tests**. No parser/codegen changes.
 ## Implementation Tracking
 
 **Epic:** [BT-2438](https://linear.app/beamtalk/issue/BT-2438) — Announcements: Typed Event Substrate (ADR 0093)
-**Status:** Planned
+**Status:** Implemented (Layers 1–2 + system events + introspection + docs/e2e; Layer 3 package = BT-2193, optional, separate track)
 
 | Phase | Issue | Scope |
 |---|---|---|

@@ -30,6 +30,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [Keyword Method Patching — `compile:source:` and `tryCompile:source:` (ADR 0082)](#keyword-method-patching--compilesource-and-trycompilesource-adr-0082)
   - [ChangeLog — Tracking In-Memory Changes (ADR 0082)](#changelog--tracking-in-memory-changes-adr-0082)
 - [Actor Observability and Tracing (ADR 0069)](#actor-observability-and-tracing-adr-0069)
+- [Announcements — Typed Events (ADR 0093)](#announcements--typed-events-adr-0093)
 - [Namespace and Class Visibility](#namespace-and-class-visibility)
   - [Visibility and Access Control (ADR 0071)](#visibility-and-access-control-adr-0071)
 - [Smalltalk + BEAM Mapping](#smalltalk--beam-mapping)
@@ -3346,6 +3347,210 @@ Actor messages automatically carry a propagated context map across boundaries. T
 |---------|-----|-----|
 | **What is happening** — log messages, debug output | `Logger info:`, `Beamtalk enableDebug:` | [ADR 0064](ADR/0064-runtime-logging-control-and-observability-api.md) |
 | **How fast is it happening** — timing, call counts, bottlenecks | `Tracing stats`, `Tracing slowMethods:` | [ADR 0069](ADR/0069-actor-observability-and-tracing.md) |
+
+---
+
+## Announcements — Typed Events (ADR 0093)
+
+Announcements are Beamtalk's **typed publish/subscribe substrate** — a first-class
+Observer pattern. One part of a program (or the runtime itself) says *"X
+happened"* by announcing a typed event; other parts react by subscribing to that
+event's class. It is Pharo's `Announcements` + `SystemAnnouncer`, adapted to the
+BEAM: subscriptions are process-rooted and cleaned up by `monitor`, dispatch runs
+caller-side off concurrent ETS reads (no central bottleneck), and crashing
+handlers are isolated. See [ADR 0093](ADR/0093-announcements-event-substrate.md)
+for the full design.
+
+The substrate lives in the **core image** (stdlib + runtime), not an optional
+package, because the *system* publishes through it — so it is always available,
+no dependency to add.
+
+### Events — subclass `Announcement`
+
+An **announcement** is an immutable, typed payload describing a fact. Subclass
+`Announcement` and add `field:` slots for the event's data. Because
+`Announcement` is a `Value`, you get keyword-constructor ergonomics and `field:`
+accessors for free:
+
+```beamtalk
+Announcement subclass: PriceChanged
+  field: newPrice :: Number = nil
+
+event := PriceChanged newPrice: 42
+event newPrice    // => 42
+event class       // => PriceChanged
+```
+
+### Announcer — a per-instance dispatcher
+
+`Announcer new` mints a fresh dispatcher handle (an opaque identity handle, like
+`Pid`). Subscribe with `when:do:`, publish with `announce:`:
+
+```beamtalk
+a := Announcer new
+
+// Subscribe: returns a Subscription token. The handler block receives the event.
+sub := a when: PriceChanged do: [:e | Transcript showLine: "now " ++ e newPrice printString]
+sub class       // => Subscription
+sub isActive    // => true
+
+// Publish asynchronously (fire-and-forget). Every matching subscriber runs.
+a announce: (PriceChanged newPrice: 42)    // prints "now 42"
+
+// Stop listening.
+sub unsubscribe
+sub isActive    // => false
+```
+
+### Subscription protocol
+
+| Message | Meaning |
+|---|---|
+| `when: aClass do: aBlock` | Evaluate `aBlock` with the event on each announcement of `aClass` (or a subclass). |
+| `when: aClass send: sel to: receiver` | Send `sel` to `receiver` with the event as the sole argument. |
+| `when: aClass doOnce: aBlock` | Deliver exactly once, then auto-unsubscribe. Consumed atomically under concurrent announcers. |
+| `announce: anEvent` | Publish asynchronously — returns immediately, handlers run fire-and-forget. |
+| `announceAndWait: anEvent` | Publish synchronously — block until every handler completes (default 5 s timeout). |
+| `announceAndWait: anEvent timeout: ms` | Synchronous publish with a custom per-handler timeout in milliseconds. |
+| `unsubscribe: receiver` | Remove every subscription `receiver` holds on this announcer. |
+
+Each `when:…` returns a **distinct** `Subscription` — a process may hold several
+to the same class, and re-subscribing never silently replaces an earlier one.
+
+### Synchronous vs asynchronous
+
+`announce:` is asynchronous: it returns immediately and each handler runs in its
+own transient process, so a slow or crashing handler never blocks the publisher
+or its siblings. `announceAndWait:` is synchronous — it waits for every handler,
+with per-handler fault isolation and a timeout, so a wedged handler can never
+hang the caller:
+
+```beamtalk
+a announceAndWait: (PriceChanged newPrice: 99)
+// returns only after all handlers have run (or timed out)
+```
+
+A crashing handler is logged and isolated — other subscribers still run, and the
+announcer is unaffected:
+
+```beamtalk
+a when: PriceChanged do: [:e | e boom]   // this handler will crash
+a announce: (PriceChanged newPrice: 1)
+// other subscribers still run; the crash is logged, not propagated
+```
+
+### MRO matching — subscribe to a superclass
+
+Dispatch walks the event's superclass chain at announce time, so subscribing to a
+**superclass** receives every subclass event. Delivery is de-duplicated per
+subscription:
+
+```beamtalk
+Announcement subclass: UIEvent
+UIEvent subclass: ButtonClicked
+  field: buttonId :: String = ""
+
+a when: UIEvent do: [:e | Transcript showLine: "ui event"]
+a announce: (ButtonClicked buttonId: "submit")   // matches — "ui event"
+```
+
+### SystemAnnouncer — watch the runtime live
+
+`SystemAnnouncer current` is the singleton bus the **runtime itself** publishes
+onto. System facilities announce well-known discrete events; a tool subscribes
+once and filters by event class instead of wiring bespoke notification channels:
+
+```beamtalk
+SystemAnnouncer current when: ActorSpawned do: [:e |
+  Transcript showLine: e actorClass asString
+]
+Counter spawn    // the subscription fires: prints "Counter"
+```
+
+The system event classes (all `Announcement` subclasses):
+
+| Event | Fields | Announced when |
+|---|---|---|
+| `ActorSpawned` | `actorClass`, `pid` | a Beamtalk actor starts |
+| `ActorStopped` | `actorClass`, `pid`, `reason` | an actor stops |
+| `ClassLoaded` | `className` | a class is loaded into the image |
+| `ClassRemoved` | `className` | a class is removed |
+| `BindingChanged` | `name`, `value` | a workspace variable is assigned |
+| `SupervisionChildAdded` | (see ADR 0092) | a supervised child is added |
+| `SupervisionChildCrashed` | (see ADR 0092) | a supervised child crashes |
+
+`SystemAnnouncer` is **async-only**: `announceAndWait:` raises
+`UnsupportedOperation`, because the shared system bus can have many subscribers
+and a synchronous gather would be an unbounded process storm under rapid system
+events. Use `announce:` for the system bus, or a per-instance `Announcer` when
+you need synchronous dispatch.
+
+```beamtalk
+[SystemAnnouncer current announceAndWait: anEvent] on: Error do: [:e | e kind]
+// => unsupported_operation
+```
+
+### Introspection — the third navigation sibling
+
+The bus is **navigable**, alongside `SystemNavigation` (static classes) and
+`ProcessNavigation` (the live supervision tree). There are two levels.
+
+**Object-knows-itself** — a live `Announcer` inspects its own subscriptions:
+
+```beamtalk
+a subscriptions          // => a List of SubscriptionNode snapshots
+a subscribersOf: PriceChanged   // => subscriptions to exactly PriceChanged
+a subscriptionCount      // => total live subscriptions on the bus
+```
+
+**Navigator-discovers-system** — `AnnouncementNavigation` queries the graph:
+
+```beamtalk
+AnnouncementNavigation default subscribersOf: ActorSpawned
+AnnouncementNavigation default announcedClasses    // => distinct event types in use
+AnnouncementNavigation of: anAnnouncer             // scope to one announcer
+```
+
+Each query returns a read-only snapshot of immutable `SubscriptionNode` value
+records (`announcementClass`, `announcer`, `subscriber`, `handlerKind`, `once`).
+To *act* on a subscription you cross back to the live `Subscription` token or the
+`Announcer` — the read-vs-mutate rule shared by all three navigators:
+
+```beamtalk
+node := (a subscribersOf: PriceChanged) first
+node announcementClass   // => PriceChanged
+node subscriber          // => a Pid
+node handlerKind         // => #do      (one of #do | #send | #doOnce)
+node once                // => false
+```
+
+### Announcements vs `telemetry` (ADR 0069)
+
+Beamtalk has two event buses; reach for the right one. **Measure** with
+`telemetry` (spans, counters, durations — [Actor Observability and
+Tracing](#actor-observability-and-tracing-adr-0069)); **react** with
+Announcements (typed domain events you subscribe to in app logic):
+
+| | `telemetry` (ADR 0069) | Announcements (ADR 0093) |
+|---|---|---|
+| Purpose | Measurement — spans, counters | Typed domain events you react to |
+| Event identity | string list `[beamtalk, actor, dispatch]` | `Announcement` subclass (typed, MRO) |
+| Delivery | sync, fire-and-forget | async or sync; isolated; monitored |
+| Liveness | none (module-fun handlers) | `monitor`-based per subscriber |
+
+> **Liveness note.** A subscription is bound to the *subscribing* process and
+> auto-removed when that process dies — no manual cleanup leaks. In the REPL each
+> turn evaluates in a fresh worker process, so a subscription made at one prompt
+> is gone by the next; subscribe, announce, and observe within a single
+> expression (or from a long-lived actor) when you need a subscription to persist.
+
+> **v1 scope.** In v1 all per-instance announcers share one class-keyed runtime
+> bus, so a subscription matches by event *class*, not by announcer;
+> `SystemAnnouncer` is the canonical multi-subscriber bus. True per-instance
+> subscription isolation is tracked as follow-up work. Cross-node delivery to a
+> *connected* node works; partition tolerance, replay, and the
+> `RecordingAnnouncer`/telemetry-bridge extras live in the optional
+> `beamtalk-announcements` package.
 
 ---
 
