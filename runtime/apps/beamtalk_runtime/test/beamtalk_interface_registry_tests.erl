@@ -268,6 +268,39 @@ class_named_metaclass_tag_test_() ->
     end}.
 
 %%====================================================================
+%% Transient class-process resolution (BT-2467)
+%%====================================================================
+
+class_object_for_pid_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"resolves a live class pid to a class object tuple", fun() ->
+                Pid = beamtalk_class_registry:whereis_class('Integer'),
+                ?assert(is_pid(Pid)),
+                ?assertMatch(
+                    {beamtalk_object, _, _, Pid},
+                    beamtalk_interface:class_object_for_pid('Integer', Pid)
+                )
+            end},
+            {"returns nil (not an exit) for a dead class process", fun() ->
+                %% A class object process that exited between whereis_class/1
+                %% returning its pid and the module_name/1 gen_server:call must
+                %% surface as nil, not propagate an `erlang_exit` to callers
+                %% such as SystemNavigation classesInPackage:. (BT-2467)
+                DeadPid = spawn(fun() -> ok end),
+                MRef = erlang:monitor(process, DeadPid),
+                receive
+                    {'DOWN', MRef, process, DeadPid, _} -> ok
+                after 1000 -> error(dead_pid_setup_timeout)
+                end,
+                ?assertEqual(
+                    nil, beamtalk_interface:class_object_for_pid('Integer', DeadPid)
+                )
+            end}
+        ]
+    end}.
+
+%%====================================================================
 %% globals Tests
 %%====================================================================
 

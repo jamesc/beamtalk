@@ -707,7 +707,185 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-143",
+      "id": "docs-beamtalk-language-features-block-141",
+      "title": "Events — subclass Announcement (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Announcement",
+        "PriceChanged",
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "subclassing"
+      ],
+      "source": "Announcement subclass: PriceChanged\n  field: newPrice :: Number = nil\n\nevent := PriceChanged newPrice: 42\nevent newPrice    // => 42\nevent class       // => PriceChanged",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-142",
+      "title": "Announcer — a per-instance dispatcher (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "append",
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "concat",
+        "concatenate",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "set",
+        "string conversion",
+        "string join",
+        "toString",
+        "to_string"
+      ],
+      "source": "a := Announcer new\n\n// Subscribe: returns a Subscription token. The handler block receives the event.\nsub := a when: PriceChanged do: [:e | Transcript showLine: \"now \" ++ e newPrice printString]\nsub class       // => Subscription\nsub isActive    // => true\n\n// Publish asynchronously (fire-and-forget). Every matching subscriber runs.\na announce: (PriceChanged newPrice: 42)    // prints \"now 42\"\n\n// Stop listening.\nsub unsubscribe\nsub isActive    // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-144",
+      "title": "Synchronous vs asynchronous (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features",
+        "constructor",
+        "create",
+        "for each",
+        "for-each",
+        "forEach",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop"
+      ],
+      "source": "a when: PriceChanged do: [:e | e boom]   // this handler will crash\na announce: (PriceChanged newPrice: 1)\n// other subscribers still run; the crash is logged, not propagated",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-145",
+      "title": "MRO matching — subscribe to a superclass (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Announcement",
+        "ButtonClicked",
+        "UIEvent",
+        "beamtalk-language-features",
+        "extends",
+        "field",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "iterate",
+        "iteration",
+        "loop",
+        "member",
+        "object",
+        "property",
+        "subclassing"
+      ],
+      "source": "Announcement subclass: UIEvent\nUIEvent subclass: ButtonClicked\n  field: buttonId :: String = \"\"\n\na when: UIEvent do: [:e | Transcript showLine: \"ui event\"]\na announce: (ButtonClicked buttonId: \"submit\")   // matches — \"ui event\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-146",
+      "title": "SystemAnnouncer — watch the runtime live (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "iterate",
+        "iteration",
+        "loop",
+        "process"
+      ],
+      "source": "SystemAnnouncer current when: ActorSpawned do: [:e |\n  Transcript showLine: e actorClass asString\n]\nCounter spawn    // the subscription fires: prints \"Counter\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-148",
+      "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "a subscriptions          // => a List of SubscriptionNode snapshots\na subscribersOf: PriceChanged   // => subscriptions to exactly PriceChanged\na subscriptionCount      // => total live subscriptions on the bus",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-149",
+      "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "gen_server",
+        "genserver",
+        "process"
+      ],
+      "source": "AnnouncementNavigation default subscribersOf: ActorSpawned\nAnnouncementNavigation default announcedClasses    // => distinct event types in use\nAnnouncementNavigation of: anAnnouncer             // scope to one announcer",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-15",
+      "title": "Message Sends (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-150",
+      "title": "Introspection — the third navigation sibling (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "node := (a subscribersOf: PriceChanged) first\nnode announcementClass   // => PriceChanged\nnode subscriber          // => a Pid\nnode handlerKind         // => #do      (one of #do | #send | #doOnce)\nnode once                // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-153",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -728,7 +906,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-144",
+      "id": "docs-beamtalk-language-features-block-154",
       "title": "Protected stdlib class names (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -749,7 +927,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-149",
+      "id": "docs-beamtalk-language-features-block-159",
       "title": "Binary — Byte-Level Data (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -770,17 +948,22 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-15",
-      "title": "Message Sends (beamtalk-language-features)",
+      "id": "docs-beamtalk-language-features-block-16",
+      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
-        "beamtalk-language-features"
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
       ],
-      "source": "// Unary message\ncounter increment\n\n// Binary message (standard math precedence: 2 + 3 * 4 = 14)\n2 + 3 * 4\n\n// Keyword message\ndict at: #name put: \"hello\"\n\n// Cascade - multiple messages to same receiver\nTranscript show: \"Hello\"; cr; show: \"World\"",
+      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-150",
+      "id": "docs-beamtalk-language-features-block-160",
       "title": "Interval — Arithmetic Sequences (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -796,7 +979,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-151",
+      "id": "docs-beamtalk-language-features-block-161",
       "title": "Bag(E) — Multisets (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -820,7 +1003,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-152",
+      "id": "docs-beamtalk-language-features-block-162",
       "title": "Constructors (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -839,7 +1022,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-153",
+      "id": "docs-beamtalk-language-features-block-163",
       "title": "Lazy Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -860,7 +1043,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-154",
+      "id": "docs-beamtalk-language-features-block-164",
       "title": "Terminal Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -873,7 +1056,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-155",
+      "id": "docs-beamtalk-language-features-block-165",
       "title": "printString — Pipeline Inspection (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -889,7 +1072,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-156",
+      "id": "docs-beamtalk-language-features-block-166",
       "title": "Eager vs Lazy — The Boundary (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -902,7 +1085,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-157",
+      "id": "docs-beamtalk-language-features-block-167",
       "title": "File Streaming (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -921,7 +1104,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-158",
+      "id": "docs-beamtalk-language-features-block-168",
       "title": "File I/O and Directory Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -931,7 +1114,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-159",
+      "id": "docs-beamtalk-language-features-block-169",
       "title": "Side-Effect Timing ⚠️ (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -946,130 +1129,6 @@
         "transform"
       ],
       "source": "// This prints NOTHING — the pipeline is just a recipe\ns := (Stream on: #(1, 2, 3)) collect: [:n | Transcript show: n. n * 2]\n\n// This is when printing actually happens\ns asList\n// Transcript shows: 1, 2, 3\n// => [2,4,6]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-16",
-      "title": "Short-circuit boolean operators (and:/or:) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Short-circuit AND - second block only evaluated if first is true\nresult := condition and: [self expensiveCheck]\n\n// Short-circuit OR - second block only evaluated if first is false  \nresult := condition or: [self fallbackValue]",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-160",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-161",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-162",
-      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "Collection",
-        "Object",
-        "beamtalk-language-features",
-        "extends",
-        "first",
-        "inherit",
-        "inheritance",
-        "object",
-        "subclassing"
-      ],
-      "source": "typed Object subclass: Collection(E)\n  @expect type\n  first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-165",
-      "title": "Creating a Table (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-166",
-      "title": "Reading and Writing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-167",
-      "title": "Other Operations (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "beamtalk-language-features"
-      ],
-      "source": "cache size                      // => number of entries\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache delete                    // destroy the table; frees all memory",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-168",
-      "title": "Cross-Actor Sharing (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "async",
-        "beamtalk-language-features",
-        "concurrent",
-        "constructor",
-        "create",
-        "gen_server",
-        "genserver",
-        "instantiate",
-        "mutate",
-        "mutation",
-        "process",
-        "set"
-      ],
-      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -1094,6 +1153,130 @@
     },
     {
       "id": "docs-beamtalk-language-features-block-170",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "@expect dnu\nsomeObject unknownMessage   // DNU hint suppressed\n\n@expect type\n42 + \"hello\"                // type warning suppressed\n\n@expect type\n42 unknownMethod            // also suppresses method-not-found (DNU) hints\n\n@expect unused\nx := computeSomething       // unused-variable warning suppressed\n\n@expect all\nanything                    // any diagnostic suppressed (discouraged — use a specific category)",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-171",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "// Result.unwrap returns Object — the type system cannot verify 'size' exists\n@expect type\nself assert: someResult unwrap size equals: 10",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-172",
+      "title": "Diagnostic Suppression (@expect) (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "Collection",
+        "Object",
+        "beamtalk-language-features",
+        "extends",
+        "first",
+        "inherit",
+        "inheritance",
+        "object",
+        "subclassing"
+      ],
+      "source": "typed Object subclass: Collection(E)\n  @expect type\n  first => (Erlang erlang) hd: self asErlangList   // polymorphic return — suppress missing-annotation warning",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-175",
+      "title": "Creating a Table (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Create a named public table\ncache := Ets new: #myCache type: #set\n\n// Table types\nEts new: #t1 type: #set          // one entry per key (unordered)\nEts new: #t2 type: #orderedSet   // one entry per key (sorted keys)\nEts new: #t3 type: #bag          // multiple entries per key, values differ\nEts new: #t4 type: #duplicateBag // multiple identical entries per key\n\n// Look up an existing named table from another actor\ncache := Ets named: #myCache",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-176",
+      "title": "Reading and Writing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache at: \"key\" put: 42         // insert or update\ncache at: \"key\"                 // => 42\ncache at: \"missing\"             // => nil (not an error)\ncache at: \"missing\" ifAbsent: [0]  // => 0 (evaluate block when absent)\ncache includesKey: \"key\"        // => true\ncache includesKey: \"other\"      // => false",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-177",
+      "title": "Other Operations (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "beamtalk-language-features"
+      ],
+      "source": "cache size                      // => number of entries\ncache keys                      // => List of all keys (order unspecified for #set)\ncache removeKey: \"key\"          // delete entry; no-op if key is absent\ncache delete                    // destroy the table; frees all memory",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-178",
+      "title": "Cross-Actor Sharing (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "async",
+        "beamtalk-language-features",
+        "concurrent",
+        "constructor",
+        "create",
+        "gen_server",
+        "genserver",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "process",
+        "set"
+      ],
+      "source": "// Actor A — create the table\ncache := Ets new: #requestCache type: #set\ncache at: \"token\" put: \"abc123\"\n\n// Actor B — retrieve by name\ncache := Ets named: #requestCache\ncache at: \"token\"               // => \"abc123\"",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-18",
+      "title": "Field Access and Assignment (beamtalk-language-features)",
+      "category": "language-reference",
+      "tags": [
+        "assign",
+        "assignment",
+        "beamtalk-language-features",
+        "mutate",
+        "mutation",
+        "set"
+      ],
+      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
+      "explanation": "Code example from docs/beamtalk-language-features.md"
+    },
+    {
+      "id": "docs-beamtalk-language-features-block-180",
       "title": "Enqueueing and Dequeueing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1108,7 +1291,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-171",
+      "id": "docs-beamtalk-language-features-block-181",
       "title": "Other Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1118,7 +1301,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-173",
+      "id": "docs-beamtalk-language-features-block-183",
       "title": "Atomic Operations (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1131,7 +1314,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-174",
+      "id": "docs-beamtalk-language-features-block-184",
       "title": "Cross-Actor Sharing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1154,7 +1337,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-175",
+      "id": "docs-beamtalk-language-features-block-185",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1177,7 +1360,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-176",
+      "id": "docs-beamtalk-language-features-block-186",
       "title": "TestCase — BUnit Testing (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1200,7 +1383,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-177",
+      "id": "docs-beamtalk-language-features-block-187",
       "title": "Suite-Level Setup — setUpOnce / tearDownOnce (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1231,7 +1414,7 @@
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
-      "id": "docs-beamtalk-language-features-block-178",
+      "id": "docs-beamtalk-language-features-block-188",
       "title": "Parallel Test Execution (beamtalk-language-features)",
       "category": "language-reference",
       "tags": [
@@ -1248,21 +1431,6 @@
         "testEnable"
       ],
       "source": "TestCase subclass: TracingTest\n\n  class serial -> Boolean => true\n\n  setUp => Tracing clear. Tracing disable\n  testEnable => self assert: Tracing enable equals: nil",
-      "explanation": "Code example from docs/beamtalk-language-features.md"
-    },
-    {
-      "id": "docs-beamtalk-language-features-block-18",
-      "title": "Field Access and Assignment (beamtalk-language-features)",
-      "category": "language-reference",
-      "tags": [
-        "assign",
-        "assignment",
-        "beamtalk-language-features",
-        "mutate",
-        "mutation",
-        "set"
-      ],
-      "source": "// Assignment as expression (returns 6)\n(self.x := 5) + 1\n\n// Field assignments as sequential statements\nself.x := 5\nself.y := self.x + 1\nself.y",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2403,7 +2571,7 @@
         "supervision",
         "throw"
       ],
-      "source": "// Boot-style: crash on failure (application boot, test setup, REPL exploration)\napp := (WebApp supervise) unwrap\n// => #Supervisor<WebApp,_>\n\n// Idempotent — second call also returns a successful Result wrapping the\n// already-running supervisor, without restarting\n(WebApp supervise) isOk\n// => true\n\n// Recoverable form — branch on the Result explicitly\n(WebApp supervise)\n  ifOk:    [:sup | sup count]\n  ifError: [:e | Logger error: e message]\n\n// Find the running instance by class name (no reference needed — returns the\n// bare supervisor or nil, unchanged from pre-ADR-0080 semantics)\nWebApp current\n// => #Supervisor<WebApp,_>",
+      "source": "// Boot-style: crash on failure (application boot, test setup, REPL exploration)\napp := (WebApp supervise) unwrap\n// => Supervisor(WebApp, _)\n\n// Idempotent — second call also returns a successful Result wrapping the\n// already-running supervisor, without restarting\n(WebApp supervise) isOk\n// => true\n\n// Recoverable form — branch on the Result explicitly\n(WebApp supervise)\n  ifOk:    [:sup | sup count]\n  ifError: [:e | Logger error: e message]\n\n// Find the running instance by class name (no reference needed — returns the\n// bare supervisor or nil, unchanged from pre-ADR-0080 semantics)\nWebApp current\n// => Supervisor(WebApp, _)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2421,7 +2589,7 @@
         "restart",
         "supervision"
       ],
-      "source": "app count                                 // => 3  (number of running children)\napp children                              // => [\"DatabasePool\",\"HTTPRouter\",\"MetricsCollector\"]  (child ids)\n(app which: DatabasePool) unwrap           // => #Actor<DatabasePool,_>  (running child instance)\n(app terminate: HTTPRouter) unwrap        // gracefully stop a single child; Result(Nil, Error)\napp stop                                  // stop the supervisor and all children (unchanged — Nil)\n\n// After stop:\nWebApp current                            // => nil",
+      "source": "app count                                 // => 3  (number of running children)\napp children                              // => [\"DatabasePool\",\"HTTPRouter\",\"MetricsCollector\"]  (child ids)\n(app which: DatabasePool) unwrap           // => Actor(DatabasePool, _)  (running child instance)\n(app terminate: HTTPRouter) unwrap        // gracefully stop a single child; Result(Nil, Error)\napp stop                                  // stop the supervisor and all children (unchanged — Nil)\n\n// After stop:\nWebApp current                            // => nil",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2534,7 +2702,7 @@
         "supervision",
         "throw"
       ],
-      "source": "pool := (WorkerPool supervise) unwrap\n// => #DynamicSupervisor<WorkerPool,_>\n\n// Start children dynamically — startChild returns Result(C, Error) where C is\n// the DynamicSupervisor's child class parameter (Worker here)\nw1 := pool startChild unwrap        // => #Actor<Worker,_>\nw2 := pool startChild unwrap        // => #Actor<Worker,_>\npool count                          // => 2\n\n// Recoverable variant — useful when a failing init should not abort the caller\npool startChild\n  ifOk:    [:w | w process: 21]\n  ifError: [:e | Logger warn: e message]\n\n// Terminate a specific child — idempotent (Ok(nil) even if already gone)\n(pool terminateChild: w1) unwrap    // => nil\npool count                          // => 1\n\n// Stop the whole pool (unchanged — Nil, let-it-crash teardown)\npool stop\nWorkerPool current                  // => nil",
+      "source": "pool := (WorkerPool supervise) unwrap\n// => DynamicSupervisor(WorkerPool, _)\n\n// Start children dynamically — startChild returns Result(C, Error) where C is\n// the DynamicSupervisor's child class parameter (Worker here)\nw1 := pool startChild unwrap        // => Actor(Worker, _)\nw2 := pool startChild unwrap        // => Actor(Worker, _)\npool count                          // => 2\n\n// Recoverable variant — useful when a failing init should not abort the caller\npool startChild\n  ifOk:    [:w | w process: 21]\n  ifError: [:e | Logger warn: e message]\n\n// Terminate a specific child — idempotent (Ok(nil) even if already gone)\n(pool terminateChild: w1) unwrap    // => nil\npool count                          // => 1\n\n// Stop the whole pool (unchanged — Nil, let-it-crash teardown)\npool stop\nWorkerPool current                  // => nil",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -2552,7 +2720,7 @@
         "set",
         "supervision"
       ],
-      "source": "root := (AppRoot supervise) unwrap\nroot count                          // => 3\n(root which: DatabaseSupervisor) unwrap  // => #Supervisor<DatabaseSupervisor,_>",
+      "source": "root := (AppRoot supervise) unwrap\nroot count                          // => 3\n(root which: DatabaseSupervisor) unwrap  // => Supervisor(DatabaseSupervisor, _)",
       "explanation": "Code example from docs/beamtalk-language-features.md"
     },
     {
@@ -10736,7 +10904,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop,\n// and error behaviour when sending to a stopped actor\n\nTestCase subclass: ActorLifecycleTest\n\n  testIsAliveAndStop =>\n    counter := Counter spawn\n    // isAlive returns true for a running actor\n    self assert: counter isAlive\n    // Actor still works after isAlive check\n    self assert: counter increment equals: 1\n    // isAlive still true after message processing\n    self assert: counter isAlive\n    // Stop the actor gracefully\n    self assert: counter stop equals: #ok\n    // Stopping an already-stopped actor is idempotent\n    self assert: counter stop equals: #ok\n    // isAlive returns false after stop\n    self deny: counter isAlive\n    // Sending a message to a stopped actor raises an error\n    self should: [counter increment] raise: #actor_dead\n\n  testNonMapArgumentToSpawnwith =>\n    // not silently fall back to spawn/0\n    self should: [Counter spawnWith: 42] raise: #type_error\n    // Passing a non-Dictionary argument to spawnWith: should raise type_error,\n    self should: [Counter spawnWith: \"hello\"] raise: #type_error\n    self should: [Counter spawnWith: true] raise: #type_error\n\n  testSpawnwithWithBareIdentifierKeys =>\n    // Bare identifier keys in map literals work as implicit symbols (formatter normalizes to #symbol form)\n    c3 := Counter spawnWith: #{#value => 10}\n    self assert: c3 getValue equals: 10\n    self assert: c3 increment equals: 11\n\n  testPrintstringActorInstanceAndClassObject =>\n    // Actor instance printString returns bare class name\n    c2 := Counter spawn\n    self assert: c2 printString equals: \"Counter\"\n    // Class object printString returns class name\n    self assert: Counter printString equals: \"Counter\"\n\n  testNewRaisesInstantiationError =>\n    // Counter new raises InstantiationError (BT-1056: class-side new)\n    @expect all\n    self should: [Counter new] raise: #instantiation_error\n    // Counter new: raises InstantiationError (BT-1056: class-side new:)\n    @expect all\n    self should: [Counter new: #{}] raise: #instantiation_error\n\n  testNewIsCatchableAsInstantiationError =>\n    // Counter new is catchable via on: InstantiationError do: (BT-1056)\n    @expect all\n    result := [Counter new] on: InstantiationError do: [:_e | #caught]\n    self assert: result equals: #caught",
+      "source": "// BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop,\n// and error behaviour when sending to a stopped actor\n\nTestCase subclass: ActorLifecycleTest\n\n  testIsAliveAndStop =>\n    counter := Counter spawn\n    // isAlive returns true for a running actor\n    self assert: counter isAlive\n    // Actor still works after isAlive check\n    self assert: counter increment equals: 1\n    // isAlive still true after message processing\n    self assert: counter isAlive\n    // Stop the actor gracefully\n    self assert: counter stop equals: #ok\n    // Stopping an already-stopped actor is idempotent\n    self assert: counter stop equals: #ok\n    // isAlive returns false after stop\n    self deny: counter isAlive\n    // Sending a message to a stopped actor raises an error\n    self should: [counter increment] raise: #actor_dead\n\n  testNonMapArgumentToSpawnwith =>\n    // not silently fall back to spawn/0\n    self should: [Counter spawnWith: 42] raise: #type_error\n    // Passing a non-Dictionary argument to spawnWith: should raise type_error,\n    self should: [Counter spawnWith: \"hello\"] raise: #type_error\n    self should: [Counter spawnWith: true] raise: #type_error\n\n  testSpawnwithWithBareIdentifierKeys =>\n    // Bare identifier keys in map literals work as implicit symbols (formatter normalizes to #symbol form)\n    c3 := Counter spawnWith: #{#value => 10}\n    self assert: c3 getValue equals: 10\n    self assert: c3 increment equals: 11\n\n  testPrintstringActorInstanceAndClassObject =>\n    // ADR 0094: actor instance printString renders kind-headed Actor(Class, pid)\n    c2 := Counter spawn\n    self assert: (c2 printString includesSubstring: \"Actor(Counter,\") equals: true\n    // Class object printString returns bare class name\n    self assert: Counter printString equals: \"Counter\"\n\n  testNewRaisesInstantiationError =>\n    // Counter new raises InstantiationError (BT-1056: class-side new)\n    @expect all\n    self should: [Counter new] raise: #instantiation_error\n    // Counter new: raises InstantiationError (BT-1056: class-side new:)\n    @expect all\n    self should: [Counter new: #{}] raise: #instantiation_error\n\n  testNewIsCatchableAsInstantiationError =>\n    // Counter new is catchable via on: InstantiationError do: (BT-1056)\n    @expect all\n    result := [Counter new] on: InstantiationError do: [:_e | #caught]\n    self assert: result equals: #caught",
       "explanation": "BT-172, BT-397: Tests actor lifecycle — isAlive, stop, idempotent stop, and error behaviour when sending to a stopped actor"
     },
     {
@@ -11299,6 +11467,63 @@
       ],
       "source": "// BT-1475: Tests that self-cast sends (!) inside Timer blocks and callback\n// blocks correctly route through the actor mailbox, not via safe_dispatch\n// on a stale captured state.\n\nTestCase subclass: ActorTimerSelfSendTest\n\n  testTimerSelfCastUpdatesState =>\n    // Timer after:do: fires a self bump! — the cast must go through the mailbox\n    a := TimerSelfSendActor spawn\n    Timer sleep: 200\n    self assert: a getCount equals: 1\n\n  testMultipleTimerSelfCasts =>\n    // Multiple Timer-based self-casts should all route through the mailbox\n    a := TimerSelfSendActor spawn\n    // Wait for the initialize timer, then fire two more\n    Timer sleep: 100\n    self assert: a getCount equals: 1\n    // Send additional casts from outside — mix of direct and timer\n    a bump!\n    Timer sleep: 50\n    self assert: a getCount equals: 2\n\n  testDeferredSelfCastFromMethod =>\n    // Calling deferBump schedules a Timer that captures self and fires\n    // self bump! in the Timer process — exercises the BT-1475 fix for\n    // self-cast inside a block created in an actor method.\n    a := TimerSelfSendActor spawn\n    Timer sleep: 200\n    // initialize already bumped once\n    self assert: a getCount equals: 1\n    a deferBump\n    Timer sleep: 200\n    self assert: a getCount equals: 2",
       "explanation": "BT-1475: Tests that self-cast sends (!) inside Timer blocks and callback blocks correctly route through the actor mailbox, not via safe_dispatch on a stale captured state."
+    },
+    {
+      "id": "stdlib-test-announcements-introspection-test",
+      "title": "AnnouncementsIntrospectionTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "AnnouncementsIntrospectionTest",
+        "TestCase",
+        "announcements_introspection_test",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "filter",
+        "filtering",
+        "for each",
+        "for-each",
+        "forEach",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
+        "member",
+        "mutate",
+        "mutation",
+        "object",
+        "property",
+        "set",
+        "setUp",
+        "string conversion",
+        "subclassing",
+        "testNavigationAnnouncedClassesExcludesUnsubscribed",
+        "testNavigationAnnouncedClassesIncludesSubscribedClass",
+        "testNavigationDefaultClass",
+        "testNavigationOfReturnsNavigation",
+        "testNavigationSubscribersOf",
+        "testNodeAnnouncementClass",
+        "testNodeHandlerKindDoForBlock",
+        "testNodeHandlerKindDoOnce",
+        "testNodeHandlerKindSend",
+        "testNodePrintStringMentionsClass",
+        "testNodeSubscriberIsPid",
+        "testSubscribersOfEmptyForUnsubscribedClass",
+        "testSubscribersOfReturnsNodes",
+        "testSubscriptionCountReflectsLiveSubs",
+        "testSubscriptionsIncludesNewSub",
+        "toString",
+        "to_string",
+        "where"
+      ],
+      "source": "// BUnit tests for Announcements introspection (BT-2444):\n// Announcer self-inspection + AnnouncementNavigation + SubscriptionNode.\n//\n// The bus is shared across tests, so each test scopes its assertions to a\n// fixture event class it subscribes to itself, and unsubscribes in-test to keep\n// the bus clean. `subscribersOf:` matches exactly the subscribed class, which\n// keeps these reads isolated from unrelated subscriptions.\n\nTestCase subclass: AnnouncementsIntrospectionTest\n  field: announcer = nil\n\n  setUp => self withAnnouncer: Announcer new\n\n  // --- Announcer self-inspection: subscribersOf: ---\n  testSubscribersOfReturnsNodes =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    nodes := self.announcer subscribersOf: IntrospectionEvent\n    self assert: nodes size equals: 1\n    self assert: nodes first class equals: SubscriptionNode\n    sub unsubscribe\n\n  testSubscribersOfEmptyForUnsubscribedClass =>\n    nodes := self.announcer subscribersOf: ParentEvent\n    self assert: nodes isEmpty equals: true\n\n  // --- SubscriptionNode fields ---\n  testNodeAnnouncementClass =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    node := (self.announcer subscribersOf: IntrospectionEvent) first\n    self assert: node announcementClass equals: IntrospectionEvent\n    sub unsubscribe\n\n  testNodeSubscriberIsPid =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    node := (self.announcer subscribersOf: IntrospectionEvent) first\n    self assert: node subscriber class equals: Pid\n    sub unsubscribe\n\n  testNodeHandlerKindDoForBlock =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    node := (self.announcer subscribersOf: IntrospectionEvent) first\n    self assert: node handlerKind equals: #do\n    self assert: node once equals: false\n    sub unsubscribe\n\n  testNodeHandlerKindDoOnce =>\n    sub := self.announcer when: IntrospectionEvent doOnce: [:e | nil]\n    node := (self.announcer subscribersOf: IntrospectionEvent) first\n    self assert: node handlerKind equals: #doOnce\n    self assert: node once equals: true\n    sub unsubscribe\n\n  testNodeHandlerKindSend =>\n    handler := Announcer new\n    sub := self.announcer\n      when: IntrospectionEvent\n      send: #class\n      to: handler\n    node := (self.announcer subscribersOf: IntrospectionEvent) first\n    self assert: node handlerKind equals: #send\n    self assert: node isSend equals: true\n    sub unsubscribe\n\n  // --- subscriptionCount ---\n  testSubscriptionCountReflectsLiveSubs =>\n    before := self.announcer subscriptionCount\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    self assert: self.announcer subscriptionCount equals: before + 1\n    sub unsubscribe\n    self assert: self.announcer subscriptionCount equals: before\n\n  // --- subscriptions (full snapshot) ---\n  testSubscriptionsIncludesNewSub =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    matching := self.announcer subscriptions select: [:n |\n      n announcementClass == IntrospectionEvent\n    ]\n    self assert: matching size equals: 1\n    sub unsubscribe\n\n  // --- AnnouncementNavigation default ---\n  testNavigationDefaultClass =>\n    nav := AnnouncementNavigation default\n    self assert: nav class equals: AnnouncementNavigation\n\n  testNavigationSubscribersOf =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    nodes := AnnouncementNavigation default subscribersOf: IntrospectionEvent\n    self assert: nodes size equals: 1\n    self assert: nodes first announcementClass equals: IntrospectionEvent\n    sub unsubscribe\n\n  testNavigationAnnouncedClassesIncludesSubscribedClass =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    classes := AnnouncementNavigation default announcedClasses\n    self assert: (classes includes: IntrospectionEvent) equals: true\n    sub unsubscribe\n\n  testNavigationAnnouncedClassesExcludesUnsubscribed =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    classes := AnnouncementNavigation default announcedClasses\n    self assert: (classes includes: ParentEvent) equals: false\n    sub unsubscribe\n\n  // --- AnnouncementNavigation of: ---\n  testNavigationOfReturnsNavigation =>\n    nav := AnnouncementNavigation of: self.announcer\n    self assert: nav class equals: AnnouncementNavigation\n\n  // --- SubscriptionNode printString ---\n  testNodePrintStringMentionsClass =>\n    sub := self.announcer when: IntrospectionEvent do: [:e | nil]\n    node := (self.announcer subscribersOf: IntrospectionEvent) first\n    self assert: (node printString includesSubstring: \"IntrospectionEvent\") equals: true\n    self assert: (node printString includesSubstring: \"SubscriptionNode\") equals: true\n    sub unsubscribe",
+      "explanation": "BUnit tests for Announcements introspection (BT-2444): Announcer self-inspection + AnnouncementNavigation + SubscriptionNode.  The bus is shared across tests, so each test scopes its assertions to a fixture event class it subscribes to itself, and unsubscribes in-test to keep the bus clean. `subscribersOf:` matches exactly the subscribed class, which keeps these reads isolated from unrelated subscriptions."
     },
     {
       "id": "stdlib-test-announcements-test",
@@ -18464,6 +18689,27 @@
       "explanation": "Internal typed class for testing modifier combinations (BT-1705, ADR 0071)"
     },
     {
+      "id": "stdlib-test-fixtures-introspection-event",
+      "title": "IntrospectionEvent",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Announcement",
+        "IntrospectionEvent",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "introspection_event",
+        "member",
+        "object",
+        "property",
+        "subclassing"
+      ],
+      "source": "// Test fixture: a dedicated Announcement subclass for the announcements\n// introspection tests (BT-2444). Kept distinct from `TestEvent` so the shared\n// global bus's exact-count assertions are isolated from other test files that\n// subscribe to `TestEvent`.\n\nAnnouncement subclass: IntrospectionEvent\n  field: payload :: Integer = 0",
+      "explanation": "Test fixture: a dedicated Announcement subclass for the announcements introspection tests (BT-2444). Kept distinct from `TestEvent` so the shared global bus's exact-count assertions are isolated from other test files that subscribe to `TestEvent`."
+    },
+    {
       "id": "stdlib-test-fixtures-local-call-helper",
       "title": "LocalCallHelper",
       "category": "stdlib-fixtures",
@@ -24447,7 +24693,7 @@
         "toString",
         "to_string"
       ],
-      "source": "// Stdlib tests for string interpolation (ADR 0023 Phase 3, BT-558)\n\nTestCase subclass: StringInterpolationTest\n\n  testBasicStringTestsNoInterpolationZeroOverhead =>\n    self assert: \"Hello\" equals: \"Hello\"\n\n  testVariableInterpolation =>\n    // Simple variable interpolation\n    name := \"World\"\n    self assert: name equals: \"World\"\n    self assert: \"Hello, {name}!\" equals: \"Hello, World!\"\n    // Variable at start\n    self assert: \"{name} says hi\" equals: \"World says hi\"\n    // Variable at end\n    self assert: \"Hi {name}\" equals: \"Hi World\"\n    // Only variable (no literal segments)\n    self assert: \"{name}\" equals: \"World\"\n\n  testExpressionInterpolation =>\n    // Arithmetic expression\n    self assert: \"Sum: {2 + 3}\" equals: \"Sum: 5\"\n\n  testPrintstringConversion =>\n    // Integer printString\n    self assert: \"Age: {30}\" equals: \"Age: 30\"\n    // Boolean interpolation\n    self assert: \"Flag: {true}\" equals: \"Flag: true\"\n    self assert: \"Flag: {false}\" equals: \"Flag: false\"\n    // Nil interpolation\n    self assert: \"Value: {nil}\" equals: \"Value: nil\"\n    // Symbol interpolation (displayString: no # prefix)\n    self assert: \"Symbol: {#hello}\" equals: \"Symbol: hello\"\n\n  testNestedMessageSends =>\n    // String message in interpolation\n    self assert: \"Length: {\"hello\" length}\" equals: \"Length: 5\"\n\n  testMultipleInterpolations =>\n    // Two variables\n    first := \"Alice\"\n    self assert: first equals: \"Alice\"\n    last := \"Bob\"\n    self assert: last equals: \"Bob\"\n    self assert: \"Name: {first} {last}\" equals: \"Name: Alice Bob\"\n    // Mixed literals and expressions\n    self assert: \"a{1}b{2}c\" equals: \"a1b2c\"\n    // Adjacent interpolations\n    self assert: \"{first}{last}\" equals: \"AliceBob\"\n\n  testEscapedBraces =>\n    // \\{ produces literal {; backslash consumed, one-char result\n    // Value check: both sides are \"\\{\" so both produce { — verifies it compiles and runs\n    self assert: \"\\{\" equals: \"\\{\"\n    self assert: \"\\{\" size equals: 1\n    // \\} and bare } are equivalent — \\} normalizes to } in formatted source\n    self assert: \"}\" size equals: 1\n    // Combined: a\\{b\\}c → a{b}c (5 chars)\n    self assert: \"a\\{b}c\" size equals: 5\n\n  testEmptyAndEdgeCases =>\n    // Empty string\n    self assert: \"\" equals: \"\"\n    // String with only literals\n    self assert: \"no interpolation here\" equals: \"no interpolation here\"\n\n  testUnicodeContent =>\n    // Unicode in literal segments\n    self assert: \"Hello 🎉\" equals: \"Hello 🎉\"\n    // Unicode variable\n    emoji := \"🚀\"\n    self assert: emoji equals: \"🚀\"\n    self assert: \"Launch: {emoji}\" equals: \"Launch: 🚀\"\n    // CJK characters\n    self assert: \"日本語: {42}\" equals: \"日本語: 42\"\n\n  testActorInterpolationAutoAwait =>\n    // Actor printString auto-awaits the future\n    c := Counter spawn\n    self assert: \"Actor: {c}\" equals: \"Actor: a Counter\"",
+      "source": "// Stdlib tests for string interpolation (ADR 0023 Phase 3, BT-558)\n\nTestCase subclass: StringInterpolationTest\n\n  testBasicStringTestsNoInterpolationZeroOverhead =>\n    self assert: \"Hello\" equals: \"Hello\"\n\n  testVariableInterpolation =>\n    // Simple variable interpolation\n    name := \"World\"\n    self assert: name equals: \"World\"\n    self assert: \"Hello, {name}!\" equals: \"Hello, World!\"\n    // Variable at start\n    self assert: \"{name} says hi\" equals: \"World says hi\"\n    // Variable at end\n    self assert: \"Hi {name}\" equals: \"Hi World\"\n    // Only variable (no literal segments)\n    self assert: \"{name}\" equals: \"World\"\n\n  testExpressionInterpolation =>\n    // Arithmetic expression\n    self assert: \"Sum: {2 + 3}\" equals: \"Sum: 5\"\n\n  testPrintstringConversion =>\n    // Integer printString\n    self assert: \"Age: {30}\" equals: \"Age: 30\"\n    // Boolean interpolation\n    self assert: \"Flag: {true}\" equals: \"Flag: true\"\n    self assert: \"Flag: {false}\" equals: \"Flag: false\"\n    // Nil interpolation\n    self assert: \"Value: {nil}\" equals: \"Value: nil\"\n    // Symbol interpolation (displayString: no # prefix)\n    self assert: \"Symbol: {#hello}\" equals: \"Symbol: hello\"\n\n  testNestedMessageSends =>\n    // String message in interpolation\n    self assert: \"Length: {\"hello\" length}\" equals: \"Length: 5\"\n\n  testMultipleInterpolations =>\n    // Two variables\n    first := \"Alice\"\n    self assert: first equals: \"Alice\"\n    last := \"Bob\"\n    self assert: last equals: \"Bob\"\n    self assert: \"Name: {first} {last}\" equals: \"Name: Alice Bob\"\n    // Mixed literals and expressions\n    self assert: \"a{1}b{2}c\" equals: \"a1b2c\"\n    // Adjacent interpolations\n    self assert: \"{first}{last}\" equals: \"AliceBob\"\n\n  testEscapedBraces =>\n    // \\{ produces literal {; backslash consumed, one-char result\n    // Value check: both sides are \"\\{\" so both produce { — verifies it compiles and runs\n    self assert: \"\\{\" equals: \"\\{\"\n    self assert: \"\\{\" size equals: 1\n    // \\} and bare } are equivalent — \\} normalizes to } in formatted source\n    self assert: \"}\" size equals: 1\n    // Combined: a\\{b\\}c → a{b}c (5 chars)\n    self assert: \"a\\{b}c\" size equals: 5\n\n  testEmptyAndEdgeCases =>\n    // Empty string\n    self assert: \"\" equals: \"\"\n    // String with only literals\n    self assert: \"no interpolation here\" equals: \"no interpolation here\"\n\n  testUnicodeContent =>\n    // Unicode in literal segments\n    self assert: \"Hello 🎉\" equals: \"Hello 🎉\"\n    // Unicode variable\n    emoji := \"🚀\"\n    self assert: emoji equals: \"🚀\"\n    self assert: \"Launch: {emoji}\" equals: \"Launch: 🚀\"\n    // CJK characters\n    self assert: \"日本語: {42}\" equals: \"日本語: 42\"\n\n  testActorInterpolationAutoAwait =>\n    // ADR 0094: actor displayString renders kind-headed Actor(Class, pid)\n    c := Counter spawn\n    self assert: (\"Actor: {c}\" includesSubstring: \"Actor: Actor(Counter,\") equals: true",
       "explanation": "Stdlib tests for string interpolation (ADR 0023 Phase 3, BT-558)"
     },
     {
@@ -24923,6 +25169,48 @@
       ],
       "source": "// BT-2041: Tests for Supervisor which: Result-returning behaviour (ADR 0080 Phase 2).\n//\n// which: returns Result(Object, Error):\n// - Result ok: child when the class has a running child\n// - Result ok: nil when the class has no running child (not-found is NOT an error)\n// - Result error: #beamtalk_error{kind = stale_handle} when the supervisor is dead\n//\n// Reuses ClassMethodSupervisor / ClassMethodActor fixtures from BT-1862.\n\nTestCase subclass: SupervisorWhichTest\n\n  // === ok with child — class has a running child ===\n  testWhichReturnsOkWithChild =>\n    sup := (ClassMethodSupervisor supervise) unwrap\n    result := sup which: ClassMethodActor\n    self assert: result isOk equals: true\n    // Unwrap is typed Object — `label` is only declared on ClassMethodActor.\n    @expect dnu\n    self assert: result unwrap label equals: \"hello:42\"\n    [sup stop] on: Error do: [:e | nil]\n\n  // === ok with nil — class is not in the supervision tree ===\n  testWhichReturnsOkNilForUnknownClass =>\n    sup := (ClassMethodSupervisor supervise) unwrap\n    result := sup which: SupInitChildA\n    self assert: result isOk equals: true\n    self assert: result unwrap equals: nil\n    [sup stop] on: Error do: [:e | nil]\n\n  // === error — supervisor process is dead ===\n  testWhichOnStoppedSupervisorReturnsError =>\n    sup := (ClassMethodSupervisor supervise) unwrap\n    sup stop\n    result := sup which: ClassMethodActor\n    self assert: result isError equals: true\n    self assert: result error kind equals: #stale_handle",
       "explanation": "BT-2041: Tests for Supervisor which: Result-returning behaviour (ADR 0080 Phase 2).  which: returns Result(Object, Error): - Result ok: child when the class has a running child - Result ok: nil when the class has no running child (not-found is NOT an error) - Result error: #beamtalk_error{kind = stale_handle} when the supervisor is dead  Reuses ClassMethodSupervisor / ClassMethodActor fixtures from BT-1862."
+    },
+    {
+      "id": "stdlib-test-system-announcements-test",
+      "title": "SystemAnnouncementsTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "SystemAnnouncementsTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "async",
+        "branch",
+        "concurrent",
+        "conditional",
+        "constructor",
+        "create",
+        "extends",
+        "for each",
+        "for-each",
+        "forEach",
+        "gen_server",
+        "genserver",
+        "if",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "iterate",
+        "iteration",
+        "loop",
+        "mutate",
+        "mutation",
+        "object",
+        "process",
+        "set",
+        "subclassing",
+        "system_announcements_test",
+        "testActorSpawnedFiresOnSpawn",
+        "testActorStoppedFiresOnStop",
+        "testEventClassesAreAnnouncements"
+      ],
+      "source": "// BUnit tests for system Announcement subclasses + runtime emit points (BT-2445).\n//\n// Each test subscribes to a well-known system event on `SystemAnnouncer current`,\n// performs the triggering action, and asserts the event was received. Handlers\n// run in transient processes, so cross-process state is captured via Ets.\n\nTestCase subclass: SystemAnnouncementsTest\n\n  // --- The system event classes exist and are Announcements ---\n  testEventClassesAreAnnouncements =>\n    self assert: (ActorSpawned new isKindOf: Announcement) equals: true\n    self assert: (ActorStopped new isKindOf: Announcement) equals: true\n    self assert: (ClassLoaded new isKindOf: Announcement) equals: true\n    self assert: (ClassRemoved new isKindOf: Announcement) equals: true\n    self assert: (BindingChanged new isKindOf: Announcement) equals: true\n    self assert: (SupervisionChildAdded new isKindOf: Announcement) equals: true\n    self assert: (SupervisionChildCrashed new isKindOf: Announcement) equals: true\n\n  // --- ActorSpawned fires when an actor is spawned ---\n  testActorSpawnedFiresOnSpawn =>\n    table := Ets new: #sysActorSpawned type: #set\n    // Filter to Counter: the SystemAnnouncer is a global singleton, so under\n    // parallel test execution other actors may spawn concurrently. Recording\n    // only Counter events keeps the assertion deterministic.\n    sub := SystemAnnouncer current when: ActorSpawned do: [:e |\n      e actorClass =:= #Counter ifTrue: [table at: #class put: e actorClass]\n    ]\n    Counter spawn\n    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #class) equals: #Counter\n    sub unsubscribe\n    table delete\n\n  // --- ActorStopped fires when an actor stops ---\n  testActorStoppedFiresOnStop =>\n    table := Ets new: #sysActorStopped type: #set\n    // Filter to Counter — see testActorSpawnedFiresOnSpawn (global singleton bus).\n    // Record only a graceful Counter stop (reason #normal); any concurrent\n    // foreign or abnormal stop on the global bus is ignored.\n    sub := SystemAnnouncer current\n      when: ActorStopped\n      do: [:e |\n        (e actorClass =:= #Counter and: [e reason =:= #normal])\n          ifTrue: [\n            table at: #class put: e actorClass\n            table at: #reason put: e reason\n          ]\n      ]\n    counter := Counter spawn\n    counter stop\n    50 timesRepeat: [(table at: #class) isNil ifTrue: [Timer sleep: 10]]\n    self assert: (table at: #class) equals: #Counter\n    self assert: (table at: #reason) equals: #normal\n    sub unsubscribe\n    table delete",
+      "explanation": "BUnit tests for system Announcement subclasses + runtime emit points (BT-2445).  Each test subscribes to a well-known system event on `SystemAnnouncer current`, performs the triggering action, and asserts the event was received. Handlers run in transient processes, so cross-process state is captured via Ets."
     },
     {
       "id": "stdlib-test-system-navigation-actor-classes-test",
@@ -28402,6 +28690,47 @@
       ],
       "source": "// TaskWorker - actor in a subdirectory of a nested fixture directory.\n// Used by load_nested_directory.bt to regression-test that actors loaded\n// from subdirectories generate the correct BEAM module name so that\n// spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker).\n\nActor subclass: TaskWorker\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\n  getCount => self.count",
       "explanation": "TaskWorker - actor in a subdirectory of a nested fixture directory. Used by load_nested_directory.bt to regression-test that actors loaded from subdirectories generate the correct BEAM module name so that spawn/0 resolves correctly (bt@...@workers@task_worker, not bt@...@task_worker)."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-object-repr-foo",
+      "title": "Foo",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Foo",
+        "Value",
+        "extends",
+        "inherit",
+        "inheritance",
+        "object_repr_foo",
+        "subclassing",
+        "value"
+      ],
+      "source": "// Field-less Value used by object_string_representation.btscript (BT-2463 /\n// ADR 0094). A Value with no fields must render structurally as `Foo()`.\n\nValue subclass: Foo",
+      "explanation": "Field-less Value used by object_string_representation.btscript (BT-2463 / ADR 0094). A Value with no fields must render structurally as `Foo()`."
+    },
+    {
+      "id": "tests-repl-protocol-fixtures-object-repr-line",
+      "title": "Line",
+      "category": "repl-protocol-fixtures",
+      "tags": [
+        "Line",
+        "Value",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "object_repr_line",
+        "property",
+        "string conversion",
+        "subclassing",
+        "toString",
+        "to_string",
+        "value"
+      ],
+      "source": "// Nested Value used by object_string_representation.btscript (BT-2463 /\n// ADR 0094 section 4). A Line holds two Point values; its structural\n// `printString` must expand the nested Points in full:\n//   Line(from: Point(x: 0, y: 0), to: Point(x: 3, y: 4))\n//\n// Depends on Point (tests/repl-protocol/fixtures/point.bt), loaded alongside.\n\nValue subclass: Line\n  field: from = nil\n  field: to = nil",
+      "explanation": "Nested Value used by object_string_representation.btscript (BT-2463 / ADR 0094 section 4). A Line holds two Point values; its structural `printString` must expand the nested Points in full:   Line(from: Point(x: 0, y: 0), to: Point(x: 3, y: 4))  Depends on Point (tests/repl-protocol/fixtures/point.bt), loaded alongside."
     },
     {
       "id": "tests-repl-protocol-fixtures-perform-locally-fixture",
