@@ -451,8 +451,13 @@ dispatch_open_args_env_dir_notify_type_error_test() ->
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
         beamtalk_reactive_subprocess:dispatch(
             'open:args:env:dir:notify:',
-            [not_a_binary, [], #{}, <<"/dir">>,
-             #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}],
+            [
+                not_a_binary,
+                [],
+                #{},
+                <<"/dir">>,
+                #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
+            ],
             undefined
         )
     ).
