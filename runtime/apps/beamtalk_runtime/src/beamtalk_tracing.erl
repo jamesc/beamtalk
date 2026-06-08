@@ -235,7 +235,9 @@ FFI: (Erlang beamtalk_tracing) slowMethods: limit
 slowMethods(Limit) when is_integer(Limit), Limit > 0 ->
     call_trace_store_default(fun() -> beamtalk_trace_store:slow_methods(Limit) end, []);
 slowMethods(Limit) ->
-    positive_integer_error('slowMethods:', Limit, <<"Pass a positive integer, e.g. Tracing slowMethods: 10">>).
+    positive_integer_error(
+        'slowMethods:', Limit, <<"Pass a positive integer, e.g. Tracing slowMethods: 10">>
+    ).
 
 -doc """
 Top N methods by call count (descending).
@@ -245,7 +247,9 @@ FFI: (Erlang beamtalk_tracing) hotMethods: limit
 hotMethods(Limit) when is_integer(Limit), Limit > 0 ->
     call_trace_store_default(fun() -> beamtalk_trace_store:hot_methods(Limit) end, []);
 hotMethods(Limit) ->
-    positive_integer_error('hotMethods:', Limit, <<"Pass a positive integer, e.g. Tracing hotMethods: 10">>).
+    positive_integer_error(
+        'hotMethods:', Limit, <<"Pass a positive integer, e.g. Tracing hotMethods: 10">>
+    ).
 
 -doc """
 Top N methods by error + timeout rate (descending).
@@ -255,7 +259,9 @@ FFI: (Erlang beamtalk_tracing) errorMethods: limit
 errorMethods(Limit) when is_integer(Limit), Limit > 0 ->
     call_trace_store_default(fun() -> beamtalk_trace_store:error_methods(Limit) end, []);
 errorMethods(Limit) ->
-    positive_integer_error('errorMethods:', Limit, <<"Pass a positive integer, e.g. Tracing errorMethods: 5">>).
+    positive_integer_error(
+        'errorMethods:', Limit, <<"Pass a positive integer, e.g. Tracing errorMethods: 5">>
+    ).
 
 -doc """
 Top N actors by message queue length (live snapshot).
@@ -265,7 +271,9 @@ FFI: (Erlang beamtalk_tracing) bottlenecks: limit
 bottlenecks(Limit) when is_integer(Limit), Limit > 0 ->
     call_trace_store_default(fun() -> beamtalk_trace_store:bottlenecks(Limit) end, []);
 bottlenecks(Limit) ->
-    positive_integer_error('bottlenecks:', Limit, <<"Pass a positive integer, e.g. Tracing bottlenecks: 5">>).
+    positive_integer_error(
+        'bottlenecks:', Limit, <<"Pass a positive integer, e.g. Tracing bottlenecks: 5">>
+    ).
 
 %%====================================================================
 %% Live process health
@@ -306,7 +314,9 @@ maxEvents(Size) when is_integer(Size), Size > 0 ->
     call_trace_store(fun() -> beamtalk_trace_store:max_events(Size) end),
     nil;
 maxEvents(Size) ->
-    positive_integer_error('maxEvents:', Size, <<"Pass a positive integer, e.g. Tracing maxEvents: 50000">>).
+    positive_integer_error(
+        'maxEvents:', Size, <<"Pass a positive integer, e.g. Tracing maxEvents: 50000">>
+    ).
 
 %%====================================================================
 %% Internal helpers
