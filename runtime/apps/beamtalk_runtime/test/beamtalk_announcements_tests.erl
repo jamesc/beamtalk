@@ -901,8 +901,11 @@ subscription_nodes_snapshot_test_() ->
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
                 Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
+                #{ref := Ref} = Announcer,
                 try
-                    {ok, _SubRef} = beamtalk_announcements:subscribe('E', Sub, h1, false),
+                    %% Subscribe under the announcer's own namespace (BT-2454), so
+                    %% the scoped `subscriptionNodes/1` read sees it.
+                    {ok, _SubRef} = beamtalk_announcements:subscribe(Ref, 'E', Sub, h1, false),
                     Nodes = beamtalk_announcements:'subscriptionNodes'(Announcer),
                     ?assertEqual(1, length(Nodes)),
                     [Node] = Nodes,
@@ -928,13 +931,15 @@ subscription_nodes_for_class_test_() ->
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
                 Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
+                #{ref := Ref} = Announcer,
                 try
-                    {ok, _R1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
+                    %% All subscriptions on this announcer's namespace (BT-2454).
+                    {ok, _R1} = beamtalk_announcements:subscribe(Ref, 'E', Sub, h1, false),
                     {ok, _R2} = beamtalk_announcements:subscribe(
-                        'E', Sub, {send, 'sel:', Sub}, false
+                        Ref, 'E', Sub, {send, 'sel:', Sub}, false
                     ),
-                    {ok, _R3} = beamtalk_announcements:subscribe('E', Sub, h3, true),
-                    {ok, _R4} = beamtalk_announcements:subscribe('Other', Sub, h4, false),
+                    {ok, _R3} = beamtalk_announcements:subscribe(Ref, 'E', Sub, h3, true),
+                    {ok, _R4} = beamtalk_announcements:subscribe(Ref, 'Other', Sub, h4, false),
 
                     EForSub = beamtalk_announcements:'subscriptionNodesFor'(Announcer, 'E'),
                     ?assertEqual(3, length(EForSub)),
@@ -957,24 +962,28 @@ subscription_nodes_for_class_test_() ->
         ]
     end}.
 
-%% `subscriptionCountAll/0` mirrors `subscription_count/0`; `announcedClasses/0`
-%% returns class objects for the distinct subscribed classes (here `nil`, since
-%% the synthetic test classes are not loaded in the registry) without crashing.
+%% `subscriptionCountOn/1` counts an announcer's own subscriptions (BT-2454);
+%% the navigation's `navAnnouncedClasses/1` returns class objects for the
+%% distinct subscribed classes (here `nil`, since the synthetic test classes are
+%% not loaded in the registry) without crashing.
 subscription_count_and_announced_classes_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
                 Collector = self(),
                 Sub = spawn_subscriber(Collector),
+                Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
+                #{ref := Ref} = Announcer,
                 try
-                    ?assertEqual(0, beamtalk_announcements:'subscriptionCountAll'()),
-                    {ok, _R1} = beamtalk_announcements:subscribe('E', Sub, h1, false),
-                    {ok, _R2} = beamtalk_announcements:subscribe('F', Sub, h2, false),
-                    ?assertEqual(2, beamtalk_announcements:'subscriptionCountAll'()),
+                    ?assertEqual(0, beamtalk_announcements:'subscriptionCountOn'(Announcer)),
+                    {ok, _R1} = beamtalk_announcements:subscribe(Ref, 'E', Sub, h1, false),
+                    {ok, _R2} = beamtalk_announcements:subscribe(Ref, 'F', Sub, h2, false),
+                    ?assertEqual(2, beamtalk_announcements:'subscriptionCountOn'(Announcer)),
                     %% Distinct subscribed classes; unloaded test classes resolve
                     %% to `nil` and are dropped, so the list is empty but the read
                     %% must not crash.
-                    ?assert(is_list(beamtalk_announcements:'announcedClasses'()))
+                    Nav = beamtalk_announcements:'navigationFor'(Announcer),
+                    ?assert(is_list(beamtalk_announcements:'navAnnouncedClasses'(Nav)))
                 after
                     stop_subscriber(Sub)
                 end
@@ -988,12 +997,44 @@ introspection_empty_bus_test_() ->
         [
             ?_test(begin
                 Announcer = #{'$beamtalk_class' => 'Announcer', ref => make_ref()},
+                Nav = beamtalk_announcements:'navigationFor'(Announcer),
                 ?assertEqual([], beamtalk_announcements:'subscriptionNodes'(Announcer)),
                 ?assertEqual(
                     [], beamtalk_announcements:'subscriptionNodesFor'(Announcer, 'E')
                 ),
-                ?assertEqual([], beamtalk_announcements:'announcedClasses'()),
-                ?assertEqual(0, beamtalk_announcements:'subscriptionCountAll'())
+                ?assertEqual([], beamtalk_announcements:'navAnnouncedClasses'(Nav)),
+                ?assertEqual(0, beamtalk_announcements:'subscriptionCountOn'(Announcer))
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% Per-instance isolation: distinct announcers don't cross-talk (BT-2454)
+%%====================================================================
+
+%% A subscription registered on announcer A is never matched by an `announce` on
+%% announcer B for the same event class; an `announce` on A itself still delivers.
+distinct_announcers_isolated_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Collector = self(),
+                Sub = spawn_subscriber(Collector),
+                RefA = make_ref(),
+                RefB = make_ref(),
+                try
+                    {ok, SubRef} = beamtalk_announcements:subscribe(
+                        RefA, 'IsoEvent', Sub, h, false
+                    ),
+                    %% Announce on a *different* announcer namespace — nothing delivered.
+                    ok = beamtalk_announcements:announce(RefB, 'IsoEvent', {x, 1}),
+                    refute_received(),
+                    %% Same namespace still delivers.
+                    ok = beamtalk_announcements:announce(RefA, 'IsoEvent', {x, 2}),
+                    {SubRef, 'IsoEvent', h, {x, 2}} = expect_received()
+                after
+                    stop_subscriber(Sub)
+                end
             end)
         ]
     end}.

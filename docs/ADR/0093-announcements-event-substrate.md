@@ -129,14 +129,18 @@ hot-path discipline as `beamtalk_xref` and `beamtalk_trace_store`: **the
 gen_server is not in the dispatch path.**
 
 - **Subscription table = ETS, gen_server owns writes only.** Each subscription
-  is a row `{SubRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag}` in an
-  ETS **`set` keyed by a unique `SubRef`** (the ref the returned `Subscription`
-  wraps), with a secondary by-class index (`ordered_set` on
-  `{AnnouncementClass, SubRef}`) for the MRO lookup. Keying by `SubRef` — *not*
-  by `{Class, Pid}` — means a process may hold **multiple distinct subscriptions
-  to the same class** (Pharo's rule, and what the per-*subscription* de-dup below
-  assumes): a second `when: C do: […]` adds a row, it never silently replaces the
-  first. `doOnce:`'s `ets:take(SubRef)` stays atomic and selective on the unique
+  is a row `{SubRef, AnnouncerRef, AnnouncementClass, SubscriberPid, Handler,
+  OnceFlag}` in an ETS **`set` keyed by a unique `SubRef`** (the ref the returned
+  `Subscription` wraps), with a secondary by-class index (`ordered_set` on
+  `{AnnouncerRef, AnnouncementClass, SubRef}`) for the MRO lookup. The
+  `AnnouncerRef` dimension scopes each subscription to **one announcer
+  namespace** so distinct `Announcer` instances are isolated (**Amendment
+  BT-2454**, see below): a `reference()` per `Announcer new`, or the well-known
+  `beamtalk_system_announcer` atom shared by `SystemAnnouncer` and the raw Layer-1
+  API. Keying by `SubRef` — *not* by `{Class, Pid}` — means a process may hold
+  **multiple distinct subscriptions to the same class** (Pharo's rule, and what
+  the per-*subscription* de-dup below assumes): a second `when: C do: […]` adds a
+  row, it never silently replaces the first. `doOnce:`'s `ets:take(SubRef)` stays atomic and selective on the unique
   key. `when:…` / `unsubscribe:` go through the gen_server (serialised writes,
   and it arms `erlang:monitor/2` per subscriber). The ETS table is created with
   `{heir, SupervisorPid, …}` so it **survives a bus crash** (the
@@ -174,11 +178,14 @@ gen_server is not in the dispatch path.**
   clusters*. Per-instance `Announcer`s use the ETS table directly (no `pg`
   group), so there is no dynamic-atom pressure; where a `pg` group is needed it
   is keyed by a `{beamtalk_announcer, Ref}` tuple, never a minted atom.
-- **Typed dispatch with MRO matching.** On `announce: anEvent` the matcher
-  walks the event's superclass chain (ETS metadata reads) and delivers to
-  subscribers of the event class *or any ancestor* (subscribe to `UIEvent`,
-  receive `ButtonClicked`); the walk is at announce time so live hierarchy
-  changes are respected. **Delivery is de-duplicated per subscriber process**
+- **Typed dispatch with MRO matching, scoped per announcer.** On
+  `anAnnouncer announce: anEvent` the matcher walks the event's superclass chain
+  (ETS metadata reads) and delivers to subscribers — *on that same announcer* —
+  of the event class *or any ancestor* (subscribe to `UIEvent`, receive
+  `ButtonClicked`); the walk is at announce time so live hierarchy changes are
+  respected. The by-class index is keyed `{AnnouncerRef, Class, SubRef}`, so the
+  walk reads `{AnnouncerRef, CurrentClass, '_'}` at each level and a subscription
+  on a *different* announcer is never matched (**Amendment BT-2454**). **Delivery is de-duplicated per subscriber process**
   across the MRO walk — a process that subscribed to *both* `UIEvent` and
   `ButtonClicked` receives one delivery per *subscription* it registered
   (Pharo's rule), and the matcher never double-sends for a single ancestor
@@ -704,6 +711,38 @@ Related: BT-2437 (`event:` emission manifest — separate track, §7). ADR-autho
 - The five consuming ADRs migrate their planned bespoke channels to
   `SystemAnnouncer` subscriptions as part of Phase 3; until then nothing
   regresses (none of those channels is built yet).
+
+## Amendments
+
+### BT-2454 — true per-instance `Announcer` subscription isolation
+
+**Context.** As originally specced (and shipped in Phase 1–2), the subscription
+table had **no announcer dimension**: it was keyed by `SubRef` with a by-class
+index `{Class, SubRef}`, so every `Announcer new` shared one class-keyed bus. A
+subscription made on announcer A received events announced on announcer B for the
+same class. This contradicted the intuitive "fresh, independent dispatcher"
+reading of `Announcer new` (and Pharo, where each `Announcer` owns its own
+`SubscriptionRegistry`), and was a latent cross-talk footgun between unrelated
+libraries that happen to share an event class.
+
+**Decision: isolate.** Each subscription row and by-class index entry now carries
+an `AnnouncerRef` dimension (a `reference()` per `Announcer new`; the
+`beamtalk_system_announcer` atom for `SystemAnnouncer` and the raw Layer-1 API).
+Matching (`announce:` / `announceAndWait:`) and introspection
+(`subscriptions` / `subscribersOf:` / `subscriptionCount`, and
+`AnnouncementNavigation`'s `default` vs `of:`) all scope to one announcer.
+
+**Why this is cheap and does not reverse §4.** §4 rejected a per-announcer
+*process* (a central mailbox to deadlock/bottleneck). Isolation reintroduces
+none of that — it is purely a **matching-key change**. Dispatch stays caller-side
+off concurrent ETS reads, the MRO walk is unchanged except for the extra key
+field, and there is still exactly one shared ETS table pair. `SystemAnnouncer`
+falls out as just the atom-keyed namespace; `system_announce/2` publishes there.
+
+**`AnnouncementNavigation`** becomes a scope-carrying handle (FFI-minted with its
+announcer, like `Announcer` carries its ref) so `default` (system bus) and
+`of: anAnnouncer` (that announcer) report different subscription sets — realising
+the §7 design that was vestigial under the shared bus.
 
 ## References
 - Related issues: BT-2396 (this ADR), BT-2193 (package — to be re-scoped),
