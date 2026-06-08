@@ -982,6 +982,7 @@ announce_child_crashed(SupClass, ChildClass, Reason) ->
     announce_supervision('SupervisionChildCrashed', #{
         supervisor => SupClass,
         childClass => ChildClass,
+        childPid => nil,
         reason => normalize_crash_reason(Reason)
     }).
 
