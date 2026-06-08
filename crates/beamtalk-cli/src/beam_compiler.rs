@@ -2489,8 +2489,12 @@ end
             dir.starts_with(&base),
             "shared cache dir should honour BEAMTALK_CACHE_DIR: {dir}"
         );
-        assert!(
-            dir.as_str().ends_with("beamtalk/otp-specs/27-15.0-weird"),
+        // Compare on path components, not a slash-joined string, so the
+        // assertion holds on Windows (where `join` uses `\`) as well as Unix.
+        let tail: Vec<&str> = dir.components().rev().take(3).map(|c| c.as_str()).collect();
+        assert_eq!(
+            tail,
+            vec!["27-15.0-weird", "otp-specs", "beamtalk"],
             "version key should be filesystem-sanitised: {dir}"
         );
     }
