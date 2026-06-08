@@ -344,7 +344,11 @@ ensure_test_context_appends_context_test() ->
         FailMsg, 'bt@user@A', testBar, Stacktrace
     ),
     ?assertNotEqual(nomatch, binary:match(Result, <<"testBar">>)),
-    %% The synthetic test context should appear after the existing "at" line
-    {HelperPos, _} = binary:match(Result, <<"helper">>),
-    {TestBarPos, _} = binary:match(Result, <<"testBar">>),
+    %% The synthetic test context should appear after the existing "at" line.
+    %% Match the full "A>>method" frame strings rather than the bare method
+    %% names: "testBar" also occurs in the leading "FAIL testBar:" message,
+    %% so matching <<"testBar">> alone would find the header, not the
+    %% appended synthetic frame.
+    {HelperPos, _} = binary:match(Result, <<"A>>helper">>),
+    {TestBarPos, _} = binary:match(Result, <<"A>>testBar">>),
     ?assert(HelperPos < TestBarPos).
