@@ -19,7 +19,7 @@
 
 // Spawn a TonelCounter (defined with separate class + method defs)
 tc := TonelCounter spawn
-// => #Actor<TonelCounter,_>
+// => Actor(TonelCounter, _)
 
 tc increment
 // => 1

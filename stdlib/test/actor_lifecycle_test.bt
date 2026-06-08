@@ -37,10 +37,10 @@ TestCase subclass: ActorLifecycleTest
     self assert: c3 increment equals: 11
 
   testPrintstringActorInstanceAndClassObject =>
-    // Actor instance printString returns bare class name
+    // ADR 0094: actor instance printString renders kind-headed Actor(Class, pid)
     c2 := Counter spawn
-    self assert: c2 printString equals: "Counter"
-    // Class object printString returns class name
+    self assert: (c2 printString includesSubstring: "Actor(Counter,") equals: true
+    // Class object printString returns bare class name
     self assert: Counter printString equals: "Counter"
 
   testNewRaisesInstantiationError =>

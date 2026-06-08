@@ -28,7 +28,7 @@ Actor subclass: InlineRedefActor
 // => _
 
 ir := InlineRedefActor spawn
-// => #Actor<InlineRedefActor,_>
+// => Actor(InlineRedefActor, _)
 
 ir bump
 // => 1
@@ -55,7 +55,7 @@ ir bump
 // ---------------------------------------------------------------------------
 
 ir2 := InlineRedefActor spawn
-// => #Actor<InlineRedefActor,_>
+// => Actor(InlineRedefActor, _)
 
 ir2 bump
 // => 10
@@ -79,7 +79,7 @@ MethodDropActor >> secret => "visible"
 // => _
 
 md := MethodDropActor spawn
-// => #Actor<MethodDropActor,_>
+// => Actor(MethodDropActor, _)
 
 md setX
 // => 1

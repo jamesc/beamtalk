@@ -21,7 +21,8 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     responds_to/2,
     class_name_to_module/1,
     print_string/1,
-    display_string/1
+    display_string/1,
+    process_label/1
 ]).
 
 -include("beamtalk.hrl").
@@ -139,10 +140,15 @@ print_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
     %% ADR 0036: Metaclass objects display as "ClassName class" (e.g. "Integer class").
     ClassName = beamtalk_object_class:class_name(Pid),
     iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
-print_string(#beamtalk_object{class = ClassName}) ->
+print_string(#beamtalk_object{class = ClassName} = Obj) ->
     case beamtalk_class_registry:is_class_name(ClassName) of
-        true -> beamtalk_class_registry:class_display_name(ClassName);
-        false -> atom_to_binary(ClassName, utf8)
+        true ->
+            %% Class object — bare class name (ADR 0094).
+            beamtalk_class_registry:class_display_name(ClassName);
+        false ->
+            %% ADR 0094: live actor instances render kind-headed and positional,
+            %% e.g. `Actor(Counter, 0.123.0)`. Derived directly from the tuple.
+            process_label(Obj)
     end;
 print_string(X) when is_map(X) -> print_string_map(X);
 print_string(#beamtalk_error{} = Error) ->
@@ -226,15 +232,63 @@ display_string({beamtalk_future, _} = Future) ->
 display_string(#beamtalk_object{class = 'Metaclass', pid = Pid}) ->
     ClassName = beamtalk_object_class:class_name(Pid),
     iolist_to_binary([atom_to_binary(ClassName, utf8), <<" class">>]);
-display_string(#beamtalk_object{class = ClassName}) ->
+display_string(#beamtalk_object{class = ClassName} = Obj) ->
     case beamtalk_class_registry:is_class_name(ClassName) of
-        true -> beamtalk_class_registry:class_display_name(ClassName);
-        false -> atom_to_binary(ClassName, utf8)
+        true ->
+            beamtalk_class_registry:class_display_name(ClassName);
+        false ->
+            %% ADR 0094: displayString for actors delegates to printString.
+            process_label(Obj)
     end;
 display_string(X) when is_map(X) ->
     beamtalk_tagged_map:format_for_display(X);
 display_string(X) ->
     iolist_to_binary(io_lib:format("~p", [X])).
+
+-doc """
+Render the kind-headed, positional label for a live process (ADR 0094).
+
+Returns `Actor(ClassName, pid)` for actor instances and
+`Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)` for
+supervisors, with the kind head determined by ancestry. The label is derived
+**directly from the tuple** — no message is sent to the process — so it is
+safe to use as the timeout/dead-process fallback for a wedged actor.
+
+The kind words `Actor`, `Supervisor`, and `DynamicSupervisor` are reserved and
+must not be shadowed by user `Value` classes (validation tracked as follow-up).
+""".
+-spec process_label(#beamtalk_object{} | tuple()) -> binary().
+process_label(#beamtalk_object{class = ClassName, pid = Identity}) ->
+    iolist_to_binary([
+        <<"Actor(">>, atom_to_binary(ClassName, utf8), <<", ">>, identity_inner(Identity), <<")">>
+    ]);
+process_label({beamtalk_supervisor, ClassName, _Module, Pid}) ->
+    Head =
+        try beamtalk_class_registry:inherits_from(ClassName, 'DynamicSupervisor') of
+            true -> <<"DynamicSupervisor(">>;
+            _ -> <<"Supervisor(">>
+        catch
+            _:_ -> <<"Supervisor(">>
+        end,
+    iolist_to_binary([
+        Head, atom_to_binary(ClassName, utf8), <<", ">>, identity_inner(Pid), <<")">>
+    ]).
+
+-doc """
+Format a process identity slot as the inner `X.Y.Z` form (no `#Pid<...>`).
+
+Handles raw pids and ADR 0079 name-resolving proxies (`{registered, Name}`),
+falling back defensively so the formatter never crashes on a malformed slot.
+""".
+-spec identity_inner(term()) -> binary().
+identity_inner(Pid) when is_pid(Pid) ->
+    List = erlang:pid_to_list(Pid),
+    %% erlang:pid_to_list/1 returns "<X.Y.Z>"; strip the angle brackets.
+    list_to_binary(lists:sublist(List, 2, length(List) - 2));
+identity_inner({registered, Name}) when is_atom(Name) ->
+    iolist_to_binary([<<"registered, ">>, atom_to_binary(Name, utf8)]);
+identity_inner(Other) ->
+    iolist_to_binary(io_lib:format("~tp", [Other])).
 
 -doc "Send a message to any value (actor or primitive).".
 -spec send(term(), atom(), list()) -> term().

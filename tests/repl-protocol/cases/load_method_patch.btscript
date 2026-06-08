@@ -26,7 +26,7 @@
 
 // Spawn and use the file-loaded Counter
 c := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c increment
 // => 1
@@ -47,7 +47,7 @@ Counter >> increment => self.value := self.value + 10
 
 // New instances should use patched method
 c2 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c2 increment
 // => 10
@@ -64,7 +64,7 @@ Counter >> doubleValue => self.value * 2
 // => _
 
 c3 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c3 increment
 // => 10

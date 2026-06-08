@@ -56,7 +56,7 @@ msg class
 
 // Create a chat room
 room := ChatRoom spawn
-// => #Actor<ChatRoom,_>
+// => Actor(ChatRoom, _)
 
 // Initially no members
 online := room online
@@ -78,10 +78,10 @@ hist size
 
 // Create members
 alice := ChatMember spawn
-// => #Actor<ChatMember,_>
+// => Actor(ChatMember, _)
 
 bob := ChatMember spawn
-// => #Actor<ChatMember,_>
+// => Actor(ChatMember, _)
 
 // Set member names
 alice setName: "Alice"
@@ -99,10 +99,10 @@ bob getName
 
 // Set room references for members
 alice setRoom: room
-// => #Actor<ChatRoom,_>
+// => Actor(ChatRoom, _)
 
 bob setRoom: room
-// => #Actor<ChatRoom,_>
+// => Actor(ChatRoom, _)
 
 // Join the room
 room join: alice
@@ -242,7 +242,7 @@ bobInbox3 last
 
 // Create a moderator (subclass of ChatMember)
 mod := Moderator spawn
-// => #Actor<Moderator,_>
+// => Actor(Moderator, _)
 
 mod class
 // => Moderator
@@ -255,7 +255,7 @@ mod getName
 // => Admin
 
 mod setRoom: room
-// => #Actor<ChatRoom,_>
+// => Actor(ChatRoom, _)
 
 room join: mod
 // => Set(_)

@@ -32,7 +32,7 @@
 // @load tests/repl-protocol/fixtures/counter.bt
 
 c := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c increment
 // => 1
@@ -48,7 +48,7 @@ c getValue
 // ---------------------------------------------------------------------------
 
 c2 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c2 increment
 // => 1
@@ -67,10 +67,10 @@ c2 getValue
 // ---------------------------------------------------------------------------
 
 a1 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 a2 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 a1 increment
 // => 1

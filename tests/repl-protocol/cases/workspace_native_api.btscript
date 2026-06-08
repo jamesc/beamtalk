@@ -134,7 +134,7 @@ ReloadCounter sourceFile
 
 // Spawn an actor before reload
 rc := ReloadCounter spawn
-// => #Actor<ReloadCounter,_>
+// => Actor(ReloadCounter, _)
 
 rc increment
 // => 1

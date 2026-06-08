@@ -27,7 +27,7 @@ rather than being duplicated in every class's generated code.
 
 | Selector      | Args | Description                              |
 |---------------|------|------------------------------------------|
-| `printString`   | []   | Developer representation (e.g. `a Counter`)  |
+| `printString`   | []   | Developer representation (e.g. `Actor(Counter, 0.123.0)`) |
 | `displayString` | []   | User-facing representation (same for actors) |
 | `inspect`       | []   | Detailed inspection string                   |
 
@@ -95,12 +95,10 @@ dispatch('fieldAt:put:', [FieldName, Value], _Self, State) ->
 %% --- Display methods ---
 
 dispatch('printString', [], Self, State) ->
-    DisplayName = class_display_name(Self, State),
-    {reply, DisplayName, State};
+    {reply, print_string_label(Self, State), State};
 dispatch('displayString', [], Self, State) ->
-    %% displayString for actors delegates to printString — same result.
-    DisplayName = class_display_name(Self, State),
-    {reply, DisplayName, State};
+    %% ADR 0094: displayString for actors delegates to printString — same result.
+    {reply, print_string_label(Self, State), State};
 dispatch(inspect, [], Self, State) ->
     %% BT-753: For class objects (State is #{}), use Self for identity.
     %% BT-1167: For actor instances, produce ClassName(field: inspect(value), ...) format.
@@ -215,6 +213,28 @@ has_method(isNil) -> true;
 has_method(notNil) -> true;
 has_method(subclassResponsibility) -> true;
 has_method(_) -> false.
+
+-doc """
+Return the printString/displayString label for an Object instance (ADR 0094).
+
+Class objects render as a bare class name. Live actor instances render
+kind-headed and positional (`Actor(ClassName, pid)` /
+`Supervisor(ClassName, pid)` / `DynamicSupervisor(ClassName, pid)`), derived
+directly from the `#beamtalk_object{}` tuple — no message round-trip.
+""".
+-spec print_string_label(term(), map()) -> binary().
+print_string_label(#beamtalk_object{} = Self, State) ->
+    case beamtalk_class_registry:is_class_object(Self) of
+        true ->
+            class_display_name(Self, State);
+        false ->
+            %% Live actor instance — kind-headed positional label.
+            beamtalk_primitive:process_label(Self)
+    end;
+print_string_label(Self, State) ->
+    %% No actor tuple available (e.g. tagged-map dispatch) — fall back to the
+    %% bare class name as before.
+    class_display_name(Self, State).
 
 -doc "Return a display-friendly class name binary, stripping the \" class\" suffix.".
 -spec class_display_name(term(), map()) -> binary().

@@ -27,7 +27,7 @@ Counter compile: #increment source: "increment => self.value := self.value + 5"
 // => Counter
 
 c := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c increment
 // => 5
@@ -44,7 +44,7 @@ Counter compile: #triple source: "triple => self.value * 3"
 // => Counter
 
 c2 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c2 increment
 // => 5
@@ -62,7 +62,7 @@ Counter compile: #increment source: "self.value := self.value + 10"
 // => Counter
 
 c4 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c4 increment
 // => 10
@@ -77,7 +77,7 @@ Counter tryCompile: #spike source: "spike => 42"
 // => Counter
 
 c3 := Counter spawn
-// => #Actor<Counter,_>
+// => Actor(Counter, _)
 
 c3 spike
 // => 42

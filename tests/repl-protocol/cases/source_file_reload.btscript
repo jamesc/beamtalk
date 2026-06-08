@@ -35,7 +35,7 @@ ReloadCounter sourceFile
 // ===========================================================================
 
 rc := ReloadCounter spawn
-// => #Actor<ReloadCounter,_>
+// => Actor(ReloadCounter, _)
 
 rc increment
 // => 1

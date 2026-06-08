@@ -234,11 +234,10 @@ format_result(V) when
                 true ->
                     beamtalk_class_registry:class_display_name(Class);
                 false ->
-                    Pid = element(4, V),
-                    ClassBin = atom_to_binary(Class, utf8),
-                    PidStr = pid_to_list(Pid),
-                    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-                    iolist_to_binary([<<"#Actor<">>, ClassBin, <<",">>, Inner, <<">">>])
+                    %% ADR 0094: live actor instances render kind-headed and
+                    %% positional, e.g. Actor(Counter, 0.123.0). Derived from the
+                    %% tuple to match the REPL/runtime renderer byte-for-byte.
+                    beamtalk_primitive:process_label(V)
             end
     end;
 format_result(V) when is_map(V) ->
@@ -255,6 +254,10 @@ format_result(V) when is_list(V) ->
                 _:_ -> iolist_to_binary(io_lib:format("~p", [V]))
             end
     end;
+format_result({beamtalk_supervisor, _, _, _} = Sup) ->
+    %% ADR 0094: supervisors render kind-headed and positional,
+    %% Supervisor(Class, pid) / DynamicSupervisor(Class, pid) by ancestry.
+    beamtalk_primitive:process_label(Sup);
 format_result({beamtalk_future, _} = Future) ->
     %% BT-840: Auto-await tagged futures before formatting.
     Value = beamtalk_future:await(Future),

@@ -26,7 +26,7 @@
 // ---------------------------------------------------------------------------
 
 c := CBCounter spawn
-// => #Actor<CBCounter,_>
+// => Actor(CBCounter, _)
 
 c add
 // => 1
@@ -88,7 +88,7 @@ c getTotal
 // ---------------------------------------------------------------------------
 
 c2 := CBCounter spawn
-// => #Actor<CBCounter,_>
+// => Actor(CBCounter, _)
 
 c2 add
 // => 10

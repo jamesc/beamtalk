@@ -89,8 +89,10 @@ dispatch_test_() ->
                 fun test_module_without_dispatch/0},
             {"error in dispatch/4 is wrapped as beamtalk_error",
                 fun test_dispatch_throws_wrapped/0},
-            {"actor instance displayString bypasses throwing module",
+            {"actor displayString override is honoured over the Object bypass",
                 fun test_actor_instance_bypass_throwing_module/0},
+            {"default actor displayString bypasses to object_ops (no override)",
+                fun test_actor_default_displaystring_bypass/0},
             {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
             {"lookup returns class_not_found when parent class is gone",
                 fun test_stale_parent_class/0},
@@ -900,14 +902,17 @@ test_dispatch_throws_wrapped() ->
         code:delete(bt_test_dispatch_throws_stub)
     end.
 
-%% Test that the actor instance bypass correctly intercepts displayString before
-%% reaching the module's dispatch/4. The stub module throws, but the actor bypass
-%% routes to beamtalk_object_ops instead, so the result is {reply, _, _}.
+%% ADR 0094: the actor display bypass to beamtalk_object_ops only fires when the
+%% display selector resolves to the base Object class (i.e. the actor did NOT
+%% override it). A class that defines its own displayString must have that
+%% override honoured — even if it errors — rather than being silently bypassed.
+%% Here the override resolves to a throwing module, so the error surfaces.
 test_actor_instance_bypass_throwing_module() ->
     ok = ensure_counter_loaded(),
 
     %% Compile a stub dispatch module whose dispatch/4 always throws.
-    %% The actor bypass should prevent this from ever being called.
+    %% Because the class declares its own displayString, the override is honoured
+    %% and this throwing module IS invoked (no bypass for non-Object owners).
     Forms = [
         {attribute, 1, module, bt_test_actor_dispatch_throws_stub},
         {attribute, 2, export, [{dispatch, 4}]},
@@ -943,17 +948,31 @@ test_actor_instance_bypass_throwing_module() ->
         },
         State = #{'$beamtalk_class' => 'ActorDispatchThrowsClass'},
 
-        %% displayString is intercepted before calling the module's dispatch/4,
-        %% so beamtalk_object_ops handles it safely and returns {reply, _, _}
+        %% The class overrides displayString (MethodOwner =/= 'Object'), so the
+        %% override is honoured and the throwing module surfaces a structured error.
         Result = beamtalk_dispatch:lookup(
             'displayString', [], ActorSelf, State, 'ActorDispatchThrowsClass'
         ),
-        ?assertMatch({reply, _, _}, Result)
+        ?assertMatch({error, #beamtalk_error{}}, Result)
     after
         gen_server:stop(Pid),
         code:purge(bt_test_actor_dispatch_throws_stub),
         code:delete(bt_test_actor_dispatch_throws_stub)
     end.
+
+%% ADR 0094: a default actor (no displayString override) resolves the selector at
+%% the base Object class, so the bypass to beamtalk_object_ops fires and yields the
+%% kind-headed Actor(ClassName, pid) label without any self-send deadlock.
+test_actor_default_displaystring_bypass() ->
+    ok = ensure_counter_loaded(),
+    ActorSelf = #beamtalk_object{
+        class = 'Counter',
+        class_mod = counter,
+        pid = self()
+    },
+    State = #{'$beamtalk_class' => 'Counter', value => 0},
+    Result = beamtalk_dispatch:lookup('displayString', [], ActorSelf, State, 'Counter'),
+    ?assertMatch({reply, <<"Actor(Counter, ", _/binary>>, _}, Result).
 
 %%% ============================================================================
 %%% BT-1970: Additional coverage tests

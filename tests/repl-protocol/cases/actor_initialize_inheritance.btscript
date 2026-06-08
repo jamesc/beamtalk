@@ -24,7 +24,7 @@
 // Child declares no `initialize`; spawning still runs the parent's
 // `initialize` so `label` is set.
 noInit := E2EInitInheritChildNoInit spawn
-// => #Actor<E2EInitInheritChildNoInit,_>
+// => Actor(E2EInitInheritChildNoInit, _)
 
 noInit getLabel
 // => parent-initialized
@@ -44,7 +44,7 @@ noInit getExtra
 // Child's `initialize` reads `self.label` which is set by the parent's
 // auto-chained `initialize` (parent runs first).
 uses := E2EInitInheritChildUses spawn
-// => #Actor<E2EInitInheritChildUses,_>
+// => Actor(E2EInitInheritChildUses, _)
 
 uses getLabel
 // => parent-initialized
@@ -58,7 +58,7 @@ uses getCache
 
 // Spawning the leaf class runs A → B → C in order, each appending to `log`.
 deep := E2EInitDeepC spawn
-// => #Actor<E2EInitDeepC,_>
+// => Actor(E2EInitDeepC, _)
 
 deep getLog
 // => ABC

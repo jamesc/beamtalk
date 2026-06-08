@@ -13,11 +13,11 @@
 
 // Create a slow actor
 slow := SlowE2EActor spawn
-// => #Actor<SlowE2EActor,_>
+// => Actor(SlowE2EActor, _)
 
 // Wrap with a generous timeout
 proxy := slow withTimeout: 5000
-// => #Actor<TimeoutProxy,_>
+// => Actor(TimeoutProxy, _)
 
 // Proxy forwards messages to the target
 proxy getValue
@@ -33,7 +33,7 @@ proxy getValue
 
 // Short timeout with slow response should raise timeout error
 shortProxy := slow withTimeout: 50
-// => #Actor<TimeoutProxy,_>
+// => Actor(TimeoutProxy, _)
 
 // slowGet: sleeps 500ms; 50ms timeout should fail
 [shortProxy slowGet: 500] on: Error do: [:e | e kind]
@@ -45,7 +45,7 @@ shortProxy := slow withTimeout: 50
 
 // Infinity timeout should never time out
 infProxy := slow withTimeout: #infinity
-// => #Actor<TimeoutProxy,_>
+// => Actor(TimeoutProxy, _)
 
 infProxy slowGet: 50
 // => 42

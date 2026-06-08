@@ -86,7 +86,8 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 %%% ===================================================================
 -export([
     dispatch_lookup/5,
-    message_send/3
+    message_send/3,
+    message_send/4
 ]).
 
 %%% ===================================================================
@@ -109,6 +110,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 %%% ===================================================================
 -export([
     print_string/1,
+    process_label/1,
     primitive_class_of/1
 ]).
 
@@ -308,6 +310,10 @@ dispatch_lookup(Selector, Args, Self, State, ClassName) ->
 message_send(Receiver, Selector, Args) ->
     beamtalk_message_dispatch:send(Receiver, Selector, Args).
 
+-spec message_send(term(), atom(), list(), timeout()) -> term().
+message_send(Receiver, Selector, Args, Timeout) ->
+    beamtalk_message_dispatch:send(Receiver, Selector, Args, Timeout).
+
 %%% ====================================================================
 %%% Reflection Delegators
 %%% ====================================================================
@@ -335,6 +341,11 @@ is_tagged(Value) ->
 -spec print_string(term()) -> binary().
 print_string(Value) ->
     beamtalk_primitive:print_string(Value).
+
+-doc "ADR 0094: tuple-derived kind-headed label for a live process (no message send).".
+-spec process_label(term()) -> binary().
+process_label(Value) ->
+    beamtalk_primitive:process_label(Value).
 
 -spec primitive_class_of(term()) -> atom().
 primitive_class_of(Value) ->
