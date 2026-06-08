@@ -220,6 +220,12 @@ websocket_info({actor_spawned, Class, Pid}, State) ->
                         <<"pid">> => list_to_binary(pid_to_list(Pid))}),
     {[{text, Push}], State};
 
+websocket_info({actor_stopped, Class, Pid}, State) ->
+    Push = jsx:encode(#{<<"push">> => <<"actor-stopped">>,
+                        <<"class">> => atom_to_binary(Class, utf8),
+                        <<"pid">> => list_to_binary(pid_to_list(Pid))}),
+    {[{text, Push}], State};
+
 websocket_info(_Info, State) ->
     {[], State}.
 
