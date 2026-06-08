@@ -439,7 +439,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Override inspect to use printString rather than the field-based\nformat defined in Value. Bag's internal counts dictionary is opaque.".into()) },
             ],
             class_methods: vec![
-                MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Bag(E)".into()), param_types: vec![Some("List(E)".into())], doc: Some("Create a Bag containing all elements from a list.\n\n## Examples\n```beamtalk\nBag withAll: #(1, 2, 1, 3)   // => a Bag\n```".into()) },
+                MethodInfo { selector: "withAll:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Bag".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Bag(E)".into()), param_types: vec![Some("List(E)".into())], doc: Some("Create a Bag containing all elements from a list.\n\n## Examples\n```beamtalk\nBag withAll: #(1, 2, 1, 3)   // => Bag\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec!["E".into()],
