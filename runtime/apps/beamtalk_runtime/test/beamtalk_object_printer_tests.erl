@@ -237,3 +237,40 @@ width_resets_per_nesting_level_test() ->
     %% Outer shows a + b, then elides c. But Inner gets its own budget of 2,
     %% so Point shows both x and y.
     ?assertEqual(<<"Outer(a: Point(x: 1, y: 2), b: 42, ...)">>, Result).
+
+%%% ============================================================================
+%%% structural_from_state/1 — extract class + user fields from a tagged map
+%%% ============================================================================
+
+structural_from_state_flat_test() ->
+    %% Class name and user fields are extracted from the tagged map; internal
+    %% keys (e.g. '$beamtalk_class') are filtered out.
+    State = #{'$beamtalk_class' => 'Point', x => 3, y => 4},
+    ?assertEqual(
+        <<"Point(x: 3, y: 4)">>,
+        beamtalk_object_printer:structural_from_state(State)
+    ).
+
+structural_from_state_empty_fields_test() ->
+    %% A tagged map with no user fields renders ClassName().
+    State = #{'$beamtalk_class' => 'Unit'},
+    ?assertEqual(
+        <<"Unit()">>,
+        beamtalk_object_printer:structural_from_state(State)
+    ).
+
+structural_from_state_defaults_to_object_test() ->
+    %% A map without a class tag defaults to 'Object'.
+    ?assertEqual(
+        <<"Object()">>,
+        beamtalk_object_printer:structural_from_state(#{})
+    ).
+
+structural_from_state_nested_test() ->
+    %% Nested tagged-map field values recurse structurally.
+    Point = #{'$beamtalk_class' => 'Point', x => 0, y => 0},
+    State = #{'$beamtalk_class' => 'Line', from => Point, label => <<"a">>},
+    ?assertEqual(
+        <<"Line(from: Point(x: 0, y: 0), label: \"a\")">>,
+        beamtalk_object_printer:structural_from_state(State)
+    ).

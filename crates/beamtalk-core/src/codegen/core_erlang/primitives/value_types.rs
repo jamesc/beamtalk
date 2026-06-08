@@ -115,6 +115,22 @@ pub(crate) fn generate_object_bif(
     None
 }
 
+/// `Value` primitive implementations (ADR 0094, Phase 2).
+///
+/// `Value` is the base class for immutable value types. Its `printString`
+/// renders the structural `ClassName(field: value, ...)` form via the
+/// canonical renderer `beamtalk_object_printer:structural_from_state/1`,
+/// guaranteeing byte-identical output with the runtime fallback paths
+/// (Critical Risk #4).
+pub(crate) fn generate_value_bif(selector: &str, _params: &[String]) -> Option<Document<'static>> {
+    match selector {
+        "printString" => Some(Document::Str(
+            "call 'beamtalk_object_printer':'structural_from_state'(Self)",
+        )),
+        _ => None,
+    }
+}
+
 /// Set primitive implementations (BT-73).
 ///
 /// Sets are represented as tagged maps: `#{'$beamtalk_class' => 'Set', elements => OrdsetData}`.
@@ -365,6 +381,25 @@ mod tests {
     fn test_object_always_returns_none() {
         assert_eq!(doc_to_string(generate_object_bif("anything", &[])), None);
         assert_eq!(doc_to_string(generate_object_bif("size", &[])), None);
+    }
+
+    // generate_value_bif tests
+
+    #[test]
+    fn test_value_print_string_uses_canonical_renderer() {
+        // ADR 0094: Value printString routes through the canonical structural
+        // renderer for byte-identical output with the runtime fallback.
+        let result = doc_to_string(generate_value_bif("printString", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_object_printer':'structural_from_state'(Self)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_value_unknown_selector_returns_none() {
+        assert_eq!(doc_to_string(generate_value_bif("size", &[])), None);
+        assert_eq!(doc_to_string(generate_value_bif("inspect", &[])), None);
     }
 
     // generate_set_bif tests

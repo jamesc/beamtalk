@@ -81,6 +81,16 @@ sealed typed Value subclass: Random
   class sealed seed: seed :: Integer -> Random =>
     (Erlang beamtalk_random) seed: seed
 
+  /// Return a display string. Overrides the default structural Value form
+  /// because the instance holds an opaque internal `rand` generator state
+  /// that is not meaningful (or safe) to render field-by-field.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Random new printString       // => "Random"
+  /// ```
+  printString -> String => self class name asString
+
   /// Return a random float from the instance state.
   ///
   /// Note: the instance holds an explicit seed snapshot. Calling `next`

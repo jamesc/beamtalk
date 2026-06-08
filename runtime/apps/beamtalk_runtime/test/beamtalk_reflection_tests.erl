@@ -123,9 +123,11 @@ source_file_from_module_returns_path_for_compiled_bt_module_test() ->
 %%% ============================================================================
 
 inspect_string_empty_fields_test() ->
+    %% ADR 0094: delegates to the canonical renderer — no-field instances
+    %% render as ClassName().
     State = #{'$beamtalk_class' => 'Empty'},
     Result = beamtalk_reflection:inspect_string(State),
-    ?assertEqual(<<"Empty">>, Result).
+    ?assertEqual(<<"Empty()">>, Result).
 
 inspect_string_single_field_test() ->
     State = #{'$beamtalk_class' => 'Counter', value => 0},
@@ -156,10 +158,11 @@ inspect_string_nil_field_test() ->
     ?assertNotEqual(nomatch, binary:match(Result, <<"value">>)).
 
 inspect_string_defaults_class_to_object_test() ->
-    %% State without $beamtalk_class should default to 'Object'
+    %% State without $beamtalk_class should default to 'Object'. Via the
+    %% canonical renderer the no-field form is Object() (ADR 0094).
     State = #{},
     Result = beamtalk_reflection:inspect_string(State),
-    ?assertEqual(<<"Object">>, Result).
+    ?assertEqual(<<"Object()">>, Result).
 
 inspect_string_boolean_field_test() ->
     State = #{'$beamtalk_class' => 'Flag', active => true},
