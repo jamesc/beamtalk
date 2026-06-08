@@ -879,6 +879,24 @@ read_specs_batch_module_names_test() ->
     [{ModName, _}] = Results,
     ?assertEqual(<<"lists">>, ModName).
 
+%% BT-2469: parallel batch processing must produce exactly the same results,
+%% in the same order, as a sequential `read_specs/1' map — across a batch large
+%% enough to span multiple worker chunks and to exercise the shared remote-type
+%% memo (several of these modules reference remote types like `sets:set()').
+read_specs_batch_matches_sequential_test() ->
+    Mods = [lists, maps, sets, dict, queue, gb_trees, gb_sets, array, ordsets, proplists],
+    Beams = [code:which(M) || M <- Mods],
+    [?assertNotEqual(non_existing, B) || B <- Beams],
+    Sequential = [
+        begin
+            ModName = list_to_binary(atom_to_list(M)),
+            {ModName, beamtalk_spec_reader:read_specs(B)}
+        end
+     || {M, B} <- lists:zip(Mods, Beams)
+    ],
+    Parallel = beamtalk_spec_reader:read_specs_batch(Beams),
+    ?assertEqual(Sequential, Parallel).
+
 %%% ---------------------------------------------------------------
 %%% Remote spec form (module:function/arity)
 %%% ---------------------------------------------------------------
