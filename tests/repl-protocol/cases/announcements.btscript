@@ -1,0 +1,162 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the Announcements typed event substrate (ADR 0093, BT-2447).
+//
+// These require E2E because the announcements bus is process-rooted: a
+// subscription is monitor-bound to the *subscribing* process and dispatch runs
+// caller-side over the live runtime ETS table. The REPL evaluates each turn in a
+// transient worker process, so a subscription made in one turn is pruned (its
+// monitor fires) before the next turn — exactly the BEAM liveness the ADR
+// designs for. Every subscribe → announce → observe scenario therefore runs
+// inside a single turn (one multi-statement expression), capturing handler side
+// effects — which execute in transient processes — through an `Ets` table, and
+// unsubscribing in-turn so the shared bus is left clean for later test files.
+//
+// This drives the full stack through the real REPL protocol (parse → compile →
+// load → dispatch), complementing the BUnit suites that prove the same
+// behaviours in compiled code.
+//
+// ADR: docs/ADR/0093-announcements-event-substrate.md
+
+// @load tests/repl-protocol/fixtures/counter.bt
+
+// ===========================================================================
+// EVENT TYPES — application announcements subclass the stdlib base
+// ===========================================================================
+
+Announcement subclass: PriceChanged
+  field: newPrice :: Number = nil
+// => _
+
+// An intermediate + leaf pair to exercise MRO (superclass) matching.
+Announcement subclass: ShopEvent
+// => _
+
+ShopEvent subclass: ItemSold
+  field: sku :: String = ""
+// => _
+
+// ===========================================================================
+// ANNOUNCER — a per-instance dispatcher handle
+// ===========================================================================
+
+Announcer new class
+// => Announcer
+
+// Each `new` mints a distinct identity handle.
+(Announcer new == Announcer new)
+// => false
+
+// ===========================================================================
+// SUBSCRIBE — when:do: returns a live Subscription token (single turn)
+// ===========================================================================
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := s class. s unsubscribe. r
+// => Subscription
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := s isActive. s unsubscribe. r
+// => true
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. s unsubscribe. s isActive
+// => false
+
+// ===========================================================================
+// ANNOUNCE (async) — fire-and-forget; the handler runs in a transient process,
+// so capture its effect via Ets and poll for delivery.
+// ===========================================================================
+
+t := Ets new: #annAsync type: #set. a := Announcer new. s := a when: PriceChanged do: [:e | t at: #v put: e newPrice]. a announce: (PriceChanged newPrice: 42). k := 0. [(t at: #v) isNil and: [k < 50]] whileTrue: [Timer sleep: 20. k := k + 1]. r := t at: #v. s unsubscribe. t delete. r
+// => 42
+
+// ===========================================================================
+// ANNOUNCE-AND-WAIT (sync) — delivery is complete before the call returns, so
+// no poll is needed.
+// ===========================================================================
+
+t := Ets new: #annSync type: #set. a := Announcer new. s := a when: PriceChanged do: [:e | t at: #v put: e newPrice]. a announceAndWait: (PriceChanged newPrice: 99). r := t at: #v. s unsubscribe. t delete. r
+// => 99
+
+// ===========================================================================
+// DO-ONCE — fires at most once; the second announce finds the row consumed.
+// ===========================================================================
+
+t := Ets new: #annOnce type: #set. a := Announcer new. a when: PriceChanged doOnce: [:e | t at: #v put: ((t at: #v ifAbsent: [0]) + 1)]. a announceAndWait: (PriceChanged newPrice: 1). a announceAndWait: (PriceChanged newPrice: 2). r := t at: #v. t delete. r
+// => 1
+
+// A one-shot's row is consumed at delivery, so it is no longer active after.
+a := Announcer new. s := a when: PriceChanged doOnce: [:e | e newPrice]. a announceAndWait: (PriceChanged newPrice: 1). s isActive
+// => false
+
+// ===========================================================================
+// MRO MATCHING — subscribe to a superclass, receive a subclass event
+// ===========================================================================
+
+t := Ets new: #annMro type: #set. a := Announcer new. s := a when: ShopEvent do: [:e | t at: #hit put: true]. a announceAndWait: (ItemSold sku: "sku-1"). r := t at: #hit. s unsubscribe. t delete. r
+// => true
+
+// ===========================================================================
+// INTROSPECTION — Announcer self-inspection (object-knows-itself, §7)
+// ===========================================================================
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (a subscribersOf: PriceChanged) size. s unsubscribe. r
+// => 1
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (a subscribersOf: PriceChanged) first class. s unsubscribe. r
+// => SubscriptionNode
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (a subscribersOf: PriceChanged) first announcementClass. s unsubscribe. r
+// => PriceChanged
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := ((a subscribersOf: PriceChanged) first handlerKind == #do). s unsubscribe. r
+// => true
+
+a := Announcer new. s := a when: PriceChanged doOnce: [:e | e newPrice]. r := (a subscribersOf: PriceChanged) first once. s unsubscribe. r
+// => true
+
+a := Announcer new. h := Announcer new. s := a when: PriceChanged send: #class to: h. r := (a subscribersOf: PriceChanged) first isSend. s unsubscribe. r
+// => true
+
+// subscriptionCount is the whole-bus total; assert it as a relative delta.
+a := Announcer new. before := a subscriptionCount. s := a when: PriceChanged do: [:e | e newPrice]. d := a subscriptionCount - before. s unsubscribe. d
+// => 1
+
+// ===========================================================================
+// INTROSPECTION — AnnouncementNavigation (navigator-discovers-system, §7)
+// ===========================================================================
+
+AnnouncementNavigation default class
+// => AnnouncementNavigation
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (AnnouncementNavigation default subscribersOf: PriceChanged) size. s unsubscribe. r
+// => 1
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (AnnouncementNavigation default subscribersOf: PriceChanged) first announcementClass. s unsubscribe. r
+// => PriceChanged
+
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (AnnouncementNavigation default announcedClasses includes: PriceChanged). s unsubscribe. r
+// => true
+
+// SubscriptionNode is a read-only Value snapshot; printString names the event.
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := ((AnnouncementNavigation default subscribersOf: PriceChanged) first printString includesSubstring: "PriceChanged"). s unsubscribe. r
+// => true
+
+// ===========================================================================
+// SYSTEM ANNOUNCER — the singleton bus the runtime emits onto
+// ===========================================================================
+
+SystemAnnouncer current class
+// => SystemAnnouncer
+
+(SystemAnnouncer current isKindOf: Announcer)
+// => true
+
+// Sealed async-only: announceAndWait: is prohibited on the system bus.
+[SystemAnnouncer current announceAndWait: (PriceChanged newPrice: 1)] on: Error do: [:e | e kind]
+// => unsupported_operation
+
+// End-to-end: a live actor spawn emits ActorSpawned on the system bus, which a
+// system subscription receives. Filter to Counter — the system bus is a global
+// singleton, so unrelated spawns may race on it.
+t := Ets new: #annSys type: #set. s := SystemAnnouncer current when: ActorSpawned do: [:e | (e actorClass =:= #Counter) ifTrue: [t at: #hit put: true]]. Counter spawn. k := 0. [(t at: #hit) isNil and: [k < 50]] whileTrue: [Timer sleep: 20. k := k + 1]. r := t at: #hit. s unsubscribe. t delete. r
+// => true
