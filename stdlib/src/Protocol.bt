@@ -13,7 +13,7 @@
 ///
 /// ## Examples
 /// ```beamtalk
-/// Protocol requiredMethods: #Printable    // => [#asString]
+/// Protocol requiredMethods: #Printable    // => [#asString, #printString]
 /// Protocol conformingClasses: #Printable  // => [Integer, String, ...]
 /// Protocol isProtocol: #Printable         // => true
 /// Protocol allProtocols                   // => [#Printable, #Comparable, ...]
@@ -27,7 +27,7 @@ sealed typed Object subclass: Protocol
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Protocol requiredMethods: #Printable   // => [#asString]
+  /// Protocol requiredMethods: #Printable   // => [#asString, #printString]
   /// ```
   class sealed requiredMethods: protocolName :: Symbol -> List(Symbol) =>
     @primitive "protocolRequiredMethods"
