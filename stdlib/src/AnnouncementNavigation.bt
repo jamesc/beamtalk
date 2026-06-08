@@ -1,0 +1,96 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// AnnouncementNavigation — live subscription-graph introspection queries
+/// (ADR 0093 §7).
+///
+/// The third navigation sibling, alongside `SystemNavigation` (static class
+/// registry) and `ProcessNavigation` (live supervision tree). Where those answer
+/// "who implements `#asString`" and "what is running, under whose supervision",
+/// `AnnouncementNavigation` answers "who listens for which events, on which
+/// bus" over the live announcements substrate.
+///
+/// Like its siblings it is a query handle — a `sealed typed Object subclass`,
+/// not an actor — so its queries run as plain Erlang in the calling eval worker
+/// off direct, concurrent ETS reads (never routed through a gen_server that the
+/// walk could deadlock against). Each query returns a fresh **read-only
+/// snapshot** of immutable `SubscriptionNode` value records; to *act* on a
+/// subscription you cross back to the live `Subscription` token or `Announcer`
+/// (the read-vs-mutate rule, ADR 0092 §3a).
+///
+/// Scopes:
+/// - `AnnouncementNavigation default` — the singleton system bus
+///   (`SystemAnnouncer current`).
+/// - `AnnouncementNavigation of: anAnnouncer` — a specific announcer.
+///
+/// In v1 every announcer shares one class-keyed bus, so both scopes report the
+/// same subscription set, and each `SubscriptionNode` is stamped with the system
+/// bus as its `announcer`. The navigation is therefore a stateless handle (like
+/// `SystemNavigation`); true per-instance isolation — at which point `of:` would
+/// scope and stamp the given announcer — is tracked as follow-up work.
+///
+/// ## Examples
+/// ```beamtalk
+/// AnnouncementNavigation default subscriptions
+/// AnnouncementNavigation default subscribersOf: ActorSpawned
+/// AnnouncementNavigation default announcedClasses
+/// (AnnouncementNavigation of: a) subscribersOf: PriceChanged
+/// ```
+sealed typed Object subclass: AnnouncementNavigation
+
+  /// A navigation over the singleton system bus (`SystemAnnouncer current`) —
+  /// the `default` scope, the one feed for everything the system emits.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// AnnouncementNavigation default subscriptions
+  /// ```
+  class default -> AnnouncementNavigation =>
+    // `new` is implicit on sealed Object subclasses (handled by the runtime's
+    // class instantiation path), as in `SystemNavigation default`.
+    self new
+
+  /// A navigation over a specific `anAnnouncer`.
+  ///
+  /// In v1 every announcer shares one bus, so this is equivalent to `default`;
+  /// the argument is accepted (and type-checked as an `Announcer`) so callers
+  /// written against the eventual per-instance scoping keep working unchanged.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// AnnouncementNavigation of: (Announcer new)
+  /// ```
+  class of: _anAnnouncer :: Announcer -> AnnouncementNavigation => self new
+
+  /// A read-only snapshot of every live subscription on the bus, as immutable
+  /// `SubscriptionNode` records. Re-call to refresh.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// AnnouncementNavigation default subscriptions   // => [a SubscriptionNode, ...]
+  /// ```
+  subscriptions -> List(SubscriptionNode) =>
+    (Erlang beamtalk_announcements) subscriptionNodes: SystemAnnouncer current
+
+  /// A read-only snapshot of the subscriptions to exactly `aClass`, as
+  /// `SubscriptionNode` records. Matches exactly `aClass` (not subclasses) — the
+  /// as-subscribed key, mirroring `when:do:`. The IDE's "event wiring" pane
+  /// (ADR 0017/0091) groups this by `announcementClass`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// AnnouncementNavigation default subscribersOf: ActorSpawned
+  /// ```
+  subscribersOf: aClass :: Class -> List(SubscriptionNode) =>
+    (Erlang beamtalk_announcements) subscriptionNodesFor: SystemAnnouncer current class: aClass
+
+  /// The distinct event classes currently subscribed to on the bus — the event
+  /// types in active use, as class objects (ADR 0093 §7). Classes with live
+  /// subscriptions appear once each; the order is unspecified.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// AnnouncementNavigation default announcedClasses   // => [ActorSpawned, PriceChanged]
+  /// ```
+  announcedClasses -> List(Class) =>
+    (Erlang beamtalk_announcements) announcedClasses

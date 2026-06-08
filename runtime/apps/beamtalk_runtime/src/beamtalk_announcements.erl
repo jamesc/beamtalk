@@ -114,6 +114,14 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     subscribers_of/1
 ]).
 
+%% FFI shims — introspection / navigation veneer (BT-2444)
+-export([
+    'subscriptionNodes'/1,
+    'subscriptionNodesFor'/2,
+    'announcedClasses'/0,
+    'subscriptionCountAll'/0
+]).
+
 %% FFI shims for stdlib veneer (BT-2443)
 -export([
     'newAnnouncer'/0,
@@ -173,6 +181,14 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 -type system_announcer() :: #{'$beamtalk_class' := 'SystemAnnouncer', atom() => term()}.
 -type subscription() :: #{'$beamtalk_class' := 'Subscription', atom() => term()}.
 
+%% An immutable `SubscriptionNode` snapshot record (BT-2444 / ADR 0093 §7). A
+%% tagged map minted here so the Beamtalk type checker infers FFI results as
+%% `SubscriptionNode`. Fields mirror the `sealed typed Value subclass`
+%% declaration: the subscribed-to event class (a class object), the announcer
+%% scope it was read from, the live subscriber pid, the handler kind
+%% (`#do | #send | #doOnce`), and the `once` flag.
+-type subscription_node() :: #{'$beamtalk_class' := 'SubscriptionNode', atom() => term()}.
+
 %% A subscription row in the primary `set` table, keyed by `SubRef`.
 -type sub_row() :: {
     sub_ref(),
@@ -189,7 +205,8 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     sub_row/0,
     announcer/0,
     system_announcer/0,
-    subscription/0
+    subscription/0,
+    subscription_node/0
 ]).
 
 %% gen_server state: the per-subscriber monitor bookkeeping. `monitors` maps a
@@ -693,6 +710,125 @@ subscribers_of(AnnouncementClass) when is_atom(AnnouncementClass) ->
                 )
             ]
     end.
+
+%%====================================================================
+%% FFI shims — introspection / navigation veneer (BT-2444)
+%%
+%% Read-only snapshots of the subscription graph as `SubscriptionNode` value
+%% records (ADR 0093 §7). All reads are direct ETS reads off the live tables —
+%% never routed through the gen_server — and never mutate. In v1 every announcer
+%% shares one class-keyed bus, so the `Announcer` scope is carried only to stamp
+%% the `announcer` field; the row set is the whole bus regardless of scope.
+%%====================================================================
+
+-doc """
+Snapshot of every live subscription as a list of `SubscriptionNode` value
+records, each stamped with `Announcer` as its `announcer` field. Backs
+`Announcer subscriptions` (self-inspection) and `AnnouncementNavigation
+subscriptions`. Direct read of the primary `set` table; `[]` when the bus has
+never started.
+""".
+-spec 'subscriptionNodes'(announcer() | system_announcer()) -> [subscription_node()].
+'subscriptionNodes'(Announcer) ->
+    case ets:whereis(?SUBS_TABLE) of
+        undefined ->
+            [];
+        _ ->
+            [
+                subscription_node(Row, Announcer)
+             || Row <- ets:tab2list(?SUBS_TABLE)
+            ]
+    end.
+
+-doc """
+Snapshot of the subscriptions to exactly `ClassRef` as `SubscriptionNode`
+records, each stamped with `Announcer`. Backs `Announcer subscribersOf:` and
+`AnnouncementNavigation subscribersOf:`. `ClassRef` is resolved to its class-name
+atom the same way subscribe does (`class_name/1`), so a class object or a bare
+atom both work. Reads the by-class index for the `SubRef`s, then the primary
+table for each row; `[]` for an unknown / never-subscribed class.
+""".
+-spec 'subscriptionNodesFor'(announcer() | system_announcer(), term()) ->
+    [subscription_node()].
+'subscriptionNodesFor'(Announcer, ClassRef) ->
+    Class = class_name(ClassRef),
+    case ets:whereis(?SUBS_TABLE) of
+        undefined ->
+            [];
+        _ ->
+            lists:filtermap(
+                fun(SubRef) ->
+                    case ets:lookup(?SUBS_TABLE, SubRef) of
+                        [Row] -> {true, subscription_node(Row, Announcer)};
+                        [] -> false
+                    end
+                end,
+                subscribers_of(Class)
+            )
+    end.
+
+-doc """
+The distinct event classes currently subscribed to, as class objects — the
+"announced classes" in active use across the bus (ADR 0093 §7). Backs
+`AnnouncementNavigation announcedClasses`. Reads the by-class index, dedupes the
+class atoms, and resolves each to its class object (atoms with no live class are
+dropped). `[]` when the bus has never started.
+""".
+-spec 'announcedClasses'() -> [term()].
+'announcedClasses'() ->
+    case ets:whereis(?BY_CLASS_TABLE) of
+        undefined ->
+            [];
+        _ ->
+            ClassAtoms = lists:usort([
+                Class
+             || {{Class, _SubRef}} <- ets:tab2list(?BY_CLASS_TABLE)
+            ]),
+            lists:filtermap(
+                fun(ClassAtom) ->
+                    case class_object(ClassAtom) of
+                        nil -> false;
+                        Obj -> {true, Obj}
+                    end
+                end,
+                ClassAtoms
+            )
+    end.
+
+-doc """
+Total number of live subscriptions across all classes — the integer form of
+`subscription_count/0`, exposed under a veneer-friendly name for `Announcer
+subscriptionCount`. Direct ETS read.
+""".
+-spec 'subscriptionCountAll'() -> non_neg_integer().
+'subscriptionCountAll'() ->
+    subscription_count().
+
+%% Build a `SubscriptionNode` value record (tagged map) from a primary-table
+%% row, stamping the supplied `Announcer` scope. The handler kind is derived
+%% from the row's handler term and once flag: a `{send, _, _}` tuple is `#send`;
+%% a once-only block is `#doOnce`; any other block is `#do`. The announcement
+%% class atom is resolved to its class object (or `nil` if unloaded).
+-spec subscription_node(sub_row(), announcer() | system_announcer()) ->
+    subscription_node().
+subscription_node({_SubRef, Class, SubscriberPid, Handler, Once}, Announcer) ->
+    #{
+        '$beamtalk_class' => 'SubscriptionNode',
+        announcementClass => class_object(Class),
+        announcer => Announcer,
+        subscriber => SubscriberPid,
+        handlerKind => handler_kind(Handler, Once),
+        once => Once
+    }.
+
+%% Classify a stored handler term into the public `handlerKind` symbol.
+-spec handler_kind(handler(), boolean()) -> 'do' | 'send' | 'doOnce'.
+handler_kind({send, _Selector, _Receiver}, _Once) ->
+    'send';
+handler_kind(_Handler, true) ->
+    'doOnce';
+handler_kind(_Handler, false) ->
+    'do'.
 
 %%====================================================================
 %% gen_server callbacks
@@ -1261,6 +1397,22 @@ class_name(#{'$beamtalk_class' := Class}) when is_atom(Class) ->
     Class;
 class_name(_) ->
     'Announcement'.
+
+-doc """
+The Beamtalk class object for a class-name atom, or `nil` when the class is not
+loaded. Mirrors `beamtalk_process_navigation:class_object/1` so introspection
+snapshots can carry rich class objects (navigable) rather than bare atoms.
+""".
+-spec class_object(atom() | term()) -> term() | nil.
+class_object(nil) ->
+    nil;
+class_object(ClassName) when is_atom(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined -> nil;
+        Pid when is_pid(Pid) -> beamtalk_class_registry:class_object_from_pid(Pid)
+    end;
+class_object(_) ->
+    nil.
 
 -doc """
 Extract the announcement class atom from an event (its `$beamtalk_class` key).

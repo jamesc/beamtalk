@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for Announcements introspection (BT-2444):
+// Announcer self-inspection + AnnouncementNavigation + SubscriptionNode.
+//
+// The bus is shared across tests, so each test scopes its assertions to a
+// fixture event class it subscribes to itself, and unsubscribes in-test to keep
+// the bus clean. `subscribersOf:` matches exactly the subscribed class, which
+// keeps these reads isolated from unrelated subscriptions.
+
+TestCase subclass: AnnouncementsIntrospectionTest
+  field: announcer = nil
+
+  setUp => self withAnnouncer: Announcer new
+
+  // --- Announcer self-inspection: subscribersOf: ---
+  testSubscribersOfReturnsNodes =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    nodes := self.announcer subscribersOf: IntrospectionEvent
+    self assert: nodes size equals: 1
+    self assert: nodes first class equals: SubscriptionNode
+    sub unsubscribe
+
+  testSubscribersOfEmptyForUnsubscribedClass =>
+    nodes := self.announcer subscribersOf: ParentEvent
+    self assert: nodes isEmpty equals: true
+
+  // --- SubscriptionNode fields ---
+  testNodeAnnouncementClass =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    node := (self.announcer subscribersOf: IntrospectionEvent) first
+    self assert: node announcementClass equals: IntrospectionEvent
+    sub unsubscribe
+
+  testNodeSubscriberIsPid =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    node := (self.announcer subscribersOf: IntrospectionEvent) first
+    self assert: node subscriber class equals: Pid
+    sub unsubscribe
+
+  testNodeHandlerKindDoForBlock =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    node := (self.announcer subscribersOf: IntrospectionEvent) first
+    self assert: node handlerKind equals: #do
+    self assert: node once equals: false
+    sub unsubscribe
+
+  testNodeHandlerKindDoOnce =>
+    sub := self.announcer when: IntrospectionEvent doOnce: [:e | nil]
+    node := (self.announcer subscribersOf: IntrospectionEvent) first
+    self assert: node handlerKind equals: #doOnce
+    self assert: node once equals: true
+    sub unsubscribe
+
+  testNodeHandlerKindSend =>
+    handler := Announcer new
+    sub := self.announcer
+      when: IntrospectionEvent
+      send: #class
+      to: handler
+    node := (self.announcer subscribersOf: IntrospectionEvent) first
+    self assert: node handlerKind equals: #send
+    self assert: node isSend equals: true
+    sub unsubscribe
+
+  // --- subscriptionCount ---
+  testSubscriptionCountReflectsLiveSubs =>
+    before := self.announcer subscriptionCount
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    self assert: self.announcer subscriptionCount equals: before + 1
+    sub unsubscribe
+    self assert: self.announcer subscriptionCount equals: before
+
+  // --- subscriptions (full snapshot) ---
+  testSubscriptionsIncludesNewSub =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    matching := self.announcer subscriptions select: [:n |
+      n announcementClass == IntrospectionEvent
+    ]
+    self assert: matching size equals: 1
+    sub unsubscribe
+
+  // --- AnnouncementNavigation default ---
+  testNavigationDefaultClass =>
+    nav := AnnouncementNavigation default
+    self assert: nav class equals: AnnouncementNavigation
+
+  testNavigationSubscribersOf =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    nodes := AnnouncementNavigation default subscribersOf: IntrospectionEvent
+    self assert: nodes size equals: 1
+    self assert: nodes first announcementClass equals: IntrospectionEvent
+    sub unsubscribe
+
+  testNavigationAnnouncedClassesIncludesSubscribedClass =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    classes := AnnouncementNavigation default announcedClasses
+    self assert: (classes includes: IntrospectionEvent) equals: true
+    sub unsubscribe
+
+  testNavigationAnnouncedClassesExcludesUnsubscribed =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    classes := AnnouncementNavigation default announcedClasses
+    self assert: (classes includes: ParentEvent) equals: false
+    sub unsubscribe
+
+  // --- AnnouncementNavigation of: ---
+  testNavigationOfReturnsNavigation =>
+    nav := AnnouncementNavigation of: self.announcer
+    self assert: nav class equals: AnnouncementNavigation
+
+  // --- SubscriptionNode printString ---
+  testNodePrintStringMentionsClass =>
+    sub := self.announcer when: IntrospectionEvent do: [:e | nil]
+    node := (self.announcer subscribersOf: IntrospectionEvent) first
+    self assert: (node printString includesSubstring: "IntrospectionEvent") equals: true
+    self assert: (node printString includesSubstring: "SubscriptionNode") equals: true
+    sub unsubscribe
