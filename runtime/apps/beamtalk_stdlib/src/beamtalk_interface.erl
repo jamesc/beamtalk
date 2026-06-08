@@ -54,8 +54,8 @@ dictionary or ETS state is required.
 ]).
 
 -ifdef(TEST).
-%% Expose internal helper for EUnit testing (BT-2219).
--export([log_compiler_diagnostics/2]).
+%% Expose internal helpers for EUnit testing (BT-2219, BT-2467).
+-export([log_compiler_diagnostics/2, class_object_for_pid/2]).
 -endif.
 
 %%% ============================================================================
@@ -666,9 +666,7 @@ handle_class_named(ClassName) when is_atom(ClassName) ->
         undefined ->
             resolve_metaclass_tag(ClassName);
         Pid when is_pid(Pid) ->
-            ModuleName = beamtalk_object_class:module_name(Pid),
-            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-            {beamtalk_object, ClassTag, ModuleName, Pid}
+            class_object_for_pid(ClassName, Pid)
     end;
 handle_class_named(_ClassName) ->
     Error0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
@@ -677,6 +675,33 @@ handle_class_named(_ClassName) ->
         Error1, <<"classNamed: expects an atom or binary class name">>
     ),
     {error, Error2}.
+
+-doc """
+Build the class object tuple for a resolved class `Pid`, tolerating a class
+object process that is transiently unavailable (BT-2467).
+
+`beamtalk_object_class:module_name/1` is a `gen_server:call` to the class
+object process. A race between `whereis_class/1` handing back a live pid and
+this call — the process restarting, or a busy scheduler under a heavy parallel
+test load — can make the call exit with `noproc` / `timeout`. We treat that as
+"not currently resolvable" and return `nil` instead of letting the raw `exit`
+surface to the caller as an `erlang_exit` error. This mirrors the
+noproc/timeout guard already in `handle_help/1`, and in particular keeps batch
+callers such as `SystemNavigation classesInPackage:` — which resolves *every*
+class in a package via `findClass:` — from crashing the whole query on a
+single transiently-unavailable class (nil results are filtered out by the
+caller, consistent with the "stale entries dropped silently" miss policy).
+""".
+-spec class_object_for_pid(atom(), pid()) -> beamtalk_object() | 'nil'.
+class_object_for_pid(ClassName, Pid) ->
+    try beamtalk_object_class:module_name(Pid) of
+        ModuleName ->
+            ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
+            {beamtalk_object, ClassTag, ModuleName, Pid}
+    catch
+        exit:{noproc, _} -> nil;
+        exit:{timeout, _} -> nil
+    end.
 
 -doc """
 Resolve a metaclass display tag (`'Foo class'`) to the `Foo class` metaclass
