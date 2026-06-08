@@ -51,17 +51,25 @@ Object subclass: Value
 
   /// Return a developer-readable string representation showing fields.
   ///
-  /// Produces `ClassName(field: value, ...)`. Field values are recursively
-  /// inspected — strings are quoted, nested objects show their own inspect.
-  /// A class with no fields produces `ClassName()`.
+  /// Produces `ClassName(field: value, ...)` via the canonical structural
+  /// renderer (ADR 0094). Field values are rendered with their own
+  /// `printString` (strings stay quoted, nested values show their structural
+  /// form), in sorted field order. A class with no fields produces
+  /// `ClassName()`. Recursion is bounded by depth/width/length caps with a
+  /// cycle guard.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ValuePoint x: 3 y: 4        printString   // => "ValuePoint(x: 3, y: 4)"
+  /// ValuePoint new              printString   // => "ValuePoint(x: 0, y: 0)"
+  /// ```
+  printString -> String => @primitive "printString"
+
+  /// Detailed inspection string. Delegates to `printString` so the structural
+  /// form has a single source of truth (ADR 0094, Critical Risk #1).
   ///
   /// ## Examples
   /// ```beamtalk
   /// ValuePoint x: 3 y: 4        inspect   // => "ValuePoint(x: 3, y: 4)"
-  /// ValuePoint new              inspect   // => "ValuePoint(x: 0, y: 0)"
   /// ```
-  inspect -> String =>
-    parts := self fieldNames sort collect: [:name |
-      name asString ++ ": " ++ (self fieldAt: name) inspect
-    ]
-    self class name asString ++ "(" ++ (parts join: ", ") ++ ")"
+  inspect -> String => self printString
