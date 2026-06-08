@@ -138,11 +138,23 @@ The LSP's connection is read-only and minimal — it subscribes to `class-loaded
 
 Most updates are event-driven via existing push channels. The extension owns the REPL terminal, so it can observe eval completion directly (terminal output parsing or `eval` op response). The only missing push event is `class-loaded` — see Protocol Changes below.
 
+**Source of the discrete push events — `SystemAnnouncer` (ADR 0093).** The
+discrete `actors` (spawned/stopped) and `classes` (`class-loaded`) push channels
+are **not** bespoke notification infrastructure. The workspace's WebSocket
+handler subscribes to the shared typed event bus from ADR 0093:
+`SystemAnnouncer current` emits the `ActorSpawned` / `ActorStopped` and
+`ClassLoaded` / `ClassRemoved` `Announcement` subclasses, and the handler
+forwards them to WebSocket subscribers as the channel pushes below. The `class`
+push is therefore not a new ad-hoc mechanism — it is one more subscription on
+the same bus. Per ADR 0093 §5, the **`transcript` push stays on the dedicated
+`beamtalk_transcript_stream` channel** (a high-volume line stream, not a discrete
+typed event) and does **not** route through the announcements bus.
+
 ### Protocol Changes Required
 
 One small addition to the existing protocol:
 
-**`class-loaded` push event**: When any session loads, reloads, or eval-defines a class, the workspace broadcasts a push event to all WebSocket subscribers — analogous to the existing `actors` channel `spawned`/`stopped` events. This lets the sidebar refresh the Classes section without polling.
+**`class-loaded` push event**: When any session loads, reloads, or eval-defines a class, the workspace broadcasts a push event to all WebSocket subscribers — analogous to the existing `actors` channel `spawned`/`stopped` events. Both are sourced from `SystemAnnouncer` (`ClassLoaded` / `ActorSpawned` / `ActorStopped`, ADR 0093) — the handler subscribes once to the typed bus rather than wiring a bespoke per-event channel. This lets the sidebar refresh the Classes section without polling.
 
 No `bindings` session param is needed: the extension owns the REPL session and queries its own session's bindings directly. The `complete` op's session param pattern already exists and works the same way.
 
@@ -327,6 +339,7 @@ Rely on the terminal REPL for all workspace inspection. The REPL already support
 One runtime-side change:
 
 1. **`class-loaded` push event** (`beamtalk_repl_server.erl`, `beamtalk_ws_handler.erl`)
+   - The WebSocket handler subscribes to `SystemAnnouncer` (ADR 0093) for `ClassLoaded` (and `ActorSpawned`/`ActorStopped`) events and forwards them as pushes — no bespoke broadcast channel is built
    - Broadcast `{"type":"push","channel":"classes","event":"loaded","data":{"class":"Counter"}}` to all WebSocket subscribers when any session loads, reloads, or eval-defines a class — same structured format as the existing `actors` channel push events
 
 2. **Session ID on REPL startup** (`beamtalk-cli/src/commands/repl.rs`)
@@ -392,6 +405,7 @@ One runtime-side change:
   - [ADR 0004: Persistent Workspace Management](0004-persistent-workspace-management.md) — workspace lifecycle, session model
   - [ADR 0017: Browser Connectivity to Running Workspaces](0017-browser-connectivity-to-running-workspaces.md) — WebSocket protocol, push channels, Phase 3 browser UI
   - [ADR 0024: Static-First, Live-Augmented IDE Tooling](0024-static-first-live-augmented-ide-tooling.md) — Tier 3 live augmentation (uses an independent LSP-owned workspace connection)
+  - [ADR 0093: Announcements (Typed Event Substrate)](0093-announcements-event-substrate.md) — source of the discrete `actors`/`classes` push events (`SystemAnnouncer`: `ActorSpawned`/`ActorStopped`/`ClassLoaded`/`ClassRemoved`); `transcript` push stays on `beamtalk_transcript_stream` per §5
 - Protocol documentation: `docs/repl-protocol.md`
 - VSCode API references:
   - [TreeView API](https://code.visualstudio.com/api/extension-guides/tree-view)

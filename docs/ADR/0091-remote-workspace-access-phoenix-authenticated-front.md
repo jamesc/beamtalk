@@ -209,12 +209,32 @@ op set (the implementation issue owns the authoritative list):
 - **Execute** (RCE-bearing): `eval`, `load-source`, method `save`/`flush`
   (write-surface, ADR 0082), `reload`.
 - **Read** (no code injection): `info`, `inspect`, `bindings`, `actors`,
-  `sessions`, `complete`, plus the push-subscription facade
-  (transcript / actors / classes / bindings).
+  `sessions`, `complete`, plus the **subscribe-only** push facade
+  (transcript / actors / classes / bindings — see below).
 - **Admin:** `kill`, `rotate-cookie`.
 
 Note `complete` is **inference-only — it does not evaluate** (ADR 0045: "inference
 without evaluation"), so it is safe to grant a non-executing role.
+
+**The push facade is subscribe-only over `SystemAnnouncer` (ADR 0093) — it has no
+publish capability.** The three discrete push channels (actors / classes /
+bindings) are **not** bespoke subscribe/broadcast infrastructure built by this
+ADR: they are subscriptions on the shared typed event bus from ADR 0093 —
+`SystemAnnouncer current` emits `ActorSpawned` / `ActorStopped` / `ClassLoaded` /
+`ClassRemoved` / `BindingChanged` `Announcement` subclasses, and the facade
+forwards the curated subset to the authenticated browser. (Transcript line
+streaming stays on its own dedicated `beamtalk_transcript_stream` channel — a
+high-volume stream, not a discrete typed event — per ADR 0093 §5.) Per ADR 0093
+§6, **subscribing to `SystemAnnouncer` is a read capability**, so the facade
+exposes it as a named, RBAC-checked *subscribe* op available to the Observer
+role; subscribing to *all* events or to internal/infra announcements is gated
+like ADR 0092's `system` scope. **Critically, the facade must never expose a
+publish capability** (`announce:`): a remote Observer can listen to the curated
+system events but can never emit onto `SystemAnnouncer`, otherwise it could forge
+`ActorSpawned` / `ClassRemoved` events and mislead other subscribers. This ADR's
+implementation issue owns adding the `subscribe` / `unsubscribe` ops (subscribe-
+only) to the authoritative facade op list; there is deliberately no `announce` /
+`publish` op in the facade.
 
 The facade is the substrate RBAC hangs off: per-op authorization is only
 meaningful against a finite, named vocabulary of ops. It is also the natural
@@ -729,7 +749,10 @@ middle "Collaborator" RBAC rung; reintroducing `inet_tls_dist` (removed PR #1401
   (amends Principle 6), [ADR 0017 — Browser Connectivity](0017-browser-connectivity-to-running-workspaces.md)
   (Phase 3), [ADR 0085 — Editor Live-Image Representation](0085-editor-live-image-representation.md)
   (read-surface), [ADR 0082 — Method-Level Edit and Save](0082-method-level-edit-save-and-changelog.md)
-  (write-surface)
+  (write-surface), [ADR 0093 — Announcements (Typed Event Substrate)](0093-announcements-event-substrate.md)
+  (the push facade is a **subscribe-only** view of `SystemAnnouncer`; this ADR's
+  facade op list owns the `subscribe`/`unsubscribe` ops and exposes **no** publish
+  capability — ADR 0093 §6)
 - Documentation: `docs/research/phoenix-topology-spike.md` ("Auth implications"),
   [REPL Protocol](../repl-protocol.md)
 - Erlang `ssl_dist`: https://www.erlang.org/doc/apps/ssl/ssl_distribution.html

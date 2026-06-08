@@ -161,7 +161,8 @@ high-level navigable object (collection protocol + parent/child/walk) backed by
 flat, inspectable node records. State capture (`sys:get_status`) is lazy and
 timeout-guarded. Foreign OTP processes appear as first-class nodes with a
 distinct `kind`. Change-event streaming is explicitly **out of scope** and
-deferred to the Announcements substrate (BT-2193).
+deferred to the Announcements substrate (ADR 0093 — `SupervisionChildAdded` /
+`SupervisionChildCrashed` on `SystemAnnouncer`; see §8).
 
 ### 1. Receiver — a dedicated `ProcessNavigation` value class
 
@@ -672,7 +673,7 @@ coverage. The full design is preferred because the foreign-process and
 The decision is **tree-object-backed-by-flat-records on a dedicated
 `ProcessNavigation` class with a `Workspace processes` alias**, snapshot
 semantics, lazy guarded state, foreign processes tagged by `kind`, and
-change-events deferred to BT-2193.
+change-events deferred to the Announcements substrate (ADR 0093 / `SystemAnnouncer`, §8).
 
 ## Consequences
 
@@ -690,7 +691,8 @@ change-events deferred to BT-2193.
   inspect it. Mitigated by lazy `status` returning `nil`, but users must
   understand "snapshot, not live."
 - No push events in v1; a "live" IDE pane must poll. Acceptable (LiveDashboard
-  does the same) but is a known follow-up dependency on BT-2193.
+  does the same) but is a known follow-up dependency on the Announcements
+  substrate (ADR 0093 — `SupervisionChild…` on `SystemAnnouncer`, §8).
 - `kind` classification leans on the `'$beamtalk_actor'` process-dictionary
   marker and OTP behaviour metadata; an exotic foreign process could be
   mis-tagged `#otpProcess`. Low impact (it still appears, just generically).
@@ -779,13 +781,16 @@ two more later + facade method), **docs/tests**. No parser or codegen changes.
 ## References
 - Related issues: BT-2395 (this ADR), BT-448 (supervision syntax, shipped),
   BT-1387 (OTP supervision tree runtime), BT-1191 (`Workspace startSupervisor:`),
-  BT-2193 (Announcements — deferred push-event substrate),
+  BT-2438 (Announcements epic, ADR 0093 — the deferred push-event substrate; §8 points here),
+  BT-2193 (Announcements package — re-scoped to optional extras by ADR 0093),
   BT-2228 (SystemNavigation xref epic — parallel pattern),
   BT-2189/BT-2190 (moved navigation off the `Beamtalk` facade)
 - Related ADRs: ADR 0059 (Supervision Tree Syntax), ADR 0080 (Supervisor
   Lifecycle Result), ADR 0085 (Editor Live-Image Representation — primary
   consumer), ADR 0087 (Maintained Xref Index for SystemNavigation — static
-  counterpart), ADR 0091 (Remote Workspace Access)
+  counterpart), ADR 0091 (Remote Workspace Access), ADR 0093 (Announcements —
+  Typed Event Substrate: supervision deltas are published on `SystemAnnouncer`;
+  §8 is the seam)
 - Documentation: `stdlib/src/WorkspaceInterface.bt`,
   `stdlib/src/SystemNavigation.bt`, `stdlib/src/Supervisor.bt`,
   `runtime/apps/beamtalk_runtime/src/beamtalk_supervisor.erl`

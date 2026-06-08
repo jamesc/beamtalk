@@ -134,8 +134,21 @@ The WebSocket handler subscribes to the workspace's `Transcript` actor on connec
 | Push type | Payload | When | Phase |
 |-----------|---------|------|-------|
 | `transcript` | `{"push": "transcript", "text": "..."}` | Any `Transcript show:` in any session | 1 |
-| `actor-spawned` | `{"push": "actor-spawned", "class": "Counter", "pid": "..."}` | Actor spawned in workspace | 2 (requires new registry notification infrastructure) |
-| `actor-stopped` | `{"push": "actor-stopped", "pid": "..."}` | Actor stopped/crashed | 2 (requires new registry notification infrastructure) |
+| `actor-spawned` | `{"push": "actor-spawned", "class": "Counter", "pid": "..."}` | Actor spawned in workspace | 2 (via `SystemAnnouncer` — see below) |
+| `actor-stopped` | `{"push": "actor-stopped", "pid": "..."}` | Actor stopped/crashed | 2 (via `SystemAnnouncer` — see below) |
+
+**Source of the actor lifecycle pushes — `SystemAnnouncer` (ADR 0093).** The
+`actor-spawned`/`actor-stopped` pushes do **not** require a bespoke registry
+notification channel. They are produced by subscribing the WebSocket handler to
+the shared typed event bus from ADR 0093: `SystemAnnouncer current` emits the
+discrete `ActorSpawned` / `ActorStopped` `Announcement` subclasses, and the
+handler translates those into the JSON pushes above. Per ADR 0093 §5, the
+**Transcript line stream stays on its own dedicated `beamtalk_transcript_stream`
+channel** — it is a high-volume ordered byte/line stream, not a discrete typed
+domain event, and deliberately does **not** route through the announcements bus.
+So this ADR uses two mechanisms: `beamtalk_transcript_stream` for the
+`transcript` push, and `SystemAnnouncer` for the discrete
+`actor-spawned`/`actor-stopped` pushes.
 
 **Message ordering:** Push messages (Transcript) and request responses (`eval` result) are independent streams. A Transcript push from another session may arrive between an eval request and its response. The browser frontend must handle messages by type (`push` vs `id`-correlated response), not by arrival order.
 
@@ -199,7 +212,8 @@ websocket_info({transcript_output, Text}, State) ->
                         <<"text">> => Text}),
     {[{text, Push}], State};
 
-%% Actor lifecycle push (future: from actor registry)
+%% Actor lifecycle push (delivered via SystemAnnouncer subscription, ADR 0093 —
+%% the handler subscribes to ActorSpawned/ActorStopped, not a bespoke registry)
 websocket_info({actor_spawned, Class, Pid}, State) ->
     Push = jsx:encode(#{<<"push">> => <<"actor-spawned">>,
                         <<"class">> => atom_to_binary(Class, utf8),
@@ -588,7 +602,9 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 
 ### Phase 2: Live Updates (Size: M)
 
-- Actor registry notification infrastructure (new: subscribe to spawn/stop events)
+- Subscribe the WebSocket handler to `SystemAnnouncer` (ADR 0093) for
+  `ActorSpawned` / `ActorStopped` events — no bespoke registry notification
+  infrastructure is built; the shared typed event bus is the source
 - `actor-spawned` and `actor-stopped` push messages
 
 ### Phase 3: Phoenix LiveView IDE (Size: XL)
@@ -626,6 +642,6 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 No migration needed — this is purely additive. The WebSocket REPL transport (ADR 0020/BT-683) is already in place. The `load-source` op is a new operation alongside the existing `load-file` op.
 
 ## References
-- Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md), [ADR 0010 — Global Objects and Singleton Dispatch](0010-global-objects-and-singleton-dispatch.md), [ADR 0020 — Connection Security](0020-connection-security.md), [ADR 0022 — Embedded Compiler via OTP Port](0022-embedded-compiler-via-otp-port.md), [ADR 0027 — Cross-Platform Support](0027-cross-platform-support.md)
+- Related ADRs: [ADR 0004 — Persistent Workspace Management](0004-persistent-workspace-management.md), [ADR 0009 — OTP Application Structure](0009-otp-application-structure.md), [ADR 0010 — Global Objects and Singleton Dispatch](0010-global-objects-and-singleton-dispatch.md), [ADR 0020 — Connection Security](0020-connection-security.md), [ADR 0022 — Embedded Compiler via OTP Port](0022-embedded-compiler-via-otp-port.md), [ADR 0027 — Cross-Platform Support](0027-cross-platform-support.md), [ADR 0093 — Announcements (Typed Event Substrate)](0093-announcements-event-substrate.md) — source of the `actor-spawned`/`actor-stopped` pushes (`SystemAnnouncer`); Transcript line streaming stays on `beamtalk_transcript_stream` per §5
 - Documentation: [REPL Protocol](../repl-protocol.md), [IDE Vision](../beamtalk-ide.md), [Design Principles](../beamtalk-principles.md)
 - Prior art: [Livebook](https://livebook.dev/), [Jupyter Kernel Gateway](https://jupyter-kernel-gateway.readthedocs.io/), [Cowboy WebSocket](https://ninenines.eu/docs/en/cowboy/2.9/manual/cowboy_websocket/)
