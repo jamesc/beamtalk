@@ -60,7 +60,7 @@ write_field(Name, Value, State) when is_atom(Name), is_map(State) ->
     {Value, NewState}.
 
 -doc """
-Generates an inspect string for an object: "a ClassName (field1: val1, field2: val2)".
+Generates an inspect string for an object: "ClassName (field1: val1, field2: val2)".
 
 BT-446: Extracted from beamtalk_object_ops:dispatch/4 so that compiled
 Object modules can call it from generated dispatch/4 code.
@@ -82,7 +82,7 @@ inspect_string(State) when is_map(State) ->
             [] -> <<"">>;
             _ -> iolist_to_binary([<<" (">>, lists:join(<<", ">>, FieldStrs), <<")">>])
         end,
-    iolist_to_binary([<<"a ">>, atom_to_binary(ClassName, utf8), FieldsPart]).
+    iolist_to_binary([atom_to_binary(ClassName, utf8), FieldsPart]).
 
 -doc """
 Read the beamtalk_source file path from a compiled module's attributes.

@@ -82,14 +82,14 @@ ProtoObject subclass: Object
 
   /// Return a developer-readable string representation.
   ///
-  /// Default implementation returns `"a ClassName"`. Subclasses such as
+  /// Default implementation returns the bare class name. Subclasses such as
   /// Integer, String, and List override this to return richer output.
   ///
   /// ## Examples
   /// ```beamtalk
   /// 42 printString            // => "42"
   /// ```
-  printString -> String => "a " ++ self class printString
+  printString -> String => self class name asString
 
   /// Return a user-facing string representation for display purposes.
   ///

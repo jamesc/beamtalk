@@ -171,17 +171,17 @@ sealed typed Value subclass: ChangeLog
   flushKinds: kinds :: Object -> Object =>
     (Erlang beamtalk_workspace_interface_primitives) changeLogFlushKinds: kinds
 
-  /// Developer-readable representation, e.g. "a ChangeLog with 2 entries".
+  /// Developer-readable representation, e.g. "ChangeLog with 2 entries".
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Workspace changes printString   // => "a ChangeLog with 0 entries"
+  /// Workspace changes printString   // => "ChangeLog with 0 entries"
   /// ```
   printString -> String =>
     n := self size
     n =:= 1 ifTrue: [
-      "a ChangeLog with 1 entry"
-    ] ifFalse: ["a ChangeLog with " ++ n asString ++ " entries"]
+      "ChangeLog with 1 entry"
+    ] ifFalse: ["ChangeLog with " ++ n asString ++ " entries"]
 
   /// Override inspect to use printString rather than the field-based format.
   inspect -> String => self printString

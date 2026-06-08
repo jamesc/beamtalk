@@ -88,7 +88,7 @@ builtin_dispatch('class', [], _Value) ->
 builtin_dispatch('printString', [], #{
     '__selector__' := Sel
 }) ->
-    {ok, iolist_to_binary(io_lib:format("a CompiledMethod(~s)", [Sel]))};
+    {ok, iolist_to_binary(io_lib:format("CompiledMethod(~s)", [Sel]))};
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->
     builtin_dispatch('printString', [], Value);

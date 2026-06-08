@@ -78,6 +78,6 @@ TestCase subclass: StringInterpolationTest
     self assert: "日本語: {42}" equals: "日本語: 42"
 
   testActorInterpolationAutoAwait =>
-    // Actor printString auto-awaits the future
+    // Actor displayString auto-awaits the future
     c := Counter spawn
-    self assert: "Actor: {c}" equals: "Actor: a Counter"
+    self assert: "Actor: {c}" equals: "Actor: Counter"

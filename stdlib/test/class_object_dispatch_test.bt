@@ -26,7 +26,7 @@ TestCase subclass: ClassObjectDispatchTest
 
   testClassObjectInspect =>
     i := Counter inspect
-    self assert: i equals: "a Counter"
+    self assert: i equals: "Counter"
 
   testClassObjectPerform =>
     self assert: (Counter perform: #name) equals: #Counter

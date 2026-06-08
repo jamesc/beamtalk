@@ -84,7 +84,7 @@ fn paint(mode: OutputMode, color: &str, text: &str) -> String {
 /// Mirrors the conventions established by the legacy CLI formatter:
 ///
 /// * Strings beginning with `#` and containing `<` (e.g. `"#Actor<0.123.0>"`)
-///   or starting with `"a Block"` are rendered as cyan opaque values.
+///   or starting with `"Block"` are rendered as cyan opaque values.
 /// * Strings that look like floats (contain `.` and parse as `f64`) — sent
 ///   as strings to preserve trailing zeros (BT-1336) — are rendered as numbers.
 /// * Plain strings render unquoted in green.
@@ -95,7 +95,7 @@ fn paint(mode: OutputMode, color: &str, text: &str) -> String {
 pub fn format_value(value: &serde_json::Value, mode: OutputMode) -> String {
     match value {
         serde_json::Value::String(s) => {
-            if (s.starts_with('#') && s.contains('<')) || s.starts_with("a Block") {
+            if (s.starts_with('#') && s.contains('<')) || s == "Block" || s.starts_with("Block/") {
                 paint(mode, CYAN, s)
             } else if s.contains('.') && s.parse::<f64>().is_ok() {
                 paint(mode, YELLOW, s)
@@ -423,8 +423,8 @@ mod tests {
 
     #[test]
     fn value_block_plain() {
-        let v = serde_json::json!("a Block/2");
-        assert_eq!(format_value(&v, OutputMode::Plain), "a Block/2");
+        let v = serde_json::json!("Block/2");
+        assert_eq!(format_value(&v, OutputMode::Plain), "Block/2");
     }
 
     #[test]

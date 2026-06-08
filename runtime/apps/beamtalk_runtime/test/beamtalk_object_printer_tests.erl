@@ -181,8 +181,9 @@ actor_reference_in_field_test() ->
     Obj = #beamtalk_object{class = 'Counter', class_mod = counter, pid = self()},
     Fields = [{target, Obj}],
     Result = beamtalk_object_printer:structural('Holder', Fields),
-    %% Should contain "a Counter" (current printString for non-class objects).
-    ?assertMatch(<<"Holder(target: a Counter)">>, Result).
+    %% Bare class name (ADR 0094 dropped the "a"/"an" article prefix);
+    %% BT-2462 will later make actor refs render as Actor(Counter, pid).
+    ?assertMatch(<<"Holder(target: Counter)">>, Result).
 
 %%% ============================================================================
 %%% Nil and boolean field values

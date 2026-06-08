@@ -56,7 +56,7 @@ make_session_value(Id, Pid, Meta) ->
 %%
 %% These read the embedded metadata only (no liveness check), so they are tested
 %% on hand-built Session values without a live shell. They are the regression
-%% guard for "Workspace sessions shows `#(a Session, a Session)`": printString
+%% guard for "Workspace sessions shows `#(Session, Session)`": printString
 %% must surface the kind + id.
 
 print_string_for_renders_kind_and_id_test() ->
@@ -64,7 +64,7 @@ print_string_for_renders_kind_and_id_test() ->
         <<"session_123_ab">>, self(), #{kind => <<"repl">>}
     ),
     ?assertEqual(
-        <<"a Session(repl: session_123_ab)">>,
+        <<"Session(repl: session_123_ab)">>,
         beamtalk_session_primitives:printStringFor(Session)
     ).
 
@@ -72,7 +72,7 @@ print_string_for_missing_meta_defaults_unknown_test() ->
     %% A legacy Session value minted before metadata existed (no meta key).
     Legacy = #{'$beamtalk_class' => 'Session', id => <<"s1">>, pid => self()},
     ?assertEqual(
-        <<"a Session(unknown: s1)">>,
+        <<"Session(unknown: s1)">>,
         beamtalk_session_primitives:printStringFor(Legacy)
     ).
 
@@ -88,7 +88,7 @@ print_string_for_does_not_liveness_check_test() ->
     end,
     Session = make_session_value(<<"dead-1">>, DeadPid, #{kind => <<"ide">>}),
     ?assertEqual(
-        <<"a Session(ide: dead-1)">>,
+        <<"Session(ide: dead-1)">>,
         beamtalk_session_primitives:printStringFor(Session)
     ).
 
@@ -120,7 +120,7 @@ with_id_carries_shell_kind_test_() ->
                 Session = beamtalk_session_primitives:withId(<<"prim-kind-1">>),
                 ?assertEqual(<<"mcp">>, beamtalk_session_primitives:kindOf(Session)),
                 ?assertEqual(
-                    <<"a Session(mcp: prim-kind-1)">>,
+                    <<"Session(mcp: prim-kind-1)">>,
                     beamtalk_session_primitives:printStringFor(Session)
                 ),
                 beamtalk_repl_shell:stop(Pid)

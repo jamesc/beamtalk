@@ -70,7 +70,7 @@ dispatch_class_test() ->
 
 dispatch_print_string_test() ->
     Result = beamtalk_compiled_method_ops:dispatch('printString', [], test_method()),
-    ?assertEqual(<<"a CompiledMethod(greet:)">>, Result).
+    ?assertEqual(<<"CompiledMethod(greet:)">>, Result).
 
 dispatch_as_string_matches_print_string_test() ->
     PS = beamtalk_compiled_method_ops:dispatch('printString', [], test_method()),

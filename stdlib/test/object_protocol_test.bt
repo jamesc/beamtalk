@@ -24,7 +24,7 @@ TestCase subclass: ObjectProtocolTest
     self assert: #(1, 2, 3) printString equals: "#(1, 2, 3)"
     self assert: #() printString equals: "#()"
     // --- Blocks ---
-    self assert: ([42] printString) equals: "a Block"
+    self assert: ([42] printString) equals: "Block"
     // --- Dictionaries ---
     // "#{}" is 3 chars; exact equality can't be asserted (#{} in a string
     // triggers empty interpolation — language limitation)

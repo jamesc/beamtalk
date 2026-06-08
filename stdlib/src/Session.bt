@@ -123,13 +123,13 @@ sealed typed Object subclass: Session
   /// ```
   info -> Dictionary => (Erlang beamtalk_session_primitives) infoFor: self
 
-  /// Developer display: `a Session(<kind>: <id>)`, e.g.
-  /// `a Session(repl: session_123_ab)`. Not liveness-checked, so printing a
+  /// Developer display: `Session(<kind>: <id>)`, e.g.
+  /// `Session(repl: session_123_ab)`. Not liveness-checked, so printing a
   /// list of sessions (`Workspace sessions`) never raises if one has died.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// Session current printString                   // => "a Session(repl: session_123_ab)"
+  /// Session current printString                   // => "Session(repl: session_123_ab)"
   /// ```
   printString -> String =>
     (Erlang beamtalk_session_primitives) printStringFor: self

@@ -3212,7 +3212,7 @@ impl CoreErlangGenerator {
             "True" => "true",
             "False" => "false",
             "UndefinedObject" => "nil",
-            "Block" => "a Block",
+            "Block" => "Block",
             _ => "",
         };
         if default_str.is_empty() {
@@ -3380,8 +3380,6 @@ impl CoreErlangGenerator {
     /// (field access, class name, etc.).
     #[allow(clippy::too_many_lines)] // Object dispatch with reflection primitives
     fn generate_object_dispatch_4(&self, mod_name: &str) -> Document<'static> {
-        let a_space_binary = "a ".to_string();
-
         // fieldAt: arity error
         let inst_var_at_err = self.arity_error_fragment("'fieldAt:'", 1, "                ");
         // fieldAt:put: arity error (used twice)
@@ -3450,9 +3448,7 @@ impl CoreErlangGenerator {
             // --- printString ---
             "        <'printString'> when 'true' ->\n",
             "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n",
-            "            let <PsStr4> = call 'erlang':'iolist_to_binary'([",
-            leaf::binary_lit(a_space_binary),
-            "|[call 'erlang':'atom_to_binary'(PsClass4, 'utf8')]]) in\n",
+            "            let <PsStr4> = call 'erlang':'atom_to_binary'(PsClass4, 'utf8') in\n",
             "            {'reply', PsStr4, State}\n",
             // --- perform: ---
             "        <'perform:'> when 'true' ->\n",

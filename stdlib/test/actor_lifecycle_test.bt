@@ -37,9 +37,9 @@ TestCase subclass: ActorLifecycleTest
     self assert: c3 increment equals: 11
 
   testPrintstringActorInstanceAndClassObject =>
-    // Actor instance printString returns "a ClassName"
+    // Actor instance printString returns bare class name
     c2 := Counter spawn
-    self assert: c2 printString equals: "a Counter"
+    self assert: c2 printString equals: "Counter"
     // Class object printString returns class name
     self assert: Counter printString equals: "Counter"
 

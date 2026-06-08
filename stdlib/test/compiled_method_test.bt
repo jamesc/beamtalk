@@ -34,7 +34,7 @@ TestCase subclass: CompiledMethodTest
     self assert: (Counter >> #getValue) source equals: "getValue => self.value"
 
   testPrintString =>
-    self assert: (Counter >> #getValue) printString equals: "a CompiledMethod(getValue)"
+    self assert: (Counter >> #getValue) printString equals: "CompiledMethod(getValue)"
 
   testLookupOnNonClass =>
     // >> on non-class value produces type_error
@@ -42,7 +42,7 @@ TestCase subclass: CompiledMethodTest
     self should: [42 >> #foo] raise: #type_error
 
   testAsString =>
-    self assert: (Counter >> #getValue) asString equals: "a CompiledMethod(getValue)"
+    self assert: (Counter >> #getValue) asString equals: "CompiledMethod(getValue)"
 
   // BT-2195: `>>` on a metaclass receiver looks up class-side methods.
   // `SystemNavigation class >> #default` is a defined class-side selector,

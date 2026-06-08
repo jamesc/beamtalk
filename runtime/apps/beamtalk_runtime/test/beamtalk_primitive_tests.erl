@@ -1267,13 +1267,13 @@ print_string_beamtalk_object_instance_test_() ->
             ok
         end,
         fun(_) -> ok end, fun() ->
-            %% Non-class beamtalk_object prints as "a ClassName"
+            %% Non-class beamtalk_object prints as bare class name
             Obj = #beamtalk_object{
                 class = 'UnknownNonClass999',
                 class_mod = 'nonexistent_module',
                 pid = self()
             },
-            ?assertEqual(<<"a UnknownNonClass999">>, beamtalk_primitive:print_string(Obj))
+            ?assertEqual(<<"UnknownNonClass999">>, beamtalk_primitive:print_string(Obj))
         end}.
 
 print_string_class_object_test_() ->
@@ -1340,13 +1340,13 @@ display_string_beamtalk_object_instance_test_() ->
             ok
         end,
         fun(_) -> ok end, fun() ->
-            %% Non-class beamtalk_object displays as "a ClassName"
+            %% Non-class beamtalk_object displays as bare class name
             Obj = #beamtalk_object{
                 class = 'UnknownNonClass999',
                 class_mod = 'nonexistent_module',
                 pid = self()
             },
-            ?assertEqual(<<"a UnknownNonClass999">>, beamtalk_primitive:display_string(Obj))
+            ?assertEqual(<<"UnknownNonClass999">>, beamtalk_primitive:display_string(Obj))
         end}.
 
 display_string_class_object_test_() ->

@@ -295,12 +295,12 @@ term_to_json_pid_dead_test() ->
 term_to_json_function_test() ->
     F = fun(X) -> X end,
     Result = beamtalk_repl_json:term_to_json(F),
-    ?assertEqual(<<"a Block/1">>, Result).
+    ?assertEqual(<<"Block/1">>, Result).
 
 term_to_json_function_arity0_test() ->
     F = fun() -> ok end,
     Result = beamtalk_repl_json:term_to_json(F),
-    ?assertEqual(<<"a Block/0">>, Result).
+    ?assertEqual(<<"Block/0">>, Result).
 
 term_to_json_beamtalk_error_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
@@ -476,8 +476,8 @@ format_response_function_test() ->
     Response = beamtalk_repl_json:format_response(Fun),
     Decoded = json:decode(Response),
     Value = maps:get(<<"value">>, Decoded),
-    %% Should be formatted as "a Block/N"
-    ?assert(binary:match(Value, <<"a Block/">>) =/= nomatch).
+    %% Should be formatted as "Block/N"
+    ?assert(binary:match(Value, <<"Block/">>) =/= nomatch).
 
 format_response_tuple_test() ->
     Response = beamtalk_repl_json:format_response({ok, value}),
@@ -531,8 +531,8 @@ format_response_multi_arity_function_test() ->
     Value0 = maps:get(<<"value">>, Decoded0),
     Value3 = maps:get(<<"value">>, Decoded3),
 
-    ?assert(binary:match(Value0, <<"a Block/0">>) =/= nomatch),
-    ?assert(binary:match(Value3, <<"a Block/3">>) =/= nomatch).
+    ?assert(binary:match(Value0, <<"Block/0">>) =/= nomatch),
+    ?assert(binary:match(Value3, <<"Block/3">>) =/= nomatch).
 
 %%% format_error additional tests
 
@@ -733,11 +733,11 @@ term_to_json_alive_pid_test() ->
 
 term_to_json_function_arity_0_test() ->
     Result = beamtalk_repl_json:term_to_json(fun() -> ok end),
-    ?assertEqual(<<"a Block/0">>, Result).
+    ?assertEqual(<<"Block/0">>, Result).
 
 term_to_json_function_arity_2_test() ->
     Result = beamtalk_repl_json:term_to_json(fun(A, B) -> {A, B} end),
-    ?assertEqual(<<"a Block/2">>, Result).
+    ?assertEqual(<<"Block/2">>, Result).
 
 term_to_json_beamtalk_object_tuple_test() ->
     Pid = spawn(fun() ->

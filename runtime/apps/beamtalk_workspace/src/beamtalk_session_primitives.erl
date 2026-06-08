@@ -245,8 +245,8 @@ infoFor(Session) ->
     Meta#{id => Id}.
 
 -doc """
-Render a `Session` for display as `a Session(<kind>: <id>)`, e.g.
-`a Session(repl: session_123_ab)`.
+Render a `Session` for display as `Session(<kind>: <id>)`, e.g.
+`Session(repl: session_123_ab)`.
 
 Backs `Session>>printString`. Reads the embedded id/kind directly with no
 liveness check so printing a list of sessions (`Workspace sessions`) never
@@ -256,7 +256,7 @@ raises just because one session died mid-enumeration.
 printStringFor(Session) ->
     {Id, Meta} = session_meta(Session, 'printString'),
     Kind = maps:get(kind, Meta, <<"unknown">>),
-    iolist_to_binary([<<"a Session(">>, Kind, <<": ">>, Id, <<")">>]).
+    iolist_to_binary([<<"Session(">>, Kind, <<": ">>, Id, <<")">>]).
 
 %%% ============================================================================
 %%% Workspace-globals view (not a Session method)

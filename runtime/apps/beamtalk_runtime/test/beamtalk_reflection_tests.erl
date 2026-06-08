@@ -125,7 +125,7 @@ source_file_from_module_returns_path_for_compiled_bt_module_test() ->
 inspect_string_empty_fields_test() ->
     State = #{'$beamtalk_class' => 'Empty'},
     Result = beamtalk_reflection:inspect_string(State),
-    ?assertEqual(<<"a Empty">>, Result).
+    ?assertEqual(<<"Empty">>, Result).
 
 inspect_string_single_field_test() ->
     State = #{'$beamtalk_class' => 'Counter', value => 0},
@@ -159,7 +159,7 @@ inspect_string_defaults_class_to_object_test() ->
     %% State without $beamtalk_class should default to 'Object'
     State = #{},
     Result = beamtalk_reflection:inspect_string(State),
-    ?assertEqual(<<"a Object">>, Result).
+    ?assertEqual(<<"Object">>, Result).
 
 inspect_string_boolean_field_test() ->
     State = #{'$beamtalk_class' => 'Flag', active => true},

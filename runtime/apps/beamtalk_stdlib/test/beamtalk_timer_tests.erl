@@ -185,13 +185,13 @@ is_active_repeating_stays_active_test() ->
 
 print_string_active_test() ->
     T = beamtalk_timer:'after:do:'(10000, fun() -> ok end),
-    ?assertEqual(<<"a Timer(active)">>, beamtalk_timer:'printString'(T)),
+    ?assertEqual(<<"Timer(active)">>, beamtalk_timer:'printString'(T)),
     beamtalk_timer:cancel(T).
 
 print_string_inactive_test() ->
     T = beamtalk_timer:'after:do:'(10000, fun() -> ok end),
     beamtalk_timer:cancel(T),
-    ?assertEqual(<<"a Timer(inactive)">>, beamtalk_timer:'printString'(T)).
+    ?assertEqual(<<"Timer(inactive)">>, beamtalk_timer:'printString'(T)).
 
 %%% ============================================================================
 %%% FFI shims (BT-1165)

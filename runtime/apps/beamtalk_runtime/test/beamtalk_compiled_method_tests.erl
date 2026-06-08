@@ -70,7 +70,7 @@ class_returns_compiled_method_test() ->
 print_string_test() ->
     Method = test_method(),
     Result = beamtalk_compiled_method_ops:dispatch('printString', [], Method),
-    ?assertEqual(<<"a CompiledMethod(increment)">>, Result).
+    ?assertEqual(<<"CompiledMethod(increment)">>, Result).
 
 as_string_same_as_print_string_test() ->
     Method = test_method(),
@@ -81,7 +81,7 @@ as_string_same_as_print_string_test() ->
 print_string_keyword_selector_test() ->
     Method = test_method_with_args(),
     Result = beamtalk_compiled_method_ops:dispatch('printString', [], Method),
-    ?assertEqual(<<"a CompiledMethod('add:')">>, Result).
+    ?assertEqual(<<"CompiledMethod('add:')">>, Result).
 
 %%====================================================================
 %% respondsTo: tests

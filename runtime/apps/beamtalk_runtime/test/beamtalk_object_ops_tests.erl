@@ -113,12 +113,12 @@ object_display_test_() ->
 test_print_string() ->
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch('printString', [], self_ref(), State),
-    ?assertEqual(<<"a Counter">>, Str).
+    ?assertEqual(<<"Counter">>, Str).
 
 test_inspect() ->
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch(inspect, [], self_ref(), State),
-    %% BT-1167: New format is "Counter(value: 0)" instead of "a Counter (value: 0)"
+    %% BT-1167: Format is "Counter(value: 0)"
     ?assert(binary:match(Str, <<"Counter(">>) =/= nomatch),
     ?assert(binary:match(Str, <<"value">>) =/= nomatch).
 
@@ -236,7 +236,7 @@ display_string_test_() ->
 test_display_string() ->
     State = counter_state(),
     {reply, Str, _} = beamtalk_object_ops:dispatch('displayString', [], self_ref(), State),
-    ?assertEqual(<<"a Counter">>, Str).
+    ?assertEqual(<<"Counter">>, Str).
 
 %%% ============================================================================
 %%% inspect on class objects (empty state) Tests
