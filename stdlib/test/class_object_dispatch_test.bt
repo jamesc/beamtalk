@@ -22,11 +22,11 @@ TestCase subclass: ClassObjectDispatchTest
 
   testClassObjectPrintString =>
     ps := Counter printString
-    self deny: ps isEmpty
+    self assert: ps equals: "Counter"
 
   testClassObjectInspect =>
     i := Counter inspect
-    self deny: i isEmpty
+    self assert: i equals: "a Counter"
 
   testClassObjectPerform =>
     self assert: (Counter perform: #name) equals: #Counter

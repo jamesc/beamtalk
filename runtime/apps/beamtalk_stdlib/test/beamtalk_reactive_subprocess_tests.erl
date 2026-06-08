@@ -439,3 +439,132 @@ flush_and_collect_partial_result_test() ->
         {[<<"hello">>], <<"world">>},
         beamtalk_subprocess_port:flush_and_collect(<<"hel">>, <<"lo\nworld">>)
     ).
+
+%%% ============================================================================
+%%% Additional coverage — dispatch/3 type errors and DNU (BT-2456)
+%%% ============================================================================
+
+dispatch_open_args_env_dir_notify_type_error_test() ->
+    %% Covers the type-error fallback clause for 'open:args:env:dir:notify:' (lines
+    %% 133–135): the guard requires is_binary(Command); passing an atom fails it.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+        beamtalk_reactive_subprocess:dispatch(
+            'open:args:env:dir:notify:',
+            [
+                not_a_binary,
+                [],
+                #{},
+                <<"/dir">>,
+                #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
+            ],
+            undefined
+        )
+    ).
+
+dispatch_unknown_selector_raises_dnu_test() ->
+    %% Covers the catch-all dispatch/3 clause (lines 136–139): an unrecognised
+    %% selector raises a does_not_understand beamtalk_error.
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
+        beamtalk_reactive_subprocess:dispatch('unknown:selector:', [], undefined)
+    ).
+
+%%% ============================================================================
+%%% Additional coverage — handle_call/3 DNU path (BT-2456)
+%%% ============================================================================
+
+unknown_tuple_call_returns_dnu_error_test() ->
+    %% Covers handle_call's DNU path for a well-formed {Selector, Args} tuple
+    %% (lines 233, 236, 241–242, 244–246, 249): selector branch of the Meta case
+    %% and selector branch of the Err1 case both fire.
+    {Notify, Collector} = make_collector(),
+    {SleepExe, SleepArgs} = sleep_cmd(),
+    {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+        executable => SleepExe,
+        args => SleepArgs,
+        notify => Notify
+    }),
+    Reply = gen_server:call(Pid, {unknown_selector, []}),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Reply),
+    gen_server:call(Pid, {close, []}),
+    Collector ! stop,
+    gen_server:stop(Pid).
+
+unknown_plain_call_returns_dnu_error_test() ->
+    %% Covers the _ branches of both case expressions in handle_call's DNU path
+    %% (lines 238 and 247): a non-{atom, list} message exercises the fallback
+    %% #{message_kind => unknown_call} and bare Err0 arms.
+    {Notify, Collector} = make_collector(),
+    {SleepExe, SleepArgs} = sleep_cmd(),
+    {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+        executable => SleepExe,
+        args => SleepArgs,
+        notify => Notify
+    }),
+    Reply = gen_server:call(Pid, plain_unknown_atom),
+    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Reply),
+    gen_server:call(Pid, {close, []}),
+    Collector ! stop,
+    gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% Additional coverage — handle_cast/2 and handle_info/2 catch-alls (BT-2456)
+%%% ============================================================================
+
+handle_cast_ignored_test() ->
+    %% Covers handle_cast/2 (line 254): casts are silently ignored and the
+    %% gen_server stays alive.
+    {Notify, Collector} = make_collector(),
+    {SleepExe, SleepArgs} = sleep_cmd(),
+    {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+        executable => SleepExe,
+        args => SleepArgs,
+        notify => Notify
+    }),
+    gen_server:cast(Pid, ignored_cast_message),
+    %% Follow up with a synchronous call to ensure the cast was processed.
+    ?assertEqual(nil, gen_server:call(Pid, {exitCode, []})),
+    ?assert(is_process_alive(Pid)),
+    gen_server:call(Pid, {close, []}),
+    Collector ! stop,
+    gen_server:stop(Pid).
+
+unknown_info_message_ignored_test() ->
+    %% Covers handle_info/2's catch-all clause (line 295): unexpected messages
+    %% are discarded without crashing the gen_server.
+    {Notify, Collector} = make_collector(),
+    {SleepExe, SleepArgs} = sleep_cmd(),
+    {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+        executable => SleepExe,
+        args => SleepArgs,
+        notify => Notify
+    }),
+    Pid ! {unexpected_info, some_message},
+    %% A synchronous call ensures the info message has been processed first.
+    ?assertEqual(nil, gen_server:call(Pid, {exitCode, []})),
+    ?assert(is_process_alive(Pid)),
+    gen_server:call(Pid, {close, []}),
+    Collector ! stop,
+    gen_server:stop(Pid).
+
+%%% ============================================================================
+%%% Additional coverage — handle_writeLine/2 type-error path (BT-2456)
+%%% ============================================================================
+
+writeLine_type_error_test() ->
+    %% Covers handle_writeLine's error:badarg catch (lines 351–354): a raw integer
+    %% at the top level is not valid iodata, so iolist_to_binary/1 raises badarg.
+    {CatExe, CatArgs} = cat_cmd(),
+    {Notify, Collector} = make_collector(),
+    {ok, Pid} = beamtalk_reactive_subprocess:start(#{
+        executable => CatExe,
+        args => CatArgs,
+        notify => Notify
+    }),
+    %% 42 is an integer — not valid as a top-level iodata argument.
+    Reply = gen_server:call(Pid, {'writeLine:', [42]}),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Reply),
+    gen_server:call(Pid, {close, []}),
+    Collector ! stop,
+    gen_server:stop(Pid).
