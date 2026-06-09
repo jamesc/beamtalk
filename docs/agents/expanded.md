@@ -53,7 +53,7 @@ In test files (`stdlib/bootstrap-test/*.btscript` and `tests/repl-protocol/cases
 - **Every expression MUST have a `// =>` assertion** (even `// => _` for wildcard)
 - **No assertion = no execution** — expressions are silently skipped
 - **Missing assertions fail CI** (BT-249)
-- **Pattern matching in assertions:** `_` within a pattern is a wildcard segment (e.g., `#Actor<Counter,_>`)
+- **Pattern matching in assertions:** `_` within a pattern is a wildcard segment (e.g., `Actor(Counter, _)`)
 - `@load` is a test directive; `:load` is a REPL command — don't mix them up
 
 **⚠️ Dangerous pattern — this looks fine but DOESN'T RUN:**

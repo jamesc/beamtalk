@@ -217,7 +217,7 @@ The REPL evaluates any Beamtalk expression and prints the result. Variables assi
 52
 
 > counter := Counter spawn
-#Actor<Counter,0.234.0>
+Actor(Counter, 0.234.0)
 
 > counter increment
 1
@@ -273,7 +273,7 @@ REPL commands start with `:` and provide shortcuts for common operations. Most a
 Loaded: Counter
 
 > c := Counter spawn
-#Actor<Counter,0.234.0>
+Actor(Counter, 0.234.0)
 
 > c increment
 1
@@ -525,7 +525,7 @@ Methods can be added or replaced on existing classes using Tonel-style standalon
 > InlineCounter >> getValue => self.value
 
 > c := InlineCounter spawn
-#Actor<InlineCounter,0.234.0>
+Actor(InlineCounter, 0.234.0)
 
 > c increment
 1
@@ -540,7 +540,7 @@ Redefining a method replaces it for all future message sends, including on exist
 > InlineCounter >> increment => self.value := self.value + 10
 
 > c2 := InlineCounter spawn
-#Actor<InlineCounter,0.234.0>
+Actor(InlineCounter, 0.234.0)
 
 > c2 increment
 10
@@ -555,7 +555,7 @@ When a class is reloaded (via `:load`, `:reload`, or an inline redefinition), ex
 Loaded: Counter
 
 > c := Counter spawn
-#Actor<Counter,0.234.0>
+Actor(Counter, 0.234.0)
 
 > c increment
 1
@@ -642,10 +642,10 @@ Integer
 #(Counter, ...)
 
 > Workspace actors
-#(#Actor<Counter,0.234.0>, ...)
+#(Actor(Counter, 0.234.0), ...)
 
 > Workspace actorsOf: Counter
-#(#Actor<Counter,0.234.0>)
+#(Actor(Counter, 0.234.0))
 
 > Workspace test
 3 passed, 0 failed
@@ -654,7 +654,7 @@ Integer
 nil
 
 > MyTool
-#Actor<Counter,0.234.0>
+Actor(Counter, 0.234.0)
 
 > Workspace unbind: #MyTool
 nil
@@ -690,7 +690,7 @@ The typical interactive development cycle:
 Loaded: Counter
 
 > c := Counter spawn            // Try it out
-#Actor<Counter,0.234.0>
+Actor(Counter, 0.234.0)
 
 > c increment
 1
@@ -737,7 +737,7 @@ Define and iterate on classes without creating files:
 ..>   greet => "Hello, " ++ self.name
 
 > g := Greeter spawn
-#Actor<Greeter,0.234.0>
+Actor(Greeter, 0.234.0)
 
 > g greet
 Hello, World
@@ -761,13 +761,13 @@ Inspect, stop, and kill actors through the workspace:
 
 ```beamtalk
 > c := Counter spawn
-#Actor<Counter,0.234.0>
+Actor(Counter, 0.234.0)
 
 > c isAlive
 true
 
 > Workspace actors              // See all live actors
-#(#Actor<Counter,0.234.0>)
+#(Actor(Counter, 0.234.0))
 
 > c stop                        // Graceful shutdown
 ok
