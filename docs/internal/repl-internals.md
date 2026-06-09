@@ -408,24 +408,21 @@ Results are serialized to JSON for transport, then formatted by the CLI.
 | Boolean | `true`/`false` | `true`/`false` |
 | String | `"hello"` | `hello` |
 | Atom | `"ok"` (binary) | `ok` |
-| Actor/PID | `"#Actor<0.123.0>"` | `#Actor<0.123.0>` |
-| Block (fun) | `"a Block/2"` | `a Block/2` |
+| Actor/PID | `"Actor(Counter, 0.123.0)"` | `Actor(Counter, 0.123.0)` |
+| Block (fun) | `"Block/2"` | `Block/2` |
 | List | `[1, 2, 3]` | `[1, 2, 3]` |
 | Tuple | `{"__tuple__": [1, 2]}` | `(1, 2)` |
 | Map | `{"key": "value"}` | `{key: value}` |
 
 ### Actor Display
 
-Actors are displayed with their class name when known:
+Actors are displayed via `printString` dispatch with a 250ms timeout fallback to the tuple-derived `process_label`:
 
-```erlang
-term_to_json(Value) when is_pid(Value) ->
-    PidStr = pid_to_list(Value),
-    Inner = lists:sublist(PidStr, 2, length(PidStr) - 2),
-    iolist_to_binary([<<"#Actor<">>, Inner, <<">">>]).
-```
+- **Actor:** `Actor(ClassName, pid)` — e.g. `Actor(Counter, 0.123.0)`
+- **Supervisor:** `Supervisor(ClassName, pid)` — e.g. `Supervisor(WebApp, 0.200.0)`
+- **DynamicSupervisor:** `DynamicSupervisor(ClassName, pid)` — e.g. `DynamicSupervisor(WorkerPool, 0.210.0)`
 
-Example: `#Actor<0.123.0>` or `#Counter<0.123.0>` (when class is registered)
+If an actor is unresponsive or dead, the REPL falls back to the tuple-derived label without hanging.
 
 ### Block Display
 
@@ -434,10 +431,10 @@ Blocks show their arity:
 ```erlang
 term_to_json(Value) when is_function(Value) ->
     {arity, Arity} = erlang:fun_info(Value, arity),
-    iolist_to_binary([<<"a Block/">>, integer_to_binary(Arity)]).
+    iolist_to_binary([<<"Block/">>, integer_to_binary(Arity)]).
 ```
 
-Example: `a Block/1`, `a Block/2`
+Example: `Block/1`, `Block/2`
 
 ---
 

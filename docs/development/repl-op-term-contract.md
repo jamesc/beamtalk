@@ -19,7 +19,7 @@ Over Erlang distribution, JSON is both overhead and **lossy in the way that
 matters**: `Counter spawn` is a live term —
 `{beamtalk_object, 'Counter', bt@counter, <0.369.0>}` carrying a real,
 messageable remote pid — that JSON flattens to the dead string
-`"#Actor<Counter,…>"`. An inspector, "send a message to this object", or
+`"Actor(Counter, …)"`. An inspector, "send a message to this object", or
 reference-following all need the term, not its `printString`. That liveness is
 the whole point of a live-image IDE.
 

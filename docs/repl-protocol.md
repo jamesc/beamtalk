@@ -61,7 +61,7 @@ For standalone BEAM nodes (no workspace), the default `~/.erlang.cookie` is used
 {
   "id": "msg-001",
   "session": "alice",
-  "value": "#Actor<Counter,0.123.0>",
+  "value": "Actor(Counter, 0.123.0)",
   "status": ["done"]
 }
 ```
