@@ -3024,8 +3024,9 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | `unusedSelectors` | `List(Dictionary)` | Selectors defined but sent nowhere — dead-method candidates |
 
 Body-based queries (`sendersOf:`, `referencesTo:`, `ffiSitesFor:`,
-`methodsMatching:`, `announcementsSentBy:`, and the selector-lint queries) scan
-instance-side, class-side, and extension method bodies. `fieldReadersOf:in:` and
+`methodsMatching:`, `announcementsSentBy:`, `announcementSitesSentBy:`, and the
+selector-lint queries) scan instance-side, class-side, and extension method
+bodies. `fieldReadersOf:in:` and
 `fieldWritersOf:in:` scan `aClass` + subclasses on instance/class sides (not
 extension methods). Each result's `#class` field is the class object for an
 instance-side hit and the metaclass object (`Counter class`) for a class-side

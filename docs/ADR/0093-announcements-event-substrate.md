@@ -456,7 +456,7 @@ the discoverability win first if wanted.
 
 **Update (BT-2475): the discoverability win shipped as a derived static
 analysis instead.** Rather than a declarative manifest, the emission-side dual
-of `AnnouncementNavigation` is now `SystemNavigation announcementsSentBy: aClass`
+of `AnnouncementNavigation` is now `SystemNavigation default announcementsSentBy: aClass`
 — it mines the `announce:` / `announceAndWait:` / `announceAndWait:timeout:` call
 sites out of a class's method bodies and resolves each event argument to its
 `Announcement` subclass, completing the publisher↔subscriber graph with zero new
