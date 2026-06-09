@@ -139,6 +139,19 @@ impl NativeTypeRegistry {
         self.modules.insert(module_name.to_string(), functions);
     }
 
+    /// Merges all modules from `other` into `self`, keeping `self`'s entry on
+    /// a module-name collision.
+    ///
+    /// Precedence is caller-defined via merge direction: merging a dependency
+    /// registry into an OTP registry keeps the OTP signatures ahead of any
+    /// same-named dependency module (mirroring the OTP-first de-duplication in
+    /// `beamtalk build`'s spec extraction).
+    pub fn merge(&mut self, other: NativeTypeRegistry) {
+        for (module, functions) in other.modules {
+            self.modules.entry(module).or_insert(functions);
+        }
+    }
+
     /// Looks up the type signature for a specific function.
     #[must_use]
     pub fn lookup(&self, module: &str, function: &str, arity: u8) -> Option<&FunctionSignature> {
@@ -211,6 +224,51 @@ mod tests {
         assert!(!reg.has_module("lists"));
         assert_eq!(reg.module_count(), 0);
         assert_eq!(reg.function_count(), 0);
+    }
+
+    #[test]
+    fn merge_keeps_self_on_collision_and_adds_new_modules() {
+        let mut otp = NativeTypeRegistry::new();
+        otp.register_module(
+            "lists",
+            vec![extracted_sig(
+                "reverse",
+                1,
+                vec![param("list", "List")],
+                InferredType::known("List"),
+            )],
+        );
+
+        let mut deps = NativeTypeRegistry::new();
+        // Same module name as OTP — must NOT overwrite the OTP entry.
+        deps.register_module(
+            "lists",
+            vec![extracted_sig(
+                "bogus",
+                0,
+                vec![],
+                InferredType::known("Dynamic"),
+            )],
+        );
+        // A module unique to deps — must be added.
+        deps.register_module(
+            "my_dep",
+            vec![extracted_sig(
+                "go",
+                0,
+                vec![],
+                InferredType::known("Integer"),
+            )],
+        );
+
+        otp.merge(deps);
+
+        assert_eq!(otp.module_count(), 2);
+        // OTP `lists` wins the collision.
+        assert!(otp.lookup("lists", "reverse", 1).is_some());
+        assert!(otp.lookup("lists", "bogus", 0).is_none());
+        // The dep-only module is present.
+        assert!(otp.lookup("my_dep", "go", 0).is_some());
     }
 
     #[test]
