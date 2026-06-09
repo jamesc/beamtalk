@@ -117,7 +117,8 @@ a := Announcer new. s := a when: PriceChanged doOnce: [:e | e newPrice]. r := (a
 a := Announcer new. h := Announcer new. s := a when: PriceChanged send: #class to: h. r := (a subscribersOf: PriceChanged) first isSend. s unsubscribe. r
 // => true
 
-// subscriptionCount is the whole-bus total; assert it as a relative delta.
+// subscriptionCount is scoped to this announcer (BT-2454); a fresh announcer
+// starts at 0, so the delta across one subscribe is 1.
 a := Announcer new. before := a subscriptionCount. s := a when: PriceChanged do: [:e | e newPrice]. d := a subscriptionCount - before. s unsubscribe. d
 // => 1
 
@@ -125,20 +126,23 @@ a := Announcer new. before := a subscriptionCount. s := a when: PriceChanged do:
 // INTROSPECTION — AnnouncementNavigation (navigator-discovers-system, §7)
 // ===========================================================================
 
+// Each announcer is isolated (BT-2454): a subscription on a per-instance
+// `Announcer new` is invisible to `default` (the system bus), so navigate that
+// announcer with `of:`. The `default` scope still yields a valid handle.
 AnnouncementNavigation default class
 // => AnnouncementNavigation
 
-a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (AnnouncementNavigation default subscribersOf: PriceChanged) size. s unsubscribe. r
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := ((AnnouncementNavigation of: a) subscribersOf: PriceChanged) size. s unsubscribe. r
 // => 1
 
-a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (AnnouncementNavigation default subscribersOf: PriceChanged) first announcementClass. s unsubscribe. r
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := ((AnnouncementNavigation of: a) subscribersOf: PriceChanged) first announcementClass. s unsubscribe. r
 // => PriceChanged
 
-a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (AnnouncementNavigation default announcedClasses includes: PriceChanged). s unsubscribe. r
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := ((AnnouncementNavigation of: a) announcedClasses includes: PriceChanged). s unsubscribe. r
 // => true
 
 // SubscriptionNode is a read-only Value snapshot; printString names the event.
-a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := ((AnnouncementNavigation default subscribersOf: PriceChanged) first printString includesSubstring: "PriceChanged"). s unsubscribe. r
+a := Announcer new. s := a when: PriceChanged do: [:e | e newPrice]. r := (((AnnouncementNavigation of: a) subscribersOf: PriceChanged) first printString includesSubstring: "PriceChanged"). s unsubscribe. r
 // => true
 
 // ===========================================================================
