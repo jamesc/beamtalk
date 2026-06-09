@@ -4,10 +4,10 @@
 // BUnit tests for Announcements introspection (BT-2444):
 // Announcer self-inspection + AnnouncementNavigation + SubscriptionNode.
 //
-// The bus is shared across tests, so each test scopes its assertions to a
-// fixture event class it subscribes to itself, and unsubscribes in-test to keep
-// the bus clean. `subscribersOf:` matches exactly the subscribed class, which
-// keeps these reads isolated from unrelated subscriptions.
+// Each test subscribes on its own per-instance `Announcer` (isolated per
+// BT-2454) and navigates it with `AnnouncementNavigation of:`, so its reads see
+// only its own subscriptions. Tests still unsubscribe in-test to keep the
+// process's subscriptions clean.
 
 TestCase subclass: AnnouncementsIntrospectionTest
   field: announcer = nil
@@ -86,22 +86,24 @@ TestCase subclass: AnnouncementsIntrospectionTest
     nav := AnnouncementNavigation default
     self assert: nav class equals: AnnouncementNavigation
 
+  // Subscriptions are made on a per-instance announcer (BT-2454), so navigate
+  // that announcer with `of:` — `default` would scope to the system bus.
   testNavigationSubscribersOf =>
     sub := self.announcer when: IntrospectionEvent do: [:e | nil]
-    nodes := AnnouncementNavigation default subscribersOf: IntrospectionEvent
+    nodes := (AnnouncementNavigation of: self.announcer) subscribersOf: IntrospectionEvent
     self assert: nodes size equals: 1
     self assert: nodes first announcementClass equals: IntrospectionEvent
     sub unsubscribe
 
   testNavigationAnnouncedClassesIncludesSubscribedClass =>
     sub := self.announcer when: IntrospectionEvent do: [:e | nil]
-    classes := AnnouncementNavigation default announcedClasses
+    classes := (AnnouncementNavigation of: self.announcer) announcedClasses
     self assert: (classes includes: IntrospectionEvent) equals: true
     sub unsubscribe
 
   testNavigationAnnouncedClassesExcludesUnsubscribed =>
     sub := self.announcer when: IntrospectionEvent do: [:e | nil]
-    classes := AnnouncementNavigation default announcedClasses
+    classes := (AnnouncementNavigation of: self.announcer) announcedClasses
     self assert: (classes includes: ParentEvent) equals: false
     sub unsubscribe
 
