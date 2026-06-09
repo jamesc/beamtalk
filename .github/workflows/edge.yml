@@ -1,0 +1,119 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Edge Build — rolling per-merge distribution
+# ===========================================
+# Publishes a Linux x86_64 distribution bundle to a rolling `edge` GitHub
+# pre-release on every merge to `main`. This is the artifact the beamtalk-uat
+# acceptance gate consumes for its per-PR end-to-end run (BEAMTALK_UAT_VERSION=
+# edge), so the gate always tests the *current* tip rather than the up-to-24h-old
+# `nightly` or a stale tagged release.
+#
+# Scope is deliberately narrow vs nightly.yml:
+#   * Linux x86_64 only — the UAT PR e2e job runs a single Linux leg. The full
+#     cross-platform matrix stays in nightly.yml (daily) and release.yml (tags).
+#   * No extra test matrix — every push to `main` already passed ci.yml. This
+#     job only builds, smoke-tests the install, packages, and publishes.
+#
+# The `edge` release/tag is deleted and recreated each run, so it always points
+# at the latest `main` commit. `nightly` (cross-platform, daily) and tagged
+# releases are untouched.
+
+name: Edge
+
+on:
+  push:
+    branches: [main]
+    # A docs-only merge doesn't change the artifact — skip the rebuild.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+concurrency:
+  # Serialize edge publishes; a newer merge supersedes an in-flight build so the
+  # rolling release always lands on the latest commit (no publish races).
+  group: edge
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  edge:
+    name: Build & publish edge (linux-x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        with:
+          otp-version: '27.0'
+          rebar3-version: '3.27'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: edge-${{ runner.os }}-erlang-otp-27.0-rebar3-3.27-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          restore-keys: |
+            edge-${{ runner.os }}-erlang-otp-27.0-rebar3-3.27-
+
+      - name: Build distribution
+        run: just dist
+
+      - name: Smoke test install
+        run: just test-install
+
+      - name: Package tarball
+        id: package
+        run: scripts/ci/package-release.sh edge linux-x86_64
+
+      - name: Publish rolling edge release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Delete the previous edge release + tag so it always points at the
+          # latest main commit (rolling). --cleanup-tag removes the git tag too.
+          gh release delete edge --yes --cleanup-tag 2>/dev/null || true
+
+          gh release create edge \
+            --title "Edge Build (${SHORT_SHA})" \
+            --notes "Rolling per-merge build from \`main\` at ${DATE}.
+
+          **Commit:** ${SHORT_SHA}
+          **Full SHA:** $(git rev-parse HEAD)
+
+          > [!WARNING]
+          > Edge builds track the development tip and are consumed by the
+          > beamtalk-uat acceptance gate. They are not a supported install
+          > channel — use a tagged release or \`--nightly\`." \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.archive }}.sha256"
