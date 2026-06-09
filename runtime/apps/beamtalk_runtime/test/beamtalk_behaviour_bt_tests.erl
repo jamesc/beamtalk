@@ -29,7 +29,9 @@ dispatch_unknown_selector_returns_dnu_test() ->
 
 dispatch_unknown_with_args_returns_dnu_test() ->
     State = #{},
-    {error, Error, RetState} = beamtalk_behaviour_bt:dispatch('method:with:args', [arg1, arg2], self(), State),
+    {error, Error, RetState} = beamtalk_behaviour_bt:dispatch(
+        'method:with:args', [arg1, arg2], self(), State
+    ),
     ?assertEqual(does_not_understand, Error#beamtalk_error.kind),
     ?assertEqual('Behaviour', Error#beamtalk_error.class),
     ?assertEqual('method:with:args', Error#beamtalk_error.selector),
