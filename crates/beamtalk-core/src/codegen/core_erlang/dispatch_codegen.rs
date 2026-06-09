@@ -38,6 +38,7 @@
 
 use super::document::Document;
 use super::document::leaf;
+use super::util::sealed_fn_name;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::{Expression, Literal, MessageSelector, WellKnownSelector};
 use crate::docvec;
@@ -1498,7 +1499,7 @@ impl CoreErlangGenerator {
                         " = case call ",
                         leaf::atom(module),
                         ":",
-                        leaf::atom(format!("__sealed_{selector_name}")),
+                        leaf::atom(sealed_fn_name(&selector_name)),
                         "(",
                         args_doc,
                         Document::Str(comma),
@@ -1670,7 +1671,7 @@ impl CoreErlangGenerator {
             "case call ",
             leaf::atom(module),
             ":",
-            leaf::atom(format!("__sealed_{selector_name}")),
+            leaf::atom(sealed_fn_name(selector_name)),
             "(",
             args_doc,
             Document::Str(comma),
@@ -3043,7 +3044,7 @@ impl CoreErlangGenerator {
                     " = case call ",
                     leaf::atom(module.to_string()),
                     ":",
-                    leaf::atom(format!("__sealed_{selector_name}")),
+                    leaf::atom(sealed_fn_name(&selector_name)),
                     "(",
                     args_doc,
                     comma,

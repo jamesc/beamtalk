@@ -14,7 +14,7 @@ use super::document::leaf::{atom, fname};
 use super::document::{Document, INDENT, join, line, nest};
 use super::selector_mangler::safe_class_method_fn_name;
 use super::spec_codegen;
-use super::util::ClassIdentity;
+use super::util::{ClassIdentity, sealed_fn_name};
 use super::{CodeGenContext, CoreErlangGenerator, Result};
 use crate::ast::{MethodKind, Module};
 use crate::docvec;
@@ -338,7 +338,7 @@ impl CoreErlangGenerator {
                     .map_or(0, |i| c.methods[i].selector.arity())
             });
             // Standalone function takes Args + Self + State params
-            parts.push(docvec![", ", fname(format!("__sealed_{sel}"), arity + 2),]);
+            parts.push(docvec![", ", fname(sealed_fn_name(&sel), arity + 2),]);
         }
         Document::Vec(parts)
     }
@@ -517,7 +517,7 @@ impl CoreErlangGenerator {
             // Generate: '__sealed_{selector}'/N = fun (Arg1, ..., Self, State) ->
             let method_entry = docvec![
                 "\n",
-                fname(format!("__sealed_{selector_name}"), arity),
+                fname(sealed_fn_name(&selector_name), arity),
                 "  = ",
                 fun_doc,
                 "\n",

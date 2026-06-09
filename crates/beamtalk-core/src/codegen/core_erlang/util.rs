@@ -73,6 +73,18 @@ pub fn escape_atom_chars(name: &str) -> String {
     result
 }
 
+/// Returns the internal function name for a sealed method with the given selector.
+///
+/// Sealed actor methods are compiled to standalone `'__sealed_{selector}'/N` functions
+/// (BT-403) instead of dispatching through the `gen_server` call machinery. Centralising
+/// the naming convention here ensures callers cannot drift from the `__sealed_` prefix.
+pub(super) fn sealed_fn_name(selector: &str) -> String {
+    let mut s = String::with_capacity("__sealed_".len() + selector.len());
+    s.push_str("__sealed_");
+    s.push_str(selector);
+    s
+}
+
 /// BT-745: Generate a `'beamtalk_class' = [{...}]` attribute fragment for the
 /// module attributes section. Returns `Document::Nil` when classes is empty.
 pub(super) fn beamtalk_class_attribute(classes: &[ClassDefinition]) -> Document<'static> {
@@ -518,6 +530,16 @@ mod tests {
             escape_core_erlang_string("C:\\Users\\foo\\bar.bt"),
             "C:\\\\Users\\\\foo\\\\bar.bt"
         );
+    }
+
+    #[test]
+    fn test_sealed_fn_name_simple() {
+        assert_eq!(sealed_fn_name("ping"), "__sealed_ping");
+    }
+
+    #[test]
+    fn test_sealed_fn_name_keyword_selector() {
+        assert_eq!(sealed_fn_name("increment:"), "__sealed_increment:");
     }
 
     #[test]
