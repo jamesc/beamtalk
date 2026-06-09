@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2475: Stable publisher fixture for `SystemNavigation announcementsSentBy:`
+// E2E tests — the static dual of `AnnouncementNavigation`. Its method bodies
+// emit announcements through an `Announcer` so the static scan can mine the
+// `announce:` / `announceAndWait:` call sites and resolve each argument to its
+// `Announcement` subclass. The methods are never executed in the tests; only
+// their source text is scanned.
+//
+// Load order matters: `announce_event_a.bt` / `announce_event_b.bt` must load
+// first so the `AnnounceEventA` / `AnnounceEventB` references resolve.
+//
+// STABLE: do not rename these methods or edit their announce arguments
+// (BT-2475) — the E2E assertions depend on which announcement classes resolve.
+
+Object subclass: AnnounceEmitter
+
+  // Class-side emit — exercises the metaclass walk.
+  class emitClassSide =>
+    announcer := Announcer new
+    announcer announce: (AnnounceEventA payload: 9)
+
+  // Async emit of a keyword-constructed event → resolves to AnnounceEventA.
+  emitA =>
+    announcer := Announcer new
+    announcer announce: (AnnounceEventA payload: 1)
+
+  // Two emissions in one method: async AnnounceEventA + sync AnnounceEventB
+  // (the `announceAndWait:` selector, unary-`new` argument).
+  emitBoth =>
+    announcer := Announcer new
+    announcer announce: (AnnounceEventA payload: 2)
+    announcer announceAndWait: AnnounceEventB new
+
+  // Dynamic argument: the concrete subclass is unresolvable by construction,
+  // so this emission is a documented miss (skipped, not an error).
+  emitDynamic: e :: Announcement =>
+    announcer := Announcer new
+    announcer announce: e

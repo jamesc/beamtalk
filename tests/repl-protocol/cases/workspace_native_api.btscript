@@ -492,6 +492,124 @@ Erlang ets delete: #beamtalk_extensions key: #(#String, #btTwoTwoOneSixBareRefEx
 // => _
 
 // ===========================================================================
+// SYSTEMNAVIGATION ANNOUNCEMENTSSENTBY: — static emission analysis (BT-2475)
+// The publisher-side dual of AnnouncementNavigation: which Announcement
+// subclasses a class emits, mined from its `announce:` call sites.
+// ===========================================================================
+
+// Load the announcement event fixtures first (the emitter references them),
+// then the emitter whose method bodies emit them.
+:load tests/repl-protocol/fixtures/announce_event_a.bt
+// => _
+
+:load tests/repl-protocol/fixtures/announce_event_b.bt
+// => _
+
+:load tests/repl-protocol/fixtures/announce_emitter.bt
+// => _
+
+// announcementsSentBy: returns the distinct Announcement subclasses the emitter
+// publishes (AnnounceEventA via announce:, AnnounceEventB via announceAndWait:),
+// sorted by name. The dynamic-argument emit (`announce: e`) is unresolvable and
+// skipped, so the distinct set is exactly {AnnounceEventA, AnnounceEventB}.
+emitted := SystemNavigation default announcementsSentBy: AnnounceEmitter
+// => _
+
+emitted size
+// => 2
+
+emitted includes: AnnounceEventA
+// => true
+
+// AnnounceEventB is emitted ONLY via `announceAndWait:` — confirms all announce
+// selectors are recognised.
+emitted includes: AnnounceEventB
+// => true
+
+// A class that emits nothing returns an empty list (SysnavFixture, loaded above,
+// has no announce: sends).
+SystemNavigation default announcementsSentBy: SysnavFixture
+// => []
+
+// Site-level form: #{#class, #selector, #line, #announcementClass} — the
+// sendersOf: record shape plus the resolved event class.
+sites := SystemNavigation default announcementSitesSentBy: AnnounceEmitter
+// => _
+
+sites isEmpty
+// => false
+
+siteRecord := sites first
+// => _
+
+siteRecord includesKey: #class
+// => true
+
+siteRecord includesKey: #selector
+// => true
+
+siteRecord includesKey: #line
+// => true
+
+siteRecord includesKey: #announcementClass
+// => true
+
+// Multi-event: both resolved announcement classes appear across the sites.
+siteEvents := sites collect: [:r | r at: #announcementClass]
+// => _
+
+siteEvents includes: AnnounceEventA
+// => true
+
+siteEvents includes: AnnounceEventB
+// => true
+
+// Class-side emit participates: `class emitClassSide` emits AnnounceEventA, and
+// its site's #class is the metaclass object (AnnounceEmitter class).
+(sites collect: [:r | r at: #class]) includes: AnnounceEmitter class
+// => true
+
+// The dynamic-argument emission is skipped: no site names #emitDynamic:.
+(sites collect: [:r | r at: #selector]) includes: #emitDynamic:
+// => false
+
+// Line numbers are 1-based positive integers.
+(sites collect: [:r | r at: #line]) allSatisfy: [:n | n > 0]
+// => true
+
+// Argument validation parity with sendersOf: / referencesTo:: a Symbol raises.
+[SystemNavigation default announcementsSentBy: #AnnounceEmitter] on: Error do: [:e | #ok]
+// => ok
+
+// A String argument also raises (the common sendersOf:-takes-a-Symbol mistake).
+[SystemNavigation default announcementsSentBy: "AnnounceEmitter"] on: Error do: [:e | #ok]
+// => ok
+
+// BT-2196 parity: source-bearing extension methods that target the publisher
+// are scanned too. Register an extension on AnnounceEmitter whose body emits
+// AnnounceEventB, assert it surfaces, then clean up both ETS tables.
+extEmitFun := [:a :s | s]
+// => _
+
+extEmitSource := "emitExt => announcer announce: (AnnounceEventB new)"
+// => _
+
+Erlang beamtalk_extensions register: #AnnounceEmitter selector: #emitExt fun: extEmitFun owner: #test source: extEmitSource
+// => _
+
+extEmitSites := SystemNavigation default announcementSitesSentBy: AnnounceEmitter
+// => _
+
+(extEmitSites collect: [:r | r at: #selector]) includes: #emitExt
+// => true
+
+Erlang ets delete: #beamtalk_extensions key: #(#AnnounceEmitter, #emitExt)
+// => _
+
+Erlang ets delete: #beamtalk_extension_sources key: #(#AnnounceEmitter, #emitExt)
+// => _
+
+// ===========================================================================
 // SYSTEMNAVIGATION FIELDREADERSOF:IN: / FIELDWRITERSOF:IN: (BT-2208)
 // ===========================================================================
 

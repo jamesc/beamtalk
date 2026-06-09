@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2475: Stable announcement event fixture for SystemNavigation
+// `announcementsSentBy:` E2E tests. A concrete `Announcement` subclass with a
+// keyword constructor (`AnnounceEventA payload:`) so the emitter fixture's
+// `announce: (AnnounceEventA payload: 1)` resolves to this class.
+
+Announcement subclass: AnnounceEventA
+  field: payload :: Integer = 0

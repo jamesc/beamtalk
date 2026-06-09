@@ -3010,6 +3010,8 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | `sendersOf: #sel` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that sends `#sel` |
 | `messagesSentBy: aMethod` | `List(Dictionary)` | `#{#selector, #line}` for every message send in `aMethod`'s body — the outgoing-call dual of `sendersOf:`. `aMethod` must be a `CompiledMethod` (e.g. `Counter >> #increment`). Excludes Erlang FFI sends |
 | `referencesTo: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that references the class name |
+| `announcementsSentBy: aClass` | `List(Behaviour)` | Distinct `Announcement` subclasses that `aClass` statically emits via `announce:` / `announceAndWait:` / `announceAndWait:timeout:`, sorted by name — the publisher-side dual of `AnnouncementNavigation`. Advisory: only constructor-call arguments (`announce: (PriceChanged newPrice: 42)`) resolve; `Dynamic`/indirect arguments are skipped |
+| `announcementSitesSentBy: aClass` | `List(Dictionary)` | `#{#class, #selector, #line, #announcementClass}` for every resolvable announcement emission within `aClass` — the site-level form of `announcementsSentBy:` |
 | `ffiSitesFor: aSpec` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method body that calls Erlang `module:function` (optionally arity-qualified, e.g. `"lists:reverse/1"`) |
 | `fieldReadersOf: #slot in: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method that reads field/class var `#slot` while scanning `aClass` + subclasses on instance and class sides |
 | `fieldWritersOf: #slot in: aClass` | `List(Dictionary)` | `#{#class, #selector, #line}` for every method that writes field/class var `#slot` while scanning `aClass` + subclasses on instance and class sides |
@@ -3022,12 +3024,22 @@ class registry. Reach the singleton via `SystemNavigation default`.
 | `unusedSelectors` | `List(Dictionary)` | Selectors defined but sent nowhere — dead-method candidates |
 
 Body-based queries (`sendersOf:`, `referencesTo:`, `ffiSitesFor:`,
-`methodsMatching:`, and the selector-lint queries) scan instance-side,
-class-side, and extension method bodies. `fieldReadersOf:in:` and
+`methodsMatching:`, `announcementsSentBy:`, `announcementSitesSentBy:`, and the
+selector-lint queries) scan instance-side, class-side, and extension method
+bodies. `fieldReadersOf:in:` and
 `fieldWritersOf:in:` scan `aClass` + subclasses on instance/class sides (not
 extension methods). Each result's `#class` field is the class object for an
 instance-side hit and the metaclass object (`Counter class`) for a class-side
 hit.
+
+`announcementsSentBy:` is a deliberately *advisory* static analysis of a dynamic
+language — the publisher-side dual of `AnnouncementNavigation`'s runtime
+subscription queries. It resolves an `announce:` argument to its `Announcement`
+subclass only when the argument is a constructor call on a bare class reference
+(`announce: (PriceChanged newPrice: 42)` or `announce: PriceChanged new`). A
+`Dynamic`-typed or indirect argument (`announce: someVar`, `perform:`-style
+dispatch) is unresolvable by construction and is silently skipped, so the result
+is discoverability, never a sound or exhaustive emission contract.
 
 ```beamtalk
 nav := SystemNavigation default
@@ -3049,6 +3061,12 @@ nav selectorsMatching: "print"
 
 nav messagesSentBy: (Counter >> #increment)
 // => [#{#selector => #+, #line => 2}, ...]
+
+nav announcementsSentBy: PriceTracker
+// => [PriceChanged, ...]  (distinct Announcement subclasses PriceTracker emits)
+
+nav announcementSitesSentBy: PriceTracker
+// => [#{#class => PriceTracker, #selector => #notify, #line => 4, #announcementClass => PriceChanged}, ...]
 
 nav unimplementedSelectors
 // => []  (empty = no typos in the loaded registry)

@@ -50,7 +50,8 @@ dictionary or ETS state is required.
     findReferencesToIn/2,
     findFieldReadersIn/2,
     findFieldWritersIn/2,
-    ffiSitesIn/4
+    ffiSitesIn/4,
+    announceSitesIn/1
 ]).
 
 -ifdef(TEST).
@@ -288,6 +289,54 @@ allSendsIn(_Source) ->
     Err2 = beamtalk_error:with_message(
         Err1,
         <<"allSendsIn: expects a binary source">>
+    ),
+    beamtalk_error:raise(Err2).
+
+-doc """
+Find every `announce:' emission within a single method's source (BT-2475).
+
+Backs `SystemNavigation announcementsSentBy:' — the static dual of
+`AnnouncementNavigation' (ADR 0093 §7). Delegates to
+`beamtalk_compiler:find_announce_sites_in_source/1', which parses the source via
+the OTP-port compiler and walks the AST for `announce:' / `announceAndWait:' /
+`announceAndWait:timeout:' sends, resolving each event argument to its
+announcement class name.
+
+Called via `(Erlang beamtalk_interface) announceSitesIn: source'. Each
+compiler-side site map `#{selector := _, line := Line, announcement_class :=
+ClassBin}' is converted to a 2-TUPLE `{Line, ClassNameBinary}' accessed via
+`entry at: N' (mirroring `allSendsIn:'). `ClassNameBinary' is the resolved
+announcement class name, or the empty binary `<<>>' when the argument is
+unresolvable (`Dynamic'-typed / indirect). The caller resolves the binary to a
+live class via `findClass:' (which answers `nil' for the empty binary), so no
+atom is interned here for an unresolvable site.
+
+Returns a list of 2-tuples; returns `[]' if the source has no emissions, cannot
+be parsed, or the compiler port is unavailable. The degrade-on-error behaviour
+mirrors `allSendsIn/1': a transient port failure on one method's source must not
+abort the whole `announcementsSentBy:' walk.
+""".
+-spec announceSitesIn(binary()) -> [{pos_integer(), binary()}].
+announceSitesIn(Source) when is_binary(Source) ->
+    case beamtalk_compiler:find_announce_sites_in_source(Source) of
+        {ok, Sites} ->
+            [
+                {Line, ClassBin}
+             || #{line := Line, announcement_class := ClassBin} <- Sites
+            ];
+        {error, _Diagnostics} ->
+            %% Compiler port unavailable — degrade to "no emissions found" rather
+            %% than crashing the caller. Iteration in `announcementsSentBy:'
+            %% should not be aborted by a transient port failure on one method's
+            %% source.
+            []
+    end;
+announceSitesIn(_Source) ->
+    Err0 = beamtalk_error:new(type_error, 'BeamtalkInterface'),
+    Err1 = beamtalk_error:with_selector(Err0, 'announceSitesIn:'),
+    Err2 = beamtalk_error:with_message(
+        Err1,
+        <<"announceSitesIn: expects a binary source">>
     ),
     beamtalk_error:raise(Err2).
 

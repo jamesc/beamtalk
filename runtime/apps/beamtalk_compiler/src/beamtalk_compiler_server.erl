@@ -37,6 +37,7 @@ to avoid temp files on disk (BT-48).
     find_field_readers_in_source/2,
     find_field_writers_in_source/2,
     find_ffi_sites_in_source/4,
+    find_announce_sites_in_source/1,
     resolve_method_span/4
 ]).
 
@@ -211,6 +212,28 @@ returns `{error, Diagnostics}' if the compiler port is unavailable.
 find_all_sends_in_source(Source) ->
     try
         gen_server:call(?MODULE, {find_all_sends_in_source, Source}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, [#{message => <<"Compiler server is not available">>}]};
+        exit:{timeout, _} ->
+            {error, [#{message => <<"Compiler server timed out">>}]}
+    end.
+
+-doc """
+Find every `announce:' emission in a single method's source (BT-2475).
+
+Backs `SystemNavigation announcementsSentBy:' — parses the method source and
+returns every announce emission as a map `#{selector := binary(),
+line := pos_integer(), announcement_class := binary()}', where
+`announcement_class' is the syntactically-resolved announcement class name
+(empty binary when unresolvable). Returns `{ok, []}' if the source has no
+emissions; returns `{error, Diagnostics}' if the compiler port is unavailable.
+""".
+-spec find_announce_sites_in_source(binary()) ->
+    {ok, [map()]} | {error, [map()]}.
+find_announce_sites_in_source(Source) ->
+    try
+        gen_server:call(?MODULE, {find_announce_sites_in_source, Source}, 30000)
     catch
         exit:{noproc, _} ->
             {error, [#{message => <<"Compiler server is not available">>}]};
@@ -486,6 +509,11 @@ handle_call({find_field_writers_in_source, Source, Field}, _From, State) ->
 handle_call({find_ffi_sites_in_source, Source, Module, Function, Arity}, _From, State) ->
     Result = beamtalk_compiler_port:find_ffi_sites_in_source(
         State#state.port, Source, Module, Function, Arity
+    ),
+    {reply, Result, State};
+handle_call({find_announce_sites_in_source, Source}, _From, State) ->
+    Result = beamtalk_compiler_port:find_announce_sites_in_source(
+        State#state.port, Source
     ),
     {reply, Result, State};
 handle_call({resolve_method_span, Source, ClassName, Selector, Side}, _From, State) ->

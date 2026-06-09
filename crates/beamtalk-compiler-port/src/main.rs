@@ -1377,6 +1377,52 @@ fn handle_find_all_sends_in_source(request: &Map) -> Term {
     ]))
 }
 
+/// Handle a `find_announce_sites_in_source` request (BT-2475).
+///
+/// Backs `SystemNavigation announcementsSentBy:` — parses the source of a single
+/// compiled method and reports every `announce:` / `announceAndWait:` /
+/// `announceAndWait:timeout:` emission site: the announce selector, the 1-based
+/// line number (relative to the input), and the syntactically-resolved
+/// announcement class name. The class name is empty (`<<>>`) when the event
+/// argument is unresolvable (a bare identifier, literal, chained send, …) — the
+/// caller treats that as a documented miss, not an error.
+///
+/// Request fields:
+/// - `source` (binary): the method source text as returned by `CompiledMethod source`
+///
+/// Response: `#{status => ok, sites => [#{selector => <binary>, line => <int>,
+/// announcement_class => <binary>}, ...]}`. The `announcement_class` is returned
+/// as a binary (not an atom) so the response decodes safely with `[safe]`; the
+/// caller interns it to an atom only when resolving to a live class. Returns an
+/// empty list when the source has no emissions or cannot be parsed.
+fn handle_find_announce_sites_in_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+
+    let sites =
+        beamtalk_core::queries::announce_sites_query::find_announce_sites_in_source(&source);
+    let site_terms: Vec<Term> = sites
+        .iter()
+        .map(|hit| {
+            let class_bin = hit.announcement_class.as_deref().unwrap_or("");
+            Term::from(Map::from([
+                (atom("selector"), binary(&hit.selector)),
+                (
+                    atom("line"),
+                    int_term(i32::try_from(hit.line).unwrap_or(i32::MAX)),
+                ),
+                (atom("announcement_class"), binary(class_bin)),
+            ]))
+        })
+        .collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("sites"), Term::from(List::from(site_terms))),
+    ]))
+}
+
 /// Handle a `find_references_to_in_source` request (BT-2203).
 ///
 /// Backs `SystemNavigation referencesTo:` — parses the source of a single
@@ -1646,6 +1692,7 @@ fn handle_request(request_term: &Term) -> Term {
         "find_field_readers_in_source" => handle_find_field_readers_in_source(map),
         "find_field_writers_in_source" => handle_find_field_writers_in_source(map),
         "find_ffi_sites_in_source" => handle_find_ffi_sites_in_source(map),
+        "find_announce_sites_in_source" => handle_find_announce_sites_in_source(map),
         "resolve_method_span" => handle_resolve_method_span(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
