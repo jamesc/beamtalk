@@ -23,11 +23,11 @@
 ///   (`SystemAnnouncer current`).
 /// - `AnnouncementNavigation of: anAnnouncer` — a specific announcer.
 ///
-/// In v1 every announcer shares one class-keyed bus, so both scopes report the
-/// same subscription set, and each `SubscriptionNode` is stamped with the system
-/// bus as its `announcer`. The navigation is therefore a stateless handle (like
-/// `SystemNavigation`); true per-instance isolation — at which point `of:` would
-/// scope and stamp the given announcer — is tracked as follow-up work.
+/// Each `Announcer` is isolated (BT-2454), so the two scopes report different
+/// subscription sets: `default` sees only the system bus, `of: anAnnouncer` sees
+/// only that announcer's subscriptions. The handle carries the announcer it
+/// navigates (minted via FFI, like `Announcer` carries its ref), and each
+/// returned `SubscriptionNode` is stamped with that announcer.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -46,31 +46,29 @@ sealed typed Object subclass: AnnouncementNavigation
   /// AnnouncementNavigation default subscriptions
   /// ```
   class default -> AnnouncementNavigation =>
-    // `new` is implicit on sealed Object subclasses (handled by the runtime's
-    // class instantiation path), as in `SystemNavigation default`.
-    self new
+    // Mint a navigation scoped to the singleton system bus. The announcer is
+    // carried in the handle (via FFI) so the queries below scope to it.
+    (Erlang beamtalk_announcements) navigationFor: SystemAnnouncer current
 
-  /// A navigation over a specific `anAnnouncer`.
-  ///
-  /// In v1 every announcer shares one bus, so this is equivalent to `default`;
-  /// the argument is accepted (and type-checked as an `Announcer`) so callers
-  /// written against the eventual per-instance scoping keep working unchanged.
+  /// A navigation over a specific `anAnnouncer` — reports only that announcer's
+  /// subscriptions (BT-2454).
   ///
   /// ## Examples
   /// ```beamtalk
   /// AnnouncementNavigation of: (Announcer new)
   /// ```
-  class of: _anAnnouncer :: Announcer -> AnnouncementNavigation => self new
+  class of: anAnnouncer :: Announcer -> AnnouncementNavigation =>
+    (Erlang beamtalk_announcements) navigationFor: anAnnouncer
 
-  /// A read-only snapshot of every live subscription on the bus, as immutable
-  /// `SubscriptionNode` records. Re-call to refresh.
+  /// A read-only snapshot of every live subscription on the navigated announcer,
+  /// as immutable `SubscriptionNode` records. Re-call to refresh.
   ///
   /// ## Examples
   /// ```beamtalk
   /// AnnouncementNavigation default subscriptions   // => [a SubscriptionNode, ...]
   /// ```
   subscriptions -> List(SubscriptionNode) =>
-    (Erlang beamtalk_announcements) subscriptionNodes: SystemAnnouncer current
+    (Erlang beamtalk_announcements) navSubscriptionNodes: self
 
   /// A read-only snapshot of the subscriptions to exactly `aClass`, as
   /// `SubscriptionNode` records. Matches exactly `aClass` (not subclasses) — the
@@ -82,15 +80,15 @@ sealed typed Object subclass: AnnouncementNavigation
   /// AnnouncementNavigation default subscribersOf: ActorSpawned
   /// ```
   subscribersOf: aClass :: Class -> List(SubscriptionNode) =>
-    (Erlang beamtalk_announcements) subscriptionNodesFor: SystemAnnouncer current class: aClass
+    (Erlang beamtalk_announcements) navSubscriptionNodesFor: self class: aClass
 
-  /// The distinct event classes currently subscribed to on the bus — the event
-  /// types in active use, as class objects (ADR 0093 §7). Classes with live
-  /// subscriptions appear once each; the order is unspecified.
+  /// The distinct event classes currently subscribed to on the navigated
+  /// announcer — the event types in active use, as class objects (ADR 0093 §7).
+  /// Classes with live subscriptions appear once each; the order is unspecified.
   ///
   /// ## Examples
   /// ```beamtalk
   /// AnnouncementNavigation default announcedClasses   // => [ActorSpawned, PriceChanged]
   /// ```
   announcedClasses -> List(Class) =>
-    (Erlang beamtalk_announcements) announcedClasses
+    (Erlang beamtalk_announcements) navAnnouncedClasses: self

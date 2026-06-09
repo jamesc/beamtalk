@@ -102,3 +102,32 @@ TestCase subclass: AnnouncementsTest
     Timer sleep: 50
     self assert: received value equals: 1
     received delete
+
+  // --- Per-instance isolation (BT-2454) ---
+  testDistinctAnnouncersAreIsolated =>
+    received := AtomicCounter new: #announcementsTestIsolation
+    other := Announcer new
+    self.announcer when: TestEvent do: [:e | received increment]
+    // An event on a *different* announcer must NOT reach this subscription.
+    other announce: (TestEvent payload: 1)
+    Timer sleep: 50
+    self assert: received value equals: 0
+    // ...but an event on the same announcer still does (sanity).
+    self.announcer announce: (TestEvent payload: 1)
+    Timer sleep: 50
+    self assert: received value equals: 1
+    received delete
+
+  testSystemAnnouncerStillReceivesSystemEvents =>
+    received := AtomicCounter new: #announcementsTestSystemBus
+    sys := SystemAnnouncer current
+    sub := sys when: TestEvent do: [:e | received increment]
+    sys announce: (TestEvent payload: 1)
+    Timer sleep: 50
+    self assert: received value equals: 1
+    // A per-instance announcer is isolated from the system bus.
+    self.announcer announce: (TestEvent payload: 2)
+    Timer sleep: 50
+    self assert: received value equals: 1
+    sub unsubscribe
+    received delete
