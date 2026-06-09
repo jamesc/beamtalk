@@ -447,6 +447,18 @@ per-object channel — the channel here is the `Announcer`). A pure-stdlib inter
 (`class emittedEvents -> List(Class)`, hand-declared, no new syntax) can deliver
 the discoverability win first if wanted.
 
+**Update (BT-2475): the discoverability win shipped as a derived static
+analysis instead.** Rather than a declarative manifest, the emission-side dual
+of `AnnouncementNavigation` is now `SystemNavigation announcementsSentBy: aClass`
+— it mines the `announce:` / `announceAndWait:` / `announceAndWait:timeout:` call
+sites out of a class's method bodies and resolves each event argument to its
+`Announcement` subclass, completing the publisher↔subscriber graph with zero new
+syntax and zero drift. It is deliberately *advisory* (constructor-call arguments
+resolve; `Dynamic`/indirect arguments are skipped), not a sound contract. This
+made the `event:` keyword track (BT-2437) redundant, and it was cancelled. See
+`docs/beamtalk-language-features.md` → "`SystemNavigation` — Cross-class code
+queries".
+
 ### REPL session
 
 ```beamtalk

@@ -553,6 +553,235 @@ sealed typed Object subclass: SystemNavigation
         acc add: #{#class => aClass, #selector => methodSel, #line => line}
       ]
 
+  /// Return the distinct `Announcement` subclasses that `aClass` statically
+  /// emits — the publisher-side dual of `AnnouncementNavigation` (ADR 0093 §7,
+  /// BT-2475).
+  ///
+  /// Where `AnnouncementNavigation` answers "who *listens* for which events"
+  /// from the live runtime ETS subscription table, this answers "which event
+  /// classes does `aClass` *publish*" by mining the `announce:` /
+  /// `announceAndWait:` / `announceAndWait:timeout:` call sites out of
+  /// `aClass`'s own method bodies (instance side + class side + extension
+  /// methods that target `aClass`). The result is the distinct set of resolved
+  /// announcement classes, sorted by name for a stable snapshot; `[]` when
+  /// `aClass` emits nothing statically resolvable.
+  ///
+  /// ## Advisory, not a complete contract
+  ///
+  /// This is a *static* analysis of a dynamic language: it reports an emission
+  /// only when the event argument resolves to a concrete `Announcement`
+  /// subclass at the call site — a constructor call on a bare class reference
+  /// (`announce: (PriceChanged newPrice: 42)` or `announce: PriceChanged new`).
+  /// A `Dynamic`-typed or indirect argument (`announce: someVar`,
+  /// `perform:`-style dispatch) is **unresolvable by construction** and is
+  /// silently skipped — it is a documented limitation, never an error. Treat
+  /// the result as advisory discoverability, not a sound or exhaustive emission
+  /// contract.
+  ///
+  /// Raises a typed error if `aClass` is a Symbol/String rather than a class
+  /// object (argument-validation parity with `referencesTo:`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default announcementsSentBy: PriceTracker  // => [PriceChanged, ...]
+  /// SystemNavigation default announcementsSentBy: SilentClass    // => []
+  /// ```
+  announcementsSentBy: aClass :: Behaviour -> List(Behaviour) =>
+    distinct := (self announcementSitesSentBy: aClass)
+      inject: List new
+      into: [:acc :site |
+        cls := site at: #announcementClass
+        (acc includes: cls) ifTrue: [acc] ifFalse: [acc add: cls]
+      ]
+    distinct sort: [:a :b | a name asString < b name asString]
+
+  /// Return a collection of the announcement emission sites within `aClass` —
+  /// the site-level form of `announcementsSentBy:` for IDE / event-graph use
+  /// (BT-2475).
+  ///
+  /// Each result is a Dictionary with four keys, the `sendersOf:` shape plus the
+  /// resolved announcement class:
+  /// - `#class` — the publisher class whose method contains the emission (the
+  ///   class object for an instance-side hit, the metaclass object for a
+  ///   class-side hit, or the resolved extension target for an extension hit)
+  /// - `#selector` — the selector of the method that contains the emission
+  /// - `#line` — the 1-based line number within the method source where the
+  ///   `announce:` send appears
+  /// - `#announcementClass` — the resolved `Announcement` subclass being emitted
+  ///
+  /// A method that emits the same announcement multiple times produces one
+  /// record per occurrence. Only sites whose event argument resolves to a
+  /// concrete `Announcement` subclass are reported; unresolvable
+  /// (`Dynamic`-typed / indirect) sites are skipped (see `announcementsSentBy:`
+  /// for the advisory-analysis discipline).
+  ///
+  /// Scope mirrors `sendersOf:`'s source-scan: `aClass`'s instance side and
+  /// class side, plus source-bearing extension methods (ADR 0066 / BT-2196) that
+  /// target `aClass`. Unlike `sendersOf:`, this query is not index-backed: the
+  /// xref index records selectors and lines but not argument types, so each
+  /// method source is re-parsed via the compiler to resolve the event argument.
+  ///
+  /// Raises a typed error if `aClass` is a Symbol/String rather than a class
+  /// object. Returns an empty collection if no resolvable emissions are found.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// SystemNavigation default announcementSitesSentBy: PriceTracker
+  ///   // => [#{#class => PriceTracker, #selector => #notify, #line => 4,
+  ///   //      #announcementClass => PriceChanged}, ...]
+  /// ```
+  announcementSitesSentBy: aClass :: Behaviour -> List(Dictionary) =>
+    self requireClassName: aClass selector: "announcementSitesSentBy:"
+    instanceScan := self collectAnnounceSitesIn: aClass into: List new
+    bothScan := self collectAnnounceSitesIn: aClass class into: instanceScan
+    self collectExtensionAnnounceSitesFor: aClass into: bothScan
+
+  /// Append announcement emission sites found in any method of `aScope` (a class
+  /// or metaclass) to `result`. Returns the (possibly extended) result list.
+  ///
+  /// Internal helper for `announcementSitesSentBy:`. Iterates `aScope methods`,
+  /// fetches each method's source via `>>`, and asks the compiler for the
+  /// `announce:` sites in it (with their resolved argument classes). Mirrors
+  /// `collectSendersFor:in:into:`; the `>>` send is guarded with `respondsTo:`
+  /// so a scope for which `>>` is not yet supported (e.g. metaclass-shaped
+  /// registry entries) is silently skipped, and a `nil` source (a primitive
+  /// registered without source text) contributes nothing.
+  collectAnnounceSitesIn: aScope :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+    aScope methods
+      inject: result
+      into: [:acc :methodSel |
+        method := (aScope respondsTo: #'>>') ifTrue: [
+          aScope >> methodSel
+        ] ifFalse: [nil]
+        method isNil
+          ifTrue: [acc]
+          ifFalse: [
+            src := method source
+            src isNil
+              ifTrue: [acc]
+              ifFalse: [
+                self
+                  appendAnnounceSitesIn: src
+                  class: aScope
+                  methodSelector: methodSel
+                  into: acc
+              ]
+          ]
+      ]
+
+  /// Append one record per resolvable announcement emission found in
+  /// `methodSource`.
+  ///
+  /// Internal helper for `collectAnnounceSitesIn:into:`. Splits the per-method
+  /// FFI call out so the surrounding `inject:into:` body stays a single
+  /// expression — same shape as `appendSendersIn:selector:class:methodSelector:into:`.
+  ///
+  /// The compiler hands back one `{Line, ClassNameBinary}` tuple per announce
+  /// site; the class-name binary is resolved to a live class via `findClass:`
+  /// (which answers `nil` for the empty-binary "unresolvable" marker). A site is
+  /// recorded only when its argument resolves to a class that *is* an
+  /// `Announcement` subclass — unresolvable arguments and non-announcement
+  /// receivers (a misclassified constructor send) are both skipped.
+  appendAnnounceSitesIn: methodSource :: String class: aClass :: Object methodSelector: methodSel :: Symbol into: result :: List(Dictionary) -> List(Dictionary) =>
+    sites := (Erlang beamtalk_interface) announceSitesIn: methodSource
+    sites
+      inject: result
+      into: [:acc :site |
+        line := site at: 1
+        announcementName := site at: 2
+        cls := (Erlang beamtalk_interface) findClass: announcementName
+        (self isAnnouncementClass: cls)
+          ifTrue: [
+            acc
+              add: #{
+                #class => aClass,
+                #selector => methodSel,
+                #line => line,
+                #announcementClass => cls
+              }
+          ]
+          ifFalse: [acc]
+      ]
+
+  /// Whether `aClass` is a loaded `Announcement` subclass (self-inclusive of
+  /// `Announcement` itself) — the gate that keeps `announcementsSentBy:` from
+  /// reporting a non-announcement class that a heuristic constructor match
+  /// happened to resolve.
+  ///
+  /// `nil` (an unresolvable argument) and any value that does not respond to
+  /// `superclassChain` (not a class object) answer `false`. Returns `false`
+  /// defensively if `Announcement` is not in the loaded image. Uses
+  /// `superclassChain includes:` exactly as `actorClasses` tests membership of
+  /// `Actor`.
+  isAnnouncementClass: aClass :: Object -> Boolean =>
+    aClass isNil ifTrue: [^false]
+    (aClass respondsTo: #superclassChain) ifFalse: [^false]
+    announcementClass := (Erlang beamtalk_interface) findClass: #Announcement
+    announcementClass isNil ifTrue: [^false]
+    // `aClass` is typed `Object` (it may be a class object, a metaclass object,
+    // or `nil`); the `respondsTo: #superclassChain` guard above makes the send
+    // safe at runtime, so suppress the static does-not-understand check.
+    @expect dnu
+    aClass superclassChain includes: announcementClass
+
+  /// Append announcement emission sites found in every source-bearing extension
+  /// method (ADR 0066 / BT-2196) that targets `aClass` to `result`. Returns the
+  /// (possibly extended) result.
+  ///
+  /// Mirrors `collectExtensionSendersFor:into:`, but — because the query is
+  /// scoped to one publisher class rather than one selector — only extensions
+  /// whose resolved target is `aClass` (instance side) or `aClass class`
+  /// (class side) are scanned. Extension target identity is matched by name so
+  /// both an instance-side tag (`#Foo`) and a metaclass tag (`#'Foo class'`)
+  /// are recognised. Extensions registered via `register/4` (no source) are
+  /// invisible, as elsewhere.
+  collectExtensionAnnounceSitesFor: aClass :: Behaviour into: result :: List(Dictionary) -> List(Dictionary) =>
+    // `List add:` is functional (returns a new list), so capture the result
+    // rather than mutating in place: the pair is `[aClass name, aClass class
+    // name]` — the instance-side and class-side tags a matching extension can
+    // carry.
+    targetNames := (List new add: aClass name) add: aClass class name
+    extEntries := (Erlang beamtalk_extensions) listAllWithSource
+    extEntries
+      inject: result
+      into: [:acc :entry |
+        extClassTag := entry at: 1
+        extSelector := entry at: 2
+        extSource := entry at: 3
+        extClass := self resolveExtensionClass: extClassTag
+        (self extensionTargets: extClass names: targetNames)
+          ifTrue: [
+            // BT-2254: `extSource` (entry at: 3) is typed `String | Binary` from
+            // the `binary()` FFI spec but is always source text (a String),
+            // which `appendAnnounceSitesIn:` requires; suppress the union-member
+            // arg-type warning.
+            @expect type
+            self
+              appendAnnounceSitesIn: extSource
+              class: extClass
+              methodSelector: extSelector
+              into: acc
+          ]
+          ifFalse: [acc]
+      ]
+
+  /// Whether the resolved extension-target class `extClass` is `aClass` or
+  /// `aClass class` — i.e. the extension extends the publisher under query.
+  ///
+  /// `targetNames` is the precomputed `[aClass name, aClass class name]` pair.
+  /// Matching by name handles both an instance-side tag (`#Foo` → `Foo`, name
+  /// `#Foo`) and a metaclass tag (`#'Foo class'` → `Foo class`, name
+  /// `#'Foo class'`) uniformly. A `resolveExtensionClass:` result that is a raw
+  /// atom (the defensive miss path) does not respond to `name` and answers
+  /// `false`. The `@expect dnu` suppresses the static does-not-understand check:
+  /// `extClass` is typed `Object` (the navigation queries report class objects,
+  /// metaclass objects, or a raw atom under one umbrella type), and the
+  /// `respondsTo: #name` guard makes the `name` send safe at runtime.
+  extensionTargets: extClass :: Object names: targetNames :: List(Symbol) -> Boolean =>
+    (extClass respondsTo: #name) ifFalse: [^false]
+    @expect dnu
+    targetNames includes: extClass name
+
   /// Return a collection of references to the given class.
   ///
   /// Each result is a Dictionary with three keys:

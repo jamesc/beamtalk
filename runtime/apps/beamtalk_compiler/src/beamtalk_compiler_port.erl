@@ -26,6 +26,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_field_readers_in_source/3,
     find_field_writers_in_source/3,
     find_ffi_sites_in_source/5,
+    find_announce_sites_in_source/2,
     resolve_method_span/5,
     close/1
 ]).
@@ -443,6 +444,69 @@ find_all_sends_in_source(_Port, _Source) ->
         #{
             message =>
                 <<"find_all_sends_in_source: source must be a binary">>
+        }
+    ]}.
+
+-doc """
+Find every `announce:' emission within a single method's source (BT-2475).
+
+Backs `SystemNavigation announcementsSentBy:' — the static dual of
+`AnnouncementNavigation'. Sends an ETF-encoded `find_announce_sites_in_source'
+request and returns `{ok, [Site]}' on success or `{error, [Diagnostic]}' on
+failure. Each `Site' is a map `#{selector := binary(), line := pos_integer(),
+announcement_class := binary()}', where `announcement_class' is the
+syntactically-resolved announcement class name (empty binary `<<>>' when the
+event argument is unresolvable). The maps are passed through unchanged.
+""".
+-spec find_announce_sites_in_source(port(), binary()) ->
+    {ok, [map()]} | {error, [map()]}.
+find_announce_sites_in_source(Port, Source) when is_binary(Source) ->
+    Request = #{
+        command => find_announce_sites_in_source,
+        source => Source
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_announce_sites_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (announce sites)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, [#{message => <<"Compiler port response is malformed">>}]}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during announce-sites query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (announce sites)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, [#{message => <<"Compiler port timed out">>}]}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (announce sites)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, [#{message => <<"Compiler port is not available">>}]}
+    end;
+find_announce_sites_in_source(_Port, _Source) ->
+    {error, [
+        #{
+            message =>
+                <<"find_announce_sites_in_source: source must be a binary">>
         }
     ]}.
 
@@ -933,6 +997,23 @@ handle_all_sends_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_all_sends_response(Other) ->
     ?LOG_ERROR("Unexpected all-sends response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+-doc """
+Handle ETF response from a find_announce_sites_in_source request (BT-2475).
+Returns `{ok, [Site]}' on success (each `Site' a
+`#{selector := binary(), line := pos_integer(), announcement_class := binary()}'
+map, passed through unchanged), `{error, [Diagnostic]}' on failure.
+""".
+-spec handle_announce_sites_response(map()) -> {ok, [map()]} | {error, [map()]}.
+handle_announce_sites_response(#{status := ok, sites := Sites}) when is_list(Sites) ->
+    {ok, Sites};
+handle_announce_sites_response(#{status := error, diagnostics := Diagnostics}) ->
+    {error, normalize_diagnostics(Diagnostics)};
+handle_announce_sites_response(Other) ->
+    ?LOG_ERROR("Unexpected announce-sites response", #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, [#{message => <<"Unexpected compiler response">>}]}.

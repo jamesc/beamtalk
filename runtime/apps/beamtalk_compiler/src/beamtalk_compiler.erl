@@ -35,6 +35,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_field_readers_in_source/2,
     find_field_writers_in_source/2,
     find_ffi_sites_in_source/4,
+    find_announce_sites_in_source/1,
     resolve_method_span/4
 ]).
 
@@ -183,6 +184,29 @@ Backs `SystemNavigation unimplementedSelectors' — the classic typo-finder
     {ok, [map()]} | {error, [map()]}.
 find_all_sends_in_source(Source) ->
     beamtalk_compiler_server:find_all_sends_in_source(Source).
+
+-doc """
+Find every `announce:' emission in a single method's source (BT-2475).
+
+`Source' is the source of a single compiled method (as returned by
+`CompiledMethod source'). Recognises `announce:', `announceAndWait:', and
+`announceAndWait:timeout:', resolving each event argument to its announcement
+class name where it is a constructor call on a bare class reference.
+
+Returns `{ok, [Site]}' on success, where each `Site' is a map
+`#{selector := binary(), line := pos_integer(), announcement_class := binary()}'.
+The `announcement_class' is an empty binary when the event argument is
+unresolvable (`Dynamic'-typed / indirect). Returns `{ok, []}' when the source
+has no emissions or cannot be parsed. Returns `{error, Diagnostics}' if the
+compiler port is unavailable.
+
+Backs `SystemNavigation announcementsSentBy:' — the static dual of
+`AnnouncementNavigation' (ADR 0093 §7).
+""".
+-spec find_announce_sites_in_source(binary()) ->
+    {ok, [map()]} | {error, [map()]}.
+find_announce_sites_in_source(Source) ->
+    beamtalk_compiler_server:find_announce_sites_in_source(Source).
 
 -doc """
 Find references to a class in a single method's source (BT-2203).

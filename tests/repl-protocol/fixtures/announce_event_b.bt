@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2475: Second announcement event fixture, exercising the unary-`new`
+// constructor path (`AnnounceEventB new`) and the multi-event result of
+// `announcementsSentBy:`.
+
+Announcement subclass: AnnounceEventB
