@@ -3,6 +3,7 @@
 
 //! Create new beamtalk projects.
 
+use beamtalk_core::unparse::format_source;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
@@ -132,6 +133,21 @@ version = "0.1.0"
         .wrap_err("Failed to create beamtalk.toml")
 }
 
+/// Render scaffolded Beamtalk source in its canonical formatted form.
+///
+/// Hand-written templates can drift from the formatter's layout — a
+/// single-statement method, for instance, is collapsed onto one line by the
+/// formatter unless it exceeds the line-width budget, in which case it stays
+/// multi-line. Running each generated `.bt` file through the same formatter
+/// `beamtalk fmt` uses guarantees a freshly scaffolded project passes its own
+/// `fmt-check` out of the box, regardless of package-name length (BT-2476).
+///
+/// Falls back to the raw template if formatting fails (it should not for our
+/// templates, which are always syntactically valid).
+fn canonical_bt(content: &str) -> String {
+    format_source(content).unwrap_or_else(|| content.to_string())
+}
+
 fn write_library_sources(path: &Utf8Path, name: &str) -> Result<()> {
     let class_name = to_class_name(name, "");
     let content = format!(
@@ -145,9 +161,12 @@ Object subclass: {class_name}
   class greet => "Hello from {name}!"
 "#
     );
-    fs::write(path.join("src").join(format!("{class_name}.bt")), content)
-        .into_diagnostic()
-        .wrap_err("Failed to create library source file")
+    fs::write(
+        path.join("src").join(format!("{class_name}.bt")),
+        canonical_bt(&content),
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to create library source file")
 }
 
 fn write_application_sources(path: &Utf8Path, name: &str) -> Result<()> {
@@ -170,9 +189,12 @@ Supervisor subclass: {sup_name}
   class children => #()
 "
     );
-    fs::write(path.join("src").join(format!("{sup_name}.bt")), sup_content)
-        .into_diagnostic()
-        .wrap_err("Failed to create supervisor")?;
+    fs::write(
+        path.join("src").join(format!("{sup_name}.bt")),
+        canonical_bt(&sup_content),
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to create supervisor")?;
 
     // Write Main entry point
     let main_content = format!(
@@ -191,9 +213,12 @@ Object subclass: {main_name}
     self
 "#
     );
-    fs::write(path.join("src").join("Main.bt"), main_content)
-        .into_diagnostic()
-        .wrap_err("Failed to create Main.bt")
+    fs::write(
+        path.join("src").join("Main.bt"),
+        canonical_bt(&main_content),
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to create Main.bt")
 }
 
 fn write_sample_test(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
@@ -220,9 +245,12 @@ TestCase subclass: {class_name}
     {assertion}
 "
     );
-    fs::write(path.join("test").join(format!("{class_name}.bt")), content)
-        .into_diagnostic()
-        .wrap_err("Failed to create test file")
+    fs::write(
+        path.join("test").join(format!("{class_name}.bt")),
+        canonical_bt(&content),
+    )
+    .into_diagnostic()
+    .wrap_err("Failed to create test file")
 }
 
 fn write_readme(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> {
@@ -694,6 +722,67 @@ mod tests {
         assert!(content.contains("test_copilot"));
         assert!(content.contains("Beamtalk"));
         assert!(content.contains("beamtalk build"));
+    }
+
+    /// Collect every generated `.bt` file in a scaffolded project.
+    fn collect_bt_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for sub in ["src", "test"] {
+            let dir = root.join(sub);
+            if let Ok(entries) = fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("bt") {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Regression guard for BT-2476: a freshly scaffolded project must be
+    /// fmt-clean, so `beamtalk fmt-check` exits 0 (and the scaffolded CI's
+    /// formatting gate passes) the moment the project is created. We assert
+    /// every generated `.bt` file is already in canonical form by checking it
+    /// is a fixed point of the formatter — the same parse/unparse pass
+    /// `fmt-check` runs.
+    fn assert_scaffold_is_fmt_clean(app: bool) {
+        let name = if app {
+            "fmt_clean_app"
+        } else {
+            "fmt_clean_lib"
+        };
+        let (_temp, project_path) = create_test_project(name, app);
+
+        let bt_files = collect_bt_files(&project_path);
+        assert!(
+            !bt_files.is_empty(),
+            "scaffold should generate at least one .bt file"
+        );
+        for file in bt_files {
+            let content = fs::read_to_string(&file).unwrap();
+            let formatted = beamtalk_core::unparse::format_source(&content)
+                .unwrap_or_else(|| panic!("{} should parse without errors", file.display()));
+            assert_eq!(
+                content,
+                formatted,
+                "{} is not fmt-clean; `beamtalk fmt-check` would fail on a fresh project",
+                file.display()
+            );
+        }
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_library_scaffold_is_fmt_clean() {
+        assert_scaffold_is_fmt_clean(false);
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_new_app_scaffold_is_fmt_clean() {
+        assert_scaffold_is_fmt_clean(true);
     }
 
     #[test]
