@@ -33,6 +33,13 @@ const MAX_ATOM_LEN: usize = 255;
 /// function names (see `beamtalk_class_dispatch:class_method_fun_name/1`).
 const CLASS_METHOD_PREFIX: &str = "class_";
 
+/// The prefix used for sealed-method standalone function names (see BT-403).
+///
+/// A sealed method `foo:` compiles to a `'__sealed_foo:'/N` function that is
+/// called directly (bypassing dynamic dispatch). Both the function definition
+/// and its direct call sites must agree on this name.
+const SEALED_PREFIX: &str = "__sealed_";
+
 /// Returns an atom-safe version of `name`.
 ///
 /// If `name` is ≤255 bytes it is returned unchanged.  Otherwise it is replaced
@@ -81,6 +88,26 @@ pub fn safe_class_method_fn_name(selector: &str) -> String {
         "{CLASS_METHOD_PREFIX}{}",
         safe_class_method_selector(selector)
     )
+}
+
+/// Returns a safe function name atom for a sealed-method standalone function.
+///
+/// A sealed method `selector` compiles to a `'__sealed_{selector}'/N` function
+/// that is called directly. This helper centralises construction of that name
+/// so the definition site and all direct-call sites stay in lock-step.
+///
+/// If `"__sealed_" + selector` would exceed Erlang's 255-char atom limit, the
+/// selector is replaced with a deterministic FNV-1a hash (`"kw_<16-hex>"`),
+/// mirroring [`safe_class_method_selector`]. For all realistic selectors
+/// (≤ 246 chars) the result is exactly `"__sealed_" + selector`.
+#[must_use]
+pub fn sealed_fn_name(selector: &str) -> String {
+    if SEALED_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
+        format!("{SEALED_PREFIX}{selector}")
+    } else {
+        let hash = fnv1a_64(selector.as_bytes());
+        format!("{SEALED_PREFIX}kw_{hash:016x}")
+    }
 }
 
 /// Deterministic FNV-1a 64-bit hash (no external dependency).
@@ -138,6 +165,39 @@ mod tests {
         assert_eq!(r1, r2);
         assert!(r1.starts_with("kw_"));
         assert_eq!(r1.len(), 19); // "kw_" + 16 hex digits
+    }
+
+    #[test]
+    fn sealed_fn_name_short() {
+        assert_eq!(sealed_fn_name("foo:"), "__sealed_foo:");
+        assert_eq!(sealed_fn_name("doSomething"), "__sealed_doSomething");
+        assert_eq!(sealed_fn_name("x:y:"), "__sealed_x:y:");
+    }
+
+    #[test]
+    fn sealed_fn_name_exactly_fits() {
+        // "__sealed_" is 9 chars; 246 + 9 = 255, exactly at the limit.
+        let sel = "a".repeat(246);
+        assert_eq!(sealed_fn_name(&sel), format!("__sealed_{sel}"));
+    }
+
+    #[test]
+    fn sealed_fn_name_boundary() {
+        // 247 + 9 = 256 > 255, so the selector is hashed.
+        let sel = "a".repeat(247);
+        let name = sealed_fn_name(&sel);
+        assert!(name.starts_with("__sealed_kw_"));
+        // "__sealed_" (9) + "kw_" (3) + 16 hex digits = 28 chars.
+        assert_eq!(name.len(), 28);
+    }
+
+    #[test]
+    fn sealed_fn_name_deterministic() {
+        let long = "a".repeat(300);
+        let r1 = sealed_fn_name(&long);
+        let r2 = sealed_fn_name(&long);
+        assert_eq!(r1, r2);
+        assert!(r1.starts_with("__sealed_kw_"));
     }
 
     #[test]
