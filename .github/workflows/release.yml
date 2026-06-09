@@ -45,8 +45,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Determine version
@@ -54,20 +55,22 @@ jobs:
         run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
           otp-version: '27.0'
           rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v4
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ~/.cache/rebar3
@@ -79,7 +82,7 @@ jobs:
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Build distribution
         run: just dist
@@ -103,7 +106,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-linux-x86_64
           path: |
@@ -116,8 +119,9 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Determine version
@@ -125,20 +129,22 @@ jobs:
         run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
           otp-version: '27.0'
           rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v4
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ~/.cache/rebar3
@@ -149,7 +155,7 @@ jobs:
             ${{ runner.os }}-x86_64-erlang-otp-27.0-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Build and install distribution
         run: just install dist
@@ -173,7 +179,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-macos-x86_64
           path: |
@@ -186,8 +192,9 @@ jobs:
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Determine version
@@ -195,20 +202,22 @@ jobs:
         run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
           otp-version: '27.0'
           rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
-        uses: extractions/setup-just@v4
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ~/.cache/rebar3
@@ -219,7 +228,7 @@ jobs:
             ${{ runner.os }}-arm64-erlang-otp-27.0-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Build and install distribution
         run: just install dist
@@ -243,7 +252,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-macos-arm64
           path: |
@@ -257,8 +266,9 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Determine version
@@ -267,17 +277,19 @@ jobs:
         run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
           otp-version: '27.0'
           rebar3-version: '3.27'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Erlang/rebar3 artifacts
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ~/.cache/rebar3
@@ -288,7 +300,7 @@ jobs:
             ${{ runner.os }}-erlang-otp-27.0-
 
       - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 
       - name: Build Rust (release)
         run: cargo build --all-targets --release --quiet
@@ -329,7 +341,7 @@ jobs:
 
       - name: Upload artifact (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: beamtalk-${{ steps.version.outputs.version }}-windows-x86_64
           path: |
@@ -353,8 +365,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # Re-resolve version/tag here (each build job computes these in its own
@@ -364,7 +377,7 @@ jobs:
         run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Dispatch UAT gate
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
         with:
           # UAT_DISPATCH_TOKEN: a PAT / fine-grained token with
           # `contents: write` (i.e. repository_dispatch) scope on
