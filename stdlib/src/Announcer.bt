@@ -14,11 +14,12 @@
 ///
 /// There is deliberately no per-announcer process — the subscriber set lives in
 /// the shared runtime ETS table and dispatch runs caller-side off concurrent
-/// ETS reads (no central mailbox to deadlock or bottleneck). Per ADR 0093 the
-/// table is keyed by a unique subscription ref and matched on the event's
-/// *class* (MRO), not by announcer: in v1 all announcers share one class-keyed
-/// bus, so the handle is an identity token rather than an isolated namespace.
-/// True per-instance subscription isolation is tracked as follow-up work.
+/// ETS reads (no central mailbox to deadlock or bottleneck). Each subscription
+/// row carries the announcer it was made on, so distinct `Announcer` instances
+/// are isolated: a subscription on announcer A never receives an event
+/// announced on announcer B, even for the same event class. Matching is by
+/// announcer + the event's *class* (MRO walk). `SystemAnnouncer current` is the
+/// one shared, well-known bus the runtime publishes onto.
 ///
 /// ## Examples
 /// ```beamtalk
@@ -128,8 +129,8 @@ typed Object subclass: Announcer
   /// own ETS rows; to *act* on a subscription, cross back to the live
   /// `Subscription` token or `unsubscribe:`. Re-call to refresh.
   ///
-  /// In v1 every announcer shares one class-keyed bus, so this reports the whole
-  /// bus; per-instance isolation is tracked as follow-up work.
+  /// Scoped to this announcer — it reports only the subscriptions made on
+  /// `self`, not those on other announcers or the system bus.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -151,9 +152,9 @@ typed Object subclass: Announcer
   subscribersOf: aClass :: Class -> List(SubscriptionNode) =>
     (Erlang beamtalk_announcements) subscriptionNodesFor: self class: aClass
 
-  /// The total number of live subscriptions on this announcer (ADR 0093 §7).
-  /// A cheap direct ETS read — the size of `subscriptions` without materialising
-  /// the snapshot records.
+  /// The number of live subscriptions on this announcer (ADR 0093 §7) — scoped
+  /// to `self`. A cheap direct ETS read — the size of `subscriptions` without
+  /// materialising the snapshot records.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -161,4 +162,4 @@ typed Object subclass: Announcer
   /// announcer subscriptionCount   // => 1
   /// ```
   subscriptionCount -> Integer =>
-    (Erlang beamtalk_announcements) subscriptionCountAll
+    (Erlang beamtalk_announcements) subscriptionCountOn: self

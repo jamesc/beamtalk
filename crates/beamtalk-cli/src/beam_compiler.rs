@@ -1240,7 +1240,16 @@ impl TypeCache {
             return;
         }
         if let Err(e) = std::fs::rename(tmp.as_std_path(), path.as_std_path()) {
-            debug!("Failed to publish type cache for {module_name}: {e}");
+            // On Windows, rename can fail with "Access denied" if the destination
+            // is open without delete-sharing (a concurrent reader). Fall back to a
+            // copy so the cache update isn't silently dropped, then always clean up
+            // the temp file regardless of which path succeeded.
+            debug!(
+                "Failed to publish type cache for {module_name} via rename: {e}; falling back to copy"
+            );
+            if let Err(e2) = std::fs::copy(tmp.as_std_path(), path.as_std_path()) {
+                debug!("Failed to publish type cache for {module_name} via copy: {e2}");
+            }
             let _ = std::fs::remove_file(tmp.as_std_path());
         }
     }

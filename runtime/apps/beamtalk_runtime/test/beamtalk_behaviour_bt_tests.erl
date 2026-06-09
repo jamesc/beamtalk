@@ -82,8 +82,14 @@ setup_with_behaviour() ->
     %% it is invoked by the module activation system when bt@stdlib@behaviour loads.
     %% We call it explicitly here so the register_class/0 path is exercised in tests.
     case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
+        undefined ->
+            case pg:start_link() of
+                {ok, _Pid} -> ok;
+                {error, {already_started, _Pid}} -> ok;
+                {error, Reason} -> error({pg_start_failed, Reason})
+            end;
+        _ ->
+            ok
     end,
     beamtalk_extensions:init(),
     case beamtalk_bootstrap:start_link() of
@@ -117,7 +123,17 @@ register_class_idempotent_test() ->
     %% Note: if stdlib has loaded, the class module will be bt@stdlib@behaviour,
     %% and re-calling register_class() with the stub may trigger stdlib_shadowing.
     %% This is expected and correct; we just verify the class is still registered.
-    _Result = beamtalk_behaviour_bt:register_class(),
+    %% register_class/0's documented contract is `ok | {error, term()}`. The
+    %% case below enforces that shape — an undocumented return (e.g. a bare atom
+    %% or `{ok, _}`) raises case_clause and fails the test — without pinning the
+    %% error reason: under the full runtime suite the second registration can
+    %% fail for reasons beyond stdlib_shadowing (e.g. transient class-process
+    %% churn), so the exact reason is not asserted.
+    Result = beamtalk_behaviour_bt:register_class(),
+    case Result of
+        ok -> ok;
+        {error, _Reason} -> ok
+    end,
     %% Regardless of whether register_class() succeeded or failed with
     %% stdlib_shadowing (which is expected if stdlib loaded first), the class
     %% should still be registered and available.

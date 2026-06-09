@@ -53,14 +53,18 @@ Design (the `beamtalk_xref` / `beamtalk_trace_store` discipline — the gen_serv
 is NOT in the dispatch path):
 
 - **Subscription table = ETS, gen_server owns writes only.** Each subscription
-  is a row `{SubRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag}` in a
-  `set` keyed by the unique `SubRef` the returned `Subscription` wraps. Keying by
-  `SubRef` — not `{Class, Pid}` — means a process may hold multiple distinct
-  subscriptions to the same class (Pharo's rule): a second `subscribe` adds a
-  row, it never replaces the first. A secondary by-class index
-  (`ordered_set` on `{AnnouncementClass, SubRef}`) lets `announce/2` fetch the
-  matching subscribers for one class without scanning the whole table, and the
-  MRO walk fetches it once per class on the event's superclass chain.
+  is a row `{SubRef, AnnouncerRef, AnnouncementClass, SubscriberPid, Handler,
+  OnceFlag}` in a `set` keyed by the unique `SubRef` the returned `Subscription`
+  wraps. Keying by `SubRef` — not `{Class, Pid}` — means a process may hold
+  multiple distinct subscriptions to the same class (Pharo's rule): a second
+  `subscribe` adds a row, it never replaces the first. The `AnnouncerRef`
+  dimension scopes each subscription to one announcer namespace so distinct
+  `Announcer` instances are isolated (BT-2454): a `reference()` per
+  `Announcer new`, or the `?SYSTEM_ANNOUNCER_REF` atom for the system bus and the
+  raw Layer 1 API. A secondary by-class index (`ordered_set` on
+  `{AnnouncerRef, AnnouncementClass, SubRef}`) lets `announce/2` fetch the
+  matching subscribers for one announcer+class without scanning the whole table,
+  and the MRO walk fetches it once per class on the event's superclass chain.
 
 - **Writes serialise through the gen_server.** `subscribe/4` / `unsubscribe/1`
   are `gen_server:call`s so the table writes are serialised and the bus can arm
@@ -97,6 +101,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% API — write path (through the gen_server)
 -export([
     subscribe/4,
+    subscribe/5,
     unsubscribe/1,
     is_active/1
 ]).
@@ -104,6 +109,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% API — dispatch (caller-side, off concurrent ETS reads)
 -export([
     announce/2,
+    announce/3,
     announceAndWait/2,
     announceAndWait/3
 ]).
@@ -114,12 +120,15 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     subscribers_of/1
 ]).
 
-%% FFI shims — introspection / navigation veneer (BT-2444)
+%% FFI shims — introspection / navigation veneer (BT-2444 / BT-2454)
 -export([
     'subscriptionNodes'/1,
     'subscriptionNodesFor'/2,
-    'announcedClasses'/0,
-    'subscriptionCountAll'/0
+    'subscriptionCountOn'/1,
+    'navigationFor'/1,
+    'navSubscriptionNodes'/1,
+    'navSubscriptionNodesFor'/2,
+    'navAnnouncedClasses'/1
 ]).
 
 %% FFI shims for stdlib veneer (BT-2443)
@@ -168,12 +177,24 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% §1 — "defaults to 5 s", configurable in ms via `announceAndWait/3`).
 -define(DEFAULT_ANNOUNCE_TIMEOUT, 5000).
 
+%% The well-known announcer namespace shared by the runtime system bus and the
+%% raw Layer 1 API (BT-2454). Per-instance `Announcer new` handles each get a
+%% unique `reference()` namespace, isolated from this and from each other; the
+%% atom-keyed system namespace is where `SystemAnnouncer` and `system_announce/2`
+%% publish, and where the low-level `subscribe/4` / `announce/2` primitives
+%% operate by default. Matches the ref carried by `systemAnnouncer/0`.
+-define(SYSTEM_ANNOUNCER_REF, beamtalk_system_announcer).
+
 %%====================================================================
 %% Types
 %%====================================================================
 
 -type announcement_class() :: atom().
 -type sub_ref() :: reference().
+%% An announcer namespace: a unique `reference()` for a per-instance `Announcer`,
+%% or the well-known `?SYSTEM_ANNOUNCER_REF` atom for the system bus / Layer 1
+%% (BT-2454).
+-type announcer_ref() :: reference() | atom().
 -type handler() :: term().
 
 %% Beamtalk object types for FFI type inference (BT-2443).
@@ -189,9 +210,19 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% (`#do | #send | #doOnce`), and the `once` flag.
 -type subscription_node() :: #{'$beamtalk_class' := 'SubscriptionNode', atom() => term()}.
 
-%% A subscription row in the primary `set` table, keyed by `SubRef`.
+%% An `AnnouncementNavigation` handle (BT-2454): a tagged map carrying the
+%% announcer scope it navigates, minted by `navigationFor/1`. Tagged so the
+%% Beamtalk type checker infers FFI results as `AnnouncementNavigation`.
+-type announcement_navigation() :: #{
+    '$beamtalk_class' := 'AnnouncementNavigation', atom() => term()
+}.
+
+%% A subscription row in the primary `set` table, keyed by the unique `SubRef`.
+%% The `AnnouncerRef` dimension scopes the row to one announcer namespace so
+%% distinct announcers are isolated (BT-2454).
 -type sub_row() :: {
     sub_ref(),
+    announcer_ref(),
     announcement_class(),
     pid(),
     handler(),
@@ -201,12 +232,14 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 -export_type([
     announcement_class/0,
     sub_ref/0,
+    announcer_ref/0,
     handler/0,
     sub_row/0,
     announcer/0,
     system_announcer/0,
     subscription/0,
-    subscription_node/0
+    subscription_node/0,
+    announcement_navigation/0
 ]).
 
 %% gen_server state: the per-subscriber monitor bookkeeping. `monitors` maps a
@@ -247,11 +280,26 @@ subscriber pid so a dead subscriber's rows are pruned automatically.
 """.
 -spec subscribe(announcement_class(), pid(), handler(), boolean()) ->
     {ok, sub_ref()} | {error, #beamtalk_error{}}.
-subscribe(AnnouncementClass, SubscriberPid, Handler, OnceFlag) when
+subscribe(AnnouncementClass, SubscriberPid, Handler, OnceFlag) ->
+    %% Layer 1 (raw) API — subscribes on the shared system announcer namespace.
+    %% Per-instance announcers go through `subscribe/5` with their own ref.
+    subscribe(?SYSTEM_ANNOUNCER_REF, AnnouncementClass, SubscriberPid, Handler, OnceFlag).
+
+-doc """
+As `subscribe/4`, but scoped to the announcer namespace `AnnouncerRef`
+(BT-2454) — a `reference()` for a per-instance `Announcer`, or the
+`?SYSTEM_ANNOUNCER_REF` atom for the system bus. A subscription registered under
+one announcer is never matched by an `announce` on another.
+""".
+-spec subscribe(announcer_ref(), announcement_class(), pid(), handler(), boolean()) ->
+    {ok, sub_ref()} | {error, #beamtalk_error{}}.
+subscribe(AnnouncerRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag) when
     is_atom(AnnouncementClass), is_pid(SubscriberPid), is_boolean(OnceFlag)
 ->
-    gen_server:call(?MODULE, {subscribe, AnnouncementClass, SubscriberPid, Handler, OnceFlag});
-subscribe(AnnouncementClass, SubscriberPid, _Handler, OnceFlag) ->
+    gen_server:call(
+        ?MODULE, {subscribe, AnnouncerRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag}
+    );
+subscribe(_AnnouncerRef, AnnouncementClass, SubscriberPid, _Handler, OnceFlag) ->
     {error, bad_subscribe_args(AnnouncementClass, SubscriberPid, OnceFlag)}.
 
 -doc """
@@ -316,13 +364,23 @@ a send to a dead pid.
 """.
 -spec announce(announcement_class(), term()) -> ok.
 announce(EventClass, Event) when is_atom(EventClass) ->
+    %% Layer 1 (raw) API — dispatches on the shared system announcer namespace.
+    announce(?SYSTEM_ANNOUNCER_REF, EventClass, Event).
+
+-doc """
+As `announce/2`, but scoped to the announcer namespace `AnnouncerRef` (BT-2454):
+only subscriptions registered on that announcer (or an ancestor class within it)
+are delivered to. Fire-and-forget, caller-side.
+""".
+-spec announce(announcer_ref(), announcement_class(), term()) -> ok.
+announce(AnnouncerRef, EventClass, Event) when is_atom(EventClass) ->
     case ets:whereis(?BY_CLASS_TABLE) of
         undefined ->
             ok;
         _ ->
             lists:foreach(
                 fun(SubRef) -> deliver(SubRef, EventClass, Event) end,
-                collect_matching(EventClass)
+                collect_matching(AnnouncerRef, EventClass)
             )
     end.
 
@@ -364,6 +422,18 @@ acked, crashed, or timed out.
 """.
 -spec announceAndWait(announcement_class(), term(), timeout()) -> ok.
 announceAndWait(EventClass, Event, Timeout) when is_atom(EventClass) ->
+    %% Layer 1 (raw) API — dispatches on the shared system announcer namespace.
+    do_announce_and_wait(?SYSTEM_ANNOUNCER_REF, EventClass, Event, Timeout).
+
+-doc """
+The announcer-scoped core of the synchronous path (BT-2454): gather the matching
+subscriptions for `AnnouncerRef`+`EventClass` (MRO), spawn one monitored handler
+process per surviving claim, and gather every reply under `Timeout`. Shared by
+the Layer 1 `announceAndWait/2,3` (system namespace) and the per-instance veneer
+`announceAndWaitOn/2,3`.
+""".
+-spec do_announce_and_wait(announcer_ref(), announcement_class(), term(), timeout()) -> ok.
+do_announce_and_wait(AnnouncerRef, EventClass, Event, Timeout) ->
     case ets:whereis(?BY_CLASS_TABLE) of
         undefined ->
             ok;
@@ -392,33 +462,41 @@ announceAndWait(EventClass, Event, Timeout) when is_atom(EventClass) ->
                     end
                 end,
                 #{},
-                collect_matching(EventClass)
+                collect_matching(AnnouncerRef, EventClass)
             ),
             gather_replies(Pending, EventClass, Timeout)
     end.
 
 -doc """
-Collect the `SubRef`s of every subscription matching `EventClass` *or any of its
-ancestors*, de-duplicated per `SubRef`, by walking the event class's superclass
+Collect the `SubRef`s of every subscription on `AnnouncerRef` matching
+`EventClass` *or any of its ancestors* (BT-2454 — scoped to the announcer
+namespace), de-duplicated per `SubRef`, by walking the event class's superclass
 chain (`beamtalk_class_metadata:lookup_superclass/1`) and reading the by-class
-index at each level. Caller-side; no bus call. Used by both `announce/2` (async)
-and `announceAndWait/3` (sync), which then deliver to / spawn handlers for the
-returned refs — the actual subscription row (handler, once flag, liveness) is read
-at delivery time, so this list is purely a matching set.
+index (keyed `{AnnouncerRef, Class, SubRef}`) at each level. Caller-side; no bus
+call. Used by every dispatch path — `announce/2,3`, `announceAndWait` (via
+`do_announce_and_wait/4`), and the veneer `dispatch_veneer_async/3` — which then
+deliver to / spawn handlers for the returned refs; the actual subscription row
+(handler, once flag, liveness) is read at delivery time, so this list is purely a
+matching set.
 
 The walk stops gracefully at the root (`{ok, none}`), at a class whose metadata
 row is absent (`not_found` — e.g. a class removed mid-walk), and at the
 `?MAX_HIERARCHY_DEPTH` cap that bounds a corrupted cyclic hierarchy.
 """.
--spec collect_matching(announcement_class()) -> [sub_ref()].
-collect_matching(EventClass) ->
-    Refs = walk_collect(EventClass, EventClass, sets:new([{version, 2}]), [], 0),
+-spec collect_matching(announcer_ref(), announcement_class()) -> [sub_ref()].
+collect_matching(AnnouncerRef, EventClass) ->
+    Refs = walk_collect(AnnouncerRef, EventClass, EventClass, sets:new([{version, 2}]), [], 0),
     lists:reverse(Refs).
 
 -spec walk_collect(
-    announcement_class(), announcement_class(), sets:set(sub_ref()), [sub_ref()], non_neg_integer()
+    announcer_ref(),
+    announcement_class(),
+    announcement_class(),
+    sets:set(sub_ref()),
+    [sub_ref()],
+    non_neg_integer()
 ) -> [sub_ref()].
-walk_collect(_CurrentClass, EventClass, _Seen, Acc, Depth) when
+walk_collect(_AnnouncerRef, _CurrentClass, EventClass, _Seen, Acc, Depth) when
     Depth > ?MAX_HIERARCHY_DEPTH
 ->
     %% Runs in the *announcing* caller's process (dispatch is caller-side), not the
@@ -432,12 +510,12 @@ walk_collect(_CurrentClass, EventClass, _Seen, Acc, Depth) when
         domain => [beamtalk, announcements]
     }),
     Acc;
-walk_collect(CurrentClass, EventClass, Seen, Acc, Depth) ->
-    %% Gather every subscription registered against `CurrentClass`, skipping any
-    %% SubRef already seen on this walk (per-subscription de-dup).
-    IndexRows = ets:match_object(?BY_CLASS_TABLE, {{CurrentClass, '_'}}),
+walk_collect(AnnouncerRef, CurrentClass, EventClass, Seen, Acc, Depth) ->
+    %% Gather every subscription registered against `AnnouncerRef`+`CurrentClass`,
+    %% skipping any SubRef already seen on this walk (per-subscription de-dup).
+    IndexRows = ets:match_object(?BY_CLASS_TABLE, {{AnnouncerRef, CurrentClass, '_'}}),
     {Seen1, Acc1} = lists:foldl(
-        fun({{_Class, SubRef}}, {SeenAcc, RefAcc}) ->
+        fun({{_Ann, _Class, SubRef}}, {SeenAcc, RefAcc}) ->
             case sets:is_element(SubRef, SeenAcc) of
                 true -> {SeenAcc, RefAcc};
                 false -> {sets:add_element(SubRef, SeenAcc), [SubRef | RefAcc]}
@@ -453,7 +531,7 @@ walk_collect(CurrentClass, EventClass, Seen, Acc, Depth) ->
         {ok, none} ->
             Acc1;
         {ok, Super} ->
-            walk_collect(Super, EventClass, Seen1, Acc1, Depth + 1);
+            walk_collect(AnnouncerRef, Super, EventClass, Seen1, Acc1, Depth + 1);
         not_found ->
             Acc1
     end.
@@ -495,14 +573,14 @@ place). Returns `not_found` for an unknown / already-consumed / unsubscribed ref
     {ok, announcement_class(), pid(), handler(), boolean()} | not_found.
 claim_row(SubRef) ->
     case ets:lookup(?SUBS_TABLE, SubRef) of
-        [{SubRef, Class, Pid, Handler, false}] ->
+        [{SubRef, _AnnouncerRef, Class, Pid, Handler, false}] ->
             {ok, Class, Pid, Handler, false};
-        [{SubRef, _Class, _Pid, _Handler, true}] ->
+        [{SubRef, _AnnouncerRef, _Class, _Pid, _Handler, true}] ->
             %% doOnce — atomically consume on the unique key. Whichever concurrent
             %% caller wins the `take` delivers; the rest get `[]` and skip.
             case ets:take(?SUBS_TABLE, SubRef) of
-                [{SubRef, Class, Pid, Handler, true}] ->
-                    true = ets:delete(?BY_CLASS_TABLE, {Class, SubRef}),
+                [{SubRef, AnnouncerRef, Class, Pid, Handler, true}] ->
+                    true = ets:delete(?BY_CLASS_TABLE, {AnnouncerRef, Class, SubRef}),
                     {ok, Class, Pid, Handler, true};
                 [] ->
                     not_found
@@ -699,34 +777,44 @@ read of the by-class index — does not go through the gen_server.
 """.
 -spec subscribers_of(announcement_class()) -> [sub_ref()].
 subscribers_of(AnnouncementClass) when is_atom(AnnouncementClass) ->
+    %% Layer 1 (raw) API — the shared system announcer namespace.
+    subscribers_of(?SYSTEM_ANNOUNCER_REF, AnnouncementClass).
+
+-doc """
+The `SubRef`s subscribed to exactly `AnnouncementClass` within the announcer
+namespace `AnnouncerRef` (BT-2454). Direct ETS read of the by-class index.
+""".
+-spec subscribers_of(announcer_ref(), announcement_class()) -> [sub_ref()].
+subscribers_of(AnnouncerRef, AnnouncementClass) when is_atom(AnnouncementClass) ->
     case ets:whereis(?BY_CLASS_TABLE) of
         undefined ->
             [];
         _ ->
             [
                 SubRef
-             || {{_Class, SubRef}} <- ets:match_object(
-                    ?BY_CLASS_TABLE, {{AnnouncementClass, '_'}}
+             || {{_Ann, _Class, SubRef}} <- ets:match_object(
+                    ?BY_CLASS_TABLE, {{AnnouncerRef, AnnouncementClass, '_'}}
                 )
             ]
     end.
 
 %%====================================================================
-%% FFI shims — introspection / navigation veneer (BT-2444)
+%% FFI shims — introspection / navigation veneer (BT-2444 / BT-2454)
 %%
 %% Read-only snapshots of the subscription graph as `SubscriptionNode` value
 %% records (ADR 0093 §7). All reads are direct ETS reads off the live tables —
-%% never routed through the gen_server — and never mutate. In v1 every announcer
-%% shares one class-keyed bus, so the `Announcer` scope is carried only to stamp
-%% the `announcer` field; the row set is the whole bus regardless of scope.
+%% never routed through the gen_server — and never mutate. Each read is scoped to
+%% the announcer's own namespace (BT-2454): a per-instance `Announcer` reports
+%% only its own subscriptions, and the system bus reports only the system
+%% namespace.
 %%====================================================================
 
 -doc """
-Snapshot of every live subscription as a list of `SubscriptionNode` value
-records, each stamped with `Announcer` as its `announcer` field. Backs
-`Announcer subscriptions` (self-inspection) and `AnnouncementNavigation
-subscriptions`. Direct read of the primary `set` table; `[]` when the bus has
-never started.
+Snapshot of `Announcer`'s own live subscriptions as a list of `SubscriptionNode`
+value records, each stamped with `Announcer` as its `announcer` field. Scoped to
+the announcer's namespace (BT-2454). Backs `Announcer subscriptions`
+(self-inspection) and `AnnouncementNavigation subscriptions`. Direct read of the
+primary `set` table; `[]` when the bus has never started.
 """.
 -spec 'subscriptionNodes'(announcer() | system_announcer()) -> [subscription_node()].
 'subscriptionNodes'(Announcer) ->
@@ -734,15 +822,19 @@ never started.
         undefined ->
             [];
         _ ->
+            AnnouncerRef = announcer_ref(Announcer),
             [
                 subscription_node(Row, Announcer)
-             || Row <- ets:tab2list(?SUBS_TABLE)
+             || Row <- ets:match_object(
+                    ?SUBS_TABLE, {'_', AnnouncerRef, '_', '_', '_', '_'}
+                )
             ]
     end.
 
 -doc """
-Snapshot of the subscriptions to exactly `ClassRef` as `SubscriptionNode`
-records, each stamped with `Announcer`. Backs `Announcer subscribersOf:` and
+Snapshot of `Announcer`'s subscriptions to exactly `ClassRef` as
+`SubscriptionNode` records, each stamped with `Announcer`. Scoped to the
+announcer's namespace (BT-2454). Backs `Announcer subscribersOf:` and
 `AnnouncementNavigation subscribersOf:`. `ClassRef` is resolved to its class-name
 atom the same way subscribe does (`class_name/1`), so a class object or a bare
 atom both work. Reads the by-class index for the `SubRef`s, then the primary
@@ -752,37 +844,45 @@ table for each row; `[]` for an unknown / never-subscribed class.
     [subscription_node()].
 'subscriptionNodesFor'(Announcer, ClassRef) ->
     Class = class_name(ClassRef),
+    AnnouncerRef = announcer_ref(Announcer),
     case ets:whereis(?SUBS_TABLE) of
         undefined ->
             [];
         _ ->
             lists:filtermap(
                 fun(SubRef) ->
+                    %% Re-assert the announcer scope on the primary row (binds
+                    %% `AnnouncerRef`), so this read stays correct even if the
+                    %% by-class index and primary table ever drift — the index is
+                    %% the scoping authority, but we never surface a cross-announcer
+                    %% row stamped with the wrong `Announcer`.
                     case ets:lookup(?SUBS_TABLE, SubRef) of
-                        [Row] -> {true, subscription_node(Row, Announcer)};
-                        [] -> false
+                        [{_SubRef, AnnouncerRef, _Class, _Pid, _Handler, _Once} = Row] ->
+                            {true, subscription_node(Row, Announcer)};
+                        _ ->
+                            false
                     end
                 end,
-                subscribers_of(Class)
+                subscribers_of(AnnouncerRef, Class)
             )
     end.
 
 -doc """
-The distinct event classes currently subscribed to, as class objects — the
-"announced classes" in active use across the bus (ADR 0093 §7). Backs
-`AnnouncementNavigation announcedClasses`. Reads the by-class index, dedupes the
-class atoms, and resolves each to its class object (atoms with no live class are
-dropped). `[]` when the bus has never started.
+The distinct event classes subscribed to within the announcer namespace
+`AnnouncerRef`, as class objects — the "announced classes" in active use on that
+announcer (ADR 0093 §7, scoped per BT-2454). Reads the by-class index, filters to
+`AnnouncerRef`, dedupes the class atoms, and resolves each to its class object
+(atoms with no live class are dropped). `[]` when the bus has never started.
 """.
--spec 'announcedClasses'() -> [term()].
-'announcedClasses'() ->
+-spec announced_classes(announcer_ref()) -> [term()].
+announced_classes(AnnouncerRef) ->
     case ets:whereis(?BY_CLASS_TABLE) of
         undefined ->
             [];
         _ ->
             ClassAtoms = lists:usort([
                 Class
-             || {{Class, _SubRef}} <- ets:tab2list(?BY_CLASS_TABLE)
+             || {{Ann, Class, _SubRef}} <- ets:tab2list(?BY_CLASS_TABLE), Ann =:= AnnouncerRef
             ]),
             lists:filtermap(
                 fun(ClassAtom) ->
@@ -796,13 +896,61 @@ dropped). `[]` when the bus has never started.
     end.
 
 -doc """
-Total number of live subscriptions across all classes — the integer form of
-`subscription_count/0`, exposed under a veneer-friendly name for `Announcer
-subscriptionCount`. Direct ETS read.
+Number of live subscriptions on `Announcer` (its own namespace, BT-2454) — backs
+`Announcer subscriptionCount`. Direct ETS read of the primary table filtered to
+the announcer's ref.
 """.
--spec 'subscriptionCountAll'() -> non_neg_integer().
-'subscriptionCountAll'() ->
-    subscription_count().
+-spec 'subscriptionCountOn'(announcer() | system_announcer()) -> non_neg_integer().
+'subscriptionCountOn'(Announcer) ->
+    case ets:whereis(?SUBS_TABLE) of
+        undefined ->
+            0;
+        _ ->
+            AnnouncerRef = announcer_ref(Announcer),
+            %% Count matching rows without materialising them (no list build).
+            ets:select_count(?SUBS_TABLE, [
+                {{'_', AnnouncerRef, '_', '_', '_', '_'}, [], [true]}
+            ])
+    end.
+
+%%====================================================================
+%% FFI shims — AnnouncementNavigation (BT-2444 / BT-2454)
+%%
+%% The navigation is an FFI-minted handle that carries the announcer scope it
+%% navigates (mirroring how `Announcer` carries its ref). `default` wraps the
+%% system bus; `of: anAnnouncer` wraps that announcer. The query shims extract
+%% the embedded announcer and delegate to the per-announcer reads above.
+%%====================================================================
+
+-doc """
+Mint an `AnnouncementNavigation` handle scoped to `Announcer` (a per-instance
+`Announcer`, or `SystemAnnouncer current` for `default`). The announcer is
+carried in the handle so the navigation's queries scope to it.
+""".
+-spec 'navigationFor'(announcer() | system_announcer()) -> announcement_navigation().
+'navigationFor'(Announcer) ->
+    #{'$beamtalk_class' => 'AnnouncementNavigation', announcer => Announcer}.
+
+-doc "Snapshot of the navigated announcer's subscriptions. Backs `AnnouncementNavigation subscriptions`.".
+-spec 'navSubscriptionNodes'(announcement_navigation()) -> [subscription_node()].
+'navSubscriptionNodes'(#{announcer := Announcer}) ->
+    'subscriptionNodes'(Announcer);
+'navSubscriptionNodes'(_) ->
+    [].
+
+-doc "Snapshot of the navigated announcer's subscriptions to `ClassRef`. Backs `AnnouncementNavigation subscribersOf:`.".
+-spec 'navSubscriptionNodesFor'(announcement_navigation(), term()) -> [subscription_node()].
+'navSubscriptionNodesFor'(#{announcer := Announcer}, ClassRef) ->
+    'subscriptionNodesFor'(Announcer, ClassRef);
+'navSubscriptionNodesFor'(_, _) ->
+    [].
+
+-doc "Distinct event classes in use on the navigated announcer. Backs `AnnouncementNavigation announcedClasses`.".
+-spec 'navAnnouncedClasses'(announcement_navigation()) -> [term()].
+'navAnnouncedClasses'(#{announcer := Announcer}) ->
+    announced_classes(announcer_ref(Announcer));
+'navAnnouncedClasses'(_) ->
+    [].
 
 %% Build a `SubscriptionNode` value record (tagged map) from a primary-table
 %% row, stamping the supplied `Announcer` scope. The handler kind is derived
@@ -811,7 +959,7 @@ subscriptionCount`. Direct ETS read.
 %% class atom is resolved to its class object (or `nil` if unloaded).
 -spec subscription_node(sub_row(), announcer() | system_announcer()) ->
     subscription_node().
-subscription_node({_SubRef, Class, SubscriberPid, Handler, Once}, Announcer) ->
+subscription_node({_SubRef, _AnnouncerRef, Class, SubscriberPid, Handler, Once}, Announcer) ->
     #{
         '$beamtalk_class' => 'SubscriptionNode',
         announcementClass => class_object(Class),
@@ -866,17 +1014,21 @@ init([]) ->
     }),
     {ok, #state{monitors = Monitors}}.
 
-handle_call({subscribe, AnnouncementClass, SubscriberPid, Handler, OnceFlag}, _From, State) ->
+handle_call(
+    {subscribe, AnnouncerRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag}, _From, State
+) ->
     SubRef = make_ref(),
-    true = ets:insert(?SUBS_TABLE, {SubRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag}),
-    true = ets:insert(?BY_CLASS_TABLE, {{AnnouncementClass, SubRef}}),
+    true = ets:insert(
+        ?SUBS_TABLE, {SubRef, AnnouncerRef, AnnouncementClass, SubscriberPid, Handler, OnceFlag}
+    ),
+    true = ets:insert(?BY_CLASS_TABLE, {{AnnouncerRef, AnnouncementClass, SubRef}}),
     NewState = arm_monitor(SubscriberPid, State),
     {reply, {ok, SubRef}, NewState};
 handle_call({unsubscribe, SubRef}, _From, State) ->
     NewState =
         case ets:lookup(?SUBS_TABLE, SubRef) of
-            [{SubRef, AnnouncementClass, SubscriberPid, _Handler, _Once}] ->
-                remove_subscription(SubRef, AnnouncementClass),
+            [{SubRef, AnnouncerRef, AnnouncementClass, SubscriberPid, _Handler, _Once}] ->
+                remove_subscription(SubRef, AnnouncerRef, AnnouncementClass),
                 disarm_monitor(SubscriberPid, State);
             [] ->
                 %% Idempotent — unknown / already-removed SubRef.
@@ -997,11 +1149,11 @@ no stale pids accumulate (BT-2442). Live pids get a fresh `erlang:monitor/2`.
 rearm_monitors() ->
     Rows = ets:tab2list(?SUBS_TABLE),
     lists:foldl(
-        fun({SubRef, Class, SubscriberPid, _Handler, _Once}, Acc) ->
+        fun({SubRef, AnnouncerRef, Class, SubscriberPid, _Handler, _Once}, Acc) ->
             case is_process_alive(SubscriberPid) of
                 false ->
                     %% Dead during the crash→restart gap — prune immediately.
-                    remove_subscription(SubRef, Class),
+                    remove_subscription(SubRef, AnnouncerRef, Class),
                     Acc;
                 true ->
                     case Acc of
@@ -1070,10 +1222,10 @@ prune_subscriber(Pid, #state{monitors = Monitors} = State) ->
         undefined ->
             ok;
         _ ->
-            Rows = ets:match_object(?SUBS_TABLE, {'_', '_', Pid, '_', '_'}),
+            Rows = ets:match_object(?SUBS_TABLE, {'_', '_', '_', Pid, '_', '_'}),
             lists:foreach(
-                fun({SubRef, AnnouncementClass, _Pid, _Handler, _Once}) ->
-                    remove_subscription(SubRef, AnnouncementClass)
+                fun({SubRef, AnnouncerRef, AnnouncementClass, _Pid, _Handler, _Once}) ->
+                    remove_subscription(SubRef, AnnouncerRef, AnnouncementClass)
                 end,
                 Rows
             )
@@ -1088,10 +1240,10 @@ prune_subscriber(Pid, #state{monitors = Monitors} = State) ->
 Remove one subscription's rows from both the primary table and the by-class
 index. Runs inside the gen_server (serialised write).
 """.
--spec remove_subscription(sub_ref(), announcement_class()) -> ok.
-remove_subscription(SubRef, AnnouncementClass) ->
+-spec remove_subscription(sub_ref(), announcer_ref(), announcement_class()) -> ok.
+remove_subscription(SubRef, AnnouncerRef, AnnouncementClass) ->
     true = ets:delete(?SUBS_TABLE, SubRef),
-    true = ets:delete(?BY_CLASS_TABLE, {AnnouncementClass, SubRef}),
+    true = ets:delete(?BY_CLASS_TABLE, {AnnouncerRef, AnnouncementClass, SubRef}),
     ok.
 
 %%====================================================================
@@ -1169,24 +1321,24 @@ Subscribe via `when:do:` — wraps `subscribe/4` and returns a Subscription hand
 Called from `Announcer when: aClass do: aBlock`.
 """.
 -spec 'whenDo'(announcer(), term(), term()) -> subscription().
-'whenDo'(_Announcer, Class, Handler) ->
-    subscribe_and_wrap(Class, Handler, false).
+'whenDo'(Announcer, Class, Handler) ->
+    subscribe_and_wrap(Announcer, Class, Handler, false).
 
 -doc """
 Subscribe via `when:send:to:` — wraps the selector/receiver into a handler tuple.
 Called from `Announcer when: aClass send: sel to: receiver`.
 """.
 -spec 'whenSendTo'(announcer(), term(), term(), term()) -> subscription().
-'whenSendTo'(_Announcer, Class, Selector, Receiver) ->
-    subscribe_and_wrap(Class, {send, Selector, Receiver}, false).
+'whenSendTo'(Announcer, Class, Selector, Receiver) ->
+    subscribe_and_wrap(Announcer, Class, {send, Selector, Receiver}, false).
 
 -doc """
 Subscribe via `when:doOnce:` — wraps `subscribe/4` with OnceFlag=true.
 Called from `Announcer when: aClass doOnce: aBlock`.
 """.
 -spec 'whenDoOnce'(announcer(), term(), term()) -> subscription().
-'whenDoOnce'(_Announcer, Class, Handler) ->
-    subscribe_and_wrap(Class, Handler, true).
+'whenDoOnce'(Announcer, Class, Handler) ->
+    subscribe_and_wrap(Announcer, Class, Handler, true).
 
 -doc """
 Announce an event asynchronously on a specific announcer.
@@ -1194,9 +1346,9 @@ Called from `Announcer announce: anEvent`. Extracts the event class from
 the event's `$beamtalk_class` key and dispatches.
 """.
 -spec 'announceOn'(announcer(), term()) -> nil.
-'announceOn'(_Announcer, Event) ->
+'announceOn'(Announcer, Event) ->
     ensure_started(),
-    dispatch_veneer_async(event_class(Event), Event),
+    dispatch_veneer_async(announcer_ref(Announcer), event_class(Event), Event),
     nil.
 
 -doc """
@@ -1210,10 +1362,11 @@ handler is a Block / `{send, ...}` tuple. Each handler runs in its own transient
 process (fire-and-forget) so a slow or crashing handler never blocks the
 publisher or its siblings — async semantics (ADR 0093 §1), mirroring the sync
 path's `spawn_monitor` minus the gather. Shared by `announceOn/2` (per-instance
-announcers) and `system_announce/2` (the system bus).
+announcers) and `system_announce/2` (the system bus). Scoped to `AnnouncerRef`
+(BT-2454): only subscriptions on that announcer match.
 """.
--spec dispatch_veneer_async(announcement_class(), term()) -> ok.
-dispatch_veneer_async(EventClass, Event) ->
+-spec dispatch_veneer_async(announcer_ref(), announcement_class(), term()) -> ok.
+dispatch_veneer_async(AnnouncerRef, EventClass, Event) ->
     lists:foreach(
         fun(SubRef) ->
             case claim_row(SubRef) of
@@ -1235,7 +1388,7 @@ dispatch_veneer_async(EventClass, Event) ->
                     ok
             end
         end,
-        collect_matching(EventClass)
+        collect_matching(AnnouncerRef, EventClass)
     ),
     ok.
 
@@ -1256,17 +1409,17 @@ started is started on demand via `ensure_started/0`. Returns `ok`.
 system_announce(EventClass, Fields) when is_atom(EventClass), is_map(Fields) ->
     ensure_started(),
     Event = Fields#{'$beamtalk_class' => EventClass},
-    dispatch_veneer_async(EventClass, Event).
+    dispatch_veneer_async(?SYSTEM_ANNOUNCER_REF, EventClass, Event).
 
 -doc """
 Announce an event synchronously on a specific announcer (default 5s timeout).
 Called from `Announcer announceAndWait: anEvent`.
 """.
 -spec 'announceAndWaitOn'(announcer(), term()) -> nil.
-'announceAndWaitOn'(_Announcer, Event) ->
+'announceAndWaitOn'(Announcer, Event) ->
     ensure_started(),
     EventClass = event_class(Event),
-    announceAndWait(EventClass, Event),
+    do_announce_and_wait(announcer_ref(Announcer), EventClass, Event, ?DEFAULT_ANNOUNCE_TIMEOUT),
     nil.
 
 -doc """
@@ -1274,29 +1427,31 @@ Announce an event synchronously with a custom timeout.
 Called from `Announcer announceAndWait: anEvent timeout: ms`.
 """.
 -spec 'announceAndWaitOn'(announcer(), term(), integer()) -> nil.
-'announceAndWaitOn'(_Announcer, Event, Timeout) ->
+'announceAndWaitOn'(Announcer, Event, Timeout) ->
     ensure_started(),
     EventClass = event_class(Event),
-    announceAndWait(EventClass, Event, Timeout),
+    do_announce_and_wait(announcer_ref(Announcer), EventClass, Event, Timeout),
     nil.
 
 -doc """
-Remove all subscriptions held by a specific receiver pid on a given announcer.
-Called from `Announcer unsubscribe: receiver`.
+Remove all subscriptions held by a specific receiver pid *on this announcer*
+(BT-2454 — scoped to the announcer's namespace, so a receiver's subscriptions on
+other announcers are untouched). Called from `Announcer unsubscribe: receiver`.
 """.
 -spec 'unsubscribeReceiver'(announcer(), term()) -> nil.
-'unsubscribeReceiver'(_Announcer, Receiver) ->
+'unsubscribeReceiver'(Announcer, Receiver) ->
     ensure_started(),
     ReceiverPid = extract_pid(Receiver),
     case ReceiverPid of
         undefined ->
             nil;
         Pid ->
-            %% Find and remove all subscriptions for this pid. We use the
-            %% gen_server path to ensure monitor bookkeeping is updated.
-            Rows = ets:match_object(?SUBS_TABLE, {'_', '_', Pid, '_', '_'}),
+            %% Find and remove this pid's subscriptions on this announcer only. We
+            %% use the gen_server path to ensure monitor bookkeeping is updated.
+            AnnouncerRef = announcer_ref(Announcer),
+            Rows = ets:match_object(?SUBS_TABLE, {'_', AnnouncerRef, '_', Pid, '_', '_'}),
             lists:foreach(
-                fun({SubRef, _Class, _Pid, _Handler, _Once}) ->
+                fun({SubRef, _Ann, _Class, _Pid, _Handler, _Once}) ->
                     unsubscribe(SubRef)
                 end,
                 Rows
@@ -1336,11 +1491,13 @@ Common implementation for `whenDo`, `whenSendTo`, and `whenDoOnce`.
 Ensures the gen_server is running (auto-starts if needed, e.g. in BUnit tests
 where the full runtime app may not be started).
 """.
--spec subscribe_and_wrap(term(), handler(), boolean()) -> subscription().
-subscribe_and_wrap(ClassRef, Handler, OnceFlag) ->
+-spec subscribe_and_wrap(announcer() | system_announcer(), term(), handler(), boolean()) ->
+    subscription().
+subscribe_and_wrap(Announcer, ClassRef, Handler, OnceFlag) ->
     ensure_started(),
     Class = class_name(ClassRef),
-    case subscribe(Class, self(), Handler, OnceFlag) of
+    AnnouncerRef = announcer_ref(Announcer),
+    case subscribe(AnnouncerRef, Class, self(), Handler, OnceFlag) of
         {ok, SubRef} ->
             #{'$beamtalk_class' => 'Subscription', ref => SubRef};
         {error, Error} ->
@@ -1413,6 +1570,21 @@ class_object(ClassName) when is_atom(ClassName) ->
     end;
 class_object(_) ->
     nil.
+
+-doc """
+Extract the announcer namespace ref from an announcer handle (BT-2454). A
+per-instance `Announcer` / `SystemAnnouncer` map carries its ref under the `ref`
+key (a `reference()`, or the `?SYSTEM_ANNOUNCER_REF` atom for the system bus).
+Anything else (a bare atom passed directly, or an unrecognised term) falls back
+to the shared system namespace, matching the Layer 1 default.
+""".
+-spec announcer_ref(announcer() | system_announcer() | term()) -> announcer_ref().
+announcer_ref(#{ref := Ref}) ->
+    Ref;
+announcer_ref(Ref) when is_reference(Ref); is_atom(Ref) ->
+    Ref;
+announcer_ref(_) ->
+    ?SYSTEM_ANNOUNCER_REF.
 
 -doc """
 Extract the announcement class atom from an event (its `$beamtalk_class` key).
