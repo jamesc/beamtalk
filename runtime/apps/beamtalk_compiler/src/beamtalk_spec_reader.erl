@@ -76,28 +76,128 @@ read_specs(BeamFile) ->
 -doc """
 Batch-read specs from multiple `.beam` files.
 
-Returns a list of `{Module, Specs}' tuples, one per input file.
-Each result is:
+Returns a list of `{Module, Specs}' tuples, one per input file, in the same
+order as the input. Each result is:
   `{Module, {ok, Specs}}' on success
   `{Module, {error, Reason}}' on failure
 
 The module name is extracted from the `.beam` file's module attribute.
+
+Files are processed across `erlang:system_info(schedulers_online)' worker
+processes (BT-2469): reading `abstract_code' is I/O- and decompression-bound,
+so it parallelises well. A shared, batch-scoped ETS table memoises the parsed
+artifacts of each remote module referenced by a `-spec' (e.g. `sets:set()',
+`queue:queue()'), so a remote module's `.beam' is read and folded at most once
+per batch instead of once per referencing type.
 """.
 -spec read_specs_batch([file:filename_all()]) ->
     [{binary(), {ok, [map()]} | {error, term()}}].
 read_specs_batch(BeamFiles) ->
-    lists:map(
-        fun(BeamFile) ->
-            ModName = beam_file_to_module_name(BeamFile),
-            case read_specs(BeamFile) of
-                {ok, Specs} ->
-                    {ModName, {ok, Specs}};
-                {error, Reason} ->
-                    {ModName, {error, Reason}}
-            end
-        end,
-        BeamFiles
-    ).
+    %% Unnamed (tid) so concurrent batches — should they ever occur — never
+    %% clash on a registered name. `public' so worker processes can read/write.
+    RemoteCache = ets:new(beamtalk_remote_type_cache, [
+        set, public, {read_concurrency, true}, {write_concurrency, true}
+    ]),
+    try
+        Schedulers = erlang:system_info(schedulers_online),
+        parallel_map(
+            fun(BeamFile) -> read_one_spec(BeamFile, RemoteCache) end,
+            BeamFiles,
+            Schedulers
+        )
+    after
+        ets:delete(RemoteCache)
+    end.
+
+%% Read specs for a single `.beam' file, tagging the result with its module
+%% name. Runs inside a `parallel_map/3' worker process; installs the shared
+%% remote-type memo table into this process's dictionary so `resolve_remote_type'
+%% can reuse parsed remote modules across the whole batch.
+-spec read_one_spec(file:filename_all(), ets:tid()) ->
+    {binary(), {ok, [map()]} | {error, term()}}.
+read_one_spec(BeamFile, RemoteCache) ->
+    put(beamtalk_remote_cache, RemoteCache),
+    ModName = beam_file_to_module_name(BeamFile),
+    case read_specs(BeamFile) of
+        {ok, Specs} ->
+            {ModName, {ok, Specs}};
+        {error, Reason} ->
+            {ModName, {error, Reason}}
+    end.
+
+%% Order-preserving, bounded-concurrency parallel map. Splits `List' into at
+%% most `N' contiguous chunks, processes each chunk sequentially in its own
+%% process, and concatenates the per-chunk results back in input order.
+%% Bounding to the scheduler count caps peak memory (each worker may
+%% transitively read further `.beam' files) and the transient duplicate work
+%% before the shared remote-type memo warms.
+%%
+%% A non-list `List' raises in the calling process (via `chunk/2''s `length/1'
+%% or `lists:map/2'), which `beamtalk_build_worker:handle_read_specs/1' relies
+%% on to turn bad input into a result-error line.
+-spec parallel_map(fun((A) -> B), [A], pos_integer()) -> [B].
+parallel_map(_Fun, [], _N) ->
+    [];
+parallel_map(Fun, List, N) when N =< 1 ->
+    lists:map(Fun, List);
+parallel_map(Fun, List, N) ->
+    case chunk(List, N) of
+        [Single] ->
+            %% A single chunk gains nothing from spawning.
+            lists:map(Fun, Single);
+        Chunks ->
+            Parent = self(),
+            Workers = lists:map(
+                fun(Chunk) ->
+                    Ref = make_ref(),
+                    {_Pid, MonRef} = spawn_monitor(fun() ->
+                        Parent ! {Ref, lists:map(Fun, Chunk)}
+                    end),
+                    {Ref, MonRef, Chunk}
+                end,
+                Chunks
+            ),
+            lists:append([collect_chunk(W, Fun) || W <- Workers])
+    end.
+
+%% Await one chunk worker's results, preserving order. If the worker died
+%% before delivering (it should not — `read_specs/1' wraps its own errors),
+%% re-run that chunk synchronously so no module is silently dropped.
+-spec collect_chunk({reference(), reference(), [A]}, fun((A) -> B)) -> [B].
+collect_chunk({Ref, MonRef, Chunk}, Fun) ->
+    receive
+        {Ref, Results} ->
+            erlang:demonitor(MonRef, [flush]),
+            Results;
+        {'DOWN', MonRef, process, _Pid, normal} ->
+            %% Worker exited normally; its result is already in the mailbox.
+            receive
+                {Ref, Results} -> Results
+            after 0 ->
+                lists:map(Fun, Chunk)
+            end;
+        {'DOWN', MonRef, process, _Pid, _Reason} ->
+            lists:map(Fun, Chunk)
+    end.
+
+%% Split `List' into at most `N' contiguous, order-preserving chunks.
+-spec chunk([A], pos_integer()) -> [[A]].
+chunk(List, N) ->
+    Len = length(List),
+    Size = (Len + N - 1) div N,
+    chunk_by(List, max(Size, 1)).
+
+-spec chunk_by([A], pos_integer()) -> [[A]].
+chunk_by([], _Size) ->
+    [];
+chunk_by(List, Size) ->
+    case length(List) =< Size of
+        true ->
+            [List];
+        false ->
+            {Head, Tail} = lists:split(Size, List),
+            [Head | chunk_by(Tail, Size)]
+    end.
 
 -doc """
 Read raw spec abstract forms from a `.beam` file.
@@ -625,15 +725,13 @@ resolve_remote_type(Mod, TypeName, Args) ->
 -spec resolve_remote_type_from_beam(
     file:filename_all() | binary(), atom(), atom(), non_neg_integer(), non_neg_integer()
 ) -> binary().
-resolve_remote_type_from_beam(BeamRef, _Mod, TypeName, Arity, Depth) ->
-    case beam_lib:chunks(BeamRef, [abstract_code]) of
-        {ok, {_, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
-            RemoteOpaqueSet = build_opaque_set(Forms),
+resolve_remote_type_from_beam(BeamRef, Mod, TypeName, Arity, Depth) ->
+    case remote_module_artifacts(Mod, BeamRef) of
+        {ok, RemoteOpaqueSet, RemoteRegistry} ->
             case sets:is_element({TypeName, Arity}, RemoteOpaqueSet) of
                 true ->
                     <<"Dynamic">>;
                 false ->
-                    RemoteRegistry = build_type_registry(Forms),
                     case maps:find({TypeName, Arity}, RemoteRegistry) of
                         {ok, TypeBody} ->
                             %% Temporarily install remote registry for nested resolution
@@ -653,8 +751,53 @@ resolve_remote_type_from_beam(BeamRef, _Mod, TypeName, Arity, Depth) ->
                             <<"Dynamic">>
                     end
             end;
-        _ ->
+        error ->
             <<"Dynamic">>
+    end.
+
+%% Return the parsed artifacts `{ok, OpaqueSet, TypeRegistry}' of a remote module
+%% (or `error' if it has no abstract code), memoised per batch (BT-2469).
+%%
+%% Reading and folding `abstract_code' depends only on the module's `.beam', so
+%% the result is cached in the batch-scoped ETS table installed by
+%% `read_one_spec/2'. Without it the same remote module (`sets', `queue',
+%% `gb_trees', …) was re-read and re-folded once per referencing `-spec'. The
+%% cache is keyed by module atom — stable across `BeamRef' being a path or a
+%% preloaded binary.
+%%
+%% When no cache is installed (the single-file `read_specs/1' API) the artifacts
+%% are computed directly. A stale table handle left in the process dictionary by
+%% an earlier, already-finished batch is tolerated: the `badarg' from the deleted
+%% table falls back to a direct computation and forgets the dead handle.
+-spec remote_module_artifacts(atom(), file:filename_all() | binary()) ->
+    {ok, sets:set({atom(), non_neg_integer()}), map()} | error.
+remote_module_artifacts(Mod, BeamRef) ->
+    case get(beamtalk_remote_cache) of
+        undefined ->
+            compute_remote_artifacts(BeamRef);
+        Tid ->
+            try ets:lookup(Tid, Mod) of
+                [{Mod, Artifacts}] ->
+                    Artifacts;
+                [] ->
+                    Artifacts = compute_remote_artifacts(BeamRef),
+                    ets:insert(Tid, {Mod, Artifacts}),
+                    Artifacts
+            catch
+                error:badarg ->
+                    erase(beamtalk_remote_cache),
+                    compute_remote_artifacts(BeamRef)
+            end
+    end.
+
+-spec compute_remote_artifacts(file:filename_all() | binary()) ->
+    {ok, sets:set({atom(), non_neg_integer()}), map()} | error.
+compute_remote_artifacts(BeamRef) ->
+    case beam_lib:chunks(BeamRef, [abstract_code]) of
+        {ok, {_, [{abstract_code, {raw_abstract_v1, Forms}}]}} ->
+            {ok, build_opaque_set(Forms), build_type_registry(Forms)};
+        _ ->
+            error
     end.
 
 -doc """
