@@ -206,6 +206,91 @@
 .bindings-panel { flex: 1; min-height: 0; }
 .inspector-panel { flex: 1; min-height: 0; }
 
+/* ============================================================================
+   Bindings + Inspector (BT-2486, epic BT-2482 Phase 1)
+   ----------------------------------------------------------------------------
+   Restyled to the spike design (spikes/cockpit-ux-spike/inspector.jsx +
+   styles.css): the Bindings list of `name := printString` rows with a type/kind
+   chip, and the docked Inspector with a reference-following drill breadcrumb,
+   class/pid type chips, and a follow-able instance-variable table. Behaviour
+   (the `inspect`/`drill`/`crumb` events, `render_term` values) is server-side and
+   unchanged — these rules only re-skin. Phase-1 scope omits the spike's live
+   field-flash / freeze / poke chrome (BT-2489/BT-2492).
+   ========================================================================== */
+
+/* Bindings list */
+.bt-cockpit .bindings-panel .panel-body { padding: 4px 0; }
+.obj-list { display: flex; flex-direction: column; }
+.obj-row {
+  display: flex; align-items: center; gap: 7px; padding: 0 10px; min-height: 28px;
+}
+.obj-row.drillable { cursor: pointer; }
+.obj-row.drillable:hover { background: var(--hover); }
+.obj-row .bname { font-size: 12px; color: var(--accent-2); font-weight: 600; flex: none; }
+.obj-row .bassign { color: var(--faint); flex: none; }
+.obj-row .ps {
+  font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; min-width: 0; flex: 1;
+}
+.obj-row .obj-inspect { flex: none; padding: 2px 8px; font-size: 11px; opacity: 0; }
+.obj-row:hover .obj-inspect { opacity: 1; }
+
+/* type/kind chip shared by Bindings rows and Inspector value cells */
+.kind {
+  flex: none; font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 4px; background: var(--panel-3); color: var(--muted);
+  border: 1px solid var(--line);
+}
+.kind.string { color: var(--t-string); }
+.kind.int    { color: var(--t-number); }
+.kind.symbol { color: var(--t-symbol); }
+.kind.bool   { color: var(--t-keyword); }
+.kind.ref    { color: var(--accent-2); background: var(--accent-soft); border-color: var(--accent-soft); }
+
+/* Inspector — docked, head + chips + ivar table */
+.insp { display: flex; flex-direction: column; min-height: 0; }
+.insp .insp-head {
+  flex: none; padding: 11px 14px; border-bottom: 1px solid var(--line); background: var(--code-bg);
+}
+.insp-head .ps { font-size: 12.5px; color: var(--ink); }
+.insp-head .ps strong { color: var(--accent-2); font-weight: 600; }
+.insp-head .ps .ps-header { color: var(--ink); margin-left: 6px; }
+.insp-crumbs {
+  display: flex; flex-wrap: wrap; gap: 5px; align-items: center;
+  font-size: 11px; color: var(--muted); margin-bottom: 7px;
+}
+.insp-crumbs .c { cursor: pointer; color: var(--accent-2); }
+.insp-crumbs .c:hover { text-decoration: underline; }
+.insp-crumbs .sep { color: var(--faint); }
+.proc-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px;
+  border: 1px solid var(--line); border-radius: 5px; padding: 2px 7px;
+  background: var(--panel); color: var(--muted); font-family: var(--code-font, ui-monospace, monospace);
+}
+.chip b { color: var(--ink); font-weight: 600; }
+
+.bt-cockpit .inspector-panel .panel-body { padding: 0; }
+.ivar-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ivar-table tr { border-bottom: 1px solid var(--line-soft); cursor: default; }
+.ivar-table tr.drillable { cursor: pointer; }
+.ivar-table tr.drillable:hover { background: var(--hover); }
+.ivar-table td { padding: 6px 12px; vertical-align: top; }
+.ivar-table .k { font-family: var(--code-font, ui-monospace, monospace); color: var(--accent-2); width: 38%; }
+.ivar-table .v { font-family: var(--code-font, ui-monospace, monospace); color: var(--ink); }
+.ivar-table .v.string { color: var(--t-string); }
+.ivar-table .v.int { color: var(--t-number); }
+.ivar-table .v.symbol { color: var(--t-symbol); }
+.ivar-table .v.bool { color: var(--t-keyword); }
+.ivar-table .v.ref { color: var(--accent-2); }
+.ivar-table .v.ref::after { content: " ›"; color: var(--faint); }
+.ivar-table .follow { width: 1%; white-space: nowrap; text-align: right; }
+.follow-link { font-size: 10.5px; color: var(--accent-2); font-weight: 600; opacity: 0; }
+.ivar-table tr.drillable:hover .follow-link { opacity: 1; }
+
+.empty { padding: 28px 16px; text-align: center; color: var(--faint); font-size: 12px; }
+
 /* generic controls reused across panes */
 .btn {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;
