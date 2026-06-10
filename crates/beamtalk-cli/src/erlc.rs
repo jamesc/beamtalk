@@ -219,8 +219,7 @@ mod tests {
 
     #[test]
     fn test_basic_invocation() {
-        let inv =
-            ErlcInvocation::new("/fake/out").source_file(Utf8PathBuf::from("/fake/foo.erl"));
+        let inv = ErlcInvocation::new("/fake/out").source_file(Utf8PathBuf::from("/fake/foo.erl"));
         let cmd = inv.build();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert_eq!(args, vec!["-o", "/fake/out", "/fake/foo.erl"]);
@@ -233,7 +232,10 @@ mod tests {
             .source_file(Utf8PathBuf::from("/fake/foo.erl"));
         let cmd = inv.build();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert_eq!(args, vec!["+debug_info", "-o", "/fake/out", "/fake/foo.erl"]);
+        assert_eq!(
+            args,
+            vec!["+debug_info", "-o", "/fake/out", "/fake/foo.erl"]
+        );
     }
 
     #[test]
