@@ -1,0 +1,194 @@
+/* morphic.css — Beamtalk Morphic World. A direct-manipulation desktop where live
+   objects ARE the UI: each running object is a draggable "morph" you can poke in
+   place, surrounded by Squeak-style halo handles when selected. Reuses the theme
+   variables from styles.css (theme / accent / fonts via Tweaks). */
+
+.world {
+  position: fixed; inset: 0; overflow: hidden;
+  background:
+    radial-gradient(circle at center, color-mix(in oklab, var(--ink) 8%, transparent) 1px, transparent 1.4px);
+  background-size: 26px 26px;
+  background-color: var(--bg);
+  user-select: none;
+}
+
+/* top toolbar */
+.world-bar {
+  position: absolute; top: 0; left: 0; right: 0; height: 50px; z-index: 60;
+  display: flex; align-items: center; gap: 14px; padding: 0 14px;
+  background: color-mix(in oklab, var(--panel) 86%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.world-bar .mark {
+  font-family: var(--code-font, monospace); font-weight: 600; font-size: 15px; letter-spacing: -.02em;
+}
+.world-bar .mark b { color: var(--accent); }
+.world-bar .sub { font-size: 11px; color: var(--faint); }
+.world-bar .attach {
+  display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--muted);
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px;
+}
+.world-bar .attach b { color: var(--ink); font-family: var(--code-font, monospace); font-weight: 600; }
+.world-bar .spacer { flex: 1; }
+
+/* new-morph palette */
+.palette { display: flex; align-items: center; gap: 7px; }
+.palette .plabel { font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.palette .pbtn {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 7px; padding: 5px 11px; font-size: 12px; font-weight: 500;
+  font-family: var(--code-font, monospace);
+}
+.palette .pbtn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.palette .pbtn .glyph { width: 16px; height: 16px; border-radius: 5px; display: grid; place-items: center; font-size: 11px; color: var(--accent-ink); background: var(--accent); }
+
+/* ---- a morph ---- */
+.morph {
+  position: absolute; border-radius: 14px; background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 6px 20px rgba(60,45,20,.16);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.morph.selected { box-shadow: 0 1px 0 rgba(255,255,255,.5) inset, 0 10px 32px rgba(60,45,20,.26); }
+.morph-head {
+  display: flex; align-items: center; gap: 7px; padding: 7px 11px; cursor: grab;
+  background: var(--panel-2); border-bottom: 1px solid var(--line);
+}
+.morph-head:active { cursor: grabbing; }
+.morph-bind { font-family: var(--code-font, monospace); font-weight: 700; color: var(--accent-2); font-size: 12.5px; }
+.morph-class { font-family: var(--code-font, monospace); font-size: 11px; color: var(--muted); }
+.morph-pid { margin-left: auto; font-family: var(--code-font, monospace); font-size: 10px; color: var(--faint); }
+.morph-live { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.morph-live.tick { animation: mpulse 1.6s ease-in-out infinite; }
+@keyframes mpulse { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+.morph-body { padding: 13px 14px; display: flex; flex-direction: column; gap: 11px; flex: 1; }
+
+/* counter morph */
+.counter-val { font-family: var(--code-font, monospace); font-size: 46px; font-weight: 600; line-height: 1; color: var(--ink); text-align: center; transition: transform .12s ease; }
+.counter-val.bump { transform: scale(1.16); color: var(--accent); }
+.counter-meta { text-align: center; font-size: 11px; color: var(--muted); font-family: var(--code-font, monospace); }
+.counter-ctl { display: flex; gap: 8px; justify-content: center; }
+.mbtn {
+  cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 8px; padding: 6px 12px; font-size: 13px; font-weight: 600; font-family: var(--code-font, monospace);
+  min-width: 40px;
+}
+.mbtn:hover { background: var(--accent-soft); border-color: var(--accent); }
+.mbtn:active { transform: translateY(1px); }
+.mbtn.wide { flex: 1; }
+.mbtn.ghost { background: transparent; color: var(--muted); }
+.mbtn.ghost:hover { color: var(--ink); }
+
+/* account morph */
+.acct-owner { font-size: 12px; color: var(--muted); }
+.acct-owner b { color: var(--ink); }
+.acct-bal { font-family: var(--code-font, monospace); font-size: 30px; font-weight: 600; color: var(--ink); transition: color .15s; }
+.acct-bal.bump { color: var(--ok); }
+.acct-row { display: flex; gap: 8px; }
+.acct-log { font-size: 10.5px; color: var(--faint); font-family: var(--code-font, monospace); border-top: 1px dashed var(--line); padding-top: 8px; }
+
+/* room morph */
+.room-name { font-family: var(--code-font, monospace); color: var(--t-symbol); font-size: 13px; font-weight: 600; }
+.room-members { display: flex; gap: 5px; flex-wrap: wrap; }
+.room-chip { font-size: 10.5px; font-family: var(--code-font, monospace); background: var(--panel-3); border: 1px solid var(--line); border-radius: 20px; padding: 2px 9px; color: var(--muted); }
+.room-feed { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-family: var(--code-font, monospace); color: var(--ink); max-height: 78px; overflow: hidden; }
+.room-feed .rmsg { opacity: .55; }
+.room-feed .rmsg:last-child { opacity: 1; }
+.room-cast { display: flex; gap: 6px; }
+.room-cast input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--code-bg); border-radius: 7px; padding: 5px 8px; font-family: var(--code-font, monospace); font-size: 11.5px; color: var(--ink); outline: none; }
+.room-cast input:focus { border-color: var(--accent); }
+
+/* ---- halo ---- */
+.halo { position: absolute; pointer-events: none; z-index: 5; }
+.halo-ring { position: absolute; inset: -14px; border: 1.5px dashed var(--accent); border-radius: 20px; opacity: .55; }
+.halo-name {
+  position: absolute; top: -38px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font-family: var(--code-font, monospace); font-size: 11px; font-weight: 600; color: var(--accent-ink);
+  background: var(--accent); padding: 2px 10px; border-radius: 20px; pointer-events: auto;
+}
+.handle {
+  position: absolute; width: 24px; height: 24px; border-radius: 50%; pointer-events: auto; cursor: pointer;
+  display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0,0,0,.28); border: 1.5px solid rgba(255,255,255,.7);
+}
+.handle:hover { transform: scale(1.18); }
+.handle svg { width: 13px; height: 13px; }
+.handle .tip {
+  position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  background: var(--ink); color: var(--panel); font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 5px;
+  opacity: 0; transition: opacity .12s; pointer-events: none; font-family: var(--ui-font);
+}
+.handle:hover .tip { opacity: 1; }
+
+.h-delete   { background: #c4493b; }
+.h-menu     { background: #6b6356; }
+.h-move     { background: #b07a2e; cursor: grab; }
+.h-dup      { background: #5d8a3a; }
+.h-inspect  { background: #2c6e8e; }
+.h-send     { background: var(--accent); }
+.h-resize   { background: #c79a2a; cursor: nwse-resize; }
+
+/* send-message bubble attached to a morph */
+.send-bubble {
+  position: absolute; z-index: 70; background: var(--ink); border-radius: 10px; padding: 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.34); display: flex; gap: 6px; align-items: center;
+}
+.send-bubble::after { content: ""; position: absolute; left: -6px; top: 16px; border: 6px solid transparent; border-right-color: var(--ink); }
+.send-bubble .recv { color: var(--accent-2); font-family: var(--code-font, monospace); font-size: 11px; font-weight: 700; }
+.send-bubble input {
+  border: 0; outline: none; background: rgba(255,255,255,.1); color: #fff; border-radius: 6px;
+  padding: 5px 8px; font-family: var(--code-font, monospace); font-size: 12px; width: 170px;
+}
+.send-bubble input::placeholder { color: rgba(255,255,255,.4); }
+.send-bubble .sb-go { cursor: pointer; background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px; padding: 5px 10px; font-weight: 700; font-size: 12px; }
+
+/* context menu */
+.morph-menu {
+  position: absolute; z-index: 80; background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 12px 34px rgba(60,45,20,.28); min-width: 188px; overflow: hidden; padding: 4px;
+}
+.morph-menu .mi { padding: 7px 10px; font-size: 12.5px; color: var(--ink); border-radius: 6px; cursor: pointer; display: flex; gap: 9px; align-items: center; }
+.morph-menu .mi:hover { background: var(--hover); }
+.morph-menu .mi .mono { color: var(--accent-2); font-size: 11.5px; }
+.morph-menu .sep { height: 1px; background: var(--line-soft); margin: 4px 2px; }
+
+/* floating inspector morph */
+.insp-morph {
+  position: absolute; z-index: 75; width: 280px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 14px 40px rgba(60,45,20,.3); overflow: hidden;
+}
+.insp-morph .imh { display: flex; align-items: center; gap: 8px; padding: 9px 12px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.insp-morph .imh .t { font-family: var(--code-font, monospace); font-size: 12px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-morph .imh .x { margin-left: auto; cursor: pointer; color: var(--faint); font-size: 15px; line-height: 1; }
+.insp-morph .imh .x:hover { color: var(--ink); }
+.insp-morph .imback { cursor: pointer; color: var(--accent-2); font-size: 12px; }
+.insp-morph table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.insp-morph td { padding: 6px 12px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.insp-morph td.k { font-family: var(--code-font, monospace); color: var(--accent-2); width: 40%; }
+.insp-morph td.v { font-family: var(--code-font, monospace); color: var(--ink); }
+.insp-morph tr.drill { cursor: pointer; }
+.insp-morph tr.drill:hover { background: var(--hover); }
+.insp-morph tr.drill td.v::after { content: " ›"; color: var(--faint); }
+
+/* poof animation on delete */
+@keyframes poof { 0%{ transform: scale(1); opacity: 1;} 100%{ transform: scale(.6) rotate(8deg); opacity: 0;} }
+.morph.poof { animation: poof .26s ease-in forwards; }
+/* spawn pop */
+@keyframes pop { 0%{ transform: scale(.7); opacity: 0;} 100%{ transform: scale(1); opacity: 1;} }
+.morph.pop { animation: pop .22s ease-out; }
+
+/* world log */
+.world-log {
+  position: absolute; left: 14px; bottom: 12px; z-index: 55; max-width: 380px;
+  font-family: var(--code-font, monospace); font-size: 11px; color: var(--muted);
+  display: flex; flex-direction: column; gap: 3px; pointer-events: none;
+}
+.world-log .wl { background: color-mix(in oklab, var(--panel) 80%, transparent); border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; }
+.world-log .wl .a { color: var(--accent); }
+.world-hint {
+  position: absolute; right: 14px; bottom: 14px; z-index: 55; font-size: 11px; color: var(--faint);
+  background: color-mix(in oklab, var(--panel) 80%, transparent); border: 1px solid var(--line);
+  border-radius: 7px; padding: 5px 11px;
+}
