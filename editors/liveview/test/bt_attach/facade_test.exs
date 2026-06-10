@@ -21,6 +21,18 @@ defmodule BtAttach.FacadeTest do
     def save_method(c, s, src), do: record({:save, c, s, src}) && {:ok, c}
     def subscribe_transcript(pid), do: record({:sub_t, pid}) && :ok
     def subscribe_bindings(pid), do: record({:sub_b, pid}) && :ok
+
+    # ADR 0095 (BT-2488): the four System Browser browse ops.
+    def browse_classes, do: record({:browse_classes}) && {:value, [%{"name" => "Counter"}]}
+
+    def browse_protocols(class, side),
+      do: record({:browse_protocols, class, side}) && {:value, %{"class" => class}}
+
+    def browse_method_source(class, side, selector),
+      do: record({:browse_method_source, class, side, selector}) && {:value, %{"source" => "x"}}
+
+    def browse_class_definition(class),
+      do: record({:browse_class_definition, class}) && {:value, %{"class" => class}}
   end
 
   setup do
@@ -40,7 +52,9 @@ defmodule BtAttach.FacadeTest do
 
       for read <- ~w(info inspect bindings actors processes sessions complete
                      subscribe_transcript subscribe_bindings subscribe_actors
-                     subscribe_classes)a do
+                     subscribe_classes
+                     browse_classes browse_protocols browse_method_source
+                     browse_class_definition)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
       end
 
@@ -91,6 +105,56 @@ defmodule BtAttach.FacadeTest do
       # yet — it must not silently no-op or hit the client.
       assert Facade.dispatch(:kill, %{}) == {:error, {:unsupported_op, :kill}}
       assert RecordingClient.calls() == []
+    end
+  end
+
+  describe "browse ops (System Browser data source, ADR 0095 / BT-2488)" do
+    test "the four browse ops route to the client and return the live term verbatim" do
+      assert Facade.dispatch(:browse_classes, %{}) == {:value, [%{"name" => "Counter"}]}
+
+      assert Facade.dispatch(:browse_protocols, %{class: "Counter", side: "instance"}) ==
+               {:value, %{"class" => "Counter"}}
+
+      assert Facade.dispatch(:browse_method_source, %{
+               class: "Counter",
+               side: "instance",
+               selector: "increment"
+             }) == {:value, %{"source" => "x"}}
+
+      assert Facade.dispatch(:browse_class_definition, %{class: "Counter"}) ==
+               {:value, %{"class" => "Counter"}}
+
+      recorded = RecordingClient.calls() |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+
+      assert recorded ==
+               MapSet.new([
+                 :browse_classes,
+                 :browse_protocols,
+                 :browse_method_source,
+                 :browse_class_definition
+               ])
+    end
+
+    test "browse_protocols side defaults to instance when omitted" do
+      assert Facade.dispatch(:browse_protocols, %{class: "Counter"}) ==
+               {:value, %{"class" => "Counter"}}
+
+      assert {:browse_protocols, "Counter", "instance"} in RecordingClient.calls()
+    end
+
+    test "the observer role may browse (read capability) but not eval" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:browse_classes, %{}, observer) == {:value, [%{"name" => "Counter"}]}
+
+      assert Facade.dispatch(:browse_class_definition, %{class: "Counter"}, observer) ==
+               {:value, %{"class" => "Counter"}}
+
+      # The same role is denied an execute op, with no dist call.
+      assert Facade.dispatch(:eval, %{session_pid: self(), code: "1"}, observer) ==
+               {:error, :unauthorized}
+
+      refute Enum.any?(RecordingClient.calls(), &(elem(&1, 0) == :eval))
     end
   end
 end

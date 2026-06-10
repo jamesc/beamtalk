@@ -208,6 +208,92 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  # ── browse-surface: the System Browser data source (ADR 0095, BT-2488) ──────
+
+  @doc """
+  List every class in scope as `ClassRow`s for the System Browser class tree
+  (ADR 0095 op 1, `browse-classes`). Each row carries `name`, `superclass`,
+  `category`, first-line `comment`, `sealed`/`abstract`/`internal`,
+  `source_file`, and `origin` (`both` | `static` | `runtime` — the image/disk
+  divergence tag, never merged away).
+
+  Returns the live `{:value, rows}` term verbatim — the rows are already a
+  wire-shaped JSON value, so no JSON crosses the Attach path here either.
+  Returns `{:error, reason}` on a dispatch failure.
+  """
+  @spec browse_classes() :: {:value, term()} | {:error, term()}
+  def browse_classes, do: dispatch_browse("browse-classes", %{})
+
+  @doc """
+  Return the selectors of `class`/`side` grouped by protocol for the System
+  Browser protocol + selector panes (ADR 0095 op 2, `browse-protocols`). `side`
+  is `"instance"` | `"class"`. Each selector row carries `line`,
+  `source_status` (xref tag — `indexed` | `synthetic` | `unindexed_runtime_fun`),
+  and `origin`. An unknown class / bad side comes back as a structured
+  `#beamtalk_error{}` (`{:error, reason}`).
+  """
+  @spec browse_protocols(String.t(), String.t()) :: {:value, term()} | {:error, term()}
+  def browse_protocols(class, side) when is_binary(class) and is_binary(side),
+    do: dispatch_browse("browse-protocols", %{"class" => class, "side" => side})
+
+  @doc """
+  Return one method's image-accurate source for the System Browser method-source
+  pane (ADR 0095 op 3, `browse-method-source`). The result carries `source`
+  (`null` for a sourceless runtime method), `source_status`, `origin`, and
+  `disk_differs` (`true` when the live/patched body differs from the static/disk
+  source — an unflushed `>>` patch; `null` when there is no static source to
+  compare). `{:error, reason}` for an unknown class.
+  """
+  @spec browse_method_source(String.t(), String.t(), String.t()) ::
+          {:value, term()} | {:error, term()}
+  def browse_method_source(class, side, selector)
+      when is_binary(class) and is_binary(side) and is_binary(selector) do
+    dispatch_browse("browse-method-source", %{
+      "class" => class,
+      "side" => side,
+      "selector" => selector
+    })
+  end
+
+  @doc """
+  Return `class`'s definition for the System Browser class-definition pane
+  (ADR 0095 op 4, `browse-class-definition`): the class header `definition`
+  (`null` for a file-less ClassBuilder class), `state` slots (name + default,
+  field reflection — no user code), full `comment`, `origin`, and
+  `disk_differs`. `{:error, reason}` for an unknown class.
+  """
+  @spec browse_class_definition(String.t()) :: {:value, term()} | {:error, term()}
+  def browse_class_definition(class) when is_binary(class),
+    do: dispatch_browse("browse-class-definition", %{"class" => class})
+
+  # Build the browse request as a plain map, decode it to a `protocol_msg()` on
+  # the workspace node, then dispatch through the term-returning op layer. The
+  # browse ops ignore the session pid (they are workspace-global reflection), so
+  # `self()` is passed only to satisfy `dispatch/4`'s arity. The `{:value, _}`
+  # term is returned verbatim — `encode/2` (JSON) is never invoked, so the
+  # wire-shaped rows arrive live over distribution (BT-2399 / ADR 0095).
+  defp dispatch_browse(op, params) when is_binary(op) and is_map(params) do
+    request = %{"op" => op, "params" => params}
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+
+        case rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()]) do
+          {:value, value} -> {:value, value}
+          {:error, reason} -> {:error, reason}
+          {:badrpc, reason} -> {:error, {:unreachable, reason}}
+          other -> {:error, {:unexpected_reply, other}}
+        end
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
   # Build the protocol request as a plain map, decode it to a `protocol_msg()`
   # on the workspace node (so we don't depend on the record's `.hrl`), then
   # dispatch through the term-returning op layer. `dispatch/4` returns the
