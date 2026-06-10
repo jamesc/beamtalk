@@ -174,6 +174,15 @@ dispatch(<<"nav-query">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_nav:handle_term(<<"nav-query">>, Params, Msg, SessionPid);
 dispatch(<<"nav-symbols">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_nav_symbols:handle_term(<<"nav-symbols">>, Params, Msg, SessionPid);
+dispatch(Op, Params, Msg, SessionPid) when
+    Op =:= <<"browse-classes">>;
+    Op =:= <<"browse-protocols">>;
+    Op =:= <<"browse-method-source">>;
+    Op =:= <<"browse-class-definition">>
+->
+    %% ADR 0095 (BT-2488): System Browser browse facade — four read-only
+    %% term-ops, each returning `{value, JsonValue}`.
+    beamtalk_repl_ops_browse:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, _Params, _Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(

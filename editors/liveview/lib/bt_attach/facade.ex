@@ -57,6 +57,15 @@ defmodule BtAttach.Facade do
     sessions: :read,
     complete: :read,
     changes: :read,
+    # ADR 0095 (BT-2488): the System Browser browse facade — four read-only
+    # ops backing the four-pane navigator. They trigger no user code (pure
+    # reflection + xref + stored source text, ADR 0091 Decision 4), so they are
+    # safe for the Observer role: an observer can browse classes, protocols,
+    # method source, and class definitions without any code-execution power.
+    browse_classes: :read,
+    browse_protocols: :read,
+    browse_method_source: :read,
+    browse_class_definition: :read,
     subscribe_transcript: :read,
     subscribe_bindings: :read,
     subscribe_actors: :read,
@@ -130,6 +139,28 @@ defmodule BtAttach.Facade do
 
   defp invoke(:processes_system, %{session_pid: pid}, _ctx),
     do: client().supervision_tree(pid, "system")
+
+  # ADR 0095 (BT-2488): the four System Browser browse ops. Each returns a
+  # `{:value, json_value}` live term (the wire-shaped browse rows) verbatim —
+  # JSON only at the WebSocket edge. `side` defaults to `"instance"` (the
+  # browser's default toggle); the selector / class params are required by the
+  # respective ops and validated workspace-side (a missing class / bad side
+  # comes back as a structured `#beamtalk_error{}`).
+  defp invoke(:browse_classes, _params, _ctx), do: client().browse_classes()
+
+  defp invoke(:browse_protocols, %{class: class} = params, _ctx),
+    do: client().browse_protocols(class, Map.get(params, :side, "instance"))
+
+  defp invoke(:browse_method_source, %{class: class, selector: selector} = params, _ctx),
+    do:
+      client().browse_method_source(
+        class,
+        Map.get(params, :side, "instance"),
+        selector
+      )
+
+  defp invoke(:browse_class_definition, %{class: class}, _ctx),
+    do: client().browse_class_definition(class)
 
   defp invoke(:flush, _params, _ctx), do: client().flush()
 
