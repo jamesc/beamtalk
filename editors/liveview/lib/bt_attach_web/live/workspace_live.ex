@@ -42,6 +42,27 @@ defmodule BtAttachWeb.WorkspaceLive do
   `#changes-panel`, `#transcript-panel`) in later Phase 1 issues. The behaviour
   (events, assigns, term rendering) is unchanged — this issue re-skins markup.
 
+  ## Bindings + Inspector restyle (BT-2486, epic BT-2482 Phase 1)
+
+  `#bindings-panel` and `#inspector-panel` are restyled to the spike design
+  (`spikes/cockpit-ux-spike/inspector.jsx`), preserving the existing
+  `inspect`/`drill` behaviour and `render_term`-based value rendering:
+
+    * Bindings render as a spike `obj-list` — one `obj-row` per binding showing
+      `name := printString` with a type/kind chip (`term_kind/1`). Object-valued
+      rows are clickable (the existing `inspect` event by name) and keep the
+      explicit "Inspect →" affordance.
+    * The Inspector head shows the live `printString`, class/pid type chips
+      (`proc-chips`), and a reference-following drill breadcrumb (`insp-crumbs`,
+      assign `:inspect_crumbs`) — clicking an earlier crumb (`crumb` event)
+      re-inspects that level via the same read-surface path. Fields render in the
+      spike `ivar-table`; object-valued slots are `drillable` rows carrying a
+      `follow →` link that fires the existing `drill` event.
+
+  Phase-1 scope deliberately excludes the spike's live-tracking affordances
+  (field-flash, freeze/snapshot, pid stats, message poke) — those are
+  BT-2489/BT-2492, blocked on ADR BT-2397.
+
   ## JS hook foundation (BT-2485, epic BT-2482 Phase 1)
 
   The cockpit's client-side behaviour rides three LiveView JS hooks, registered
@@ -215,6 +236,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:inspect_target, nil)
       |> assign(:inspect_rows, [])
       |> assign(:inspect_error, nil)
+      # Drill breadcrumb (BT-2486): the trail of references followed so far, each
+      # carrying the live term so a crumb click re-inspects that level. Reset when
+      # inspection starts from a binding, appended to when a field is drilled.
+      |> assign(:inspect_crumbs, [])
       # Method editor (Wave 3): the write-surface edit/save/flush pane.
       |> assign(:edit_class, "")
       |> assign(:edit_selector, "")
@@ -320,13 +345,29 @@ defmodule BtAttachWeb.WorkspaceLive do
     # crash the LiveView (`String.to_integer/1` would raise on non-digits).
     with {i, ""} when i >= 0 <- Integer.parse(index),
          %{term: term, name: name} <- Enum.at(rows, i) do
-      {:noreply, inspect_term(socket, name, term)}
+      # Following a reference extends the drill breadcrumb one level deeper.
+      crumbs = socket.assigns.inspect_crumbs ++ [%{label: to_string(name), term: term}]
+      {:noreply, inspect_term(socket, name, term, crumbs)}
     else
       _ -> {:noreply, socket}
     end
   end
 
   def handle_event("drill", _params, socket), do: {:noreply, socket}
+
+  # Jump back to an earlier level of the drill breadcrumb (BT-2486): truncate the
+  # trail at the clicked crumb and re-inspect that level's live term. Defensive
+  # against a client-supplied index that no longer maps to a crumb.
+  def handle_event("crumb", %{"index" => index}, %{assigns: %{inspect_crumbs: crumbs}} = socket) do
+    with {i, ""} when i >= 0 <- Integer.parse(index),
+         %{term: term, label: label} <- Enum.at(crumbs, i) do
+      {:noreply, inspect_term(socket, label, term, Enum.take(crumbs, i + 1))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("crumb", _params, socket), do: {:noreply, socket}
 
   # ── method editor (Wave 3, write-surface ADR 0082) ──────────────────────────
 
@@ -550,7 +591,8 @@ defmodule BtAttachWeb.WorkspaceLive do
             %{
               name: name,
               value: Workspace.render_term(term),
-              inspectable: Workspace.inspectable?(term)
+              inspectable: Workspace.inspectable?(term),
+              kind: term_kind(term)
             }
           end)
 
@@ -564,8 +606,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
       pairs when is_list(pairs) ->
         case List.keyfind(pairs, name, 0) do
-          {^name, term} -> inspect_term(socket, name, term)
-          nil -> assign(socket, inspect_error: "binding not found: #{name}")
+          # Inspecting a binding starts a fresh drill breadcrumb at this object.
+          {^name, term} ->
+            inspect_term(socket, name, term, [%{label: to_string(name), term: term}])
+
+          nil ->
+            assign(socket, inspect_error: "binding not found: #{name}")
         end
 
       {:error, reason} ->
@@ -574,30 +620,34 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Inspect a single live term via the read-surface `inspect` op and assign the
-  # resulting structured-field rows. Object-valued fields are flagged drillable,
-  # carrying their live term so the next drill follows the reference one level
-  # deeper. Non-object terms are not inspectable, so we say so rather than guess.
-  defp inspect_term(socket, label, term) do
+  # resulting structured-field rows plus the drill breadcrumb (`crumbs`). Object-
+  # valued fields are flagged drillable, carrying their live term so the next
+  # drill follows the reference one level deeper. Non-object terms are not
+  # inspectable, so we say so rather than guess.
+  defp inspect_term(socket, label, term, crumbs) do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
         {:ok, fields} when is_map(fields) ->
           assign(socket,
-            inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
+            inspect_target: target_info(label, term),
             inspect_rows: field_rows(fields),
+            inspect_crumbs: crumbs,
             inspect_error: nil
           )
 
         {:ok, scalar} ->
           assign(socket,
-            inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
+            inspect_target: target_info(label, term),
             inspect_rows: [
               %{
                 name: "value",
                 value: Workspace.format_value(scalar),
                 term: scalar,
-                drillable: false
+                drillable: false,
+                kind: term_kind(scalar)
               }
             ],
+            inspect_crumbs: crumbs,
             inspect_error: nil
           )
 
@@ -606,11 +656,35 @@ defmodule BtAttachWeb.WorkspaceLive do
       end
     else
       assign(socket,
-        inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
+        inspect_target: target_info(label, term),
         inspect_rows: [],
+        inspect_crumbs: crumbs,
         inspect_error: "#{label} is a #{scalar_kind(term)} — no fields to inspect"
       )
     end
+  end
+
+  # Build the Inspector head's target descriptor: the binding/field label, the
+  # live printString header, and the class/pid type chips. For a live actor the
+  # term is `{:beamtalk_object, class, _module, pid}` (over distribution), so the
+  # class atom and pid render straight into the spike's `proc-chips`. Non-object
+  # values carry no pid and report their scalar kind as the class chip.
+  defp target_info(label, {:beamtalk_object, class, _module, pid} = term) when is_pid(pid) do
+    %{
+      label: to_string(label),
+      header: Workspace.render_term(term),
+      class_name: to_string(class),
+      pid: inspect(pid)
+    }
+  end
+
+  defp target_info(label, term) do
+    %{
+      label: to_string(label),
+      header: Workspace.render_term(term),
+      class_name: scalar_kind(term),
+      pid: nil
+    }
   end
 
   # Turn an inspect fields map (live terms) into ordered display rows. Each row
@@ -623,7 +697,8 @@ defmodule BtAttachWeb.WorkspaceLive do
         name: to_string(key),
         value: Workspace.render_term(term),
         term: term,
-        drillable: Workspace.inspectable?(term)
+        drillable: Workspace.inspectable?(term),
+        kind: term_kind(term)
       }
     end)
     |> Enum.sort_by(& &1.name)
@@ -636,6 +711,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp scalar_kind(term) when is_list(term), do: "collection"
   defp scalar_kind(term) when is_map(term), do: "map"
   defp scalar_kind(_term), do: "value"
+
+  # Map a live term to the spike Inspector's value-kind class (inspector.jsx
+  # `valueClass`), driving the type-chip / value colour. Object references render
+  # as `ref` (the drillable, follow-able class); scalars map to their CSS class.
+  # A boolean must be matched before the integer guard (`is_boolean` ⊂ atoms, not
+  # integers, but kept explicit and first for clarity).
+  defp term_kind({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: "ref"
+  defp term_kind(term) when is_boolean(term), do: "bool"
+  defp term_kind(term) when is_integer(term) or is_float(term), do: "int"
+  defp term_kind(term) when is_binary(term), do: "string"
+  defp term_kind(term) when is_atom(term), do: "symbol"
+  defp term_kind(_term), do: "value"
 
   @impl true
   def render(assigns) do
@@ -812,66 +899,96 @@ defmodule BtAttachWeb.WorkspaceLive do
               <div class="right-split">
                 <div id="bindings-panel" class="panel bindings-panel">
                   <div class="panel-head">
-                    Bindings <span class="spacer"></span><span class="count">live</span>
+                    Bindings <span class="spacer"></span>
+                    <span class="count">{length(@bindings)} in session</span>
                   </div>
                   <div class="panel-body">
                     <div :if={@bindings_error} class="io-block err">{@bindings_error}</div>
                     <%= if @bindings == [] do %>
                       <p class="muted-note">No bindings yet. Try <code>x := 42</code>.</p>
                     <% else %>
-                      <table class="bt-table">
-                        <tbody>
-                          <tr :for={b <- @bindings}>
-                            <td class="k">{b.name}</td>
-                            <td class="v">{b.value}</td>
-                            <td style="white-space:nowrap;">
-                              <button
-                                :if={b.inspectable}
-                                class="btn ghost"
-                                type="button"
-                                phx-click="inspect"
-                                phx-value-name={b.name}
-                              >
-                                Inspect →
-                              </button>
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
+                      <%!-- Spike Bindings list (inspector.jsx `BindingsList`): each row is
+                           `name := printString` with a type/kind chip. An object-valued
+                           binding is drillable — clicking the row fires the existing
+                           `inspect` event by name, and the explicit "Inspect →" affordance
+                           carries the same phx-value-name the e2e test (BT-2408) clicks. --%>
+                      <div class="obj-list">
+                        <div
+                          :for={b <- @bindings}
+                          class={["obj-row", b.inspectable && "drillable"]}
+                          phx-click={b.inspectable && "inspect"}
+                          phx-value-name={b.inspectable && b.name}
+                        >
+                          <span class="bname mono">{b.name}</span>
+                          <span class="bassign mono">:=</span>
+                          <span class="ps mono">{b.value}</span>
+                          <span class={["kind", b.kind]}>{b.kind}</span>
+                          <button
+                            :if={b.inspectable}
+                            class="btn ghost obj-inspect"
+                            type="button"
+                            phx-click="inspect"
+                            phx-value-name={b.name}
+                          >
+                            Inspect →
+                          </button>
+                        </div>
+                      </div>
                     <% end %>
                   </div>
                 </div>
 
-                <div id="inspector-panel" class="panel inspector-panel">
-                  <div class="panel-head">Inspector</div>
+                <div id="inspector-panel" class="panel insp inspector-panel">
+                  <div class="panel-head">
+                    Inspector <span class="spacer"></span>
+                    <span :if={@inspect_target} class="count">following references</span>
+                  </div>
+                  <%= if @inspect_target do %>
+                    <%!-- Spike Inspector head (inspector.jsx `InspectorContent`): a
+                         drill breadcrumb of the references followed so far, the live
+                         printString, and class/pid type chips. Each crumb re-inspects
+                         that level via the existing read-surface inspect path. The word
+                         "Inspecting" is retained for the BT-2408 e2e assertion. --%>
+                    <div class="insp-head">
+                      <div :if={length(@inspect_crumbs) > 1} class="insp-crumbs">
+                        <%= for {crumb, i} <- Enum.with_index(@inspect_crumbs) do %>
+                          <span :if={i > 0} class="sep">›</span>
+                          <span class="c" phx-click="crumb" phx-value-index={i}>{crumb.label}</span>
+                        <% end %>
+                      </div>
+                      <div class="ps mono">
+                        Inspecting <strong>{@inspect_target.label}</strong>
+                        <span class="ps-header">{@inspect_target.header}</span>
+                      </div>
+                      <div class="proc-chips">
+                        <span class="chip">class <b>{@inspect_target.class_name}</b></span>
+                        <span :if={@inspect_target.pid} class="chip">
+                          pid <b>{@inspect_target.pid}</b>
+                        </span>
+                      </div>
+                    </div>
+                  <% end %>
                   <div class="panel-body">
-                    <p :if={@inspect_target} class="muted-note">
-                      Inspecting <strong>{@inspect_target.label}</strong>
-                      · <code>{@inspect_target.header}</code>
-                    </p>
                     <div :if={@inspect_error} class="io-block warn">{@inspect_error}</div>
                     <%= if @inspect_target && @inspect_rows != [] do %>
-                      <table class="bt-table">
+                      <table class="ivar-table">
                         <tbody>
-                          <tr :for={{row, i} <- Enum.with_index(@inspect_rows)}>
+                          <tr
+                            :for={{row, i} <- Enum.with_index(@inspect_rows)}
+                            class={row.drillable && "drillable"}
+                            phx-click={row.drillable && "drill"}
+                            phx-value-index={row.drillable && i}
+                          >
                             <td class="k">{row.name}</td>
-                            <td class="v">{row.value}</td>
-                            <td style="white-space:nowrap;">
-                              <button
-                                :if={row.drillable}
-                                class="btn ghost"
-                                type="button"
-                                phx-click="drill"
-                                phx-value-index={i}
-                              >
-                                Follow →
-                              </button>
+                            <td class={["v", row.kind]}>{row.value}</td>
+                            <td class="follow">
+                              <span :if={row.drillable} class="follow-link">follow →</span>
                             </td>
                           </tr>
                         </tbody>
                       </table>
                     <% else %>
-                      <p :if={@inspect_target == nil && @inspect_error == nil} class="muted-note">
+                      <p :if={@inspect_target == nil && @inspect_error == nil} class="empty">
                         Spawn an object (<code>Counter spawn</code>), bind it, then Inspect it to
                         follow its live references.
                       </p>
