@@ -270,6 +270,37 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert render_hook(view, "select_source", %{"text" => 123})
   end
 
+  test "the Tweaks panel and its controls render on the connected shell (BT-2487)", %{
+    conn: conn
+  } do
+    {:ok, _view, html} = live(conn, "/")
+
+    # The panel is hooked client-side (TweaksPanel) and carries the first-run
+    # defaults the hook restores before a localStorage choice exists.
+    assert html =~ ~s(id="tweaks-panel")
+    assert html =~ ~s(phx-hook="TweaksPanel")
+    assert html =~ "data-tweaks-defaults"
+
+    # Each control declares the tweak it drives via data-tweak; the hook maps it
+    # to a :root CSS variable (theme/accent/syntax/density/uiFont/codeFont).
+    assert html =~ ~s(data-tweak="theme")
+    assert html =~ ~s(data-tweak="accent")
+    assert html =~ ~s(data-tweak="syntax")
+    assert html =~ ~s(data-tweak="density")
+    assert html =~ ~s(data-tweak="uiFont")
+    assert html =~ ~s(data-tweak="codeFont")
+
+    # The curated option sets match the spike: three themes, the warm/mono/vivid
+    # syntax modes, and the accent swatches.
+    assert html =~ ~s(data-tweak-value="paper")
+    assert html =~ ~s(data-tweak-value="squeak")
+    assert html =~ ~s(data-tweak-value="dusk")
+    assert html =~ ~s(data-tweak-value="warm")
+    assert html =~ ~s(data-tweak-value="mono")
+    assert html =~ ~s(data-tweak-value="vivid")
+    assert html =~ ~s(data-tweak-value="#b9711b")
+  end
+
   # ── Wave 4: multi-tab isolation / session resume / teardown (BT-2410) ────────
 
   test "two tabs map to two isolated workspace sessions (BT-2410)", %{conn: conn} do
