@@ -148,6 +148,26 @@ subclasses would fan out, §Steelman). Per-class *custom views* are a natural
 extension point (`inspectorFields`, §7) but are **not v1**: the kind-derived
 fields cover the common case.
 
+**One class with a `kind` tag — not a subclass per kind.** `Inspector` is *not*
+split into `ValueInspector`/`ActorInspector`/`CollectionInspector`/
+`ForeignInspector`. This is the same fork ADR 0092 faced and settled: its
+`SupervisionNode` carries *five* `kind` values (`#beamtalkActor`/
+`#beamtalkSupervisor`/`#otpSupervisor`/`#otpProcess`/`#restarting`) in **one
+record**, with classification done in the runtime shim — not five subclasses. We
+mirror that exactly, for three reasons: (1) the kinds barely diverge in *public
+protocol* — all answer `fields`/`at:`/`path`/`refresh`/`asDictionaries`; the only
+kind-specific message is collection `page:` (a `Result error:` elsewhere), too
+little to justify a hierarchy; (2) the work that genuinely varies — subject
+classification and actor state capture — lives in the **runtime shim** (reusing
+ADR 0092's kind machinery), so there is no big `case` in Beamtalk `Inspector`
+code, just a tagged `InspectorField` list coming back; (3) a fat abstract base +
+four thin leaves overriding ~one method each is more surface (four more
+`generated_builtins.rs`/`build_stdlib.rs` registrations, four files) for no
+behavioural gain, against the lean-v1 goal. Subclasses would earn their keep only
+if a kind exposed a *different protocol*, which none does. Keeping `Inspector` one
+class also keeps the user-visible type stable — `inspect` always returns "an
+`Inspector`," never a kind-specific class the caller must not depend on.
+
 ### 2. The field record — `InspectorField` (`Value`)
 
 Each drillable thing is an immutable record, mirroring `SupervisionNode` /
