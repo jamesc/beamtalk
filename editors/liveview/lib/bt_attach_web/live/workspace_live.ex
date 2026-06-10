@@ -28,6 +28,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   All workspace interaction goes through `BtAttach.Workspace`, which talks to
   the workspace node via Erlang distribution + `:rpc`. The data path carries
   live Erlang terms; JSON lives only at the browser WebSocket edge.
+
+  ## Cockpit shell (BT-2484, epic BT-2482 Phase 1)
+
+  `render/1` is the cockpit shell: a 46px top bar over a three-column grid —
+  System Browser (286px) | editor + Workspace dock | Bindings + Inspector
+  (348px) — ported from `spikes/cockpit-ux-spike/`. Theme/accent/syntax are all
+  driven by CSS variables (`assets/css/app.css`) so a later Tweaks panel can
+  re-skin the IDE by toggling `data-theme` on the document. Phase 1 lays the
+  shell + theming foundation; the System Browser, Workspace, Bindings, and
+  Inspector panes build on the placeholder regions (`#system-browser`,
+  `#workspace-dock`, `#bindings-panel`, `#inspector-panel`, `#method-editor`,
+  `#changes-panel`, `#transcript-panel`) in later Phase 1 issues. The behaviour
+  (events, assigns, term rendering) is unchanged — this issue re-skins markup.
   """
   use BtAttachWeb, :live_view
 
@@ -53,6 +66,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     # NOT create a workspace session, or every page load would leak an orphaned
     # one. The per-tab resume token is only present on the connected mount (it
     # rides the LiveSocket `params`), so `get_connect_params/1` is the right read.
+    # The page title flows into the root layout `<.live_title>` and is the
+    # canonical "Beamtalk Workspace" string the HTTP-render tests assert on
+    # (rbac_web/oidc_flow/session_lifecycle). Set it on BOTH mounts so the
+    # disconnected render carries it too.
+    socket = assign(socket, :page_title, "Beamtalk Workspace")
+
     if connected?(socket) do
       token = connect_token(socket)
       attach(assign(socket, :token, token))
@@ -576,222 +595,283 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div style="font-family: ui-monospace, monospace; max-width: 760px; margin: 2rem auto;">
-      <h1>Beamtalk Workspace</h1>
-
-      <%= if @connected do %>
-        <p>
-          Attached to <strong>{@node}</strong> · session <code>{@session_id}</code>
-          <span :if={@role == :observer} style="color:#a60;">· read-only (Observer)</span>
-        </p>
-
-        <%= if @role == :owner do %>
-          <form phx-submit="eval" style="display:flex; gap:.5rem; margin:1rem 0;">
-            <input
-              name="expr"
-              value={@expr}
-              autocomplete="off"
-              style="flex:1; padding:.5rem; font-family:inherit;"
-            />
-            <button type="submit" style="padding:.5rem 1rem;">Eval</button>
-          </form>
-        <% else %>
-          <p style="color:#666; margin:1rem 0;">
-            Your role is read-only — evaluation and editing are disabled. You can
-            still browse bindings, follow references in the Inspector, and watch
-            the live Transcript.
-          </p>
-        <% end %>
-
-        <%= if @output do %>
-          <pre style="background:#f7f7f7; padding:.75rem; border:1px solid #ddd;"><%= @output %></pre>
-        <% end %>
-        <%= if @result do %>
-          <pre style="background:#f0fff0; padding:.75rem; border:1px solid #cec;"><%= @result %></pre>
-        <% end %>
-        <%= if @error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @error %></pre>
-        <% end %>
-
-        <h2>Bindings (live)</h2>
-        <%= if @bindings_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @bindings_error %></pre>
-        <% end %>
-        <%= if @bindings == [] do %>
-          <p style="color:#666;">No bindings yet. Try <code>x := 42</code>.</p>
-        <% else %>
-          <table style="width:100%; border-collapse:collapse;">
-            <tbody>
-              <tr :for={b <- @bindings} style="border-bottom:1px solid #eee;">
-                <td style="padding:.25rem .5rem; font-weight:bold; vertical-align:top;">{b.name}</td>
-                <td style="padding:.25rem .5rem; width:100%;">{b.value}</td>
-                <td style="padding:.25rem .5rem; white-space:nowrap;">
-                  <%= if b.inspectable do %>
-                    <button
-                      type="button"
-                      phx-click="inspect"
-                      phx-value-name={b.name}
-                      style="font-family:inherit;"
-                    >
-                      Inspect →
-                    </button>
-                  <% end %>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        <% end %>
-
-        <h2>Inspector</h2>
-        <%= if @inspect_target do %>
-          <p>
-            Inspecting <strong>{@inspect_target.label}</strong>
-            · <code>{@inspect_target.header}</code>
-          </p>
-        <% end %>
-        <%= if @inspect_error do %>
-          <pre style="background:#fff8e8; padding:.75rem; border:1px solid #eda;"><%= @inspect_error %></pre>
-        <% end %>
-        <%= if @inspect_target && @inspect_rows != [] do %>
-          <table style="width:100%; border-collapse:collapse; background:#fafaff; border:1px solid #dde;">
-            <tbody>
-              <tr
-                :for={{row, i} <- Enum.with_index(@inspect_rows)}
-                style="border-bottom:1px solid #eef;"
-              >
-                <td style="padding:.25rem .5rem; font-weight:bold; vertical-align:top;">
-                  {row.name}
-                </td>
-                <td style="padding:.25rem .5rem; width:100%;">{row.value}</td>
-                <td style="padding:.25rem .5rem; white-space:nowrap;">
-                  <%= if row.drillable do %>
-                    <button
-                      type="button"
-                      phx-click="drill"
-                      phx-value-index={i}
-                      style="font-family:inherit;"
-                    >
-                      Follow →
-                    </button>
-                  <% end %>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        <% else %>
-          <%= if @inspect_target == nil && @inspect_error == nil do %>
-            <p style="color:#666;">
-              Spawn an object (<code>Counter spawn</code>), bind it, then Inspect it to
-              follow its live references.
-            </p>
+    <div class="bt-cockpit">
+      <div class="app">
+        <%!-- ── top bar (46px): brand + Attach-topology widget ───────────── --%>
+        <div class="topbar">
+          <div class="brand">
+            <span class="mark"><b>Beam</b>talk</span>
+            <span class="ver">Cockpit</span>
+          </div>
+          <span class="spacer"></span>
+          <%= if @connected do %>
+            <div class="attach">
+              <span class="dot live"></span>
+              <span class="att-label">attached</span>
+              <b class="att-node mono">{@node}</b>
+              <span class="att-sep">·</span>
+              <span class="att-sess mono">{@session_id}</span>
+              <span class={"role-badge #{@role}"}>{@role}</span>
+              <span :if={@role == :observer} class="att-sess">· read-only (Observer)</span>
+            </div>
+          <% else %>
+            <div class="attach"><span class="att-sess">connecting…</span></div>
           <% end %>
-        <% end %>
-
-        <%= if @role == :owner do %>
-          <h2>Method Editor (write-surface)</h2>
-          <p style="color:#666;">
-            Edit a method and Save to compile + flush it onto the workspace
-            (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
-            eval observes the new behaviour.
-          </p>
-          <form phx-submit="save_method" style="margin:1rem 0;">
-            <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
-              <input
-                name="class"
-                value={@edit_class}
-                placeholder="Class (e.g. Counter)"
-                autocomplete="off"
-                style="flex:1; padding:.5rem; font-family:inherit;"
-              />
-              <input
-                name="selector"
-                value={@edit_selector}
-                placeholder="selector (e.g. increment)"
-                autocomplete="off"
-                style="flex:1; padding:.5rem; font-family:inherit;"
-              />
-            </div>
-            <textarea
-              name="source"
-              rows="4"
-              placeholder="increment => self.value := self.value + 1"
-              style="width:100%; padding:.5rem; font-family:inherit; box-sizing:border-box;"
-            ><%= @edit_source %></textarea>
-            <div style="display:flex; gap:.5rem; margin-top:.5rem;">
-              <button type="submit" style="padding:.5rem 1rem;">Save Method</button>
-              <button type="button" phx-click="flush" style="padding:.5rem 1rem;">
-                Save All to Disk (flush)
-              </button>
-            </div>
-          </form>
-        <% end %>
-
-        <%= if @save_result do %>
-          <pre style="background:#f0fff0; padding:.75rem; border:1px solid #cec;"><%= @save_result %></pre>
-        <% end %>
-        <%= if @save_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @save_error %></pre>
-        <% end %>
-        <%= if @flush_result do %>
-          <pre style="background:#eef6ff; padding:.75rem; border:1px solid #cce;"><%= @flush_result %></pre>
-        <% end %>
-        <%= if @flush_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @flush_error %></pre>
-        <% end %>
-
-        <h2>Changes (ChangeLog)</h2>
-        <%= if @changes_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @changes_error %></pre>
-        <% end %>
-        <%= if @changes == [] do %>
-          <p style="color:#666;">No pending changes. Save a method to record one.</p>
-        <% else %>
-          <table style="width:100%; border-collapse:collapse;">
-            <thead>
-              <tr style="border-bottom:1px solid #ccc; text-align:left;">
-                <th style="padding:.25rem .5rem;">Class</th>
-                <th style="padding:.25rem .5rem;">Selector</th>
-                <th style="padding:.25rem .5rem;">Intent</th>
-                <th style="padding:.25rem .5rem;">Flushable</th>
-                <th style="padding:.25rem .5rem;">Author</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={c <- @changes} style="border-bottom:1px solid #eee;">
-                <td style="padding:.25rem .5rem; font-weight:bold;">{c.class}</td>
-                <td style="padding:.25rem .5rem;">{c.selector}</td>
-                <td style="padding:.25rem .5rem;">{c.intent}</td>
-                <td style="padding:.25rem .5rem;">{if c.flushable, do: "yes", else: "no"}</td>
-                <td style="padding:.25rem .5rem;">{c.author_kind}</td>
-              </tr>
-            </tbody>
-          </table>
-        <% end %>
-
-        <h2>Transcript (live)</h2>
-        <div
-          id="transcript"
-          phx-update="stream"
-          style="background:#111; color:#0f0; padding:.75rem; min-height:6rem;"
-        >
-          <div :for={{dom_id, line} <- @streams.transcript} id={dom_id}>{line.text}</div>
         </div>
-        <p style="color:#666;">Try <code>Transcript show: "hello"</code> to see a live push.</p>
-      <% else %>
-        <%= if @error do %>
-          <pre style="background:#fff0f0; padding:1rem;">Not attached.
 
-    <%= @error %>
+        <%= if @connected do %>
+          <%!-- ── three-column cockpit grid ──────────────────────────────── --%>
+          <div class="cockpit">
+            <%!-- LEFT — System Browser (placeholder, 286px) --%>
+            <div class="col">
+              <div id="system-browser" class="panel" style="flex:1;">
+                <div class="panel-head">System Browser</div>
+                <div class="panel-body">
+                  <div class="placeholder">
+                    <span class="ph-title">System Browser</span>
+                    <span>Class hierarchy → protocol → methods.</span>
+                    <span>Lands in a later Phase 1 issue.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <%!-- CENTER — editor placeholder + workspace dock --%>
+            <%!-- DOM order note: the Workspace dock (eval form) is emitted
+                 BEFORE the Method Editor so the eval `<form>` is the first form
+                 on the page — `form("form")` in the e2e tests resolves to it.
+                 CSS `order` keeps the editor visually on top per the spike. --%>
+            <div class="col">
+              <%!-- workspace dock: eval + result --%>
+              <div class="dock" style="order:2;">
+                <div id="workspace-dock" class="panel">
+                  <div class="panel-head">
+                    Workspace
+                    <span class="spacer"></span>
+                    <span class="count">live</span>
+                  </div>
+                  <div class="panel-body">
+                    <%!-- eval form: the FIRST <form> on the page (owner only) --%>
+                    <%= if @role == :owner do %>
+                      <form id="eval-form" phx-submit="eval" style="display:flex; gap:.5rem; margin-bottom:.6rem;">
+                        <input
+                          class="field"
+                          name="expr"
+                          value={@expr}
+                          autocomplete="off"
+                          style="flex:1;"
+                        />
+                        <button class="btn primary" type="submit">Eval</button>
+                      </form>
+                    <% end %>
+
+                    <div :if={@output} class="io-block">{@output}</div>
+                    <div :if={@result} class="io-block ok">{@result}</div>
+                    <div :if={@error} class="io-block err">{@error}</div>
+
+                    <p class="muted-note">
+                      Try <code>Transcript show: "hello"</code> to see a live push.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div id="method-editor" class="panel editor-panel" style="order:1;">
+                <div class="panel-head">Method Editor</div>
+                <div class="panel-body">
+                  <%= if @role == :owner do %>
+                    <p class="muted-note">
+                      Edit a method and Save to compile + flush it onto the workspace
+                      (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
+                      eval observes the new behaviour.
+                    </p>
+                    <form phx-submit="save_method">
+                      <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+                        <input
+                          class="field"
+                          name="class"
+                          value={@edit_class}
+                          placeholder="Class (e.g. Counter)"
+                          autocomplete="off"
+                          style="flex:1;"
+                        />
+                        <input
+                          class="field"
+                          name="selector"
+                          value={@edit_selector}
+                          placeholder="selector (e.g. increment)"
+                          autocomplete="off"
+                          style="flex:1;"
+                        />
+                      </div>
+                      <textarea
+                        class="field"
+                        name="source"
+                        rows="4"
+                        placeholder="increment => self.value := self.value + 1"
+                        style="width:100%;"
+                      ><%= @edit_source %></textarea>
+                      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+                        <button class="btn primary" type="submit">Save Method</button>
+                        <button class="btn" type="button" phx-click="flush">
+                          Save All to Disk (flush)
+                        </button>
+                      </div>
+                    </form>
+                  <% else %>
+                    <p class="muted-note">
+                      Your role is read-only — evaluation and editing are disabled. You can
+                      still browse bindings, follow references in the Inspector, and watch
+                      the live Transcript.
+                    </p>
+                  <% end %>
+
+                  <div :if={@save_result} class="io-block ok">{@save_result}</div>
+                  <div :if={@save_error} class="io-block err">{@save_error}</div>
+                  <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
+                  <div :if={@flush_error} class="io-block err">{@flush_error}</div>
+                </div>
+              </div>
+            </div>
+
+            <%!-- RIGHT — Bindings + Inspector (348px), with ChangeLog + Transcript --%>
+            <div class="col">
+              <div class="right-split">
+                <div id="bindings-panel" class="panel bindings-panel">
+                  <div class="panel-head">
+                    Bindings <span class="spacer"></span><span class="count">live</span>
+                  </div>
+                  <div class="panel-body">
+                    <div :if={@bindings_error} class="io-block err">{@bindings_error}</div>
+                    <%= if @bindings == [] do %>
+                      <p class="muted-note">No bindings yet. Try <code>x := 42</code>.</p>
+                    <% else %>
+                      <table class="bt-table">
+                        <tbody>
+                          <tr :for={b <- @bindings}>
+                            <td class="k">{b.name}</td>
+                            <td class="v">{b.value}</td>
+                            <td style="white-space:nowrap;">
+                              <button
+                                :if={b.inspectable}
+                                class="btn ghost"
+                                type="button"
+                                phx-click="inspect"
+                                phx-value-name={b.name}
+                              >
+                                Inspect →
+                              </button>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    <% end %>
+                  </div>
+                </div>
+
+                <div id="inspector-panel" class="panel inspector-panel">
+                  <div class="panel-head">Inspector</div>
+                  <div class="panel-body">
+                    <p :if={@inspect_target} class="muted-note">
+                      Inspecting <strong>{@inspect_target.label}</strong>
+                      · <code>{@inspect_target.header}</code>
+                    </p>
+                    <div :if={@inspect_error} class="io-block warn">{@inspect_error}</div>
+                    <%= if @inspect_target && @inspect_rows != [] do %>
+                      <table class="bt-table">
+                        <tbody>
+                          <tr :for={{row, i} <- Enum.with_index(@inspect_rows)}>
+                            <td class="k">{row.name}</td>
+                            <td class="v">{row.value}</td>
+                            <td style="white-space:nowrap;">
+                              <button
+                                :if={row.drillable}
+                                class="btn ghost"
+                                type="button"
+                                phx-click="drill"
+                                phx-value-index={i}
+                              >
+                                Follow →
+                              </button>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    <% else %>
+                      <p :if={@inspect_target == nil && @inspect_error == nil} class="muted-note">
+                        Spawn an object (<code>Counter spawn</code>), bind it, then Inspect it to
+                        follow its live references.
+                      </p>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <%!-- ── full-width footer dock: ChangeLog + live Transcript ──────── --%>
+          <div id="changes-panel" class="panel" style="flex:none;">
+            <div class="panel-head">Changes (ChangeLog)</div>
+            <div class="panel-body">
+              <div :if={@changes_error} class="io-block err">{@changes_error}</div>
+              <%= if @changes == [] do %>
+                <p class="muted-note">No pending changes. Save a method to record one.</p>
+              <% else %>
+                <table class="bt-table">
+                  <thead>
+                    <tr>
+                      <th>Class</th>
+                      <th>Selector</th>
+                      <th>Intent</th>
+                      <th>Flushable</th>
+                      <th>Author</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr :for={c <- @changes}>
+                      <td class="k">{c.class}</td>
+                      <td>{c.selector}</td>
+                      <td>{c.intent}</td>
+                      <td>{if c.flushable, do: "yes", else: "no"}</td>
+                      <td>{c.author_kind}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              <% end %>
+            </div>
+          </div>
+
+          <div id="transcript-panel" class="panel" style="flex:none; height:9rem;">
+            <div class="panel-head">Transcript (live)</div>
+            <div id="transcript" class="transcript" phx-update="stream">
+              <div :for={{dom_id, line} <- @streams.transcript} id={dom_id}>{line.text}</div>
+            </div>
+          </div>
+        <% else %>
+          <div class="cockpit" style="grid-template-columns: minmax(0, 1fr);">
+            <div class="col">
+              <div class="panel" style="flex:1;">
+                <div class="panel-head">Workspace</div>
+                <div class="panel-body">
+                  <%= if @error do %>
+                    <div class="io-block err">Not attached.
+
+    {@error}
 
     Start a workspace and export its node + cookie:
       beamtalk workspace create spike --background --persistent
       export BT_WORKSPACE_NODE=beamtalk_workspace_spike@localhost
       export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' ~/.beamtalk/workspaces/spike/vm.args)
-    then restart this server.</pre>
-        <% else %>
-          <p>Connecting to workspace…</p>
+    then restart this server.</div>
+                  <% else %>
+                    <p class="muted-note">Connecting to workspace…</p>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          </div>
         <% end %>
-      <% end %>
+      </div>
     </div>
     """
   end

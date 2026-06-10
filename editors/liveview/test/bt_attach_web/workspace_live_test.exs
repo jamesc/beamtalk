@@ -74,7 +74,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "eval round-trip renders the workspace result term", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    html = view |> form("form") |> render_submit(%{expr: "3 + 4"})
+    html = view |> form("#eval-form") |> render_submit(%{expr: "3 + 4"})
     assert html =~ "7"
   end
 
@@ -82,15 +82,15 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view, _html} = live(conn, "/")
 
     # Bind a variable, then read it back in a later eval on the same session.
-    view |> form("form") |> render_submit(%{expr: "x := 21 * 2"})
-    html = view |> form("form") |> render_submit(%{expr: "x"})
+    view |> form("#eval-form") |> render_submit(%{expr: "x := 21 * 2"})
+    html = view |> form("#eval-form") |> render_submit(%{expr: "x"})
     assert html =~ "42"
   end
 
   test "Transcript output streams live into the LiveView", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     marker = "hello-#{System.unique_integer([:positive])}"
-    view |> form("form") |> render_submit(%{expr: ~s|Transcript show: "#{marker}"|})
+    view |> form("#eval-form") |> render_submit(%{expr: ~s|Transcript show: "#{marker}"|})
 
     # The push is delivered asynchronously over distribution; poll the render.
     assert eventually(fn -> render(view) =~ marker end)
@@ -102,7 +102,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Defining a binding fires the BT-2399 `bindings` push; the pane re-reads the
     # read-surface and should list the new name and its value live.
-    view |> form("form") |> render_submit(%{expr: "#{name} := 123"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := 123"})
 
     assert eventually(fn ->
              html = render(view)
@@ -127,8 +127,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       count => self.count
     """
 
-    view |> form("form") |> render_submit(%{expr: class_src})
-    view |> form("form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
 
     assert eventually(fn -> render(view) =~ name end)
 
@@ -157,12 +157,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
 
     # Sanity: the original method returns the initial field value.
     name = "ec_#{suffix}"
-    view |> form("form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
-    html = view |> form("form") |> render_submit(%{expr: "#{name} value"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    html = view |> form("#eval-form") |> render_submit(%{expr: "#{name} value"})
     assert html =~ "1"
 
     # Save a NEW body for `value` via the write-surface method editor (ADR 0082).
@@ -184,10 +184,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # A subsequent eval on a freshly-spawned actor observes the patched behaviour
     # (compiled + flushed into the live BEAM module on the workspace node).
     name2 = "ec2_#{suffix}"
-    view |> form("form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
 
     assert eventually(fn ->
-             html = view |> form("form") |> render_submit(%{expr: "#{name2} value"})
+             html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} value"})
              html =~ "101"
            end)
   end
@@ -204,7 +204,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       value => self.value
     """
 
-    view |> form("form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
 
     # A syntactically broken body fails to compile; the write-surface returns a
     # structured #beamtalk_error{} which the LiveView renders as an actionable
@@ -248,12 +248,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view1, _} = live(tab1, "/")
     {:ok, view2, _} = live(tab2, "/")
 
-    view1 |> form("form") |> render_submit(%{expr: "x := 100"})
-    view2 |> form("form") |> render_submit(%{expr: "x := 999"})
+    view1 |> form("#eval-form") |> render_submit(%{expr: "x := 100"})
+    view2 |> form("#eval-form") |> render_submit(%{expr: "x := 999"})
 
     # Each tab reads back ITS OWN x — no cross-tab leakage.
-    assert view1 |> form("form") |> render_submit(%{expr: "x"}) =~ "100"
-    assert view2 |> form("form") |> render_submit(%{expr: "x"}) =~ "999"
+    assert view1 |> form("#eval-form") |> render_submit(%{expr: "x"}) =~ "100"
+    assert view2 |> form("#eval-form") |> render_submit(%{expr: "x"}) =~ "999"
   end
 
   test "a reconnect resumes the same session and retains state (BT-2410)", %{conn: conn} do
@@ -263,8 +263,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     conn = with_token(conn, "resume-#{System.unique_integer([:positive])}")
 
     {:ok, view1, _} = live(conn, "/")
-    view1 |> form("form") |> render_submit(%{expr: "y := 7"})
-    assert view1 |> form("form") |> render_submit(%{expr: "y"}) =~ "7"
+    view1 |> form("#eval-form") |> render_submit(%{expr: "y := 7"})
+    assert view1 |> form("#eval-form") |> render_submit(%{expr: "y"}) =~ "7"
 
     # Disconnect: stopping the LiveView fires terminate/2 → release/1, which opens
     # the grace window (it does NOT close the session). The same-tab reconnect
@@ -274,7 +274,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, view2, _} = live(conn, "/")
     # Resumed onto the same session: the earlier binding is still there, with no
     # re-eval — state survived the reconnect.
-    assert view2 |> form("form") |> render_submit(%{expr: "y"}) =~ "7"
+    assert view2 |> form("#eval-form") |> render_submit(%{expr: "y"}) =~ "7"
     # And the live bindings pane was resubscribed + re-read on resume.
     assert eventually(fn -> render(view2) =~ "y" end)
   end
@@ -289,7 +289,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert is_integer(before)
 
     {:ok, view, _} = live(conn, "/")
-    view |> form("form") |> render_submit(%{expr: "z := 1"})
+    view |> form("#eval-form") |> render_submit(%{expr: "z := 1"})
     # One more active session while the tab is open.
     assert eventually(fn -> BtAttach.Workspace.session_count() == before + 1 end)
 
