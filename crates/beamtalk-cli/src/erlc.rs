@@ -219,28 +219,31 @@ mod tests {
 
     #[test]
     fn test_basic_invocation() {
-        let inv = ErlcInvocation::new("/tmp/out").source_file(Utf8PathBuf::from("/tmp/foo.erl"));
+        let inv = ErlcInvocation::new("/fake/out").source_file(Utf8PathBuf::from("/fake/foo.erl"));
         let cmd = inv.build();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert_eq!(args, vec!["-o", "/tmp/out", "/tmp/foo.erl"]);
+        assert_eq!(args, vec!["-o", "/fake/out", "/fake/foo.erl"]);
     }
 
     #[test]
     fn test_debug_info() {
-        let inv = ErlcInvocation::new("/tmp/out")
+        let inv = ErlcInvocation::new("/fake/out")
             .debug_info()
-            .source_file(Utf8PathBuf::from("/tmp/foo.erl"));
+            .source_file(Utf8PathBuf::from("/fake/foo.erl"));
         let cmd = inv.build();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
-        assert_eq!(args, vec!["+debug_info", "-o", "/tmp/out", "/tmp/foo.erl"]);
+        assert_eq!(
+            args,
+            vec!["+debug_info", "-o", "/fake/out", "/fake/foo.erl"]
+        );
     }
 
     #[test]
     fn test_docs() {
-        let inv = ErlcInvocation::new("/tmp/out")
+        let inv = ErlcInvocation::new("/fake/out")
             .debug_info()
             .docs()
-            .source_file(Utf8PathBuf::from("/tmp/foo.erl"));
+            .source_file(Utf8PathBuf::from("/fake/foo.erl"));
         let cmd = inv.build();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert_eq!(
@@ -249,30 +252,30 @@ mod tests {
                 "+debug_info",
                 "+warn_missing_doc",
                 "-o",
-                "/tmp/out",
-                "/tmp/foo.erl"
+                "/fake/out",
+                "/fake/foo.erl"
             ]
         );
     }
 
     #[test]
     fn test_code_paths() {
-        let inv = ErlcInvocation::new("/tmp/out")
-            .code_path("/tmp/ebin1")
-            .code_path("/tmp/ebin2")
-            .source_file(Utf8PathBuf::from("/tmp/foo.erl"));
+        let inv = ErlcInvocation::new("/fake/out")
+            .code_path("/fake/ebin1")
+            .code_path("/fake/ebin2")
+            .source_file(Utf8PathBuf::from("/fake/foo.erl"));
         let cmd = inv.build();
         let args: Vec<_> = cmd.get_args().map(|a| a.to_str().unwrap()).collect();
         assert_eq!(
             args,
             vec![
                 "-o",
-                "/tmp/out",
+                "/fake/out",
                 "-pa",
-                "/tmp/ebin1",
+                "/fake/ebin1",
                 "-pa",
-                "/tmp/ebin2",
-                "/tmp/foo.erl"
+                "/fake/ebin2",
+                "/fake/foo.erl"
             ]
         );
     }
