@@ -1185,3 +1185,100 @@ fn test_list_select_non_literal_callable_emits_arity_check() {
         "Non-literal callable select: fallback should use 'select:' selector. Got:\n{code}"
     );
 }
+
+// ── BT-2478: ValueType context — list-op codegen ──────────────────────
+
+#[test]
+fn test_value_type_do_with_local_mutation_open_chain() {
+    // ValueType + do: + local mutation → generate_value_type_do_open (value_type_codegen.rs).
+    // Unlike Actor mode (which produces a closed expression returning {'nil', StateAcc}),
+    // ValueType emits an open let-chain: foldl → let X = maps:get(key, FoldResult) in
+    // so updated locals are visible to all subsequent method-body expressions.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    total := 0\n    #(1, 2, 3) do: [:item | total := total + item]\n    total\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "ValueType do: with mutation should use lists:foldl. Got:\n{code}"
+    );
+    // Open chain: no ThreadedResult wrapper variable (unlike collect: / select:).
+    // The caller (method body) directly continues the chain with the next expression.
+    assert!(
+        !code.contains("ThreadedResult"),
+        "ValueType do: open chain should NOT emit a ThreadedResult wrapper. Got:\n{code}"
+    );
+    // Open chain: extracts local via maps:get (map-acc), not element(N, ...) (tuple-acc).
+    assert!(
+        code.contains("maps':'get'('__local__total'"),
+        "ValueType do: should extract updated local via maps:get. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_type_collect_with_local_mutation_threaded_result_wrapper() {
+    // ValueType + collect: + local mutation → generate_list_collect_with_mutations
+    // (basic_ops.rs) in map-acc mode (ValueType forces map-acc; tuple-acc is disabled).
+    // The result is wrapped in a {List, StateAcc} pair; the outer method body unpacks
+    // it via element(1, ThreadedResult).
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    count := 0\n    #(1, 2, 3) collect: [:item | count := count + 1. item * 2]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "ValueType collect: with mutation should use lists:foldl. Got:\n{code}"
+    );
+    // The outer method body wraps the result via a ThreadedResult variable.
+    assert!(
+        code.contains("ThreadedResult"),
+        "ValueType collect: should produce a ThreadedResult wrapper. Got:\n{code}"
+    );
+    // BT-1489: String-aware result wrapping via from_list_like.
+    assert!(
+        code.contains("'beamtalk_collection':'from_list_like'"),
+        "ValueType collect: should use from_list_like for string-aware result. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_type_select_with_local_mutation_threaded_result_wrapper() {
+    // ValueType + select: + local mutation → generate_list_filter_with_mutations
+    // (filter_ops.rs) in map-acc mode (ValueType forces map-acc).
+    // Like collect:, the result is wrapped in a {List, StateAcc} pair that the outer
+    // method body unpacks via element(1, ThreadedResult).
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    count := 0\n    #(1, -2, 3) select: [:item | count := count + 1. item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "ValueType select: with mutation should use lists:foldl. Got:\n{code}"
+    );
+    // The outer method body wraps the result via a ThreadedResult variable.
+    assert!(
+        code.contains("ThreadedResult"),
+        "ValueType select: should produce a ThreadedResult wrapper. Got:\n{code}"
+    );
+    // BT-1489: String-aware result wrapping via from_list_like.
+    assert!(
+        code.contains("'beamtalk_collection':'from_list_like'"),
+        "ValueType select: should use from_list_like for string-aware result. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_value_type_do_non_literal_callable_seeds_empty_state() {
+    // ValueType + do: with non-literal callable → generate_simple_list_op (mod.rs lines 141–150).
+    // In ValueType context there is no actor State var in scope, so the Tier-2 wrapper is
+    // seeded with ~{}~ (empty map) rather than the current StateAcc.
+    let src = "Value subclass: V\n  state: dummy = 0\n\n  run: items with: block =>\n    items do: block\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foreach'"),
+        "ValueType do: with non-literal callable should use lists:foreach. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_function'"),
+        "ValueType non-literal do: should emit is_function/2 arity check (BT-909). Got:\n{code}"
+    );
+    // ValueType seeds the Tier-2 wrapper with ~{}~ (no actor State in scope).
+    assert!(
+        code.contains("~{}~"),
+        "ValueType non-literal do: should seed wrapper with ~{{}}~ (empty map). Got:\n{code}"
+    );
+}
