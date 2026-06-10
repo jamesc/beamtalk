@@ -3589,13 +3589,13 @@ Announcements (typed domain events you subscribe to in app logic):
 > is gone by the next; subscribe, announce, and observe within a single
 > expression (or from a long-lived actor) when you need a subscription to persist.
 >
-> **v1 scope.** In v1 all per-instance announcers share one class-keyed runtime
-> bus, so a subscription matches by event *class*, not by announcer;
-> `SystemAnnouncer` is the canonical multi-subscriber bus. True per-instance
-> subscription isolation is tracked as follow-up work. Cross-node delivery to a
-> *connected* node works; partition tolerance, replay, and the
+> **Per-instance isolation.** Each `Announcer new` mints an independent
+> dispatcher — subscriptions on announcer A are never matched by an `announce:`
+> on announcer B, even for the same event class. `SystemAnnouncer` is the
+> canonical multi-subscriber bus for system-wide events. Cross-node delivery to
+> a *connected* node works; partition tolerance, replay, and the
 > `RecordingAnnouncer`/telemetry-bridge extras live in the optional
-> `beamtalk-announcements` package.
+> `beamtalk-announcements` package (BT-2454).
 
 ---
 
