@@ -393,3 +393,69 @@
 .tok-send    { color: var(--t-send); font-weight: 700; }
 .tok-cascade { color: var(--t-cascade); }
 .tok-punct   { color: var(--t-punct); }
+
+/* ============================================================================
+   Tweaks panel (BT-2487, epic BT-2482 Phase 1)
+   ----------------------------------------------------------------------------
+   The cockpit's appearance controls, ported from the spike's Tweaks panel
+   (spikes/cockpit-ux-spike/tweaks-panel.jsx + app.jsx tweak effects). The
+   `TweaksPanel` JS hook (assets/js/hooks/tweaks_panel.js) reads each control's
+   `data-tweak` / `data-tweak-value` and flips the matching `:root` CSS variable
+   (data-theme, data-density, --ui-font, --code-font, --accent, syntax --t-*),
+   persisting to localStorage — no server round-trip. These rules style the
+   controls themselves, themed by the same CSS variables they drive so the panel
+   re-skins along with the IDE. The panel lives in the right column as a `.panel`
+   (it reuses `.panel` / `.panel-head` chrome), so only the form rows are here.
+   ========================================================================== */
+.tweaks-panel .panel-body { display: flex; flex-direction: column; gap: var(--gap, 9px); }
+
+/* a labelled row: caption above its control */
+.twk-row { display: flex; flex-direction: column; gap: 5px; }
+.twk-row > .twk-cap {
+  font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* segmented radio (theme / syntax / density) — buttons in a track */
+.twk-seg {
+  display: flex; gap: 2px; padding: 2px; border-radius: 7px;
+  background: var(--panel-3); border: 1px solid var(--line);
+}
+.twk-seg button {
+  flex: 1; min-width: 0; appearance: none; border: 0; cursor: pointer;
+  background: transparent; color: var(--muted); font: inherit; font-size: 11.5px;
+  font-weight: 500; border-radius: 5px; padding: 4px 6px; line-height: 1.2;
+  text-transform: capitalize;
+}
+.twk-seg button:hover { color: var(--ink); }
+.twk-seg button[data-on="1"] {
+  background: var(--panel); color: var(--ink);
+  box-shadow: var(--shadow); font-weight: 600;
+}
+
+/* accent swatches — a row of colour chips */
+.twk-swatches { display: flex; gap: 7px; }
+.twk-swatch {
+  appearance: none; flex: 1; min-width: 0; height: 26px; padding: 0; cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, .18); border-radius: 6px; position: relative;
+  box-shadow: var(--shadow);
+}
+.twk-swatch[data-on="1"] {
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink);
+}
+.twk-swatch[data-on="1"]::after {
+  content: "✓"; position: absolute; inset: 0; display: grid; place-items: center;
+  color: #fff; font-size: 13px; font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
+}
+
+/* dropdowns (UI font / code font) reuse the shared `.field` look */
+.twk-select {
+  appearance: none; width: 100%; height: 28px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg);
+  color: var(--ink); font: inherit; font-size: 12.5px; outline: none; cursor: pointer;
+}
+.twk-select:focus { border-color: var(--accent); }
+.twk-select.mono { font-family: var(--code-font, ui-monospace, monospace); }
+
+.twk-note { color: var(--faint); font-size: 11px; margin: 2px 0 0; }

@@ -7,6 +7,17 @@
     <.live_title suffix=" · Beamtalk">
       {assigns[:page_title] || "Beamtalk"}
     </.live_title>
+    <%!-- Cockpit Tweaks panel font options (BT-2487): the curated UI + code
+         typefaces the TweaksPanel hook can swap via --ui-font / --code-font.
+         Matches the set offered by the spike (spikes/cockpit-ux-spike). The
+         font-family fallbacks in app.css keep the IDE legible if these never
+         load (offline / blocked). --%>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=Public+Sans:wght@400;500;600;700&family=Schibsted+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&family=Spline+Sans+Mono:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap"
+    />
     <link phx-track-static rel="stylesheet" href={~p"/assets/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/app.js"}>
     </script>
