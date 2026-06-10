@@ -261,3 +261,50 @@
 .panel-body::-webkit-scrollbar, .transcript::-webkit-scrollbar { width: 10px; height: 10px; }
 .bt-cockpit *::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 2px solid var(--panel); }
 .bt-cockpit *::-webkit-scrollbar-track { background: transparent; }
+
+/* ============================================================================
+   Syntax-highlighting editor overlay (BT-2485, epic BT-2482 Phase 1)
+   ----------------------------------------------------------------------------
+   The `CodeEditor` JS hook (assets/js/hooks/code_editor.js) paints a Beamtalk
+   highlight into a `<pre class="bt-editor-pre">` behind a transparent
+   `<textarea class="bt-editor-ta">`. The two layers MUST share identical font,
+   font-size, line-height, padding and tab-size so the highlighted glyphs sit
+   exactly under the typed (transparent) glyphs — keep these rules in sync.
+   The `.tok-*` colours below resolve the `--t-*` variables themed per surface.
+   ========================================================================== */
+.bt-editor-wrap {
+  position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--code-bg);
+}
+.bt-editor-pre, .bt-editor-ta {
+  margin: 0; padding: 12px 14px; font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12.5px; line-height: 1.6; tab-size: 2; -moz-tab-size: 2;
+  white-space: pre; word-wrap: normal; border: 0;
+}
+.bt-editor-pre {
+  position: absolute; inset: 0; pointer-events: none; color: var(--ink); overflow: auto;
+}
+.bt-editor-ta {
+  position: absolute; inset: 0; outline: none; resize: none; background: transparent;
+  color: transparent; caret-color: var(--accent); overflow: auto;
+}
+
+/* token colours — themed by the per-surface `--t-*` variables */
+.tok-comment { color: var(--t-comment); font-style: italic; }
+.tok-string  { color: var(--t-string); }
+.tok-interp  { color: var(--t-symbol); font-weight: 600; }
+.tok-symbol  { color: var(--t-symbol); }
+.tok-char    { color: var(--t-char); }
+.tok-number  { color: var(--t-number); }
+.tok-keyword { color: var(--t-keyword); }
+.tok-reserved{ color: var(--t-reserved); font-weight: 600; }
+.tok-global  { color: var(--t-global); }
+.tok-var     { color: var(--t-var); }
+.tok-field   { color: var(--t-keyword); }
+.tok-binary  { color: var(--t-binary); }
+.tok-assign  { color: var(--t-assign); }
+.tok-return  { color: var(--t-return); font-weight: 600; }
+.tok-arrow   { color: var(--t-send); font-weight: 700; }
+.tok-match   { color: var(--t-binary); }
+.tok-send    { color: var(--t-send); font-weight: 700; }
+.tok-cascade { color: var(--t-cascade); }
+.tok-punct   { color: var(--t-punct); }

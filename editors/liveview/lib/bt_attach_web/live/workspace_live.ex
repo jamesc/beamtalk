@@ -41,6 +41,24 @@ defmodule BtAttachWeb.WorkspaceLive do
   `#workspace-dock`, `#bindings-panel`, `#inspector-panel`, `#method-editor`,
   `#changes-panel`, `#transcript-panel`) in later Phase 1 issues. The behaviour
   (events, assigns, term rendering) is unchanged — this issue re-skins markup.
+
+  ## JS hook foundation (BT-2485, epic BT-2482 Phase 1)
+
+  The cockpit's client-side behaviour rides three LiveView JS hooks, registered
+  on the `LiveSocket` in `assets/js/app.js` and referenced via `phx-hook`:
+
+    * `CodeEditor` — a syntax-highlighting editor overlay. A transparent
+      `<textarea>` sits over a `<pre>` the hook paints with the Beamtalk
+      highlighter (`assets/js/hooks/highlight.js`); `.tok-*` colours resolve the
+      themed `--t-*` CSS variables. The method-editor `source` field
+      (`#method-editor-overlay`) uses it; the Workspace dock will too.
+    * `KeyboardShortcuts` — maps Cmd/Ctrl chords to actions from a
+      `data-shortcuts` JSON map. The method-editor form binds ⌘S → `submit`
+      (request-submits the form so class/selector/source ride the normal
+      `save_method` `phx-submit`).
+    * `SelectionTracker` — reports the editor textarea's selection
+      (`{text, start, end}`) via the `select_source` event, held in
+      `:edit_selection` so a later pane can evaluate the selection vs the buffer.
   """
   use BtAttachWeb, :live_view
 
@@ -201,6 +219,8 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:edit_class, "")
       |> assign(:edit_selector, "")
       |> assign(:edit_source, "")
+      # Method-editor selection (BT-2485), reported by the SelectionTracker hook.
+      |> assign(:edit_selection, nil)
       |> assign(:save_result, nil)
       |> assign(:save_error, nil)
       |> assign(:flush_result, nil)
@@ -340,6 +360,25 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, flush_changes(socket)}
   end
 
+  # Selection tracking (BT-2485): the SelectionTracker JS hook reports the
+  # method-editor textarea's current selection (text + offsets). We hold it in
+  # `edit_selection` so a later pane can evaluate the selected expression rather
+  # than the whole buffer (the spike's "evaluates selection" vs "evaluates
+  # buffer" distinction). The payload is client-supplied, so accept only the
+  # well-formed shape and ignore anything else rather than crash the LiveView.
+  def handle_event("select_source", %{"text" => text} = params, socket)
+      when is_binary(text) do
+    selection = %{
+      text: text,
+      start: clamp_offset(params["start"]),
+      end: clamp_offset(params["end"])
+    }
+
+    {:noreply, assign(socket, edit_selection: selection)}
+  end
+
+  def handle_event("select_source", _params, socket), do: {:noreply, socket}
+
   # Transcript push, delivered directly over distribution to this LiveView pid.
   @impl true
   def handle_info({:transcript_output, text}, socket) do
@@ -411,6 +450,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp present(""), do: nil
   defp present(nil), do: nil
   defp present(output) when is_binary(output), do: output
+
+  # Normalise a client-supplied selection offset to a non-negative integer (or
+  # nil). The SelectionTracker hook sends integer offsets, but the payload is
+  # untrusted, so a missing / negative / non-integer value collapses to nil.
+  defp clamp_offset(n) when is_integer(n) and n >= 0, do: n
+  defp clamp_offset(_), do: nil
 
   # ── method editor helpers (Wave 3) ──────────────────────────────────────────
 
@@ -646,14 +691,17 @@ defmodule BtAttachWeb.WorkspaceLive do
               <div class="dock" style="order:2;">
                 <div id="workspace-dock" class="panel">
                   <div class="panel-head">
-                    Workspace
-                    <span class="spacer"></span>
+                    Workspace <span class="spacer"></span>
                     <span class="count">live</span>
                   </div>
                   <div class="panel-body">
                     <%!-- eval form: the FIRST <form> on the page (owner only) --%>
                     <%= if @role == :owner do %>
-                      <form id="eval-form" phx-submit="eval" style="display:flex; gap:.5rem; margin-bottom:.6rem;">
+                      <form
+                        id="eval-form"
+                        phx-submit="eval"
+                        style="display:flex; gap:.5rem; margin-bottom:.6rem;"
+                      >
                         <input
                           class="field"
                           name="expr"
@@ -685,7 +733,17 @@ defmodule BtAttachWeb.WorkspaceLive do
                       (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
                       eval observes the new behaviour.
                     </p>
-                    <form phx-submit="save_method">
+                    <%!-- ⌘S submits this editor form via the KeyboardShortcuts
+                         hook (BT-2485): the chord request-submits the form so
+                         the class/selector/source ride the normal phx-submit,
+                         exactly as clicking "Save Method" would. --%>
+                    <form
+                      id="method-editor-form"
+                      phx-submit="save_method"
+                      phx-hook="KeyboardShortcuts"
+                      data-scope="window"
+                      data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                    >
                       <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
                         <input
                           class="field"
@@ -704,13 +762,28 @@ defmodule BtAttachWeb.WorkspaceLive do
                           style="flex:1;"
                         />
                       </div>
-                      <textarea
-                        class="field"
-                        name="source"
-                        rows="4"
-                        placeholder="increment => self.value := self.value + 1"
-                        style="width:100%;"
-                      ><%= @edit_source %></textarea>
+                      <%!-- syntax-highlighting editor overlay (BT-2485): the
+                           CodeEditor hook paints the highlight into the <pre>
+                           behind the transparent <textarea>; SelectionTracker
+                           reports the caret selection so a later Do-it/Print-it
+                           can target the selected expression. The textarea
+                           keeps name="source" so save_method reads it. --%>
+                      <div
+                        id="method-editor-overlay"
+                        class="bt-editor-wrap field"
+                        style="display:block; height:6rem; padding:0;"
+                        phx-hook="CodeEditor"
+                      >
+                        <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
+                        <textarea
+                          id="method-editor-source"
+                          class="bt-editor-ta"
+                          name="source"
+                          phx-hook="SelectionTracker"
+                          data-select-event="select_source"
+                          placeholder="increment => self.value := self.value + 1"
+                        ><%= @edit_source %></textarea>
+                      </div>
                       <div style="display:flex; gap:.5rem; margin-top:.5rem;">
                         <button class="btn primary" type="submit">Save Method</button>
                         <button class="btn" type="button" phx-click="flush">
@@ -854,15 +927,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                 <div class="panel-head">Workspace</div>
                 <div class="panel-body">
                   <%= if @error do %>
-                    <div class="io-block err">Not attached.
-
-    {@error}
-
-    Start a workspace and export its node + cookie:
-      beamtalk workspace create spike --background --persistent
-      export BT_WORKSPACE_NODE=beamtalk_workspace_spike@localhost
-      export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' ~/.beamtalk/workspaces/spike/vm.args)
-    then restart this server.</div>
+                    <div class="io-block err">
+                      Not attached. {@error} Start a workspace and export its node + cookie:
+                      beamtalk workspace create spike --background --persistent
+                      export BT_WORKSPACE_NODE=beamtalk_workspace_spike@localhost
+                      export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' ~/.beamtalk/workspaces/spike/vm.args)
+                      then restart this server.
+                    </div>
                   <% else %>
                     <p class="muted-note">Connecting to workspace…</p>
                   <% end %>
