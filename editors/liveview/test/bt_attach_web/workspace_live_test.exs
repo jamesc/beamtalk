@@ -236,6 +236,40 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "Enter a class name"
   end
 
+  # ── Phase 1 JS hook foundation (BT-2485) ────────────────────────────────────
+
+  test "the editor hooks are present on the owner's connected render (BT-2485)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+
+    # CodeEditor overlay (highlight <pre> behind the transparent <textarea>),
+    # KeyboardShortcuts (⌘S → submit) and SelectionTracker (select_source).
+    assert html =~ ~s(phx-hook="CodeEditor")
+    assert html =~ ~s(phx-hook="KeyboardShortcuts")
+    assert html =~ ~s(phx-hook="SelectionTracker")
+    assert html =~ ~s(data-shortcuts)
+    assert html =~ ~s(data-select-event="select_source")
+    assert html =~ "bt-editor-pre"
+  end
+
+  test "the SelectionTracker hook event is accepted and ignored when malformed (BT-2485)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+
+    # A well-formed selection payload must not crash the LiveView (the assign is
+    # internal, so we just prove the handler accepts it and re-renders).
+    assert render_hook(view, "select_source", %{
+             "text" => "self.value",
+             "start" => 0,
+             "end" => 10
+           })
+
+    # A malformed payload (no text key, or non-binary) is ignored, not a crash —
+    # the LiveView keeps rendering, proving the defensive clause holds.
+    assert render_hook(view, "select_source", %{"garbage" => true})
+    assert render_hook(view, "select_source", %{"text" => 123})
+  end
+
   # ── Wave 4: multi-tab isolation / session resume / teardown (BT-2410) ────────
 
   test "two tabs map to two isolated workspace sessions (BT-2410)", %{conn: conn} do
