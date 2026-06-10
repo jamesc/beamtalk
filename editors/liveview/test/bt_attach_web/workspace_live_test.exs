@@ -270,6 +270,66 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert render_hook(view, "select_source", %{"text" => 123})
   end
 
+  # ── Phase 2 tabbed method editor (BT-2494) ──────────────────────────────────
+
+  test "the method editor renders a tab strip + breadcrumb (BT-2494)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+
+    # The tabbed write-surface: a tab strip over a breadcrumb. The starter tab is
+    # the Counter#increment method; the "+ def" affordance opens a class
+    # definition; the save_method form is preserved with a hidden tab field.
+    assert html =~ "tabstrip"
+    assert html =~ "editor-meta"
+    assert html =~ ~s(phx-click="tab_select")
+    assert html =~ ~s(phx-click="open_definition")
+    assert html =~ "+ def"
+    assert html =~ ~s(phx-submit="save_method")
+    assert html =~ ~s(name="tab")
+    # The breadcrumb shows Class › side › selector for the active tab.
+    assert html =~ "Counter"
+    assert html =~ "increment"
+  end
+
+  test "opening a class definition adds a + def tab and switches to it (BT-2494)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    # "+ def" opens (or re-focuses) the active class's definition tab — a tab
+    # whose compile evals the class definition. The tab label carries the ▸ def
+    # marker and the breadcrumb switches to the class-definition form.
+    html = view |> element(~s(button[phx-click="open_definition"])) |> render_click()
+    assert html =~ "Counter ▸ def"
+    assert html =~ "class definition"
+  end
+
+  test "a dirty edit marks the active tab with a dirty dot (BT-2494)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    # The starter Counter tab opens clean (no dirty dot), reporting "in image".
+    assert render(view) =~ "in image"
+    refute render(view) =~ "modot"
+
+    # Editing the source via the form's phx-change marks the active tab dirty —
+    # the dirty dot (.modot) appears in the tab strip and the meta-note flips to
+    # "edited". This is pure view state (no workspace round-trip).
+    edited =
+      view
+      |> form("#method-editor-form")
+      |> render_change(%{"source" => "increment => self.value := self.value + 2"})
+
+    assert edited =~ "modot"
+    assert edited =~ "edited"
+  end
+
+  test "the tab edit-source handler ignores a malformed payload (BT-2494)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    # A crafted edit_source event with no/non-binary source must not crash the
+    # LiveView — the defensive clause keeps it rendering.
+    assert render_hook(view, "edit_source", %{"garbage" => true})
+    assert render_hook(view, "edit_source", %{"source" => 123})
+    assert Process.alive?(view.pid)
+  end
+
   test "the Tweaks panel and its controls render on the connected shell (BT-2487)", %{
     conn: conn
   } do

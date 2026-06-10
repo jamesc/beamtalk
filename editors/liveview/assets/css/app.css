@@ -202,6 +202,50 @@
 .dock .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* ============================================================================
+   Tabbed method editor — write-surface tab strip + breadcrumb (BT-2494)
+   ----------------------------------------------------------------------------
+   Ported from the spike (spikes/cockpit-ux-spike/app.jsx + styles.css). The
+   `#method-editor` panel holds a `.tabstrip` (one `.tab` per open method / class
+   definition, each with a `.modot` dirty dot and a close `.x`), an
+   `.editor-meta` breadcrumb (Class › side › selector), and the BT-2485
+   highlighted editor in the panel body.
+   ========================================================================== */
+.tabstrip {
+  display: flex; align-items: stretch; gap: 0; background: var(--panel-2);
+  border-bottom: 1px solid var(--line); flex: none; overflow-x: auto;
+}
+.tabstrip .tab {
+  display: flex; align-items: center; gap: 7px; padding: 0 12px; height: 30px;
+  cursor: pointer; font-size: 12px; color: var(--muted);
+  border: 0; border-right: 1px solid var(--line); white-space: nowrap;
+  background: transparent; font-family: var(--code-font, monospace);
+}
+.tabstrip .tab.on { background: var(--panel); color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); }
+.tabstrip .tab:hover { color: var(--ink); }
+.tabstrip .tab .tab-label { color: inherit; }
+.tabstrip .tab .x { color: var(--faint); border-radius: 3px; padding: 0 3px; line-height: 1; }
+.tabstrip .tab .x:hover { background: var(--line); color: var(--ink); }
+.tabstrip .tab .modot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.tabstrip .tab.tab-add { border-right: 0; color: var(--muted); }
+.tabstrip > .spacer { flex: 1; }
+
+.editor-meta {
+  flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 12px;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+  font-size: 11px; color: var(--muted);
+}
+.editor-meta .crumb {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  display: flex; align-items: center; gap: 5px;
+}
+.editor-meta .crumb b { color: var(--ink); font-weight: 600; }
+.editor-meta .crumb .mono { color: var(--accent-2); font-family: var(--code-font, monospace); }
+.editor-meta .crumb .sep { color: var(--faint); }
+.editor-meta > .spacer { flex: 1; }
+.editor-meta .meta-note { flex: none; white-space: nowrap; color: var(--faint); }
+.editor-meta .meta-note.edited, .editor-meta .meta-note.read-only { color: var(--accent-2); }
+
+/* ============================================================================
    Workspace dock — tabbed Workspace / Transcript / Changes (BT-2490)
    ----------------------------------------------------------------------------
    Ported from the spike (spikes/cockpit-ux-spike/app.jsx + styles.css). One

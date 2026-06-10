@@ -123,6 +123,38 @@ defmodule BtAttachWeb.WorkspaceLive do
   `form("#eval-form")` (and `form("form")`) resolve to it; the Method Editor form
   follows. A plain submit (no `action`) defaults to printIt — the historical eval
   behaviour the BT-2407/2408/2410 tests assert on.
+
+  ## Tabbed method editor (BT-2494, epic BT-2482 Phase 2)
+
+  The center `#method-editor` panel is the spike's **tabbed write-surface**
+  (`spikes/cockpit-ux-spike/app.jsx`, ADR 0082): a tab strip over a breadcrumb
+  over the BT-2485 highlighted editor. The open-tab list is `:tabs` (each a map
+  with `id`, `kind` (`:method | :def`), `class`, `side`, `selector`, `source`,
+  `base`, `dirty`) and the focused id is `:active_tab`:
+
+    * **Tab strip** — one tab per open method *or* class definition, each with a
+      `.modot` dirty dot (unsaved edits) and a close `×` (the strip always keeps
+      ≥1 tab). A `+ def` affordance opens (or re-focuses) the active class's
+      definition tab. `tab_select` / `tab_close` / `open_definition` are pure
+      view state — no workspace round-trip.
+    * **Compile (⌘S)** — the single `save_method` form is preserved verbatim
+      (`id`, `phx-submit="save_method"`, ⌘S via `KeyboardShortcuts`, the
+      `class`/`selector`/`source` fields) so the BT-2409 e2e flows keep working.
+      The active tab id rides as a hidden `tab` field; `save_method/5` reads the
+      tab's *kind* (not the payload shape) to route: a method tab drives the
+      write-surface `save` op (compile + flush, ADR 0082), a class-definition tab
+      `eval`s its whole definition (compiling the class) — neither invents a new
+      server op. The historical no-tab payload (`tab` absent) takes the method
+      path unchanged.
+    * **Dirty tracking** — the form's `phx-debounce`d `phx-change="edit_source"`
+      reports live edits; `track_edit/2` flips the active tab's `dirty` when its
+      `source` diverges from the last-compiled `base`, and a successful compile
+      (`compile_clean/3`) clears the dot + re-bases. To avoid caret-jump we do
+      NOT echo the live value back into the textarea on change — the element is
+      re-keyed on `@active_tab`, so switching tabs remounts it with the new tab's
+      source.
+    * **Breadcrumb** — `Class › side › selector` for the active tab (a class
+      definition shows `Class › class definition`).
   """
   use BtAttachWeb, :live_view
 
@@ -289,6 +321,12 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:edit_class, "")
       |> assign(:edit_selector, "")
       |> assign(:edit_source, "")
+      # Tabbed method editor (BT-2494, epic BT-2482 Phase 2): the spike's
+      # write-surface tab strip (ADR 0082). `:tabs` is the ordered open-tab list;
+      # `:active_tab` is the id of the focused tab. Each tab carries its own
+      # source/base/dirty so switching tabs swaps the whole edit buffer, and a
+      # dirty dot per tab tracks unsaved edits (cleared on a successful compile).
+      |> init_tabs()
       # Method-editor selection (BT-2485), reported by the SelectionTracker hook.
       |> assign(:edit_selection, nil)
       # Workspace-editor selection (BT-2490): the dock's own SelectionTracker,
@@ -450,19 +488,66 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def handle_event(
         "save_method",
-        %{"class" => class, "selector" => selector, "source" => source},
+        %{"class" => class, "selector" => selector, "source" => source} = params,
         socket
       )
       when is_binary(class) and is_binary(selector) and is_binary(source) do
-    {:noreply, save_method(socket, class, selector, source)}
+    # The active tab's id rides the form as a hidden field (BT-2494) so a
+    # successful compile clears *that* tab's dirty dot and refreshes its base.
+    # The historical save_method payload (the BT-2409 e2e) carries no tab id —
+    # `params["tab"]` is then nil and the save still works, just without a tab
+    # to reconcile.
+    {:noreply, save_method(socket, class, selector, source, params["tab"])}
   end
 
   # Malformed payload (missing keys or non-binary values): never let a crafted
-  # form event crash the LiveView — `save_method/4` calls `String.trim/1`, which
+  # form event crash the LiveView — `save_method/5` calls `String.trim/1`, which
   # would raise on a non-binary. Surface a validation error instead.
   def handle_event("save_method", _params, socket) do
     {:noreply, assign(socket, save_result: nil, save_error: "Invalid method form payload.")}
   end
+
+  # ── tabbed method editor (BT-2494, epic BT-2482 Phase 2) ────────────────────
+
+  # Switch the focused editor tab. Pure view state — no workspace round-trip; an
+  # id that no longer maps to an open tab is ignored rather than blanking the
+  # editor. Switching also re-syncs the visible class/selector/source assigns
+  # (which the save_method form reads) to the newly-active tab.
+  def handle_event("tab_select", %{"id" => id}, socket) do
+    {:noreply, activate_tab(socket, id)}
+  end
+
+  def handle_event("tab_select", _params, socket), do: {:noreply, socket}
+
+  # Close a tab (the spike's × affordance). The last tab is never closable — the
+  # editor always holds ≥1 tab — so a close request that would empty the strip is
+  # ignored. Closing the active tab moves focus to the previous (or first)
+  # remaining tab.
+  def handle_event("tab_close", %{"id" => id}, socket) do
+    {:noreply, close_tab(socket, id)}
+  end
+
+  def handle_event("tab_close", _params, socket), do: {:noreply, socket}
+
+  # Open a fresh class-definition tab (the spike's "+ def" affordance): a tab
+  # whose source is a *class definition* rather than a method body, so saving it
+  # compiles the class. The class name comes from the active tab (so "+ def"
+  # opens the definition of the class you're editing); a definition tab already
+  # open for that class is re-focused rather than duplicated.
+  def handle_event("open_definition", _params, socket) do
+    {:noreply, open_definition(socket)}
+  end
+
+  # Track edits to the active tab so its dirty dot reflects unsaved changes
+  # (BT-2494). The save_method form's `phx-change` reports the live source on
+  # each keystroke; we stash it on the active tab and recompute its dirty flag
+  # (source != the last-compiled base). Client-supplied, so a non-binary / absent
+  # source is ignored rather than crashing.
+  def handle_event("edit_source", %{"source" => source}, socket) when is_binary(source) do
+    {:noreply, track_edit(socket, source)}
+  end
+
+  def handle_event("edit_source", _params, socket), do: {:noreply, socket}
 
   # Flush all pending durable changes to disk ("Save All to Disk", ADR 0082
   # `Workspace flush`). The summary's conflicts/skipped lists carry recoverable
@@ -648,10 +733,24 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # ── method editor helpers (Wave 3) ──────────────────────────────────────────
 
+  # Compile (⌘S) the active tab's source. A class-definition tab evals its whole
+  # definition (compiling the class); a method tab drives the write-surface
+  # `save` install chokepoint (compile + flush). The tab kind is read from the
+  # open-tab list by id — NOT inferred from the payload — so the historical
+  # method save_method payload (no tab id, the BT-2409 e2e) keeps its exact
+  # behaviour. On success the matching tab's dirty dot clears and its base source
+  # is updated to the compiled text.
+  defp save_method(socket, class, selector, source, tab_id) do
+    case tab_id && find_tab(socket, tab_id) do
+      %{kind: :def} = tab -> save_definition(socket, tab, source)
+      _ -> save_method_body(socket, class, selector, source, tab_id)
+    end
+  end
+
   # Validate the edit form, then drive the write-surface save. Empty class or
   # selector is a local validation error (rendered without a round-trip); a real
   # save threads the body value straight to the workspace install chokepoint.
-  defp save_method(socket, class, selector, source) do
+  defp save_method_body(socket, class, selector, source, tab_id) do
     class = String.trim(class)
     selector = String.trim(selector)
 
@@ -677,7 +776,9 @@ defmodule BtAttachWeb.WorkspaceLive do
              ) do
           {:ok, saved_class} ->
             # The patch is live + logged; refresh the change-history pane so the
-            # new entry is visible (ChangeLog coherence).
+            # new entry is visible (ChangeLog coherence). A successful compile
+            # also clears the active tab's dirty dot and re-bases it on the
+            # compiled source.
             socket
             |> assign(
               save_result: "Saved #{selector} on #{saved_class}",
@@ -685,6 +786,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               flush_result: nil,
               flush_error: nil
             )
+            |> compile_clean(tab_id, source)
             |> assign_changes()
 
           {:error, reason} ->
@@ -692,6 +794,48 @@ defmodule BtAttachWeb.WorkspaceLive do
             # event from a read-only role, or a workspace #beamtalk_error{}.
             assign(socket, save_result: nil, save_error: facade_error(reason))
         end
+    end
+  end
+
+  # Compile a class-definition tab (BT-2494) by evaluating its definition source
+  # against the workspace — exactly the path the e2e tests use to define a class,
+  # so "saving a class definition compiles the class" needs no new server op
+  # (ADR 0082; the `eval` facade op). An empty body is a local validation error;
+  # a compile failure renders the structured `#beamtalk_error{}`.
+  defp save_definition(socket, tab, source) do
+    socket = assign(socket, edit_source: source)
+    pid = socket.assigns[:session_pid]
+
+    cond do
+      String.trim(source) == "" ->
+        assign(socket, save_result: nil, save_error: "Enter a class definition to compile.")
+
+      not is_pid(pid) ->
+        assign(socket, save_result: nil, save_error: "not attached to workspace")
+
+      true ->
+        save_definition_eval(socket, tab, source, pid)
+    end
+  end
+
+  defp save_definition_eval(socket, tab, source, pid) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: source}, ctx(socket)) do
+      {:ok, _term, _output, _warnings} ->
+        socket
+        |> assign(
+          save_result: "Compiled #{tab.class}",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil
+        )
+        |> compile_clean(tab.id, source)
+        |> assign_changes()
+
+      {:error, reason, _output, _warnings} ->
+        assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
+
+      {:error, reason} ->
+        assign(socket, save_result: nil, save_error: facade_error(reason))
     end
   end
 
@@ -721,6 +865,161 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, changes: [], changes_error: Workspace.render_error(reason))
     end
   end
+
+  # ── tabbed method editor data model (BT-2494) ───────────────────────────────
+  #
+  # A tab is a plain map; the open-tab list lives in `:tabs` and the focused
+  # tab's id in `:active_tab`. The visible class/selector/source assigns (which
+  # the save_method form binds) always mirror the active tab, so the existing
+  # write-surface handler reads them unchanged.
+  #
+  #   %{
+  #     id: stable string id (method-key or "def:<Class>"),
+  #     kind: :method | :def,
+  #     class: "Counter",
+  #     side: "instance" | "class",     # methods only
+  #     selector: "increment",          # methods only
+  #     source: live edit buffer,
+  #     base: last-compiled source (dirty = source != base),
+  #     dirty: boolean
+  #   }
+  #
+  # The cockpit opens with one starter method tab so the editor is never empty
+  # (the strip always holds ≥1 tab) and the ⌘S / Save Method e2e flow has a tab
+  # to compile into.
+
+  defp init_tabs(socket) do
+    tab = %{
+      id: "method:Counter:instance:increment",
+      kind: :method,
+      class: "Counter",
+      side: "instance",
+      selector: "increment",
+      source: "",
+      base: "",
+      dirty: false
+    }
+
+    socket
+    |> assign(:tabs, [tab])
+    |> assign(:active_tab, tab.id)
+  end
+
+  defp find_tab(socket, id), do: Enum.find(socket.assigns.tabs, &(&1.id == id))
+
+  # The focused tab. Takes the bare `assigns` (not the socket) so the render
+  # template can call it for the breadcrumb / dirty-state too; falls back to the
+  # first tab if the active id somehow no longer maps (the strip is never empty).
+  defp active_tab(%{tabs: tabs, active_tab: id}) do
+    Enum.find(tabs, &(&1.id == id)) || List.first(tabs)
+  end
+
+  # Focus a tab by id and mirror its class/selector/source into the form-backing
+  # assigns. Clears any stale save/flush result so switching tabs starts clean.
+  defp activate_tab(socket, id) do
+    case find_tab(socket, id) do
+      nil -> socket
+      tab -> sync_active(assign(socket, :active_tab, id), tab)
+    end
+  end
+
+  # Push the active tab's fields into the form-backing assigns so the (single)
+  # save_method form always reflects the focused tab.
+  defp sync_active(socket, tab) do
+    assign(socket,
+      edit_class: tab.class,
+      edit_selector: tab.selector || "",
+      edit_source: tab.source,
+      save_result: nil,
+      save_error: nil,
+      flush_result: nil,
+      flush_error: nil
+    )
+  end
+
+  # Close a tab, keeping at least one open. Closing the active tab moves focus to
+  # the previous remaining tab (or the first), re-syncing the form assigns.
+  defp close_tab(socket, id) do
+    tabs = socket.assigns.tabs
+
+    if length(tabs) <= 1 or not Enum.any?(tabs, &(&1.id == id)) do
+      socket
+    else
+      idx = Enum.find_index(tabs, &(&1.id == id))
+      remaining = List.delete_at(tabs, idx)
+      socket = assign(socket, :tabs, remaining)
+
+      if socket.assigns.active_tab == id do
+        next = Enum.at(remaining, max(idx - 1, 0))
+        sync_active(assign(socket, :active_tab, next.id), next)
+      else
+        socket
+      end
+    end
+  end
+
+  # Open (or re-focus) a class-definition tab for the active tab's class. A def
+  # tab evals its definition source on compile (saving compiles the class).
+  defp open_definition(socket) do
+    class = active_tab(socket.assigns).class
+    id = "def:" <> class
+
+    case find_tab(socket, id) do
+      %{} ->
+        activate_tab(socket, id)
+
+      nil ->
+        tab = %{
+          id: id,
+          kind: :def,
+          class: class,
+          side: nil,
+          selector: nil,
+          source: "",
+          base: "",
+          dirty: false
+        }
+
+        socket
+        |> assign(:tabs, socket.assigns.tabs ++ [tab])
+        |> assign(:active_tab, id)
+        |> sync_active(tab)
+    end
+  end
+
+  # Record a keystroke edit on the active tab and recompute its dirty flag
+  # (source != last-compiled base). We deliberately do NOT re-assign
+  # `:edit_source` here: echoing the live value back would make LiveView patch
+  # the textarea mid-typing and jump the caret. The tab's `source` is the truth
+  # the next compile / tab-switch reads; `:edit_source` is only the *initial*
+  # textarea value, re-synced when a tab is (re)focused (the element is re-keyed
+  # on `@active_tab`, so a fresh mount picks it up).
+  defp track_edit(socket, source) do
+    update_active_tab(socket, fn tab -> %{tab | source: source, dirty: source != tab.base} end)
+  end
+
+  # After a successful compile, clear the saved tab's dirty dot and re-base it on
+  # the compiled source. `tab_id` is nil for the historical no-tab save payload —
+  # then there's nothing to reconcile.
+  defp compile_clean(socket, nil, _source), do: socket
+
+  defp compile_clean(socket, tab_id, source) do
+    update_active_tab_by_id(socket, tab_id, fn tab ->
+      %{tab | source: source, base: source, dirty: false}
+    end)
+  end
+
+  defp update_active_tab(socket, fun),
+    do: update_active_tab_by_id(socket, socket.assigns.active_tab, fun)
+
+  defp update_active_tab_by_id(socket, id, fun) do
+    tabs = Enum.map(socket.assigns.tabs, fn t -> if t.id == id, do: fun.(t), else: t end)
+    assign(socket, :tabs, tabs)
+  end
+
+  # The Class › side › selector breadcrumb label parts for the active tab.
+  defp breadcrumb(%{kind: :def, class: class}), do: {class, nil, "class definition"}
+  defp breadcrumb(%{class: class, side: side, selector: selector}), do: {class, side, selector}
 
   # ── bindings + inspector helpers ────────────────────────────────────────────
 
@@ -1208,68 +1507,149 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
               </div>
 
+              <%!-- TABBED METHOD EDITOR (BT-2494): the spike's write-surface.
+                   A tab strip (methods + class definitions) over a breadcrumb
+                   and the BT-2485 highlighted editor. The single save_method
+                   form is preserved (id, phx-submit, ⌘S, name="class"/"selector"/
+                   "source") so the BT-2409 e2e flows keep working; the active tab
+                   rides as a hidden `tab` field so a compile clears its dirty dot
+                   and a class-definition tab compiles the class via `eval`. --%>
               <div id="method-editor" class="panel editor-panel" style="order:1;">
-                <div class="panel-head">Method Editor</div>
+                <%!-- tab strip: one tab per open method / class definition, with
+                     a per-tab dirty dot and a close × (the last tab stays open). --%>
+                <div class="tabstrip" role="tablist">
+                  <button
+                    :for={t <- @tabs}
+                    type="button"
+                    role="tab"
+                    class={["tab", @active_tab == t.id && "on"]}
+                    aria-selected={to_string(@active_tab == t.id)}
+                    phx-click="tab_select"
+                    phx-value-id={t.id}
+                  >
+                    <span :if={t.dirty} class="modot" title="unsaved edits"></span>
+                    <span class="tab-label mono">
+                      {if t.kind == :def, do: t.class <> " ▸ def", else: t.selector}
+                    </span>
+                    <span
+                      :if={length(@tabs) > 1}
+                      class="x"
+                      title="Close tab"
+                      phx-click="tab_close"
+                      phx-value-id={t.id}
+                    >
+                      ×
+                    </span>
+                  </button>
+                  <span class="spacer"></span>
+                  <%!-- "+ def" opens (or focuses) the active class's definition
+                       tab — saving it compiles the class (ADR 0082). --%>
+                  <button
+                    :if={@role == :owner}
+                    type="button"
+                    class="tab tab-add"
+                    title="Open class definition"
+                    phx-click="open_definition"
+                  >
+                    + def
+                  </button>
+                </div>
+
+                <%!-- breadcrumb: Class › side › selector for the active tab. --%>
+                <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
+                <div class="editor-meta">
+                  <span class="crumb">
+                    <b>{bc_class}</b>
+                    <span :if={bc_side} class="sep">›</span>
+                    <span :if={bc_side} class="mono">{bc_side}</span>
+                    <span class="sep">›</span>
+                    <span class="mono">{bc_sel}</span>
+                  </span>
+                  <span class="spacer"></span>
+                  <span :if={@role != :owner} class="meta-note read-only">read-only · Observer</span>
+                  <span :if={@role == :owner and active_tab(assigns).dirty} class="meta-note edited">
+                    edited — ⌘S to compile
+                  </span>
+                  <span :if={@role == :owner and not active_tab(assigns).dirty} class="meta-note">
+                    in image
+                  </span>
+                </div>
+
                 <div class="panel-body">
                   <%= if @role == :owner do %>
-                    <p class="muted-note">
-                      Edit a method and Save to compile + flush it onto the workspace
-                      (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
-                      eval observes the new behaviour.
-                    </p>
                     <%!-- ⌘S submits this editor form via the KeyboardShortcuts
                          hook (BT-2485): the chord request-submits the form so
-                         the class/selector/source ride the normal phx-submit,
-                         exactly as clicking "Save Method" would. --%>
+                         the class/selector/source/tab ride the normal phx-submit,
+                         exactly as clicking "Compile" would. `phx-change` reports
+                         live edits so the active tab's dirty dot tracks them. --%>
                     <form
                       id="method-editor-form"
                       phx-submit="save_method"
+                      phx-change="edit_source"
                       phx-hook="KeyboardShortcuts"
                       data-scope="window"
                       data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
                     >
-                      <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
-                        <input
-                          class="field"
-                          name="class"
-                          value={@edit_class}
-                          placeholder="Class (e.g. Counter)"
-                          autocomplete="off"
-                          style="flex:1;"
-                        />
-                        <input
-                          class="field"
-                          name="selector"
-                          value={@edit_selector}
-                          placeholder="selector (e.g. increment)"
-                          autocomplete="off"
-                          style="flex:1;"
-                        />
-                      </div>
-                      <%!-- syntax-highlighting editor overlay (BT-2485): the
-                           CodeEditor hook paints the highlight into the <pre>
-                           behind the transparent <textarea>; SelectionTracker
-                           reports the caret selection so a later Do-it/Print-it
-                           can target the selected expression. The textarea
-                           keeps name="source" so save_method reads it. --%>
+                      <%!-- the active tab id rides every compile so the handler
+                           knows which tab to clean and whether it's a class
+                           definition. --%>
+                      <input type="hidden" name="tab" value={@active_tab} />
+                      <%!-- a method tab edits class + selector inline; a class-
+                           definition tab carries them as hidden fields (the class
+                           name) so the form payload shape is unchanged. --%>
+                      <%= if active_tab(assigns).kind == :def do %>
+                        <input type="hidden" name="class" value={@edit_class} />
+                        <input type="hidden" name="selector" value="▸ class definition" />
+                      <% else %>
+                        <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+                          <input
+                            class="field"
+                            name="class"
+                            value={@edit_class}
+                            placeholder="Class (e.g. Counter)"
+                            autocomplete="off"
+                            style="flex:1;"
+                          />
+                          <input
+                            class="field"
+                            name="selector"
+                            value={@edit_selector}
+                            placeholder="selector (e.g. increment)"
+                            autocomplete="off"
+                            style="flex:1;"
+                          />
+                        </div>
+                      <% end %>
+                      <%!-- syntax-highlighting editor overlay (BT-2485). Re-keyed
+                           on the active tab id (`@active_tab`) so switching tabs
+                           replaces the element and the textarea picks up the new
+                           tab's source. The textarea keeps name="source" so
+                           save_method reads it. --%>
                       <div
-                        id="method-editor-overlay"
+                        id={"method-editor-overlay-" <> @active_tab}
                         class="bt-editor-wrap field"
                         style="display:block; height:6rem; padding:0;"
                         phx-hook="CodeEditor"
                       >
                         <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
                         <textarea
-                          id="method-editor-source"
+                          id={"method-editor-source-" <> @active_tab}
                           class="bt-editor-ta"
                           name="source"
+                          phx-debounce="300"
                           phx-hook="SelectionTracker"
                           data-select-event="select_source"
-                          placeholder="increment => self.value := self.value + 1"
+                          placeholder={
+                            if active_tab(assigns).kind == :def,
+                              do: "Actor subclass: Counter\n  state: value = 0",
+                              else: "increment => self.value := self.value + 1"
+                          }
                         ><%= @edit_source %></textarea>
                       </div>
                       <div style="display:flex; gap:.5rem; margin-top:.5rem;">
-                        <button class="btn primary" type="submit">Save Method</button>
+                        <button class="btn primary" type="submit">
+                          Compile <span class="k">⌘S</span>
+                        </button>
                         <button class="btn" type="button" phx-click="flush">
                           Save All to Disk (flush)
                         </button>
