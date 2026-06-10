@@ -3,3 +3,261 @@
 @import "tailwindcss/utilities";
 
 /* This file is for your main application CSS */
+
+/* ============================================================================
+   Cockpit shell (BT-2484, epic BT-2482 Phase 1)
+   ----------------------------------------------------------------------------
+   The CSS-variable theming foundation + three-column grid shell for the
+   LiveView IDE, ported from spikes/cockpit-ux-spike/styles.css. Phase 1 lays
+   down the shell only; the System Browser, Workspace dock, Bindings, Inspector,
+   and Tweaks panels build on the placeholder regions defined here.
+
+   Theme + accent + syntax palette are all driven by CSS variables so a later
+   Tweaks panel can re-skin the whole IDE by toggling `data-theme` on <html>.
+   ========================================================================== */
+
+/* ---------- Themes ---------- */
+:root,
+[data-theme="paper"] {
+  --bg:        #cfc6b0;   /* desk behind the paper */
+  --panel:     #f7f2e7;   /* paper */
+  --panel-2:   #efe8d6;   /* header strips */
+  --panel-3:   #e7dfca;   /* nested headers */
+  --ink:       #2c2620;
+  --muted:     #837a68;
+  --faint:     #a89e88;
+  --line:      #d8cfb8;
+  --line-soft: #e4dcc7;
+  --sel:       #ecdcb8;   /* selected row */
+  --sel-ink:   #4a3a18;
+  --hover:     #efe7d3;
+  --code-bg:   #fbf8ef;
+  --accent:    #b9711b;
+  --accent-2:  #9a5b12;
+  --accent-ink:#fff8ec;
+  --accent-soft:#f0dcb6;
+  --shadow:    0 1px 0 rgba(255,255,255,.6) inset, 0 1px 2px rgba(60,45,20,.10);
+  --ok:        #5d7a2e;
+  --err:       #b23b2e;
+  /* syntax */
+  --t-comment:#a4957a; --t-string:#5d7a2e; --t-symbol:#1f7a6b; --t-char:#1f7a6b;
+  --t-number:#b5651d; --t-keyword:#2c6e8e; --t-reserved:#a8324e; --t-global:#8a5a1e;
+  --t-var:#3a3228; --t-binary:#7a6a4e; --t-assign:#a8324e; --t-return:#a8324e;
+  --t-send:#b9711b; --t-cascade:#7a6a4e; --t-punct:#9b9079;
+}
+
+[data-theme="squeak"] {
+  --bg:        #c7b58c;
+  --panel:     #fcf6e3;
+  --panel-2:   #f3e8c8;
+  --panel-3:   #ecdfba;
+  --ink:       #3a2f1c;
+  --muted:     #8a7a52;
+  --faint:     #b09a68;
+  --line:      #ddc999;
+  --line-soft: #e9dab2;
+  --sel:       #f6d98a;
+  --sel-ink:   #5a3e0e;
+  --hover:     #f2e7c6;
+  --code-bg:   #fffae9;
+  --accent:    #c8851a;
+  --accent-2:  #a4650c;
+  --accent-ink:#fff8e8;
+  --accent-soft:#f7df9e;
+  --shadow:    0 1px 0 rgba(255,255,255,.7) inset, 0 2px 3px rgba(80,55,10,.16);
+  --ok:        #5d7a2e; --err:#b23b2e;
+  --t-comment:#b09a68; --t-string:#5d7a2e; --t-symbol:#1f7a6b; --t-char:#1f7a6b;
+  --t-number:#b5651d; --t-keyword:#2c6e8e; --t-reserved:#b23048; --t-global:#9a6314;
+  --t-var:#4a3c22; --t-binary:#8a7338; --t-assign:#b23048; --t-return:#b23048;
+  --t-send:#c8851a; --t-cascade:#8a7338; --t-punct:#a89263;
+}
+
+[data-theme="dusk"] {
+  --bg:        #14110c;
+  --panel:     #211c14;
+  --panel-2:   #2a241a;
+  --panel-3:   #322a1e;
+  --ink:       #ece3d0;
+  --muted:     #9c907a;
+  --faint:     #6f6552;
+  --line:      #3a3122;
+  --line-soft: #2e2719;
+  --sel:       #43361d;
+  --sel-ink:   #f4e6c4;
+  --hover:     #2c2519;
+  --code-bg:   #1b160f;
+  --accent:    #e0962f;
+  --accent-2:  #f0ad4e;
+  --accent-ink:#1b150b;
+  --accent-soft:#3c2f17;
+  --shadow:    0 1px 0 rgba(255,255,255,.04) inset, 0 2px 4px rgba(0,0,0,.4);
+  --ok:        #9bbb5a; --err:#e0795f;
+  --t-comment:#7a6f58; --t-string:#a9c071; --t-symbol:#5bc4ad; --t-char:#5bc4ad;
+  --t-number:#e0a35a; --t-keyword:#79b8d6; --t-reserved:#e98aa0; --t-global:#d9a85a;
+  --t-var:#ece3d0; --t-binary:#bcae8e; --t-assign:#e98aa0; --t-return:#e98aa0;
+  --t-send:#f0ad4e; --t-cascade:#bcae8e; --t-punct:#8a7d64;
+}
+
+/* density */
+[data-density="compact"] { --row-h: 22px; --pad: 5px; --gap: 6px; }
+:root { --row-h: 26px; --pad: 7px; --gap: 9px; }
+
+/* ---------- Cockpit base ---------- */
+.bt-cockpit, .bt-cockpit * { box-sizing: border-box; }
+.bt-cockpit {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--ui-font, system-ui, sans-serif);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+.bt-cockpit .mono { font-family: var(--code-font, ui-monospace, monospace); }
+.bt-cockpit button { font-family: inherit; color: inherit; }
+
+/* ---------- App shell ----------
+   The cockpit fills the viewport. It is pinned with `position: fixed; inset: 0`
+   so it breaks out of the default `:app` layout's centred `max-w-2xl` wrapper
+   (which suits forms/pages) without needing a per-LiveView layout override —
+   the IDE owns the whole window. */
+.bt-cockpit .app {
+  position: fixed; inset: 0; z-index: 1;
+  height: 100vh; display: flex; flex-direction: column;
+  padding: 9px; gap: 9px;
+  background: var(--bg);
+}
+
+/* top bar */
+.topbar {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: 9px; padding: 0 12px; height: 46px;
+  box-shadow: var(--shadow); flex: none;
+}
+.brand { display: flex; align-items: baseline; gap: 8px; }
+.brand .mark {
+  font-family: var(--code-font, ui-monospace, monospace);
+  font-weight: 600; font-size: 16px; letter-spacing: -.02em; color: var(--ink);
+}
+.brand .mark b { color: var(--accent); }
+.brand .ver { font-size: 11px; color: var(--faint); }
+
+/* Attach-topology widget */
+.attach {
+  display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--muted);
+  white-space: nowrap; background: var(--code-bg); border: 1px solid var(--line);
+  border-radius: 7px; padding: 5px 10px;
+}
+.attach .att-label { color: var(--ok); font-weight: 600; }
+.attach .att-node { color: var(--ink); font-size: 11.5px; }
+.attach .att-sep { color: var(--faint); }
+.attach .att-sess { color: var(--muted); font-size: 11px; }
+.role-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 7px; border-radius: 4px; margin-left: 2px;
+}
+.role-badge.owner { background: var(--accent-soft); color: var(--accent-2); }
+.role-badge.observer { background: var(--panel-3); color: var(--muted); border: 1px solid var(--line); }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: inline-block; }
+.dot.live { animation: pulse 1.8s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+.topbar .spacer { flex: 1; }
+
+/* main grid: System Browser | editor + workspace dock | bindings + inspector */
+.cockpit {
+  flex: 1; min-height: 0; display: grid; gap: 9px;
+  grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) var(--inspector-w, 348px);
+}
+.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 9px; }
+
+/* panel chrome */
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: var(--shadow); display: flex; flex-direction: column;
+  min-height: 0; overflow: hidden;
+}
+.panel-head {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 0 10px; height: 30px; background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--muted);
+}
+.panel-head .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none; }
+.panel-head .spacer { flex: 1; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
+
+/* placeholder copy for not-yet-built Phase 1 panes */
+.placeholder {
+  display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center;
+  height: 100%; padding: 24px 16px; text-align: center; color: var(--faint); font-size: 12px;
+}
+.placeholder .ph-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted);
+}
+
+/* center column splits between editor and the workspace dock */
+.editor-panel { flex: 1; min-height: 0; }
+.dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; }
+.dock .panel { flex: 1; }
+
+/* right column splits between bindings and inspector */
+.right-split { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
+.bindings-panel { flex: 1; min-height: 0; }
+.inspector-panel { flex: 1; min-height: 0; }
+
+/* generic controls reused across panes */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 6px; padding: 5px 11px; font-size: 12px; font-weight: 500;
+  box-shadow: 0 1px 1px rgba(60,45,20,.06);
+}
+.btn:hover { background: var(--hover); }
+.btn:active { transform: translateY(.5px); }
+.btn.primary { background: var(--accent); border-color: var(--accent-2); color: var(--accent-ink); }
+.btn.primary:hover { background: var(--accent-2); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--hover); color: var(--ink); }
+.btn:disabled { opacity: .4; cursor: default; }
+
+.field {
+  border: 1px solid var(--line); background: var(--code-bg); border-radius: 6px;
+  padding: 6px 9px; font-family: var(--code-font, ui-monospace, monospace); font-size: 12.5px;
+  color: var(--ink); outline: none;
+}
+.field:focus { border-color: var(--accent); }
+
+/* result / output / error blocks */
+.io-block {
+  margin: 0 0 8px 0; padding: 9px 12px; border: 1px solid var(--line);
+  border-radius: 7px; background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12.5px; white-space: pre-wrap; word-break: break-word; color: var(--ink);
+}
+.io-block.ok  { background: color-mix(in oklab, var(--ok) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
+.io-block.err { background: color-mix(in oklab, var(--err) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--err) 35%, var(--line)); color: var(--err); }
+.io-block.warn{ background: color-mix(in oklab, var(--accent) 12%, var(--code-bg)); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+
+/* simple data tables (bindings / inspector / changelog) */
+.bt-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.bt-table th {
+  text-align: left; font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--line);
+}
+.bt-table td { padding: 5px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+.bt-table .k { font-weight: 600; color: var(--accent-2); font-family: var(--code-font, ui-monospace, monospace); }
+.bt-table .v { width: 100%; color: var(--ink); }
+
+/* transcript */
+.transcript {
+  padding: 10px 14px; font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12px; line-height: 1.7; background: var(--code-bg); color: var(--ink);
+  height: 100%; overflow: auto;
+}
+
+.muted-note { color: var(--muted); font-size: 12px; margin: 6px 0; }
+
+/* scrollbars */
+.panel-body::-webkit-scrollbar, .transcript::-webkit-scrollbar { width: 10px; height: 10px; }
+.bt-cockpit *::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; border: 2px solid var(--panel); }
+.bt-cockpit *::-webkit-scrollbar-track { background: transparent; }
