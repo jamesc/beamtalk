@@ -19,6 +19,12 @@
 //              This carries the form's field values through the normal
 //              phx-submit, which a bare pushEvent could not. ⌘S = "Save Method"
 //              uses this so the class/selector/source ride along.
+//   "submit:<action>" — set the form's hidden `action` input to <action>, then
+//              request-submit. This is how the Workspace dock's ⌘D/⌘P/⌘I
+//              (do_it / print_it / inspect_it) ride the SAME eval form submit as
+//              the buttons, carrying the entered code (or selection) along — a
+//              bare pushEvent could not. The form must contain
+//              `<input type="hidden" name="action">` for the value to ride.
 //   any other string — pushed as a `phx-` server event name with an empty
 //              payload (for parameterless actions a later pane wires up).
 //
@@ -71,10 +77,20 @@ export const KeyboardShortcuts = {
     if (!action) return
     ev.preventDefault()
 
-    if (action === "submit") {
+    if (action === "submit" || action.startsWith("submit:")) {
       const form =
         this.el.tagName === "FORM" ? this.el : this.el.closest("form")
-      if (form) form.requestSubmit()
+      if (!form) return
+      // "submit:<action>" sets a hidden `action` input so the chord rides the
+      // same form submit as the matching button (the Workspace dock's
+      // ⌘D/⌘P/⌘I → do_it/print_it/inspect_it). Plain "submit" leaves it alone.
+      const colon = action.indexOf(":")
+      if (colon !== -1) {
+        const value = action.slice(colon + 1)
+        const hidden = form.querySelector('input[name="action"]')
+        if (hidden) hidden.value = value
+      }
+      form.requestSubmit()
       return
     }
 

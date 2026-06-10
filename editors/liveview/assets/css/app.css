@@ -199,7 +199,55 @@
 /* center column splits between editor and the workspace dock */
 .editor-panel { flex: 1; min-height: 0; }
 .dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; }
-.dock .panel { flex: 1; }
+.dock .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+/* ============================================================================
+   Workspace dock — tabbed Workspace / Transcript / Changes (BT-2490)
+   ----------------------------------------------------------------------------
+   Ported from the spike (spikes/cockpit-ux-spike/app.jsx + styles.css). One
+   panel switched by `dock_tab`; the three panes are all rendered (toggled with
+   `hidden`) so the `#transcript` stream container stays in the DOM. The Workspace
+   pane wraps the BT-2485 CodeEditor overlay in the eval `<form>` with the
+   doIt/printIt/inspectIt action bar.
+   ========================================================================== */
+.dock-tabs { display: flex; gap: 2px; align-items: center; }
+.dock-tab {
+  font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--muted); cursor: pointer; padding: 0 4px; background: transparent;
+  border: 0; line-height: inherit; font-family: inherit;
+}
+.dock-tab:hover { color: var(--ink); }
+.dock-tab.on { color: var(--ink); }
+.dock-tab.on::after {
+  content: ""; display: block; height: 2px; background: var(--accent);
+  margin-top: 6px; border-radius: 2px;
+}
+.tab-count {
+  display: inline-block; margin-left: 5px; font-size: 9.5px; font-weight: 700;
+  background: var(--accent-soft); color: var(--accent-2); border-radius: 8px; padding: 0 5px;
+  vertical-align: middle;
+}
+.dock-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
+.dock-pane[hidden] { display: none; }
+.ws-pane { padding: 10px 12px; }
+.ws-pane > form { flex: 1; min-height: 0; }
+.ws-wrap { flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: 7px; }
+.ws-result {
+  margin-top: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12.5px; display: flex; align-items: flex-start; gap: 8px; flex: none;
+  white-space: pre-wrap; word-break: break-word;
+}
+.ws-result .arrow { color: var(--accent); font-weight: 700; flex: none; }
+.ws-result .val { color: var(--ink); min-width: 0; }
+.ws-result.err { border-color: color-mix(in oklab, var(--err) 35%, var(--line)); }
+.ws-result.err .arrow, .ws-result.err .val { color: var(--err); }
+.actionbar {
+  flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0 0 0;
+}
+.actionbar .spacer { flex: 1; }
+.btn .k { font-family: var(--code-font, ui-monospace, monospace); font-size: 10px; color: var(--faint); }
+.kbdhint { font-size: 10.5px; color: var(--faint); }
 
 /* right column splits between bindings and inspector */
 .right-split { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }

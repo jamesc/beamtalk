@@ -38,9 +38,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   re-skin the IDE by toggling `data-theme` on the document. Phase 1 lays the
   shell + theming foundation; the System Browser, Workspace, Bindings, and
   Inspector panes build on the placeholder regions (`#system-browser`,
-  `#workspace-dock`, `#bindings-panel`, `#inspector-panel`, `#method-editor`,
-  `#changes-panel`, `#transcript-panel`) in later Phase 1 issues. The behaviour
-  (events, assigns, term rendering) is unchanged — this issue re-skins markup.
+  `#workspace-dock`, `#bindings-panel`, `#inspector-panel`, `#method-editor`)
+  in later Phase 1 issues. The behaviour (events, assigns, term rendering) is
+  unchanged — this issue re-skins markup. (The standalone `#changes-panel` /
+  `#transcript-panel` footer regions were folded into the tabbed Workspace dock
+  in BT-2490 — see below.)
 
   ## Bindings + Inspector restyle (BT-2486, epic BT-2482 Phase 1)
 
@@ -72,11 +74,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       `<textarea>` sits over a `<pre>` the hook paints with the Beamtalk
       highlighter (`assets/js/hooks/highlight.js`); `.tok-*` colours resolve the
       themed `--t-*` CSS variables. The method-editor `source` field
-      (`#method-editor-overlay`) uses it; the Workspace dock will too.
+      (`#method-editor-overlay`) uses it; the Workspace dock's editor
+      (`#workspace-editor-overlay`, BT-2490) does too.
     * `KeyboardShortcuts` — maps Cmd/Ctrl chords to actions from a
       `data-shortcuts` JSON map. The method-editor form binds ⌘S → `submit`
       (request-submits the form so class/selector/source ride the normal
-      `save_method` `phx-submit`).
+      `save_method` `phx-submit`); the Workspace dock binds ⌘D/⌘P/⌘I →
+      `submit:<action>` (BT-2490), riding the eval form's hidden `action` field.
     * `SelectionTracker` — reports the editor textarea's selection
       (`{text, start, end}`) via the `select_source` event, held in
       `:edit_selection` so a later pane can evaluate the selection vs the buffer.
@@ -93,6 +97,32 @@ defmodule BtAttachWeb.WorkspaceLive do
   `data-density`, `--ui-font`, `--code-font`, `--accent`, the syntax `--t-*`
   palette), and persists to `localStorage`, so no change round-trips to the
   server and the panel carries no socket state beyond the static defaults.
+
+  ## Workspace dock (BT-2490, epic BT-2482 Phase 1)
+
+  The center-bottom region (`#workspace-dock`) is the spike's **tabbed dock**
+  (`spikes/cockpit-ux-spike/app.jsx`), merging the previously-separate eval area,
+  Transcript, and Changes panes into one panel switched by `dock_tab` (held in
+  `:dock_tab`, default `"workspace"`):
+
+    * **Workspace** — a highlighted code editor (the BT-2485 `CodeEditor` overlay
+      + `SelectionTracker`) wrapped in the eval `<form>` (`#eval-form`,
+      `phx-submit="eval"`, field `expr`), with three actions that ride the same
+      submit via an `action` field: **Do it** (⌘D — evaluate for side effects),
+      **Print it** (⌘P — evaluate and show the result term), and **Inspect it**
+      (⌘I — evaluate and open the result in the Inspector). All three reuse the
+      existing `eval` op + `render_term`; inspectIt reuses `inspect_term/4`. They
+      evaluate the editor's tracked selection if there is one (its own
+      `SelectionTracker` → `select_workspace` → `:ws_selection`, kept separate
+      from the method editor's `:edit_selection`), else the whole buffer.
+    * **Transcript** — the live `Transcript show:` stream (`#transcript`,
+      `phx-update="stream"`), wired via the BT-2399 subscription facade, unchanged.
+    * **Changes** — the workspace ChangeLog viewer (`Workspace changes`, ADR 0082).
+
+  The eval form stays the FIRST `<form>` on the page so the e2e tests'
+  `form("#eval-form")` (and `form("form")`) resolve to it; the Method Editor form
+  follows. A plain submit (no `action`) defaults to printIt — the historical eval
+  behaviour the BT-2407/2408/2410 tests assert on.
   """
   use BtAttachWeb, :live_view
 
@@ -246,6 +276,8 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:output, nil)
       |> assign(:error, nil)
       |> assign(:expr, "3 + 4")
+      # Workspace dock active tab (BT-2490): Workspace | Transcript | Changes.
+      |> assign(:dock_tab, "workspace")
       |> assign(:inspect_target, nil)
       |> assign(:inspect_rows, [])
       |> assign(:inspect_error, nil)
@@ -259,6 +291,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:edit_source, "")
       # Method-editor selection (BT-2485), reported by the SelectionTracker hook.
       |> assign(:edit_selection, nil)
+      # Workspace-editor selection (BT-2490): the dock's own SelectionTracker,
+      # kept separate so the method editor's selection can't leak into an eval.
+      |> assign(:ws_selection, nil)
       |> assign(:save_result, nil)
       |> assign(:save_error, nil)
       |> assign(:flush_result, nil)
@@ -299,20 +334,31 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp force_close(_token, _pid), do: :ok
 
+  # The Workspace dock's three actions (BT-2490) all evaluate the entered code (or
+  # the tracked selection, the spike's "evaluates selection vs buffer") and differ
+  # only in what they do with the result term — so they ride the SAME `eval`
+  # facade op and the existing `render_term` formatting rather than inventing new
+  # server ops:
+  #
+  #   * doIt      (⌘D) — evaluate for side effects; show a terse "✓ evaluated".
+  #   * printIt   (⌘P) — evaluate and show the result term (the classic eval).
+  #   * inspectIt (⌘I) — evaluate, then inspect the *result term* in the Inspector
+  #     (reuses `inspect_term/4`, the same read-surface path bindings drill into).
+  #
+  # The clicked action rides the eval `<form>` submit as the `action` field; a
+  # plain submit (or the e2e test's `render_submit(%{expr: …})`) carries no action
+  # and defaults to printIt — the historical eval behaviour the tests assert on.
   @impl true
-  def handle_event("eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
+  def handle_event("eval", %{"expr" => expr} = params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+    action = eval_action(params)
+    target = eval_target(expr, socket)
+
+    case Facade.dispatch(:eval, %{session_pid: pid, code: target}, ctx(socket)) do
       {:ok, term, output, _warnings} ->
         # eval returns the live term; rendering is display-only and reuses the
         # workspace's own formatter for surface-consistency with the browser.
-        {:noreply,
-         assign(socket,
-           result: Workspace.render_term(term),
-           output: present(output),
-           error: nil,
-           expr: expr
-         )}
+        {:noreply, eval_success(socket, action, term, output, expr)}
 
       {:error, reason, output, _warnings} ->
         {:noreply,
@@ -339,6 +385,17 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply,
      assign(socket, result: nil, output: nil, error: "not attached to workspace", expr: expr)}
   end
+
+  # Switch the Workspace dock's active tab (Workspace / Transcript / Changes,
+  # BT-2490). Pure view state — no workspace round-trip; an unknown tab is
+  # ignored rather than rendered, so a crafted value can't blank the dock.
+  @impl true
+  def handle_event("dock_tab", %{"tab" => tab}, socket)
+      when tab in ~w(workspace transcript changes) do
+    {:noreply, assign(socket, dock_tab: tab)}
+  end
+
+  def handle_event("dock_tab", _params, socket), do: {:noreply, socket}
 
   # Inspect a binding by name: look up its live term and drill into it via the
   # read-surface `inspect` op. Reference-following starts here.
@@ -433,6 +490,24 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("select_source", _params, socket), do: {:noreply, socket}
 
+  # Selection tracking for the Workspace dock's editor (BT-2490). Tracked in a
+  # SEPARATE assign (`ws_selection`) from the method editor's `edit_selection` so
+  # the dock's doIt/printIt/inspectIt evaluate *this* editor's selection — a
+  # selection left in the method editor must not leak into a Workspace eval. Same
+  # defensive shape as `select_source`.
+  def handle_event("select_workspace", %{"text" => text} = params, socket)
+      when is_binary(text) do
+    selection = %{
+      text: text,
+      start: clamp_offset(params["start"]),
+      end: clamp_offset(params["end"])
+    }
+
+    {:noreply, assign(socket, ws_selection: selection)}
+  end
+
+  def handle_event("select_workspace", _params, socket), do: {:noreply, socket}
+
   # Transcript push, delivered directly over distribution to this LiveView pid.
   @impl true
   def handle_info({:transcript_output, text}, socket) do
@@ -499,6 +574,66 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp facade_error(:forbidden_op), do: "Operation not permitted."
   defp facade_error(reason), do: Workspace.render_error(reason)
+
+  # ── Workspace dock actions (BT-2490) ────────────────────────────────────────
+
+  # Which dock action the eval submit carried. The clicked action button rides
+  # the form as `action`; a plain submit (the e2e `render_submit(%{expr: …})`)
+  # carries none and defaults to printIt — the historical eval behaviour.
+  defp eval_action(%{"action" => action}) when action in ~w(do_it print_it inspect_it),
+    do: action
+
+  defp eval_action(_params), do: "print_it"
+
+  # The code an action evaluates: the Workspace editor's tracked selection if
+  # there is one (the spike's "evaluates selection"), else the whole entered
+  # buffer ("evaluates buffer"). The Workspace editor's SelectionTracker keeps
+  # `ws_selection` current (distinct from the method editor's `edit_selection`);
+  # an empty or whitespace-only selection falls back to the buffer.
+  defp eval_target(expr, socket) do
+    if ws_selection?(socket.assigns), do: socket.assigns.ws_selection.text, else: expr
+  end
+
+  # Whether the Workspace editor has a non-blank selection to evaluate. Takes the
+  # bare `assigns` so the render template can call it directly too.
+  defp ws_selection?(assigns) do
+    case assigns[:ws_selection] do
+      %{text: text} when is_binary(text) -> String.trim(text) != ""
+      _ -> false
+    end
+  end
+
+  # Render an eval success according to the chosen action, reusing the existing
+  # `render_term` formatting and (for inspectIt) the same `inspect_term/4`
+  # read-surface path bindings drill through:
+  #
+  #   * print_it   — show the result term (classic eval; the default).
+  #   * do_it      — evaluate for side effects; show a terse confirmation only.
+  #   * inspect_it — show the term AND open it in the Inspector (when inspectable).
+  defp eval_success(socket, "do_it", _term, output, expr) do
+    assign(socket, result: "✓ evaluated", output: present(output), error: nil, expr: expr)
+  end
+
+  defp eval_success(socket, "inspect_it", term, output, expr) do
+    socket
+    |> assign(
+      result: Workspace.render_term(term),
+      output: present(output),
+      error: nil,
+      expr: expr
+    )
+    |> inspect_term("→ result", term, [%{label: "→ result", term: term}])
+  end
+
+  # print_it (and the historical default).
+  defp eval_success(socket, _print_it, term, output, expr) do
+    assign(socket,
+      result: Workspace.render_term(term),
+      output: present(output),
+      error: nil,
+      expr: expr
+    )
+  end
 
   # Blank captured output is not worth rendering a pane for.
   defp present(""), do: nil
@@ -923,39 +1058,152 @@ defmodule BtAttachWeb.WorkspaceLive do
                  on the page — `form("form")` in the e2e tests resolves to it.
                  CSS `order` keeps the editor visually on top per the spike. --%>
             <div class="col">
-              <%!-- workspace dock: eval + result --%>
+              <%!-- workspace dock (BT-2490): tabbed Workspace / Transcript /
+                   Changes. The three tab bodies are ALL rendered (toggled with
+                   `hidden`, not removed) so the `#transcript` stream container is
+                   always in the DOM for `stream_insert` regardless of the active
+                   tab. --%>
               <div class="dock" style="order:2;">
                 <div id="workspace-dock" class="panel">
                   <div class="panel-head">
-                    Workspace <span class="spacer"></span>
-                    <span class="count">live</span>
+                    <span class="dock-tabs" role="tablist">
+                      <button
+                        :for={
+                          {tab, label} <- [
+                            {"workspace", "Workspace"},
+                            {"transcript", "Transcript"},
+                            {"changes", "Changes"}
+                          ]
+                        }
+                        type="button"
+                        role="tab"
+                        class={["dock-tab", @dock_tab == tab && "on"]}
+                        aria-selected={to_string(@dock_tab == tab)}
+                        phx-click="dock_tab"
+                        phx-value-tab={tab}
+                      >
+                        {label}<span :if={tab == "changes" and @changes != []} class="tab-count">{length(@changes)}</span>
+                      </button>
+                    </span>
+                    <span class="spacer"></span>
+                    <span :if={@dock_tab == "workspace"} class="count">
+                      {if ws_selection?(assigns), do: "evaluates selection", else: "evaluates buffer"}
+                    </span>
                   </div>
-                  <div class="panel-body">
-                    <%!-- eval form: the FIRST <form> on the page (owner only) --%>
+
+                  <%!-- WORKSPACE tab: highlighted editor + doIt/printIt/inspectIt --%>
+                  <div class="dock-pane ws-pane" hidden={@dock_tab != "workspace"}>
                     <%= if @role == :owner do %>
+                      <%!-- eval form: the FIRST <form> on the page. The CodeEditor
+                           overlay (BT-2485) highlights the entered code; the
+                           textarea keeps name="expr" so the existing `eval`
+                           handler (and the e2e `render_submit(%{expr: …})`) read
+                           it. The three actions ride the SAME submit via the
+                           hidden `action` field — Print it is the plain submit
+                           (default), Do it / Inspect it set the field. ⌘D/⌘P/⌘I
+                           do the same through the KeyboardShortcuts hook. --%>
                       <form
                         id="eval-form"
                         phx-submit="eval"
-                        style="display:flex; gap:.5rem; margin-bottom:.6rem;"
+                        phx-hook="KeyboardShortcuts"
+                        data-shortcuts={
+                          Jason.encode!(%{
+                            "mod+d" => "submit:do_it",
+                            "mod+p" => "submit:print_it",
+                            "mod+i" => "submit:inspect_it"
+                          })
+                        }
+                        style="display:flex; flex-direction:column; height:100%;"
                       >
-                        <input
-                          class="field"
-                          name="expr"
-                          value={@expr}
-                          autocomplete="off"
-                          style="flex:1;"
-                        />
-                        <button class="btn primary" type="submit">Eval</button>
+                        <input type="hidden" name="action" value="print_it" />
+                        <div
+                          id="workspace-editor-overlay"
+                          class="bt-editor-wrap ws-wrap"
+                          phx-hook="CodeEditor"
+                        >
+                          <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
+                          <textarea
+                            id="workspace-editor-source"
+                            class="bt-editor-ta"
+                            name="expr"
+                            phx-hook="SelectionTracker"
+                            data-select-event="select_workspace"
+                            spellcheck="false"
+                            autocomplete="off"
+                          ><%= @expr %></textarea>
+                        </div>
+
+                        <div class="actionbar">
+                          <button class="btn" type="submit" name="action" value="do_it">
+                            Do it <span class="k">⌘D</span>
+                          </button>
+                          <button class="btn primary" type="submit" name="action" value="print_it">
+                            Print it <span class="k">⌘P</span>
+                          </button>
+                          <button class="btn" type="submit" name="action" value="inspect_it">
+                            Inspect it <span class="k">⌘I</span>
+                          </button>
+                          <span class="spacer"></span>
+                          <span class="kbdhint">select an expression, or evaluate all</span>
+                        </div>
                       </form>
+                    <% else %>
+                      <p class="muted-note">
+                        Your role is read-only — evaluation is disabled. You can still watch the
+                        live Transcript and review pending Changes in the tabs above.
+                      </p>
                     <% end %>
 
+                    <%!-- Result / output / error render REGARDLESS of role: a
+                         crafted eval from an Observer is refused by the facade and
+                         its "Not authorized" message must still show (the form
+                         itself is owner-gated away). --%>
                     <div :if={@output} class="io-block">{@output}</div>
-                    <div :if={@result} class="io-block ok">{@result}</div>
-                    <div :if={@error} class="io-block err">{@error}</div>
+                    <div :if={@result} class="ws-result">
+                      <span class="arrow">→</span>
+                      <span class="val">{@result}</span>
+                    </div>
+                    <div :if={@error} class="ws-result err">
+                      <span class="arrow">→</span>
+                      <span class="val">{@error}</span>
+                    </div>
+                  </div>
 
-                    <p class="muted-note">
-                      Try <code>Transcript show: "hello"</code> to see a live push.
-                    </p>
+                  <%!-- TRANSCRIPT tab: the live stream (always in the DOM so
+                       stream_insert lands regardless of the active tab). --%>
+                  <div class="dock-pane" hidden={@dock_tab != "transcript"}>
+                    <div id="transcript" class="transcript" phx-update="stream">
+                      <div :for={{dom_id, line} <- @streams.transcript} id={dom_id}>{line.text}</div>
+                    </div>
+                  </div>
+
+                  <%!-- CHANGES tab: the workspace ChangeLog (ADR 0082). --%>
+                  <div class="dock-pane panel-body" hidden={@dock_tab != "changes"}>
+                    <div :if={@changes_error} class="io-block err">{@changes_error}</div>
+                    <%= if @changes == [] do %>
+                      <p class="muted-note">No pending changes. Save a method to record one.</p>
+                    <% else %>
+                      <table class="bt-table">
+                        <thead>
+                          <tr>
+                            <th>Class</th>
+                            <th>Selector</th>
+                            <th>Intent</th>
+                            <th>Flushable</th>
+                            <th>Author</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr :for={c <- @changes}>
+                            <td class="k">{c.class}</td>
+                            <td>{c.selector}</td>
+                            <td>{c.intent}</td>
+                            <td>{if c.flushable, do: "yes", else: "no"}</td>
+                            <td>{c.author_kind}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    <% end %>
                   </div>
                 </div>
               </div>
@@ -1147,45 +1395,9 @@ defmodule BtAttachWeb.WorkspaceLive do
               </div>
             </div>
           </div>
-
-          <%!-- ── full-width footer dock: ChangeLog + live Transcript ──────── --%>
-          <div id="changes-panel" class="panel" style="flex:none;">
-            <div class="panel-head">Changes (ChangeLog)</div>
-            <div class="panel-body">
-              <div :if={@changes_error} class="io-block err">{@changes_error}</div>
-              <%= if @changes == [] do %>
-                <p class="muted-note">No pending changes. Save a method to record one.</p>
-              <% else %>
-                <table class="bt-table">
-                  <thead>
-                    <tr>
-                      <th>Class</th>
-                      <th>Selector</th>
-                      <th>Intent</th>
-                      <th>Flushable</th>
-                      <th>Author</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr :for={c <- @changes}>
-                      <td class="k">{c.class}</td>
-                      <td>{c.selector}</td>
-                      <td>{c.intent}</td>
-                      <td>{if c.flushable, do: "yes", else: "no"}</td>
-                      <td>{c.author_kind}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              <% end %>
-            </div>
-          </div>
-
-          <div id="transcript-panel" class="panel" style="flex:none; height:9rem;">
-            <div class="panel-head">Transcript (live)</div>
-            <div id="transcript" class="transcript" phx-update="stream">
-              <div :for={{dom_id, line} <- @streams.transcript} id={dom_id}>{line.text}</div>
-            </div>
-          </div>
+          <%!-- The Changes (ChangeLog) viewer and the live Transcript stream now
+               live in the tabbed Workspace dock above (BT-2490), not a separate
+               full-width footer. --%>
         <% else %>
           <div class="cockpit" style="grid-template-columns: minmax(0, 1fr);">
             <div class="col">
