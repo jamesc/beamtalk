@@ -1,0 +1,9 @@
+{
+  "name": "bt_attach_assets",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Test-only JS deps for editors/liveview. The esbuild + tailwind asset pipeline uses standalone binaries (no npm) — this exists solely for the Playwright CLI that phoenix_test_playwright drives in the browser e2e suite (mix test --only playwright). See README 'Browser e2e'.",
+  "devDependencies": {
+    "playwright": "1.55.0"
+  }
+}
