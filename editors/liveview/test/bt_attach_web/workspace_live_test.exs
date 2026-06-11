@@ -298,6 +298,38 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "increment"
   end
 
+  test "the starter tab populates the class/selector inputs on mount (BT-2518)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+
+    # The method editor's class/selector inputs must mirror the starter tab from
+    # the FIRST connected render (init_tabs syncs the active tab into the edit
+    # assigns) — not stay empty until the tab is clicked. The inputs render the
+    # starter Counter#increment values.
+    assert html =~ ~s(value="Counter")
+    assert html =~ ~s(value="increment")
+  end
+
+  test "a save on open compiles against the starter tab without clicking it first (BT-2518)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+
+    # Reproduce BT-2518: on a fresh connected mount, submit the method editor
+    # form WITHOUT first clicking the tab, so the submit rides the inputs' own
+    # values. Before the fix the class/selector inputs were empty, so the save
+    # failed local validation with "Enter a class name to save a method." With
+    # the starter tab synced, the payload carries Counter/increment and the save
+    # proceeds past validation (it may then report a compile/save error — that's
+    # fine; the regression was the spurious empty-class guard).
+    html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit()
+
+    refute html =~ "Enter a class name"
+    refute html =~ "Enter a selector"
+  end
+
   test "opening a class definition adds a + def tab and switches to it (BT-2494)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
 
