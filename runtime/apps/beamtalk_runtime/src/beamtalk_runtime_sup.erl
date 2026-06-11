@@ -108,6 +108,17 @@ init([]) ->
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_trace_store]
+        },
+        %% Per-object change subscriptions — live Inspector push substrate
+        %% (ADR 0095 §5, BT-2489, Cockpit Phase 3). Owns the public
+        %% `beamtalk_object_watch_pids` table the actor dispatch path reads.
+        #{
+            id => beamtalk_object_watch,
+            start => {beamtalk_object_watch, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_object_watch]
         }
     ],
 

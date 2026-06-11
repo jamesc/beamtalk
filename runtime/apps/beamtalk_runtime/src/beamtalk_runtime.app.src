@@ -2,7 +2,7 @@
     {description, "Beamtalk Runtime - Actor and Future implementations"},
     {vsn, {cmd, "escript ../../../scripts/version.escript"}},
     {modules, []},
-    {registered, [beamtalk_classes]},
+    {registered, [beamtalk_classes, beamtalk_object_watch]},
     {applications, [kernel, stdlib, telemetry, telemetry_poller]},
     {mod, {beamtalk_runtime_app, []}},
     {env, [

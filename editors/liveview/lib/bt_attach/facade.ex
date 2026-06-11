@@ -70,6 +70,14 @@ defmodule BtAttach.Facade do
     subscribe_bindings: :read,
     subscribe_actors: :read,
     subscribe_classes: :read,
+    # ADR 0095 §5 / BT-2489 (Cockpit Phase 3): the live-Inspector tracking ops.
+    # `subscribe_object`/`unsubscribe_object` arm a per-actor state-change push;
+    # `pid_stats` reads live process metrics. All read-only — they trigger no
+    # user code (a state-change *signal* plus `process_info` reflection), so they
+    # are safe for the Observer role, scoped like `inspect`/`actors`.
+    subscribe_object: :read,
+    unsubscribe_object: :read,
+    pid_stats: :read,
     kill: :admin,
     rotate_cookie: :admin
   }
@@ -177,6 +185,19 @@ defmodule BtAttach.Facade do
 
   defp invoke(:subscribe_transcript, %{pid: pid}, _ctx), do: client().subscribe_transcript(pid)
   defp invoke(:subscribe_bindings, %{pid: pid}, _ctx), do: client().subscribe_bindings(pid)
+
+  # ADR 0095 §5 / BT-2489: per-object change tracking. `subscribe_object` watches
+  # one inspected actor (`term`) for the LiveView `pid`; `pid_stats` reads its
+  # live process metrics. The term is the live `{:beamtalk_object, ...}` handle
+  # held in the Inspector pane; non-pid-backed terms come back
+  # `{:error, :not_inspectable}` from the client.
+  defp invoke(:subscribe_object, %{term: term, pid: pid}, _ctx),
+    do: client().subscribe_object_changes(term, pid)
+
+  defp invoke(:unsubscribe_object, %{term: term, pid: pid}, _ctx),
+    do: client().unsubscribe_object_changes(term, pid)
+
+  defp invoke(:pid_stats, %{term: term}, _ctx), do: client().pid_stats(term)
 
   defp invoke(op, _params, _ctx), do: {:error, {:unsupported_op, op}}
 

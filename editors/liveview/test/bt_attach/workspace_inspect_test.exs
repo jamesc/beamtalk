@@ -51,4 +51,30 @@ defmodule BtAttach.WorkspaceInspectTest do
       assert {:error, :not_inspectable} = Workspace.inspect_value(proxy)
     end
   end
+
+  describe "per-object tracking — non-object short-circuit (no RPC, ADR 0095 §5 / BT-2489)" do
+    # The live-Inspector tracking calls watch/read a *pid-backed* actor handle.
+    # A non-pid term (scalar, container, or a name-resolving proxy with no pid)
+    # is rejected with :not_inspectable before any RPC — the same contract
+    # `inspect_value/1` uses, so the caller never has to guess the term shape.
+    test "subscribe_object_changes rejects non-pid-backed terms" do
+      proxy = {:beamtalk_object, :Counter, :counter, {:registered, :counter}}
+      assert {:error, :not_inspectable} = Workspace.subscribe_object_changes(42, self())
+      assert {:error, :not_inspectable} = Workspace.subscribe_object_changes("x", self())
+      assert {:error, :not_inspectable} = Workspace.subscribe_object_changes(proxy, self())
+    end
+
+    test "unsubscribe_object_changes rejects non-pid-backed terms" do
+      proxy = {:beamtalk_object, :Counter, :counter, {:registered, :counter}}
+      assert {:error, :not_inspectable} = Workspace.unsubscribe_object_changes(42, self())
+      assert {:error, :not_inspectable} = Workspace.unsubscribe_object_changes(proxy, self())
+    end
+
+    test "pid_stats rejects non-pid-backed terms" do
+      proxy = {:beamtalk_object, :Counter, :counter, {:registered, :counter}}
+      assert {:error, :not_inspectable} = Workspace.pid_stats(42)
+      assert {:error, :not_inspectable} = Workspace.pid_stats("x")
+      assert {:error, :not_inspectable} = Workspace.pid_stats(proxy)
+    end
+  end
 end
