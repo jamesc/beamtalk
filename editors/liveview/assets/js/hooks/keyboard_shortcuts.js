@@ -77,6 +77,7 @@ export const KeyboardShortcuts = {
     if (!action) return
     ev.preventDefault()
 
+    if (typeof action !== "string") return
     if (action === "submit" || action.startsWith("submit:")) {
       const form =
         this.el.tagName === "FORM" ? this.el : this.el.closest("form")

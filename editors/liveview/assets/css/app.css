@@ -280,7 +280,7 @@
   margin-top: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px;
   background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
   font-size: 12.5px; display: flex; align-items: flex-start; gap: 8px; flex: none;
-  white-space: pre-wrap; word-break: break-word;
+  white-space: pre-wrap; overflow-wrap: break-word;
 }
 .ws-result .arrow { color: var(--accent); font-weight: 700; flex: none; }
 .ws-result .val { color: var(--ink); min-width: 0; }
@@ -409,7 +409,7 @@
 .io-block {
   margin: 0 0 8px 0; padding: 9px 12px; border: 1px solid var(--line);
   border-radius: 7px; background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
-  font-size: 12.5px; white-space: pre-wrap; word-break: break-word; color: var(--ink);
+  font-size: 12.5px; white-space: pre-wrap; overflow-wrap: break-word; color: var(--ink);
 }
 .io-block.ok  { background: color-mix(in oklab, var(--ok) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
 .io-block.err { background: color-mix(in oklab, var(--err) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--err) 35%, var(--line)); color: var(--err); }
@@ -455,7 +455,7 @@
 .bt-editor-pre, .bt-editor-ta {
   margin: 0; padding: 12px 14px; font-family: var(--code-font, ui-monospace, monospace);
   font-size: 12.5px; line-height: 1.6; tab-size: 2; -moz-tab-size: 2;
-  white-space: pre; word-wrap: normal; border: 0;
+  white-space: pre; overflow-wrap: normal; border: 0;
 }
 .bt-editor-pre {
   position: absolute; inset: 0; pointer-events: none; color: var(--ink); overflow: auto;

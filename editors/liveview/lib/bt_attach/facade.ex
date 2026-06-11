@@ -148,19 +148,27 @@ defmodule BtAttach.Facade do
   # comes back as a structured `#beamtalk_error{}`).
   defp invoke(:browse_classes, _params, _ctx), do: client().browse_classes()
 
-  defp invoke(:browse_protocols, %{class: class} = params, _ctx),
-    do: client().browse_protocols(class, Map.get(params, :side, "instance"))
+  defp invoke(:browse_protocols, %{class: class} = params, _ctx) do
+    side = Map.get(params, :side, "instance")
 
-  defp invoke(:browse_method_source, %{class: class, selector: selector} = params, _ctx),
-    do:
-      client().browse_method_source(
-        class,
-        Map.get(params, :side, "instance"),
-        selector
-      )
+    if is_binary(class) and is_binary(side),
+      do: client().browse_protocols(class, side),
+      else: {:error, :invalid_params}
+  end
 
-  defp invoke(:browse_class_definition, %{class: class}, _ctx),
-    do: client().browse_class_definition(class)
+  defp invoke(:browse_method_source, %{class: class, selector: selector} = params, _ctx) do
+    side = Map.get(params, :side, "instance")
+
+    if is_binary(class) and is_binary(side) and is_binary(selector),
+      do: client().browse_method_source(class, side, selector),
+      else: {:error, :invalid_params}
+  end
+
+  defp invoke(:browse_class_definition, %{class: class}, _ctx) do
+    if is_binary(class),
+      do: client().browse_class_definition(class),
+      else: {:error, :invalid_params}
+  end
 
   defp invoke(:flush, _params, _ctx), do: client().flush()
 

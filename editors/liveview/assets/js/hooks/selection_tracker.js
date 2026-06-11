@@ -54,7 +54,7 @@ export const SelectionTracker = {
     const start = this.ta.selectionStart
     const end = this.ta.selectionEnd
     const text = this.ta.value.slice(start, end)
-    const key = start + ":" + end + ":" + text.length
+    const key = start + ":" + end + ":" + text
     if (key === this.last) return
     this.last = key
     this.pushEvent(this.event, { text, start, end })
