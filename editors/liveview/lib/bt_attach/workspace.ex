@@ -273,7 +273,10 @@ defmodule BtAttach.Workspace do
   # term is returned verbatim — `encode/2` (JSON) is never invoked, so the
   # wire-shaped rows arrive live over distribution (BT-2399 / ADR 0096).
   defp dispatch_browse(op, params) when is_binary(op) and is_map(params) do
-    request = %{"op" => op, "params" => params}
+    # The protocol is FLAT: `decode_map/1` reads each op param as a TOP-LEVEL key
+    # (`params = maps:without([op, id, session], Map)`), not from a nested
+    # `"params"` sub-map. Merge the op's params straight in alongside `"op"`.
+    request = Map.put(params, "op", op)
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
@@ -299,7 +302,10 @@ defmodule BtAttach.Workspace do
   # dispatch through the term-returning op layer. `dispatch/4` returns the
   # `op_result()` term directly — JSON encoding (`encode/2`) is never invoked.
   defp dispatch_eval(session_pid, expression) do
-    request = %{"op" => "eval", "params" => %{"code" => expression}}
+    # Flat protocol: `code` is a top-level key, NOT nested under `"params"` (see
+    # `dispatch_browse/2`). A nested map decodes to `params = %{"params" => …}`,
+    # so the eval op never finds `code` and reports an empty expression.
+    request = %{"op" => "eval", "code" => expression}
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
@@ -696,7 +702,9 @@ defmodule BtAttach.Workspace do
   # directly — JSON encoding (`encode/2`) is never invoked, so the fields stay
   # live terms with their messageable pids intact.
   defp dispatch_inspect(pid_str) do
-    request = %{"op" => "inspect", "params" => %{"actor" => pid_str}}
+    # Flat protocol: `actor` is a top-level key, NOT nested under `"params"`
+    # (see `dispatch_browse/2`).
+    request = %{"op" => "inspect", "actor" => pid_str}
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
