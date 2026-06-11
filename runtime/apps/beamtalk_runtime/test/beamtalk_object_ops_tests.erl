@@ -109,7 +109,7 @@ test_inst_var_at_put_state() ->
 object_display_test_() ->
     {"Object display methods", [
         {"printString returns readable string", fun test_print_string/0},
-        {"inspect includes fields", fun test_inspect/0}
+        {"inspect returns an Inspector cursor", fun test_inspect/0}
     ]}.
 
 test_print_string() ->
@@ -121,10 +121,11 @@ test_print_string() ->
 
 test_inspect() ->
     State = counter_state(),
-    {reply, Str, _} = beamtalk_object_ops:dispatch(inspect, [], self_ref(), State),
-    %% BT-1167: Format is "Counter(value: 0)"
-    ?assert(binary:match(Str, <<"Counter(">>) =/= nomatch),
-    ?assert(binary:match(Str, <<"value">>) =/= nomatch).
+    %% ADR 0095 Phase 3 (BT-2504): `inspect` is repurposed from `-> String` to
+    %% the verb that opens an `Inspector` cursor over the receiver.
+    {reply, Insp, _} = beamtalk_object_ops:dispatch(inspect, [], self_ref(), State),
+    ?assert(is_map(Insp)),
+    ?assertEqual('Inspector', maps:get('$beamtalk_class', Insp)).
 
 %%% ============================================================================
 %%% Utility Method Tests
@@ -250,15 +251,17 @@ test_display_string() ->
 
 inspect_class_object_test_() ->
     {"inspect on class objects (empty state)", [
-        {"inspect with empty state returns class display name", fun test_inspect_empty_state/0}
+        {"inspect with empty state returns an Inspector cursor", fun test_inspect_empty_state/0}
     ]}.
 
 test_inspect_empty_state() ->
-    %% BT-753: Class objects have empty state map
+    %% BT-753 / ADR 0095 Phase 3 (BT-2504): a class object (empty state map)
+    %% inspects to an `Inspector` cursor rather than a String.
     Self = #beamtalk_object{class = 'Counter', pid = self(), class_mod = counter},
     State = #{},
-    {reply, Str, _} = beamtalk_object_ops:dispatch(inspect, [], Self, State),
-    ?assert(is_binary(Str)).
+    {reply, Insp, _} = beamtalk_object_ops:dispatch(inspect, [], Self, State),
+    ?assert(is_map(Insp)),
+    ?assertEqual('Inspector', maps:get('$beamtalk_class', Insp)).
 
 %%% ============================================================================
 %%% class_name/3 Tests (exported API)

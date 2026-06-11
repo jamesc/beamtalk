@@ -274,5 +274,4 @@ sealed typed Object subclass: Inspector
   /// ((1 to: 1000) asList inspect) asDictionary
   /// // => #{#kind => #collection, #childCount => 1000, #page => 1, #fields => #(...), ...}
   /// ```
-  asDictionary -> Dictionary =>
-    (Erlang beamtalk_inspector) asDictionary: self
+  asDictionary -> Dictionary => (Erlang beamtalk_inspector) asDictionary: self

@@ -459,4 +459,4 @@ TestCase subclass: InspectorTest
     i := Inspector on: ((1 to: 1000) asList)
     env := (i page: 2) unwrap asDictionary
     self assert: (env at: #page) equals: 2
-    self assert: (env at: #fields) first at: #value equals: "51"
+    self assert: ((env at: #fields) first at: #value) equals: "51"
