@@ -364,3 +364,49 @@ foreign_evaluate_unsupported_test() ->
     {error, Err} = beamtalk_inspector:evaluate(I, <<"self">>),
     ?assertEqual(actor_eval_unsupported, Err#beamtalk_error.kind),
     gen_server:stop(Pid).
+
+%%====================================================================
+%% Edge cases (BT-2509)
+%%====================================================================
+
+%% The empty list `#()` is a leaf `#value`, not a `#collection` — consistent with
+%% a drilled empty-list field (which is also a leaf).
+empty_list_is_value_leaf_test() ->
+    I = beamtalk_inspector:on([]),
+    ?assertEqual(value, beamtalk_inspector:kindOf(I)),
+    %% A tagged value whose slot holds `#()` renders that slot as a non-drillable
+    %% leaf field.
+    V = #{'$beamtalk_class' => 'Holder', items => []},
+    HF = hd([
+        F
+     || F <- beamtalk_inspector:fieldsOf(beamtalk_inspector:on(V)),
+        maps:get(name, F) =:= items
+    ]),
+    ?assertEqual(false, maps:get(drillable, HF)).
+
+%% `refresh` of an `#actor` whose process has died stays `#actor` (unavailable),
+%% rather than re-classifying as `#foreign` and losing the actor kind.
+dead_actor_refresh_stays_actor_test() ->
+    Pid = start_actor(point(1, 2)),
+    I = beamtalk_inspector:on(Pid),
+    ?assertEqual(actor, beamtalk_inspector:kindOf(I)),
+    gen_server:stop(Pid),
+    R = beamtalk_inspector:refresh(I),
+    ?assertEqual(actor, beamtalk_inspector:kindOf(R)),
+    [StatusF] = beamtalk_inspector:fieldsOf(R),
+    ?assertEqual(status, maps:get(name, StatusF)),
+    ?assertEqual(unavailable, maps:get(value, StatusF)).
+
+%% A forged/malformed collection-tagged map (wrong-typed `data`/`elements`/`counts`)
+%% must not crash `array:size/1`, `length/1`, etc. — it degrades to an empty view.
+forged_collection_maps_never_crash_test() ->
+    Array = #{'$beamtalk_class' => 'Array', data => 42},
+    IA = beamtalk_inspector:on(Array),
+    ?assertEqual(collection, beamtalk_inspector:kindOf(IA)),
+    ?assertEqual(0, beamtalk_inspector:sizeOf(IA)),
+    ?assertEqual([], beamtalk_inspector:fieldsOf(IA)),
+    ?assert(is_binary(beamtalk_inspector:printString(IA, 1))),
+    Set = #{'$beamtalk_class' => 'Set', elements => not_a_list},
+    ?assertEqual(0, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Set))),
+    Bag = #{'$beamtalk_class' => 'Bag', counts => not_a_map},
+    ?assertEqual(0, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Bag))).

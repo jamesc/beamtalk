@@ -460,6 +460,11 @@ label_for(Key) -> iolist_to_binary(io_lib:format("~p", [Key])).
 %% collection-tagged maps all qualify; a tagged `Value`/`Actor`/exception map does
 %% not.
 -spec is_collection(term()) -> boolean().
+is_collection([]) ->
+    %% The empty list `#()` is a leaf (no elements to navigate), consistent with
+    %% `is_drillable([])` — direct `Inspector on: #()` and a drilled `#()` field
+    %% agree it is not a collection (BT-2509).
+    false;
 is_collection(Subject) when is_list(Subject) ->
     %% Only *proper* (nil-terminated) lists are collections. Improper lists
     %% (e.g. `[1|2]`, routine in foreign OTP process state) would crash the
@@ -489,7 +494,7 @@ collection_size(Subject) when is_list(Subject) ->
     length(Subject);
 collection_size(Subject) when is_map(Subject) ->
     case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
-        'Array' -> array:size(maps:get(data, Subject, array:new()));
+        'Array' -> array:size(array_data(Subject));
         'Set' -> length(set_elements(Subject));
         'Bag' -> bag_size(Subject);
         _ -> length(dictionary_pairs(Subject))
@@ -517,7 +522,7 @@ collection_fields(Subject, Page) ->
 -spec keyed_collection_pairs(term()) -> {ok, [{term(), term()}]} | not_keyed.
 keyed_collection_pairs(Subject) when is_map(Subject) ->
     case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
-        'Bag' -> {ok, dictionary_pairs(maps:get(counts, Subject, #{}))};
+        'Bag' -> {ok, bag_counts_pairs(Subject)};
         Class when Class =:= 'Array'; Class =:= 'Set' -> not_keyed;
         _ -> {ok, dictionary_pairs(Subject)}
     end;
@@ -531,21 +536,46 @@ ordered_elements(Subject) when is_list(Subject) ->
     Subject;
 ordered_elements(Subject) when is_map(Subject) ->
     case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
-        'Array' -> array:to_list(maps:get(data, Subject, array:new()));
+        'Array' -> array:to_list(array_data(Subject));
         'Set' -> set_elements(Subject);
         _ -> []
     end.
 
-%% The `ordsets`-backed element list of a `Set`.
+%% The `array`-backing of an `Array` tagged map. A forged/malformed tagged map
+%% (e.g. `#{'$beamtalk_class' => 'Array', data => 42}`) whose `data` is missing or
+%% not a real `array` must not crash `array:size/1`/`array:to_list/1` — degrade to
+%% an empty array (BT-2509). `array:is_array/1` is total (false for any non-array).
+-spec array_data(map()) -> array:array().
+array_data(Subject) ->
+    Data = maps:get(data, Subject, array:new()),
+    case array:is_array(Data) of
+        true -> Data;
+        false -> array:new()
+    end.
+
+%% The `ordsets`-backed element list of a `Set` — `[]` for a forged map whose
+%% `elements` field is not a list (must not crash `length/1`/`lists:nth/2`).
 -spec set_elements(map()) -> [term()].
 set_elements(Subject) ->
-    maps:get(elements, Subject, []).
+    case maps:get(elements, Subject, []) of
+        Elements when is_list(Elements) -> Elements;
+        _ -> []
+    end.
 
-%% A `Bag`'s total size — the sum of its element counts.
+%% A `Bag`'s total size — the sum of its element counts. A forged map whose
+%% `counts` field is not a map degrades to `0` (`dictionary_pairs/1` requires a
+%% map).
 -spec bag_size(map()) -> non_neg_integer().
 bag_size(Subject) ->
-    Counts = maps:get(counts, Subject, #{}),
-    lists:sum([C || {_K, C} <- dictionary_pairs(Counts), is_integer(C)]).
+    lists:sum([C || {_K, C} <- bag_counts_pairs(Subject), is_integer(C)]).
+
+%% The `{Element, Count}` pairs of a `Bag`, tolerating a forged non-map `counts`.
+-spec bag_counts_pairs(map()) -> [{term(), term()}].
+bag_counts_pairs(Subject) ->
+    case maps:get(counts, Subject, #{}) of
+        Counts when is_map(Counts) -> dictionary_pairs(Counts);
+        _ -> []
+    end.
 
 %% The user key→value pairs of a (tagged or plain) Dictionary map, in a stable
 %% sorted order so windows are deterministic. The `'$beamtalk_class'` tag (if any)
@@ -592,7 +622,7 @@ element_at(Subject, Index) when is_integer(Index), Index >= 1 ->
         _ when is_map(Subject) ->
             case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
                 'Array' ->
-                    Arr = maps:get(data, Subject, array:new()),
+                    Arr = array_data(Subject),
                     case Index =< array:size(Arr) of
                         true -> {ok, array:get(Index - 1, Arr)};
                         false -> out_of_range
@@ -778,7 +808,10 @@ immutable term cannot move on its own). The new cursor preserves `parent` and
 """.
 -spec refresh(inspector()) -> inspector().
 refresh(#{kind := actor, pid := Pid, parent := Parent, path := Path}) ->
-    cursor(Pid, Parent, Path);
+    %% Re-snapshot as an `#actor`, not via `cursor/3` (→ `process_cursor`): a now
+    %% dead actor would re-classify as `#foreign` and lose the actor kind. A dead
+    %% actor stays `#actor` with `available => false` (BT-2509).
+    actor_cursor(Pid, Parent, Path);
 refresh(#{kind := foreign, pid := Pid, parent := Parent, path := Path}) ->
     cursor(Pid, Parent, Path);
 refresh(#{kind := collection, subject := Subject, page := Page, parent := Parent, path := Path}) ->
