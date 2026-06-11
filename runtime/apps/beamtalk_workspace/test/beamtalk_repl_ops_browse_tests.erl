@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context (System Browser bridge)
 
 -moduledoc """
-EUnit tests for `beamtalk_repl_ops_browse` (ADR 0095, BT-2488).
+EUnit tests for `beamtalk_repl_ops_browse` (ADR 0096, BT-2488).
 
 Covers:
 
@@ -240,7 +240,7 @@ browse_tests(_Ctx) ->
         end},
         {"browse-classes origin is runtime for a file-less class", fun() ->
             %% The fixture module has no backing .bt source attribute, so
-            %% source_file is null → origin runtime (ADR 0095).
+            %% source_file is null → origin runtime (ADR 0096).
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
             ),
@@ -310,7 +310,7 @@ browse_tests(_Ctx) ->
         end},
         {"browse-method-source disk_differs is null with no static source", fun() ->
             %% No workspace_meta class source is stored in this isolated node, so
-            %% there is nothing to diff against → null (ADR 0095).
+            %% there is nothing to diff against → null (ADR 0096).
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-method-source">>,

@@ -6,7 +6,7 @@
 %%% **DDD Context:** REPL Session Context (System Browser bridge)
 
 -moduledoc """
-Op handlers for the System Browser browse facade (ADR 0095, BT-2488).
+Op handlers for the System Browser browse facade (ADR 0096, BT-2488).
 
 The LiveView IDE's System Browser (ADR 0017 Phase 3, epic BT-2482) renders the
 four-pane Smalltalk navigator — *classes → protocols → selectors → method
@@ -57,7 +57,7 @@ Image/disk divergence is surfaced, never merged (Principle #5):
   `unindexed_runtime_fun`. How the browser knows a selector has no openable
   source.
 
-See `docs/ADR/0095-system-browser-data-source.md`.
+See `docs/ADR/0096-system-browser-data-source.md`.
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -74,7 +74,7 @@ handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for the four browse ops (ADR 0095). Returns
+Term-returning handler for the four browse ops (ADR 0096). Returns
 `{value, JsonValue}` on success or `{error, #beamtalk_error{}}` on a validation
 failure (unknown class, bad side, missing selector).
 """.
@@ -123,7 +123,7 @@ describe_ops() ->
 %% Lists every class in scope with the edges the class tree needs: superclass
 %% (hierarchy) + category (the Smalltalk class-category group). Extends the
 %% list-classes field set with `category` and `origin`; it does not replace
-%% list-classes (ADR 0095). Reuses `beamtalk_runtime_api:all_classes/0` and the
+%% list-classes (ADR 0096). Reuses `beamtalk_runtime_api:all_classes/0` and the
 %% same per-class reflection list-classes uses — no new runtime bookkeeping.
 -spec browse_classes() -> [map()].
 browse_classes() ->
@@ -211,7 +211,7 @@ info_fields(_) ->
     {null, unindexed_runtime_fun, put_method}.
 
 %% Group selector rows into sorted protocol buckets. The protocol of a selector
-%% is derived from its xref provenance (ADR 0095): class_body / extension map to
+%% is derived from its xref provenance (ADR 0096): class_body / extension map to
 %% concrete buckets, everything else falls into "as yet unclassified" (Pharo
 %% convention). Selectors within a protocol are sorted; protocols are sorted.
 -spec group_by_protocol([map()]) -> [map()].
@@ -275,7 +275,7 @@ browse_method_source(ClassName, ClassSide, Selector) ->
 
 %% Sourceless runtime methods (unindexed_runtime_fun): source is null, the
 %% source_status says why — the browser shows "no source (runtime method)"
-%% rather than an empty pane (ADR 0095).
+%% rather than an empty pane (ADR 0096).
 -spec method_source_text(pid(), boolean(), atom(), beamtalk_xref:source_status()) ->
     binary() | null.
 method_source_text(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
@@ -324,7 +324,7 @@ browse_class_definition(ClassName) ->
                 %% — so a substring diff against the disk store would be unsound
                 %% (false positives on formatting/syntax). With no separate
                 %% image-side class-source snapshot to diff, the honest answer is
-                %% `null` ("nothing to compare", ADR 0095). A precise class-level
+                %% `null` ("nothing to compare", ADR 0096). A precise class-level
                 %% diff is future work; the per-method `disk_differs` (op 3) is
                 %% the live-patch signal the browser relies on today.
                 <<"disk_differs">> => class_definition_disk_differs(SourceFile)
@@ -373,7 +373,7 @@ default_text(Value) ->
 
 %% Synthesize the class-definition skeleton: header + state slots, method bodies
 %% excluded. `null` for file-less classes (ClassBuilder) — the browser shows "no
-%% source (programmatic class)" (ADR 0095, consistent with ADR 0085's non-goal).
+%% source (programmatic class)" (ADR 0096, consistent with ADR 0085's non-goal).
 -spec class_definition_text(atom(), atom() | none, [map()], binary() | null) ->
     binary() | null.
 class_definition_text(_ClassName, _Super, _State, null) ->
@@ -399,7 +399,7 @@ default_suffix(Default) -> [<<" = ">>, Default].
 %%% Divergence — origin / disk_differs
 %%% ====================================================================
 
-%% origin :: both | static | runtime (ADR 0095). A class/row with a backing disk
+%% origin :: both | static | runtime (ADR 0096). A class/row with a backing disk
 %% source that is loaded in the image is `both`; a file-less / ClassBuilder class
 %% (no disk source) is `runtime`. The `static` case (on disk, not loaded) is the
 %% cold-mode answer and is produced by the static (Rust) layer, not here — a
@@ -593,7 +593,7 @@ first_line(Doc) when is_binary(Doc) ->
         [] -> Doc
     end.
 
-%% Map xref provenance to a browser protocol bucket (ADR 0095). class_body and
+%% Map xref provenance to a browser protocol bucket (ADR 0096). class_body and
 %% extension are the two source-bearing provenances; runtime-installed selectors
 %% (put_method, class_builder) fall into "as yet unclassified" (Pharo).
 -spec protocol_for_provenance(beamtalk_xref:provenance()) -> binary().

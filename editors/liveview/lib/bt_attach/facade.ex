@@ -57,7 +57,7 @@ defmodule BtAttach.Facade do
     sessions: :read,
     complete: :read,
     changes: :read,
-    # ADR 0095 (BT-2488): the System Browser browse facade — four read-only
+    # ADR 0096 (BT-2488): the System Browser browse facade — four read-only
     # ops backing the four-pane navigator. They trigger no user code (pure
     # reflection + xref + stored source text, ADR 0091 Decision 4), so they are
     # safe for the Observer role: an observer can browse classes, protocols,
@@ -140,7 +140,7 @@ defmodule BtAttach.Facade do
   defp invoke(:processes_system, %{session_pid: pid}, _ctx),
     do: client().supervision_tree(pid, "system")
 
-  # ADR 0095 (BT-2488): the four System Browser browse ops. Each returns a
+  # ADR 0096 (BT-2488): the four System Browser browse ops. Each returns a
   # `{:value, json_value}` live term (the wire-shaped browse rows) verbatim —
   # JSON only at the WebSocket edge. `side` defaults to `"instance"` (the
   # browser's default toggle); the selector / class params are required by the

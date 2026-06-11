@@ -208,11 +208,11 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # ── browse-surface: the System Browser data source (ADR 0095, BT-2488) ──────
+  # ── browse-surface: the System Browser data source (ADR 0096, BT-2488) ──────
 
   @doc """
   List every class in scope as `ClassRow`s for the System Browser class tree
-  (ADR 0095 op 1, `browse-classes`). Each row carries `name`, `superclass`,
+  (ADR 0096 op 1, `browse-classes`). Each row carries `name`, `superclass`,
   `category`, first-line `comment`, `sealed`/`abstract`/`internal`,
   `source_file`, and `origin` (`both` | `static` | `runtime` — the image/disk
   divergence tag, never merged away).
@@ -226,7 +226,7 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Return the selectors of `class`/`side` grouped by protocol for the System
-  Browser protocol + selector panes (ADR 0095 op 2, `browse-protocols`). `side`
+  Browser protocol + selector panes (ADR 0096 op 2, `browse-protocols`). `side`
   is `"instance"` | `"class"`. Each selector row carries `line`,
   `source_status` (xref tag — `indexed` | `synthetic` | `unindexed_runtime_fun`),
   and `origin`. An unknown class / bad side comes back as a structured
@@ -238,7 +238,7 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Return one method's image-accurate source for the System Browser method-source
-  pane (ADR 0095 op 3, `browse-method-source`). The result carries `source`
+  pane (ADR 0096 op 3, `browse-method-source`). The result carries `source`
   (`null` for a sourceless runtime method), `source_status`, `origin`, and
   `disk_differs` (`true` when the live/patched body differs from the static/disk
   source — an unflushed `>>` patch; `null` when there is no static source to
@@ -257,7 +257,7 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Return `class`'s definition for the System Browser class-definition pane
-  (ADR 0095 op 4, `browse-class-definition`): the class header `definition`
+  (ADR 0096 op 4, `browse-class-definition`): the class header `definition`
   (`null` for a file-less ClassBuilder class), `state` slots (name + default,
   field reflection — no user code), full `comment`, `origin`, and
   `disk_differs`. `{:error, reason}` for an unknown class.
@@ -271,7 +271,7 @@ defmodule BtAttach.Workspace do
   # browse ops ignore the session pid (they are workspace-global reflection), so
   # `self()` is passed only to satisfy `dispatch/4`'s arity. The `{:value, _}`
   # term is returned verbatim — `encode/2` (JSON) is never invoked, so the
-  # wire-shaped rows arrive live over distribution (BT-2399 / ADR 0095).
+  # wire-shaped rows arrive live over distribution (BT-2399 / ADR 0096).
   defp dispatch_browse(op, params) when is_binary(op) and is_map(params) do
     request = %{"op" => op, "params" => params}
 

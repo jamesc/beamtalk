@@ -1,4 +1,4 @@
-# ADR 0095: System Browser Data Source — Class/Method Browse API for the LiveView IDE
+# ADR 0096: System Browser Data Source — Class/Method Browse API for the LiveView IDE
 
 ## Status
 Proposed (2026-06-10)
@@ -40,7 +40,7 @@ comes from and the exact op shapes the browser consumes.
   source** the *LiveView IDE's* System Browser panes consume — the class/protocol/
   selector trees and the read-only source/definition payloads. The two share a
   substrate (live source comes from the same runtime accessors) but answer
-  different questions: 0085 is "what does the editor edit", 0095 is "what does the
+  different questions: 0085 is "what does the editor edit", 0096 is "what does the
   browser list".
 - **Not a new transport.** It reuses the BT-2399 term-op layer
   (`docs/development/repl-op-term-contract.md`): `beamtalk_repl_ops:dispatch/4`
