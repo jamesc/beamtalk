@@ -174,8 +174,13 @@ TestCase subclass: ReactiveSubprocessTest
       notify: delegate) unwrap
     self waitForExit: delegate from: proc
     self assert: (delegate stdoutLines includes: "hello1187")
-    // On Windows, cd prints path with drive letter; on Unix, pwd prints /tmp
-    dir := self envDir
+    // On Windows, cd prints path with drive letter; on Unix, pwd prints the dir.
+    // macOS TMPDIR ends with a trailing slash (e.g. "/var/folders/.../T/") and is
+    // reached through the /private symlink, but the subprocess reports its
+    // canonical working directory without the trailing slash
+    // (e.g. "/private/var/folders/.../T"). Strip a trailing "/" so the substring
+    // check matches the canonical path the shell prints.
+    dir := self envDir replaceRegex: "/$" with: ""
     self assert: (delegate stdoutLines anySatisfy: [:line |
       line includesSubstring: dir
     ])
