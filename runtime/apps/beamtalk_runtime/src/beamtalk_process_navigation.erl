@@ -82,6 +82,8 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     from/1,
     from/2,
     status/1,
+    guarded_state/1,
+    guarded_state/2,
     infra_deny_list/0,
     is_infra/1,
     %% Node / tree accessors consumed by the SupervisionNode & SupervisionTree
@@ -109,6 +111,11 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 %% non-`sys`-compliant process must yield `nil`, never block the caller
 %% (ADR 0092 §5).
 -define(STATUS_TIMEOUT, 2000).
+
+%% Bounded timeout (ms) for the guarded `sys:get_state/1` fetch shared with the
+%% Inspector (ADR 0095 §4). Same discipline as `status/1`: a busy, wedged, dead,
+%% or non-`sys`-compliant process yields `unavailable`, never blocks the caller.
+-define(GET_STATE_TIMEOUT, 2000).
 
 %% Per-supervisor child-expansion cap (ADR 0092 §Constraints 1). A supervisor
 %% with more than this many live children — typically a `simple_one_for_one`
@@ -266,6 +273,38 @@ status(_) ->
 -spec sys_state([term()]) -> atom().
 sys_state([_ProcDict, SysState | _]) when is_atom(SysState) -> SysState;
 sys_state(_) -> running.
+
+-doc """
+Timeout-guarded `sys:get_state/1` — the shared safe live-state read (ADR 0095 §4).
+
+Returns `{ok, State}` for an alive, `sys`-compliant process; `unavailable` —
+logged at debug, never raised — for a process that is dead, busy past the
+timeout, or not `sys`-compliant. This is the one place that knows how to safely
+read a live process's state; the Inspector (`beamtalk_inspector`) shares it so
+there is a single guarded-read discipline across the runtime (the same intent
+`status/1` serves for `sys:get_status/1`).
+""".
+-spec guarded_state(term()) -> {ok, term()} | unavailable.
+guarded_state(Pid) ->
+    guarded_state(Pid, ?GET_STATE_TIMEOUT).
+
+-spec guarded_state(term(), timeout()) -> {ok, term()} | unavailable.
+guarded_state(Pid, Timeout) when is_pid(Pid) ->
+    try sys:get_state(Pid, Timeout) of
+        State ->
+            {ok, State}
+    catch
+        Class:Reason ->
+            ?LOG_DEBUG("guarded state fetch failed", #{
+                pid => Pid,
+                error_class => Class,
+                reason => Reason,
+                domain => [beamtalk, runtime]
+            }),
+            unavailable
+    end;
+guarded_state(_, _) ->
+    unavailable.
 
 %%% ============================================================================
 %%% Node / tree accessors (BT-2429)

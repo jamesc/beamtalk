@@ -242,9 +242,19 @@ text across surfaces:
   `beamtalk_primitive`, `beamtalk_reflection`) — both delegating to one shared
   structural renderer so output is byte-identical regardless of dispatch path.
 
-`inspect` is unchanged (returns a `String`, delegates to `printString`); the
-richer navigable-inspector surface is deferred to
-[BT-2397](https://linear.app/beamtalk/issue/BT-2397).
+`inspect` (the language method) is **unchanged in Phase 1** — it still returns a
+`String`, delegating to `printString`. ADR 0095 Phase 1
+([BT-2502](https://linear.app/beamtalk/issue/BT-2502)) adds the navigable
+`Inspector` / `InspectorField` classes and the `Inspector on: anObject` entry
+point — a drillable cursor with `at:`, structural/snapshot `fields`, `refresh`,
+and a depth-1 `printString` tree. The breaking *repurpose* of `inspect`
+(`inspect -> Inspector`, removing the 14 `inspect -> String` overrides, the
+gradual-typing crash audit) is Phase 3
+([BT-2504](https://linear.app/beamtalk/issue/BT-2504)); the `"op": "inspect"`
+REPL/MCP **wire op** stays the agent-only flat JSON (line 86) until its
+`asDictionaries` migration in Phase 5. Epic:
+[BT-2501](https://linear.app/beamtalk/issue/BT-2501) (design
+[BT-2397](https://linear.app/beamtalk/issue/BT-2397)).
 
 ## Drift Check (CI)
 

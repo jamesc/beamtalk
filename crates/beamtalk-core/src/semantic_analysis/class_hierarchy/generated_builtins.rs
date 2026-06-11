@@ -15,6 +15,7 @@ use std::collections::HashMap;
 /// Returns true if the given class name is a stdlib built-in class.
 ///
 /// Auto-generated from `lib/*.bt` file names.
+#[allow(clippy::too_many_lines)] // auto-generated: one match arm per stdlib class
 pub(super) fn is_generated_builtin_class(name: &str) -> bool {
     matches!(
         name,
@@ -57,6 +58,8 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "File"
             | "FileHandle"
             | "Float"
+            | "Inspector"
+            | "InspectorField"
             | "InstantiationError"
             | "Integer"
             | "Interval"
@@ -1548,6 +1551,82 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Inspector".into(),
+        ClassInfo {
+            name: "Inspector".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![
+                MethodInfo { selector: "subject".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("The inspected object — the value itself, or, for an actor, the captured\nstate snapshot.\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) subject   // => Point(x: 3, y: 4)\n```".into()) },
+                MethodInfo { selector: "kind".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("The subject kind: `#value` (structural) or `#actor` (snapshot) in v1.\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) kind   // => #value\n(Inspector on: aCounter) kind            // => #actor\n```".into()) },
+                MethodInfo { selector: "fields".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List(InspectorField)".into()), param_types: vec![], doc: Some("The drillable fields of the inspected object, as immutable\n`InspectorField` records (ADR 0095 §2–§3).\n\nFor a `#value`, these are its `field:` slots in ADR-0094 sort order. For an\n`#actor`, they are its user state slots from a lazy, timeout-guarded\nsnapshot — or, if the actor is busy/dead/non-`sys`, the single diagnostic\n`InspectorField name: #status value: #unavailable` (never a crash).\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) fields size   // => 2\n```".into()) },
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Result(Inspector, Error)".into()), param_types: vec![Some("Object".into())], doc: Some("Drill into one field by name, returning a child `Inspector` cursor on that\nfield's value (ADR 0095 §1).\n\nReturns a `Result`: `Result error: (beamtalk_error no_such_field)` when no\nfield has that name. The child cursor's `parent` is this cursor, and its\n`path` extends this one's by the drilled name.\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) at: #x     // => Result ok: (an Inspector on 3)\n(Inspector on: (Point x: 3 y: 4)) at: #zzz   // => Result error: no_such_field\n```".into()) },
+                MethodInfo { selector: "parent".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Inspector | Nil".into()), param_types: vec![], doc: Some("The cursor this one was drilled from, or `nil` at the root.\n\n## Examples\n```beamtalk\nchild := ((Inspector on: (Point x: 3 y: 4)) at: #x) unwrap\nchild parent kind   // => #value\n```".into()) },
+                MethodInfo { selector: "root".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Inspector".into()), param_types: vec![], doc: Some("The top of this drill chain — the cursor with no `parent`.\n\n## Examples\n```beamtalk\nchild := ((Inspector on: (Point x: 3 y: 4)) at: #x) unwrap\nchild root kind   // => #value\n```".into()) },
+                MethodInfo { selector: "path".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("List".into()), param_types: vec![], doc: Some("The breadcrumb of drilled names from the root to this cursor (for UI).\n`#()` at the root.\n\n## Examples\n```beamtalk\nchild := ((Inspector on: (Point x: 3 y: 4)) at: #x) unwrap\nchild path   // => #(#x)\n```".into()) },
+                MethodInfo { selector: "refresh".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Inspector".into()), param_types: vec![], doc: Some("A cursor on a freshly-captured snapshot of the *same* subject (ADR 0095\n§5). The original cursor is unchanged (immutable).\n\n`refresh` re-snapshots **this cursor's own subject**, which differs by how\nthe cursor was reached:\n- A **root `#actor`** cursor re-issues the guarded `sys:get_state`, picking\n  up state change since the previous snapshot.\n- A **`#value`** cursor (including one drilled into an actor's slot with\n  `at:`) re-freezes its already-captured value — structurally identical,\n  since per ADR 0095 §4 drilling never re-contacts the live actor (the\n  sub-tree is a consistent point-in-time view). To see a drilled actor\n  field move, `refresh` the **root** actor cursor and drill again.\n\n## Examples\n```beamtalk\nci := Inspector on: aCounter   // snapshot at T0\naCounter increment             // state moves on\nci refresh fields              // a fresh cursor at T1 (root actor re-fetched)\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("An indented text tree of the cursor and its immediate fields, one level\ndeep (ADR 0095 §7). The REPL default.\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) printString\n  // => \"Inspector(Point)\\n  x: 3\\n  y: 4\"\n```".into()) },
+                MethodInfo { selector: "printStringExpanded:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![Some("Integer".into())], doc: Some("An indented text tree of the cursor to `depth` levels (ADR 0095 §7).\n`depth: 1` is the immediate fields; deeper expands drillable children.\n\n## Examples\n```beamtalk\n(Inspector on: (Point x: 3 y: 4)) printStringExpanded: 1\n```".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "on:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Inspector".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Inspector".into()), param_types: vec![Some("Object".into())], doc: Some("Open an inspector cursor on `anObject` (ADR 0095 §1).\n\nFor an actor, the timeout-guarded `sys:get_state` snapshot is captured\nhere, at construction; for a value the subject is taken structurally with no\nprocess contact. This is the Phase-1 entry point (`anObject inspect`\nshorthand is Phase 3).\n\n## Examples\n```beamtalk\nInspector on: (Point x: 3 y: 4)   // => an Inspector\nInspector on: aCounter            // => an Inspector (#actor)\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "InspectorField".into(),
+        ClassInfo {
+            name: "InspectorField".into(),
+            superclass: Some("Value".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: true,
+            is_native: false,
+            state: vec!["name".into(), "label".into(), "value".into(), "kind".into(), "drillable".into()],
+            state_types: HashMap::from([("name".into(), "Object".into()), ("label".into(), "String".into()), ("value".into(), "Object".into()), ("kind".into(), "Symbol".into()), ("drillable".into(), "Boolean".into())]),
+            state_has_default: HashMap::from([("name".into(), true), ("label".into(), true), ("value".into(), true), ("kind".into(), true), ("drillable".into(), true)]),
+            methods: vec![
+                MethodInfo { selector: "isLeaf".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Whether this field is a leaf scalar (the negation of `drillable`).\n\n## Examples\n```beamtalk\nfield isLeaf   // => false\n```".into()) },
+                MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Human-readable one-line description, e.g.\n`#InspectorField<x: 3>` or `#InspectorField<status: #unavailable>`.\n\n## Examples\n```beamtalk\nfield printString   // => \"#InspectorField<x: 3>\"\n```".into()) },
+                MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Returns the `name` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withName:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("InspectorField".into()), param_types: vec![Some("Object".into())], doc: Some("Returns a new `InspectorField` with `name` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "label".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Returns the `label` field value. Default: `\"\"`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withLabel:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("InspectorField".into()), param_types: vec![Some("String".into())], doc: Some("Returns a new `InspectorField` with `label` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "value".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Object".into()), param_types: vec![], doc: Some("Returns the `value` field value. Default: `nil`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withValue:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("InspectorField".into()), param_types: vec![Some("Object".into())], doc: Some("Returns a new `InspectorField` with `value` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "kind".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Symbol".into()), param_types: vec![], doc: Some("Returns the `kind` field value. Default: `#slot`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withKind:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("InspectorField".into()), param_types: vec![Some("Symbol".into())], doc: Some("Returns a new `InspectorField` with `kind` set to the given value.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "drillable".into(), arity: 0, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![], doc: Some("Returns the `drillable` field value. Default: `true`.\n\n*(compiler-generated)*".into()) },
+                MethodInfo { selector: "withDrillable:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("InspectorField".into()), param_types: vec![Some("Boolean".into())], doc: Some("Returns a new `InspectorField` with `drillable` set to the given value.\n\n*(compiler-generated)*".into()) },
+            ],
+            class_methods: vec![
+                MethodInfo { selector: "name:label:value:kind:drillable:".into(), arity: 5, kind: MethodKind::Primary, defined_in: "InspectorField".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("InspectorField".into()), param_types: vec![Some("Object".into()), Some("String".into()), Some("Object".into()), Some("Symbol".into()), Some("Boolean".into())], doc: Some("Creates a new `InspectorField`. Args: name (default: nil), label (default: \"\"), value (default: nil), kind (default: #slot), drillable (default: true).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "InstantiationError".into(),
         ClassInfo {
             name: "InstantiationError".into(),
@@ -1941,7 +2020,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "ifNotNil:ifNil:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: None, param_types: vec![Some("Block".into()), Some("Block".into())], doc: Some("If not nil, evaluate `notNilBlock` with self; otherwise evaluate `nilBlock`.\n\n## Examples\n```beamtalk\n42 ifNotNil: [:v | v + 1] ifNil: [0]    // => 43\nnil ifNotNil: [:v | v + 1] ifNil: [0]   // => 0\n```".into()) },
                 MethodInfo { selector: "printString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the developer-readable (Debug) string representation.\n\n`printString` is the **Debug** protocol (ADR 0094): the self-describing,\nstructural form used by the REPL, logs, and by any *other* `printString`\nthat nests this object. It is the REPL default — evaluating an expression\nshows its `printString`.\n\nThis default returns the **bare class name** (no `a`/`an` article — the\nold `\"a ClassName\"` form was dropped in ADR 0094). `Value` overrides it\nwith the structural `ClassName(field: value, ...)` form, actors render as\n`Actor(ClassName, pid)`, supervisors as `Supervisor(ClassName, pid)` /\n`DynamicSupervisor(ClassName, pid)`, and primitive types (Integer, String,\nList, …) override it with their own richer output. Authors rarely override\n`printString` directly — the default is derived.\n\n## Examples\n```beamtalk\n42 printString            // => \"42\"\n```".into()) },
                 MethodInfo { selector: "displayString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the user-facing (Display) string representation.\n\n`displayString` is the **Display** protocol (ADR 0094): the human-facing\nform. It is the hook the **language** pulls during string interpolation —\nevery `{...}` segment renders via the value's `displayString`. Developers\nrarely call it directly; they **override** it when a value has a natural\nhuman rendering (e.g. `Money` → `$10.50`, where `printString` would still\nshow the Debug form).\n\nIt **defaults to `printString`**, so most types need no override. `String`\nand `Symbol` demonstrate the split: `\"hi\" printString` → `\"\\\"hi\\\"\"`\n(quoted, Debug) while `\"hi\" displayString` → `\"hi\"` (plain, Display);\nlikewise `#foo` drops its `#` prefix under `displayString`.\n\n`displayString` is **not** part of the `Printable` protocol (deferred per\nADR 0094 §5).\n\n## Examples\n```beamtalk\n42 displayString             // => \"42\"\n```".into()) },
-                MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Inspect the receiver.\n\nUnchanged by ADR 0094: `inspect` still returns a `String` and delegates to\n`printString`, so it shares the structural Debug form with a single source\nof truth. Its planned redesign into a rich, navigable tooling/action verb\nis deferred to a follow-up ADR designed against the LiveView surface\n(BT-2397).\n\n## Examples\n```beamtalk\n42 inspect             // => \"42\"\n```".into()) },
+                MethodInfo { selector: "inspect".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Inspect the receiver.\n\nUnchanged by ADR 0094: `inspect` still returns a `String` and delegates to\n`printString`, so it shares the structural Debug form with a single source\nof truth.\n\n**ADR 0095 Phase 1 (BT-2502).** The rich, navigable inspector now exists as\nthe `Inspector` class — use `Inspector on: anObject` to open a drillable,\nrefreshable cursor. The *repurpose* of `inspect` itself (`inspect ->\nInspector`, removing the 14 `inspect -> String` overrides, and the\ngradual-typing crash audit) is the breaking change deferred to Phase 3\n(BT-2504); `inspect` keeps returning a `String` until then.\n\n## Examples\n```beamtalk\n42 inspect             // => \"42\"\n(Point x: 3 y: 4) inspect    // => \"Point(x: 3, y: 4)\"  (String, until Phase 3)\n```".into()) },
                 MethodInfo { selector: "yourself".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Self".into()), param_types: vec![], doc: Some("Return the receiver itself. Useful for cascading side effects.\n\n## Examples\n```beamtalk\n42 yourself            // => 42\n```".into()) },
                 MethodInfo { selector: "hash".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return a hash value for the receiver.\n\n## Examples\n```beamtalk\n42 hash\n```".into()) },
                 MethodInfo { selector: "respondsTo:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![Some("Symbol".into())], doc: Some("Test if the receiver responds to the given selector.\n\n## Examples\n```beamtalk\n42 respondsTo: #abs    // => true\n```".into()) },
