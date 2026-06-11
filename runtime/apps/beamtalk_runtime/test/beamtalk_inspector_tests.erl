@@ -323,6 +323,30 @@ dead_foreign_unavailable_test() ->
     ?assertEqual(status, maps:get(name, StatusF)),
     ?assertEqual(unavailable, maps:get(value, StatusF)).
 
+%% A pid on another node must not crash classification — `is_beamtalk_actor/1`,
+%% `is_process_alive/1`, and `process_info/2` all raise `badarg` for a remote pid.
+%% It degrades to the single #status => #unavailable foreign field (BT-2508).
+remote_pid_degrades_to_unavailable_test() ->
+    RemotePid = a_remote_pid(),
+    ?assert(node(RemotePid) =/= node()),
+    I = beamtalk_inspector:on(RemotePid),
+    ?assertEqual(foreign, beamtalk_inspector:kindOf(I)),
+    %% fieldsOf must not raise; it yields only the unavailable status field.
+    [StatusF] = beamtalk_inspector:fieldsOf(I),
+    ?assertEqual(status, maps:get(name, StatusF)),
+    ?assertEqual(unavailable, maps:get(value, StatusF)),
+    %% printString and refresh must not raise on a remote pid either.
+    ?assert(is_binary(beamtalk_inspector:printString(I, 1))),
+    ?assertEqual(foreign, beamtalk_inspector:kindOf(beamtalk_inspector:refresh(I))).
+
+%% A deterministic pid on a *non-local* node, built via the external term format
+%% (`NEW_PID_EXT`) so the test needs no distribution / peer node — `binary_to_term`
+%% does not require the encoded node to exist or be connected.
+a_remote_pid() ->
+    NodeBin = atom_to_binary('inspector_remote@nohost', utf8),
+    Len = byte_size(NodeBin),
+    binary_to_term(<<131, 88, 119, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
+
 %%====================================================================
 %% evaluate: — actor/foreign return actor_eval_unsupported (ADR 0095 §7)
 %%====================================================================
