@@ -314,11 +314,11 @@ browse-class-definition {class: "Counter"}
 ```text
 // Unknown class:
 browse-protocols {class: "Nope", side: "instance"}
-  → {error, #beamtalk_error{...}}   // not_found, structured (term contract)
+  → Result error: (not_found beamtalk_error)   // structured (term contract)
 
 // Bad side:
 browse-protocols {class: "Counter", side: "klass"}
-  → {error, #beamtalk_error{...}}   // invalid_argument: side must be instance|class
+  → Result error: (invalid_argument beamtalk_error)   // side must be instance|class
 
 // Observer attempts a write op (ADR 0091 RBAC, enforced in Phoenix):
 save ...   → 403, never reaches dist. browse-* stay allowed for Observer.
