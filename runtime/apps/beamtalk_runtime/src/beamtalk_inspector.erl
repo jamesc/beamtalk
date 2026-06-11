@@ -497,7 +497,18 @@ collection_size(Subject) when is_map(Subject) ->
         'Array' -> array:size(array_data(Subject));
         'Set' -> length(set_elements(Subject));
         'Bag' -> bag_size(Subject);
-        _ -> length(dictionary_pairs(Subject))
+        _ -> dictionary_size(Subject)
+    end.
+
+%% The user-key count of a Dictionary tagged map — `maps:size/1` minus the
+%% `'$beamtalk_class'` tag (if present), avoiding the full `maps:to_list/1` + sort
+%% `dictionary_pairs/1` does. `size` is read on *every* render via `header_line`,
+%% so it must stay cheap even for a large Dictionary (BT-2507).
+-spec dictionary_size(map()) -> non_neg_integer().
+dictionary_size(Map) ->
+    case maps:is_key('$beamtalk_class', Map) of
+        true -> maps:size(Map) - 1;
+        false -> maps:size(Map)
     end.
 
 %% The current window of `InspectorField` records for a collection at page `Page`
@@ -511,11 +522,32 @@ collection_fields(Subject, Page) ->
             Window = window(Pairs, Page),
             [association_field(K, V) || {K, V} <- Window];
         not_keyed ->
-            Elements = ordered_elements(Subject),
             Offset = Page * ?PAGE_SIZE,
-            Window = window(Elements, Page),
+            Window = ordered_window(Subject, Page),
             [element_field(Offset + I, E) || {I, E} <- enumerate(Window)]
     end.
+
+%% The page-`Page` window of an ordered collection's elements, materialising only
+%% the window. For an `Array` this is `array:get/2` over the window's index range
+%% — no full `array:to_list/1` per `fields` call. List/Set slice the in-memory
+%% list (already cheap; no conversion) (BT-2507).
+-spec ordered_window(term(), non_neg_integer()) -> [term()].
+ordered_window(Subject, Page) when is_map(Subject) ->
+    case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
+        'Array' -> array_window(array_data(Subject), Page);
+        _ -> window(ordered_elements(Subject), Page)
+    end;
+ordered_window(Subject, Page) ->
+    window(ordered_elements(Subject), Page).
+
+%% The page-`Page` window of an `array` via `array:get/2` over its index range —
+%% at most `?PAGE_SIZE` elements, never the whole array. Indices are 0-based; an
+%% empty range (past the end) yields `[]`.
+-spec array_window(array:array(), non_neg_integer()) -> [term()].
+array_window(Arr, Page) ->
+    Start = Page * ?PAGE_SIZE,
+    End = min(Start + ?PAGE_SIZE, array:size(Arr)),
+    [array:get(I, Arr) || I <- lists:seq(Start, End - 1)].
 
 %% The associations of a keyed collection (Dictionary key→value, Bag element→
 %% count) as a `{Key, Value}` list, or `not_keyed` for an ordered collection.
@@ -569,13 +601,19 @@ set_elements(Subject) ->
 bag_size(Subject) ->
     lists:sum([C || {_K, C} <- bag_counts_pairs(Subject), is_integer(C)]).
 
+%% The `counts` map of a `Bag` (element → count), tolerating a forged non-map
+%% `counts` field by degrading to `#{}`.
+-spec bag_counts(map()) -> map().
+bag_counts(Subject) ->
+    case maps:get(counts, Subject, #{}) of
+        Counts when is_map(Counts) -> Counts;
+        _ -> #{}
+    end.
+
 %% The `{Element, Count}` pairs of a `Bag`, tolerating a forged non-map `counts`.
 -spec bag_counts_pairs(map()) -> [{term(), term()}].
 bag_counts_pairs(Subject) ->
-    case maps:get(counts, Subject, #{}) of
-        Counts when is_map(Counts) -> dictionary_pairs(Counts);
-        _ -> []
-    end.
+    dictionary_pairs(bag_counts(Subject)).
 
 %% The user key→value pairs of a (tagged or plain) Dictionary map, in a stable
 %% sorted order so windows are deterministic. The `'$beamtalk_class'` tag (if any)
@@ -730,30 +768,40 @@ drill_to(Cursor, Name, Value) ->
     {ok, cursor(Value, Cursor, ChildPath)}.
 
 %% Resolve a collection navigation key to its value across the *whole* collection
-%% (not just the current window). For an **ordered** collection an integer indexes
-%% directly (no full traversal for List/Array). For a **keyed** collection
-%% (Dictionary/Bag) the navigation key is the entry key — including an integer key
-%% — looked up by association, never by position.
+%% (not just the current window). An **ordered** collection (List/Array/Set) takes
+%% an integer index directly (O(1) for Array). A **keyed** collection
+%% (Dictionary/Bag) looks the key up by `maps:find/2` — O(log n), exact-key
+%% semantics matching `Dictionary >> at:` (`beamtalk_map:at:`), never the
+%% `'$beamtalk_class'` tag (BT-2507; was an O(n) `lists:keyfind/3` over the
+%% materialised pairs).
 -spec collection_value_at(term(), term()) -> {ok, term()} | error.
+collection_value_at(Subject, Key) when is_map(Subject) ->
+    case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
+        'Bag' -> keyed_value_at(Key, bag_counts(Subject));
+        Class when Class =:= 'Array'; Class =:= 'Set' -> ordered_value_at(Subject, Key);
+        _ -> keyed_value_at(Key, Subject)
+    end;
 collection_value_at(Subject, Key) ->
-    case keyed_collection_pairs(Subject) of
-        {ok, Pairs} ->
-            %% `lists:keyfind/3` matches the key with `==`, so a numerically
-            %% equal-but-not-identical key (e.g. `at: 1` against a `1.0` entry)
-            %% returns the stored pair; bind the value positionally rather than
-            %% re-matching the key with `=:=`, which would raise `case_clause`.
-            case lists:keyfind(Key, 1, Pairs) of
-                {_FoundKey, Value} -> {ok, Value};
-                false -> error
-            end;
-        not_keyed when is_integer(Key) ->
-            case element_at(Subject, Key) of
-                {ok, Value} -> {ok, Value};
-                out_of_range -> error
-            end;
-        not_keyed ->
-            error
-    end.
+    ordered_value_at(Subject, Key).
+
+%% O(log n) exact-key lookup in a keyed collection's backing map. Never resolves
+%% the `'$beamtalk_class'` tag (it is not a user association key).
+-spec keyed_value_at(term(), map()) -> {ok, term()} | error.
+keyed_value_at('$beamtalk_class', _Map) ->
+    error;
+keyed_value_at(Key, Map) ->
+    maps:find(Key, Map).
+
+%% Direct positional lookup in an ordered collection (List/Array/Set) — `error`
+%% for a non-integer key or an out-of-range index.
+-spec ordered_value_at(term(), term()) -> {ok, term()} | error.
+ordered_value_at(Subject, Key) when is_integer(Key) ->
+    case element_at(Subject, Key) of
+        {ok, Value} -> {ok, Value};
+        out_of_range -> error
+    end;
+ordered_value_at(_Subject, _Key) ->
+    error.
 
 %% Look up a field's value by its navigation name in a derived field list.
 -spec find_field(term(), [field_map()]) -> {ok, term()} | error.
