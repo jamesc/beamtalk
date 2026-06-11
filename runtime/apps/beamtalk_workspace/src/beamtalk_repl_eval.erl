@@ -345,7 +345,17 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
         {module, ModuleName} ->
             try
                 {RawResult, _UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
-                {ok, maybe_await_future(RawResult)}
+                case maybe_await_future(RawResult) of
+                    {future_rejected, FutureReason} ->
+                        %% An awaited future that rejected/timed out is an error,
+                        %% not a success — honour the structured-error contract
+                        %% rather than leaking the internal `{future_rejected, _}`
+                        %% tuple through `{ok, _}` (mirrors process_eval_result/4).
+                        FutExObj = beamtalk_exception_handler:ensure_wrapped(FutureReason),
+                        {error, beamtalk_repl_errors:ensure_structured_error(FutExObj)};
+                    Value ->
+                        {ok, Value}
+                end
             catch
                 Class:Reason:Stacktrace ->
                     ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),

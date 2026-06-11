@@ -52,7 +52,7 @@ start_actor(State) ->
 %% Start a sys-compliant process that is NOT marked as a Beamtalk actor — a
 %% stand-in for a foreign OTP gen_server (`#foreign`).
 start_foreign(State) ->
-    {ok, Pid} = gen_server:start(?MODULE, {foreign, State}, []),
+    {ok, Pid} = gen_server:start_link(?MODULE, {foreign, State}, []),
     Pid.
 
 %% A Value-shaped tagged map (Point with x/y).
