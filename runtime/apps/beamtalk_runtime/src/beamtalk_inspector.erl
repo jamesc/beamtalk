@@ -219,14 +219,37 @@ cursor(Subject, Parent, Path) ->
     end.
 
 %% Classify a live pid: a Beamtalk actor is `#actor` (guarded snapshot), any other
-%% OTP process is `#foreign` (best-effort `process_info`, never snapshotted at
-%% construction — read lazily by `fieldsOf`).
+%% *local* OTP process is `#foreign` (best-effort `process_info`, never snapshotted
+%% at construction — read lazily by `fieldsOf`). A pid on **another node** cannot be
+%% introspected locally — `is_beamtalk_actor/1` (process dictionary),
+%% `is_process_alive/1`, and `process_info/2` all raise `badarg` for a remote pid —
+%% so it degrades to an unavailable `#foreign` cursor rather than crashing (BT-2508).
 -spec process_cursor(pid(), inspector() | nil, [term()]) -> inspector().
+process_cursor(Pid, Parent, Path) when node(Pid) =/= node() ->
+    remote_cursor(Pid, Parent, Path);
 process_cursor(Pid, Parent, Path) ->
     case beamtalk_actor:is_beamtalk_actor(Pid) of
         true -> actor_cursor(Pid, Parent, Path);
         false -> foreign_cursor(Pid, Parent, Path)
     end.
+
+%% Mint an unavailable `#foreign` cursor over a remote-node pid (BT-2508). No local
+%% introspection BIF (`process_info`/`is_process_alive`) accepts a remote pid, so
+%% `available` is fixed `false` — `fieldsOf` yields the single `#status =>
+%% #unavailable` diagnostic and `header_line` shows the pid, never a crash. Mirrors
+%% `foreign_cursor/3` but skips the `process_alive/1` probe.
+-spec remote_cursor(pid(), inspector() | nil, [term()]) -> inspector().
+remote_cursor(Pid, Parent, Path) ->
+    #{
+        '$beamtalk_class' => 'Inspector',
+        kind => foreign,
+        pid => Pid,
+        available => false,
+        subject => Pid,
+        page => 0,
+        parent => Parent,
+        path => Path
+    }.
 
 %% Mint an `#actor` cursor over a live pid: capture the guarded snapshot now
 %% (ADR 0095 §4). The pid is retained for refresh. `available` records whether
