@@ -55,16 +55,23 @@ TestCase subclass: InspectTest
     self assert: true printString equals: "true"
     self assert: false printString equals: "false"
 
-  // --- Actor subclass with fields ---
+  // --- Actor subclass: inspect renders name + fields ---
+  // A live actor's `printString` is the identity label `Actor(Counter, <pid>)`
+  // (ADR 0094), NOT a structural dump. The structural field view of an actor's
+  // state is reached via `inspect` (ADR 0095): `c inspect` opens a seeded
+  // `#actor` cursor whose `printString` shows the class header and field values.
   testActorSubclassWithFieldsProducesNameAndFields =>
     c := Counter spawn
-    self assert: c printString equals: "Counter(value: 0)"
+    str := c inspect printString
+    self assert: (str includesSubstring: "Counter") equals: true
+    self assert: (str includesSubstring: "value: 0") equals: true
 
   testActorSubclassAfterMutationShowsUpdatedValue =>
     c := Counter spawn
     c increment
     c increment
-    self assert: c printString equals: "Counter(value: 2)"
+    str := c inspect printString
+    self assert: (str includesSubstring: "value: 2") equals: true
 
   // --- Nested value objects use recursive printString ---
   testNestedValueObjectUsesRecursivePrintString =>
