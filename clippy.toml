@@ -1,0 +1,7 @@
+# Identifiers allowed in doc comments without backticks (clippy::doc_markdown).
+# `..` extends clippy's default allowlist rather than replacing it.
+#
+# The README is included as crate docs (beamtalk-core/src/lib.rs), so product
+# names that look like camelCase identifiers — e.g. "LiveView" (the Phoenix
+# LiveView IDE, BT-2512) — would otherwise trip the lint in prose/headings.
+doc-valid-idents = ["LiveView", ".."]
