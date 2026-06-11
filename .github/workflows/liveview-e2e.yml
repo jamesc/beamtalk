@@ -1,15 +1,28 @@
 # Copyright 2026 James Casey
 # SPDX-License-Identifier: Apache-2.0
 
-name: LiveView IDE e2e (browser)
+name: LiveView IDE e2e (workspace + browser)
 
-# Browser end-to-end gate for the LiveView IDE: PhoenixTest + Playwright driving
-# a real Chromium against the connected IDE, backed by a live Beamtalk workspace.
+# End-to-end gate for the LiveView IDE against a *real* running Beamtalk
+# workspace node, covering two tag-gated suites that a bare `mix test` skips:
+#
+#   * `:workspace` — the Attach-topology eval / inspect / bindings / method-editor
+#     / session-isolation tests (workspace_live_test.exs). Needs a live workspace
+#     + its cookie; runs through the Phoenix LiveView stack, no browser.
+#   * `:playwright` — PhoenixTest + Playwright driving a real Chromium against the
+#     connected IDE. The connected-only JS hooks (CodeEditor, KeyboardShortcuts,
+#     SelectionTracker, TweaksPanel) only run in a browser, so this is the only
+#     lane that exercises them.
+#
 # Heavier than liveview.yml (it builds Beamtalk from source and boots a workspace
 # node), so it is a separate, path-scoped lane — only editors/liveview changes
-# (or this workflow) pay the cost. The connected-only JS hooks (CodeEditor,
-# KeyboardShortcuts, SelectionTracker, TweaksPanel) only run in a browser, so
-# this is the only lane that exercises them.
+# (or this workflow) pay the cost.
+#
+# BT-2510: the `:workspace`-only suite previously ran in *no* CI lane — liveview.yml
+# excludes it (no cookie) and this lane's browser step (`--only playwright`) selects
+# only `:playwright`-tagged tests. We piggyback the `:workspace` suite here, on the
+# job that already builds the toolchain and boots a workspace, rather than paying a
+# second Rust build in liveview.yml or deferring coverage to a nightly leg.
 on:
   push:
     branches: [main]
@@ -107,6 +120,17 @@ jobs:
           mix assets.setup
           mix assets.build
 
+      # The `:workspace`-only suite (no browser): runs the LiveView e2e tests
+      # against the live workspace booted above. Scoped to the file by path
+      # because the browser file (workspace_browser_test.exs) is tagged BOTH
+      # `:workspace` and `:playwright`, and ExUnit's `--only`/`--include` wins
+      # over `--exclude` — so a tag filter can't subtract it out. It needs the
+      # Playwright driver and is covered by the browser step below. `--only
+      # workspace` then selects the `:workspace` tests within that file.
+      - name: Run workspace e2e suite (non-browser)
+        working-directory: editors/liveview
+        run: mix test --only workspace test/bt_attach_web/workspace_live_test.exs
+
       # The Playwright CLI lives under assets/node_modules; install it + the
       # Chromium browser (with OS deps) the e2e suite drives.
       - name: Install Playwright + Chromium
@@ -120,3 +144,10 @@ jobs:
         env:
           PHX_PLAYWRIGHT: '1'
         run: mix test --only playwright
+
+      # Stop the background workspace node regardless of suite outcome so the job
+      # never leaves a stray distributed node behind (AC: created and torn down
+      # cleanly). `|| true` keeps a teardown hiccup from masking a real failure.
+      - name: Stop the workspace
+        if: always()
+        run: ./target/debug/beamtalk workspace stop e2e || true
