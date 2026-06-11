@@ -435,3 +435,73 @@ forged_collection_maps_never_crash_test() ->
     ?assertEqual(0, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Set))),
     Bag = #{'$beamtalk_class' => 'Bag', counts => not_a_map},
     ?assertEqual(0, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Bag))).
+
+%%====================================================================
+%% Foreign-state charlist rendering (BT-2511, provenance-scoped)
+%%====================================================================
+
+%% A foreign process whose *whole state* is an Erlang string (a charlist) renders
+%% it as a `String` leaf, not a drillable Integer `#collection`.
+foreign_charlist_state_renders_as_string_test() ->
+    Pid = start_foreign("hello"),
+    I = beamtalk_inspector:on(Pid),
+    [StateF] = [F || F <- beamtalk_inspector:fieldsOf(I), maps:get(name, F) =:= state],
+    ?assertEqual(<<"hello">>, maps:get(value, StateF)),
+    ?assertEqual(false, maps:get(drillable, StateF)),
+    gen_server:stop(Pid).
+
+%% Drilling into a foreign-state map presents a charlist *value* as a `String`
+%% (provenance is inherited through the drill), while a genuine integer value
+%% beside it stays an Integer.
+foreign_state_map_charlist_value_drills_as_string_test() ->
+    Pid = start_foreign(#{name => "bob", port => 8080}),
+    {ok, StateCur} = beamtalk_inspector:inspector(beamtalk_inspector:on(Pid), state),
+    ?assertEqual(collection, beamtalk_inspector:kindOf(StateCur)),
+    Fields = beamtalk_inspector:fieldsOf(StateCur),
+    [NameF] = [F || F <- Fields, maps:get(name, F) =:= name],
+    ?assertEqual(<<"bob">>, maps:get(value, NameF)),
+    ?assertEqual(false, maps:get(drillable, NameF)),
+    [PortF] = [F || F <- Fields, maps:get(name, F) =:= port],
+    ?assertEqual(8080, maps:get(value, PortF)),
+    gen_server:stop(Pid).
+
+%% The heuristic is **scoped to foreign provenance**: a top-level Beamtalk integer
+%% `List` (`#(72, 73)`) is NOT reinterpreted as the string `"HI"` — this is the
+%% regression the global `printable_list/1` fix would have caused (BT-2511).
+beamtalk_integer_list_not_coerced_test() ->
+    I = beamtalk_inspector:on([72, 73]),
+    ?assertEqual(collection, beamtalk_inspector:kindOf(I)),
+    ?assertEqual(2, beamtalk_inspector:sizeOf(I)),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    ?assertEqual([72, 73], [maps:get(value, F) || F <- Fields]).
+
+%% An actor's own state is native Beamtalk, never foreign-scoped: a printable
+%% integer-list slot stays a drillable `List`, not a `String`.
+actor_state_integer_list_slot_not_coerced_test() ->
+    Pid = start_actor(#{'$beamtalk_class' => 'Holder', items => [72, 73]}),
+    I = beamtalk_inspector:on(Pid),
+    [F] = [X || X <- beamtalk_inspector:fieldsOf(I), maps:get(name, X) =:= items],
+    ?assertEqual([72, 73], maps:get(value, F)),
+    ?assertEqual(true, maps:get(drillable, F)),
+    gen_server:stop(Pid).
+
+%% Even within foreign provenance the heuristic is conservative: a list of
+%% non-printable control codes (`[1, 2, 3]`) is not a string, so it stays an
+%% Integer `List`.
+foreign_control_code_list_not_coerced_test() ->
+    Pid = start_foreign([1, 2, 3]),
+    I = beamtalk_inspector:on(Pid),
+    [StateF] = [F || F <- beamtalk_inspector:fieldsOf(I), maps:get(name, F) =:= state],
+    ?assertEqual([1, 2, 3], maps:get(value, StateF)),
+    ?assertEqual(true, maps:get(drillable, StateF)),
+    gen_server:stop(Pid).
+
+%% The empty list is excluded from the charlist rule even under foreign
+%% provenance: `[]` stays the `#()` leaf, never an empty `String` (`<<>>`).
+foreign_empty_list_stays_leaf_test() ->
+    Pid = start_foreign(#{tags => []}),
+    {ok, StateCur} = beamtalk_inspector:inspector(beamtalk_inspector:on(Pid), state),
+    [TagsF] = [F || F <- beamtalk_inspector:fieldsOf(StateCur), maps:get(name, F) =:= tags],
+    ?assertEqual([], maps:get(value, TagsF)),
+    ?assertEqual(false, maps:get(drillable, TagsF)),
+    gen_server:stop(Pid).
