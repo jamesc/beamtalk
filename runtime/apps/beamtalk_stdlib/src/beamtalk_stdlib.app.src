@@ -45,6 +45,8 @@
             #{name => 'File', module => 'bt@stdlib@file', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'FileHandle', module => 'bt@stdlib@file_handle', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Float', module => 'bt@stdlib@float', parent => 'Number', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Inspector', module => 'bt@stdlib@inspector', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'InspectorField', module => 'bt@stdlib@inspector_field', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'InstantiationError', module => 'bt@stdlib@instantiation_error', parent => 'Error', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Integer', module => 'bt@stdlib@integer', parent => 'Number', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Interval', module => 'bt@stdlib@interval', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},

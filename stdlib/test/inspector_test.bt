@@ -1,0 +1,285 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2502: Tests for the Inspector / InspectorField classes (ADR 0095 Phase 1).
+//
+// Covers value drill (#value structural traversal), actor snapshot (#actor lazy
+// guarded sys:get_state), the no_such_field error on `at:`, immutable
+// parent/root/path navigation, refresh re-snapshotting, and printString.
+//
+// Fixtures:
+//   fixtures/value_point.bt — Value subclass with x, y integer fields
+//   fixtures/counter.bt     — Actor subclass with a `value` integer field
+//   fixtures/inspect_pair.bt — Value subclass with left/right fields (nesting)
+
+TestCase subclass: InspectorTest
+
+  // === InspectorField value record ===
+  testInspectorFieldAccessors =>
+    f := InspectorField
+      name: #x
+      label: "x"
+      value: 3
+      kind: #slot
+      drillable: true
+    self assert: f name equals: #x
+    self assert: f label equals: "x"
+    self assert: f value equals: 3
+    self assert: f kind equals: #slot
+    self assert: f drillable equals: true
+
+  testInspectorFieldIsLeafIsNegationOfDrillable =>
+    leaf := InspectorField
+      name: #n
+      label: "n"
+      value: 7
+      kind: #slot
+      drillable: false
+    self assert: leaf isLeaf equals: true
+    drillable := InspectorField
+      name: #n
+      label: "n"
+      value: 7
+      kind: #slot
+      drillable: true
+    self assert: drillable isLeaf equals: false
+
+  testInspectorFieldPrintStringShape =>
+    f := InspectorField
+      name: #x
+      label: "x"
+      value: 3
+      kind: #slot
+      drillable: false
+    self assert: (f printString startsWith: "#InspectorField<") equals: true
+    self assert: (f printString includesSubstring: "x: 3") equals: true
+
+  // === Construction: Inspector on: / inspect shorthand ===
+  testInspectorOnReturnsInspector =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: (i isKindOf: Inspector) equals: true
+
+  testValueKindClassifiedAsValue =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: i kind equals: #value
+
+  testActorKindClassifiedAsActor =>
+    c := Counter spawn
+    i := Inspector on: c
+    self assert: i kind equals: #actor
+
+  // === #value: structural field derivation (ADR 0094 sort order) ===
+  testValueFieldsAreSlots =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: i fields size equals: 2
+
+  testValueFieldsSortedByName =>
+    // ADR 0094 sort order: fields come back sorted by name (x before y).
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    names := i fields collect: [:f | f name]
+    self assert: names equals: #(#x, #y)
+
+  testValueFieldValuesMatch =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    xField := i fields detect: [:f | f name == #x]
+    self assert: xField value equals: 3
+
+  testScalarFieldIsNotDrillable =>
+    // An Integer slot value is a leaf — not drillable.
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    xField := i fields detect: [:f | f name == #x]
+    self assert: xField drillable equals: false
+
+  testNestedValueFieldIsDrillable =>
+    // A field holding another Value is drillable.
+    inner := ValuePoint x: 1 y: 2
+    pair := InspectPair new: #{#left => inner, #right => 42}
+    i := Inspector on: pair
+    leftField := i fields detect: [:f | f name == #left]
+    self assert: leftField drillable equals: true
+
+  // === Navigation: at: drills into a child cursor ===
+  testAtDrillsIntoChildValue =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    child := (i at: #x) unwrap
+    self assert: child subject equals: 3
+
+  testAtChildParentIsTheCursor =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    child := (i at: #x) unwrap
+    self assert: child parent kind equals: #value
+
+  testAtMissReturnsNoSuchField =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    result := i at: #nonesuch
+    self assert: result isError equals: true
+
+  testAtMissErrorKindIsNoSuchField =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    result := i at: #nonesuch
+    self assert: result error kind equals: #no_such_field
+
+  // === Immutable cursor: parent / root / path ===
+  testRootCursorParentIsNil =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: i parent equals: nil
+
+  testRootCursorPathIsEmpty =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: i path equals: #()
+
+  testChildPathExtendsByDrilledName =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    child := (i at: #x) unwrap
+    self assert: child path equals: #(#x)
+
+  testRootWalksBackToTop =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    child := (i at: #x) unwrap
+    self assert: child root kind equals: #value
+
+  testNavigationDoesNotMutateOriginalCursor =>
+    // Drilling returns a new cursor; the original is unchanged (immutable).
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    _ := (i at: #x) unwrap
+    self assert: i path equals: #()
+    self assert: i parent equals: nil
+
+  // === #actor: lazy guarded snapshot ===
+  testActorFieldsFromSnapshot =>
+    c := Counter spawn
+    c increment
+    c increment
+    i := Inspector on: c
+    valueField := i fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 2
+
+  testActorSnapshotIsFrozen =>
+    // The snapshot is captured at `on:`; later mutation is not seen until refresh.
+    c := Counter spawn
+    i := Inspector on: c
+    c increment
+    valueField := i fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 0
+
+  testRefreshReSnapshotsActor =>
+    c := Counter spawn
+    i := Inspector on: c
+    c increment
+    refreshed := i refresh
+    valueField := refreshed fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 1
+
+  testRefreshReturnsNewCursorOriginalUnchanged =>
+    c := Counter spawn
+    i := Inspector on: c
+    c increment
+    _ := i refresh
+    // Original cursor still shows the T0 snapshot.
+    valueField := i fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 0
+
+  // === Busy / dead actor degrades to #unavailable, never crashes ===
+  testDeadActorFieldsAreUnavailable =>
+    c := Counter spawn
+    c stop
+    // Inspecting a dead actor must not crash — it yields a single status field.
+    i := Inspector on: c
+    statusField := i fields detect: [:f | f name == #status]
+    self assert: statusField value equals: #unavailable
+
+  testDeadActorStatusFieldIsNotDrillable =>
+    c := Counter spawn
+    c stop
+    i := Inspector on: c
+    statusField := i fields detect: [:f | f name == #status]
+    self assert: statusField drillable equals: false
+
+  // === Rendering: printString depth-1 tree ===
+  testPrintStringHeaderNamesClass =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: (i printString includesSubstring: "Inspector(ValuePoint)") equals: true
+
+  testPrintStringIncludesImmediateFields =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    str := i printString
+    self assert: (str includesSubstring: "x: 3") equals: true
+    self assert: (str includesSubstring: "y: 4") equals: true
+
+  testPrintStringExpandedDepthAcceptsDepth =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: (i printStringExpanded: 1) equals: i printString
+
+  // === Cycle guard: pid-keyed seen-set with back-reference marker ===
+  testActorCycleEmitsBackReference =>
+    // A's state holds B, B's state holds A (a pid cycle). Expanding deeply must
+    // not recurse forever — the revisited actor pid yields a `↩ Actor(...)`
+    // back-reference marker instead (ADR 0095 Cycle handling).
+    a := CycleActorA spawn
+    b := CycleActorB spawn
+    a setPeer: b
+    b setPeer: a
+    str := (Inspector on: a) printStringExpanded: 5
+    self assert: (str includesSubstring: "↩ Actor") equals: true
+
+  testActorCycleRenderTerminates =>
+    // The expansion completes (does not hang) and names both actors once.
+    a := CycleActorA spawn
+    b := CycleActorB spawn
+    a setPeer: b
+    b setPeer: a
+    str := (Inspector on: a) printStringExpanded: 5
+    self assert: (str includesSubstring: "Inspector(CycleActorA)") equals: true
+
+  testSharedActorReferenceIsNotMistakenForCycle =>
+    // A diamond (shared, non-cyclic) reference: a value whose two fields both
+    // hold the SAME actor. Neither is an ancestor of the other, so BOTH must
+    // expand — the cycle guard tracks ancestry, not mere prior visitation, so
+    // there is no spurious back-reference (ADR 0095 Cycle handling).
+    c := Counter spawn
+    pair := InspectPair new: #{#left => c, #right => c}
+    str := (Inspector on: pair) printStringExpanded: 3
+    self deny: (str includesSubstring: "↩ Actor")
+
+  // === Depth bound: deeper expansion shows nested fields ===
+  testDepthOneRendersNestedValueInline =>
+    // At depth 1 a nested Value renders as its one-line structural string on the
+    // field line — not expanded into its own indented sub-tree.
+    inner := ValuePoint x: 1 y: 2
+    pair := InspectPair new: #{#left => inner, #right => 42}
+    str := (Inspector on: pair) printStringExpanded: 1
+    self assert: (str includesSubstring: "left: ValuePoint(x: 1, y: 2)") equals: true
+
+  testDepthTwoExpandsNestedValueSubTree =>
+    // At depth 2 the nested ValuePoint expands into its own header + fields, so a
+    // child header line `Inspector(ValuePoint)` appears that depth 1 omits.
+    inner := ValuePoint x: 1 y: 2
+    pair := InspectPair new: #{#left => inner, #right => 42}
+    shallow := (Inspector on: pair) printStringExpanded: 1
+    deep := (Inspector on: pair) printStringExpanded: 2
+    self deny: (shallow includesSubstring: "Inspector(ValuePoint)")
+    self assert: (deep includesSubstring: "Inspector(ValuePoint)") equals: true
+
+  // === Edge case: a Value with no fields ===
+  testEmptyValueHasNoFields =>
+    i := Inspector on: EmptyValue new
+    self assert: i fields size equals: 0
+
+  testEmptyValuePrintStringHasHeaderOnly =>
+    i := Inspector on: EmptyValue new
+    self assert: (i printString includesSubstring: "Inspector(EmptyValue)") equals: true
+
+  // === Edge case: drilling into a scalar yields a leaf cursor with no fields ===
+  testDrilledScalarHasNoFields =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    child := (i at: #x) unwrap
+    self assert: child fields size equals: 0
+    self assert: child kind equals: #value
+
+  // === `Inspector on:` is the Phase-1 entry point (inspect repurpose is Phase 3) ===
+  testInspectorOnIsTheEntryPoint =>
+    // ADR 0095 Phase 1 ships `Inspector on:`; `Object >> inspect` still returns a
+    // String (the breaking repurpose is Phase 3, BT-2504). `Inspector on:` is the
+    // unambiguous way to open a cursor on any receiver.
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    self assert: i kind equals: #value

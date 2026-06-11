@@ -1,0 +1,182 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Inspector — a live, immutable cursor for navigating into a single object
+/// (ADR 0095).
+///
+/// Where the three navigators (`SystemNavigation`, `ProcessNavigation`,
+/// `AnnouncementNavigation`) each enumerate a *system-wide collection*, an
+/// `Inspector` is a **cursor over one object** that drills *into* it — the
+/// Beamtalk equivalent of a Pharo Inspector. `Inspector on: anObject` returns a
+/// cursor; `fields` lists its drillable `InspectorField` records; `at:` drills
+/// into one field, returning a new child cursor; `parent`/`root`/`path` walk the
+/// drill chain; `refresh` re-captures a fresh snapshot of the same subject.
+///
+/// (`Inspector on:` is the Phase-1 entry point. The `anObject inspect` shorthand
+/// — repurposing `inspect` from `String` to `Inspector` — is the breaking change
+/// deferred to ADR 0095 Phase 3, BT-2504; in Phase 1 `inspect` still returns a
+/// structural `String`.)
+///
+/// **The cursor is immutable.** Every navigation message returns a *new*
+/// `Inspector` — `at:` returns a child cursor (with `parent` set), `refresh`
+/// returns a cursor on a freshly-captured snapshot. Nothing mutates in place, so
+/// a UI can hold several cursors at once.
+///
+/// **`kind`-polymorphic, one class.** A single `Inspector` carries a `kind` tag
+/// (`#value` structural, `#actor` snapshot) rather than a subclass per kind —
+/// the same fork ADR 0092's `SupervisionNode` settled. v1 covers `#value` (pure
+/// structural traversal of a `Value`'s `field:` slots, ADR 0094 sort order) and
+/// `#actor` (a lazy, timeout-guarded `sys:get_state` snapshot of an `Actor`'s
+/// state). A wedged, dead, or non-`sys` actor degrades to a single
+/// `InspectorField name: #status value: #unavailable` — never a crash.
+/// (`#collection`/`#foreign` and value `evaluate:` are later phases, ADR 0095
+/// §6–§7.)
+///
+/// `Inspector` is a `sealed typed Object subclass`: a live cursor handle, like
+/// the navigators. Its carried state (subject, kind, snapshot, parent, path)
+/// lives in a runtime-minted handle — not in declarable `field:` slots (an
+/// Object subclass has none, ADR 0067) — and is read back through the
+/// `beamtalk_inspector` shim. The *records* it returns (`InspectorField`) are
+/// the `Value`s.
+///
+/// ## Examples
+/// ```beamtalk
+/// i := Inspector on: (Point x: 3 y: 4)
+/// i kind            // => #value
+/// i fields size     // => 2
+/// (i at: #x) unwrap subject   // => 3
+/// i path            // => #()
+/// ```
+sealed typed Object subclass: Inspector
+
+  /// Open an inspector cursor on `anObject` (ADR 0095 §1).
+  ///
+  /// For an actor, the timeout-guarded `sys:get_state` snapshot is captured
+  /// here, at construction; for a value the subject is taken structurally with no
+  /// process contact. This is the Phase-1 entry point (`anObject inspect`
+  /// shorthand is Phase 3).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Inspector on: (Point x: 3 y: 4)   // => an Inspector
+  /// Inspector on: aCounter            // => an Inspector (#actor)
+  /// ```
+  class on: anObject :: Object -> Inspector =>
+    (Erlang beamtalk_inspector) on: anObject
+
+  /// The inspected object — the value itself, or, for an actor, the captured
+  /// state snapshot.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: (Point x: 3 y: 4)) subject   // => Point(x: 3, y: 4)
+  /// ```
+  subject -> Object => (Erlang beamtalk_inspector) subjectOf: self
+
+  /// The subject kind: `#value` (structural) or `#actor` (snapshot) in v1.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: (Point x: 3 y: 4)) kind   // => #value
+  /// (Inspector on: aCounter) kind            // => #actor
+  /// ```
+  kind -> Symbol => (Erlang beamtalk_inspector) kindOf: self
+
+  /// The drillable fields of the inspected object, as immutable
+  /// `InspectorField` records (ADR 0095 §2–§3).
+  ///
+  /// For a `#value`, these are its `field:` slots in ADR-0094 sort order. For an
+  /// `#actor`, they are its user state slots from a lazy, timeout-guarded
+  /// snapshot — or, if the actor is busy/dead/non-`sys`, the single diagnostic
+  /// `InspectorField name: #status value: #unavailable` (never a crash).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: (Point x: 3 y: 4)) fields size   // => 2
+  /// ```
+  fields -> List(InspectorField) => (Erlang beamtalk_inspector) fieldsOf: self
+
+  /// Drill into one field by name, returning a child `Inspector` cursor on that
+  /// field's value (ADR 0095 §1).
+  ///
+  /// Returns a `Result`: `Result error: (beamtalk_error no_such_field)` when no
+  /// field has that name. The child cursor's `parent` is this cursor, and its
+  /// `path` extends this one's by the drilled name.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: (Point x: 3 y: 4)) at: #x     // => Result ok: (an Inspector on 3)
+  /// (Inspector on: (Point x: 3 y: 4)) at: #zzz   // => Result error: no_such_field
+  /// ```
+  at: aName :: Object -> Result(Inspector, Error) =>
+    (Erlang beamtalk_inspector) inspector: self at: aName
+
+  /// The cursor this one was drilled from, or `nil` at the root.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// child := ((Inspector on: (Point x: 3 y: 4)) at: #x) unwrap
+  /// child parent kind   // => #value
+  /// ```
+  parent -> Inspector | Nil => (Erlang beamtalk_inspector) parentOf: self
+
+  /// The top of this drill chain — the cursor with no `parent`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// child := ((Inspector on: (Point x: 3 y: 4)) at: #x) unwrap
+  /// child root kind   // => #value
+  /// ```
+  root -> Inspector =>
+    self parent isNil ifTrue: [self] ifFalse: [self parent root]
+
+  /// The breadcrumb of drilled names from the root to this cursor (for UI).
+  /// `#()` at the root.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// child := ((Inspector on: (Point x: 3 y: 4)) at: #x) unwrap
+  /// child path   // => #(#x)
+  /// ```
+  path -> List => (Erlang beamtalk_inspector) pathOf: self
+
+  /// A cursor on a freshly-captured snapshot of the *same* subject (ADR 0095
+  /// §5). The original cursor is unchanged (immutable).
+  ///
+  /// `refresh` re-snapshots **this cursor's own subject**, which differs by how
+  /// the cursor was reached:
+  /// - A **root `#actor`** cursor re-issues the guarded `sys:get_state`, picking
+  ///   up state change since the previous snapshot.
+  /// - A **`#value`** cursor (including one drilled into an actor's slot with
+  ///   `at:`) re-freezes its already-captured value — structurally identical,
+  ///   since per ADR 0095 §4 drilling never re-contacts the live actor (the
+  ///   sub-tree is a consistent point-in-time view). To see a drilled actor
+  ///   field move, `refresh` the **root** actor cursor and drill again.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ci := Inspector on: aCounter   // snapshot at T0
+  /// aCounter increment             // state moves on
+  /// ci refresh fields              // a fresh cursor at T1 (root actor re-fetched)
+  /// ```
+  refresh -> Inspector => (Erlang beamtalk_inspector) refresh: self
+
+  /// An indented text tree of the cursor and its immediate fields, one level
+  /// deep (ADR 0095 §7). The REPL default.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: (Point x: 3 y: 4)) printString
+  ///   // => "Inspector(Point)\n  x: 3\n  y: 4"
+  /// ```
+  printString -> String => self printStringExpanded: 1
+
+  /// An indented text tree of the cursor to `depth` levels (ADR 0095 §7).
+  /// `depth: 1` is the immediate fields; deeper expands drillable children.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: (Point x: 3 y: 4)) printStringExpanded: 1
+  /// ```
+  printStringExpanded: depth :: Integer -> String =>
+    (Erlang beamtalk_inspector) printString: self depth: depth

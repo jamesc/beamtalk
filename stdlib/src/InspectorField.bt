@@ -1,0 +1,62 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// InspectorField — an immutable record for one drillable field of an inspected
+/// object (ADR 0095 §2).
+///
+/// An `InspectorField` is a frozen, point-in-time fact about a single slot,
+/// element, or association of the object an `Inspector` is focused on: its name
+/// (the navigation key), a display `label`, the field's `value`, the field
+/// `kind`, and whether the value is itself drillable. Fields are minted by the
+/// runtime shim (`beamtalk_inspector`) when an `Inspector` derives its fields,
+/// and never mutate — to observe change, `refresh` the cursor for a new snapshot.
+///
+/// The **read-vs-mutate rule** (ADR 0092 §3a, applied identically): an
+/// `InspectorField` is a frozen fact and read-only. To *change* something you
+/// discovered, cross back to the live object and send it a message. This keeps
+/// the Object/Value split consistent with the three navigators — cursors
+/// (`Inspector`, `SystemNavigation`, …) are `Object`; snapshot records
+/// (`InspectorField`, `SupervisionNode`, `SubscriptionNode`) are `Value`.
+///
+/// ## Examples
+/// ```beamtalk
+/// field := (Inspector on: (Point x: 3 y: 4)) fields first
+/// field name        // => #x
+/// field label       // => "x"
+/// field value       // => 3
+/// field kind        // => #slot
+/// field drillable   // => true
+/// ```
+sealed typed Value subclass: InspectorField
+  /// The navigation key: a Symbol (slot name), Integer (element index), or key
+  /// (association key). Passed to `Inspector at:` to drill into this field.
+  field: name :: Object = nil
+  /// The display label for this field, e.g. `"x"`, `"[0]"`, `"#key →"`.
+  field: label :: String = ""
+  /// The field's value — the object reached by drilling here.
+  field: value :: Object = nil
+  /// The field kind: one of `#slot` (Value/actor slot), `#element` (collection
+  /// element), `#association` (dictionary entry), or `#processInfo` (foreign
+  /// process datum).
+  field: kind :: Symbol = #slot
+  /// Whether the value is itself drillable (`false` for leaf scalars — numbers,
+  /// atoms, booleans, nil).
+  field: drillable :: Boolean = true
+
+  /// Whether this field is a leaf scalar (the negation of `drillable`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// field isLeaf   // => false
+  /// ```
+  isLeaf -> Boolean => self drillable not
+
+  /// Human-readable one-line description, e.g.
+  /// `#InspectorField<x: 3>` or `#InspectorField<status: #unavailable>`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// field printString   // => "#InspectorField<x: 3>"
+  /// ```
+  printString -> String =>
+    "#InspectorField<" ++ self label ++ ": " ++ self value printString ++ ">"

@@ -1011,6 +1011,7 @@ fn generate_builtins_rs(class_metadata: &[ClassMeta]) -> Result<()> {
         "/// Returns true if the given class name is a stdlib built-in class.\n\
          ///\n\
          /// Auto-generated from `lib/*.bt` file names.\n\
+         #[allow(clippy::too_many_lines)] // auto-generated: one match arm per stdlib class\n\
          pub(super) fn is_generated_builtin_class(name: &str) -> bool {\n\
          \x20   matches!(\n\
          \x20       name,\n",
