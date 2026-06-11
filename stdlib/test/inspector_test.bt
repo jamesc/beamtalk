@@ -276,13 +276,35 @@ TestCase subclass: InspectorTest
     self assert: child fields size equals: 0
     self assert: child kind equals: #value
 
-  // === `Inspector on:` is the Phase-1 entry point (inspect repurpose is Phase 3) ===
+  // === `inspect` shorthand and `Inspector on:` (ADR 0095 §1, Phase 3 BT-2504) ===
   testInspectorOnIsTheEntryPoint =>
-    // ADR 0095 Phase 1 ships `Inspector on:`; `Object >> inspect` still returns a
-    // String (the breaking repurpose is Phase 3, BT-2504). `Inspector on:` is the
-    // unambiguous way to open a cursor on any receiver.
+    // `Inspector on:` is the explicit entry point on any receiver.
     i := Inspector on: (ValuePoint x: 3 y: 4)
     self assert: i kind equals: #value
+
+  testInspectShorthandOpensCursor =>
+    // ADR 0095 Phase 3 (BT-2504): `anObject inspect` is the shorthand for
+    // `Inspector on: anObject` — it returns an Inspector cursor, not a String.
+    i := (ValuePoint x: 3 y: 4) inspect
+    self assert: (i isKindOf: Inspector) equals: true
+    self assert: i kind equals: #value
+    self assert: i fields size equals: 2
+
+  testInspectShorthandOnActor =>
+    c := Counter spawn
+    self assert: c inspect kind equals: #actor
+
+  testInspectShorthandOnActorCapturesState =>
+    // Regression guard (BT-2504): `c inspect` dispatches *inside* the actor's
+    // own process, so a `sys:get_state(self())` snapshot would deadlock and time
+    // out — the cursor must instead be seeded from the actor's in-hand state.
+    // Asserting on `fields` (not just `kind`) exercises that the snapshot was
+    // actually captured (a self-deadlock would yield only a #status field).
+    c := Counter spawn
+    c increment
+    c increment
+    valueField := c inspect fields detect: [:f | f name == #value]
+    self assert: valueField value equals: 2
 
   // === #collection: windowing, size, page:, direct-index at: (ADR 0095 §6) ===
   testListClassifiedAsCollection =>
@@ -395,3 +417,46 @@ TestCase subclass: InspectorTest
     result := i evaluate: "self increment"
     self assert: result isError equals: true
     self assert: result error kind equals: #actor_eval_unsupported
+
+  // === asDictionaries / asDictionary — wire form (ADR 0095 §7) ===
+  testAsDictionariesIsOneDictPerField =>
+    // One dictionary per drillable field, mirroring SupervisionTree asDictionaries.
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    dicts := i asDictionaries
+    self assert: dicts size equals: 2
+
+  testAsDictionariesFieldShape =>
+    // Each dict carries the typed field record: name (the at: key), label,
+    // value (a display string), kind, drillable.
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    xDict := i asDictionaries detect: [:d | (d at: #name) == #x]
+    self assert: (xDict at: #name) equals: #x
+    self assert: (xDict at: #label) equals: "x"
+    self assert: (xDict at: #value) equals: "3"
+    self assert: (xDict at: #kind) equals: #slot
+    self assert: (xDict at: #drillable) equals: false
+
+  testAsDictionaryEnvelopeCarriesCursorMetadata =>
+    // The singular envelope carries kind/path/childCount/page + the fields window.
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    env := i asDictionary
+    self assert: (env at: #kind) equals: #value
+    self assert: (env at: #path) equals: #()
+    self assert: (env at: #childCount) equals: 2
+    self assert: (env at: #page) equals: 1
+    self assert: (env at: #fields) size equals: 2
+
+  testAsDictionaryChildCountIsFullCollectionSize =>
+    // For a collection, childCount is the cheap full size (not the window length).
+    i := Inspector on: ((1 to: 1000) asList)
+    env := i asDictionary
+    self assert: (env at: #childCount) equals: 1000
+    self assert: (env at: #fields) size equals: 50
+    self assert: (env at: #page) equals: 1
+
+  testAsDictionaryPageReflectsWindow =>
+    // page: 2 → the envelope reports page 2 and its window of elements.
+    i := Inspector on: ((1 to: 1000) asList)
+    env := (i page: 2) unwrap asDictionary
+    self assert: (env at: #page) equals: 2
+    self assert: (env at: #fields) first at: #value equals: "51"

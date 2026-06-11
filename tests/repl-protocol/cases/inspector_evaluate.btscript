@@ -57,3 +57,37 @@ big fields size
 
 (big at: 73) unwrap subject
 // => 73
+
+// ===========================================================================
+// `inspect` shorthand + asDictionaries / asDictionary wire form
+// (ADR 0095 §1, §7, Phase 3 BT-2504)
+// ===========================================================================
+
+// `anObject inspect` is the shorthand for `Inspector on: anObject` and returns
+// an Inspector cursor (the breaking repurpose from `-> String`).
+(Point x: 3 y: 4) inspect kind
+// => #value
+
+(Point x: 3 y: 4) inspect fields size
+// => 2
+
+// printString remains the structural Debug string (the old inspect result).
+(Point x: 3 y: 4) printString
+// => "Point(x: 3, y: 4)"
+
+// asDictionaries: one dictionary per field, carrying the typed record.
+((Point x: 3 y: 4) inspect asDictionaries) size
+// => 2
+
+(((Point x: 3 y: 4) inspect asDictionaries) detect: [:d | (d at: #name) == #x]) at: #value
+// => "3"
+
+// asDictionary: the cursor envelope with kind / childCount / page / fields.
+(((1 to: 1000) asList inspect) asDictionary) at: #childCount
+// => 1000
+
+(((1 to: 1000) asList inspect) asDictionary) at: #page
+// => 1
+
+((((1 to: 1000) asList inspect) asDictionary) at: #fields) size
+// => 50

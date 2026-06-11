@@ -2228,7 +2228,8 @@ sealed typed Object subclass: SystemNavigation
   /// - `printString` — invoked by the REPL / transcript display path to render
   ///   a value; an override is reached through display, not a source send.
   /// - `displayString` — invoked by user-facing display surfaces.
-  /// - `inspect` — invoked by the inspector surface.
+  /// - `inspect` — invoked by the inspector surface (ADR 0095): `anObject
+  ///   inspect` opens an `Inspector` cursor, which the REPL/MCP surfaces render.
   /// - `hash` — invoked by hashed collections (Set / Dictionary) when storing
   ///   or comparing elements, not via a source-level send.
   runtimeCalledSelectors -> List(Symbol) =>

@@ -12,10 +12,10 @@
 /// into one field, returning a new child cursor; `parent`/`root`/`path` walk the
 /// drill chain; `refresh` re-captures a fresh snapshot of the same subject.
 ///
-/// (`Inspector on:` is the Phase-1 entry point. The `anObject inspect` shorthand
-/// — repurposing `inspect` from `String` to `Inspector` — is the breaking change
-/// deferred to ADR 0095 Phase 3, BT-2504; in Phase 1 `inspect` still returns a
-/// structural `String`.)
+/// `Inspector on: anObject` is the explicit entry point; `anObject inspect` is
+/// the shorthand (ADR 0095 Phase 3, BT-2504, repurposed `inspect` from `String`
+/// to `Inspector`). The MCP/browser surfaces render `asDictionaries` /
+/// `asDictionary` (the typed wire form); the REPL renders `printString`.
 ///
 /// **The cursor is immutable.** Every navigation message returns a *new*
 /// `Inspector` — `at:` returns a child cursor (with `parent` set), `refresh`
@@ -53,8 +53,8 @@ sealed typed Object subclass: Inspector
   ///
   /// For an actor, the timeout-guarded `sys:get_state` snapshot is captured
   /// here, at construction; for a value the subject is taken structurally with no
-  /// process contact. This is the Phase-1 entry point (`anObject inspect`
-  /// shorthand is Phase 3).
+  /// process contact. `anObject inspect` is the shorthand for `Inspector on:
+  /// anObject` (ADR 0095 §1).
   ///
   /// ## Examples
   /// ```beamtalk
@@ -241,3 +241,38 @@ sealed typed Object subclass: Inspector
   /// ```
   printStringExpanded: depth :: Integer -> String =>
     (Erlang beamtalk_inspector) printString: self depth: depth
+
+  /// The cross-surface wire form — one `Dictionary` per drillable field
+  /// (ADR 0095 §7). The MCP/browser surfaces render this structure so every
+  /// surface shows equivalent data.
+  ///
+  /// Each dictionary carries the field's named, typed slots: `#name` (the
+  /// navigation key to pass back to `at:`), `#label`, `#value` (a JSON-stable
+  /// display string), `#kind`, and `#drillable`. This is the same typed-record
+  /// pattern `SupervisionTree asDictionaries` (ADR 0092) uses. For the
+  /// cursor-level envelope (`kind`/`path`/`childCount`/page), use `asDictionary`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: (Point x: 3 y: 4)) asDictionaries
+  /// // => #(#{#name => #x, #label => "x", #value => "3", ...}, ...)
+  /// ```
+  asDictionaries -> List(Dictionary) =>
+    (Erlang beamtalk_inspector) asDictionaries: self
+
+  /// The whole cursor as a single wire-form `Dictionary` (ADR 0095 §7) — the
+  /// navigable-node envelope the MCP/browser surfaces render and page through.
+  ///
+  /// Carries `#kind` (the subject kind), `#path` (the breadcrumb of drilled keys
+  /// from the root), `#childCount` (the cheap full element count for a
+  /// `#collection`, else the field count), `#page` (the 1-based window index),
+  /// and `#fields` (the `asDictionaries` window of field records). A surface
+  /// fetches the next window by re-issuing `page:` and re-serialising.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ((1 to: 1000) asList inspect) asDictionary
+  /// // => #{#kind => #collection, #childCount => 1000, #page => 1, #fields => #(...), ...}
+  /// ```
+  asDictionary -> Dictionary =>
+    (Erlang beamtalk_inspector) asDictionary: self

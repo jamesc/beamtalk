@@ -1396,7 +1396,7 @@ Beamtalk follows a **two-string-protocol** model (ADR 0094), mirroring Rust's `D
 
 - **`printString` = Debug.** The self-describing, structural representation used by the REPL, logs, and any *other* `printString` that nests this object. It is the **REPL default** — evaluating an expression shows its `printString`. It is *derived* by default, so you rarely override it.
 - **`displayString` = Display.** The human-facing representation. It is the hook the **language** pulls during **string interpolation** — every `{...}` segment renders its value via `displayString`. It **defaults to `printString`**; you *override* it when a value has a natural human form (e.g. `Money` → `$10.50`).
-- **`inspect`** is **unchanged** — it still returns a `String` and delegates to `printString`. Its redesign into a rich, navigable tooling/action verb is deferred to a follow-up ADR designed against the LiveView surface ([BT-2397](https://linear.app/beamtalk/issue/BT-2397)).
+- **`inspect`** is the **navigable-inspector verb** (ADR 0095): `anObject inspect` opens an `Inspector` cursor (`Inspector on: self`), *not* a string. The cursor drills into fields (`at:`/`fields`/`path`), `refresh`es a snapshot, renders a `printString` text tree, and serialises to the MCP/browser wire form (`asDictionaries`/`asDictionary`). For the **structural Debug string** — formerly the `inspect` result — use `printString`. (Repurposed in ADR 0095 Phase 3, [BT-2504](https://linear.app/beamtalk/issue/BT-2504); the redesign ADR 0094 deferred.)
 
 `String` demonstrates the Debug/Display split directly: `"hi" printString` → `"\"hi\""` (quoted, Debug) while `"hi" displayString` → `hi` (plain, Display).
 
@@ -1445,7 +1445,7 @@ The related display methods on `Object` are:
 | `asString` | Human-readable string conversion (override per class) |
 | `printString` | **Debug** representation — self-describing, structural; the REPL default and what nested rendering uses |
 | `displayString` | **Display** representation — the string-interpolation `{...}` hook; defaults to `printString`, override for a natural human form |
-| `inspect` | Returns a `String`, delegates to `printString` (unchanged; rich-inspector redesign deferred to [BT-2397](https://linear.app/beamtalk/issue/BT-2397)) |
+| `inspect` | Opens an `Inspector` cursor on the receiver (`Inspector on: self`) — a navigable, drillable view (ADR 0095). For the structural Debug string, use `printString`. |
 | `show: value` | Write `value` to Transcript (nil-safe, returns `self`) |
 | `showCr: value` | Write `value` to Transcript followed by newline (nil-safe, returns `self`) |
 

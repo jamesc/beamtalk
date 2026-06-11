@@ -22,6 +22,7 @@
 mod cascade_candidate;
 mod dead_block_assignment;
 mod effect_free_statement;
+mod inspect_in_string_position;
 mod shadowed_block_param;
 mod sync_send_in_timer_block;
 mod trailing_caret;
@@ -49,6 +50,7 @@ fn all_passes() -> Vec<Box<dyn LintPass>> {
         Box::new(cascade_candidate::CascadeCandidatePass),
         Box::new(dead_block_assignment::DeadBlockAssignmentPass),
         Box::new(effect_free_statement::EffectFreeStatementPass),
+        Box::new(inspect_in_string_position::InspectInStringPositionPass),
         Box::new(shadowed_block_param::ShadowedBlockParamPass),
         Box::new(sync_send_in_timer_block::SyncSendInTimerBlockPass),
         Box::new(trailing_caret::TrailingCaretPass),

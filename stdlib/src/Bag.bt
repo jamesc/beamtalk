@@ -115,7 +115,3 @@ typed Collection(E) subclass: Bag(E)
   /// Bag new printString   // => "Bag"
   /// ```
   printString -> String => "Bag"
-
-  /// Override inspect to use printString rather than the field-based
-  /// format defined in Value. Bag's internal counts dictionary is opaque.
-  inspect -> String => self printString

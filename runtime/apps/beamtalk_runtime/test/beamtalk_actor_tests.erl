@@ -1105,12 +1105,22 @@ object_printstring_test() ->
     gen_server:stop(Counter).
 
 object_inspect_test() ->
-    %% Test inspect on actor (inherited from Object via hierarchy walk)
+    %% ADR 0095 Phase 3 (BT-2504): inspect on an actor (inherited from Object via
+    %% the hierarchy walk) now returns an Inspector cursor, not a binary string.
+    %% A live Beamtalk actor classifies as kind = actor.
+    %%
+    %% Crucially the snapshot must be *available* and seeded from the actor's own
+    %% live state: `inspect` dispatches inside the actor's handle_call, so a
+    %% sys:get_state(self()) would deadlock — the cursor is seeded from the
+    %% in-hand State (beamtalk_inspector:on/2) instead. `available => true` and a
+    %% captured `value` slot prove no self-deadlock occurred.
     application:ensure_all_started(beamtalk_runtime),
     {ok, Counter} = test_counter:start_link(42),
 
     Result = gen_server:call(Counter, {inspect, []}),
-    ?assert(is_binary(Result)),
+    ?assertMatch(#{'$beamtalk_class' := 'Inspector', kind := actor, available := true}, Result),
+    %% The cursor's subject is the seeded state snapshot, carrying the value slot.
+    ?assertMatch(#{value := 42}, maps:get(subject, Result)),
 
     gen_server:stop(Counter).
 

@@ -63,6 +63,7 @@ compile-time dependency); actor evaluate-in-context is a deferred follow-up
 %% `printString/2`).
 -export([
     on/1,
+    on/2,
     subjectOf/1,
     kindOf/1,
     fieldsOf/1,
@@ -73,7 +74,9 @@ compile-time dependency); actor evaluate-in-context is a deferred follow-up
     parentOf/1,
     pathOf/1,
     refresh/1,
-    printString/2
+    printString/2,
+    asDictionaries/1,
+    asDictionary/1
 ]).
 
 -include("beamtalk.hrl").
@@ -120,6 +123,57 @@ state snapshot. The minted cursor is a root (`parent => nil`, `path => []`).
 on(Subject) ->
     root_cursor(Subject, []).
 
+-doc """
+Mint an `Inspector` cursor on `Subject`, seeding an actor snapshot from a state
+map the caller *already holds* (`Inspector on:` dispatched from inside the
+actor).
+
+This is the self-inspection-safe entry point used by `beamtalk_object_ops`'s
+`inspect` dispatch: when `anActor inspect` runs, it executes **inside the
+actor's own `handle_call`**, so a `sys:get_state(self())` would deadlock and
+time out (the process cannot service the system message while busy in the call).
+`KnownState` is the live state map the dispatch already has in hand, so we seed
+the `#actor` cursor directly — no self-`sys:get_state`.
+
+It only short-circuits when `Subject` resolves to a **live Beamtalk actor pid**
+*and* `KnownState` is a non-empty tagged map (a real actor-instance state). Every
+other shape — a value, a collection, a class object (`KnownState` is `#{}`), or a
+*different* process — falls back to `on/1`, whose `sys:get_state` is safe because
+it targets another process, not the caller.
+""".
+-spec on(term(), term()) -> inspector().
+on(Subject, KnownState) when is_map(KnownState), map_size(KnownState) > 0 ->
+    case actor_pid(Subject) of
+        {ok, Pid} ->
+            case beamtalk_actor:is_beamtalk_actor(Pid) of
+                true -> actor_cursor_from_state(Pid, KnownState, nil, []);
+                false -> on(Subject)
+            end;
+        not_actor ->
+            on(Subject)
+    end;
+on(Subject, _KnownState) ->
+    on(Subject).
+
+%% Mint an `#actor` cursor seeded from a state map the caller already holds (no
+%% `sys:get_state` — used for actor self-inspection, which runs inside the
+%% actor's process where a self-call would deadlock). Mirrors `actor_cursor/3`
+%% but with `available => true` and the given snapshot. `refresh` later re-issues
+%% the guarded `sys:get_state` (safe, since refresh is made by an external holder
+%% of the cursor, not from inside the actor's call).
+-spec actor_cursor_from_state(pid(), map(), inspector() | nil, [term()]) -> inspector().
+actor_cursor_from_state(Pid, State, Parent, Path) ->
+    #{
+        '$beamtalk_class' => 'Inspector',
+        kind => actor,
+        pid => Pid,
+        available => true,
+        subject => State,
+        page => 0,
+        parent => Parent,
+        path => Path
+    }.
+
 %% Build a root cursor (no parent) for a subject, classifying kind and capturing
 %% actor state. `Path` is the breadcrumb a drilled child inherits.
 -spec root_cursor(term(), [term()]) -> inspector().
@@ -134,8 +188,19 @@ root_cursor(Subject, Path) ->
 %% `Bag` is `#collection`. Everything else (including a tagged `Value`) is
 %% `#value`.
 -spec cursor(term(), inspector() | nil, [term()]) -> inspector().
-cursor(#beamtalk_object{pid = Pid}, Parent, Path) when is_pid(Pid) ->
-    process_cursor(Pid, Parent, Path);
+cursor(#beamtalk_object{pid = Pid} = Obj, Parent, Path) when is_pid(Pid) ->
+    %% A class object (e.g. `Counter`) is a `#beamtalk_object{}` whose `pid` field
+    %% holds its *class registry* gen_server — a live but unrelated pid. Without
+    %% this guard it would classify as `#foreign` and surface the registry
+    %% process's `process_info`, which is surprising: inspecting a class should
+    %% view the class, not its backing process. Treat it as a `#value` cursor over
+    %% the class object record (no drillable slots — a `#beamtalk_object{}` is not
+    %% a tagged map — a correct, non-leaky `Inspector(Counter class)`). An actor
+    %% *instance* handle (not a class object) falls through to `process_cursor`.
+    case beamtalk_class_registry:is_class_object(Obj) of
+        true -> value_cursor(Obj, Parent, Path);
+        false -> process_cursor(Pid, Parent, Path)
+    end;
 cursor(#beamtalk_object{pid = {registered, Name}}, Parent, Path) ->
     case erlang:whereis(Name) of
         Pid when is_pid(Pid) -> process_cursor(Pid, Parent, Path);
@@ -923,6 +988,77 @@ value_string(Value) ->
     catch
         _:_ -> iolist_to_binary(io_lib:format("~p", [Value]))
     end.
+
+%%====================================================================
+%% Wire form — asDictionaries / asDictionary (ADR 0095 §7)
+%%====================================================================
+
+-doc """
+Serialise the cursor's drillable fields to the cross-surface wire form
+(`Inspector >> asDictionaries`, ADR 0095 §7).
+
+Returns one `Dictionary` per `InspectorField`, each carrying its named typed
+fields: `#name` (the navigation key for `at:` — an atom/integer/key), `#label`
+(display label), `#value` (a JSON-stable display string, the same one-line
+rendering the text tree uses — a browser drills via `at:` rather than embedding
+the raw term), `#kind` (`#slot`/`#element`/`#association`/`#processInfo`), and
+`#drillable`. This is the *exact* pattern `SupervisionTree asDictionaries`
+(ADR 0092) uses, so the schema is pinned by the typed records. The cursor-level
+envelope (`kind`/`path`/`childCount`/page) is carried by `asDictionary/1`.
+""".
+-spec asDictionaries(inspector()) -> [map()].
+asDictionaries(Cursor) ->
+    [field_dictionary(F) || F <- fieldsOf(Cursor)].
+
+-doc """
+Serialise the whole cursor to a single wire-form `Dictionary`
+(`Inspector >> asDictionary`, ADR 0095 §7).
+
+Carries the cursor-level envelope the MCP/browser surfaces need to render a
+navigable node and fetch subsequent windows lazily: `#kind` (the subject kind),
+`#path` (the breadcrumb of drilled navigation keys from the root), `#childCount`
+(the cheap full element count for a `#collection`, else the field count),
+`#page` (the 1-based window index — `1` for non-collections), and `#fields`
+(the `asDictionaries/1` window of field records).
+""".
+-spec asDictionary(inspector()) -> map().
+asDictionary(#{kind := Kind, page := Page, path := Path} = Cursor) ->
+    %% Derive `fields` once and reuse it for both the wire records and the
+    %% non-collection `childCount` — for a `#foreign` cursor `fieldsOf/1` does a
+    %% `process_info` + a guarded `sys:get_state`, so computing it twice would
+    %% double that (potentially blocking) work.
+    Fields = fieldsOf(Cursor),
+    #{
+        kind => Kind,
+        path => Path,
+        childCount => child_count(Cursor, Fields),
+        page => Page + 1,
+        fields => [field_dictionary(F) || F <- Fields]
+    }.
+
+%% The full child count for the envelope: the cheap collection size for a
+%% `#collection` (not a window walk), else the number of already-derived fields.
+-spec child_count(inspector(), [field_map()]) -> non_neg_integer().
+child_count(#{kind := collection} = Cursor, _Fields) ->
+    sizeOf(Cursor);
+child_count(_Cursor, Fields) ->
+    length(Fields).
+
+%% One field record as a wire-form dictionary. `value` is rendered to a
+%% JSON-stable display string (the same one the text tree shows); `name` stays a
+%% raw navigation key (atom/integer/term) so the surface can pass it back to
+%% `at:`.
+-spec field_dictionary(field_map()) -> map().
+field_dictionary(#{
+    name := Name, label := Label, value := Value, kind := Kind, drillable := Drillable
+}) ->
+    #{
+        name => Name,
+        label => Label,
+        value => value_string(Value),
+        kind => Kind,
+        drillable => Drillable
+    }.
 
 %%====================================================================
 %% Errors

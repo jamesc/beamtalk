@@ -68,12 +68,3 @@ Object subclass: Value
   /// ValuePoint new              printString   // => "ValuePoint(x: 0, y: 0)"
   /// ```
   printString -> String => @primitive "printString"
-
-  /// Detailed inspection string. Delegates to `printString` so the structural
-  /// form has a single source of truth (ADR 0094, Critical Risk #1).
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// ValuePoint x: 3 y: 4        inspect   // => "ValuePoint(x: 3, y: 4)"
-  /// ```
-  inspect -> String => self printString
