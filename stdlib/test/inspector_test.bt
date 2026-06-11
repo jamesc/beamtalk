@@ -283,3 +283,115 @@ TestCase subclass: InspectorTest
     // unambiguous way to open a cursor on any receiver.
     i := Inspector on: (ValuePoint x: 3 y: 4)
     self assert: i kind equals: #value
+
+  // === #collection: windowing, size, page:, direct-index at: (ADR 0095 §6) ===
+  testListClassifiedAsCollection =>
+    i := Inspector on: #(10, 20, 30)
+    self assert: i kind equals: #collection
+
+  testCollectionSizeIsFullCount =>
+    // size is the cheap full count, not the (capped) window length.
+    i := Inspector on: ((1 to: 1000) asList)
+    self assert: i size equals: 1000
+
+  testCollectionFieldsAreWindowed =>
+    // fields returns only the first window (page size 50), even for a large list.
+    i := Inspector on: ((1 to: 1000) asList)
+    self assert: i fields size equals: 50
+
+  testCollectionWindowElementsKeyedByIndex =>
+    // Ordered elements are #element fields keyed by 1-based absolute index.
+    i := Inspector on: #(10, 20, 30)
+    first := i fields first
+    self assert: first name equals: 1
+    self assert: first kind equals: #element
+    self assert: first value equals: 10
+
+  testCollectionPageReturnsNextWindow =>
+    // page: 2 (1-based) returns a new cursor on the next window.
+    i := Inspector on: ((1 to: 1000) asList)
+    p2 := (i page: 2) unwrap
+    self assert: p2 fields size equals: 50
+    self assert: p2 fields first value equals: 51
+
+  testCollectionPagePastEndIsEmpty =>
+    // A page past the end yields an empty window, not an error.
+    i := Inspector on: #(1, 2, 3)
+    p5 := (i page: 5) unwrap
+    self assert: p5 fields size equals: 0
+
+  testPageOnNonCollectionIsError =>
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    result := i page: 2
+    self assert: result isError equals: true
+    self assert: result error kind equals: #not_a_collection
+
+  testCollectionAtDirectIndexBeyondWindow =>
+    // at: indexes a list directly (1-based), reaching beyond the first window.
+    i := Inspector on: ((1 to: 1000) asList)
+    child := (i at: 73) unwrap
+    self assert: child subject equals: 73
+
+  testCollectionAtOutOfRangeIsNoSuchField =>
+    i := Inspector on: #(1, 2, 3)
+    result := i at: 99
+    self assert: result isError equals: true
+    self assert: result error kind equals: #no_such_field
+
+  testDictionaryRendersAssociations =>
+    // A Dictionary classifies as #collection; its entries are #association fields
+    // keyed by the entry key, and at: looks them up by key.
+    i := Inspector on: #{#a => 1, #b => 2}
+    self assert: i kind equals: #collection
+    self assert: i size equals: 2
+    bField := i fields detect: [:f | f name == #b]
+    self assert: bField kind equals: #association
+    child := (i at: #b) unwrap
+    self assert: child subject equals: 2
+
+  testSetClassifiedAsCollection =>
+    s := (Set new) fromList: #(1, 2, 3)
+    i := Inspector on: s
+    self assert: i kind equals: #collection
+    self assert: i size equals: 3
+
+  // === #foreign: a non-Beamtalk OTP process (ADR 0095 §3–§4) ===
+  testForeignProcessClassifiedAsForeign =>
+    // A stock OTP gen_server (the code server) is a foreign process, not a
+    // Beamtalk actor.
+    pid := (Erlang erlang) whereis: #code_server
+    i := Inspector on: pid
+    self assert: i kind equals: #foreign
+
+  testForeignProcessFieldsAreProcessInfo =>
+    pid := (Erlang erlang) whereis: #code_server
+    i := Inspector on: pid
+    // Best-effort process_info: every field is tagged #processInfo, and there is
+    // at least one (a live process always has a current_function / status).
+    self assert: i fields isNotEmpty equals: true
+    self assert: (i fields allSatisfy: [:f |
+      f kind == #processInfo
+    ]) equals: true
+
+  // === evaluate: — value Result contract, actor_eval_unsupported (ADR 0095 §1, §7) ===
+  //
+  // The value `evaluate:` *happy path* needs the compiler port, which the BUnit
+  // harness does not start (see beamtalk_senders_test.bt:94 for the same caveat),
+  // so it is covered by the REPL e2e btscript
+  // (tests/repl-protocol/cases/inspector_evaluate.btscript). Here we verify the
+  // safe contract: `evaluate:` always returns a `Result` and never crashes, even
+  // when the compiler is unavailable (it degrades to a `Result error:`).
+  testValueEvaluateReturnsResultNeverRaises =>
+    // No compiler port in BUnit → an error Result, but never a raise.
+    i := Inspector on: (ValuePoint x: 3 y: 4)
+    result := i evaluate: "self x + self y"
+    self assert: (result isKindOf: Result) equals: true
+
+  testActorEvaluateIsUnsupported =>
+    // Actor evaluate-in-context is deferred (ADR 0095 §7) — returns an error
+    // independent of the compiler (it short-circuits before any eval).
+    c := Counter spawn
+    i := Inspector on: c
+    result := i evaluate: "self increment"
+    self assert: result isError equals: true
+    self assert: result error kind equals: #actor_eval_unsupported

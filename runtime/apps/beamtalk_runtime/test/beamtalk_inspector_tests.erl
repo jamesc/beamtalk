@@ -31,13 +31,28 @@ Coverage:
 %% Test gen_server
 %%====================================================================
 
-init(State) -> {ok, State}.
+%% Mark the process as a Beamtalk actor (BT-2503): classification keys on a
+%% `'$beamtalk_actor'` process-dictionary entry, distinguishing a real actor
+%% (`#actor`) from a foreign OTP process (`#foreign`). A `{foreign, State}` arg
+%% starts without the marker, standing in for a foreign OTP gen_server.
+init({foreign, State}) ->
+    {ok, State};
+init(State) ->
+    erlang:put('$beamtalk_actor', 'TestActor'),
+    {ok, State}.
 handle_call(_Req, _From, State) -> {reply, ok, State}.
 handle_cast(_Msg, State) -> {noreply, State}.
 
-%% Start a sys-compliant process whose state is the given tagged map.
+%% Start a sys-compliant process, marked as a Beamtalk actor, whose state is the
+%% given tagged map.
 start_actor(State) ->
     {ok, Pid} = gen_server:start_link(?MODULE, State, []),
+    Pid.
+
+%% Start a sys-compliant process that is NOT marked as a Beamtalk actor — a
+%% stand-in for a foreign OTP gen_server (`#foreign`).
+start_foreign(State) ->
+    {ok, Pid} = gen_server:start(?MODULE, {foreign, State}, []),
     Pid.
 
 %% A Value-shaped tagged map (Point with x/y).
@@ -167,3 +182,161 @@ dead_actor_fields_unavailable_test() ->
     ?assertEqual(status, maps:get(name, StatusF)),
     ?assertEqual(unavailable, maps:get(value, StatusF)),
     ?assertEqual(false, maps:get(drillable, StatusF)).
+
+%%====================================================================
+%% #collection — windowing, size, page, direct-index at: (ADR 0095 §6)
+%%====================================================================
+
+%% A bare Erlang list (a Beamtalk List) classifies as #collection.
+list_kind_collection_test() ->
+    I = beamtalk_inspector:on([10, 20, 30]),
+    ?assertEqual(collection, beamtalk_inspector:kindOf(I)).
+
+%% size is the cheap full count, not the (capped) window length.
+collection_size_is_full_count_test() ->
+    Big = lists:seq(1, 1000),
+    I = beamtalk_inspector:on(Big),
+    ?assertEqual(1000, beamtalk_inspector:sizeOf(I)).
+
+%% fields returns only the first window (page size 50), even for a large list.
+collection_fields_windowed_test() ->
+    Big = lists:seq(1, 1000),
+    I = beamtalk_inspector:on(Big),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    ?assertEqual(50, length(Fields)),
+    %% Ordered elements are #element fields keyed by 1-based absolute index.
+    First = hd(Fields),
+    ?assertEqual(1, maps:get(name, First)),
+    ?assertEqual(element, maps:get(kind, First)),
+    ?assertEqual(1, maps:get(value, First)).
+
+%% page/2 (1-based) returns a new cursor on the next window.
+collection_page_next_window_test() ->
+    Big = lists:seq(1, 1000),
+    I = beamtalk_inspector:on(Big),
+    {ok, P2} = beamtalk_inspector:page(I, 2),
+    Fields = beamtalk_inspector:fieldsOf(P2),
+    ?assertEqual(50, length(Fields)),
+    First = hd(Fields),
+    %% Window 2 starts at absolute index 51 (value 51).
+    ?assertEqual(51, maps:get(name, First)),
+    ?assertEqual(51, maps:get(value, First)).
+
+%% A page past the end yields an empty window, not an error.
+collection_page_past_end_empty_test() ->
+    I = beamtalk_inspector:on(lists:seq(1, 10)),
+    {ok, P5} = beamtalk_inspector:page(I, 5),
+    ?assertEqual([], beamtalk_inspector:fieldsOf(P5)).
+
+%% page/2 on a non-collection cursor is a not_a_collection error.
+page_on_non_collection_errors_test() ->
+    I = beamtalk_inspector:on(point(3, 4)),
+    {error, Err} = beamtalk_inspector:page(I, 2),
+    ?assertEqual(not_a_collection, Err#beamtalk_error.kind).
+
+%% at: indexes a list directly (1-based), reaching beyond the first window.
+collection_at_direct_index_test() ->
+    Big = lists:seq(1, 1000),
+    I = beamtalk_inspector:on(Big),
+    {ok, Child} = beamtalk_inspector:inspector(I, 73),
+    ?assertEqual(73, beamtalk_inspector:subjectOf(Child)).
+
+%% at: out of range is a no_such_field error.
+collection_at_out_of_range_test() ->
+    I = beamtalk_inspector:on([1, 2, 3]),
+    {error, Err} = beamtalk_inspector:inspector(I, 99),
+    ?assertEqual(no_such_field, Err#beamtalk_error.kind).
+
+%% A Dictionary (plain map) classifies as #collection with #association fields.
+dictionary_associations_test() ->
+    Dict = #{a => 1, b => 2},
+    I = beamtalk_inspector:on(Dict),
+    ?assertEqual(collection, beamtalk_inspector:kindOf(I)),
+    ?assertEqual(2, beamtalk_inspector:sizeOf(I)),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    ?assertEqual([association, association], [maps:get(kind, F) || F <- Fields]),
+    %% at: looks up an association by key.
+    {ok, Child} = beamtalk_inspector:inspector(I, b),
+    ?assertEqual(2, beamtalk_inspector:subjectOf(Child)).
+
+%% A Dictionary with integer keys drills by key (association lookup), never by
+%% ordered position — so `at: 5` reaches the entry keyed 5, not the 5th element.
+dictionary_integer_key_drills_by_key_test() ->
+    Dict = #{5 => fifty, 9 => ninety},
+    I = beamtalk_inspector:on(Dict),
+    {ok, Child} = beamtalk_inspector:inspector(I, 5),
+    ?assertEqual(fifty, beamtalk_inspector:subjectOf(Child)),
+    %% A missing key is a no_such_field miss, not an out-of-range index slip.
+    {error, Err} = beamtalk_inspector:inspector(I, 1),
+    ?assertEqual(no_such_field, Err#beamtalk_error.kind).
+
+%% `at:` resolves keys with `==` (via `lists:keyfind/3`), so an integer key
+%% reaches a numerically-equal float-keyed entry rather than crashing with a
+%% `case_clause` from re-matching the key by `=:=` (BT-2503 regression).
+dictionary_numeric_key_no_case_clause_test() ->
+    Dict = #{1.0 => one_point_oh},
+    I = beamtalk_inspector:on(Dict),
+    {ok, Child} = beamtalk_inspector:inspector(I, 1),
+    ?assertEqual(one_point_oh, beamtalk_inspector:subjectOf(Child)).
+
+%% An improper list (routine in foreign OTP process state) is *not* a collection:
+%% it degrades to a #value cursor instead of crashing the windowing paths
+%% (length/1, lists:sublist/3, lists:nth/2) (BT-2503 regression).
+improper_list_degrades_to_value_test() ->
+    I = beamtalk_inspector:on([1 | 2]),
+    ?assertEqual(value, beamtalk_inspector:kindOf(I)),
+    %% Field derivation and rendering must not raise on the improper list.
+    ?assertEqual([], beamtalk_inspector:fieldsOf(I)),
+    ?assert(is_binary(beamtalk_inspector:printString(I, 1))).
+
+%%====================================================================
+%% #foreign — process_info + guarded state (ADR 0095 §3–§4)
+%%====================================================================
+
+%% A non-Beamtalk OTP process classifies as #foreign.
+foreign_kind_test() ->
+    Pid = start_foreign(point(1, 2)),
+    I = beamtalk_inspector:on(Pid),
+    ?assertEqual(foreign, beamtalk_inspector:kindOf(I)),
+    gen_server:stop(Pid).
+
+%% Foreign fields are best-effort process_info, tagged #processInfo, including a
+%% guarded sys:get_state `state` field for a sys-compliant process.
+foreign_fields_process_info_test() ->
+    Pid = start_foreign(point(5, 6)),
+    I = beamtalk_inspector:on(Pid),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    Kinds = lists:usort([maps:get(kind, F) || F <- Fields]),
+    ?assertEqual([processInfo], Kinds),
+    StateFields = [F || F <- Fields, maps:get(name, F) =:= state],
+    ?assertMatch([_], StateFields),
+    [StateF] = StateFields,
+    ?assertEqual(point(5, 6), maps:get(value, StateF)),
+    gen_server:stop(Pid).
+
+%% A dead foreign process degrades to the single #status => #unavailable field.
+dead_foreign_unavailable_test() ->
+    Pid = start_foreign(point(5, 6)),
+    gen_server:stop(Pid),
+    I = beamtalk_inspector:on(Pid),
+    [StatusF] = beamtalk_inspector:fieldsOf(I),
+    ?assertEqual(status, maps:get(name, StatusF)),
+    ?assertEqual(unavailable, maps:get(value, StatusF)).
+
+%%====================================================================
+%% evaluate: — actor/foreign return actor_eval_unsupported (ADR 0095 §7)
+%%====================================================================
+
+actor_evaluate_unsupported_test() ->
+    Pid = start_actor(point(1, 2)),
+    I = beamtalk_inspector:on(Pid),
+    {error, Err} = beamtalk_inspector:evaluate(I, <<"self">>),
+    ?assertEqual(actor_eval_unsupported, Err#beamtalk_error.kind),
+    gen_server:stop(Pid).
+
+foreign_evaluate_unsupported_test() ->
+    Pid = start_foreign(point(1, 2)),
+    I = beamtalk_inspector:on(Pid),
+    {error, Err} = beamtalk_inspector:evaluate(I, <<"self">>),
+    ?assertEqual(actor_eval_unsupported, Err#beamtalk_error.kind),
+    gen_server:stop(Pid).

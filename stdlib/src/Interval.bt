@@ -69,6 +69,21 @@ typed Collection subclass: Interval
       self error: "Interval is empty"
     ] ifFalse: [self.from + ((self size - 1) * self.step)]
 
+  /// Materialise the interval into a `List` of its elements (ADR 0095 §6 — the
+  /// canonical large-collection example `(1 to: 100000) asList`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 5) asList            // => #(1, 2, 3, 4, 5)
+  /// (1 to: 10 by: 3) asList    // => #(1, 4, 7, 10)
+  /// (1 to: 0) asList            // => #()
+  /// ```
+  asList -> List(Integer) =>
+    (Erlang beamtalk_interval)
+      from: self.from
+      to: self.to
+      by: self.step
+
   /// Return a developer-readable string representation.
   ///
   /// ## Examples

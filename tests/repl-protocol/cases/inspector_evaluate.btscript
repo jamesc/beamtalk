@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for the Inspector's value `evaluate:` and collection navigation
+// (ADR 0095 Phase 2, BT-2503).
+//
+// These require E2E because value `evaluate:` compiles the expression with
+// `self` bound to the inspected value through the live compiler port, which the
+// BUnit harness does not start (see stdlib/test/inspector_test.bt for the
+// contract-only coverage there). Collection windowing/`page:`/`at:` are checked
+// here end-to-end alongside it.
+
+// @load tests/repl-protocol/fixtures/point.bt
+
+// ===========================================================================
+// VALUE evaluate: — `self` bound to the inspected value (ADR 0095 §1, §7)
+// ===========================================================================
+
+i := Inspector on: (Point x: 3 y: 4)
+// => _
+
+(i evaluate: "self x + self y") unwrap
+// => 7
+
+(i evaluate: "self x * 10") unwrap
+// => 30
+
+// A failure in the expression is a Result error:, never a crash.
+(i evaluate: "self nonesuchMessage") isError
+// => true
+
+// ---------------------------------------------------------------------------
+// Drilling yields a #value cursor on the scalar; `self` is that scalar.
+// ---------------------------------------------------------------------------
+
+child := (i at: #x) unwrap
+// => _
+
+(child evaluate: "self + 100") unwrap
+// => 103
+
+// ===========================================================================
+// COLLECTION windowing, page:, direct-index at: (ADR 0095 §6)
+// ===========================================================================
+
+big := Inspector on: ((1 to: 1000) asList)
+// => _
+
+big size
+// => 1000
+
+big fields size
+// => 50
+
+(big page: 2) unwrap fields first value
+// => 51
+
+(big at: 73) unwrap subject
+// => 73
