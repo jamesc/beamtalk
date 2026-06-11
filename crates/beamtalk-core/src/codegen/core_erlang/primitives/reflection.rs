@@ -9,7 +9,9 @@
 //! `CompiledMethod`, `Symbol`.
 
 use super::super::document::Document;
+use super::super::document::leaf;
 use super::binary_bif;
+use crate::docvec;
 
 /// Symbol primitive implementations (BT-273).
 ///
@@ -47,24 +49,13 @@ pub(crate) fn generate_compiled_method_bif(
 ) -> Option<Document<'static>> {
     let _ = params; // all CompiledMethod selectors are zero-param instance reads
     match selector {
-        "selector" => Some(Document::Str(
-            "call 'beamtalk_compiled_method_ops':'dispatch'('selector', [], Self)",
-        )),
-        "source" => Some(Document::Str(
-            "call 'beamtalk_compiled_method_ops':'dispatch'('source', [], Self)",
-        )),
-        "doc" => Some(Document::Str(
-            "call 'beamtalk_compiled_method_ops':'dispatch'('doc', [], Self)",
-        )),
-        "argumentCount" => Some(Document::Str(
-            "call 'beamtalk_compiled_method_ops':'dispatch'('argumentCount', [], Self)",
-        )),
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_compiled_method_ops':'dispatch'('printString', [], Self)",
-        )),
-        "asString" => Some(Document::Str(
-            "call 'beamtalk_compiled_method_ops':'dispatch'('asString', [], Self)",
-        )),
+        "selector" | "source" | "doc" | "argumentCount" | "printString" | "asString" => {
+            Some(docvec![
+                "call 'beamtalk_compiled_method_ops':'dispatch'(",
+                leaf::atom(selector.to_owned()),
+                ", [], Self)",
+            ])
+        }
         _ => None,
     }
 }
