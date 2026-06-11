@@ -73,28 +73,51 @@ sealed typed Object subclass: Inspector
   /// ```
   subject -> Object => (Erlang beamtalk_inspector) subjectOf: self
 
-  /// The subject kind: `#value` (structural) or `#actor` (snapshot) in v1.
+  /// The subject kind: `#value` (structural), `#actor` (snapshot),
+  /// `#collection` (windowed elements/associations, ADR 0095 §6), or `#foreign`
+  /// (a non-Beamtalk OTP process, ADR 0095 §3).
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Inspector on: (Point x: 3 y: 4)) kind   // => #value
   /// (Inspector on: aCounter) kind            // => #actor
+  /// (Inspector on: #(1, 2, 3)) kind          // => #collection
   /// ```
   kind -> Symbol => (Erlang beamtalk_inspector) kindOf: self
 
   /// The drillable fields of the inspected object, as immutable
-  /// `InspectorField` records (ADR 0095 §2–§3).
+  /// `InspectorField` records (ADR 0095 §2–§3, §6).
   ///
   /// For a `#value`, these are its `field:` slots in ADR-0094 sort order. For an
   /// `#actor`, they are its user state slots from a lazy, timeout-guarded
   /// snapshot — or, if the actor is busy/dead/non-`sys`, the single diagnostic
-  /// `InspectorField name: #status value: #unavailable` (never a crash).
+  /// `InspectorField name: #status value: #unavailable` (never a crash). For a
+  /// `#collection`, they are the current **window** of elements (default page
+  /// size 50, ADR 0095 §6) — ordered collections render `#element` fields keyed
+  /// by 1-based index, keyed collections (`Dictionary`/`Bag`) render
+  /// `#association` fields keyed by the entry key; use `page:` for the next
+  /// window. For a `#foreign` process, they are best-effort `#processInfo` data.
   ///
   /// ## Examples
   /// ```beamtalk
   /// (Inspector on: (Point x: 3 y: 4)) fields size   // => 2
+  /// (Inspector on: ((1 to: 1000) asList)) fields size   // => 50
   /// ```
   fields -> List(InspectorField) => (Erlang beamtalk_inspector) fieldsOf: self
+
+  /// The cheap full element count of a `#collection` cursor — the collection's
+  /// `size`, **not** a window walk (ADR 0095 §6). For a non-collection cursor it
+  /// is the number of `fields` (already cheap).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Inspector on: ((1 to: 100000) asList)) size   // => 100000
+  /// (Inspector on: (Point x: 3 y: 4)) size         // => 2
+  /// ```
+  size -> Integer =>
+    self kind == #collection ifTrue: [
+      (Erlang beamtalk_inspector) sizeOf: self
+    ] ifFalse: [self fields size]
 
   /// Drill into one field by name, returning a child `Inspector` cursor on that
   /// field's value (ADR 0095 §1).
@@ -110,6 +133,44 @@ sealed typed Object subclass: Inspector
   /// ```
   at: aName :: Object -> Result(Inspector, Error) =>
     (Erlang beamtalk_inspector) inspector: self at: aName
+
+  /// Return a new `Inspector` cursor on the `aPage`-th window of a `#collection`
+  /// (1-based, ADR 0095 §6).
+  ///
+  /// `page: 1` is the first window (the elements `fields` shows on a fresh
+  /// cursor); `page: 2` is the next 50-element window, and so on. A page past the
+  /// end yields a cursor whose `fields` is empty. The original cursor is
+  /// unchanged (immutable). Sending `page:` to a non-collection cursor returns
+  /// `Result error: (beamtalk_error not_a_collection)`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// big := Inspector on: ((1 to: 1000) asList)
+  /// (big page: 2) unwrap fields first value   // => 51
+  /// ```
+  page: aPage :: Integer -> Result(Inspector, Error) =>
+    (Erlang beamtalk_inspector) page: self number: aPage
+
+  /// Evaluate the Beamtalk expression `src` against the inspected object, with
+  /// `self` bound to the value (ADR 0095 §1, §7).
+  ///
+  /// For a `#value` or `#collection` cursor, `src` is compiled and evaluated with
+  /// `self` bound to the subject — a pure compiled dispatch — returning
+  /// `Result ok: theValue` (or `Result error:` if the expression fails to compile
+  /// or raises). For an `#actor` or `#foreign` cursor it returns
+  /// `Result error: (beamtalk_error actor_eval_unsupported)`: actor
+  /// evaluate-in-context cannot bind `self` to a frozen snapshot and is a deferred
+  /// follow-up (ADR 0095 §7) — drill with `at:` instead.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// i := Inspector on: (Point x: 3 y: 0)
+  /// (i evaluate: "self x + 10") unwrap   // => 13
+  /// ci := Inspector on: aCounter
+  /// (ci evaluate: "self increment") isError   // => true (actor_eval_unsupported)
+  /// ```
+  evaluate: src :: String -> Result(Object, Error) =>
+    (Erlang beamtalk_inspector) evaluate: self source: src
 
   /// The cursor this one was drilled from, or `nil` at the root.
   ///

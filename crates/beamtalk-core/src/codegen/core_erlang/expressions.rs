@@ -207,6 +207,31 @@ impl CoreErlangGenerator {
                     // BT-833: In value type context, self resolves to the latest Self{N}
                     // snapshot after any preceding field assignments.
                     Ok(leaf::var(self.current_self_var()))
+                } else if self.context == super::CodeGenContext::Repl {
+                    // BT-2503 (ADR 0095 §1): at the top level of a REPL eval there is
+                    // no enclosing-method receiver, so a bare `Self` would be an
+                    // unbound Core Erlang variable. Resolve `self` from the bindings
+                    // map instead (the same `maps:find` → `resolve_name` path a free
+                    // identifier takes), so the Inspector's value `evaluate:` can bind
+                    // `self` to the inspected value by passing `#{self => Value}`. A
+                    // bare `self` with no such binding falls through to
+                    // `resolve_name`, yielding an `undefined_variable` error rather
+                    // than a crash.
+                    let state_var = self.current_state_var();
+                    let resolved_var = self.fresh_var("Resolved");
+                    Ok(docvec![
+                        "case call 'maps':'find'('self', ",
+                        leaf::var(state_var.clone()),
+                        ") of ",
+                        "<{'ok', ",
+                        leaf::var(resolved_var.clone()),
+                        "}> when 'true' -> ",
+                        leaf::var(resolved_var),
+                        " <'error'> when 'true' -> call 'beamtalk_workspace':'resolve_name'(",
+                        leaf::var(state_var),
+                        ", 'self') ",
+                        "end",
+                    ])
                 } else {
                     Ok(Document::Str("Self")) // self → Self parameter (BT-161)
                 }

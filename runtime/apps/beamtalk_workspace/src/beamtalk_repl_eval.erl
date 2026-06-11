@@ -29,6 +29,11 @@ module loading to beamtalk_repl_loader (BT-863).
 %% ADR 0082 Phase 1 (BT-2285) — new-class creation backing `Workspace newClass:at:'.
 -export([new_class/2]).
 
+%% ADR 0095 Phase 2 (BT-2503) — stateless evaluate-in-context for the Inspector's
+%% value `evaluate:`. Called via erlang:apply from beamtalk_inspector
+%% (beamtalk_runtime) so the runtime keeps no compile-time dep on beamtalk_workspace.
+-export([eval_with_self/2]).
+
 %% ADR 0082 Phase 1 (BT-2283) — stateless live method patch backing
 %% `Behaviour compile:source:' / `tryCompile:source:'. Called via erlang:apply
 %% from beamtalk_behaviour_intrinsics so beamtalk_runtime keeps no compile-time
@@ -277,6 +282,129 @@ validation contract. Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}
     {ok, [tuple()]} | {error, term()}.
 new_class(Source, TargetPath) ->
     beamtalk_repl_loader:new_class(Source, TargetPath).
+
+-doc """
+Evaluate `Source` (a Beamtalk expression) with `self` bound to `Self`, returning
+`{ok, Value}` or `{error, #beamtalk_error{}}` (ADR 0095 §1, BT-2503).
+
+Stateless evaluate-in-context for the Inspector's value `evaluate:`: the
+expression is compiled with `self` as a known free variable (resolved from the
+bindings map in REPL codegen, BT-2503) and evaluated in this worker with
+`#{self => Self}` as the only binding. No session state is touched, no workspace
+bindings are merged, and the eval module is purged afterwards. Compile and runtime
+failures are returned as structured `#beamtalk_error{}` — never raised — so the
+Inspector lifts them to a `Result error:` at the FFI boundary.
+
+Called via `erlang:apply` from `beamtalk_inspector` (beamtalk_runtime) so the
+runtime keeps no compile-time dependency on beamtalk_workspace.
+""".
+-spec eval_with_self(term(), binary() | string()) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+eval_with_self(Self, Source) ->
+    SourceStr = unicode:characters_to_list(Source),
+    %% Reuse a per-process module name (minted once, cached in the process
+    %% dictionary) instead of a fresh atom per call, so a hot `evaluate:` loop in
+    %% one process cannot exhaust the never-reclaimed atom table (BT-2503).
+    ModuleName = eval_module_name(),
+    Bindings = #{self => Self},
+    case beamtalk_repl_compiler:compile_expression(SourceStr, ModuleName, Bindings) of
+        {ok, class_definition, _Info, _Warnings} ->
+            eval_not_an_expression_error();
+        {ok, method_definition, _Info, _Warnings} ->
+            eval_not_an_expression_error();
+        {ok, protocol_definition, _Info, _Warnings} ->
+            eval_not_an_expression_error();
+        {ok, Binary, _ResultExpr, _Warnings} ->
+            run_self_eval_module(ModuleName, Binary, Bindings);
+        {error, Reason} ->
+            {error, eval_with_self_error(Reason)}
+    end.
+
+%% The error for `evaluate:` given a class/method/protocol definition rather than
+%% a value expression.
+-spec eval_not_an_expression_error() -> {error, #beamtalk_error{}}.
+eval_not_an_expression_error() ->
+    {error,
+        beamtalk_error:new(
+            eval_failed,
+            'Inspector',
+            'evaluate:',
+            <<"evaluate: expects an expression, not a class/method definition">>
+        )}.
+
+%% Load the compiled eval module, run its `eval/1` with the self-binding, and
+%% purge it. Any throw/error/exit is captured into a structured error so the
+%% Inspector never sees a raise.
+-spec run_self_eval_module(atom(), binary(), map()) ->
+    {ok, term()} | {error, #beamtalk_error{}}.
+run_self_eval_module(ModuleName, Binary, Bindings) ->
+    %% Fully unload any module left in this process's recycled eval slot before
+    %% loading the new one, so a prior call's code never lingers.
+    purge_eval_module(ModuleName),
+    case code:load_binary(ModuleName, "", Binary) of
+        {module, ModuleName} ->
+            try
+                {RawResult, _UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
+                case maybe_await_future(RawResult) of
+                    {future_rejected, FutureReason} ->
+                        %% An awaited future that rejected/timed out is an error,
+                        %% not a success — honour the structured-error contract
+                        %% rather than leaking the internal `{future_rejected, _}`
+                        %% tuple through `{ok, _}` (mirrors process_eval_result/4).
+                        FutExObj = beamtalk_exception_handler:ensure_wrapped(FutureReason),
+                        {error, beamtalk_repl_errors:ensure_structured_error(FutExObj)};
+                    Value ->
+                        {ok, Value}
+                end
+            catch
+                Class:Reason:Stacktrace ->
+                    ExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
+                    {error, beamtalk_repl_errors:ensure_structured_error(ExObj)}
+            after
+                %% `evaluate:` is values-only and stateless, and the module name
+                %% is private to this process (never shared with an actor), so the
+                %% transient module is always fully unloaded.
+                purge_eval_module(ModuleName)
+            end;
+        {error, LoadReason} ->
+            {error, eval_with_self_error({load_error, LoadReason})}
+    end.
+
+%% The per-process module name for stateless `evaluate:` compilation. Minted once
+%% per process and cached in the process dictionary so repeated `evaluate:` calls
+%% (e.g. a tight loop in one worker) reuse a single atom rather than leaking one
+%% never-reclaimed atom per call. The name is private to the calling process, so
+%% recycling it is race-free: only sequential same-process calls share it, and no
+%% other process can be executing its code when it is purged.
+-spec eval_module_name() -> atom().
+eval_module_name() ->
+    case get('$beamtalk_inspector_eval_module') of
+        undefined ->
+            Unique = erlang:unique_integer([positive]),
+            % elp:fixme W0023 one recycled atom per process, not per call
+            ModuleName = list_to_atom("beamtalk_inspector_eval_" ++ integer_to_list(Unique)),
+            put('$beamtalk_inspector_eval_module', ModuleName),
+            ModuleName;
+        ModuleName ->
+            ModuleName
+    end.
+
+%% Fully unload a transient `evaluate:` module. `code:delete/1` moves the current
+%% code to old; `code:purge/1` then reclaims it. The order matters: `purge` before
+%% `delete` is a no-op for a module with no *old* code, so a freshly loaded module
+%% would otherwise stay resident forever.
+-spec purge_eval_module(atom()) -> ok.
+purge_eval_module(ModuleName) ->
+    code:delete(ModuleName),
+    code:purge(ModuleName),
+    ok.
+
+%% Wrap a compile/load failure from `eval_with_self/2` as a structured error.
+-spec eval_with_self_error(term()) -> #beamtalk_error{}.
+eval_with_self_error(Reason) ->
+    Message = iolist_to_binary(io_lib:format("evaluate: failed: ~tp", [Reason])),
+    Err = beamtalk_error:new(eval_failed, 'Inspector', 'evaluate:'),
+    beamtalk_error:with_message(Err, Message).
 
 -doc """
 Install a live method patch from a `(ClassName, Selector, Source, Intent)' tuple
