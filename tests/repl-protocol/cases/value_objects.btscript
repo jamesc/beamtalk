@@ -19,7 +19,7 @@
 
 // new — default-initialises all slots
 p := ValuePoint new
-// => _
+// => ValuePoint(x: 0, y: 0)
 
 p x
 // => 0
@@ -29,7 +29,7 @@ p y
 
 // new: — initialise from map
 p2 := ValuePoint new: #{#x => 3, #y => 4}
-// => _
+// => ValuePoint(x: 3, y: 4)
 
 p2 x
 // => 3
@@ -39,7 +39,7 @@ p2 y
 
 // Keyword constructor
 p3 := ValuePoint x: 10 y: 20
-// => _
+// => ValuePoint(x: 10, y: 20)
 
 p3 x
 // => 10
@@ -53,10 +53,10 @@ p3 y
 
 // with*: returns a new instance — original unchanged
 orig := ValuePoint x: 1 y: 2
-// => _
+// => ValuePoint(x: 1, y: 2)
 
 moved := orig withX: 99
-// => _
+// => ValuePoint(x: 99, y: 2)
 
 orig x
 // => 1
@@ -69,7 +69,7 @@ moved y
 
 // Chaining with*: setters
 chained := (ValuePoint new withX: 5) withY: 7
-// => _
+// => ValuePoint(x: 5, y: 7)
 
 chained x
 // => 5
@@ -86,7 +86,7 @@ chained y
 
 // runtime: fieldAt:put: raises immutable_value
 immPt := ValuePoint x: 1 y: 2
-// => _
+// => ValuePoint(x: 1, y: 2)
 
 immPt fieldAt: #x put: 99
 // => ERROR: immutable value
@@ -97,27 +97,27 @@ immPt fieldAt: #x put: 99
 
 // Two value objects with the same fields are equal
 a := ValuePoint x: 3 y: 4
-// => _
+// => ValuePoint(x: 3, y: 4)
 
 b := ValuePoint x: 3 y: 4
-// => _
+// => ValuePoint(x: 3, y: 4)
 
 a == b
 // => true
 
 // Different values are not equal
 c := ValuePoint x: 9 y: 9
-// => _
+// => ValuePoint(x: 9, y: 9)
 
 a == c
 // => false
 
 // with*: result equals a fresh object with the same values
 withResult := a withX: 10
-// => _
+// => ValuePoint(x: 10, y: 4)
 
 fresh := ValuePoint x: 10 y: 4
-// => _
+// => ValuePoint(x: 10, y: 4)
 
 withResult == fresh
 // => true
@@ -128,7 +128,7 @@ withResult == fresh
 
 // fieldAt: reads slot by name
 reflPt := ValuePoint x: 7 y: 8
-// => _
+// => ValuePoint(x: 7, y: 8)
 
 reflPt fieldAt: #x
 // => 7
