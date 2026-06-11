@@ -4063,3 +4063,151 @@ fn test_method_xref_drops_oversized_selectors() {
         "the only send was oversized, so sends should be empty. Got:\n{mx_seg}"
     );
 }
+
+// ── BT-2499: initialize chain codegen coverage ────────────────────────────
+
+/// BT-1417/BT-1541: When an Actor defines an `initialize` method, `init/1`
+/// must NOT call it inline. Instead it emits a `__skip_initialize__` guard
+/// and returns `{'ok', CleanState1, {'continue', 'initialize'}}` so OTP
+/// invokes `handle_continue/2` after the message loop starts, avoiding
+/// deadlock on self-sends from within initialize.
+#[test]
+fn test_actor_with_initialize_defers_to_handle_continue() {
+    let src = concat!(
+        "Actor subclass: Counter\n",
+        "  state: value = 0\n\n",
+        "  initialize =>\n",
+        "    self.value := 10\n\n",
+        "  getValue => self.value\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+
+    // init/1 must contain the __skip_initialize__ guard (BT-1541) so that when
+    // a subclass calls this as a parent state-builder, initialize is not
+    // dispatched a second time.
+    assert!(
+        code.contains("'__skip_initialize__'"),
+        "init/1 must guard against double-dispatch with __skip_initialize__. Got:\n{code}"
+    );
+
+    // The non-helper branch must return {ok, State, {continue, initialize}} to
+    // hand off to handle_continue.
+    assert!(
+        code.contains("{'continue', 'initialize'}"),
+        "init/1 must return {{continue, initialize}} to defer initialize dispatch. Got:\n{code}"
+    );
+
+    // The CleanState variants strip the flag from state before returning.
+    assert!(
+        code.contains("'__skip_initialize__', FinalState"),
+        "init/1 must strip __skip_initialize__ flag from FinalState. Got:\n{code}"
+    );
+}
+
+/// BT-1951 (ADR 0078): When an Actor defines `initialize`, `handle_continue/2`
+/// must build a pdict-stash + `safe_dispatch` loop so each class in the
+/// initialize chain gets a chance to run. Verifies the pdict stash/restore,
+/// the `safe_dispatch` call, and the final `noreply` return.
+#[test]
+fn test_handle_continue_dispatches_initialize_chain() {
+    let src = concat!(
+        "Actor subclass: Counter\n",
+        "  state: value = 0\n\n",
+        "  initialize =>\n",
+        "    self.value := 10\n\n",
+        "  getValue => self.value\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+
+    // The callback function must be present.
+    assert!(
+        code.contains("'handle_continue'/2 = fun (Continue, State) ->"),
+        "handle_continue/2 must be generated. Got:\n{code}"
+    );
+
+    // The <'initialize'> pattern dispatches the chain.
+    assert!(
+        code.contains("<'initialize'> when 'true' ->"),
+        "handle_continue/2 must match on 'initialize' continuation. Got:\n{code}"
+    );
+
+    // BT-1325: pdict stash/restore brackets every safe_dispatch call to
+    // preserve re-entrant self-send semantics inside initialize.
+    assert!(
+        code.contains("'$bt_actor_state'"),
+        "handle_continue/2 must stash/restore $bt_actor_state for re-entrant sends. Got:\n{code}"
+    );
+
+    // The chain dispatches initialize via safe_dispatch on the class module.
+    assert!(
+        code.contains("'safe_dispatch'('initialize',"),
+        "handle_continue/2 must dispatch 'initialize' via safe_dispatch. Got:\n{code}"
+    );
+
+    // On success (the reply arm), the outer result is a noreply continuation.
+    assert!(
+        code.contains("'noreply'"),
+        "handle_continue/2 must return noreply on successful initialize. Got:\n{code}"
+    );
+}
+
+/// BT-1417: When a class inherits from a user-defined Actor (not directly
+/// from `Actor`), `init/1` must call the parent's `init/1` to accumulate
+/// inherited state, then merge the child's own fields on top, and propagate
+/// any `{error, Reason}` the parent returns.
+#[test]
+fn test_init_parent_actor_subclass_calls_parent_init() {
+    // LoggingCounter extends Counter (itself an Actor subclass).
+    // Compiling only LoggingCounter — Counter's AST is absent, but the
+    // superclass name "Counter" != "Actor" triggers the parent-init path.
+    let src = concat!(
+        "Counter subclass: LoggingCounter\n",
+        "  state: logCount = 0\n",
+    );
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("logging_counter"))
+        .expect("codegen should succeed");
+
+    // init/1 must delegate to the parent module's init/1.
+    assert!(
+        code.contains("'bt@counter':'init'("),
+        "init/1 must call parent bt@counter:init/1. Got:\n{code}"
+    );
+
+    // The parent's returned state is bound and then merged with child fields.
+    assert!(
+        code.contains("ParentState"),
+        "init/1 must bind parent state as ParentState. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ChildFields"),
+        "init/1 must create ChildFields map for child-only state. Got:\n{code}"
+    );
+    assert!(
+        code.contains("MergedState"),
+        "init/1 must merge parent and child state into MergedState. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FinalState"),
+        "init/1 must produce FinalState (MergedState + InitArgs overrides). Got:\n{code}"
+    );
+
+    // Parent init errors must be propagated, not swallowed.
+    assert!(
+        code.contains("{'error', Reason}"),
+        "init/1 must propagate parent {{error, Reason}} without modification. Got:\n{code}"
+    );
+
+    // The child's own state field must appear in ChildFields.
+    assert!(
+        code.contains("'logCount'"),
+        "ChildFields must include the child's own logCount state field. Got:\n{code}"
+    );
+}
