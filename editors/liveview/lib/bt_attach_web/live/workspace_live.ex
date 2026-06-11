@@ -1064,18 +1064,24 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Hierarchy: a flat, ordered list of `{class_row, indent}` walking the
   # superclass tree from roots down. A class whose superclass is not itself in the
   # browse set is treated as a root, so an external/kernel superclass doesn't hide
-  # its subclasses.
+  # its subclasses. Any class unreachable from a root — e.g. a member of a
+  # superclass cycle in a transiently-inconsistent live image, where every member
+  # has an in-set superclass so none is a root — is appended at indent 0 rather
+  # than silently dropped from the view (it still renders, just un-nested).
   defp hierarchy_rows(classes) do
     by_parent =
       Enum.group_by(classes, fn c ->
         super_name = Map.get(c, "superclass")
+
         if super_name && Enum.any?(classes, &(Map.get(&1, "name") == super_name)),
           do: super_name,
           else: :__root
       end)
 
-    walk_hierarchy(by_parent, :__root, 0, [])
-    |> Enum.reverse()
+    walked = Enum.reverse(walk_hierarchy(by_parent, :__root, 0, []))
+    emitted = MapSet.new(walked, fn {class, _indent} -> Map.get(class, "name") end)
+    orphans = for c <- classes, not MapSet.member?(emitted, Map.get(c, "name")), do: {c, 0}
+    walked ++ Enum.sort_by(orphans, fn {c, _} -> Map.get(c, "name") end)
   end
 
   defp walk_hierarchy(by_parent, parent, indent, acc) do
