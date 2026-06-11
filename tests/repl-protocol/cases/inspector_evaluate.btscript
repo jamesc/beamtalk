@@ -11,6 +11,7 @@
 // here end-to-end alongside it.
 
 // @load tests/repl-protocol/fixtures/point.bt
+// @load tests/repl-protocol/fixtures/counter.bt
 
 // ===========================================================================
 // VALUE evaluate: — `self` bound to the inspected value (ADR 0095 §1, §7)
@@ -91,3 +92,65 @@ big fields size
 
 ((((1 to: 1000) asList inspect) asDictionary) at: #fields) size
 // => 50
+
+// ===========================================================================
+// inspect → drill → refresh, end-to-end against a VALUE and a live ACTOR
+// (ADR 0095 Phase 4, BT-2505)
+// ===========================================================================
+
+// --- VALUE: inspect → render → drill ---
+p := (Point x: 3 y: 4) inspect
+// => _
+
+p kind
+// => value
+
+// printString renders the class-headed text tree with immediate fields.
+p printString includesSubstring: "Inspector(Point)"
+// => true
+
+p printString includesSubstring: "x: 3"
+// => true
+
+// Drill into a field → a child cursor on that value; the root path stays empty.
+(p at: #x) unwrap subject
+// => 3
+
+p path
+// => []
+
+// --- ACTOR: inspect captures a live snapshot; refresh re-snapshots ---
+c := Counter spawn
+// => _
+
+c increment
+// => _
+
+c increment
+// => _
+
+// `c inspect` runs inside the actor and seeds the cursor from its in-hand state
+// (no self-`sys:get_state` deadlock) — the snapshot shows value 2.
+ci := c inspect
+// => _
+
+ci kind
+// => actor
+
+ci printString includesSubstring: "value: 2"
+// => true
+
+// The snapshot is frozen at inspect-time: mutating the actor does not change it.
+c increment
+// => _
+
+ci printString includesSubstring: "value: 2"
+// => true
+
+// refresh re-issues the guarded snapshot from outside the actor — now value 3.
+ci refresh printString includesSubstring: "value: 3"
+// => true
+
+// asDictionary envelope reports the cursor kind for the MCP/browser surfaces.
+(c inspect asDictionary) at: #kind
+// => actor
