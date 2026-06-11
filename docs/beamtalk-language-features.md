@@ -1462,6 +1462,55 @@ Transcript show: "Hello"; cr; show: "World"
 
 `TranscriptStream >> show:` accepts any `Printable` value, so custom classes that conform to `Printable` work directly with `Transcript show:` without manual `asString` conversion.
 
+### Navigable Inspector (ADR 0095)
+
+`printString` renders an object to *one* string. The **Inspector** lets you *navigate into* it — drill through fields, render across surfaces (REPL text tree, MCP/browser wire form), and re-snapshot live actor state. `anObject inspect` is the shorthand for `Inspector on: anObject`; it returns a cursor, **not** a string.
+
+```beamtalk
+i := (Point x: 3 y: 4) inspect      // an Inspector cursor (#value kind)
+i fields                            // the drillable InspectorField records (x, y)
+i at: #x                            // Result(Inspector) — a child cursor on the value 3
+(i at: #x) unwrap subject           // => 3
+i printString                       // an indented text tree (Inspector(Point) + fields)
+```
+
+**One polymorphic class, four `kind`s.** A single `Inspector` carries a `kind` tag rather than a subclass per kind — classification lives in the runtime shim:
+
+| `kind` | Subject | Fields are… |
+|--------|---------|-------------|
+| `#value` | an immutable `Value` (or scalar) | its slots, in ADR 0094 sort order (`#slot`) |
+| `#actor` | a live actor | a lazy, timeout-guarded `sys:get_state` snapshot of its state |
+| `#collection` | `List`/`Array`/`Set`/`Dictionary`/`Bag` | a **window** (page size 50) of `#element` / `#association` fields |
+| `#foreign` | a non-Beamtalk OTP process | best-effort `process_info` + a guarded state snapshot (`#processInfo`) |
+
+A wedged, dead, or non-`sys` actor degrades to a single `#status: #unavailable` field — it never crashes.
+
+**Navigation is immutable.** Every navigation message returns a *new* cursor, so a UI can hold several at once:
+
+| Message | Returns |
+|---------|---------|
+| `fields` | `List(InspectorField)` — the current window of drillable fields |
+| `at: key` | `Result(Inspector)` — a child cursor on that field's value (`#no_such_field` on a miss) |
+| `parent` / `root` | the parent cursor / the top of the drill path (`nil` parent at the root) |
+| `path` | the breadcrumb of drilled keys from the root |
+| `refresh` | a fresh cursor on a newly-captured snapshot (the original is unchanged) |
+| `size` | the cheap full element count (for `#collection`), else the field count |
+| `page: n` | a new cursor on the `n`-th window (1-based) of a large collection |
+| `printString` / `printStringExpanded: depth` | the indented text tree (depth 1 = immediate fields) |
+| `asDictionaries` / `asDictionary` | the typed cross-surface wire form (one dict per field / the cursor envelope) |
+
+Each `InspectorField` is an immutable `Value` record with `name` (the navigation key), `label`, `value`, `kind`, and `drillable` (`isLeaf` is its negation).
+
+**`evaluate:` is values-only.** On a `#value` cursor, `i evaluate: "self x + self y"` compiles and runs the expression with `self` bound to the inspected value, returning a `Result` — never raising. On an `#actor` cursor it returns `Result error:` with kind `#actor_eval_unsupported` (actor evaluate-in-context is a deferred §7 follow-up). Live updates are **poll-only**: re-issue `refresh`.
+
+```beamtalk
+i := (Point x: 3 y: 4) inspect
+(i evaluate: "self x * 10") unwrap        // => 30
+(i evaluate: "self nonesuch") isError     // => true  (a Result error:, not a crash)
+```
+
+**Deferred §7 seams** (not in v1): actor evaluate-in-context (live routing), per-class `inspectorFields` custom views, `sealedFromInspection`, and push live updates (poll-only for now).
+
 ---
 
 ## Union Types and Narrowing (ADR 0068)

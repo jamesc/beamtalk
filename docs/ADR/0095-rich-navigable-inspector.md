@@ -1,24 +1,24 @@
 # ADR 0095: Rich Navigable Inspector — Drillable, Live-Refreshing Object Views
 
 ## Status
-Accepted (2026-06-11)
+Implemented (2026-06-11)
 
 ## Implementation Tracking
 
 **Epic:** [BT-2501](https://linear.app/beamtalk/issue/BT-2501) — Rich Navigable Inspector v1 (ADR 0095)
 **Design issue:** [BT-2397](https://linear.app/beamtalk/issue/BT-2397)
-**Status:** Planned
+**Status:** Implemented (2026-06-11)
 
 | Phase | Issue | Title | Size | Status |
 |---|---|---|---|---|
-| 1 | [BT-2502](https://linear.app/beamtalk/issue/BT-2502) | Inspector core — `Inspector`/`InspectorField` classes + navigation (`#value`/`#actor`, drill, cycle guard, render) | L | Backlog |
-| 2 | [BT-2503](https://linear.app/beamtalk/issue/BT-2503) | Collection + foreign kinds, windowing, value `evaluate:` | M | Backlog |
-| 3 | [BT-2504](https://linear.app/beamtalk/issue/BT-2504) | Repurpose `inspect` → `Inspector` — migration, lint, MCP/REPL surfaces | L | Backlog |
-| 4 | [BT-2505](https://linear.app/beamtalk/issue/BT-2505) | Language docs, BUnit, REPL e2e btscript; flip ADR → Implemented | M | Backlog |
+| 1 | [BT-2502](https://linear.app/beamtalk/issue/BT-2502) | Inspector core — `Inspector`/`InspectorField` classes + navigation (`#value`/`#actor`, drill, cycle guard, render) | L | Done (#2520) |
+| 2 | [BT-2503](https://linear.app/beamtalk/issue/BT-2503) | Collection + foreign kinds, windowing, value `evaluate:` | M | Done (#2521) |
+| 3 | [BT-2504](https://linear.app/beamtalk/issue/BT-2504) | Repurpose `inspect` → `Inspector` — migration, lint, MCP/REPL surfaces | L | Done (#2522) |
+| 4 | [BT-2505](https://linear.app/beamtalk/issue/BT-2505) | Language docs, BUnit, REPL e2e btscript; flip ADR → Implemented | M | Done |
 
 ```text
-Wave 1: BT-2502
-Wave 2: BT-2503  BT-2504          (parallel — both need only BT-2502)
+Wave 1: BT-2502  (#2520, merged)
+Wave 2: BT-2503  (#2521, merged) → BT-2504 (#2522, merged)   (serialised — both touch the Inspector class)
 Wave 3: BT-2505                   (epic closer → flips Status to Implemented)
 ```
 
