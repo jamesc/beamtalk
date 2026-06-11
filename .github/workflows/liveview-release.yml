@@ -1,0 +1,148 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# LiveView IDE Release Pipeline
+# =============================
+# Builds self-contained, ERTS-embedded `mix release` archives of the LiveView
+# IDE (bt_attach) and, on a full release, uploads them to the GitHub Release.
+#
+# The IDE ships on its OWN release lane — separate from the compiler/runtime
+# bundle (release.yml) and the VS Code extension (release-vscode.yml) — because:
+#   1. It is a separate consumer (Attach topology, ADR 0017/0091): its own BEAM
+#      node, reached over Erlang distribution; it never lives in the core bundle.
+#   2. Its Elixir/Phoenix toolchain must not be forced onto every CLI install.
+#   3. It can ship fixes without a full compiler release.
+#
+# Trigger modes (mirrors release-vscode.yml):
+#   - workflow_call: invoked by release.yml during a full release (uploads to the
+#     GitHub Release by default).
+#   - workflow_dispatch: manual build (artifacts only unless `publish` is set).
+#
+# Windows is out of scope: per ADR 0091 the remote IDE host is Linux/macOS;
+# Windows is a browser-only client.
+#
+# Related: release.yml (core bundle), liveview.yml (per-PR CI)
+# Issue: BT-2515 (epic BT-2512)
+
+name: LiveView IDE Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Upload archives to the GitHub Release (otherwise build artifacts only)'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      publish:
+        description: 'Upload archives to the GitHub Release'
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: liveview-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build IDE release (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    permissions:
+      contents: write # gh release upload on a full release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux-x86_64
+          - runner: macos-latest
+            platform: macos-arm64
+          - runner: macos-15-intel
+            platform: macos-x86_64
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      # The IDE version tracks the repo VERSION file (BT-2514), matching the
+      # version mix.exs embeds in the release — so the archive name agrees with
+      # what `bin/bt_attach version` reports.
+      - name: Determine version
+        id: version
+        shell: bash
+        run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
+
+      # setup-beam installs an Elixir precompiled for OTP 27 — the supported
+      # toolchain (never the distro `elixir`, which pins erlang < 26).
+      - name: Install Erlang/OTP + Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        with:
+          otp-version: '27.0'
+          elixir-version: '1.18'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Mix deps and build
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            editors/liveview/deps
+            editors/liveview/_build
+          key: ${{ runner.os }}-${{ matrix.platform }}-liveview-rel-${{ hashFiles('editors/liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.platform }}-liveview-rel-
+
+      - name: Build release
+        working-directory: editors/liveview
+        run: |
+          export MIX_ENV=prod
+          mix deps.get --only prod
+          mix assets.setup
+          mix assets.deploy
+          mix release --overwrite
+
+      # Boot the ERTS-embedded release without binding a socket — proves the
+      # archive is self-contained and the prod config provider (runtime.exs,
+      # incl. OIDC fail-closed resolution) loads. A full HTTP/attach smoke needs
+      # a live workspace and is covered by the workspace-gated e2e (BT-2510).
+      - name: Smoke test (release boots)
+        working-directory: editors/liveview
+        env:
+          # `eval` runs the prod config provider (runtime.exs), which requires a
+          # signing secret. A throwaway one suffices — we never bind a socket.
+          SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+        run: |
+          _build/prod/rel/bt_attach/bin/bt_attach version
+          _build/prod/rel/bt_attach/bin/bt_attach eval 'IO.puts("boot-ok " <> to_string(Application.spec(:bt_attach, :vsn)))'
+
+      - name: Package archive
+        id: package
+        run: scripts/ci/package-liveview-release.sh "${{ steps.version.outputs.version }}" "${{ matrix.platform }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: beamtalk-ide-${{ steps.version.outputs.version }}-${{ matrix.platform }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.archive }}.sha256
+          retention-days: 7
+
+      # On a full release (release.yml calls this workflow with publish=true),
+      # attach the archive to the GitHub Release. GITHUB_REF_NAME is the tag.
+      - name: Upload to GitHub Release
+        if: github.event_name == 'release' && inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.archive }}.sha256" \
+            --repo "${{ github.repository }}" \
+            --clobber
