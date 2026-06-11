@@ -1,0 +1,153 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+name: LiveView IDE e2e (workspace + browser)
+
+# End-to-end gate for the LiveView IDE against a *real* running Beamtalk
+# workspace node, covering two tag-gated suites that a bare `mix test` skips:
+#
+#   * `:workspace` — the Attach-topology eval / inspect / bindings / method-editor
+#     / session-isolation tests (workspace_live_test.exs). Needs a live workspace
+#     + its cookie; runs through the Phoenix LiveView stack, no browser.
+#   * `:playwright` — PhoenixTest + Playwright driving a real Chromium against the
+#     connected IDE. The connected-only JS hooks (CodeEditor, KeyboardShortcuts,
+#     SelectionTracker, TweaksPanel) only run in a browser, so this is the only
+#     lane that exercises them.
+#
+# Heavier than liveview.yml (it builds Beamtalk from source and boots a workspace
+# node), so it is a separate, path-scoped lane — only editors/liveview changes
+# (or this workflow) pay the cost.
+#
+# BT-2510: the `:workspace`-only suite previously ran in *no* CI lane — liveview.yml
+# excludes it (no cookie) and this lane's browser step (`--only playwright`) selects
+# only `:playwright`-tagged tests. We piggyback the `:workspace` suite here, on the
+# job that already builds the toolchain and boots a workspace, rather than paying a
+# second Rust build in liveview.yml or deferring coverage to a nightly leg.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'editors/liveview/**'
+      - '.github/workflows/liveview-e2e.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'editors/liveview/**'
+      - '.github/workflows/liveview-e2e.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+
+      # setup-beam installs an Elixir precompiled for OTP 27 (the supported
+      # toolchain) plus rebar3 for the runtime build — matching ci.yml + liveview.yml.
+      - name: Install Erlang/OTP + Elixir + rebar3
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        with:
+          otp-version: '27.0'
+          elixir-version: '1.18'
+          rebar3-version: '3.27'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-otp-27.0-rebar3-3.27
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-otp-27.0-rebar3-3.27
+
+      - name: Cache LiveView Mix deps and build
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            editors/liveview/deps
+            editors/liveview/_build
+          key: ${{ runner.os }}-liveview-mix-${{ hashFiles('editors/liveview/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-liveview-mix-
+
+      # Builds the Beamtalk toolchain (Rust CLI + Erlang runtime + stdlib) so the
+      # workspace the IDE attaches to is the freshly-built one — the honest e2e.
+      - name: Build Beamtalk
+        run: just build
+
+      # Boot a persistent workspace node, then export its node + cookie the same
+      # way `just web` resolves them, so the LiveView attaches over distribution.
+      - name: Start a workspace
+        run: |
+          ./target/debug/beamtalk workspace create e2e --background --persistent
+          # Poll status briefly in case the node hasn't finished registering.
+          node=""
+          for _ in $(seq 1 10); do
+            node=$(./target/debug/beamtalk workspace status e2e | awk '/^Node:/ {print $2}')
+            [ -n "${node:-}" ] && break
+            sleep 1
+          done
+          if [ -z "${node:-}" ]; then echo "::error::workspace did not start"; exit 1; fi
+          id="${node#beamtalk_workspace_}"; id="${id%@*}"
+          cookie=$(cat "${HOME}/.beamtalk/workspaces/${id}/cookie")
+          echo "BT_WORKSPACE_NODE=${node}" >> "$GITHUB_ENV"
+          echo "BT_WORKSPACE_COOKIE=${cookie}" >> "$GITHUB_ENV"
+
+      - name: Fetch LiveView deps + build assets
+        working-directory: editors/liveview
+        run: |
+          mix deps.get
+          mix assets.setup
+          mix assets.build
+
+      # The `:workspace`-only suite (no browser): runs the LiveView e2e tests
+      # against the live workspace booted above. Scoped to the file by path
+      # because the browser file (workspace_browser_test.exs) is tagged BOTH
+      # `:workspace` and `:playwright`, and ExUnit's `--only`/`--include` wins
+      # over `--exclude` — so a tag filter can't subtract it out. It needs the
+      # Playwright driver and is covered by the browser step below. `--only
+      # workspace` then selects the `:workspace` tests within that file.
+      - name: Run workspace e2e suite (non-browser)
+        working-directory: editors/liveview
+        run: mix test --only workspace test/bt_attach_web/workspace_live_test.exs
+
+      # The Playwright CLI lives under assets/node_modules; install it + the
+      # Chromium browser (with OS deps) the e2e suite drives.
+      - name: Install Playwright + Chromium
+        working-directory: editors/liveview
+        run: |
+          npm --prefix assets install --no-audit --no-fund
+          npx --prefix assets playwright install chromium --with-deps
+
+      - name: Run browser e2e suite
+        working-directory: editors/liveview
+        env:
+          PHX_PLAYWRIGHT: '1'
+        run: mix test --only playwright
+
+      # Stop the background workspace node regardless of suite outcome so the job
+      # never leaves a stray distributed node behind (AC: created and torn down
+      # cleanly). `|| true` keeps a teardown hiccup from masking a real failure.
+      - name: Stop the workspace
+        if: always()
+        run: ./target/debug/beamtalk workspace stop e2e || true

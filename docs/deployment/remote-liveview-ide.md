@@ -10,6 +10,37 @@ For the security model and trust path, see
 > on localhost stay zero-config (cookie handshake, no OIDC). Everything here is
 > opt-in and applies only when you expose the IDE beyond the local machine.
 
+## Installing the IDE
+
+The IDE ships on its **own release lane** (separate from the `beamtalk-<version>`
+toolchain bundle — it runs as its own BEAM node and attaches over distribution).
+Three ways to get it, from most turnkey to most hands-on:
+
+1. **Docker image** (recommended for remote/operator deployments) —
+   `ghcr.io/jamesc/beamtalk-ide:<version>` bundles Elixir + OTP + the built
+   assets; the host needs only Docker. See [Run with Docker](#run-with-docker).
+2. **Release archive** — `beamtalk-ide-<version>-<platform>.tar.gz` from the
+   [GitHub Release](https://github.com/jamesc/beamtalk/releases) is a
+   self-contained, ERTS-embedded build that runs with no Elixir/Mix on the host:
+
+   ```sh
+   tar -xzf beamtalk-ide-<version>-<platform>.tar.gz
+   cd beamtalk-ide-<version>
+   PHX_SERVER=true SECRET_KEY_BASE="$(openssl rand -base64 48)" \
+   PHX_HOST=ide.example.com \
+   BT_WORKSPACE_NODE=... BT_WORKSPACE_COOKIE=... \
+     bin/bt_attach start          # OIDC env per step 1 below
+   ```
+
+   Available for `linux-x86_64`, `macos-arm64`, `macos-x86_64`. (Windows is a
+   browser-only client — there is no IDE-host build for it.)
+3. **From source** (contributors) — `just web <ws>` / `just web-remote <ws>`
+   from a checkout; see [editors/liveview/README.md](../../editors/liveview/README.md).
+
+All three run the same release and read the same configuration (below). The rest
+of this guide configures the IDE for **non-localhost** access; it applies
+identically however you installed it.
+
 ## The shape
 
 ```text
@@ -112,6 +143,33 @@ just web-remote ws                       # discovers node+cookie, starts prod Ph
 and starts Phoenix in prod mode (server on `:8443` by default; put a TLS
 terminator in front, or add `https:` to the endpoint). OIDC must be configured
 (step 1) or boot fails closed.
+
+### Run with Docker
+
+The published image (`ghcr.io/jamesc/beamtalk-ide`) is the turnkey option — it
+bundles Elixir + OTP + the built assets, so the host needs only Docker. It runs
+the same ERTS-embedded release as `just dist-liveview`, configured by the same
+env. Pin a version tag (it tracks the toolchain version) rather than `latest`:
+
+```sh
+docker run --network host \
+  -e SECRET_KEY_BASE="$(openssl rand -base64 48)" \
+  -e PHX_HOST=ide.example.com \
+  -e BT_WORKSPACE_NODE="beamtalk_workspace_ws@localhost" \
+  -e BT_WORKSPACE_COOKIE="$(cat ~/.beamtalk/workspaces/ws/cookie)" \
+  -e BT_OIDC_ISSUER=https://idp.example.com \
+  -e BT_OIDC_CLIENT_ID=beamtalk-ide \
+  -e BT_OIDC_CLIENT_SECRET="$BT_OIDC_CLIENT_SECRET" \
+  ghcr.io/jamesc/beamtalk-ide:0.4.0
+```
+
+`--network host` co-locates the container with the workspace so the Phoenix ↔
+workspace **Erlang distribution link stays on loopback** (ADR 0091 Decision 5);
+the only network-facing service is Phoenix's HTTP(S) port. Do **not** publish
+epmd/dist ports — keep distribution off untrusted networks (co-located or a
+private interface). The cookie is an infrastructure secret passed via env; it is
+never sent to a browser. Boot fails closed if OIDC is requested but
+misconfigured.
 
 ### Cookie rotation
 

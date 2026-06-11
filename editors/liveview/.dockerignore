@@ -1,0 +1,13 @@
+# Build outputs and fetched deps — regenerated inside the image build.
+_build/
+deps/
+node_modules/
+assets/node_modules/
+# Digested/static asset outputs — phx.digest regenerates them in the release.
+priv/static/assets/
+priv/static/cache_manifest.json
+# Local cruft.
+*.tar.gz
+erl_crash.dump
+.elixir_ls/
+.DS_Store

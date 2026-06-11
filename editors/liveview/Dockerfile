@@ -1,0 +1,80 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# LiveView IDE (bt_attach) container image — the turnkey artifact for the
+# remote/OIDC deployment (ADR 0091, docs/deployment/remote-liveview-ide.md).
+# Ships on the IDE's own release lane (BT-2512), never the core toolchain bundle.
+#
+# Build context is editors/liveview (the version is injected, not read from the
+# repo tree). Build from the repo root with:
+#   docker build -f editors/liveview/Dockerfile \
+#     --build-arg VERSION="$(cat VERSION)" -t beamtalk-ide editors/liveview
+#
+# Run (operator supplies the ADR 0091 env; the dist link stays internal):
+#   docker run --network host \
+#     -e SECRET_KEY_BASE=... -e PHX_HOST=ide.example.com \
+#     -e BT_WORKSPACE_NODE=... -e BT_WORKSPACE_COOKIE=... \
+#     -e BT_OIDC_ISSUER=... -e BT_OIDC_CLIENT_ID=... -e BT_OIDC_CLIENT_SECRET=... \
+#     ghcr.io/jamesc/beamtalk-ide:latest
+#
+# The only network-facing service is Phoenix's HTTP(S) port. Keep the
+# Phoenix<->workspace Erlang distribution link off untrusted networks
+# (co-located / private interface) — never expose epmd/dist publicly.
+
+ARG ELIXIR_IMAGE=elixir:1.18-otp-27
+ARG RUNTIME_IMAGE=debian:bookworm-slim
+
+# ─── Build stage ─────────────────────────────────────────────────────────
+FROM ${ELIXIR_IMAGE} AS build
+
+ENV MIX_ENV=prod \
+    LANG=C.UTF-8
+
+# bt_attach version tracks the repo VERSION (BT-2514). The build context is the
+# editors/liveview dir, so it is injected and written where mix.exs reads it
+# (../../VERSION, relative to mix.exs at /src/app/mix.exs).
+ARG VERSION=0.0.0
+RUN mkdir -p /src && printf '%s' "${VERSION}" > /src/VERSION
+
+WORKDIR /src/app
+
+RUN mix local.hex --force && mix local.rebar --force
+
+# Dependencies first, for layer caching.
+COPY mix.exs mix.lock ./
+RUN mix deps.get --only prod
+
+# Config is needed to compile deps (Phoenix reads compile-time config).
+COPY config ./config
+RUN mix deps.compile
+
+# App sources + assets, then bundle (minified + digested) and cut the release.
+COPY . ./
+RUN mix assets.setup \
+ && mix assets.deploy \
+ && mix release --overwrite
+
+# ─── Runtime stage ───────────────────────────────────────────────────────
+# The release embeds its own ERTS, so the runtime image needs only the C
+# libraries OTP links against — no Erlang/Elixir/Mix install.
+FROM ${RUNTIME_IMAGE} AS app
+
+ENV LANG=C.UTF-8 \
+    PHX_SERVER=true \
+    PORT=8443
+
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends \
+      libstdc++6 libncurses6 openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+# Run as a non-root user.
+RUN useradd --create-home --uid 1000 app
+WORKDIR /app
+COPY --from=build --chown=app:app /src/app/_build/prod/rel/bt_attach ./
+USER app
+
+EXPOSE 8443
+
+ENTRYPOINT ["/app/bin/bt_attach"]
+CMD ["start"]

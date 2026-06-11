@@ -400,3 +400,12 @@ jobs:
       publish: ${{ github.event_name == 'release' }}
     secrets:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+  # ─── LiveView IDE (delegated to liveview-release.yml) ────────────────────
+  # Ships the IDE on its own lane (BT-2512): self-contained mix-release archives,
+  # uploaded to the GitHub Release on a full release. Independent of the core
+  # bundle above — the Elixir/Phoenix toolchain is never added to it.
+  liveview-ide:
+    uses: ./.github/workflows/liveview-release.yml
+    with:
+      publish: ${{ github.event_name == 'release' }}

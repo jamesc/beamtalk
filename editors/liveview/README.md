@@ -56,6 +56,19 @@ mix assets.build                # bundle JS + CSS into priv/static/assets/
 
 ## Run
 
+There are three ways to run the IDE, by audience:
+
+| Way | For | Where |
+| --- | --- | --- |
+| **From source** (`just web` / `just web-remote`) | contributors hacking on the IDE | this section |
+| **Release archive** (`beamtalk-ide-<version>-<platform>.tar.gz`) | users who want a self-contained build, no Elixir/Mix | [deployment guide](../../docs/deployment/remote-liveview-ide.md#installing-the-ide) |
+| **Docker** (`ghcr.io/jamesc/beamtalk-ide`) | remote / operator deployments (OIDC) | [deployment guide](../../docs/deployment/remote-liveview-ide.md#run-with-docker) |
+
+The archive and image are produced by the IDE's own release lane
+(`.github/workflows/liveview-release.yml` and `liveview-docker.yml`); both run the
+same release as `just dist-liveview`. The rest of this section is the from-source
+path.
+
 ```bash
 # from the repo root: build Beamtalk on OTP 27 and start a workspace
 just build
@@ -88,3 +101,45 @@ The workspace-attach tests are tagged `:workspace` and are **excluded
 automatically** unless `BT_WORKSPACE_COOKIE` is set, so a bare `mix test` passes
 without a running workspace. To run them, start a workspace and export the node
 + cookie (as in *Run* above) first.
+
+## Browser e2e (Playwright)
+
+`Phoenix.LiveViewTest` renders the LiveView server-side and **never loads
+`app.js`**, so the cockpit's client-side JS hooks — `CodeEditor`,
+`KeyboardShortcuts`, `SelectionTracker` (BT-2485) and `TweaksPanel` (BT-2487) —
+are invisible to it. The browser e2e suite
+(`test/bt_attach_web/workspace_browser_test.exs`) closes that gap:
+[PhoenixTest](https://hexdocs.pm/phoenix_test) driving a **real Chromium** via
+[Playwright](https://hexdocs.pm/phoenix_test_playwright) against the connected
+IDE.
+
+The interesting UI lives behind the *connected* render, which only appears once
+the LiveView attaches to a workspace, so these tests are **double-gated**: tagged
+both `:workspace` (need a running workspace + cookie) and `:playwright` (need the
+browser install + `PHX_PLAYWRIGHT=1`). A bare `mix test` excludes both; the
+dedicated `liveview-e2e.yml` CI lane provisions a workspace + Chromium and runs
+them.
+
+To run locally (from the repo root):
+
+```bash
+just build
+./target/debug/beamtalk workspace create e2e --background --persistent
+
+cd editors/liveview
+mix deps.get
+mix assets.build                       # app.js must exist for the LiveSocket
+npm --prefix assets install            # the Playwright CLI
+npx --prefix assets playwright install chromium --with-deps
+
+export BT_WORKSPACE_NODE=beamtalk_workspace_e2e@localhost
+export BT_WORKSPACE_COOKIE=$(cat ~/.beamtalk/workspaces/e2e/cookie)
+export PHX_PLAYWRIGHT=1
+mix test --only playwright
+```
+
+OIDC is unconfigured in test, so the route is open and the LiveView attaches as
+the `:owner` role — every hook + the eval form is in scope. Do **not** set
+`BT_IDE_DEV_AUTH` for the e2e run: it switches on the loopback dev-auth gate,
+which the headless browser does not satisfy, leaving the IDE on the
+"connecting…" screen.

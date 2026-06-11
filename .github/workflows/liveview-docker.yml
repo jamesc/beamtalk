@@ -1,0 +1,98 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# LiveView IDE Docker image
+# =========================
+# Builds (and, on a full release, publishes) the container image for the
+# LiveView IDE (bt_attach) — the turnkey artifact for ADR 0091's remote/OIDC
+# deployment (docs/deployment/remote-liveview-ide.md).
+#
+# The IDE ships on its own lane (BT-2512), separate from the core toolchain
+# bundle. This is a *standalone* workflow (its own `release` trigger) rather
+# than a job in release.yml, so it composes with the archive lane
+# (liveview-release.yml) without coupling the two.
+#
+# Trigger modes:
+#   - pull_request (Dockerfile-related paths): build only — verifies the image
+#     builds. No registry push.
+#   - release (published): build + push ghcr.io/<owner>/beamtalk-ide:<version>
+#     and :latest.
+#   - workflow_dispatch: build, and push only when `push: true`.
+#
+# Windows is out of scope (browser-only client per ADR 0091).
+#
+# Related: liveview-release.yml (archive lane), release.yml (core bundle)
+# Issue: BT-2516 (epic BT-2512)
+
+name: LiveView IDE Docker
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'editors/liveview/Dockerfile'
+      - 'editors/liveview/.dockerignore'
+      - '.github/workflows/liveview-docker.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      push:
+        description: 'Push the image to GHCR (otherwise build only)'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: liveview-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      # Push on a full release, or on a manual dispatch that opts in. PRs always
+      # build-only (verifies the Dockerfile) and never push.
+      - name: Resolve build parameters
+        id: params
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # ghcr image refs must be lowercase.
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${owner}/beamtalk-ide" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "release" ] || \
+             { [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.push }}" = "true" ]; }; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        if: steps.params.outputs.push == 'true'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build image
+        run: |
+          docker build \
+            -f editors/liveview/Dockerfile \
+            --build-arg VERSION="${{ steps.params.outputs.version }}" \
+            -t "${{ steps.params.outputs.image }}:${{ steps.params.outputs.version }}" \
+            -t "${{ steps.params.outputs.image }}:latest" \
+            editors/liveview
+
+      - name: Push image
+        if: steps.params.outputs.push == 'true'
+        run: |
+          docker push "${{ steps.params.outputs.image }}:${{ steps.params.outputs.version }}"
+          docker push "${{ steps.params.outputs.image }}:latest"
