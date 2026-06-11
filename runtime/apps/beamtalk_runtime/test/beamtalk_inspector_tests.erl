@@ -270,14 +270,39 @@ dictionary_integer_key_drills_by_key_test() ->
     {error, Err} = beamtalk_inspector:inspector(I, 1),
     ?assertEqual(no_such_field, Err#beamtalk_error.kind).
 
-%% `at:` resolves keys with `==` (via `lists:keyfind/3`), so an integer key
-%% reaches a numerically-equal float-keyed entry rather than crashing with a
-%% `case_clause` from re-matching the key by `=:=` (BT-2503 regression).
-dictionary_numeric_key_no_case_clause_test() ->
+%% `at:` on a Dictionary uses exact (`=:=`) keys via `maps:find/2`, matching
+%% `Dictionary >> at:` (`beamtalk_map:at:`): an exact key drills; a numerically-
+%% equal-but-not-identical key (`at: 1` against a `1.0` entry) misses cleanly —
+%% no crash, no `==` false hit (BT-2507; replaces the BT-2503 `==`-keyfind path).
+dictionary_numeric_key_exact_match_test() ->
     Dict = #{1.0 => one_point_oh},
     I = beamtalk_inspector:on(Dict),
-    {ok, Child} = beamtalk_inspector:inspector(I, 1),
-    ?assertEqual(one_point_oh, beamtalk_inspector:subjectOf(Child)).
+    {ok, Child} = beamtalk_inspector:inspector(I, 1.0),
+    ?assertEqual(one_point_oh, beamtalk_inspector:subjectOf(Child)),
+    {error, Err} = beamtalk_inspector:inspector(I, 1),
+    ?assertEqual(no_such_field, Err#beamtalk_error.kind).
+
+%% Dictionary `size` is the user-key count — `maps:size/1` minus the class tag,
+%% for both tagged and plain maps (BT-2507, cheap on the render hot path).
+dictionary_size_excludes_tag_test() ->
+    Tagged = #{'$beamtalk_class' => 'Dictionary', a => 1, b => 2, c => 3},
+    ?assertEqual(3, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Tagged))),
+    ?assertEqual(2, beamtalk_inspector:sizeOf(beamtalk_inspector:on(#{x => 1, y => 2}))).
+
+%% A large Array windows via `array:get/2` over the page's index range (not a
+%% whole-array `array:to_list/1`), with correct absolute indices (BT-2507).
+large_array_windowed_test() ->
+    Arr = #{'$beamtalk_class' => 'Array', data => array:from_list(lists:seq(1, 1000))},
+    I = beamtalk_inspector:on(Arr),
+    ?assertEqual(1000, beamtalk_inspector:sizeOf(I)),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    ?assertEqual(50, length(Fields)),
+    ?assertEqual(1, maps:get(name, hd(Fields))),
+    ?assertEqual(1, maps:get(value, hd(Fields))),
+    {ok, P2} = beamtalk_inspector:page(I, 2),
+    [P2First | _] = beamtalk_inspector:fieldsOf(P2),
+    ?assertEqual(51, maps:get(name, P2First)),
+    ?assertEqual(51, maps:get(value, P2First)).
 
 %% An improper list (routine in foreign OTP process state) is *not* a collection:
 %% it degrades to a #value cursor instead of crashing the windowing paths
