@@ -155,6 +155,37 @@ defmodule BtAttachWeb.WorkspaceLive do
       source.
     * **Breadcrumb** — `Class › side › selector` for the active tab (a class
       definition shows `Class › class definition`).
+
+  ## System Browser pane (BT-2491, epic BT-2482 Phase 2)
+
+  The left column is the spike's **System Browser** (`spikes/cockpit-ux-spike`),
+  replacing the BT-2484 placeholder. It is the four-pane Smalltalk navigator —
+  *classes → protocols → selectors → method source* — driven entirely by the
+  BT-2488 browse ops (ADR 0096) through the read-only facade (`browse_classes` /
+  `browse_protocols` / `browse_method_source`, all `:read` capability), so the
+  pane works for the Observer role too:
+
+    * **Class tree** — two toggleable views (`browser_view`): **Hierarchy**
+      (indented by superclass depth, `hierarchy_rows/1`) and **Category**
+      (grouped by the class annotation, `category_groups/1`). Selecting a class
+      (`browser_select_class`) fetches its protocols for the current side.
+    * **Instance / class side** toggle (`browser_side`) at the pane footer
+      re-populates the protocol + method list (a class's instance methods differ
+      from its class methods — a fresh `browse-protocols` fetch per side).
+    * **Protocol + method list** — selectors grouped by protocol, with a filter
+      row (`browser_select_protocol`; `nil` = "all" shows every selector,
+      `filtered_methods/2`). Runtime-only (image-diverged) classes and methods
+      carry a `runtime` badge (origin = `runtime`, ADR 0096 / BT-2483).
+    * **Method source** — selecting a method (`browser_select_method`) drives a
+      read-only centre display (`#browse-method-source`) of its image-accurate
+      source with a `Class instance » selector · category` breadcrumb and
+      image-diverged badges (`runtime` / unflushed `>>` patch). Read-only is
+      enough until the tabbed editor consumes the browse selection in a follow-up.
+
+  The browse data path carries the wire-shaped live term verbatim over
+  distribution (`{:value, json_value}`, BT-2399) — JSON only at the WebSocket
+  edge, never re-serialised here. A dispatch failure / RBAC denial renders a
+  `browser_error` rather than crashing the pane.
   """
   use BtAttachWeb, :live_view
 
@@ -336,6 +367,23 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:save_error, nil)
       |> assign(:flush_result, nil)
       |> assign(:flush_error, nil)
+      # System Browser (BT-2491, epic BT-2482 Phase 2): the left-column
+      # class → protocol → method navigator, driven by the BT-2488 browse ops
+      # (ADR 0096) through the read-only facade. `browser_view` toggles the class
+      # tree between Hierarchy (indented by superclass) and Category (grouped by
+      # annotation); `browser_side` is the instance/class toggle that
+      # re-populates the protocol/method list; `selected_protocol` is the
+      # protocol filter (`nil` = "all"). Selecting a method drives the center
+      # method-source display (`browser_method`) with its breadcrumb. All four
+      # browse ops are `:read`, so the pane works for the Observer role too.
+      |> assign(:browser_view, "hierarchy")
+      |> assign(:browser_side, "instance")
+      |> assign(:selected_class, nil)
+      |> assign(:selected_protocol, nil)
+      |> assign(:browser_protocols, [])
+      |> assign(:browser_method, nil)
+      |> assign(:browser_error, nil)
+      |> assign_browser_classes()
       |> assign_bindings(pid)
       |> assign_changes()
       |> stream(:transcript, [])
@@ -555,6 +603,75 @@ defmodule BtAttachWeb.WorkspaceLive do
   def handle_event("flush", _params, socket) do
     {:noreply, flush_changes(socket)}
   end
+
+  # ── System Browser (BT-2491, epic BT-2482 Phase 2) ──────────────────────────
+
+  # Toggle the class tree between Hierarchy (indented by superclass) and Category
+  # (grouped by annotation). Pure view state over the already-loaded class rows —
+  # no workspace round-trip; an unknown view is ignored rather than blanking the
+  # tree.
+  def handle_event("browser_view", %{"view" => view}, socket)
+      when view in ~w(hierarchy category) do
+    {:noreply, assign(socket, browser_view: view)}
+  end
+
+  def handle_event("browser_view", _params, socket), do: {:noreply, socket}
+
+  # Toggle the instance/class side. The protocol/method list is class-side
+  # specific (a class's instance methods differ from its class methods), so
+  # flipping the side re-fetches the selected class's protocols for the new side
+  # and clears the protocol filter + any open method source. Pure toggle when no
+  # class is selected yet.
+  def handle_event("browser_side", %{"side" => side}, socket)
+      when side in ~w(instance class) do
+    socket = assign(socket, browser_side: side, selected_protocol: nil, browser_method: nil)
+
+    case socket.assigns.selected_class do
+      nil -> {:noreply, assign(socket, browser_protocols: [])}
+      class -> {:noreply, load_protocols(socket, class, side)}
+    end
+  end
+
+  def handle_event("browser_side", _params, socket), do: {:noreply, socket}
+
+  # Select a class in the tree: fetch its protocols (for the current side) and
+  # reset the protocol filter + open method. A non-binary / absent class name is
+  # ignored rather than crashing the LiveView.
+  def handle_event("browser_select_class", %{"class" => class}, socket)
+      when is_binary(class) do
+    socket =
+      assign(socket, selected_class: class, selected_protocol: nil, browser_method: nil)
+
+    {:noreply, load_protocols(socket, class, socket.assigns.browser_side)}
+  end
+
+  def handle_event("browser_select_class", _params, socket), do: {:noreply, socket}
+
+  # Set the protocol filter (the method list shows only that protocol's
+  # selectors). An empty value clears the filter back to "all" — the spike's ∗
+  # row. Pure view state over the already-loaded protocol tree.
+  def handle_event("browser_select_protocol", %{"protocol" => protocol}, socket)
+      when is_binary(protocol) do
+    filter = if protocol == "", do: nil, else: protocol
+    {:noreply, assign(socket, selected_protocol: filter)}
+  end
+
+  def handle_event("browser_select_protocol", _params, socket), do: {:noreply, socket}
+
+  # Select a method: fetch its image-accurate source and drive the center
+  # method-source display (read-only until the tabbed editor consumes it in a
+  # follow-up issue). The class/side/selector ride the click; a malformed payload
+  # is ignored.
+  def handle_event(
+        "browser_select_method",
+        %{"class" => class, "side" => side, "selector" => selector},
+        socket
+      )
+      when is_binary(class) and is_binary(side) and is_binary(selector) do
+    {:noreply, load_method_source(socket, class, side, selector)}
+  end
+
+  def handle_event("browser_select_method", _params, socket), do: {:noreply, socket}
 
   # Selection tracking (BT-2485): the SelectionTracker JS hook reports the
   # method-editor textarea's current selection (text + offsets). We hold it in
@@ -865,6 +982,148 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, changes: [], changes_error: Workspace.render_error(reason))
     end
   end
+
+  # ── System Browser data source (BT-2491, browse ops ADR 0096) ───────────────
+  #
+  # The four browse ops return a `{:value, json_value}` live term verbatim
+  # (wire-shaped maps/lists of binaries — JSON only at the WebSocket edge, never
+  # here) or `{:error, reason}`. Each `assign_*`/`load_*` helper unwraps that and
+  # holds the rows in browser assigns the render walks; a dispatch failure or an
+  # RBAC denial renders a `browser_error` rather than crashing the pane.
+
+  # Load every class in scope for the class tree (op 1, `browse-classes`). Sorted
+  # workspace-side; the rows carry `superclass`/`category`/`origin` so the
+  # Hierarchy and Category views and the runtime badge render off one fetch.
+  defp assign_browser_classes(socket) do
+    case Facade.dispatch(:browse_classes, %{}, ctx(socket)) do
+      {:value, rows} when is_list(rows) ->
+        assign(socket, browser_classes: rows, browser_error: nil)
+
+      {:error, reason} ->
+        assign(socket, browser_classes: [], browser_error: facade_error(reason))
+    end
+  end
+
+  # Load `class`/`side`'s selectors grouped by protocol (op 2, `browse-protocols`)
+  # for the protocol filter row + method list. The `protocols` list each carry a
+  # `name` and `selectors`; an unknown class / bad side comes back as a structured
+  # error we surface without blanking the rest of the pane.
+  defp load_protocols(socket, class, side) do
+    case Facade.dispatch(:browse_protocols, %{class: class, side: side}, ctx(socket)) do
+      {:value, %{"protocols" => protocols}} when is_list(protocols) ->
+        assign(socket, browser_protocols: protocols, browser_error: nil)
+
+      {:value, _other} ->
+        assign(socket, browser_protocols: [], browser_error: nil)
+
+      {:error, reason} ->
+        assign(socket, browser_protocols: [], browser_error: facade_error(reason))
+    end
+  end
+
+  # Load one method's image-accurate source (op 3, `browse-method-source`) for the
+  # center method-source display. The result carries `source` (`null` for a
+  # sourceless runtime method), `origin`, and `disk_differs` (an unflushed live
+  # patch) — all surfaced in the breadcrumb / badge. We keep the protocol of the
+  # selected selector for the breadcrumb's `· category` segment by looking it up
+  # in the already-loaded protocol tree.
+  defp load_method_source(socket, class, side, selector) do
+    case Facade.dispatch(
+           :browse_method_source,
+           %{class: class, side: side, selector: selector},
+           ctx(socket)
+         ) do
+      {:value, result} when is_map(result) ->
+        method = Map.put(result, "protocol", protocol_of(socket, selector))
+        assign(socket, browser_method: method, browser_error: nil)
+
+      {:error, reason} ->
+        assign(socket, browser_method: nil, browser_error: facade_error(reason))
+    end
+  end
+
+  # The protocol (method category) a selector belongs to, read from the loaded
+  # protocol tree — the breadcrumb's `· category` part. Falls back to nil when the
+  # selector isn't found (e.g. the tree hasn't loaded), which the breadcrumb omits.
+  defp protocol_of(socket, selector) do
+    Enum.find_value(socket.assigns.browser_protocols, fn proto ->
+      selectors = Map.get(proto, "selectors", [])
+
+      if Enum.any?(selectors, &(Map.get(&1, "selector") == selector)),
+        do: Map.get(proto, "name")
+    end)
+  end
+
+  # ── System Browser view helpers (BT-2491) ───────────────────────────────────
+
+  # The class rows in display order for the active view. Hierarchy walks
+  # roots→children indenting by superclass depth (capped at 2 like the spike);
+  # Category groups by the class annotation, each group a `{category, rows}` pair.
+  # Both return `{row, indent}` tuples so the template renders one branch.
+
+  # Hierarchy: a flat, ordered list of `{class_row, indent}` walking the
+  # superclass tree from roots down. A class whose superclass is not itself in the
+  # browse set is treated as a root, so an external/kernel superclass doesn't hide
+  # its subclasses.
+  defp hierarchy_rows(classes) do
+    by_parent =
+      Enum.group_by(classes, fn c ->
+        super_name = Map.get(c, "superclass")
+        if super_name && Enum.any?(classes, &(Map.get(&1, "name") == super_name)),
+          do: super_name,
+          else: :__root
+      end)
+
+    walk_hierarchy(by_parent, :__root, 0, [])
+    |> Enum.reverse()
+  end
+
+  defp walk_hierarchy(by_parent, parent, indent, acc) do
+    by_parent
+    |> Map.get(parent, [])
+    |> Enum.sort_by(&Map.get(&1, "name"))
+    |> Enum.reduce(acc, fn class, acc ->
+      acc = [{class, indent} | acc]
+      walk_hierarchy(by_parent, Map.get(class, "name"), min(indent + 1, 2), acc)
+    end)
+  end
+
+  # Category: `{category, [class_row]}` groups, each group's classes sorted by
+  # name, the groups themselves sorted by category. A class with no category falls
+  # into an "(uncategorized)" bucket rather than vanishing.
+  defp category_groups(classes) do
+    classes
+    |> Enum.group_by(fn c -> Map.get(c, "category") || "(uncategorized)" end)
+    |> Enum.sort_by(fn {category, _} -> category end)
+    |> Enum.map(fn {category, rows} ->
+      {category, Enum.sort_by(rows, &Map.get(&1, "name"))}
+    end)
+  end
+
+  # The flat method list for the current protocol filter: all selectors across the
+  # protocol tree (filter = nil → "all") or just the selected protocol's, each
+  # carrying its protocol name so the row badge / breadcrumb can show it. Sorted
+  # by selector for stable order.
+  defp filtered_methods(protocols, filter) do
+    protocols
+    |> Enum.filter(fn p -> filter == nil or Map.get(p, "name") == filter end)
+    |> Enum.flat_map(fn p ->
+      name = Map.get(p, "name")
+      Enum.map(Map.get(p, "selectors", []), &Map.put(&1, "protocol", name))
+    end)
+    |> Enum.sort_by(&Map.get(&1, "selector"))
+  end
+
+  # Total selector count across the protocol tree (the "all" filter row's count).
+  defp protocol_method_count(protocols) do
+    Enum.reduce(protocols, 0, fn p, acc -> acc + length(Map.get(p, "selectors", [])) end)
+  end
+
+  # A row is "runtime-only" (image-diverged, ADR 0096 / BT-2483) when its origin
+  # is `runtime` — in the live image with no static/disk source. The class tree
+  # and method list badge these so an observer sees what is not on disk.
+  defp runtime_only?(%{"origin" => "runtime"}), do: true
+  defp runtime_only?(_), do: false
 
   # ── tabbed method editor data model (BT-2494) ───────────────────────────────
   #
@@ -1311,6 +1570,248 @@ defmodule BtAttachWeb.WorkspaceLive do
     """
   end
 
+  # ── System Browser panes (BT-2491) ──────────────────────────────────────────
+
+  # The class tree pane: a Hierarchy / Category view toggle in the head, the
+  # class rows in the body, and the instance/class side toggle in the footer
+  # (the spike's ClassBrowser). Selecting a class fires `browser_select_class`;
+  # the view + side toggles are `browser_view` / `browser_side`. Runtime-only
+  # (image-diverged) classes carry a `runtime` badge.
+  attr :browser_view, :string, required: true
+  attr :browser_side, :string, required: true
+  attr :browser_classes, :list, required: true
+  attr :selected_class, :string, default: nil
+  attr :browser_error, :string, default: nil
+
+  defp system_browser_classes(assigns) do
+    ~H"""
+    <div id="system-browser" class="panel" style="flex:1;">
+      <div class="panel-head">
+        System Browser
+        <span class="spacer"></span>
+        <div class="seg" role="tablist" aria-label="Class tree view">
+          <button
+            :for={{view, label} <- [{"hierarchy", "Hier"}, {"category", "Cats"}]}
+            type="button"
+            role="tab"
+            class={[@browser_view == view && "on"]}
+            aria-selected={to_string(@browser_view == view)}
+            phx-click="browser_view"
+            phx-value-view={view}
+          >
+            {label}
+          </button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div :if={@browser_error} class="io-block err">{@browser_error}</div>
+        <%= if @browser_classes == [] do %>
+          <p :if={!@browser_error} class="muted-note">No classes in the image yet.</p>
+        <% else %>
+          <div class="tree">
+            <%= if @browser_view == "category" do %>
+              <div :for={{category, rows} <- category_groups(@browser_classes)} class="cat-group">
+                <div class="cat-row">{category}</div>
+                <.class_rows
+                  rows={Enum.map(rows, &{&1, 1})}
+                  selected_class={@selected_class}
+                  browser_side={@browser_side}
+                />
+              </div>
+            <% else %>
+              <.class_rows
+                rows={hierarchy_rows(@browser_classes)}
+                selected_class={@selected_class}
+                browser_side={@browser_side}
+              />
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+      <div class="actionbar sb-side">
+        <div class="seg" role="tablist" aria-label="Instance / class side">
+          <button
+            :for={side <- ~w(instance class)}
+            type="button"
+            role="tab"
+            class={[@browser_side == side && "on"]}
+            aria-selected={to_string(@browser_side == side)}
+            phx-click="browser_side"
+            phx-value-side={side}
+          >
+            {side}
+          </button>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Render a list of `{class_row, indent}` tuples — shared by the Hierarchy and
+  # Category views. The selected class is highlighted; an indented row reads as a
+  # subclass. A runtime-only class is badged; the class-side selection shows a
+  # `class` pill so the side is visible in the tree.
+  attr :rows, :list, required: true
+  attr :selected_class, :string, default: nil
+  attr :browser_side, :string, required: true
+
+  defp class_rows(assigns) do
+    ~H"""
+    <div
+      :for={{class, indent} <- @rows}
+      class={[
+        "row",
+        indent == 2 && "subclass2",
+        indent == 1 && "subclass",
+        @selected_class == class["name"] && "sel"
+      ]}
+      phx-click="browser_select_class"
+      phx-value-class={class["name"]}
+      title={class["name"]}
+    >
+      <span class="twig">{if class["superclass"], do: "→", else: "●"}</span>
+      <span class="cls">{class["name"]}</span>
+      <span :if={runtime_only?(class)} class="runtime-tag" title="runtime-only (not on disk)">
+        runtime
+      </span>
+      <span :if={@selected_class == class["name"] and @browser_side == "class"} class="pill">
+        class
+      </span>
+    </div>
+    """
+  end
+
+  # The protocol + method pane (the spike's MethodList): a protocol filter row
+  # ("all" + one row per protocol, BT-2491) over the method list for the current
+  # filter. Selecting a method fires `browser_select_method`; runtime-only methods
+  # are badged. Empty until a class is selected.
+  attr :browser_protocols, :list, required: true
+  attr :selected_protocol, :string, default: nil
+  attr :selected_class, :string, default: nil
+  attr :browser_side, :string, required: true
+  attr :browser_method, :map, default: nil
+
+  defp system_browser_methods(assigns) do
+    assigns =
+      assigns
+      |> assign(:methods, filtered_methods(assigns.browser_protocols, assigns.selected_protocol))
+      |> assign(:total_methods, protocol_method_count(assigns.browser_protocols))
+
+    ~H"""
+    <div class="panel" style="flex:1;">
+      <div class="panel-head">
+        <%= if @selected_class do %>
+          {if @browser_side == "class", do: @selected_class <> " class", else: @selected_class}
+        <% else %>
+          Protocols &amp; Methods
+        <% end %>
+        <span class="spacer"></span>
+        <span :if={@selected_class} class="count">{@total_methods} methods</span>
+      </div>
+      <div class="panel-body" style="display:flex; flex-direction:column;">
+        <%= if @selected_class == nil do %>
+          <div class="empty">Select a class to browse its methods.</div>
+        <% else %>
+          <%!-- protocol filter row: ∗ "all" + one row per protocol --%>
+          <div class="tree sb-protocols">
+            <div
+              class={["row", @selected_protocol == nil && "sel"]}
+              phx-click="browser_select_protocol"
+              phx-value-protocol=""
+            >
+              <span class="twig">∗</span>
+              <span>all</span>
+              <span class="meta">{@total_methods}</span>
+            </div>
+            <div
+              :for={proto <- @browser_protocols}
+              class={["row", @selected_protocol == proto["name"] && "sel"]}
+              phx-click="browser_select_protocol"
+              phx-value-protocol={proto["name"]}
+            >
+              <span class="twig">·</span>
+              <span>{proto["name"]}</span>
+              <span class="meta">{length(proto["selectors"] || [])}</span>
+            </div>
+          </div>
+          <%!-- method list for the active protocol filter --%>
+          <div class="tree">
+            <div :if={@methods == []} class="empty">No methods on the {@browser_side} side.</div>
+            <div
+              :for={m <- @methods}
+              class={[
+                "row method-row",
+                @browser_method && @browser_method["selector"] == m["selector"] &&
+                  @browser_method["side"] == @browser_side && "sel"
+              ]}
+              phx-click="browser_select_method"
+              phx-value-class={@selected_class}
+              phx-value-side={@browser_side}
+              phx-value-selector={m["selector"]}
+            >
+              <span class="twig" style="color: var(--accent);">ƒ</span>
+              <span class="mname mono">{m["selector"]}</span>
+              <span :if={runtime_only?(m)} class="runtime-tag">runtime</span>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  # The center method-source display (BT-2491): the selected method's
+  # image-accurate source, read-only, with a `Class instance » selector ·
+  # category` breadcrumb and image-diverged badges (runtime-only / unflushed
+  # patch). Read-only is enough until the tabbed editor consumes it in a
+  # follow-up issue. Renders nothing until a method is selected.
+  attr :browser_method, :map, default: nil
+
+  defp browser_method_source(assigns) do
+    ~H"""
+    <div :if={@browser_method} id="browse-method-source" class="panel" style="order:3; flex:none;">
+      <div class="panel-head">
+        Method Source
+        <span class="spacer"></span>
+        <span :if={@browser_method["disk_differs"] == true} class="runtime-tag" title="unflushed live patch">
+          unflushed
+        </span>
+        <span :if={runtime_only?(@browser_method)} class="runtime-tag" title="runtime-only (not on disk)">
+          runtime
+        </span>
+      </div>
+      <div class="editor-meta">
+        <% {bc_class, bc_side, bc_sel, bc_cat} = browse_breadcrumb(@browser_method) %>
+        <span class="crumb">
+          <b>{bc_class}</b>
+          <span class="mono sep-side">{bc_side}</span>
+          <span class="sep">»</span>
+          <span class="mono">{bc_sel}</span>
+          <span :if={bc_cat} class="meta-note">· {bc_cat}</span>
+        </span>
+      </div>
+      <div class="panel-body">
+        <%= if @browser_method["source"] do %>
+          <pre class="bt-source mono">{@browser_method["source"]}</pre>
+        <% else %>
+          <p class="muted-note">No source — runtime-only method (defined in the live image).</p>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
+
+  # The breadcrumb parts for a selected method: `Class instance » selector ·
+  # category` (BT-2491, the spike's crumb at app.jsx:401). `side` renders as the
+  # word "class"/"instance"; `category` is the method's protocol (nil when
+  # unknown, then the breadcrumb omits the `· category` segment).
+  defp browse_breadcrumb(method) do
+    {method["class"], side_label(method["side"]), method["selector"], method["protocol"]}
+  end
+
+  defp side_label("class"), do: "class"
+  defp side_label(_), do: "instance"
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -1341,17 +1842,26 @@ defmodule BtAttachWeb.WorkspaceLive do
         <%= if @connected do %>
           <%!-- ── three-column cockpit grid ──────────────────────────────── --%>
           <div class="cockpit">
-            <%!-- LEFT — System Browser (placeholder, 286px) + Tweaks panel --%>
+            <%!-- LEFT — System Browser (BT-2491, 286px) + Tweaks panel.
+                 A class tree (Hierarchy / Category views, instance/class side
+                 toggle) over a protocol-grouped method list, driven by the
+                 BT-2488 browse ops (ADR 0096). --%>
             <div class="col">
-              <div id="system-browser" class="panel" style="flex:1;">
-                <div class="panel-head">System Browser</div>
-                <div class="panel-body">
-                  <div class="placeholder">
-                    <span class="ph-title">System Browser</span>
-                    <span>Class hierarchy → protocol → methods.</span>
-                    <span>Lands in a later Phase 1 issue.</span>
-                  </div>
-                </div>
+              <div class="browser-split">
+                <.system_browser_classes
+                  browser_view={@browser_view}
+                  browser_side={@browser_side}
+                  browser_classes={@browser_classes}
+                  selected_class={@selected_class}
+                  browser_error={@browser_error}
+                />
+                <.system_browser_methods
+                  browser_protocols={@browser_protocols}
+                  selected_protocol={@selected_protocol}
+                  selected_class={@selected_class}
+                  browser_side={@browser_side}
+                  browser_method={@browser_method}
+                />
               </div>
 
               <.tweaks_panel />
@@ -1675,6 +2185,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <div :if={@flush_error} class="io-block err">{@flush_error}</div>
                 </div>
               </div>
+
+              <.browser_method_source browser_method={@browser_method} />
             </div>
 
             <%!-- RIGHT — Bindings + Inspector (348px), with ChangeLog + Transcript --%>
