@@ -63,6 +63,7 @@ Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Only use `stdlib/boots
 Version flows automatically at build time:
 - **Rust:** `build.rs` reads `VERSION` + git state → `BEAMTALK_VERSION` compile-time env var
 - **Erlang:** `.app.src` files use `{vsn, {cmd, "escript ../../../scripts/version.escript"}}`
+- **LiveView IDE (Elixir):** `editors/liveview/mix.exs` reads `VERSION` at compile time, so the `bt_attach` release/Docker tag tracks the toolchain version (BT-2514). It ships on its own release lane (BT-2512), not the core bundle.
 - **Dev builds** (not on a git tag): version becomes `0.3.0-dev+<short sha>`
 - **Release builds** (on a git tag): version is the clean `0.3.0`
 
@@ -75,7 +76,7 @@ Version flows automatically at build time:
 4. Update version references in docs (`README.md`, `docs/beamtalk-tooling.md`, `docs/beamtalk-language-features.md`, `docs/repl-protocol.md`, `docs/beamtalk-ddd-model.md`, `crates/beamtalk-examples/corpus.json`)
 5. Tag the release commit: `git tag v<version>`
 
-**Do not** manually edit version strings in `.app.src` files or `build_stdlib.rs` — they are derived from `VERSION` at build time.
+**Do not** manually edit version strings in `.app.src` files, `build_stdlib.rs`, or `editors/liveview/mix.exs` — they are derived from `VERSION` at build time.
 
 ## Issue Workflow (Linear)
 

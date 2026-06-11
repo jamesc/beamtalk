@@ -1,10 +1,23 @@
 defmodule BtAttach.MixProject do
   use Mix.Project
 
+  # Single source of truth: the repo-root VERSION file (CLAUDE.md "Versioning &
+  # Releases"). The LiveView IDE ships on its own release lane (BT-2512) but
+  # tracks the same version as the eval/Transcript surface it attaches to
+  # (BT-2394 spike, BT-2514), so it is read here at compile time rather than
+  # hand-edited. Artifact-level dev suffixing (`-dev+<sha>` off a release tag)
+  # is applied by the packaging lane (BT-2515/BT-2516), matching how the Erlang
+  # apps derive theirs via scripts/version.escript. The fallback keeps `mix`
+  # usable when the app is built outside the monorepo tree.
+  @version (case File.read(Path.expand("../../VERSION", __DIR__)) do
+              {:ok, contents} -> String.trim(contents)
+              {:error, _} -> "0.0.0"
+            end)
+
   def project do
     [
       app: :bt_attach,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
