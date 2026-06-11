@@ -74,8 +74,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "eval round-trip renders the workspace result term", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    html = view |> form("#eval-form") |> render_submit(%{expr: "3 + 4"})
-    assert html =~ "7"
+    view |> form("#eval-form") |> render_submit(%{expr: "3 + 4"})
+    # Scope the assertion to the result value element, NOT the whole page: the
+    # connected shell renders a session id (`phoenix-<integer>`) whose digits
+    # would let a bare `html =~ "7"` pass even when eval is completely broken and
+    # the result pane shows an error. The value span is the real signal — it must
+    # carry the computed `7` and there must be no error pane (BT-2496).
+    assert view |> element(".ws-result:not(.err) .val") |> render() =~ "7"
+    refute render(view) =~ "Empty expression"
   end
 
   test "eval state persists across evals within a session", %{conn: conn} do
@@ -83,8 +89,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Bind a variable, then read it back in a later eval on the same session.
     view |> form("#eval-form") |> render_submit(%{expr: "x := 21 * 2"})
-    html = view |> form("#eval-form") |> render_submit(%{expr: "x"})
-    assert html =~ "42"
+    view |> form("#eval-form") |> render_submit(%{expr: "x"})
+    # Result-scoped (see "eval round-trip" above) so a session-id digit can't
+    # spuriously satisfy the assertion when eval is broken.
+    assert view |> element(".ws-result:not(.err) .val") |> render() =~ "42"
   end
 
   test "Transcript output streams live into the LiveView", %{conn: conn} do
