@@ -1593,8 +1593,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     ~H"""
     <div id="system-browser" class="panel" style="flex:1;">
       <div class="panel-head">
-        System Browser
-        <span class="spacer"></span>
+        System Browser <span class="spacer"></span>
         <div class="seg" role="tablist" aria-label="Class tree view">
           <button
             :for={{view, label} <- [{"hierarchy", "Hier"}, {"category", "Cats"}]}
@@ -1777,12 +1776,19 @@ defmodule BtAttachWeb.WorkspaceLive do
     ~H"""
     <div :if={@browser_method} id="browse-method-source" class="panel" style="order:3; flex:none;">
       <div class="panel-head">
-        Method Source
-        <span class="spacer"></span>
-        <span :if={@browser_method["disk_differs"] == true} class="runtime-tag" title="unflushed live patch">
+        Method Source <span class="spacer"></span>
+        <span
+          :if={@browser_method["disk_differs"] == true}
+          class="runtime-tag"
+          title="unflushed live patch"
+        >
           unflushed
         </span>
-        <span :if={runtime_only?(@browser_method)} class="runtime-tag" title="runtime-only (not on disk)">
+        <span
+          :if={runtime_only?(@browser_method)}
+          class="runtime-tag"
+          title="runtime-only (not on disk)"
+        >
           runtime
         </span>
       </div>
