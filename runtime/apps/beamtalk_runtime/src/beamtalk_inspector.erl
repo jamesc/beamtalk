@@ -144,12 +144,16 @@ it targets another process, not the caller.
 -spec on(term(), term()) -> inspector().
 on(Subject, KnownState) when is_map(KnownState), map_size(KnownState) > 0 ->
     case actor_pid(Subject) of
-        {ok, Pid} ->
+        {ok, Pid} when Pid =:= self() ->
+            %% Self-inspection only: seed from the state the caller (the actor's
+            %% own handle_call) already holds, since `sys:get_state(self())`
+            %% would deadlock. A *different* pid must NOT be seeded with this
+            %% caller's state — it falls back to `on/1`'s guarded snapshot.
             case beamtalk_actor:is_beamtalk_actor(Pid) of
                 true -> actor_cursor_from_state(Pid, KnownState, nil, []);
                 false -> on(Subject)
             end;
-        not_actor ->
+        _ ->
             on(Subject)
     end;
 on(Subject, _KnownState) ->
