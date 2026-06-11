@@ -22,27 +22,12 @@ pub(crate) fn generate_exception_bif(
     params: &[String],
 ) -> Option<Document<'static>> {
     match selector {
-        "message" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('message', [], Self)",
-        )),
-        "hint" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('hint', [], Self)",
-        )),
-        "kind" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('kind', [], Self)",
-        )),
-        "selector" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('selector', [], Self)",
-        )),
-        "errorClass" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('errorClass', [], Self)",
-        )),
-        "printString" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('printString', [], Self)",
-        )),
-        "signal" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('signal', [], Self)",
-        )),
+        "message" | "hint" | "kind" | "selector" | "errorClass" | "printString" | "signal"
+        | "stackTrace" => Some(docvec![
+            "call 'beamtalk_exception_handler':'dispatch'(",
+            leaf::atom(selector.to_owned()),
+            ", [], Self)",
+        ]),
         "signal:" => {
             let p0 = param(params, 0, "_Msg");
             Some(docvec![
@@ -51,9 +36,6 @@ pub(crate) fn generate_exception_bif(
                 "], Self)",
             ])
         }
-        "stackTrace" => Some(Document::Str(
-            "call 'beamtalk_exception_handler':'dispatch'('stackTrace', [], Self)",
-        )),
         // BT-1524: Class-side signal primitives — raise exceptions without instance allocation.
         "classSignal:" => {
             let p0 = param(params, 0, "_Msg");
