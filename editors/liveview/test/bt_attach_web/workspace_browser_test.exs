@@ -135,7 +135,9 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # Build a live object graph: a Boxx actor holding a Leaf actor, both spawned on
     # the workspace node and bound in this session.
     |> eval_do("Actor subclass: Leaf\n  state: n = 99\n\n  n => self.n")
-    |> eval_do("Actor subclass: Boxx\n  state: item = nil\n\n  setItem: x => self.item := x\n  item => self.item")
+    |> eval_do(
+      "Actor subclass: Boxx\n  state: item = nil\n\n  setItem: x => self.item := x\n  item => self.item"
+    )
     |> eval_do("leaf := Leaf spawn")
     |> eval_do("box := Boxx spawn")
     |> eval_do("box setItem: leaf")
@@ -205,16 +207,24 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   # Set the Workspace editor's contents to exactly `source`.
   defp set_source(conn, source), do: set_text(conn, "#workspace-editor-source", source)
 
-  # Replace a `<textarea>`'s contents with `text`. Two wrinkles the connected IDE
-  # forces us to handle: the editor ships a starter expression (so it is never
-  # empty — `WorkspaceLive` `bind_session/3` / `init_tabs/1`), and each eval
-  # re-renders the form (LiveView patches `@expr`/`@edit_source` back in). So we
-  # let any in-flight patch settle, then select-all + type, which *replaces* the
-  # current value rather than prepending to it.
+  # Replace a `<textarea>`'s contents with exactly `text`. Two wrinkles the
+  # connected IDE forces us to handle: the editor ships a starter expression (so
+  # it is never empty — `WorkspaceLive` `bind_session/3` / `init_tabs/1`), and
+  # each eval re-renders the form (LiveView patches `@expr`/`@edit_source` back
+  # in). So we let any in-flight patch settle, then set the value + fire the
+  # `input` event the CodeEditor hook listens for in one atomic step — which
+  # *replaces* the contents deterministically, unlike select-all + type, whose
+  # caret/selection timing raced under CI load.
   defp set_text(conn, selector, text) do
     conn
-    |> evaluate("new Promise((resolve) => setTimeout(resolve, 200))")
-    |> press(selector, "ControlOrMeta+a")
-    |> type(selector, text)
+    |> evaluate("new Promise((resolve) => setTimeout(resolve, 300))")
+    |> evaluate("""
+    (() => {
+      const el = document.querySelector(#{Jason.encode!(selector)});
+      el.focus();
+      el.value = #{Jason.encode!(text)};
+      el.dispatchEvent(new Event("input", {bubbles: true}));
+    })()
+    """)
   end
 end
