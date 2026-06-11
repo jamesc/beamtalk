@@ -13,6 +13,7 @@ It delegates to beamtalk_workspace_meta for workspace metadata.
 """.
 
 -export([status/0, resolve_name/2, resolve_class_reference/2, resolve_singleton_instance/1]).
+-export([raise_undefined_variable/1]).
 
 -doc """
 Resolve a bare name against session locals + live workspace sources (ADR 0081).
@@ -25,6 +26,19 @@ classes → undefined_variable) shared with `Session resolve:`.
 -spec resolve_name(map(), atom()) -> term().
 resolve_name(Locals, Name) ->
     beamtalk_workspace_interface_primitives:resolve_name(Locals, Name).
+
+-doc """
+Raise the `undefined_variable` error for `Name` directly, bypassing the workspace
+resolution tiers (BT-2509).
+
+The REPL `self` codegen uses this on a bindings-map miss: a top-level `self` has
+no receiver and must be `undefined_variable`, NOT resolved through
+`resolve_name/2` — whose `bind:as:` tier would let a user binding named `self`
+silently shadow the reserved word.
+""".
+-spec raise_undefined_variable(atom()) -> no_return().
+raise_undefined_variable(Name) ->
+    beamtalk_error:raise(beamtalk_repl_errors:ensure_structured_error({undefined_variable, Name})).
 
 -doc """
 Resolve a capitalised class reference not found in the session locals (ADR 0081).

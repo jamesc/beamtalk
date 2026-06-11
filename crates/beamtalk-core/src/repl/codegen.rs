@@ -983,6 +983,27 @@ mod tests {
     }
 
     #[test]
+    fn repl_self_miss_raises_undefined_variable_not_resolve_name() {
+        // BT-2509: a top-level `self` resolves from the bindings map, but on a
+        // miss it must raise `undefined_variable` directly — never route through
+        // `resolve_name`, whose `bind:as:` tier would let a user binding named
+        // `self` silently shadow the reserved word.
+        let result = generate_repl_expression(&ident_expr("self"), "repl_self_test").unwrap();
+        assert!(
+            result.contains("'maps':'find'('self'"),
+            "self should be resolved from the bindings map"
+        );
+        assert!(
+            result.contains("'raise_undefined_variable'('self')"),
+            "a self miss should raise undefined_variable directly"
+        );
+        assert!(
+            !result.contains("'resolve_name'"),
+            "self must not fall through to resolve_name (bind:as: shadow)"
+        );
+    }
+
+    #[test]
     fn repl_module_structure() {
         let result = generate_repl_expression(&int_expr(1), "repl_mod_struct").unwrap();
         // Verify the essential Core Erlang module structure

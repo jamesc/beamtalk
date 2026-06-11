@@ -211,25 +211,25 @@ impl CoreErlangGenerator {
                     // BT-2503 (ADR 0095 §1): at the top level of a REPL eval there is
                     // no enclosing-method receiver, so a bare `Self` would be an
                     // unbound Core Erlang variable. Resolve `self` from the bindings
-                    // map instead (the same `maps:find` → `resolve_name` path a free
-                    // identifier takes), so the Inspector's value `evaluate:` can bind
-                    // `self` to the inspected value by passing `#{self => Value}`. A
-                    // bare `self` with no such binding falls through to
-                    // `resolve_name`, yielding an `undefined_variable` error rather
-                    // than a crash.
+                    // map instead, so the Inspector's value `evaluate:` can bind
+                    // `self` to the inspected value by passing `#{self => Value}`.
+                    // BT-2509: on a miss, raise `undefined_variable` directly rather
+                    // than routing through `resolve_name`, whose `bind:as:` tier would
+                    // let a user binding named `self` silently shadow the reserved
+                    // word. A top-level `self` with no `#{self => _}` binding is
+                    // genuinely undefined.
                     let state_var = self.current_state_var();
                     let resolved_var = self.fresh_var("Resolved");
                     Ok(docvec![
                         "case call 'maps':'find'('self', ",
-                        leaf::var(state_var.clone()),
+                        leaf::var(state_var),
                         ") of ",
                         "<{'ok', ",
                         leaf::var(resolved_var.clone()),
                         "}> when 'true' -> ",
                         leaf::var(resolved_var),
-                        " <'error'> when 'true' -> call 'beamtalk_workspace':'resolve_name'(",
-                        leaf::var(state_var),
-                        ", 'self') ",
+                        " <'error'> when 'true' -> ",
+                        "call 'beamtalk_workspace':'raise_undefined_variable'('self') ",
                         "end",
                     ])
                 } else {
