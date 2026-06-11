@@ -22,7 +22,27 @@ defmodule BtAttach.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      deps: deps()
+      deps: deps(),
+      releases: releases()
+    ]
+  end
+
+  # Self-contained, ERTS-embedded OTP release of the LiveView IDE (BT-2513).
+  #
+  # `MIX_ENV=prod mix release` (see `just dist-liveview`) produces
+  # `_build/prod/rel/bt_attach`, runnable with `bin/bt_attach start` and no
+  # Elixir/Mix on the host. The server is enabled at boot by `PHX_SERVER=true`
+  # (config/runtime.exs); OIDC / workspace-attach env (ADR 0091) is read there
+  # too, so the release honours the same configuration as `just web-remote`.
+  # This is the artifact the packaging lane ships (BT-2515 archive, BT-2516
+  # Docker) — the IDE's own release lane, never the core toolchain bundle
+  # (BT-2512).
+  defp releases do
+    [
+      bt_attach: [
+        include_executables_for: [:unix],
+        applications: [bt_attach: :permanent]
+      ]
     ]
   end
 

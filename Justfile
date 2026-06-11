@@ -216,6 +216,25 @@ web-remote name:
     mix assets.deploy
     exec mix phx.server
 
+# Build a self-contained, ERTS-embedded release of the LiveView IDE (BT-2513).
+# Bundles JS+CSS (minified, digested) and produces
+# editors/liveview/_build/prod/rel/bt_attach — runnable with no Elixir/Mix on
+# the host. This is the artifact the packaging lane ships (BT-2515 archive,
+# BT-2516 Docker), separate from the core `just dist` bundle (BT-2512).
+#   just dist-liveview
+[unix]
+[working-directory: 'editors/liveview']
+dist-liveview:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export MIX_ENV=prod
+    echo "📦 Building LiveView IDE release (bt_attach)..."
+    mix deps.get --only prod
+    mix assets.deploy
+    mix release --overwrite
+    echo "✅ LiveView IDE release at editors/liveview/_build/prod/rel/bt_attach"
+    echo "   Run: PHX_SERVER=true SECRET_KEY_BASE=... _build/prod/rel/bt_attach/bin/bt_attach start"
+
 # Build Erlang runtime
 [working-directory: 'runtime']
 build-erlang:
