@@ -28,6 +28,133 @@ defmodule BtAttachWeb.WorkspaceLive do
   All workspace interaction goes through `BtAttach.Workspace`, which talks to
   the workspace node via Erlang distribution + `:rpc`. The data path carries
   live Erlang terms; JSON lives only at the browser WebSocket edge.
+
+  ## Cockpit shell (BT-2484, epic BT-2482 Phase 1)
+
+  `render/1` is the cockpit shell: a 46px top bar over a three-column grid —
+  System Browser (286px) | editor + Workspace dock | Bindings + Inspector
+  (348px) — ported from `spikes/cockpit-ux-spike/`. Theme/accent/syntax are all
+  driven by CSS variables (`assets/css/app.css`) so a later Tweaks panel can
+  re-skin the IDE by toggling `data-theme` on the document. Phase 1 lays the
+  shell + theming foundation; the System Browser, Workspace, Bindings, and
+  Inspector panes build on the placeholder regions (`#system-browser`,
+  `#workspace-dock`, `#bindings-panel`, `#inspector-panel`, `#method-editor`)
+  in later Phase 1 issues. The behaviour (events, assigns, term rendering) is
+  unchanged — this issue re-skins markup. (The standalone `#changes-panel` /
+  `#transcript-panel` footer regions were folded into the tabbed Workspace dock
+  in BT-2490 — see below.)
+
+  ## Bindings + Inspector restyle (BT-2486, epic BT-2482 Phase 1)
+
+  `#bindings-panel` and `#inspector-panel` are restyled to the spike design
+  (`spikes/cockpit-ux-spike/inspector.jsx`), preserving the existing
+  `inspect`/`drill` behaviour and `render_term`-based value rendering:
+
+    * Bindings render as a spike `obj-list` — one `obj-row` per binding showing
+      `name := printString` with a type/kind chip (`term_kind/1`). Object-valued
+      rows are clickable (the existing `inspect` event by name) and keep the
+      explicit "Inspect →" affordance.
+    * The Inspector head shows the live `printString`, class/pid type chips
+      (`proc-chips`), and a reference-following drill breadcrumb (`insp-crumbs`,
+      assign `:inspect_crumbs`) — clicking an earlier crumb (`crumb` event)
+      re-inspects that level via the same read-surface path. Fields render in the
+      spike `ivar-table`; object-valued slots are `drillable` rows carrying a
+      `follow →` link that fires the existing `drill` event.
+
+  Phase-1 scope deliberately excludes the spike's live-tracking affordances
+  (field-flash, freeze/snapshot, pid stats, message poke) — those are
+  BT-2489/BT-2492, blocked on ADR BT-2397.
+
+  ## JS hook foundation (BT-2485, epic BT-2482 Phase 1)
+
+  The cockpit's client-side behaviour rides three LiveView JS hooks, registered
+  on the `LiveSocket` in `assets/js/app.js` and referenced via `phx-hook`:
+
+    * `CodeEditor` — a syntax-highlighting editor overlay. A transparent
+      `<textarea>` sits over a `<pre>` the hook paints with the Beamtalk
+      highlighter (`assets/js/hooks/highlight.js`); `.tok-*` colours resolve the
+      themed `--t-*` CSS variables. The method-editor `source` field
+      (`#method-editor-overlay`) uses it; the Workspace dock's editor
+      (`#workspace-editor-overlay`, BT-2490) does too.
+    * `KeyboardShortcuts` — maps Cmd/Ctrl chords to actions from a
+      `data-shortcuts` JSON map. The method-editor form binds ⌘S → `submit`
+      (request-submits the form so class/selector/source ride the normal
+      `save_method` `phx-submit`); the Workspace dock binds ⌘D/⌘P/⌘I →
+      `submit:<action>` (BT-2490), riding the eval form's hidden `action` field.
+    * `SelectionTracker` — reports the editor textarea's selection
+      (`{text, start, end}`) via the `select_source` event, held in
+      `:edit_selection` so a later pane can evaluate the selection vs the buffer.
+
+  ## Tweaks panel (BT-2487, epic BT-2482 Phase 1)
+
+  The left column carries a **Tweaks** panel (`tweaks_panel/1`) — the cockpit's
+  appearance controls, ported from the spike (`spikes/cockpit-ux-spike`): a
+  theme picker (paper/squeak/dusk), accent swatches, syntax-palette mode
+  (warm/mono/vivid), density (cozy/compact), and UI-font + code-font dropdowns.
+  It is **pure presentation** — the `TweaksPanel` JS hook
+  (`assets/js/hooks/tweaks_panel.js`) reads each control's `data-tweak`, flips
+  the matching `:root` CSS variable that BT-2484 defined (`data-theme`,
+  `data-density`, `--ui-font`, `--code-font`, `--accent`, the syntax `--t-*`
+  palette), and persists to `localStorage`, so no change round-trips to the
+  server and the panel carries no socket state beyond the static defaults.
+
+  ## Workspace dock (BT-2490, epic BT-2482 Phase 1)
+
+  The center-bottom region (`#workspace-dock`) is the spike's **tabbed dock**
+  (`spikes/cockpit-ux-spike/app.jsx`), merging the previously-separate eval area,
+  Transcript, and Changes panes into one panel switched by `dock_tab` (held in
+  `:dock_tab`, default `"workspace"`):
+
+    * **Workspace** — a highlighted code editor (the BT-2485 `CodeEditor` overlay
+      + `SelectionTracker`) wrapped in the eval `<form>` (`#eval-form`,
+      `phx-submit="eval"`, field `expr`), with three actions that ride the same
+      submit via an `action` field: **Do it** (⌘D — evaluate for side effects),
+      **Print it** (⌘P — evaluate and show the result term), and **Inspect it**
+      (⌘I — evaluate and open the result in the Inspector). All three reuse the
+      existing `eval` op + `render_term`; inspectIt reuses `inspect_term/4`. They
+      evaluate the editor's tracked selection if there is one (its own
+      `SelectionTracker` → `select_workspace` → `:ws_selection`, kept separate
+      from the method editor's `:edit_selection`), else the whole buffer.
+    * **Transcript** — the live `Transcript show:` stream (`#transcript`,
+      `phx-update="stream"`), wired via the BT-2399 subscription facade, unchanged.
+    * **Changes** — the workspace ChangeLog viewer (`Workspace changes`, ADR 0082).
+
+  The eval form stays the FIRST `<form>` on the page so the e2e tests'
+  `form("#eval-form")` (and `form("form")`) resolve to it; the Method Editor form
+  follows. A plain submit (no `action`) defaults to printIt — the historical eval
+  behaviour the BT-2407/2408/2410 tests assert on.
+
+  ## Tabbed method editor (BT-2494, epic BT-2482 Phase 2)
+
+  The center `#method-editor` panel is the spike's **tabbed write-surface**
+  (`spikes/cockpit-ux-spike/app.jsx`, ADR 0082): a tab strip over a breadcrumb
+  over the BT-2485 highlighted editor. The open-tab list is `:tabs` (each a map
+  with `id`, `kind` (`:method | :def`), `class`, `side`, `selector`, `source`,
+  `base`, `dirty`) and the focused id is `:active_tab`:
+
+    * **Tab strip** — one tab per open method *or* class definition, each with a
+      `.modot` dirty dot (unsaved edits) and a close `×` (the strip always keeps
+      ≥1 tab). A `+ def` affordance opens (or re-focuses) the active class's
+      definition tab. `tab_select` / `tab_close` / `open_definition` are pure
+      view state — no workspace round-trip.
+    * **Compile (⌘S)** — the single `save_method` form is preserved verbatim
+      (`id`, `phx-submit="save_method"`, ⌘S via `KeyboardShortcuts`, the
+      `class`/`selector`/`source` fields) so the BT-2409 e2e flows keep working.
+      The active tab id rides as a hidden `tab` field; `save_method/5` reads the
+      tab's *kind* (not the payload shape) to route: a method tab drives the
+      write-surface `save` op (compile + flush, ADR 0082), a class-definition tab
+      `eval`s its whole definition (compiling the class) — neither invents a new
+      server op. The historical no-tab payload (`tab` absent) takes the method
+      path unchanged.
+    * **Dirty tracking** — the form's `phx-debounce`d `phx-change="edit_source"`
+      reports live edits; `track_edit/2` flips the active tab's `dirty` when its
+      `source` diverges from the last-compiled `base`, and a successful compile
+      (`compile_clean/3`) clears the dot + re-bases. To avoid caret-jump we do
+      NOT echo the live value back into the textarea on change — the element is
+      re-keyed on `@active_tab`, so switching tabs remounts it with the new tab's
+      source.
+    * **Breadcrumb** — `Class › side › selector` for the active tab (a class
+      definition shows `Class › class definition`).
   """
   use BtAttachWeb, :live_view
 
@@ -53,6 +180,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     # NOT create a workspace session, or every page load would leak an orphaned
     # one. The per-tab resume token is only present on the connected mount (it
     # rides the LiveSocket `params`), so `get_connect_params/1` is the right read.
+    # The page title flows into the root layout `<.live_title>` and is the
+    # canonical "Beamtalk Workspace" string the HTTP-render tests assert on
+    # (rbac_web/oidc_flow/session_lifecycle). Set it on BOTH mounts so the
+    # disconnected render carries it too.
+    socket = assign(socket, :page_title, "Beamtalk Workspace")
+
     if connected?(socket) do
       token = connect_token(socket)
       attach(assign(socket, :token, token))
@@ -175,13 +308,30 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:output, nil)
       |> assign(:error, nil)
       |> assign(:expr, "3 + 4")
+      # Workspace dock active tab (BT-2490): Workspace | Transcript | Changes.
+      |> assign(:dock_tab, "workspace")
       |> assign(:inspect_target, nil)
       |> assign(:inspect_rows, [])
       |> assign(:inspect_error, nil)
+      # Drill breadcrumb (BT-2486): the trail of references followed so far, each
+      # carrying the live term so a crumb click re-inspects that level. Reset when
+      # inspection starts from a binding, appended to when a field is drilled.
+      |> assign(:inspect_crumbs, [])
       # Method editor (Wave 3): the write-surface edit/save/flush pane.
       |> assign(:edit_class, "")
       |> assign(:edit_selector, "")
       |> assign(:edit_source, "")
+      # Tabbed method editor (BT-2494, epic BT-2482 Phase 2): the spike's
+      # write-surface tab strip (ADR 0082). `:tabs` is the ordered open-tab list;
+      # `:active_tab` is the id of the focused tab. Each tab carries its own
+      # source/base/dirty so switching tabs swaps the whole edit buffer, and a
+      # dirty dot per tab tracks unsaved edits (cleared on a successful compile).
+      |> init_tabs()
+      # Method-editor selection (BT-2485), reported by the SelectionTracker hook.
+      |> assign(:edit_selection, nil)
+      # Workspace-editor selection (BT-2490): the dock's own SelectionTracker,
+      # kept separate so the method editor's selection can't leak into an eval.
+      |> assign(:ws_selection, nil)
       |> assign(:save_result, nil)
       |> assign(:save_error, nil)
       |> assign(:flush_result, nil)
@@ -222,20 +372,31 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp force_close(_token, _pid), do: :ok
 
+  # The Workspace dock's three actions (BT-2490) all evaluate the entered code (or
+  # the tracked selection, the spike's "evaluates selection vs buffer") and differ
+  # only in what they do with the result term — so they ride the SAME `eval`
+  # facade op and the existing `render_term` formatting rather than inventing new
+  # server ops:
+  #
+  #   * doIt      (⌘D) — evaluate for side effects; show a terse "✓ evaluated".
+  #   * printIt   (⌘P) — evaluate and show the result term (the classic eval).
+  #   * inspectIt (⌘I) — evaluate, then inspect the *result term* in the Inspector
+  #     (reuses `inspect_term/4`, the same read-surface path bindings drill into).
+  #
+  # The clicked action rides the eval `<form>` submit as the `action` field; a
+  # plain submit (or the e2e test's `render_submit(%{expr: …})`) carries no action
+  # and defaults to printIt — the historical eval behaviour the tests assert on.
   @impl true
-  def handle_event("eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
+  def handle_event("eval", %{"expr" => expr} = params, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+    action = eval_action(params)
+    target = eval_target(expr, socket)
+
+    case Facade.dispatch(:eval, %{session_pid: pid, code: target}, ctx(socket)) do
       {:ok, term, output, _warnings} ->
         # eval returns the live term; rendering is display-only and reuses the
         # workspace's own formatter for surface-consistency with the browser.
-        {:noreply,
-         assign(socket,
-           result: Workspace.render_term(term),
-           output: present(output),
-           error: nil,
-           expr: expr
-         )}
+        {:noreply, eval_success(socket, action, term, output, expr)}
 
       {:error, reason, output, _warnings} ->
         {:noreply,
@@ -263,6 +424,17 @@ defmodule BtAttachWeb.WorkspaceLive do
      assign(socket, result: nil, output: nil, error: "not attached to workspace", expr: expr)}
   end
 
+  # Switch the Workspace dock's active tab (Workspace / Transcript / Changes,
+  # BT-2490). Pure view state — no workspace round-trip; an unknown tab is
+  # ignored rather than rendered, so a crafted value can't blank the dock.
+  @impl true
+  def handle_event("dock_tab", %{"tab" => tab}, socket)
+      when tab in ~w(workspace transcript changes) do
+    {:noreply, assign(socket, dock_tab: tab)}
+  end
+
+  def handle_event("dock_tab", _params, socket), do: {:noreply, socket}
+
   # Inspect a binding by name: look up its live term and drill into it via the
   # read-surface `inspect` op. Reference-following starts here.
   @impl true
@@ -281,13 +453,29 @@ defmodule BtAttachWeb.WorkspaceLive do
     # crash the LiveView (`String.to_integer/1` would raise on non-digits).
     with {i, ""} when i >= 0 <- Integer.parse(index),
          %{term: term, name: name} <- Enum.at(rows, i) do
-      {:noreply, inspect_term(socket, name, term)}
+      # Following a reference extends the drill breadcrumb one level deeper.
+      crumbs = socket.assigns.inspect_crumbs ++ [%{label: to_string(name), term: term}]
+      {:noreply, inspect_term(socket, name, term, crumbs)}
     else
       _ -> {:noreply, socket}
     end
   end
 
   def handle_event("drill", _params, socket), do: {:noreply, socket}
+
+  # Jump back to an earlier level of the drill breadcrumb (BT-2486): truncate the
+  # trail at the clicked crumb and re-inspect that level's live term. Defensive
+  # against a client-supplied index that no longer maps to a crumb.
+  def handle_event("crumb", %{"index" => index}, %{assigns: %{inspect_crumbs: crumbs}} = socket) do
+    with {i, ""} when i >= 0 <- Integer.parse(index),
+         %{term: term, label: label} <- Enum.at(crumbs, i) do
+      {:noreply, inspect_term(socket, label, term, Enum.take(crumbs, i + 1))}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("crumb", _params, socket), do: {:noreply, socket}
 
   # ── method editor (Wave 3, write-surface ADR 0082) ──────────────────────────
 
@@ -300,19 +488,66 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def handle_event(
         "save_method",
-        %{"class" => class, "selector" => selector, "source" => source},
+        %{"class" => class, "selector" => selector, "source" => source} = params,
         socket
       )
       when is_binary(class) and is_binary(selector) and is_binary(source) do
-    {:noreply, save_method(socket, class, selector, source)}
+    # The active tab's id rides the form as a hidden field (BT-2494) so a
+    # successful compile clears *that* tab's dirty dot and refreshes its base.
+    # The historical save_method payload (the BT-2409 e2e) carries no tab id —
+    # `params["tab"]` is then nil and the save still works, just without a tab
+    # to reconcile.
+    {:noreply, save_method(socket, class, selector, source, params["tab"])}
   end
 
   # Malformed payload (missing keys or non-binary values): never let a crafted
-  # form event crash the LiveView — `save_method/4` calls `String.trim/1`, which
+  # form event crash the LiveView — `save_method/5` calls `String.trim/1`, which
   # would raise on a non-binary. Surface a validation error instead.
   def handle_event("save_method", _params, socket) do
     {:noreply, assign(socket, save_result: nil, save_error: "Invalid method form payload.")}
   end
+
+  # ── tabbed method editor (BT-2494, epic BT-2482 Phase 2) ────────────────────
+
+  # Switch the focused editor tab. Pure view state — no workspace round-trip; an
+  # id that no longer maps to an open tab is ignored rather than blanking the
+  # editor. Switching also re-syncs the visible class/selector/source assigns
+  # (which the save_method form reads) to the newly-active tab.
+  def handle_event("tab_select", %{"id" => id}, socket) do
+    {:noreply, activate_tab(socket, id)}
+  end
+
+  def handle_event("tab_select", _params, socket), do: {:noreply, socket}
+
+  # Close a tab (the spike's × affordance). The last tab is never closable — the
+  # editor always holds ≥1 tab — so a close request that would empty the strip is
+  # ignored. Closing the active tab moves focus to the previous (or first)
+  # remaining tab.
+  def handle_event("tab_close", %{"id" => id}, socket) do
+    {:noreply, close_tab(socket, id)}
+  end
+
+  def handle_event("tab_close", _params, socket), do: {:noreply, socket}
+
+  # Open a fresh class-definition tab (the spike's "+ def" affordance): a tab
+  # whose source is a *class definition* rather than a method body, so saving it
+  # compiles the class. The class name comes from the active tab (so "+ def"
+  # opens the definition of the class you're editing); a definition tab already
+  # open for that class is re-focused rather than duplicated.
+  def handle_event("open_definition", _params, socket) do
+    {:noreply, open_definition(socket)}
+  end
+
+  # Track edits to the active tab so its dirty dot reflects unsaved changes
+  # (BT-2494). The save_method form's `phx-change` reports the live source on
+  # each keystroke; we stash it on the active tab and recompute its dirty flag
+  # (source != the last-compiled base). Client-supplied, so a non-binary / absent
+  # source is ignored rather than crashing.
+  def handle_event("edit_source", %{"source" => source}, socket) when is_binary(source) do
+    {:noreply, track_edit(socket, source)}
+  end
+
+  def handle_event("edit_source", _params, socket), do: {:noreply, socket}
 
   # Flush all pending durable changes to disk ("Save All to Disk", ADR 0082
   # `Workspace flush`). The summary's conflicts/skipped lists carry recoverable
@@ -320,6 +555,43 @@ defmodule BtAttachWeb.WorkspaceLive do
   def handle_event("flush", _params, socket) do
     {:noreply, flush_changes(socket)}
   end
+
+  # Selection tracking (BT-2485): the SelectionTracker JS hook reports the
+  # method-editor textarea's current selection (text + offsets). We hold it in
+  # `edit_selection` so a later pane can evaluate the selected expression rather
+  # than the whole buffer (the spike's "evaluates selection" vs "evaluates
+  # buffer" distinction). The payload is client-supplied, so accept only the
+  # well-formed shape and ignore anything else rather than crash the LiveView.
+  def handle_event("select_source", %{"text" => text} = params, socket)
+      when is_binary(text) do
+    selection = %{
+      text: text,
+      start: clamp_offset(params["start"]),
+      end: clamp_offset(params["end"])
+    }
+
+    {:noreply, assign(socket, edit_selection: selection)}
+  end
+
+  def handle_event("select_source", _params, socket), do: {:noreply, socket}
+
+  # Selection tracking for the Workspace dock's editor (BT-2490). Tracked in a
+  # SEPARATE assign (`ws_selection`) from the method editor's `edit_selection` so
+  # the dock's doIt/printIt/inspectIt evaluate *this* editor's selection — a
+  # selection left in the method editor must not leak into a Workspace eval. Same
+  # defensive shape as `select_source`.
+  def handle_event("select_workspace", %{"text" => text} = params, socket)
+      when is_binary(text) do
+    selection = %{
+      text: text,
+      start: clamp_offset(params["start"]),
+      end: clamp_offset(params["end"])
+    }
+
+    {:noreply, assign(socket, ws_selection: selection)}
+  end
+
+  def handle_event("select_workspace", _params, socket), do: {:noreply, socket}
 
   # Transcript push, delivered directly over distribution to this LiveView pid.
   @impl true
@@ -388,17 +660,97 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp facade_error(:forbidden_op), do: "Operation not permitted."
   defp facade_error(reason), do: Workspace.render_error(reason)
 
+  # ── Workspace dock actions (BT-2490) ────────────────────────────────────────
+
+  # Which dock action the eval submit carried. The clicked action button rides
+  # the form as `action`; a plain submit (the e2e `render_submit(%{expr: …})`)
+  # carries none and defaults to printIt — the historical eval behaviour.
+  defp eval_action(%{"action" => action}) when action in ~w(do_it print_it inspect_it),
+    do: action
+
+  defp eval_action(_params), do: "print_it"
+
+  # The code an action evaluates: the Workspace editor's tracked selection if
+  # there is one (the spike's "evaluates selection"), else the whole entered
+  # buffer ("evaluates buffer"). The Workspace editor's SelectionTracker keeps
+  # `ws_selection` current (distinct from the method editor's `edit_selection`);
+  # an empty or whitespace-only selection falls back to the buffer.
+  defp eval_target(expr, socket) do
+    if ws_selection?(socket.assigns), do: socket.assigns.ws_selection.text, else: expr
+  end
+
+  # Whether the Workspace editor has a non-blank selection to evaluate. Takes the
+  # bare `assigns` so the render template can call it directly too.
+  defp ws_selection?(assigns) do
+    case assigns[:ws_selection] do
+      %{text: text} when is_binary(text) -> String.trim(text) != ""
+      _ -> false
+    end
+  end
+
+  # Render an eval success according to the chosen action, reusing the existing
+  # `render_term` formatting and (for inspectIt) the same `inspect_term/4`
+  # read-surface path bindings drill through:
+  #
+  #   * print_it   — show the result term (classic eval; the default).
+  #   * do_it      — evaluate for side effects; show a terse confirmation only.
+  #   * inspect_it — show the term AND open it in the Inspector (when inspectable).
+  defp eval_success(socket, "do_it", _term, output, expr) do
+    assign(socket, result: "✓ evaluated", output: present(output), error: nil, expr: expr)
+  end
+
+  defp eval_success(socket, "inspect_it", term, output, expr) do
+    socket
+    |> assign(
+      result: Workspace.render_term(term),
+      output: present(output),
+      error: nil,
+      expr: expr
+    )
+    |> inspect_term("→ result", term, [%{label: "→ result", term: term}])
+  end
+
+  # print_it (and the historical default).
+  defp eval_success(socket, _print_it, term, output, expr) do
+    assign(socket,
+      result: Workspace.render_term(term),
+      output: present(output),
+      error: nil,
+      expr: expr
+    )
+  end
+
   # Blank captured output is not worth rendering a pane for.
   defp present(""), do: nil
   defp present(nil), do: nil
   defp present(output) when is_binary(output), do: output
 
+  # Normalise a client-supplied selection offset to a non-negative integer (or
+  # nil). The SelectionTracker hook sends integer offsets, but the payload is
+  # untrusted, so a missing / negative / non-integer value collapses to nil.
+  defp clamp_offset(n) when is_integer(n) and n >= 0, do: n
+  defp clamp_offset(_), do: nil
+
   # ── method editor helpers (Wave 3) ──────────────────────────────────────────
+
+  # Compile (⌘S) the active tab's source. A class-definition tab evals its whole
+  # definition (compiling the class); a method tab drives the write-surface
+  # `save` install chokepoint (compile + flush). The tab kind is read from the
+  # open-tab list by id — NOT inferred from the payload — so the historical
+  # method save_method payload (no tab id, the BT-2409 e2e) keeps its exact
+  # behaviour. On success the matching tab's dirty dot clears and its base source
+  # is updated to the compiled text.
+  defp save_method(socket, class, selector, source, tab_id) do
+    case tab_id && find_tab(socket, tab_id) do
+      %{kind: :def} = tab -> save_definition(socket, tab, source)
+      _ -> save_method_body(socket, class, selector, source, tab_id)
+    end
+  end
 
   # Validate the edit form, then drive the write-surface save. Empty class or
   # selector is a local validation error (rendered without a round-trip); a real
   # save threads the body value straight to the workspace install chokepoint.
-  defp save_method(socket, class, selector, source) do
+  defp save_method_body(socket, class, selector, source, tab_id) do
     class = String.trim(class)
     selector = String.trim(selector)
 
@@ -424,7 +776,9 @@ defmodule BtAttachWeb.WorkspaceLive do
              ) do
           {:ok, saved_class} ->
             # The patch is live + logged; refresh the change-history pane so the
-            # new entry is visible (ChangeLog coherence).
+            # new entry is visible (ChangeLog coherence). A successful compile
+            # also clears the active tab's dirty dot and re-bases it on the
+            # compiled source.
             socket
             |> assign(
               save_result: "Saved #{selector} on #{saved_class}",
@@ -432,6 +786,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               flush_result: nil,
               flush_error: nil
             )
+            |> compile_clean(tab_id, source)
             |> assign_changes()
 
           {:error, reason} ->
@@ -439,6 +794,48 @@ defmodule BtAttachWeb.WorkspaceLive do
             # event from a read-only role, or a workspace #beamtalk_error{}.
             assign(socket, save_result: nil, save_error: facade_error(reason))
         end
+    end
+  end
+
+  # Compile a class-definition tab (BT-2494) by evaluating its definition source
+  # against the workspace — exactly the path the e2e tests use to define a class,
+  # so "saving a class definition compiles the class" needs no new server op
+  # (ADR 0082; the `eval` facade op). An empty body is a local validation error;
+  # a compile failure renders the structured `#beamtalk_error{}`.
+  defp save_definition(socket, tab, source) do
+    socket = assign(socket, edit_source: source)
+    pid = socket.assigns[:session_pid]
+
+    cond do
+      String.trim(source) == "" ->
+        assign(socket, save_result: nil, save_error: "Enter a class definition to compile.")
+
+      not is_pid(pid) ->
+        assign(socket, save_result: nil, save_error: "not attached to workspace")
+
+      true ->
+        save_definition_eval(socket, tab, source, pid)
+    end
+  end
+
+  defp save_definition_eval(socket, tab, source, pid) do
+    case Facade.dispatch(:eval, %{session_pid: pid, code: source}, ctx(socket)) do
+      {:ok, _term, _output, _warnings} ->
+        socket
+        |> assign(
+          save_result: "Compiled #{tab.class}",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil
+        )
+        |> compile_clean(tab.id, source)
+        |> assign_changes()
+
+      {:error, reason, _output, _warnings} ->
+        assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
+
+      {:error, reason} ->
+        assign(socket, save_result: nil, save_error: facade_error(reason))
     end
   end
 
@@ -469,6 +866,161 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # ── tabbed method editor data model (BT-2494) ───────────────────────────────
+  #
+  # A tab is a plain map; the open-tab list lives in `:tabs` and the focused
+  # tab's id in `:active_tab`. The visible class/selector/source assigns (which
+  # the save_method form binds) always mirror the active tab, so the existing
+  # write-surface handler reads them unchanged.
+  #
+  #   %{
+  #     id: stable string id (method-key or "def:<Class>"),
+  #     kind: :method | :def,
+  #     class: "Counter",
+  #     side: "instance" | "class",     # methods only
+  #     selector: "increment",          # methods only
+  #     source: live edit buffer,
+  #     base: last-compiled source (dirty = source != base),
+  #     dirty: boolean
+  #   }
+  #
+  # The cockpit opens with one starter method tab so the editor is never empty
+  # (the strip always holds ≥1 tab) and the ⌘S / Save Method e2e flow has a tab
+  # to compile into.
+
+  defp init_tabs(socket) do
+    tab = %{
+      id: "method:Counter:instance:increment",
+      kind: :method,
+      class: "Counter",
+      side: "instance",
+      selector: "increment",
+      source: "",
+      base: "",
+      dirty: false
+    }
+
+    socket
+    |> assign(:tabs, [tab])
+    |> assign(:active_tab, tab.id)
+  end
+
+  defp find_tab(socket, id), do: Enum.find(socket.assigns.tabs, &(&1.id == id))
+
+  # The focused tab. Takes the bare `assigns` (not the socket) so the render
+  # template can call it for the breadcrumb / dirty-state too; falls back to the
+  # first tab if the active id somehow no longer maps (the strip is never empty).
+  defp active_tab(%{tabs: tabs, active_tab: id}) do
+    Enum.find(tabs, &(&1.id == id)) || List.first(tabs)
+  end
+
+  # Focus a tab by id and mirror its class/selector/source into the form-backing
+  # assigns. Clears any stale save/flush result so switching tabs starts clean.
+  defp activate_tab(socket, id) do
+    case find_tab(socket, id) do
+      nil -> socket
+      tab -> sync_active(assign(socket, :active_tab, id), tab)
+    end
+  end
+
+  # Push the active tab's fields into the form-backing assigns so the (single)
+  # save_method form always reflects the focused tab.
+  defp sync_active(socket, tab) do
+    assign(socket,
+      edit_class: tab.class,
+      edit_selector: tab.selector || "",
+      edit_source: tab.source,
+      save_result: nil,
+      save_error: nil,
+      flush_result: nil,
+      flush_error: nil
+    )
+  end
+
+  # Close a tab, keeping at least one open. Closing the active tab moves focus to
+  # the previous remaining tab (or the first), re-syncing the form assigns.
+  defp close_tab(socket, id) do
+    tabs = socket.assigns.tabs
+
+    if length(tabs) <= 1 or not Enum.any?(tabs, &(&1.id == id)) do
+      socket
+    else
+      idx = Enum.find_index(tabs, &(&1.id == id))
+      remaining = List.delete_at(tabs, idx)
+      socket = assign(socket, :tabs, remaining)
+
+      if socket.assigns.active_tab == id do
+        next = Enum.at(remaining, max(idx - 1, 0))
+        sync_active(assign(socket, :active_tab, next.id), next)
+      else
+        socket
+      end
+    end
+  end
+
+  # Open (or re-focus) a class-definition tab for the active tab's class. A def
+  # tab evals its definition source on compile (saving compiles the class).
+  defp open_definition(socket) do
+    class = active_tab(socket.assigns).class
+    id = "def:" <> class
+
+    case find_tab(socket, id) do
+      %{} ->
+        activate_tab(socket, id)
+
+      nil ->
+        tab = %{
+          id: id,
+          kind: :def,
+          class: class,
+          side: nil,
+          selector: nil,
+          source: "",
+          base: "",
+          dirty: false
+        }
+
+        socket
+        |> assign(:tabs, socket.assigns.tabs ++ [tab])
+        |> assign(:active_tab, id)
+        |> sync_active(tab)
+    end
+  end
+
+  # Record a keystroke edit on the active tab and recompute its dirty flag
+  # (source != last-compiled base). We deliberately do NOT re-assign
+  # `:edit_source` here: echoing the live value back would make LiveView patch
+  # the textarea mid-typing and jump the caret. The tab's `source` is the truth
+  # the next compile / tab-switch reads; `:edit_source` is only the *initial*
+  # textarea value, re-synced when a tab is (re)focused (the element is re-keyed
+  # on `@active_tab`, so a fresh mount picks it up).
+  defp track_edit(socket, source) do
+    update_active_tab(socket, fn tab -> %{tab | source: source, dirty: source != tab.base} end)
+  end
+
+  # After a successful compile, clear the saved tab's dirty dot and re-base it on
+  # the compiled source. `tab_id` is nil for the historical no-tab save payload —
+  # then there's nothing to reconcile.
+  defp compile_clean(socket, nil, _source), do: socket
+
+  defp compile_clean(socket, tab_id, source) do
+    update_active_tab_by_id(socket, tab_id, fn tab ->
+      %{tab | source: source, base: source, dirty: false}
+    end)
+  end
+
+  defp update_active_tab(socket, fun),
+    do: update_active_tab_by_id(socket, socket.assigns.active_tab, fun)
+
+  defp update_active_tab_by_id(socket, id, fun) do
+    tabs = Enum.map(socket.assigns.tabs, fn t -> if t.id == id, do: fun.(t), else: t end)
+    assign(socket, :tabs, tabs)
+  end
+
+  # The Class › side › selector breadcrumb label parts for the active tab.
+  defp breadcrumb(%{kind: :def, class: class}), do: {class, nil, "class definition"}
+  defp breadcrumb(%{class: class, side: side, selector: selector}), do: {class, side, selector}
+
   # ── bindings + inspector helpers ────────────────────────────────────────────
 
   # Read the session's live bindings through the read-surface and assign display
@@ -486,7 +1038,8 @@ defmodule BtAttachWeb.WorkspaceLive do
             %{
               name: name,
               value: Workspace.render_term(term),
-              inspectable: Workspace.inspectable?(term)
+              inspectable: Workspace.inspectable?(term),
+              kind: term_kind(term)
             }
           end)
 
@@ -500,8 +1053,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
       pairs when is_list(pairs) ->
         case List.keyfind(pairs, name, 0) do
-          {^name, term} -> inspect_term(socket, name, term)
-          nil -> assign(socket, inspect_error: "binding not found: #{name}")
+          # Inspecting a binding starts a fresh drill breadcrumb at this object.
+          {^name, term} ->
+            inspect_term(socket, name, term, [%{label: to_string(name), term: term}])
+
+          nil ->
+            assign(socket, inspect_error: "binding not found: #{name}")
         end
 
       {:error, reason} ->
@@ -510,30 +1067,34 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Inspect a single live term via the read-surface `inspect` op and assign the
-  # resulting structured-field rows. Object-valued fields are flagged drillable,
-  # carrying their live term so the next drill follows the reference one level
-  # deeper. Non-object terms are not inspectable, so we say so rather than guess.
-  defp inspect_term(socket, label, term) do
+  # resulting structured-field rows plus the drill breadcrumb (`crumbs`). Object-
+  # valued fields are flagged drillable, carrying their live term so the next
+  # drill follows the reference one level deeper. Non-object terms are not
+  # inspectable, so we say so rather than guess.
+  defp inspect_term(socket, label, term, crumbs) do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
         {:ok, fields} when is_map(fields) ->
           assign(socket,
-            inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
+            inspect_target: target_info(label, term),
             inspect_rows: field_rows(fields),
+            inspect_crumbs: crumbs,
             inspect_error: nil
           )
 
         {:ok, scalar} ->
           assign(socket,
-            inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
+            inspect_target: target_info(label, term),
             inspect_rows: [
               %{
                 name: "value",
                 value: Workspace.format_value(scalar),
                 term: scalar,
-                drillable: false
+                drillable: false,
+                kind: term_kind(scalar)
               }
             ],
+            inspect_crumbs: crumbs,
             inspect_error: nil
           )
 
@@ -542,11 +1103,35 @@ defmodule BtAttachWeb.WorkspaceLive do
       end
     else
       assign(socket,
-        inspect_target: %{label: to_string(label), header: Workspace.render_term(term)},
+        inspect_target: target_info(label, term),
         inspect_rows: [],
+        inspect_crumbs: crumbs,
         inspect_error: "#{label} is a #{scalar_kind(term)} — no fields to inspect"
       )
     end
+  end
+
+  # Build the Inspector head's target descriptor: the binding/field label, the
+  # live printString header, and the class/pid type chips. For a live actor the
+  # term is `{:beamtalk_object, class, _module, pid}` (over distribution), so the
+  # class atom and pid render straight into the spike's `proc-chips`. Non-object
+  # values carry no pid and report their scalar kind as the class chip.
+  defp target_info(label, {:beamtalk_object, class, _module, pid} = term) when is_pid(pid) do
+    %{
+      label: to_string(label),
+      header: Workspace.render_term(term),
+      class_name: to_string(class),
+      pid: inspect(pid)
+    }
+  end
+
+  defp target_info(label, term) do
+    %{
+      label: to_string(label),
+      header: Workspace.render_term(term),
+      class_name: scalar_kind(term),
+      pid: nil
+    }
   end
 
   # Turn an inspect fields map (live terms) into ordered display rows. Each row
@@ -559,7 +1144,8 @@ defmodule BtAttachWeb.WorkspaceLive do
         name: to_string(key),
         value: Workspace.render_term(term),
         term: term,
-        drillable: Workspace.inspectable?(term)
+        drillable: Workspace.inspectable?(term),
+        kind: term_kind(term)
       }
     end)
     |> Enum.sort_by(& &1.name)
@@ -573,225 +1159,648 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp scalar_kind(term) when is_map(term), do: "map"
   defp scalar_kind(_term), do: "value"
 
+  # Map a live term to the spike Inspector's value-kind class (inspector.jsx
+  # `valueClass`), driving the type-chip / value colour. Object references render
+  # as `ref` (the drillable, follow-able class); scalars map to their CSS class.
+  # A boolean must be matched before the integer guard (`is_boolean` ⊂ atoms, not
+  # integers, but kept explicit and first for clarity).
+  defp term_kind({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: "ref"
+  defp term_kind(term) when is_boolean(term), do: "bool"
+  defp term_kind(term) when is_integer(term) or is_float(term), do: "int"
+  defp term_kind(term) when is_binary(term), do: "string"
+  defp term_kind(term) when is_atom(term), do: "symbol"
+  defp term_kind(_term), do: "value"
+
+  # ── Tweaks panel (BT-2487) ──────────────────────────────────────────────────
+
+  # The default appearance the cockpit ships with, mirroring the spike's
+  # `useTweaks` initial state (spikes/cockpit-ux-spike/app.jsx). The `TweaksPanel`
+  # JS hook reads these from `data-tweaks-defaults`, then a per-key localStorage
+  # override (the user's last choice) wins — so this is just the first-run skin.
+  @tweak_defaults %{
+    theme: "paper",
+    accent: "#b9711b",
+    syntax: "warm",
+    density: "cozy",
+    uiFont: "Hanken Grotesk",
+    codeFont: "IBM Plex Mono"
+  }
+
+  # The curated accent swatches (paper/squeak only — dusk keeps its built-in
+  # accent), UI-font and code-font options — exactly the sets the spike offers.
+  @tweak_accents ~w(#b9711b #a8324e #2c6e8e #5d7a2e #7a4ea8)
+  @tweak_ui_fonts ["Hanken Grotesk", "Inter Tight", "Public Sans", "Schibsted Grotesk"]
+  @tweak_code_fonts ["IBM Plex Mono", "JetBrains Mono", "Spline Sans Mono", "Courier Prime"]
+
+  # The appearance panel: a pure-client control surface. The `TweaksPanel` hook
+  # owns all behaviour — each control declares the tweak it drives via
+  # `data-tweak` / `data-tweak-value`, and the hook flips the matching `:root`
+  # CSS variable + persists to localStorage. The server never sees a change; this
+  # is presentation only, so it carries no socket state beyond the static
+  # defaults the hook restores on first run.
+  defp tweaks_panel(assigns) do
+    assigns =
+      assigns
+      |> assign(:defaults, @tweak_defaults)
+      |> assign(:accents, @tweak_accents)
+      |> assign(:ui_fonts, @tweak_ui_fonts)
+      |> assign(:code_fonts, @tweak_code_fonts)
+
+    ~H"""
+    <div
+      id="tweaks-panel"
+      class="panel tweaks-panel"
+      style="flex:none;"
+      phx-hook="TweaksPanel"
+      data-tweaks-defaults={Jason.encode!(@defaults)}
+    >
+      <div class="panel-head">Tweaks</div>
+      <div class="panel-body">
+        <%!-- Theme → data-theme on <html> (whole palette swap) --%>
+        <div class="twk-row">
+          <span class="twk-cap">Theme</span>
+          <div class="twk-seg" role="radiogroup" aria-label="Theme">
+            <button
+              :for={theme <- ~w(paper squeak dusk)}
+              type="button"
+              role="radio"
+              data-tweak="theme"
+              data-tweak-value={theme}
+            >
+              {theme}
+            </button>
+          </div>
+        </div>
+
+        <%!-- Accent → --accent / --accent-2 (paper/squeak; dusk keeps its own) --%>
+        <div class="twk-row">
+          <span class="twk-cap">Accent</span>
+          <div class="twk-swatches" role="radiogroup" aria-label="Accent colour">
+            <button
+              :for={hex <- @accents}
+              type="button"
+              role="radio"
+              class="twk-swatch"
+              style={"background: #{hex};"}
+              title={hex}
+              aria-label={hex}
+              data-tweak="accent"
+              data-tweak-value={hex}
+            >
+            </button>
+          </div>
+        </div>
+
+        <%!-- Syntax → the --t-* token palette (warm/mono/vivid) --%>
+        <div class="twk-row">
+          <span class="twk-cap">Syntax palette</span>
+          <div class="twk-seg" role="radiogroup" aria-label="Syntax palette">
+            <button
+              :for={mode <- ~w(warm mono vivid)}
+              type="button"
+              role="radio"
+              data-tweak="syntax"
+              data-tweak-value={mode}
+            >
+              {mode}
+            </button>
+          </div>
+        </div>
+
+        <%!-- Density → data-density (--row-h / --pad / --gap) --%>
+        <div class="twk-row">
+          <span class="twk-cap">Density</span>
+          <div class="twk-seg" role="radiogroup" aria-label="Density">
+            <button
+              :for={d <- ~w(cozy compact)}
+              type="button"
+              role="radio"
+              data-tweak="density"
+              data-tweak-value={d}
+            >
+              {d}
+            </button>
+          </div>
+        </div>
+
+        <%!-- UI font → --ui-font (the shell typeface) --%>
+        <div class="twk-row">
+          <span class="twk-cap">UI font</span>
+          <select class="twk-select" data-tweak="uiFont" aria-label="UI font">
+            <option :for={font <- @ui_fonts} value={font}>{font}</option>
+          </select>
+        </div>
+
+        <%!-- Code font → --code-font (the editor / mono typeface) --%>
+        <div class="twk-row">
+          <span class="twk-cap">Code font</span>
+          <select class="twk-select mono" data-tweak="codeFont" aria-label="Code font">
+            <option :for={font <- @code_fonts} value={font}>{font}</option>
+          </select>
+        </div>
+
+        <p class="twk-note">Appearance only — saved to this browser.</p>
+      </div>
+    </div>
+    """
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
-    <div style="font-family: ui-monospace, monospace; max-width: 760px; margin: 2rem auto;">
-      <h1>Beamtalk Workspace</h1>
-
-      <%= if @connected do %>
-        <p>
-          Attached to <strong>{@node}</strong> · session <code>{@session_id}</code>
-          <span :if={@role == :observer} style="color:#a60;">· read-only (Observer)</span>
-        </p>
-
-        <%= if @role == :owner do %>
-          <form phx-submit="eval" style="display:flex; gap:.5rem; margin:1rem 0;">
-            <input
-              name="expr"
-              value={@expr}
-              autocomplete="off"
-              style="flex:1; padding:.5rem; font-family:inherit;"
-            />
-            <button type="submit" style="padding:.5rem 1rem;">Eval</button>
-          </form>
-        <% else %>
-          <p style="color:#666; margin:1rem 0;">
-            Your role is read-only — evaluation and editing are disabled. You can
-            still browse bindings, follow references in the Inspector, and watch
-            the live Transcript.
-          </p>
-        <% end %>
-
-        <%= if @output do %>
-          <pre style="background:#f7f7f7; padding:.75rem; border:1px solid #ddd;"><%= @output %></pre>
-        <% end %>
-        <%= if @result do %>
-          <pre style="background:#f0fff0; padding:.75rem; border:1px solid #cec;"><%= @result %></pre>
-        <% end %>
-        <%= if @error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @error %></pre>
-        <% end %>
-
-        <h2>Bindings (live)</h2>
-        <%= if @bindings_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @bindings_error %></pre>
-        <% end %>
-        <%= if @bindings == [] do %>
-          <p style="color:#666;">No bindings yet. Try <code>x := 42</code>.</p>
-        <% else %>
-          <table style="width:100%; border-collapse:collapse;">
-            <tbody>
-              <tr :for={b <- @bindings} style="border-bottom:1px solid #eee;">
-                <td style="padding:.25rem .5rem; font-weight:bold; vertical-align:top;">{b.name}</td>
-                <td style="padding:.25rem .5rem; width:100%;">{b.value}</td>
-                <td style="padding:.25rem .5rem; white-space:nowrap;">
-                  <%= if b.inspectable do %>
-                    <button
-                      type="button"
-                      phx-click="inspect"
-                      phx-value-name={b.name}
-                      style="font-family:inherit;"
-                    >
-                      Inspect →
-                    </button>
-                  <% end %>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        <% end %>
-
-        <h2>Inspector</h2>
-        <%= if @inspect_target do %>
-          <p>
-            Inspecting <strong>{@inspect_target.label}</strong>
-            · <code>{@inspect_target.header}</code>
-          </p>
-        <% end %>
-        <%= if @inspect_error do %>
-          <pre style="background:#fff8e8; padding:.75rem; border:1px solid #eda;"><%= @inspect_error %></pre>
-        <% end %>
-        <%= if @inspect_target && @inspect_rows != [] do %>
-          <table style="width:100%; border-collapse:collapse; background:#fafaff; border:1px solid #dde;">
-            <tbody>
-              <tr
-                :for={{row, i} <- Enum.with_index(@inspect_rows)}
-                style="border-bottom:1px solid #eef;"
-              >
-                <td style="padding:.25rem .5rem; font-weight:bold; vertical-align:top;">
-                  {row.name}
-                </td>
-                <td style="padding:.25rem .5rem; width:100%;">{row.value}</td>
-                <td style="padding:.25rem .5rem; white-space:nowrap;">
-                  <%= if row.drillable do %>
-                    <button
-                      type="button"
-                      phx-click="drill"
-                      phx-value-index={i}
-                      style="font-family:inherit;"
-                    >
-                      Follow →
-                    </button>
-                  <% end %>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        <% else %>
-          <%= if @inspect_target == nil && @inspect_error == nil do %>
-            <p style="color:#666;">
-              Spawn an object (<code>Counter spawn</code>), bind it, then Inspect it to
-              follow its live references.
-            </p>
+    <div class="bt-cockpit">
+      <div class="app">
+        <%!-- ── top bar (46px): brand + Attach-topology widget ───────────── --%>
+        <div class="topbar">
+          <div class="brand">
+            <span class="mark"><b>Beam</b>talk</span>
+            <span class="ver">Cockpit</span>
+          </div>
+          <span class="spacer"></span>
+          <%= if @connected do %>
+            <div class="attach">
+              <span class="dot live"></span>
+              <span class="att-label">attached</span>
+              <b class="att-node mono">{@node}</b>
+              <span class="att-sep">·</span>
+              <span class="att-sess mono">{@session_id}</span>
+              <span class={"role-badge #{@role}"}>{@role}</span>
+              <span :if={@role == :observer} class="att-sess">· read-only (Observer)</span>
+            </div>
+          <% else %>
+            <div class="attach"><span class="att-sess">connecting…</span></div>
           <% end %>
-        <% end %>
-
-        <%= if @role == :owner do %>
-          <h2>Method Editor (write-surface)</h2>
-          <p style="color:#666;">
-            Edit a method and Save to compile + flush it onto the workspace
-            (<code>Counter compile: #increment source: …</code>, ADR 0082). A later
-            eval observes the new behaviour.
-          </p>
-          <form phx-submit="save_method" style="margin:1rem 0;">
-            <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
-              <input
-                name="class"
-                value={@edit_class}
-                placeholder="Class (e.g. Counter)"
-                autocomplete="off"
-                style="flex:1; padding:.5rem; font-family:inherit;"
-              />
-              <input
-                name="selector"
-                value={@edit_selector}
-                placeholder="selector (e.g. increment)"
-                autocomplete="off"
-                style="flex:1; padding:.5rem; font-family:inherit;"
-              />
-            </div>
-            <textarea
-              name="source"
-              rows="4"
-              placeholder="increment => self.value := self.value + 1"
-              style="width:100%; padding:.5rem; font-family:inherit; box-sizing:border-box;"
-            ><%= @edit_source %></textarea>
-            <div style="display:flex; gap:.5rem; margin-top:.5rem;">
-              <button type="submit" style="padding:.5rem 1rem;">Save Method</button>
-              <button type="button" phx-click="flush" style="padding:.5rem 1rem;">
-                Save All to Disk (flush)
-              </button>
-            </div>
-          </form>
-        <% end %>
-
-        <%= if @save_result do %>
-          <pre style="background:#f0fff0; padding:.75rem; border:1px solid #cec;"><%= @save_result %></pre>
-        <% end %>
-        <%= if @save_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @save_error %></pre>
-        <% end %>
-        <%= if @flush_result do %>
-          <pre style="background:#eef6ff; padding:.75rem; border:1px solid #cce;"><%= @flush_result %></pre>
-        <% end %>
-        <%= if @flush_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @flush_error %></pre>
-        <% end %>
-
-        <h2>Changes (ChangeLog)</h2>
-        <%= if @changes_error do %>
-          <pre style="background:#fff0f0; padding:.75rem; border:1px solid #ecc;"><%= @changes_error %></pre>
-        <% end %>
-        <%= if @changes == [] do %>
-          <p style="color:#666;">No pending changes. Save a method to record one.</p>
-        <% else %>
-          <table style="width:100%; border-collapse:collapse;">
-            <thead>
-              <tr style="border-bottom:1px solid #ccc; text-align:left;">
-                <th style="padding:.25rem .5rem;">Class</th>
-                <th style="padding:.25rem .5rem;">Selector</th>
-                <th style="padding:.25rem .5rem;">Intent</th>
-                <th style="padding:.25rem .5rem;">Flushable</th>
-                <th style="padding:.25rem .5rem;">Author</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={c <- @changes} style="border-bottom:1px solid #eee;">
-                <td style="padding:.25rem .5rem; font-weight:bold;">{c.class}</td>
-                <td style="padding:.25rem .5rem;">{c.selector}</td>
-                <td style="padding:.25rem .5rem;">{c.intent}</td>
-                <td style="padding:.25rem .5rem;">{if c.flushable, do: "yes", else: "no"}</td>
-                <td style="padding:.25rem .5rem;">{c.author_kind}</td>
-              </tr>
-            </tbody>
-          </table>
-        <% end %>
-
-        <h2>Transcript (live)</h2>
-        <div
-          id="transcript"
-          phx-update="stream"
-          style="background:#111; color:#0f0; padding:.75rem; min-height:6rem;"
-        >
-          <div :for={{dom_id, line} <- @streams.transcript} id={dom_id}>{line.text}</div>
         </div>
-        <p style="color:#666;">Try <code>Transcript show: "hello"</code> to see a live push.</p>
-      <% else %>
-        <%= if @error do %>
-          <pre style="background:#fff0f0; padding:1rem;">Not attached.
 
-    <%= @error %>
+        <%= if @connected do %>
+          <%!-- ── three-column cockpit grid ──────────────────────────────── --%>
+          <div class="cockpit">
+            <%!-- LEFT — System Browser (placeholder, 286px) + Tweaks panel --%>
+            <div class="col">
+              <div id="system-browser" class="panel" style="flex:1;">
+                <div class="panel-head">System Browser</div>
+                <div class="panel-body">
+                  <div class="placeholder">
+                    <span class="ph-title">System Browser</span>
+                    <span>Class hierarchy → protocol → methods.</span>
+                    <span>Lands in a later Phase 1 issue.</span>
+                  </div>
+                </div>
+              </div>
 
-    Start a workspace and export its node + cookie:
-      beamtalk workspace create spike --background --persistent
-      export BT_WORKSPACE_NODE=beamtalk_workspace_spike@localhost
-      export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' ~/.beamtalk/workspaces/spike/vm.args)
-    then restart this server.</pre>
+              <.tweaks_panel />
+            </div>
+
+            <%!-- CENTER — editor placeholder + workspace dock --%>
+            <%!-- DOM order note: the Workspace dock (eval form) is emitted
+                 BEFORE the Method Editor so the eval `<form>` is the first form
+                 on the page — `form("form")` in the e2e tests resolves to it.
+                 CSS `order` keeps the editor visually on top per the spike. --%>
+            <div class="col">
+              <%!-- workspace dock (BT-2490): tabbed Workspace / Transcript /
+                   Changes. The three tab bodies are ALL rendered (toggled with
+                   `hidden`, not removed) so the `#transcript` stream container is
+                   always in the DOM for `stream_insert` regardless of the active
+                   tab. --%>
+              <div class="dock" style="order:2;">
+                <div id="workspace-dock" class="panel">
+                  <div class="panel-head">
+                    <span class="dock-tabs" role="tablist">
+                      <button
+                        :for={
+                          {tab, label} <- [
+                            {"workspace", "Workspace"},
+                            {"transcript", "Transcript"},
+                            {"changes", "Changes"}
+                          ]
+                        }
+                        type="button"
+                        role="tab"
+                        class={["dock-tab", @dock_tab == tab && "on"]}
+                        aria-selected={to_string(@dock_tab == tab)}
+                        phx-click="dock_tab"
+                        phx-value-tab={tab}
+                      >
+                        {label}<span :if={tab == "changes" and @changes != []} class="tab-count">{length(@changes)}</span>
+                      </button>
+                    </span>
+                    <span class="spacer"></span>
+                    <span :if={@dock_tab == "workspace"} class="count">
+                      {if ws_selection?(assigns), do: "evaluates selection", else: "evaluates buffer"}
+                    </span>
+                  </div>
+
+                  <%!-- WORKSPACE tab: highlighted editor + doIt/printIt/inspectIt --%>
+                  <div class="dock-pane ws-pane" hidden={@dock_tab != "workspace"}>
+                    <%= if @role == :owner do %>
+                      <%!-- eval form: the FIRST <form> on the page. The CodeEditor
+                           overlay (BT-2485) highlights the entered code; the
+                           textarea keeps name="expr" so the existing `eval`
+                           handler (and the e2e `render_submit(%{expr: …})`) read
+                           it. The three actions ride the SAME submit via the
+                           hidden `action` field — Print it is the plain submit
+                           (default), Do it / Inspect it set the field. ⌘D/⌘P/⌘I
+                           do the same through the KeyboardShortcuts hook. --%>
+                      <form
+                        id="eval-form"
+                        phx-submit="eval"
+                        phx-hook="KeyboardShortcuts"
+                        data-shortcuts={
+                          Jason.encode!(%{
+                            "mod+d" => "submit:do_it",
+                            "mod+p" => "submit:print_it",
+                            "mod+i" => "submit:inspect_it"
+                          })
+                        }
+                        style="display:flex; flex-direction:column; height:100%;"
+                      >
+                        <input type="hidden" name="action" value="print_it" />
+                        <div
+                          id="workspace-editor-overlay"
+                          class="bt-editor-wrap ws-wrap"
+                          phx-hook="CodeEditor"
+                        >
+                          <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
+                          <textarea
+                            id="workspace-editor-source"
+                            class="bt-editor-ta"
+                            name="expr"
+                            phx-hook="SelectionTracker"
+                            data-select-event="select_workspace"
+                            spellcheck="false"
+                            autocomplete="off"
+                          ><%= @expr %></textarea>
+                        </div>
+
+                        <div class="actionbar">
+                          <button class="btn" type="submit" name="action" value="do_it">
+                            Do it <span class="k">⌘D</span>
+                          </button>
+                          <button class="btn primary" type="submit" name="action" value="print_it">
+                            Print it <span class="k">⌘P</span>
+                          </button>
+                          <button class="btn" type="submit" name="action" value="inspect_it">
+                            Inspect it <span class="k">⌘I</span>
+                          </button>
+                          <span class="spacer"></span>
+                          <span class="kbdhint">select an expression, or evaluate all</span>
+                        </div>
+                      </form>
+                    <% else %>
+                      <p class="muted-note">
+                        Your role is read-only — evaluation is disabled. You can still watch the
+                        live Transcript and review pending Changes in the tabs above.
+                      </p>
+                    <% end %>
+
+                    <%!-- Result / output / error render REGARDLESS of role: a
+                         crafted eval from an Observer is refused by the facade and
+                         its "Not authorized" message must still show (the form
+                         itself is owner-gated away). --%>
+                    <div :if={@output} class="io-block">{@output}</div>
+                    <div :if={@result} class="ws-result">
+                      <span class="arrow">→</span>
+                      <span class="val">{@result}</span>
+                    </div>
+                    <div :if={@error} class="ws-result err">
+                      <span class="arrow">→</span>
+                      <span class="val">{@error}</span>
+                    </div>
+                  </div>
+
+                  <%!-- TRANSCRIPT tab: the live stream (always in the DOM so
+                       stream_insert lands regardless of the active tab). --%>
+                  <div class="dock-pane" hidden={@dock_tab != "transcript"}>
+                    <div id="transcript" class="transcript" phx-update="stream">
+                      <div :for={{dom_id, line} <- @streams.transcript} id={dom_id}>{line.text}</div>
+                    </div>
+                  </div>
+
+                  <%!-- CHANGES tab: the workspace ChangeLog (ADR 0082). --%>
+                  <div class="dock-pane panel-body" hidden={@dock_tab != "changes"}>
+                    <div :if={@changes_error} class="io-block err">{@changes_error}</div>
+                    <%= if @changes == [] do %>
+                      <p class="muted-note">No pending changes. Save a method to record one.</p>
+                    <% else %>
+                      <table class="bt-table">
+                        <thead>
+                          <tr>
+                            <th>Class</th>
+                            <th>Selector</th>
+                            <th>Intent</th>
+                            <th>Flushable</th>
+                            <th>Author</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr :for={c <- @changes}>
+                            <td class="k">{c.class}</td>
+                            <td>{c.selector}</td>
+                            <td>{c.intent}</td>
+                            <td>{if c.flushable, do: "yes", else: "no"}</td>
+                            <td>{c.author_kind}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+
+              <%!-- TABBED METHOD EDITOR (BT-2494): the spike's write-surface.
+                   A tab strip (methods + class definitions) over a breadcrumb
+                   and the BT-2485 highlighted editor. The single save_method
+                   form is preserved (id, phx-submit, ⌘S, name="class"/"selector"/
+                   "source") so the BT-2409 e2e flows keep working; the active tab
+                   rides as a hidden `tab` field so a compile clears its dirty dot
+                   and a class-definition tab compiles the class via `eval`. --%>
+              <div id="method-editor" class="panel editor-panel" style="order:1;">
+                <%!-- tab strip: one tab per open method / class definition, with
+                     a per-tab dirty dot and a close × (the last tab stays open). --%>
+                <div class="tabstrip" role="tablist">
+                  <button
+                    :for={t <- @tabs}
+                    type="button"
+                    role="tab"
+                    class={["tab", @active_tab == t.id && "on"]}
+                    aria-selected={to_string(@active_tab == t.id)}
+                    phx-click="tab_select"
+                    phx-value-id={t.id}
+                  >
+                    <span :if={t.dirty} class="modot" title="unsaved edits"></span>
+                    <span class="tab-label mono">
+                      {if t.kind == :def, do: t.class <> " ▸ def", else: t.selector}
+                    </span>
+                    <span
+                      :if={length(@tabs) > 1}
+                      class="x"
+                      title="Close tab"
+                      phx-click="tab_close"
+                      phx-value-id={t.id}
+                    >
+                      ×
+                    </span>
+                  </button>
+                  <span class="spacer"></span>
+                  <%!-- "+ def" opens (or focuses) the active class's definition
+                       tab — saving it compiles the class (ADR 0082). --%>
+                  <button
+                    :if={@role == :owner}
+                    type="button"
+                    class="tab tab-add"
+                    title="Open class definition"
+                    phx-click="open_definition"
+                  >
+                    + def
+                  </button>
+                </div>
+
+                <%!-- breadcrumb: Class › side › selector for the active tab. --%>
+                <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
+                <div class="editor-meta">
+                  <span class="crumb">
+                    <b>{bc_class}</b>
+                    <span :if={bc_side} class="sep">›</span>
+                    <span :if={bc_side} class="mono">{bc_side}</span>
+                    <span class="sep">›</span>
+                    <span class="mono">{bc_sel}</span>
+                  </span>
+                  <span class="spacer"></span>
+                  <span :if={@role != :owner} class="meta-note read-only">read-only · Observer</span>
+                  <span :if={@role == :owner and active_tab(assigns).dirty} class="meta-note edited">
+                    edited — ⌘S to compile
+                  </span>
+                  <span :if={@role == :owner and not active_tab(assigns).dirty} class="meta-note">
+                    in image
+                  </span>
+                </div>
+
+                <div class="panel-body">
+                  <%= if @role == :owner do %>
+                    <%!-- ⌘S submits this editor form via the KeyboardShortcuts
+                         hook (BT-2485): the chord request-submits the form so
+                         the class/selector/source/tab ride the normal phx-submit,
+                         exactly as clicking "Compile" would. `phx-change` reports
+                         live edits so the active tab's dirty dot tracks them. --%>
+                    <form
+                      id="method-editor-form"
+                      phx-submit="save_method"
+                      phx-change="edit_source"
+                      phx-hook="KeyboardShortcuts"
+                      data-scope="window"
+                      data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                    >
+                      <%!-- the active tab id rides every compile so the handler
+                           knows which tab to clean and whether it's a class
+                           definition. --%>
+                      <input type="hidden" name="tab" value={@active_tab} />
+                      <%!-- a method tab edits class + selector inline; a class-
+                           definition tab carries them as hidden fields (the class
+                           name) so the form payload shape is unchanged. --%>
+                      <%= if active_tab(assigns).kind == :def do %>
+                        <input type="hidden" name="class" value={@edit_class} />
+                        <input type="hidden" name="selector" value="▸ class definition" />
+                      <% else %>
+                        <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
+                          <input
+                            class="field"
+                            name="class"
+                            value={@edit_class}
+                            placeholder="Class (e.g. Counter)"
+                            autocomplete="off"
+                            style="flex:1;"
+                          />
+                          <input
+                            class="field"
+                            name="selector"
+                            value={@edit_selector}
+                            placeholder="selector (e.g. increment)"
+                            autocomplete="off"
+                            style="flex:1;"
+                          />
+                        </div>
+                      <% end %>
+                      <%!-- syntax-highlighting editor overlay (BT-2485). Re-keyed
+                           on the active tab id (`@active_tab`) so switching tabs
+                           replaces the element and the textarea picks up the new
+                           tab's source. The textarea keeps name="source" so
+                           save_method reads it. --%>
+                      <div
+                        id={"method-editor-overlay-" <> @active_tab}
+                        class="bt-editor-wrap field"
+                        style="display:block; height:6rem; padding:0;"
+                        phx-hook="CodeEditor"
+                      >
+                        <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
+                        <textarea
+                          id={"method-editor-source-" <> @active_tab}
+                          class="bt-editor-ta"
+                          name="source"
+                          phx-debounce="300"
+                          phx-hook="SelectionTracker"
+                          data-select-event="select_source"
+                          placeholder={
+                            if active_tab(assigns).kind == :def,
+                              do: "Actor subclass: Counter\n  state: value = 0",
+                              else: "increment => self.value := self.value + 1"
+                          }
+                        ><%= @edit_source %></textarea>
+                      </div>
+                      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+                        <button class="btn primary" type="submit">
+                          Compile <span class="k">⌘S</span>
+                        </button>
+                        <button class="btn" type="button" phx-click="flush">
+                          Save All to Disk (flush)
+                        </button>
+                      </div>
+                    </form>
+                  <% else %>
+                    <p class="muted-note">
+                      Your role is read-only — evaluation and editing are disabled. You can
+                      still browse bindings, follow references in the Inspector, and watch
+                      the live Transcript.
+                    </p>
+                  <% end %>
+
+                  <div :if={@save_result} class="io-block ok">{@save_result}</div>
+                  <div :if={@save_error} class="io-block err">{@save_error}</div>
+                  <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
+                  <div :if={@flush_error} class="io-block err">{@flush_error}</div>
+                </div>
+              </div>
+            </div>
+
+            <%!-- RIGHT — Bindings + Inspector (348px), with ChangeLog + Transcript --%>
+            <div class="col">
+              <div class="right-split">
+                <div id="bindings-panel" class="panel bindings-panel">
+                  <div class="panel-head">
+                    Bindings <span class="spacer"></span>
+                    <span class="count">{length(@bindings)} in session</span>
+                  </div>
+                  <div class="panel-body">
+                    <div :if={@bindings_error} class="io-block err">{@bindings_error}</div>
+                    <%= if @bindings == [] do %>
+                      <p class="muted-note">No bindings yet. Try <code>x := 42</code>.</p>
+                    <% else %>
+                      <%!-- Spike Bindings list (inspector.jsx `BindingsList`): each row is
+                           `name := printString` with a type/kind chip. An object-valued
+                           binding is drillable — clicking the row fires the existing
+                           `inspect` event by name, and the explicit "Inspect →" affordance
+                           carries the same phx-value-name the e2e test (BT-2408) clicks. --%>
+                      <div class="obj-list">
+                        <div
+                          :for={b <- @bindings}
+                          class={["obj-row", b.inspectable && "drillable"]}
+                          phx-click={b.inspectable && "inspect"}
+                          phx-value-name={b.inspectable && b.name}
+                        >
+                          <span class="bname mono">{b.name}</span>
+                          <span class="bassign mono">:=</span>
+                          <span class="ps mono">{b.value}</span>
+                          <span class={["kind", b.kind]}>{b.kind}</span>
+                          <button
+                            :if={b.inspectable}
+                            class="btn ghost obj-inspect"
+                            type="button"
+                            phx-click="inspect"
+                            phx-value-name={b.name}
+                          >
+                            Inspect →
+                          </button>
+                        </div>
+                      </div>
+                    <% end %>
+                  </div>
+                </div>
+
+                <div id="inspector-panel" class="panel insp inspector-panel">
+                  <div class="panel-head">
+                    Inspector <span class="spacer"></span>
+                    <span :if={@inspect_target} class="count">following references</span>
+                  </div>
+                  <%= if @inspect_target do %>
+                    <%!-- Spike Inspector head (inspector.jsx `InspectorContent`): a
+                         drill breadcrumb of the references followed so far, the live
+                         printString, and class/pid type chips. Each crumb re-inspects
+                         that level via the existing read-surface inspect path. The word
+                         "Inspecting" is retained for the BT-2408 e2e assertion. --%>
+                    <div class="insp-head">
+                      <div :if={length(@inspect_crumbs) > 1} class="insp-crumbs">
+                        <%= for {crumb, i} <- Enum.with_index(@inspect_crumbs) do %>
+                          <span :if={i > 0} class="sep">›</span>
+                          <span class="c" phx-click="crumb" phx-value-index={i}>{crumb.label}</span>
+                        <% end %>
+                      </div>
+                      <div class="ps mono">
+                        Inspecting <strong>{@inspect_target.label}</strong>
+                        <span class="ps-header">{@inspect_target.header}</span>
+                      </div>
+                      <div class="proc-chips">
+                        <span class="chip">class <b>{@inspect_target.class_name}</b></span>
+                        <span :if={@inspect_target.pid} class="chip">
+                          pid <b>{@inspect_target.pid}</b>
+                        </span>
+                      </div>
+                    </div>
+                  <% end %>
+                  <div class="panel-body">
+                    <div :if={@inspect_error} class="io-block warn">{@inspect_error}</div>
+                    <%= if @inspect_target && @inspect_rows != [] do %>
+                      <table class="ivar-table">
+                        <tbody>
+                          <tr
+                            :for={{row, i} <- Enum.with_index(@inspect_rows)}
+                            class={row.drillable && "drillable"}
+                            phx-click={row.drillable && "drill"}
+                            phx-value-index={row.drillable && i}
+                          >
+                            <td class="k">{row.name}</td>
+                            <td class={["v", row.kind]}>{row.value}</td>
+                            <td class="follow">
+                              <span :if={row.drillable} class="follow-link">follow →</span>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    <% else %>
+                      <p :if={@inspect_target == nil && @inspect_error == nil} class="empty">
+                        Spawn an object (<code>Counter spawn</code>), bind it, then Inspect it to
+                        follow its live references.
+                      </p>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <%!-- The Changes (ChangeLog) viewer and the live Transcript stream now
+               live in the tabbed Workspace dock above (BT-2490), not a separate
+               full-width footer. --%>
         <% else %>
-          <p>Connecting to workspace…</p>
+          <div class="cockpit" style="grid-template-columns: minmax(0, 1fr);">
+            <div class="col">
+              <div class="panel" style="flex:1;">
+                <div class="panel-head">Workspace</div>
+                <div class="panel-body">
+                  <%= if @error do %>
+                    <div class="io-block err">
+                      Not attached. {@error} Start a workspace and export its node + cookie:
+                      beamtalk workspace create spike --background --persistent
+                      export BT_WORKSPACE_NODE=beamtalk_workspace_spike@localhost
+                      export BT_WORKSPACE_COOKIE=$(sed 's/-setcookie //;s/ //g' ~/.beamtalk/workspaces/spike/vm.args)
+                      then restart this server.
+                    </div>
+                  <% else %>
+                    <p class="muted-note">Connecting to workspace…</p>
+                  <% end %>
+                </div>
+              </div>
+            </div>
+          </div>
         <% end %>
-      <% end %>
+      </div>
     </div>
     """
   end

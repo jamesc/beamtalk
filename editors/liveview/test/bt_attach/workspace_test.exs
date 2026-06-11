@@ -118,4 +118,36 @@ defmodule BtAttach.WorkspaceTest do
       assert Workspace.format_flush_summary({:error, :boom}) == "{:error, :boom}"
     end
   end
+
+  describe "browse-surface wrappers (System Browser data source, ADR 0095 / BT-2488)" do
+    # No live workspace here, so the RPC targets an unconnected node. The
+    # contract under test: the wrappers route through `dispatch_browse/2` and
+    # surface a `{:badrpc, :nodedown}` as `{:error, {:unreachable, _}}` rather
+    # than crashing — the same graceful-degradation other Attach reads use.
+    test "browse_classes against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_classes()
+    end
+
+    test "browse_protocols against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_protocols("Counter", "instance")
+    end
+
+    test "browse_method_source against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} =
+               Workspace.browse_method_source("Counter", "instance", "increment")
+    end
+
+    test "browse_class_definition against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.browse_class_definition("Counter")
+    end
+
+    test "the browse wrappers reject non-binary arguments (guard contract)" do
+      assert_raise FunctionClauseError, fn -> Workspace.browse_protocols(:Counter, "instance") end
+      assert_raise FunctionClauseError, fn -> Workspace.browse_class_definition(:Counter) end
+
+      assert_raise FunctionClauseError, fn ->
+        Workspace.browse_method_source("Counter", :instance, "increment")
+      end
+    end
+  end
 end

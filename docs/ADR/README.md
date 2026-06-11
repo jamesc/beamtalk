@@ -122,6 +122,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0093](0093-announcements-event-substrate.md) | Announcements — Typed Event Substrate (Runtime Bus + stdlib Veneer) | Accepted | 2026-06-07 |
 | [0094](0094-object-string-representation-protocols.md) | Object String Representation Protocols (printString / displayString / inspect) | Proposed | 2026-06-07 |
 | [0095](0095-rich-navigable-inspector.md) | Rich Navigable Inspector — Drillable, Live-Refreshing Object Views | Accepted | 2026-06-11 |
+| [0096](0096-system-browser-data-source.md) | System Browser Data Source — Class/Method Browse API for the LiveView IDE | Proposed | 2026-06-10 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
