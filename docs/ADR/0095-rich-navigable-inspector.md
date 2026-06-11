@@ -1,7 +1,33 @@
 # ADR 0095: Rich Navigable Inspector — Drillable, Live-Refreshing Object Views
 
 ## Status
-Proposed (2026-06-10)
+Accepted (2026-06-11)
+
+## Implementation Tracking
+
+**Epic:** [BT-2501](https://linear.app/beamtalk/issue/BT-2501) — Rich Navigable Inspector v1 (ADR 0095)
+**Design issue:** [BT-2397](https://linear.app/beamtalk/issue/BT-2397)
+**Status:** Planned
+
+| Phase | Issue | Title | Size | Status |
+|---|---|---|---|---|
+| 1 | [BT-2502](https://linear.app/beamtalk/issue/BT-2502) | Inspector core — `Inspector`/`InspectorField` classes + navigation (`#value`/`#actor`, drill, cycle guard, render) | L | Backlog |
+| 2 | [BT-2503](https://linear.app/beamtalk/issue/BT-2503) | Collection + foreign kinds, windowing, value `evaluate:` | M | Backlog |
+| 3 | [BT-2504](https://linear.app/beamtalk/issue/BT-2504) | Repurpose `inspect` → `Inspector` — migration, lint, MCP/REPL surfaces | L | Backlog |
+| 4 | [BT-2505](https://linear.app/beamtalk/issue/BT-2505) | Language docs, BUnit, REPL e2e btscript; flip ADR → Implemented | M | Backlog |
+
+```text
+Wave 1: BT-2502
+Wave 2: BT-2503  BT-2504          (parallel — both need only BT-2502)
+Wave 3: BT-2505                   (epic closer → flips Status to Implemented)
+```
+
+**Deferred follow-ups (ADR §7 — not in this epic):** actor evaluate-in-context
+(snapshot-proxy / live routing, ADR 0091 gated), per-class `inspectorFields` custom
+views, `sealedFromInspection` (parser-free class-side method), and push live
+updates ([BT-2489](https://linear.app/beamtalk/issue/BT-2489)). Browser consumer:
+Cockpit [BT-2486](https://linear.app/beamtalk/issue/BT-2486) /
+[BT-2492](https://linear.app/beamtalk/issue/BT-2492).
 
 ## Context
 
