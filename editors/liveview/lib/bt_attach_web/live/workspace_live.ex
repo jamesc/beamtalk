@@ -903,6 +903,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(:tabs, [tab])
     |> assign(:active_tab, tab.id)
+    # Mirror the starter tab into the form-backing edit assigns NOW, so the
+    # method editor's class/selector/source inputs match the breadcrumb from the
+    # first connected render (BT-2518). Without this, the inputs stay `""` until
+    # the user clicks the tab (`tab_select` → `sync_active/2`), so a ⌘S /
+    # Compile on open fails with "Enter a class name to save a method."
+    |> sync_active(tab)
   end
 
   defp find_tab(socket, id), do: Enum.find(socket.assigns.tabs, &(&1.id == id))
