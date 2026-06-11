@@ -137,6 +137,3 @@ sealed typed Object subclass: BindingsView
       acc at: k put: (self at: k)
     ]
     snapshot printString
-
-  /// Override inspect to use printString rather than the field-based format.
-  inspect -> String => self printString

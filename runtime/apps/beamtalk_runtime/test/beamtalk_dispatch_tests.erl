@@ -83,7 +83,8 @@ dispatch_test_() ->
             %% BT-1086: Uncovered path tests
             {"actor instance displayString bypasses module dispatch",
                 fun test_actor_instance_displaystring/0},
-            {"actor instance inspect bypasses module dispatch", fun test_actor_instance_inspect/0},
+            {"actor instance inspect returns an Inspector cursor",
+                fun test_actor_instance_inspect/0},
             {"depth limit exceeded returns DNU error", fun test_depth_limit_exceeded/0},
             {"module without dispatch/4 falls through to superclass",
                 fun test_module_without_dispatch/0},
@@ -761,7 +762,11 @@ test_actor_instance_displaystring() ->
 
     ?assertMatch({reply, _, _}, Result).
 
-%% Test that inspect sent to an actor instance similarly bypasses module dispatch.
+%% ADR 0095 Phase 3 (BT-2504): inspect sent to an actor instance now flows
+%% through normal dispatch into beamtalk_object_ops, returning an Inspector
+%% cursor (a tagged map) rather than a printString binary. (Here `pid = self()`
+%% is the EUnit process, not a live Beamtalk actor, so the cursor classifies as
+%% #foreign; we assert on the class tag, which is kind-agnostic.)
 test_actor_instance_inspect() ->
     ok = ensure_counter_loaded(),
 
@@ -777,7 +782,7 @@ test_actor_instance_inspect() ->
 
     Result = beamtalk_dispatch:lookup(inspect, [], ActorSelf, State, 'Counter'),
 
-    ?assertMatch({reply, _, _}, Result).
+    ?assertMatch({reply, #{'$beamtalk_class' := 'Inspector'}, _}, Result).
 
 %% Test that exceeding MAX_HIERARCHY_DEPTH (20) returns a DNU error with a message
 %% about depth limit rather than crashing the process.

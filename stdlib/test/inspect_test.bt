@@ -1,10 +1,15 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-1167: Tests for inspect output format on user-defined classes.
-// Target format: ClassName(field: inspectValue, ...)
-// Value subclasses use the Beamtalk inspect method in Value.bt.
-// Actor subclasses use the Erlang inspect dispatch in beamtalk_object_ops.
+// BT-1167 / BT-2504: Tests for the structural Debug string and the repurposed
+// `inspect` verb.
+//
+// ADR 0095 Phase 3 (BT-2504) repurposed `inspect` from `-> String` to
+// `-> Inspector`: `anObject inspect` now opens a navigable Inspector cursor.
+// The structural Debug string (`ClassName(field: value, ...)`) — formerly the
+// `inspect` result — is now produced solely by `printString` (ADR 0094). These
+// tests keep the format coverage on `printString` and verify the new `inspect`
+// contract.
 //
 // Fixtures:
 //   fixtures/empty_value.bt  — Value subclass with no state
@@ -15,54 +20,82 @@
 
 TestCase subclass: InspectTest
 
-  // --- Value subclass: with fields ---
+  // --- Structural string (printString): Value subclass with fields ---
   testValueSubclassWithFieldsProducesNameAndFields =>
     p := ValuePoint x: 3 y: 4
-    self assert: p inspect equals: "ValuePoint(x: 3, y: 4)"
+    self assert: p printString equals: "ValuePoint(x: 3, y: 4)"
 
   testValueSubclassDefaultValuesProducesZeros =>
     p := ValuePoint new
-    self assert: p inspect equals: "ValuePoint(x: 0, y: 0)"
+    self assert: p printString equals: "ValuePoint(x: 0, y: 0)"
 
   testValueSubclassPartialInitShowsDefaults =>
     p := ValuePoint new: #{#x => 7}
-    self assert: p inspect equals: "ValuePoint(x: 7, y: 0)"
+    self assert: p printString equals: "ValuePoint(x: 7, y: 0)"
 
   // --- Value subclass: with no fields ---
   testValueSubclassWithNoFieldsProducesEmptyParens =>
     ev := EmptyValue new
-    self assert: ev inspect equals: "EmptyValue()"
+    self assert: ev printString equals: "EmptyValue()"
 
   // --- String field values are quoted ---
   testStringFieldValueIsQuoted =>
     item := NamedItem new: #{#name => "today"}
-    self assert: item inspect equals: "NamedItem(name: ""today"")"
+    self assert: item printString equals: "NamedItem(name: ""today"")"
 
-  // --- Primitive inspect still works ---
-  testIntegerInspectReturnsPrintString => self assert: 42 inspect equals: "42"
+  // --- Primitive printString still works ---
+  testIntegerPrintStringIsStructural => self assert: 42 printString equals: "42"
 
-  testStringInspectReturnsPrintString =>
-    self assert: "hello" inspect equals: """hello"""
+  testStringPrintStringIsStructural =>
+    self assert: "hello" printString equals: """hello"""
 
-  testNilInspectReturnsPrintString => self assert: nil inspect equals: "nil"
+  testNilPrintStringIsStructural => self assert: nil printString equals: "nil"
 
-  testBooleanInspectReturnsPrintString =>
-    self assert: true inspect equals: "true"
-    self assert: false inspect equals: "false"
+  testBooleanPrintStringIsStructural =>
+    self assert: true printString equals: "true"
+    self assert: false printString equals: "false"
 
-  // --- Actor subclass with fields ---
+  // --- Actor subclass: inspect renders name + fields ---
+  // A live actor's `printString` is the identity label `Actor(Counter, <pid>)`
+  // (ADR 0094), NOT a structural dump. The structural field view of an actor's
+  // state is reached via `inspect` (ADR 0095): `c inspect` opens a seeded
+  // `#actor` cursor whose `printString` shows the class header and field values.
   testActorSubclassWithFieldsProducesNameAndFields =>
     c := Counter spawn
-    self assert: c inspect equals: "Counter(value: 0)"
+    str := c inspect printString
+    self assert: (str includesSubstring: "Counter") equals: true
+    self assert: (str includesSubstring: "value: 0") equals: true
 
   testActorSubclassAfterMutationShowsUpdatedValue =>
     c := Counter spawn
     c increment
     c increment
-    self assert: c inspect equals: "Counter(value: 2)"
+    str := c inspect printString
+    self assert: (str includesSubstring: "value: 2") equals: true
 
-  // --- Nested value objects use recursive inspect ---
-  testNestedValueObjectUsesRecursiveInspect =>
+  // --- Nested value objects use recursive printString ---
+  testNestedValueObjectUsesRecursivePrintString =>
     inner := ValuePoint x: 1 y: 2
     p := InspectPair new: #{#left => inner, #right => 42}
-    self assert: p inspect equals: "InspectPair(left: ValuePoint(x: 1, y: 2), right: 42)"
+    self assert: p printString equals: "InspectPair(left: ValuePoint(x: 1, y: 2), right: 42)"
+
+  // --- ADR 0095 Phase 3: `inspect` now returns an Inspector, not a String ---
+  testInspectReturnsAnInspector =>
+    p := ValuePoint x: 3 y: 4
+    self assert: (p inspect isKindOf: Inspector) equals: true
+
+  testInspectIsShorthandForInspectorOn =>
+    // `anObject inspect` is the shorthand for `Inspector on: anObject`.
+    p := ValuePoint x: 3 y: 4
+    self assert: p inspect kind equals: #value
+    self assert: p inspect fields size equals: 2
+
+  testInspectOnActorClassifiesAsActor =>
+    c := Counter spawn
+    self assert: c inspect kind equals: #actor
+
+  testInspectOnPrimitiveClassifiesAsValue =>
+    self assert: 42 inspect kind equals: #value
+
+  testInspectOnCollectionClassifiesAsCollection =>
+    self assert: #(1, 2, 3) inspect kind equals: #collection

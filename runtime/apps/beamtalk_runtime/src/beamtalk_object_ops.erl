@@ -29,7 +29,7 @@ rather than being duplicated in every class's generated code.
 |---------------|------|---------------------------------------------------|
 | `printString`   | []   | Class objects: bare class name; instances: `ClassName(field: value, ...)`; actors: `Actor(Counter, 0.123.0)` |
 | `displayString` | []   | Delegates to `printString`                        |
-| `inspect`       | []   | Delegates to `printString` (ADR 0094)             |
+| `inspect`       | []   | Returns an `Inspector` cursor on the receiver (ADR 0095) |
 
 ## Utility Methods
 
@@ -104,17 +104,20 @@ dispatch('displayString', [], Self, State) ->
     %% ADR 0094: displayString delegates to printString — same result.
     {reply, print_string_label(Self, State), State};
 dispatch(inspect, [], Self, State) ->
-    %% ADR 0094 (Critical Risk #4): inspect renders structurally via the canonical
-    %% renderer for any instance with fields (values and actors alike, BT-1167);
-    %% class objects (State is #{}) keep the bare class name. There is no
-    %% independent inspect formatter — both this path and `printString` route
-    %% through `beamtalk_object_printer`.
-    case map_size(State) =:= 0 of
-        true ->
-            {reply, class_display_name(Self, State), State};
-        false ->
-            {reply, beamtalk_object_printer:structural_from_state(State), State}
-    end;
+    %% ADR 0095 Phase 3 (BT-2504): `inspect` is repurposed from `-> String` to
+    %% `-> Inspector` — it mints an immutable Inspector cursor over the receiver
+    %% via the inspector shim. We pass BOTH `Self` (the #beamtalk_object{} handle,
+    %% which carries the kind-classifying pid) and `State` (the receiver's own
+    %% live state map).
+    %%
+    %% Why `on/2` and not `on/1`: `anActor inspect` runs *inside the actor's own
+    %% `handle_call`*, so `on/1`'s `sys:get_state(self())` would deadlock and
+    %% time out (the process can't service the system message while busy in the
+    %% call). `on/2` seeds the `#actor` cursor from the in-hand `State` — no
+    %% self-send. For a value/collection/class object (`State` is `#{}`) it falls
+    %% back to `on/1`'s normal classification (whose `sys:get_state`, if any,
+    %% targets a *different* process and is safe).
+    {reply, beamtalk_inspector:on(Self, State), State};
 %% --- Utility methods ---
 
 dispatch(yourself, [], Self, State) ->

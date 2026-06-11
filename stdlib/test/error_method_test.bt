@@ -88,9 +88,10 @@ TestCase subclass: ErrorMethodTest
     self assert: (result isKindOf: Integer)
 
   testExceptionInspect =>
+    // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.
     exc := [1 / 0] on: Exception do: [:e | e]
     result := exc inspect
-    self assert: (result isKindOf: String)
+    self assert: (result isKindOf: Inspector)
 
   testExceptionRespondsToNonExistentMethod =>
     exc := [1 / 0] on: Exception do: [:e | e]

@@ -22,7 +22,9 @@ TestCase subclass: ErlangObjectInheritanceTest
   testErlangModuleDisplayString =>
     self assert: (self.proxy displayString isKindOf: String)
 
-  testErlangModuleInspect => self assert: (self.proxy inspect isKindOf: String)
+  // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.
+  testErlangModuleInspect =>
+    self assert: (self.proxy inspect isKindOf: Inspector)
 
   testErlangModuleIsNilReturnsFalse => self deny: self.proxy isNil
 
@@ -47,7 +49,8 @@ TestCase subclass: ErlangObjectInheritanceTest
   testErlangDisplayString =>
     self assert: (self.e displayString isKindOf: String)
 
-  testErlangInspect => self assert: (self.e inspect isKindOf: String)
+  // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.
+  testErlangInspect => self assert: (self.e inspect isKindOf: Inspector)
 
   testErlangIsNilReturnsFalse => self deny: self.e isNil
 

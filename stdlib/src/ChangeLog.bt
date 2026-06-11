@@ -182,6 +182,3 @@ sealed typed Value subclass: ChangeLog
     n =:= 1 ifTrue: [
       "ChangeLog with 1 entry"
     ] ifFalse: ["ChangeLog with " ++ n asString ++ " entries"]
-
-  /// Override inspect to use printString rather than the field-based format.
-  inspect -> String => self printString

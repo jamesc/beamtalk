@@ -96,7 +96,3 @@ typed Collection subclass: Interval
       ""
     ] ifFalse: [" by: " ++ self.step asString]
     "(" ++ self.from asString ++ " to: " ++ self.to asString ++ stepStr ++ ")"
-
-  /// Override inspect to use printString rather than the field-based
-  /// format defined in Value. Intervals use their mathematical notation.
-  inspect -> String => self printString

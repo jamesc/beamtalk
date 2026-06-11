@@ -246,18 +246,29 @@ text across surfaces:
   `beamtalk_primitive`, `beamtalk_reflection`) — both delegating to one shared
   structural renderer so output is byte-identical regardless of dispatch path.
 
-`inspect` (the language method) is **unchanged in Phase 1** — it still returns a
-`String`, delegating to `printString`. ADR 0095 Phase 1
-([BT-2502](https://linear.app/beamtalk/issue/BT-2502)) adds the navigable
+`inspect` (the language method) is **repurposed in Phase 3**
+([BT-2504](https://linear.app/beamtalk/issue/BT-2504)): `anObject inspect` now
+returns an `Inspector` cursor (`Inspector on: self`), not a `String`. The
+structural Debug string — formerly the `inspect` result — is produced solely by
+`printString` (ADR 0094). Phase 1
+([BT-2502](https://linear.app/beamtalk/issue/BT-2502)) added the navigable
 `Inspector` / `InspectorField` classes and the `Inspector on: anObject` entry
 point — a drillable cursor with `at:`, structural/snapshot `fields`, `refresh`,
-and a depth-1 `printString` tree. The breaking *repurpose* of `inspect`
-(`inspect -> Inspector`, removing the 14 `inspect -> String` overrides, the
-gradual-typing crash audit) is Phase 3
-([BT-2504](https://linear.app/beamtalk/issue/BT-2504)); the `"op": "inspect"`
-REPL/MCP **wire op** stays the agent-only flat JSON (line 86) until its
-`asDictionaries` migration in Phase 5. Epic:
-[BT-2501](https://linear.app/beamtalk/issue/BT-2501) (design
+and a depth-1 `printString` tree; Phase 2
+([BT-2503](https://linear.app/beamtalk/issue/BT-2503)) added collection/foreign
+kinds and value `evaluate:`. Phase 3 also adds the cross-surface wire form —
+`Inspector asDictionaries` (one `Dictionary` per `InspectorField`) and
+`Inspector asDictionary` (the cursor envelope: `kind`/`path`/`childCount`/page +
+`fields`) — the same typed-record pattern `SupervisionTree asDictionaries`
+(ADR 0092) uses; surfaces consume it through the shared `evaluate` seam (e.g.
+`(Inspector on: anObject) asDictionary`).
+
+A **transitional lint** (`inspect_in_string_position`) flags `inspect` used
+directly in `++`/string-interpolation position, since it no longer yields a
+`String`. The dedicated `"op": "inspect"` REPL/MCP **wire op** stays the
+agent-only flat JSON (line 86) — a compat shim — until its full `asDictionaries`
+migration in Phase 5; the navigable wire form is already reachable via
+`evaluate`. Epic: [BT-2501](https://linear.app/beamtalk/issue/BT-2501) (design
 [BT-2397](https://linear.app/beamtalk/issue/BT-2397)).
 
 ## Drift Check (CI)

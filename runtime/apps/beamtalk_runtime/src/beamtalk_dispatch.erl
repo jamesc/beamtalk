@@ -364,17 +364,28 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
                     %% methods return a bare class name. Routing here unifies all
                     %% three display selectors onto the runtime renderer.
                     %%
-                    %% This also avoids the displayString/inspect deadlock: the
-                    %% compiled Object methods send a message back to Self
-                    %% (displayString calls self printString, inspect delegates to
-                    %% self printString), producing a second gen_server:call on the
-                    %% same actor process. beamtalk_object_ops derives the label
-                    %% directly from the tuple with no self-sends.
+                    %% This also avoids the displayString deadlock: the compiled
+                    %% Object displayString sends a message back to Self
+                    %% (displayString calls self printString), producing a second
+                    %% gen_server:call on the same actor process. beamtalk_object_ops
+                    %% derives the label directly from the tuple with no self-sends.
+                    %%
+                    %% ADR 0095 Phase 3 (BT-2504): `inspect` on a default actor is
+                    %% also routed here. Although it returns an `Inspector` cursor
+                    %% (not a self-rendered string), the compiled `Object>>inspect`
+                    %% is `Inspector on: self`, i.e. `on/1` — which, when it runs
+                    %% *inside* the actor's own `handle_call`, issues
+                    %% `sys:get_state(self())` and dead-locks (time-out →
+                    %% `#unavailable`). beamtalk_object_ops:dispatch(inspect, ...)
+                    %% instead seeds the cursor from the in-hand `State` via
+                    %% `on/2` — the self-inspection-safe path. A user `inspect`
+                    %% override (MethodOwner =/= 'Object') is honoured as usual.
                     case
                         MethodOwner =:= 'Object' andalso
                             is_actor_instance(Self) andalso
                             (Selector =:= 'printString' orelse
-                                Selector =:= 'displayString' orelse Selector =:= inspect)
+                                Selector =:= 'displayString' orelse
+                                Selector =:= inspect)
                     of
                         true ->
                             %% beamtalk_object_ops:dispatch is known-safe, but wrap it

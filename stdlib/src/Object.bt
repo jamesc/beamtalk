@@ -124,25 +124,28 @@ ProtoObject subclass: Object
   /// ```
   displayString -> String => self printString
 
-  /// Inspect the receiver.
+  /// Open a navigable `Inspector` cursor on the receiver.
   ///
-  /// Unchanged by ADR 0094: `inspect` still returns a `String` and delegates to
-  /// `printString`, so it shares the structural Debug form with a single source
-  /// of truth.
+  /// **ADR 0095 Phase 3 (BT-2504).** `inspect` is repurposed from `-> String`
+  /// (the ADR-0094 deferral) to the verb that *produces* an `Inspector` — a
+  /// live, immutable cursor for drilling into the object (`Inspector on: self`).
+  /// `anObject inspect` is the shorthand; `Inspector on: anObject` is the
+  /// explicit spelling. The cursor exposes `fields`/`at:`/`path`/`refresh`/
+  /// `printString` (an indented text tree) and `asDictionaries` (the MCP/browser
+  /// wire form); see `Inspector`.
   ///
-  /// **ADR 0095 Phase 1 (BT-2502).** The rich, navigable inspector now exists as
-  /// the `Inspector` class — use `Inspector on: anObject` to open a drillable,
-  /// refreshable cursor. The *repurpose* of `inspect` itself (`inspect ->
-  /// Inspector`, removing the 14 `inspect -> String` overrides, and the
-  /// gradual-typing crash audit) is the breaking change deferred to Phase 3
-  /// (BT-2504); `inspect` keeps returning a `String` until then.
+  /// This is a **breaking change**: code that used `inspect` for its old
+  /// `String` result must switch to `printString` (the structural Debug string,
+  /// ADR 0094) — a transitional lint flags `inspect` used directly in `++`/
+  /// string position.
   ///
   /// ## Examples
   /// ```beamtalk
-  /// 42 inspect             // => "42"
-  /// (Point x: 3 y: 4) inspect    // => "Point(x: 3, y: 4)"  (String, until Phase 3)
+  /// 42 inspect kind                  // => #value
+  /// (Point x: 3 y: 4) inspect fields size   // => 2
+  /// (Point x: 3 y: 4) printString    // => "Point(x: 3, y: 4)"  (the old inspect string)
   /// ```
-  inspect -> String => self printString
+  inspect -> Inspector => Inspector on: self
 
   /// Return the receiver itself. Useful for cascading side effects.
   ///
