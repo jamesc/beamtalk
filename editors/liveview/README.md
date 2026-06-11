@@ -56,6 +56,19 @@ mix assets.build                # bundle JS + CSS into priv/static/assets/
 
 ## Run
 
+There are three ways to run the IDE, by audience:
+
+| Way | For | Where |
+| --- | --- | --- |
+| **From source** (`just web` / `just web-remote`) | contributors hacking on the IDE | this section |
+| **Release archive** (`beamtalk-ide-<version>-<platform>.tar.gz`) | users who want a self-contained build, no Elixir/Mix | [deployment guide](../../docs/deployment/remote-liveview-ide.md#installing-the-ide) |
+| **Docker** (`ghcr.io/jamesc/beamtalk-ide`) | remote / operator deployments (OIDC) | [deployment guide](../../docs/deployment/remote-liveview-ide.md#run-with-docker) |
+
+The archive and image are produced by the IDE's own release lane
+(`.github/workflows/liveview-release.yml` and `liveview-docker.yml`); both run the
+same release as `just dist-liveview`. The rest of this section is the from-source
+path.
+
 ```bash
 # from the repo root: build Beamtalk on OTP 27 and start a workspace
 just build
