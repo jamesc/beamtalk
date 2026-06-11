@@ -113,6 +113,33 @@ and starts Phoenix in prod mode (server on `:8443` by default; put a TLS
 terminator in front, or add `https:` to the endpoint). OIDC must be configured
 (step 1) or boot fails closed.
 
+### Run with Docker
+
+The published image (`ghcr.io/jamesc/beamtalk-ide`) is the turnkey option — it
+bundles Elixir + OTP + the built assets, so the host needs only Docker. It runs
+the same ERTS-embedded release as `just dist-liveview`, configured by the same
+env. Pin a version tag (it tracks the toolchain version) rather than `latest`:
+
+```sh
+docker run --network host \
+  -e SECRET_KEY_BASE="$(openssl rand -base64 48)" \
+  -e PHX_HOST=ide.example.com \
+  -e BT_WORKSPACE_NODE="beamtalk_workspace_ws@localhost" \
+  -e BT_WORKSPACE_COOKIE="$(cat ~/.beamtalk/workspaces/ws/cookie)" \
+  -e BT_OIDC_ISSUER=https://idp.example.com \
+  -e BT_OIDC_CLIENT_ID=beamtalk-ide \
+  -e BT_OIDC_CLIENT_SECRET="$BT_OIDC_CLIENT_SECRET" \
+  ghcr.io/jamesc/beamtalk-ide:0.4.0
+```
+
+`--network host` co-locates the container with the workspace so the Phoenix ↔
+workspace **Erlang distribution link stays on loopback** (ADR 0091 Decision 5);
+the only network-facing service is Phoenix's HTTP(S) port. Do **not** publish
+epmd/dist ports — keep distribution off untrusted networks (co-located or a
+private interface). The cookie is an infrastructure secret passed via env; it is
+never sent to a browser. Boot fails closed if OIDC is requested but
+misconfigured.
+
 ### Cookie rotation
 
 Rotate with `beamtalk workspace rotate-cookie` (future CLI work, ADR 0020),
