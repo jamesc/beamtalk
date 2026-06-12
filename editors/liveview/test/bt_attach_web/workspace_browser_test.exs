@@ -303,7 +303,10 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   # Assert the FieldFlash hook applied (at some point) the `.vflash` pulse to the
   # cell `selector`. The class is transient (a ~700ms CSS animation), so poll the
   # browser for it rather than asserting a single instant. Returns the conn so it
-  # chains. Fails if the flash never appears within the window.
+  # chains. Fails if the flash never appears within the window. Relies on the
+  # fresh-page invariant (each test `visit("/")`s) so a `.vflash` we observe is
+  # this scenario's, not a leftover — call it at most once per test, right after
+  # the triggering change.
   defp assert_flashed(conn, selector) do
     conn
     |> evaluate(

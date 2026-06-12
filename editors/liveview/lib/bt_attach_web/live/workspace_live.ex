@@ -821,11 +821,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # table repeatedly), the first push schedules a single deferred refresh via a
   # self-send and sets `:refresh_pending`; intervening pushes are dropped while the
   # flag is set. The deferred `:do_object_refresh` then performs ONE re-read for
-  # the whole burst. We ignore the push entirely once frozen, or once we've
-  # navigated off this object (the watched term no longer matches the head).
-  def handle_info({:object_changed, _pid, _slots}, %{assigns: assigns} = socket) do
+  # the whole burst. We ignore the push entirely once frozen, once we've navigated
+  # off this object, or for a `pid` that isn't the currently-watched one — the
+  # watch server warns it may deliver one final push after we unsubscribe (a
+  # navigate-away/freeze race), so we drop a push whose pid doesn't match the head.
+  def handle_info({:object_changed, pid, _slots}, %{assigns: assigns} = socket) do
     cond do
-      assigns.inspect_frozen or is_nil(assigns.inspect_watch) ->
+      assigns.inspect_frozen or not watched_pid?(assigns.inspect_watch, pid) ->
         {:noreply, socket}
 
       assigns.refresh_pending ->
@@ -837,6 +839,15 @@ defmodule BtAttachWeb.WorkspaceLive do
         {:noreply, assign(socket, refresh_pending: true)}
     end
   end
+
+  # True when `pid` is the pid backing the currently-watched object term — so a
+  # late push for an object we've since navigated away from (or never watched) is
+  # ignored rather than spuriously re-reading + flashing the current head.
+  defp watched_pid?({:beamtalk_object, _c, _m, watched}, pid)
+       when is_pid(watched) and is_pid(pid),
+       do: watched == pid
+
+  defp watched_pid?(_watch, _pid), do: false
 
   # The coalesced refresh fired by `{:object_changed, …}`: re-read the watched
   # object's fields + stats once for the whole burst, then clear the pending flag
@@ -1509,7 +1520,16 @@ defmodule BtAttachWeb.WorkspaceLive do
           |> track_object(term)
 
         {:error, reason} ->
-          assign(socket, inspect_error: Workspace.render_error(reason))
+          # A failed inspect leaves no coherent head: reset the crumbs + rows so a
+          # later freeze/poke doesn't act on a stale level, and drop any watch.
+          socket
+          |> assign(
+            inspect_target: nil,
+            inspect_rows: [],
+            inspect_crumbs: [],
+            inspect_error: Workspace.render_error(reason)
+          )
+          |> track_object(nil)
       end
     else
       socket
@@ -1541,7 +1561,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The previously-watched term (`:inspect_watch`) is always unsubscribed first so
   # the workspace never keeps pushing changes for an object we navigated away from.
   defp track_object(socket, {:beamtalk_object, _class, _module, pid} = term) when is_pid(pid) do
-    socket = unwatch(socket)
+    # Reset any in-flight coalesced-refresh flag: a pending `:do_object_refresh`
+    # timer was scheduled for the *previous* object, so clearing the flag lets the
+    # NEW object's first change push schedule its own refresh immediately (the
+    # stale timer, if it still fires, is a harmless no-op on the fresh watch).
+    socket = unwatch(assign(socket, refresh_pending: false))
 
     socket =
       if socket.assigns.inspect_frozen do
@@ -1647,7 +1671,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # re-subscribes the current head object and refreshes it so it catches up.
   defp toggle_freeze(%{assigns: %{inspect_frozen: true}} = socket) do
     # Unfreeze: re-arm tracking on the current head term (if any) and catch up.
-    socket = assign(socket, inspect_frozen: false)
+    # Clear any stale `refresh_pending` too: a timer scheduled before the freeze
+    # could otherwise fire a redundant second refresh (double flash) right after
+    # this catch-up re-read.
+    socket = assign(socket, inspect_frozen: false, refresh_pending: false)
 
     case head_term(socket) do
       {:beamtalk_object, _c, _m, pid} = term when is_pid(pid) ->
@@ -1760,9 +1787,13 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # A poke receiver must be a plain Beamtalk identifier (a binding name) — not the
-  # `→ result` synthetic label or anything with spaces/punctuation that would make
-  # `<label> <message>` ill-formed source.
+  # A poke receiver must be a plain lowercase Beamtalk identifier (a binding name)
+  # — not the `→ result` synthetic label or anything with spaces/punctuation that
+  # would make `<label> <message>` ill-formed source. This is a well-formedness
+  # gate, not an injection guard: the poke eval is RBAC-gated (owner-only) and the
+  # label comes from the crumb the *server* set from the inspected binding name,
+  # never raw browser input. A pseudo-keyword binding (`self`/`nil`/…) that slips
+  # through just produces a normal eval that DNUs or no-ops — no escalation.
   defp valid_receiver?(label), do: Regex.match?(~r/\A[a-z_][A-Za-z0-9_]*\z/, label)
 
   # Build the Inspector head's target descriptor: the binding/field label, the
@@ -2722,10 +2753,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                         <span :if={stat_status(@inspect_stats)} class="chip pid-stat">
                           <span class="dot"></span>{stat_status(@inspect_stats)}
                         </span>
-                        <span :if={stat_mailbox(@inspect_stats)} class="chip pid-stat">
+                        <%!-- not is_nil, not truthiness: a mailbox depth of 0 (the
+                             actor drained) is the most reassuring reading and must
+                             still show, but 0 is falsy in a HEEx `:if`. --%>
+                        <span :if={not is_nil(stat_mailbox(@inspect_stats))} class="chip pid-stat">
                           mailbox <b>{stat_mailbox(@inspect_stats)}</b>
                         </span>
-                        <span :if={stat_reductions(@inspect_stats)} class="chip pid-stat">
+                        <span :if={not is_nil(stat_reductions(@inspect_stats))} class="chip pid-stat">
                           reductions <b>{stat_reductions(@inspect_stats)}</b>
                         </span>
                       </div>

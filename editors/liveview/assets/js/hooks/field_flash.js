@@ -46,23 +46,25 @@ export const FieldFlash = {
   },
 
   updated() {
-    // Only react when the server signalled a fresh live refresh (the flash-gen
-    // bumped). A re-render for an unrelated reason (e.g. a sibling assign) does
-    // not re-flash, even if LiveView patched the table DOM.
     const gen = this.el.dataset.flashGen
-    if (gen === this.gen) {
-      // No live refresh — just re-baseline in case the rows changed shape (a
-      // drill/crumb swap re-keys the cells), so a later change diffs correctly.
-      this.prev = this.snapshot()
-      return
-    }
-    this.gen = gen
-
     const next = this.snapshot()
-    next.forEach((val, key) => {
-      const had = this.prev.has(key)
-      if (had && this.prev.get(key) !== val) this.flash(key)
-    })
+
+    // Only flash on a fresh LIVE refresh (the flash-gen bumped) AND when the row
+    // SHAPE is unchanged — i.e. we're still looking at the same object's same
+    // fields. A drill / crumb walk-back swaps to a different object (a different
+    // key set); LiveView can batch that row-shape change into the SAME diff that
+    // a background change-push bumped the gen, so the gen alone is not enough to
+    // tell "same object, new values" from "different object". When the key set
+    // differs (or the gen didn't move), we just re-baseline without flashing, so
+    // a later real value change on the new object diffs correctly.
+    const sameShape = sameKeys(this.prev, next)
+    if (gen !== this.gen && sameShape) {
+      next.forEach((val, key) => {
+        if (this.prev.has(key) && this.prev.get(key) !== val) this.flash(key)
+      })
+    }
+
+    this.gen = gen
     this.prev = next
   },
 
@@ -113,11 +115,22 @@ export const FieldFlash = {
   },
 }
 
-// Minimal CSS.escape fallback for attribute-selector safety (field names are
-// Beamtalk identifiers, but stay defensive against a non-identifier key).
+// True when two snapshots cover exactly the same set of field keys — i.e. the
+// same object's same fields, so a value diff between them is a real change (not a
+// drill to a different object). Order-independent.
+function sameKeys(a, b) {
+  if (a.size !== b.size) return false
+  for (const k of a.keys()) if (!b.has(k)) return false
+  return true
+}
+
+// CSS.escape for attribute-selector safety (field names are Beamtalk
+// identifiers, but stay defensive against a non-identifier key). CSS.escape is
+// supported by every browser that runs LiveView; the fallback escapes any
+// non-[alnum-_] char rather than an incomplete hand-picked set.
 function cssEscape(s) {
   if (window.CSS && typeof window.CSS.escape === "function") {
     return window.CSS.escape(s)
   }
-  return String(s).replace(/["\\\]]/g, "\\$&")
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&")
 }

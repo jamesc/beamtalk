@@ -602,8 +602,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
     assert eventually(fn -> render(view) =~ name end)
 
-    html = view |> element("button[phx-value-name='#{name}']") |> render_click()
-    assert html =~ "Inspecting"
+    view |> element("button[phx-value-name='#{name}']") |> render_click()
+    # Assert on the full page render, not the click's element-scoped return.
+    assert render(view) =~ "Inspecting"
     {name, class}
   end
 
@@ -664,9 +665,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     Process.sleep(300)
     assert flash_gen(view) == gen_frozen
 
-    # Unfreeze: re-subscribe + catch up — the pane re-reads, so it reflects the
-    # write made while frozen (value is now 2: one before freeze in this flow? no —
-    # one increment while frozen → value 1) and tracking is live again.
+    # Unfreeze: re-subscribe + catch up — the pane re-reads, so it now reflects the
+    # single increment made while frozen (value 1) and tracking is live again.
     live_again = view |> element(~s(button[phx-click="freeze_toggle"])) |> render_click()
     assert live_again =~ "live"
     assert render(view) =~ "1"
@@ -698,6 +698,41 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # A malformed payload (no/non-binary message) is ignored, not a crash.
     assert render_hook(view, "poke", %{"garbage" => true})
     assert render_hook(view, "poke", %{"message" => 123})
+    assert Process.alive?(view.pid)
+  end
+
+  test "a change push for an unwatched pid is ignored (no spurious refresh) (BT-2492)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    {_name, _class} = inspect_live_counter(view, conn)
+
+    # Drive the {:object_changed, …} clause directly with a pid that is NOT the
+    # watched actor (the test process). The pid-match guard must drop it: no
+    # flash-gen bump, no crash. This isolates the BT-2492 stale-push guard from
+    # the actor runtime's timing.
+    gen_before = flash_gen(view)
+    send(view.pid, {:object_changed, self(), []})
+    # Let the message be processed (a render flushes the mailbox).
+    _ = render(view)
+    assert flash_gen(view) == gen_before
+    assert Process.alive?(view.pid)
+  end
+
+  test "a frozen pane drops a change push for the watched pid (BT-2492)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    {name, _class} = inspect_live_counter(view, conn)
+
+    # Freeze, then a real write to the watched actor. The frozen guard in the
+    # {:object_changed, …} clause must drop the push — flash-gen stays put even
+    # though the actor genuinely changed (this asserts the guard, not just timing).
+    view |> element(~s(button[phx-click="freeze_toggle"])) |> render_click()
+    gen_frozen = flash_gen(view)
+
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    # The write committed (the pane is frozen, so it must NOT reflect it). Poll a
+    # few times to let any push land, asserting the gen never moves.
+    refute eventually(fn -> flash_gen(view) != gen_frozen end, 10)
     assert Process.alive?(view.pid)
   end
 
