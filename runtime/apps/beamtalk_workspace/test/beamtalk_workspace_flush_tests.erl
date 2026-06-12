@@ -1383,3 +1383,50 @@ del_tree(Path) ->
         false -> _ = file:delete(Path)
     end,
     ok.
+
+%%====================================================================
+%% FlushCompleted announcement (ADR 0093 §2, BT-2530)
+%%====================================================================
+
+%% `announce_flush_completed/1` publishes the typed FlushCompleted event on the
+%% SystemAnnouncer bus with the flushed files, alongside the legacy
+%% `beamtalk_flush_events` broadcast. Subscribed with a fun handler so the
+%% veneer async dispatch invokes it and we can assert on the typed event map.
+announce_flush_completed_emits_typed_event_test() ->
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt, E} end, false
+    ),
+    Files = [<<"/ws/src/Foo.bt">>, <<"/ws/src/Bar.bt">>],
+    try
+        ok = beamtalk_workspace_flush:announce_flush_completed(Files),
+        receive
+            {flush_evt, Event} ->
+                ?assertMatch(
+                    #{'$beamtalk_class' := 'FlushCompleted', files := Files},
+                    Event
+                )
+        after 1000 -> ?assert(false)
+        end
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.
+
+%% An empty file list announces nothing (parity with the legacy broadcast's
+%% empty-rename skip).
+announce_flush_completed_empty_is_silent_test() ->
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'FlushCompleted', self(), fun(E) -> Collector ! {flush_evt_empty, E} end, false
+    ),
+    try
+        ok = beamtalk_workspace_flush:announce_flush_completed([]),
+        receive
+            {flush_evt_empty, _} -> ?assert(false)
+        after 200 -> ok
+        end
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.

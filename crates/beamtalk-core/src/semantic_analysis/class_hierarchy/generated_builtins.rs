@@ -58,6 +58,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "File"
             | "FileHandle"
             | "Float"
+            | "FlushCompleted"
             | "Inspector"
             | "InspectorField"
             | "InstantiationError"
@@ -607,9 +608,9 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
             package: Some("stdlib".into()),
             is_value: false,
             is_native: false,
-            state: vec!["name".into(), "value".into()],
-            state_types: HashMap::from([("name".into(), "Symbol".into()), ("value".into(), "Object | Nil".into())]),
-            state_has_default: HashMap::from([("name".into(), true), ("value".into(), true)]),
+            state: vec!["name".into(), "value".into(), "sessionId".into()],
+            state_types: HashMap::from([("name".into(), "Symbol".into()), ("value".into(), "Object | Nil".into()), ("sessionId".into(), "String | Nil".into())]),
+            state_has_default: HashMap::from([("name".into(), true), ("value".into(), true), ("sessionId".into(), true)]),
             methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
@@ -1538,6 +1539,30 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "e".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Euler's number (e ≈ 2.71828...).\n\n## Examples\n```beamtalk\nFloat e              // => 2.718281828459045\n```".into()) },
                 MethodInfo { selector: "infinity".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Float".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Float".into()), param_types: vec![], doc: Some("Positive infinity.\n\nNote: BEAM does not support IEEE 754 infinity. This method\nis provided for API completeness but will raise an error.\nUse `isInfinite` to check (always returns false on BEAM).\n\n## Examples\n```beamtalk\nFloat infinity       // => ERROR: _\n```".into()) },
             ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "FlushCompleted".into(),
+        ClassInfo {
+            name: "FlushCompleted".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["files".into()],
+            state_types: HashMap::from([("files".into(), "List(String)".into())]),
+            state_has_default: HashMap::from([("files".into(), true)]),
+            methods: vec![],
+            class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],

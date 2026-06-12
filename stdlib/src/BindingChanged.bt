@@ -7,6 +7,16 @@
 /// created or updated (e.g. `x := 5` in the REPL). The remote workspace front
 /// (ADR 0091) subscribes to keep its bindings pane live.
 ///
+/// `sessionId` is the protocol session id of the evaluating session (`nil` when
+/// the assignment ran outside a session worker), so a multi-session consumer can
+/// attribute the change without querying back.
+///
+/// Note: `value` carries the bound value itself for in-image ergonomics
+/// (Pharo-style). A subscriber on a *remote* node receives a full distributed
+/// copy of that value with the event — for large values that cost is real, so
+/// remote consumers should treat the event as a refresh trigger (re-read the
+/// binding on demand) rather than consuming `value` directly.
+///
 /// ## Examples
 /// ```beamtalk
 /// SystemAnnouncer current when: BindingChanged do: [:e |
@@ -16,3 +26,4 @@
 sealed typed Announcement subclass: BindingChanged
   field: name :: Symbol = #unknown
   field: value :: Object | Nil = nil
+  field: sessionId :: String | Nil = nil

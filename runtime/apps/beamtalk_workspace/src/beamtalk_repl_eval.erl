@@ -43,6 +43,7 @@ module loading to beamtalk_repl_loader (BT-863).
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
+    announce_binding_changed/2,
     extract_assignment/1,
     maybe_await_future/1,
     rebuild_bindings_from_steps/2,
@@ -751,6 +752,12 @@ process_eval_result(Result, Expression, CleanBindings, State) ->
 Announce `BindingChanged` on the `SystemAnnouncer` bus after a workspace variable
 is assigned (ADR 0093 §2, BT-2445).
 
+The payload carries `sessionId` — the protocol session id of the evaluating
+session, read from the eval worker's process dictionary (seeded by
+`beamtalk_repl_shell:seed_session_context/3`) — so a multi-session consumer can
+attribute the change without a round-trip (BT-2530). `nil` when the eval runs
+outside a shell-spawned worker.
+
 Guarded by a `whereis` check (the announcements worker may be absent on a
 minimal runtime) and wrapped in try/catch: announcing is a best-effort
 observability side effect and must never fail or delay the eval reply.
@@ -761,9 +768,14 @@ announce_binding_changed(VarName, Value) ->
         undefined ->
             ok;
         _Pid ->
+            SessionId =
+                case get(beamtalk_session_id) of
+                    undefined -> nil;
+                    Id -> Id
+                end,
             try
                 beamtalk_announcements:system_announce('BindingChanged', #{
-                    name => VarName, value => Value
+                    name => VarName, value => Value, sessionId => SessionId
                 })
             catch
                 _:_ -> ok

@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// FlushCompleted — system event announced when `Workspace flush` finishes (ADR 0093).
+///
+/// Published on `SystemAnnouncer current` from the workspace flush pipeline
+/// after a flush has fully written one or more `.bt` source files to disk
+/// (Phase B renames complete), alongside the legacy `beamtalk_flush_events`
+/// broadcast. `files` holds the absolute path of each flushed source file.
+/// Editor-facing consumers (LSP, LiveView) subscribe to realign open buffers
+/// with the new on-disk state.
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: FlushCompleted do: [:e |
+///   e files do: [:path | Transcript showLine: path]
+/// ]
+/// ```
+sealed typed Announcement subclass: FlushCompleted
+  field: files :: List(String) = #()

@@ -83,8 +83,9 @@ is NOT in the dispatch path):
 - **Crash-survivable tables.** Both ETS tables are created with
   `{heir, SupervisorPid, ...}` so they survive a bus crash (the
   `beamtalk_trace_store` pattern). On restart the gen_server re-arms monitors
-  from the surviving rows and eagerly prunes any subscriber that died during the
-  crash→restart gap via `is_process_alive/1` (BT-2442).
+  from the surviving rows and eagerly prunes any *local* subscriber that died
+  during the crash→restart gap via `subscriber_alive/1` (BT-2442); a remote
+  subscriber is re-monitored and left to the cross-node `DOWN` (BT-2530).
 
 Out of scope here (later issues): the stdlib typed veneer classes — `Announcer` /
 `Announcement` / `Subscription` (BT-2444).
@@ -358,9 +359,11 @@ The walk stops gracefully at the root (`{ok, none}`), at a class whose metadata
 row is absent (`not_found` — e.g. a class removed mid-walk), and at a depth cap
 (`?MAX_HIERARCHY_DEPTH`) that bounds a corrupted cyclic hierarchy.
 
-A subscriber whose process has already died (its `DOWN` not yet processed by the
-bus) is skipped via an `is_process_alive/1` guard, so a stale row never produces
-a send to a dead pid.
+A local subscriber whose process has already died (its `DOWN` not yet processed
+by the bus) is skipped via the `subscriber_alive/1` guard, so a stale row never
+produces a send to a dead pid. A remote subscriber is always sent to —
+`is_process_alive/1` is local-only — and relies on the cross-node monitor for
+cleanup (BT-2530).
 """.
 -spec announce(announcement_class(), term()) -> ok.
 announce(EventClass, Event) when is_atom(EventClass) ->
@@ -449,7 +452,7 @@ do_announce_and_wait(AnnouncerRef, EventClass, Event, Timeout) ->
                 fun(SubRef, Acc) ->
                     case claim_row(SubRef) of
                         {ok, _Class, SubscriberPid, Handler, _Once} ->
-                            case is_process_alive(SubscriberPid) of
+                            case subscriber_alive(SubscriberPid) of
                                 true ->
                                     spawn_handler(
                                         EventClass, Event, Handler, SubscriberPid, Acc
@@ -549,7 +552,7 @@ bus call.
 deliver(SubRef, EventClass, Event) ->
     case claim_row(SubRef) of
         {ok, _Class, SubscriberPid, Handler, _Once} ->
-            case is_process_alive(SubscriberPid) of
+            case subscriber_alive(SubscriberPid) of
                 true ->
                     SubscriberPid ! {beamtalk_announcement, SubRef, EventClass, Handler, Event},
                     ok;
@@ -559,6 +562,23 @@ deliver(SubRef, EventClass, Event) ->
         not_found ->
             ok
     end.
+
+-doc """
+Whether a subscriber pid should still be delivered to (BT-2530).
+`erlang:is_process_alive/1` is local-only — it raises `badarg` for a pid on
+another node — so it is used as a fast-path skip for **local** pids only. A
+**remote** pid (a dist-attached subscriber registered by explicit pid, e.g. the
+`bt_attach` LiveView front) is always treated as deliverable: `Pid ! Msg` to a
+dead or unreachable remote pid is a silent no-op, and the cross-node
+`erlang:monitor/2` armed at subscribe time prunes the row when the `DOWN`
+arrives (with up to ~`net_ticktime` lag for an undetected node loss). Every
+delivery path must call this instead of `is_process_alive/1` directly.
+""".
+-spec subscriber_alive(pid()) -> boolean().
+subscriber_alive(SubscriberPid) when node(SubscriberPid) =:= node() ->
+    is_process_alive(SubscriberPid);
+subscriber_alive(_RemoteSubscriberPid) ->
+    true.
 
 -doc """
 Read a subscription row for delivery, consuming it if it is a `doOnce`
@@ -1141,16 +1161,18 @@ ensure_table(Name, Opts) ->
 -doc """
 Re-arm one monitor per distinct subscriber pid found in the surviving primary
 table (after a crash→restart with heir-preserved rows). Returns the monitor
-bookkeeping map. A pid that died during the crash→restart gap is pruned eagerly
-via `is_process_alive/1` — its rows are removed from both tables immediately so
-no stale pids accumulate (BT-2442). Live pids get a fresh `erlang:monitor/2`.
+bookkeeping map. A *local* pid that died during the crash→restart gap is pruned
+eagerly via `subscriber_alive/1` — its rows are removed from both tables
+immediately so no stale pids accumulate (BT-2442). Live local pids and all
+remote pids get a fresh `erlang:monitor/2` (cross-node monitors work; a remote
+pid that died during the gap is pruned when its `DOWN` arrives, BT-2530).
 """.
 -spec rearm_monitors() -> #{pid() => {reference(), pos_integer()}}.
 rearm_monitors() ->
     Rows = ets:tab2list(?SUBS_TABLE),
     lists:foldl(
         fun({SubRef, AnnouncerRef, Class, SubscriberPid, _Handler, _Once}, Acc) ->
-            case is_process_alive(SubscriberPid) of
+            case subscriber_alive(SubscriberPid) of
                 false ->
                     %% Dead during the crash→restart gap — prune immediately.
                     remove_subscription(SubRef, AnnouncerRef, Class),
@@ -1371,7 +1393,7 @@ dispatch_veneer_async(AnnouncerRef, EventClass, Event) ->
         fun(SubRef) ->
             case claim_row(SubRef) of
                 {ok, _Class, SubscriberPid, Handler, _Once} ->
-                    case is_process_alive(SubscriberPid) of
+                    case subscriber_alive(SubscriberPid) of
                         true ->
                             _ = spawn(fun() ->
                                 try

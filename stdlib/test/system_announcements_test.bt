@@ -20,6 +20,23 @@ TestCase subclass: SystemAnnouncementsTest
     self assert: (SupervisionChildCrashed new isKindOf: Announcement) equals: true
     // ADR 0095 §5 / BT-2489: per-object change event.
     self assert: (ObjectStateChanged new isKindOf: Announcement) equals: true
+    // BT-2530: workspace flush completion event.
+    self assert: (FlushCompleted new isKindOf: Announcement) equals: true
+
+  // --- BindingChanged carries name / value / sessionId (BT-2530) ---
+  testBindingChangedFields =>
+    // Default-constructed field values (the workspace emit point fills them in).
+    e := BindingChanged new
+    self assert: e name equals: #unknown
+    self assert: e value equals: nil
+    self assert: e sessionId equals: nil
+
+  // --- FlushCompleted carries the flushed file paths (BT-2530) ---
+  testFlushCompletedFields =>
+    e := FlushCompleted new
+    self assert: e files equals: #()
+    e2 := FlushCompleted files: #("/ws/src/Foo.bt")
+    self assert: e2 files size equals: 1
 
   // --- ObjectStateChanged carries pid / actorClass / changedSlots (ADR 0095 §5) ---
   testObjectStateChangedFields =>

@@ -1040,6 +1040,107 @@ distinct_announcers_isolated_test_() ->
     end}.
 
 %%====================================================================
+%% Remote subscriber pids: no is_process_alive badarg on any path (BT-2530)
+%%====================================================================
+
+%% A subscription whose subscriber pid lives on another node must not crash any
+%% delivery path: `erlang:is_process_alive/1` is local-only (`badarg` on a remote
+%% pid), so every path now goes through the node-discriminating
+%% `subscriber_alive/1`. The remote pid is fabricated via the external term
+%% format (the `beamtalk_inspector_tests` precedent) so no peer node or
+%% distribution is needed; rows are inserted directly into the public ETS tables
+%% so no monitor-to-unreachable-node race interferes with the dispatch asserts.
+
+%% Async announce: a remote-subscriber row alongside a local one — the announce
+%% must not crash the announcing process, and the local subscriber still
+%% receives. The remote send itself is a silent no-op without a dist connection.
+announce_with_remote_subscriber_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            RemotePid = a_remote_pid(),
+            ?assert(node(RemotePid) =/= node()),
+            Collector = self(),
+            LocalSub = spawn_subscriber(Collector),
+            try
+                _RemoteRef = insert_subscription_row(
+                    'RemoteAsyncEvent', RemotePid, remote_h, false
+                ),
+                {ok, LocalRef} = beamtalk_announcements:subscribe(
+                    'RemoteAsyncEvent', LocalSub, local_h, false
+                ),
+                ok = beamtalk_announcements:announce('RemoteAsyncEvent', payload),
+                {GotRef, 'RemoteAsyncEvent', local_h, payload} = expect_received(),
+                ?assertEqual(LocalRef, GotRef)
+            after
+                stop_subscriber(LocalSub)
+            end
+        end)
+    end}.
+
+%% The production subscribe path: registering a remote pid through the real
+%% gen_server must not crash the bus — `arm_monitor/2` runs `erlang:monitor/2`
+%% inside the bus process, which (verified empirically) does not raise for a
+%% remote pid even on a non-distributed node; it delivers an immediate
+%% `noconnection` DOWN instead, which auto-prunes the row. Both halves of that
+%% contract are asserted here.
+subscribe_remote_pid_through_gen_server_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            RemotePid = a_remote_pid(),
+            ?assert(node(RemotePid) =/= node()),
+            BusPid = whereis(beamtalk_announcements),
+            {ok, SubRef} = beamtalk_announcements:subscribe(
+                'RemoteSubEvent', RemotePid, remote_h, false
+            ),
+            %% The bus survived arming the cross-node monitor.
+            ?assert(is_process_alive(BusPid)),
+            %% Without a dist connection the monitor's immediate `noconnection`
+            %% DOWN prunes the subscription — the documented cleanup path.
+            ok = wait_until(fun() ->
+                not beamtalk_announcements:is_active(SubRef)
+            end),
+            ?assertEqual([], beamtalk_announcements:subscribers_of('RemoteSubEvent'))
+        end)
+    end}.
+
+%% Synchronous gather: `do_announce_and_wait` must not crash on the remote row,
+%% and the remote subscription's handler still runs (handlers run in local
+%% transient processes regardless of where the subscriber pid lives).
+announce_and_wait_with_remote_subscriber_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            RemotePid = a_remote_pid(),
+            ?assert(node(RemotePid) =/= node()),
+            Collector = self(),
+            Handler = fun(Event) -> Collector ! {remote_handler_ran, Event} end,
+            _RemoteRef = insert_subscription_row('RemoteSyncEvent', RemotePid, Handler, false),
+            ok = beamtalk_announcements:announceAndWait('RemoteSyncEvent', sync_payload),
+            receive
+                {remote_handler_ran, sync_payload} -> ok
+            after 1000 -> ?assert(false)
+            end
+        end)
+    end}.
+
+%% Veneer async dispatch (the `system_announce/2` path): must not crash, and the
+%% remote subscription's block handler runs caller-side as for any subscriber.
+system_announce_with_remote_subscriber_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            RemotePid = a_remote_pid(),
+            ?assert(node(RemotePid) =/= node()),
+            Collector = self(),
+            Handler = fun(Event) -> Collector ! {veneer_handler_ran, Event} end,
+            _RemoteRef = insert_subscription_row('RemoteVeneerEvent', RemotePid, Handler, false),
+            ok = beamtalk_announcements:system_announce('RemoteVeneerEvent', #{k => v}),
+            receive
+                {veneer_handler_ran, #{k := v}} -> ok
+            after 1000 -> ?assert(false)
+            end
+        end)
+    end}.
+
+%%====================================================================
 %% Heir crash-survival: live subscriptions survive, dead-in-gap pruned (BT-2442)
 %%====================================================================
 
@@ -1221,8 +1322,113 @@ heir_rearm_monitor_fires_on_later_death_impl() ->
         end)}.
 
 %%====================================================================
+%% Heir crash-survival: remote subscriber row must not crash re-arm (BT-2530)
+%%====================================================================
+
+%% A remote-subscriber row that survives a bus crash via heir must not crash the
+%% restarted bus: `rearm_monitors/0` used to call `is_process_alive/1` on every
+%% surviving pid, which is `badarg` for a remote pid — killing the bus gen_server
+%% in init. The remote row is re-monitored (cross-node monitor) and left to the
+%% `DOWN` for cleanup; the live local subscription must survive and keep working.
+heir_rearm_with_remote_subscriber_test_() ->
+    case whereis(beamtalk_runtime_sup) of
+        Sup when is_pid(Sup) ->
+            %% See heir_crash_survival_test_/0 — skipped under the live runtime;
+            %% exercised in the standalone EUnit context.
+            {"heir re-arm with remote subscriber (skipped: live runtime supervises the bus)",
+                ?_test(ok)};
+        undefined ->
+            heir_rearm_with_remote_subscriber_impl()
+    end.
+
+heir_rearm_with_remote_subscriber_impl() ->
+    {timeout, 15,
+        ?_test(begin
+            FakeSup = ensure_heir_process(),
+            try
+                stop_existing_bus(),
+                {ok, _} = beamtalk_announcements:start_link(),
+                clear_all_subscriptions(),
+
+                Collector = self(),
+                LocalSub = spawn_subscriber(Collector),
+                try
+                    {ok, LocalRef} = beamtalk_announcements:subscribe(
+                        'RemoteRearmEvent', LocalSub, local_h, false
+                    ),
+                    %% Inserted directly (not via subscribe) so no monitor exists —
+                    %% exactly the crash→restart-gap shape rearm_monitors sees.
+                    RemotePid = a_remote_pid(),
+                    ?assert(node(RemotePid) =/= node()),
+                    _RemoteRef = insert_subscription_row(
+                        'RemoteRearmEvent', RemotePid, remote_h, false
+                    ),
+                    ?assertEqual(2, beamtalk_announcements:subscription_count()),
+
+                    %% Kill the bus; tables survive via heir.
+                    BusPid = whereis(beamtalk_announcements),
+                    unlink(BusPid),
+                    BusMon = erlang:monitor(process, BusPid),
+                    exit(BusPid, kill),
+                    receive
+                        {'DOWN', BusMon, process, BusPid, _} -> ok
+                    after 2000 -> ?assert(false)
+                    end,
+
+                    %% Restart — re-arm must not badarg on the remote pid.
+                    {ok, NewBus} = beamtalk_announcements:start_link(),
+                    ?assert(is_process_alive(NewBus)),
+
+                    %% The local subscription survived and still delivers. (The
+                    %% remote row is re-monitored; without a dist connection its
+                    %% noconnection DOWN prunes it asynchronously — not asserted,
+                    %% timing-dependent.)
+                    ?assert(beamtalk_announcements:is_active(LocalRef)),
+                    ok = beamtalk_announcements:announce('RemoteRearmEvent', post_rearm),
+                    {GotRef, 'RemoteRearmEvent', local_h, post_rearm} = expect_received(),
+                    ?assertEqual(LocalRef, GotRef)
+                after
+                    stop_subscriber(LocalSub),
+                    clear_all_subscriptions()
+                end
+            after
+                stop_heir_process(FakeSup)
+            end
+        end)}.
+
+%%====================================================================
 %% Helpers
 %%====================================================================
+
+%% A deterministic pid on a *non-local* node, built via the external term format
+%% (`NEW_PID_EXT`) so the tests need no distribution / peer node —
+%% `binary_to_term` does not require the encoded node to exist or be connected.
+%% (The `beamtalk_inspector_tests` precedent.)
+a_remote_pid() ->
+    NodeBin = atom_to_binary('announcements_remote@nohost', utf8),
+    Len = byte_size(NodeBin),
+    %% 118 = ATOM_UTF8_EXT (2-byte length, matching Len:16). The superficially
+    %% similar SMALL_ATOM_UTF8_EXT (119) takes a 1-byte length — pairing it with
+    %% Len:16 decodes the node as the empty atom '' (still remote-shaped, but
+    %% not the intended node name).
+    binary_to_term(<<131, 88, 118, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
+
+%% Insert a subscription row directly into both public ETS tables (system
+%% announcer namespace), bypassing the gen_server. Used by the remote-pid tests:
+%% subscribing a remote pid through the gen_server would arm a monitor to an
+%% unreachable node whose immediate `noconnection` DOWN races the dispatch
+%% asserts, and the direct insert also models the heir-surviving stale row.
+insert_subscription_row(Class, Pid, Handler, Once) ->
+    SubRef = make_ref(),
+    true = ets:insert(
+        beamtalk_announcement_subs,
+        {SubRef, beamtalk_system_announcer, Class, Pid, Handler, Once}
+    ),
+    true = ets:insert(
+        beamtalk_announcement_by_class,
+        {{beamtalk_system_announcer, Class, SubRef}}
+    ),
+    SubRef.
 
 %% Stand up a 3-level class hierarchy in the metadata table for the MRO tests:
 %% ButtonClicked -> UIEvent -> DomainEvent (root, superclass = none).
