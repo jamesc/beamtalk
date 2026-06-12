@@ -42,8 +42,9 @@ Historically meta-commands like `:bindings`, `:sync`, `:test` existed to bootstr
 
 The Phoenix LiveView IDE (`editors/liveview/`, Attach topology) is **not a new
 op vocabulary** — its curated facade (`BtAttach.Facade`) dispatches the *same*
-REPL ops (`eval`, `inspect`, `bindings`, `load-source`, save/flush, the
-transcript/bindings subscriptions, …) via the BT-2399 term-returning seam, so
+REPL ops (`eval`, `inspect`, `bindings`, `load-source`, save/flush, `pid-stats`,
+the transcript/bindings/per-object subscriptions, …) via the BT-2399
+term-returning seam, so
 results are surface-consistent by construction (live terms; JSON only at the
 WebSocket edge). It adds, **only on this surface**, two access controls that do
 not change op output:
@@ -139,6 +140,7 @@ not change op output:
 | `get-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `get_traces` | -- | Retrieve captured traces |
 | `actor-stats` | -- | `surface-specific: agent-only workflow (BT-1606)` | `actor_stats` | -- | Per-actor/method aggregate stats |
 | `export-traces` | -- | `surface-specific: agent-only workflow (BT-1606)` | `export_traces` | -- | Export traces to JSON file |
+| `pid-stats` | -- | `surface-specific: LiveView IDE Inspector` | *(via LiveView IDE)* | -- | Live process metrics (queue depth, memory, reductions, status, current function) for one actor pid — the read companion to the live-Inspector per-object change stream (ADR 0095 §5, BT-2489). Read-only `process_info` reflection (the `:observer`/LiveDashboard primitive set), guarded so a dead pid degrades to `status: dead`. The Cockpit Inspector pane re-issues it on each `{object_changed, …}` push (or a refresh timer). |
 
 ## Server Operations
 

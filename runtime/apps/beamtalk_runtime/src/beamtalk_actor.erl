@@ -1760,7 +1760,37 @@ log_dispatch_complete(OldState, NewState, Selector, Mode, T0) ->
                 domain => [beamtalk, runtime]
             })
     end,
+    maybe_publish_state_change(NewState, ChangedKeys),
     ok.
+
+-doc """
+Publish a committed state change to the per-object change subscription substrate
+(`beamtalk_object_watch`, ADR 0095 §5 / BT-2489), but only when this actor is
+*watched*. The opt-in keeps the common path cheap: when `ChangedKeys` is empty
+nothing is published, and otherwise a single message-free `ets:member/2` read
+short-circuits for the (usual) unwatched actor — only a watched actor with an
+actual state change reaches `publish_change/3`.
+
+The actor class is read **here**, from the just-committed `NewState`
+(`beamtalk_tagged_map:class_of/2`, cheap), and passed through — *not* re-derived
+later in the watch server. The watch server runs the publish off the actor's own
+message loop, by which point the actor has finished dispatch and cleared its
+`$bt_actor_state` pdict entry, so reading the class from afar there would observe
+`nil` in the common case (and would deep-copy the whole pdict). Capturing it at
+the source keeps `actorClass` accurate and avoids that copy.
+""".
+-spec maybe_publish_state_change(map(), [atom()]) -> ok.
+maybe_publish_state_change(_NewState, []) ->
+    ok;
+maybe_publish_state_change(NewState, ChangedKeys) ->
+    Self = self(),
+    case beamtalk_object_watch:is_watched(Self) of
+        true ->
+            ActorClass = beamtalk_tagged_map:class_of(NewState, nil),
+            beamtalk_object_watch:publish_change(Self, ActorClass, ChangedKeys);
+        false ->
+            ok
+    end.
 
 -doc """
 Compute which user-visible state keys changed between two state maps.

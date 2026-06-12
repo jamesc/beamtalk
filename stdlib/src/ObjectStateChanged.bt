@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ObjectStateChanged — system event announced when a *watched* actor commits a
+/// state write (ADR 0095 §5, BT-2489 — Cockpit Phase 3 live Inspector tracking).
+///
+/// Publishing on every actor mutation is expensive, so this is **opt-in**: an
+/// actor only publishes while at least one consumer is watching its pid (via the
+/// `subscribe-object` workspace op / `beamtalk_object_watch`). The event is
+/// published on `SystemAnnouncer current` after the state write commits, so an
+/// in-image tool can react with the same announcement idiom used for
+/// `ActorSpawned`/`ActorStopped` (ADR 0093) without wiring a bespoke channel.
+///
+/// `changedSlots` lists the user-visible state keys whose values differed; an
+/// empty list means "unknown — refresh all". It is a *refresh trigger*: a
+/// subscriber re-inspects the actor to read the new snapshot, keeping actor
+/// opacity intact (the snapshot is a guarded `sys:get_state`, never a hot-path
+/// read).
+///
+/// ## Examples
+/// ```beamtalk
+/// SystemAnnouncer current when: ObjectStateChanged do: [:e |
+///   Transcript showLine: e actorClass asString, " changed ", e changedSlots printString
+/// ]
+/// ```
+sealed typed Announcement subclass: ObjectStateChanged
+  field: pid :: Pid | Nil = nil
+  field: actorClass :: Symbol = #unknown
+  field: changedSlots :: List = #()

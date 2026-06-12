@@ -337,7 +337,7 @@ browse_tests(#{class_name := Class}) ->
         end},
         {"browse-protocols rejects a bad side", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
-
+                <<"browse-protocols">>,
                 #{<<"class">> => Class, <<"side">> => <<"klass">>},
                 make_msg(),
                 self()

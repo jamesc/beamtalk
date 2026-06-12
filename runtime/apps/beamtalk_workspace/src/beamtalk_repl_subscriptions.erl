@@ -55,6 +55,18 @@ These message shapes are part of the documented push contract; clients pattern
 match on them (the browser edge re-encodes them to JSON push frames in
 `beamtalk_ws_handler`).
 
+## Per-object change subscriptions (ADR 0095 §5, BT-2489)
+
+The streams above are *system-wide* (every transcript line, every class load).
+The **live Inspector** (Cockpit Phase 3) needs a narrower, *per-object* stream: a
+pane watching one actor's pid wants `{object_changed, Pid, ChangedSlots}` only
+for that actor. Because it is parameterised by a target pid it does not fit the
+`stream()` enum; `subscribe_object/2` / `unsubscribe_object/2` take the watched
+actor pid **and** an explicit subscriber pid (the same dist-attach explicit-pid
+form `subscribe/2` uses). It is opt-in — an actor only *publishes* while watched,
+so an unwatched actor's dispatch pays just a single message-free `ets:member/2`
+membership read and never builds or sends an event (see `beamtalk_object_watch`).
+
 ## References
 
 * `docs/development/repl-op-term-contract.md` — the op + subscription contract.
@@ -72,7 +84,9 @@ match on them (the browser edge re-encodes them to JSON push frames in
     subscribe_all/0,
     subscribe_all/1,
     unsubscribe_all/0,
-    unsubscribe_all/1
+    unsubscribe_all/1,
+    subscribe_object/2,
+    unsubscribe_object/2
 ]).
 
 %% Registered names of the underlying event servers (all local to the workspace
@@ -178,3 +192,22 @@ subscribe_all(Pid) when is_pid(Pid) ->
 -spec unsubscribe_all(pid()) -> ok.
 unsubscribe_all(Pid) when is_pid(Pid) ->
     lists:foreach(fun(Stream) -> unsubscribe(Stream, Pid) end, streams()).
+
+-doc """
+Subscribe `Subscriber` to committed state-change events on a single actor
+`ActorPid` (ADR 0095 §5 / BT-2489). The subscriber receives
+`{object_changed, ActorPid, ChangedSlots}` after each state write on the actor.
+
+Parameterised by the watched pid (unlike the system-wide streams), so it takes
+both pids explicitly; the LiveView passes its own location-transparent pid as
+`Subscriber` over `rpc:call/4`. Delegates to the runtime `beamtalk_object_watch`
+server, which keys the opt-in (only watched actors publish).
+""".
+-spec subscribe_object(pid(), pid()) -> ok.
+subscribe_object(ActorPid, Subscriber) when is_pid(ActorPid), is_pid(Subscriber) ->
+    beamtalk_object_watch:subscribe(ActorPid, Subscriber).
+
+-doc "Unsubscribe `Subscriber` from state-change events on the actor `ActorPid`.".
+-spec unsubscribe_object(pid(), pid()) -> ok.
+unsubscribe_object(ActorPid, Subscriber) when is_pid(ActorPid), is_pid(Subscriber) ->
+    beamtalk_object_watch:unsubscribe(ActorPid, Subscriber).
