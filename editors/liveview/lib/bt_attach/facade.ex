@@ -66,6 +66,16 @@ defmodule BtAttach.Facade do
     browse_protocols: :read,
     browse_method_source: :read,
     browse_class_definition: :read,
+    # BT-2495 (Cockpit Phase 3): the navigation aids — Senders/Implementors
+    # popovers (`senders`/`implementors`) and the top-bar omni search (`symbols`).
+    # Each is a thin `:read` facade over the navigation channel the LSP/MCP
+    # already use (ADR 0096): `nav-query` (senders/implementors call sites, backed
+    # by the `beamtalk_xref` index) and `nav-symbols` (the class+method outline).
+    # They trigger no user code — pure xref + reflection — so they are safe for
+    # the Observer role, scoped exactly like the browse ops.
+    senders: :read,
+    implementors: :read,
+    symbols: :read,
     subscribe_transcript: :read,
     subscribe_bindings: :read,
     subscribe_actors: :read,
@@ -175,6 +185,32 @@ defmodule BtAttach.Facade do
   defp invoke(:browse_class_definition, %{class: class}, _ctx) do
     if is_binary(class),
       do: client().browse_class_definition(class),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2495: the Senders/Implementors popovers and the omni-search index. Each
+  # routes to the matching navigation read on the workspace client (`nav-query` /
+  # `nav-symbols`) and returns the live `{:value, _}` term verbatim. The selector
+  # param is required by `senders`/`implementors`; `symbols` takes an optional
+  # `scope` (`"all"` default). Bad params come back as `:invalid_params` with no
+  # dist call, matching the browse ops.
+  defp invoke(:senders, %{selector: selector}, _ctx) do
+    if is_binary(selector),
+      do: client().senders_of(selector),
+      else: {:error, :invalid_params}
+  end
+
+  defp invoke(:implementors, %{selector: selector}, _ctx) do
+    if is_binary(selector),
+      do: client().implementors_of(selector),
+      else: {:error, :invalid_params}
+  end
+
+  defp invoke(:symbols, params, _ctx) do
+    scope = Map.get(params, :scope, "all")
+
+    if is_binary(scope),
+      do: client().symbol_index(scope),
       else: {:error, :invalid_params}
   end
 
