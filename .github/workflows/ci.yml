@@ -342,6 +342,20 @@ jobs:
       - name: Test REPL protocol (full pipeline)
         run: just test-repl-protocol
 
+      # On any failure, surface epmd state + the most recent workspace startup
+      # logs. The recurring "REPL did not report port" flake (BT-1599 and its
+      # 2026-06 recurrence) means a workspace BEAM node booted but never became
+      # healthy — startup.log holds the only crash/hang diagnostics, and they
+      # are unrecoverable once the runner is gone.
+      - name: Dump workspace startup logs
+        if: failure()
+        run: |
+          epmd -names || true
+          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log 2>/dev/null | head -5); do
+            echo "=== $f ==="
+            cat "$f"
+          done
+
   coverage:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

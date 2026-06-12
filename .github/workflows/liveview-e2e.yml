@@ -145,6 +145,16 @@ jobs:
           PHX_PLAYWRIGHT: '1'
         run: mix test --only playwright
 
+      # On any failure, surface the workspace node's startup log — the only
+      # diagnostic for "WebSocket health check failed" / degraded-workspace
+      # failures, which are otherwise unreproducible once the runner is gone
+      # (the create-step failure seen on the BT-2493 runs).
+      - name: Dump workspace startup log
+        if: failure()
+        run: |
+          epmd -names || true
+          cat "${HOME}/.beamtalk/workspaces/e2e/startup.log" || true
+
       # Stop the background workspace node regardless of suite outcome so the job
       # never leaves a stray distributed node behind (AC: created and torn down
       # cleanly). `|| true` keeps a teardown hiccup from masking a real failure.
