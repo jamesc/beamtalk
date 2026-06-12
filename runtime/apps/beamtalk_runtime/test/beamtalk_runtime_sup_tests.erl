@@ -34,9 +34,10 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Should have exactly 8 children: xref, bootstrap, announcements, stdlib,
-    %% object_instances, subprocess_sup, reactive_subprocess_sup, trace_store
-    ?assertEqual(8, length(ChildSpecs)).
+    %% Should have exactly 9 children: xref, bootstrap, announcements, stdlib,
+    %% object_instances, subprocess_sup, reactive_subprocess_sup, trace_store,
+    %% object_watch
+    ?assertEqual(9, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
