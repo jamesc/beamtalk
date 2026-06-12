@@ -58,10 +58,11 @@ children_are_workers_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
     %% xref (worker), bootstrap, announcements, stdlib, object_instances are workers;
-    %% subprocess_sup and reactive_subprocess_sup are supervisors; trace_store is worker.
+    %% subprocess_sup and reactive_subprocess_sup are supervisors; trace_store and
+    %% object_watch are workers.
     Types = [maps:get(type, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
-        [worker, worker, worker, worker, worker, supervisor, supervisor, worker],
+        [worker, worker, worker, worker, worker, supervisor, supervisor, worker, worker],
         Types
     ).
 
@@ -71,7 +72,7 @@ children_are_permanent_test() ->
     %% All children should have permanent restart
     RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
-        lists:duplicate(8, permanent),
+        lists:duplicate(9, permanent),
         RestartTypes
     ).
 
@@ -84,7 +85,7 @@ children_ordered_correctly_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
     %% Verify ordering: xref -> bootstrap -> announcements -> stdlib -> instances
-    %% -> subprocess_sup -> reactive_subprocess_sup -> trace_store
+    %% -> subprocess_sup -> reactive_subprocess_sup -> trace_store -> object_watch
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
         [
@@ -95,7 +96,8 @@ children_ordered_correctly_test() ->
             beamtalk_object_instances,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,
-            beamtalk_trace_store
+            beamtalk_trace_store,
+            beamtalk_object_watch
         ],
         Ids
     ).
@@ -125,7 +127,8 @@ bootstrap_child_spec_test() ->
         _InstancesSpec,
         _SubprocessSupSpec,
         _ReactiveSupSpec,
-        _TraceStoreSpec
+        _TraceStoreSpec,
+        _ObjectWatchSpec
     ] = ChildSpecs,
     ?assertEqual(beamtalk_bootstrap, maps:get(id, BootstrapSpec)),
     ?assertEqual({beamtalk_bootstrap, start_link, []}, maps:get(start, BootstrapSpec)),
@@ -145,7 +148,8 @@ instances_child_spec_test() ->
         InstancesSpec,
         _SubprocessSupSpec,
         _ReactiveSupSpec,
-        _TraceStoreSpec
+        _TraceStoreSpec,
+        _ObjectWatchSpec
     ] = ChildSpecs,
     ?assertEqual(beamtalk_object_instances, maps:get(id, InstancesSpec)),
     ?assertEqual({beamtalk_object_instances, start_link, []}, maps:get(start, InstancesSpec)),
@@ -165,7 +169,8 @@ stdlib_child_spec_test() ->
         _InstancesSpec,
         _SubprocessSupSpec,
         _ReactiveSupSpec,
-        _TraceStoreSpec
+        _TraceStoreSpec,
+        _ObjectWatchSpec
     ] = ChildSpecs,
     ?assertEqual(beamtalk_stdlib, maps:get(id, StdlibSpec)),
     ?assertEqual({beamtalk_stdlib, start_link, []}, maps:get(start, StdlibSpec)),
@@ -185,7 +190,8 @@ subprocess_sup_child_spec_test() ->
         _InstancesSpec,
         SubprocessSupSpec,
         _ReactiveSupSpec,
-        _TraceStoreSpec
+        _TraceStoreSpec,
+        _ObjectWatchSpec
     ] = ChildSpecs,
     ?assertEqual(beamtalk_subprocess_sup, maps:get(id, SubprocessSupSpec)),
     ?assertEqual({beamtalk_subprocess_sup, start_link, []}, maps:get(start, SubprocessSupSpec)),
@@ -205,7 +211,8 @@ reactive_subprocess_sup_child_spec_test() ->
         _InstancesSpec,
         _SubprocessSupSpec,
         ReactiveSupSpec,
-        _TraceStoreSpec
+        _TraceStoreSpec,
+        _ObjectWatchSpec
     ] = ChildSpecs,
     ?assertEqual(beamtalk_reactive_subprocess_sup, maps:get(id, ReactiveSupSpec)),
     ?assertEqual(
@@ -220,7 +227,7 @@ reactive_subprocess_sup_child_spec_test() ->
 
 init_returns_proper_format_test() ->
     Result = beamtalk_runtime_sup:init([]),
-    ?assertMatch({ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _]}}, Result).
+    ?assertMatch({ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _, _]}}, Result).
 
 %%% Behavioral tests
 
@@ -259,7 +266,8 @@ all_children_alive_test() ->
             beamtalk_object_instances,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,
-            beamtalk_trace_store
+            beamtalk_trace_store,
+            beamtalk_object_watch
         ],
         ActualIds = [Id || {Id, _Pid, _Type, _Modules} <- Children],
         ?assertEqual(lists:sort(ExpectedIds), lists:sort(ActualIds)),
