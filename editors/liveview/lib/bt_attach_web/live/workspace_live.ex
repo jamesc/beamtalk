@@ -2418,8 +2418,6 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  defp refresh_window(w, _socket, _term), do: w
-
   # The label at a window's current head: its last drill crumb, falling back to its
   # target label.
   defp window_label(w) do
