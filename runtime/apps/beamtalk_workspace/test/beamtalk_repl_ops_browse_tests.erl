@@ -218,7 +218,10 @@ browse_xref() ->
         %% Precedence overlap: synthetic AND extension. The synthetic source
         %% status (a compiler-generated accessor) is decided before the extension
         %% provenance, so this must bucket "accessing", not "extensions".
-        method_row('syntheticExt', 104, synthetic, extension)
+        method_row('syntheticExt', 104, synthetic, extension),
+        %% print* prefix path (distinct from the exact-name `printString` match):
+        %% `printDetails` must reach the prefix heuristic and land in "printing".
+        method_row('printDetails', 106, indexed, class_body)
     ].
 
 method_row(Selector, Line, SourceStatus, Provenance) ->
@@ -327,7 +330,10 @@ browse_tests(#{class_name := Class}) ->
             %% Word-boundary discipline: `address` is not an `add` mutator.
             ?assertEqual(<<"as yet unclassified">>, protocol_of(Protocols, <<"address">>)),
             %% Precedence: synthetic status decided before extension provenance.
-            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"syntheticExt">>))
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"syntheticExt">>)),
+            %% print* prefix path (not the exact-name `printString` match):
+            %% `printDetails` must reach the prefix heuristic and land in "printing".
+            ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>))
         end},
         {"browse-protocols rejects a bad side", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
