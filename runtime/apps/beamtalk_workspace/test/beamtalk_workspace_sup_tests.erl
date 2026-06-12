@@ -232,6 +232,14 @@ all_children_alive_test() ->
     %% Ensure runtime is started (workspace depends on it)
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
 
+    %% The repl_server child boots a cowboy listener (`cowboy:start_clear`), which
+    %% needs ranch/cowboy already running. When this suite runs as an isolated
+    %% module (`rebar3 eunit --module=…`) the beamtalk_workspace app — and thus its
+    %% cowboy dependency — is not started, so the child would fail with
+    %% `{noproc, ranch_sup …}`. Starting cowboy here makes the single-module run
+    %% deterministic (BT-2523).
+    {ok, _} = application:ensure_all_started(cowboy),
+
     %% Set trap_exit before start_link
     OldTrap = process_flag(trap_exit, true),
 
