@@ -584,7 +584,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # Spawn + bind a real Counter actor in `view`'s session and inspect it, returning
   # the binding name. The Counter exposes `value` (a field) and `increment` (a
   # mutator) so the change stream + field flash + poke have something to move.
-  defp inspect_live_counter(view, conn) do
+  defp inspect_live_counter(view) do
     suffix = System.unique_integer([:positive])
     class = "TrackCounter#{suffix}"
     name = "tc_#{suffix}"
@@ -612,7 +612,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     conn: conn
   } do
     {:ok, view, _html} = live(conn, "/")
-    {_name, _class} = inspect_live_counter(view, conn)
+    {_name, _class} = inspect_live_counter(view)
 
     # The Inspector head carries the live process-health chips read via pid_stats:
     # a scheduling status, the mailbox depth, and a reduction count. They are the
@@ -631,7 +631,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     conn: conn
   } do
     {:ok, view, _html} = live(conn, "/")
-    {name, _class} = inspect_live_counter(view, conn)
+    {name, _class} = inspect_live_counter(view)
 
     gen_before = flash_gen(view)
 
@@ -650,7 +650,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "the freeze toggle stops live tracking and resumes on unfreeze (BT-2492)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    {name, _class} = inspect_live_counter(view, conn)
+    {name, _class} = inspect_live_counter(view)
 
     # Freeze: the head button flips to "frozen" and the change subscription is
     # dropped, so a subsequent write does NOT bump flash-gen (the pane holds a
@@ -674,7 +674,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "owner poke sends a message to the inspected actor (BT-2492)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    {_name, _class} = inspect_live_counter(view, conn)
+    {_name, _class} = inspect_live_counter(view)
 
     # The owner-only poke bar sends a Beamtalk message to the actor by eval'ing
     # `<binding> <message>`. Sending `increment` mutates the actor; the result
@@ -688,7 +688,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "poke validates an empty message and a non-bound target (BT-2492)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    {_name, _class} = inspect_live_counter(view, conn)
+    {_name, _class} = inspect_live_counter(view)
 
     # An empty message is a local validation error (no eval round-trip).
     empty = render_hook(view, "poke", %{"message" => "  "})
@@ -705,7 +705,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     conn: conn
   } do
     {:ok, view, _html} = live(conn, "/")
-    {_name, _class} = inspect_live_counter(view, conn)
+    {_name, _class} = inspect_live_counter(view)
 
     # Drive the {:object_changed, …} clause directly with a pid that is NOT the
     # watched actor (the test process). The pid-match guard must drop it: no
@@ -721,7 +721,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "a frozen pane drops a change push for the watched pid (BT-2492)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    {name, _class} = inspect_live_counter(view, conn)
+    {name, _class} = inspect_live_counter(view)
 
     # Freeze, then a real write to the watched actor. The frozen guard in the
     # {:object_changed, …} clause must drop the push — flash-gen stays put even
