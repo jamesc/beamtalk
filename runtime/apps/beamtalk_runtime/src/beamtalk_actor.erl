@@ -187,6 +187,10 @@ handle_getValue([], State) ->
 %% Internal dispatch
 -export([dispatch/4, make_self/1]).
 
+%% BT-2524: per-object change publish hook, called from compiled actor
+%% gen_server callbacks after a method commits new state.
+-export([notify_state_change/2]).
+
 %% Named registration (ADR 0079, BT-1987)
 -export([
     is_beamtalk_actor/1,
@@ -1788,6 +1792,31 @@ maybe_publish_state_change(NewState, ChangedKeys) ->
         true ->
             ActorClass = beamtalk_tagged_map:class_of(NewState, nil),
             beamtalk_object_watch:publish_change(Self, ActorClass, ChangedKeys);
+        false ->
+            ok
+    end.
+
+-doc """
+Per-object change publish hook for **compiled** actors (BT-2524).
+
+The runtime `beamtalk_actor` gen_server callbacks publish state changes via
+`log_dispatch_complete/5`. Compiled actor classes generate their *own*
+`handle_call/3` / `handle_cast/2` (codegen), which dispatch through
+`safe_dispatch/3` and never reach `log_dispatch_complete`, so without this hook a
+state write on a compiled actor was invisible to the live Inspector
+(`{object_changed, …}` never fired). The generated callbacks call this after a
+method commits `NewState`.
+
+Cheap on the common path: a single message-free `is_watched/1` ETS read
+short-circuits before any state diff, so an unwatched actor (the usual case)
+pays only that read — the `changed_state_keys/2` diff runs only for a watched
+actor.
+""".
+-spec notify_state_change(map(), map()) -> ok.
+notify_state_change(OldState, NewState) ->
+    case beamtalk_object_watch:is_watched(self()) of
+        true ->
+            maybe_publish_state_change(NewState, changed_state_keys(OldState, NewState));
         false ->
             ok
     end.
