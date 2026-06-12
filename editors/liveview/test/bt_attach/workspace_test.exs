@@ -177,9 +177,12 @@ defmodule BtAttach.WorkspaceTest do
     end
 
     test "the navigation wrappers reject non-binary arguments (guard contract)" do
-      assert_raise FunctionClauseError, fn -> Workspace.senders_of(:increment) end
-      assert_raise FunctionClauseError, fn -> Workspace.implementors_of(42) end
-      assert_raise FunctionClauseError, fn -> Workspace.symbol_index(:all) end
+      # Dispatch via apply/3 so the runtime guard is exercised without Elixir's
+      # compile-time type checker statically flagging the deliberately-bad literal
+      # against the binary() guard (a --warnings-as-errors failure on a full build).
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :senders_of, [:increment]) end
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :implementors_of, [42]) end
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :symbol_index, [:all]) end
     end
   end
 end
