@@ -61,6 +61,32 @@ defmodule BtAttach.SessionRegistryTest do
     refute pid1 == pid2
   end
 
+  test "stash_windows persists a desk that window_stash reads once on resume", %{reg: reg} do
+    pid = fake_session()
+    SessionRegistry.register(reg, "tab-stash", "phoenix-stash", pid)
+
+    # Nothing stashed yet.
+    assert SessionRegistry.window_stash(reg, "tab-stash") == nil
+
+    stash = %{windows: [%{label: "x", x: 120, y: 96}], mode: "float"}
+    assert :ok = SessionRegistry.stash_windows(reg, "tab-stash", stash)
+
+    # Read once on resume...
+    assert SessionRegistry.window_stash(reg, "tab-stash") == stash
+    # ...then cleared, so a later re-render can't replay a stale desk.
+    assert SessionRegistry.window_stash(reg, "tab-stash") == nil
+  end
+
+  test "a stash for an unknown/non-binary token is a harmless no-op", %{reg: reg} do
+    # Unknown token: nothing to attach the stash to, and nothing to read back.
+    assert :ok = SessionRegistry.stash_windows(reg, "never", %{windows: []})
+    assert SessionRegistry.window_stash(reg, "never") == nil
+
+    # Non-binary tokens never participate (resume disabled), matching checkout/3.
+    assert :ok = SessionRegistry.stash_windows(reg, 123, %{windows: []})
+    assert SessionRegistry.window_stash(reg, nil) == nil
+  end
+
   test "release schedules a reap that drops the entry after the grace window", %{reg: reg} do
     pid = fake_session()
     SessionRegistry.register(reg, "tab-2", "phoenix-2", pid)

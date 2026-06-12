@@ -75,7 +75,7 @@ defmodule BtAttach.SessionRegistry do
   defmodule Entry do
     @moduledoc false
     @enforce_keys [:session_id, :session_pid]
-    defstruct [:session_id, :session_pid, :monitor_ref, :reap_timer, :reap_tag]
+    defstruct [:session_id, :session_pid, :monitor_ref, :reap_timer, :reap_tag, :window_stash]
   end
 
   ## Public API
@@ -128,6 +128,35 @@ defmodule BtAttach.SessionRegistry do
   def discard(server, token), do: GenServer.call(server, {:discard, token})
 
   @doc """
+  Stash `token`'s floating-inspector window roots so a resume can rebuild them.
+
+  Called from the LiveView's `terminate/2` alongside `release/1`. A LiveView
+  reconnect mounts a brand-new process whose assigns (including the open window
+  list) start empty, so a transient socket drop would otherwise tear down a desk
+  full of inspector windows even though the underlying session resumes (BT-2527
+  #3). The stash rides the registry entry — Phoenix-node memory that outlives the
+  reconnect — and is read back by `window_stash/2` on the resuming mount. A
+  `nil`/non-binary or unknown token is a harmless no-op; the stash dies with the
+  entry when the session is reaped, so a genuinely-closed tab leaves nothing.
+  """
+  @spec stash_windows(GenServer.server(), term(), term()) :: :ok
+  def stash_windows(server \\ __MODULE__, token, stash)
+  def stash_windows(_server, token, _stash) when not is_binary(token), do: :ok
+  def stash_windows(server, token, stash), do: GenServer.call(server, {:stash, token, stash})
+
+  @doc """
+  Read (and clear) `token`'s stashed window roots, or `nil` when there are none.
+
+  Read once by the resuming mount after `checkout/1` resumes the session; the
+  stash is cleared so a later re-render can't replay a stale desk. A
+  `nil`/non-binary or unknown token returns `nil`.
+  """
+  @spec window_stash(GenServer.server(), term()) :: term() | nil
+  def window_stash(server \\ __MODULE__, token)
+  def window_stash(_server, token) when not is_binary(token), do: nil
+  def window_stash(server, token), do: GenServer.call(server, {:take_stash, token})
+
+  @doc """
   Mark `token`'s session releasable: schedule a grace-period reap.
 
   Called from the LiveView's `terminate/2`. If the same tab reconnects within the
@@ -177,6 +206,28 @@ defmodule BtAttach.SessionRegistry do
   @impl true
   def handle_call({:discard, token}, _from, state) do
     {:reply, :ok, close_existing(state, token)}
+  end
+
+  @impl true
+  def handle_call({:stash, token, stash}, _from, state) do
+    case Map.fetch(state.entries, token) do
+      {:ok, entry} ->
+        {:reply, :ok, put_entry(state, token, %Entry{entry | window_stash: stash})}
+
+      :error ->
+        {:reply, :ok, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:take_stash, token}, _from, state) do
+    case Map.fetch(state.entries, token) do
+      {:ok, %Entry{window_stash: stash} = entry} ->
+        {:reply, stash, put_entry(state, token, %Entry{entry | window_stash: nil})}
+
+      :error ->
+        {:reply, nil, state}
+    end
   end
 
   @impl true
