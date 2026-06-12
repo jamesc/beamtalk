@@ -200,7 +200,10 @@ defmodule BtAttach.FacadeTest do
   describe "navigation aids (Senders/Implementors + omni search, BT-2495)" do
     test "senders/implementors/symbols route to the client and return the live term" do
       assert Facade.dispatch(:senders, %{selector: "increment"}) == {:value, %{"sites" => []}}
-      assert Facade.dispatch(:implementors, %{selector: "increment"}) == {:value, %{"sites" => []}}
+
+      assert Facade.dispatch(:implementors, %{selector: "increment"}) ==
+               {:value, %{"sites" => []}}
+
       assert Facade.dispatch(:symbols, %{scope: "all"}) == {:value, %{"classes" => []}}
 
       recorded = RecordingClient.calls() |> Enum.map(&elem(&1, 0)) |> MapSet.new()

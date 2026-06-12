@@ -3029,8 +3029,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                       phx-value-selector={site["method"]}
                     >
                       <span class="nav-site-name mono">
-                        {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span>
-                        » {site["method"]}
+                        {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
+                          "method"
+                        ]}
                       </span>
                       <span :if={site["source_file"]} class="nav-loc mono">
                         {site["source_file"]}:{site["line"]}

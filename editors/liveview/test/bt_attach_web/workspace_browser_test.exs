@@ -312,7 +312,9 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> visit("/")
     |> assert_has("#workspace-editor-source")
     # Define a class so a known, image-present selector exists to search for.
-    |> eval_do("Actor subclass: OmniCounter\n  state: value = 0\n\n  bumpValue => self.value := self.value + 1")
+    |> eval_do(
+      "Actor subclass: OmniCounter\n  state: value = 0\n\n  bumpValue => self.value := self.value + 1"
+    )
     # Type into the top-bar omni search; the server filters the nav-symbols index
     # and renders the results popover (a class row + the selector rows).
     |> omni_type("OmniCounter")
@@ -343,7 +345,9 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has("#workspace-editor-source")
     # Define a class whose method sends a selector we can then trace. The starter
     # tab targets Counter#increment; define both so a real implementor exists.
-    |> eval_do("Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1")
+    |> eval_do(
+      "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
+    )
     # Select the starter method tab so the active selector is `increment`, then
     # open the Implementors popover for it.
     |> click(".tabstrip button[role='tab']")
