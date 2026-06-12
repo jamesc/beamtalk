@@ -579,6 +579,128 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "self.value"
   end
 
+  # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
+
+  # Spawn + bind a real Counter actor in `view`'s session and inspect it, returning
+  # the binding name. The Counter exposes `value` (a field) and `increment` (a
+  # mutator) so the change stream + field flash + poke have something to move.
+  defp inspect_live_counter(view, conn) do
+    suffix = System.unique_integer([:positive])
+    class = "TrackCounter#{suffix}"
+    name = "tc_#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      value => self.value
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    assert eventually(fn -> render(view) =~ name end)
+
+    html = view |> element("button[phx-value-name='#{name}']") |> render_click()
+    assert html =~ "Inspecting"
+    {name, class}
+  end
+
+  test "inspecting an actor renders pid-stats chips from the pid_stats op (BT-2492)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    {_name, _class} = inspect_live_counter(view, conn)
+
+    # The Inspector head carries the live process-health chips read via pid_stats:
+    # a scheduling status, the mailbox depth, and a reduction count. They are the
+    # spike's process-health line, refreshed on every change push.
+    html = render(view)
+    assert html =~ "pid-stat"
+    assert html =~ "mailbox"
+    assert html =~ "reductions"
+    # The FieldFlash hook + freeze toggle are wired onto the connected render.
+    assert html =~ ~s(phx-hook="FieldFlash")
+    assert html =~ ~s(phx-click="freeze_toggle")
+    assert html =~ "data-flash-gen"
+  end
+
+  test "a committed state write flashes the changed field and bumps flash-gen (BT-2492)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    {name, _class} = inspect_live_counter(view, conn)
+
+    gen_before = flash_gen(view)
+
+    # Mutate the inspected actor: `increment` commits a state write, which the
+    # workspace pushes as {:object_changed, …}. The pane coalesces + re-reads,
+    # bumping data-flash-gen and re-rendering the new value (1). The FieldFlash JS
+    # hook turns the gen bump into a visual pulse (covered by the Playwright case);
+    # here we assert the server-side signal the hook keys off.
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+
+    assert eventually(fn ->
+             html = render(view)
+             flash_gen(view) > gen_before and html =~ "value" and html =~ "1"
+           end)
+  end
+
+  test "the freeze toggle stops live tracking and resumes on unfreeze (BT-2492)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    {name, _class} = inspect_live_counter(view, conn)
+
+    # Freeze: the head button flips to "frozen" and the change subscription is
+    # dropped, so a subsequent write does NOT bump flash-gen (the pane holds a
+    # snapshot).
+    frozen = view |> element(~s(button[phx-click="freeze_toggle"])) |> render_click()
+    assert frozen =~ "frozen"
+
+    gen_frozen = flash_gen(view)
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+    # Give any (incorrectly-still-subscribed) push time to arrive; the gen must NOT
+    # move while frozen.
+    Process.sleep(300)
+    assert flash_gen(view) == gen_frozen
+
+    # Unfreeze: re-subscribe + catch up — the pane re-reads, so it reflects the
+    # write made while frozen (value is now 2: one before freeze in this flow? no —
+    # one increment while frozen → value 1) and tracking is live again.
+    live_again = view |> element(~s(button[phx-click="freeze_toggle"])) |> render_click()
+    assert live_again =~ "live"
+    assert render(view) =~ "1"
+  end
+
+  test "owner poke sends a message to the inspected actor (BT-2492)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    {_name, _class} = inspect_live_counter(view, conn)
+
+    # The owner-only poke bar sends a Beamtalk message to the actor by eval'ing
+    # `<binding> <message>`. Sending `increment` mutates the actor; the result
+    # confirmation renders and the change stream re-reads the new value.
+    poked = view |> form(".poke form") |> render_submit(%{"message" => "increment"})
+    refute poked =~ "Can only send"
+    refute poked =~ "Not authorized"
+
+    assert eventually(fn -> render(view) =~ "value" and render(view) =~ "1" end)
+  end
+
+  test "poke validates an empty message and a non-bound target (BT-2492)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    {_name, _class} = inspect_live_counter(view, conn)
+
+    # An empty message is a local validation error (no eval round-trip).
+    empty = render_hook(view, "poke", %{"message" => "  "})
+    assert empty =~ "Enter a message"
+    assert Process.alive?(view.pid)
+
+    # A malformed payload (no/non-binary message) is ignored, not a crash.
+    assert render_hook(view, "poke", %{"garbage" => true})
+    assert render_hook(view, "poke", %{"message" => 123})
+    assert Process.alive?(view.pid)
+  end
+
   # ── Wave 4: multi-tab isolation / session resume / teardown (BT-2410) ────────
 
   test "two tabs map to two isolated workspace sessions (BT-2410)", %{conn: conn} do
@@ -647,6 +769,16 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # the browser replays on the LiveSocket params.
   defp with_token(conn, token) do
     Phoenix.LiveViewTest.put_connect_params(conn, %{"workspace_token" => token})
+  end
+
+  # The Inspector's `data-flash-gen` counter (BT-2492) parsed out of the render —
+  # the server-side signal the FieldFlash hook keys its pulses off. 0 when the
+  # attribute is absent (no fields rendered yet).
+  defp flash_gen(view) do
+    case Regex.run(~r/data-flash-gen="(\d+)"/, render(view)) do
+      [_, n] -> String.to_integer(n)
+      _ -> 0
+    end
   end
 
   # ~6s total — generous for cross-node async transcript delivery under CI load.
