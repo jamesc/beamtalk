@@ -117,6 +117,7 @@ jobs:
           # signing secret. A throwaway one suffices — we never bind a socket.
           SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
         run: |
+          test -x dist-liveview/bin/server  # launcher overlay present + executable
           dist-liveview/bin/bt_attach version
           dist-liveview/bin/bt_attach eval 'IO.puts("boot-ok " <> to_string(Application.spec(:bt_attach, :vsn)))'
 

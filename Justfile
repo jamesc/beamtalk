@@ -251,7 +251,8 @@ dist-liveview:
     # The release embeds its own copies, so restore the source tree.
     mix phx.digest.clean --all
     echo "✅ LiveView IDE release ready in dist-liveview/"
-    echo "   Run: PHX_SERVER=true SECRET_KEY_BASE=... dist-liveview/bin/bt_attach start"
+    echo "   Run: dist-liveview/bin/server <workspace-id>   (resolves node+cookie like 'just web')"
+    echo "   Or:  PHX_SERVER=true SECRET_KEY_BASE=... dist-liveview/bin/bt_attach start"
 
 # Build Erlang runtime
 [working-directory: 'runtime']

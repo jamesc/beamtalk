@@ -68,8 +68,11 @@ There are three ways to run the IDE, by audience:
 
 The archive and image are produced by the IDE's own release lane
 (`.github/workflows/liveview-release.yml` and `liveview-docker.yml`); both run the
-same release as `just dist-liveview`. The rest of this section is the from-source
-path.
+same release as `just dist-liveview`. The release ships a `bin/server` launcher:
+`bin/server <workspace-id>` resolves the workspace's node + cookie from
+`~/.beamtalk/workspaces/` exactly like `just web` does (and generates an
+ephemeral `SECRET_KEY_BASE` when unset). The rest of this section is the
+from-source path.
 
 ```bash
 # from the repo root: build Beamtalk on OTP 27 and start a workspace
