@@ -13,6 +13,9 @@
 //   fixtures/inspect_pair.bt — Value subclass with left/right fields (nesting)
 
 TestCase subclass: InspectorTest
+  field: i = nil
+
+  setUp => self.i := Inspector on: (ValuePoint x: 3 y: 4)
 
   // === InspectorField value record ===
   testInspectorFieldAccessors =>
@@ -56,12 +59,10 @@ TestCase subclass: InspectorTest
 
   // === Construction: Inspector on: / inspect shorthand ===
   testInspectorOnReturnsInspector =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: (i isKindOf: Inspector) equals: true
+    self assert: (self.i isKindOf: Inspector) equals: true
 
   testValueKindClassifiedAsValue =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: i kind equals: #value
+    self assert: self.i kind equals: #value
 
   testActorKindClassifiedAsActor =>
     c := Counter spawn
@@ -70,24 +71,20 @@ TestCase subclass: InspectorTest
 
   // === #value: structural field derivation (ADR 0094 sort order) ===
   testValueFieldsAreSlots =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: i fields size equals: 2
+    self assert: self.i fields size equals: 2
 
   testValueFieldsSortedByName =>
     // ADR 0094 sort order: fields come back sorted by name (x before y).
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    names := i fields collect: [:f | f name]
+    names := self.i fields collect: [:f | f name]
     self assert: names equals: #(#x, #y)
 
   testValueFieldValuesMatch =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    xField := i fields detect: [:f | f name == #x]
+    xField := self.i fields detect: [:f | f name == #x]
     self assert: xField value equals: 3
 
   testScalarFieldIsNotDrillable =>
     // An Integer slot value is a leaf — not drillable.
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    xField := i fields detect: [:f | f name == #x]
+    xField := self.i fields detect: [:f | f name == #x]
     self assert: xField drillable equals: false
 
   testNestedValueFieldIsDrillable =>
@@ -100,50 +97,41 @@ TestCase subclass: InspectorTest
 
   // === Navigation: at: drills into a child cursor ===
   testAtDrillsIntoChildValue =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    child := (i at: #x) unwrap
+    child := (self.i at: #x) unwrap
     self assert: child subject equals: 3
 
   testAtChildParentIsTheCursor =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    child := (i at: #x) unwrap
+    child := (self.i at: #x) unwrap
     self assert: child parent kind equals: #value
 
   testAtMissReturnsNoSuchField =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    result := i at: #nonesuch
+    result := self.i at: #nonesuch
     self assert: result isError equals: true
 
   testAtMissErrorKindIsNoSuchField =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    result := i at: #nonesuch
+    result := self.i at: #nonesuch
     self assert: result error kind equals: #no_such_field
 
   // === Immutable cursor: parent / root / path ===
   testRootCursorParentIsNil =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: i parent equals: nil
+    self assert: self.i parent equals: nil
 
   testRootCursorPathIsEmpty =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: i path equals: #()
+    self assert: self.i path equals: #()
 
   testChildPathExtendsByDrilledName =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    child := (i at: #x) unwrap
+    child := (self.i at: #x) unwrap
     self assert: child path equals: #(#x)
 
   testRootWalksBackToTop =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    child := (i at: #x) unwrap
+    child := (self.i at: #x) unwrap
     self assert: child root kind equals: #value
 
   testNavigationDoesNotMutateOriginalCursor =>
     // Drilling returns a new cursor; the original is unchanged (immutable).
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    _ := (i at: #x) unwrap
-    self assert: i path equals: #()
-    self assert: i parent equals: nil
+    _ := (self.i at: #x) unwrap
+    self assert: self.i path equals: #()
+    self assert: self.i parent equals: nil
 
   // === #actor: lazy guarded snapshot ===
   testActorFieldsFromSnapshot =>
@@ -197,18 +185,15 @@ TestCase subclass: InspectorTest
 
   // === Rendering: printString depth-1 tree ===
   testPrintStringHeaderNamesClass =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: (i printString includesSubstring: "Inspector(ValuePoint)") equals: true
+    self assert: (self.i printString includesSubstring: "Inspector(ValuePoint)") equals: true
 
   testPrintStringIncludesImmediateFields =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    str := i printString
+    str := self.i printString
     self assert: (str includesSubstring: "x: 3") equals: true
     self assert: (str includesSubstring: "y: 4") equals: true
 
   testPrintStringExpandedDepthAcceptsDepth =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: (i printStringExpanded: 1) equals: i printString
+    self assert: (self.i printStringExpanded: 1) equals: self.i printString
 
   // === Cycle guard: pid-keyed seen-set with back-reference marker ===
   testActorCycleEmitsBackReference =>
@@ -271,16 +256,14 @@ TestCase subclass: InspectorTest
 
   // === Edge case: drilling into a scalar yields a leaf cursor with no fields ===
   testDrilledScalarHasNoFields =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    child := (i at: #x) unwrap
+    child := (self.i at: #x) unwrap
     self assert: child fields size equals: 0
     self assert: child kind equals: #value
 
   // === `inspect` shorthand and `Inspector on:` (ADR 0095 §1, Phase 3 BT-2504) ===
   testInspectorOnIsTheEntryPoint =>
     // `Inspector on:` is the explicit entry point on any receiver.
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    self assert: i kind equals: #value
+    self assert: self.i kind equals: #value
 
   testInspectShorthandOpensCursor =>
     // ADR 0095 Phase 3 (BT-2504): `anObject inspect` is the shorthand for
@@ -343,8 +326,7 @@ TestCase subclass: InspectorTest
     self assert: p5 fields size equals: 0
 
   testPageOnNonCollectionIsError =>
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    result := i page: 2
+    result := self.i page: 2
     self assert: result isError equals: true
     self assert: result error kind equals: #not_a_collection
 
@@ -405,8 +387,7 @@ TestCase subclass: InspectorTest
   // when the compiler is unavailable (it degrades to a `Result error:`).
   testValueEvaluateReturnsResultNeverRaises =>
     // No compiler port in BUnit → an error Result, but never a raise.
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    result := i evaluate: "self x + self y"
+    result := self.i evaluate: "self x + self y"
     self assert: (result isKindOf: Result) equals: true
 
   testActorEvaluateIsUnsupported =>
@@ -421,15 +402,13 @@ TestCase subclass: InspectorTest
   // === asDictionaries / asDictionary — wire form (ADR 0095 §7) ===
   testAsDictionariesIsOneDictPerField =>
     // One dictionary per drillable field, mirroring SupervisionTree asDictionaries.
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    dicts := i asDictionaries
+    dicts := self.i asDictionaries
     self assert: dicts size equals: 2
 
   testAsDictionariesFieldShape =>
     // Each dict carries the typed field record: name (the at: key), label,
     // value (a display string), kind, drillable.
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    xDict := i asDictionaries detect: [:d | (d at: #name) == #x]
+    xDict := self.i asDictionaries detect: [:d | (d at: #name) == #x]
     self assert: (xDict at: #name) equals: #x
     self assert: (xDict at: #label) equals: "x"
     self assert: (xDict at: #value) equals: "3"
@@ -438,8 +417,7 @@ TestCase subclass: InspectorTest
 
   testAsDictionaryEnvelopeCarriesCursorMetadata =>
     // The singular envelope carries kind/path/childCount/page + the fields window.
-    i := Inspector on: (ValuePoint x: 3 y: 4)
-    env := i asDictionary
+    env := self.i asDictionary
     self assert: (env at: #kind) equals: #value
     self assert: (env at: #path) equals: #()
     self assert: (env at: #childCount) equals: 2
