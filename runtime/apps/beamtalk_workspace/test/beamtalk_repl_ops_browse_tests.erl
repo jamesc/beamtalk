@@ -119,8 +119,14 @@ browse_setup() ->
     XrefPid =
         case whereis(beamtalk_xref) of
             undefined ->
-                {ok, P} = beamtalk_xref:start_link(),
-                P;
+                %% start-or-get: another fixture may win the race between the
+                %% whereis/1 above and start_link/0 here (CodeRabbit BT-2506).
+                case beamtalk_xref:start_link() of
+                    {ok, P} ->
+                        P;
+                    {error, {already_started, P}} ->
+                        P
+                end;
             P ->
                 P
         end,
