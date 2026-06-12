@@ -163,21 +163,27 @@ gen_server is not in the dispatch path.**
   send yourself. Use a **dedicated Beamtalk scope** (`pg:start_link(beamtalk_pg)`),
   not the default `pg` scope — both to keep announcer groups separate from the
   existing `beamtalk_classes` membership use, and to avoid colliding with any
-  `pg` use on a connected non-Beamtalk node. For the singleton system bus we
-  register subscribers in a `beamtalk_pg` group so that *membership is
-  cluster-wide for free*. Cross-node **delivery to a connected node works in v1**
-  with no extra machinery — `pg` membership spans connected nodes, `monitor`
-  works cross-node, `Pid ! Msg` is location-transparent — **on two conditions
-  that ADR-0091 Phase-3 integration must confirm:** (1) both nodes run `pg`
-  under the `beamtalk_pg` scope; (2) the 0091 front subscribes directly (it may
-  instead front the bus with its own push facade, in which case this path is not
-  exercised — see Consequences for the failure-semantics caveat). What is
-  genuinely *out of scope* and deferred to the package (Layer 3) is delivery
-  across the **absence** of a connection: netsplit / partition tolerance,
-  buffering and replay for a reconnecting subscriber, and multi-node *workspace
-  clusters*. Per-instance `Announcer`s use the ETS table directly (no `pg`
-  group), so there is no dynamic-atom pressure; where a `pg` group is needed it
-  is keyed by a `{beamtalk_announcer, Ref}` tuple, never a minted atom.
+  `pg` use on a connected non-Beamtalk node. **(Amendment BT-2530 — what was
+  actually built:)** the implementation starts the `beamtalk_pg` scope but
+  subscribers are **never joined to pg groups** — subscription membership is the
+  workspace-local ETS table (`beamtalk_announcement_subs` + its by-class index),
+  so the original "membership is cluster-wide for free" claim does not describe
+  the shipped design. Cross-node delivery in v1 is instead via **explicit-pid
+  registration**: a dist-attached consumer (e.g. the ADR-0091 front) subscribes
+  its own remote pid through the normal subscribe path on the workspace node,
+  and from there `Pid ! Msg` is location-transparent and `erlang:monitor/2`
+  works cross-node. The original claim that this "works for free" also missed
+  that all delivery paths guarded sends with `erlang:is_process_alive/1`, which
+  is **local-only** (`badarg` on a remote pid) — fixed in BT-2530 by
+  discriminating on `node(Pid) =:= node()`: local pids keep the fast-path
+  liveness skip; remote pids are always sent to, with the cross-node monitor
+  handling cleanup (up to ~`net_ticktime` lag for an undetected node loss).
+  What is genuinely *out of scope* and deferred to the package (Layer 3) is
+  delivery across the **absence** of a connection: netsplit / partition
+  tolerance, buffering and replay for a reconnecting subscriber, and multi-node
+  *workspace clusters*. Per-instance `Announcer`s use the ETS table directly,
+  so there is no dynamic-atom pressure; if a `pg` group is ever needed it is
+  keyed by a `{beamtalk_announcer, Ref}` tuple, never a minted atom.
 - **Typed dispatch with MRO matching, scoped per announcer.** On
   `anAnnouncer announce: anEvent` the matcher walks the event's superclass chain
   (ETS metadata reads) and delivers to subscribers — *on that same announcer* —
@@ -569,13 +575,15 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
   announcing process off `read_concurrency` ETS, so there is no central
   dispatch mailbox to deadlock (`announceAndWait:` reentrancy) or bottleneck.
   This is the `beamtalk_xref` / `beamtalk_trace_store` pattern.
-- **`pg` for `SystemAnnouncer` membership:** gives cluster-wide *membership* for
-  the shared bus at no extra cost — `pg` has no send primitive, so it is a
-  registry, not a transport, but combined with location-transparent `Pid ! Msg`
-  and cross-node monitors it delivers to any *connected* node in v1 (the
-  ADR-0091 LiveView front gets live updates for free over the existing dist
-  link). Only partition tolerance / replay / multi-workspace-cluster fall to the
-  package. Per-instance announcers don't use `pg`.
+- **`pg` for `SystemAnnouncer` membership:** the original design point — `pg`
+  has no send primitive, so it is a registry, not a transport. **(Amendment
+  BT-2530:)** as built, only the `beamtalk_pg` *scope* is started; subscribers
+  are never joined to pg groups — membership is the workspace-local ETS table,
+  and a connected node (the ADR-0091 LiveView front) gets delivery by
+  registering its own remote pid through the normal subscribe path
+  (location-transparent `Pid ! Msg` + cross-node monitors; see the Layer 1
+  amendment). Only partition tolerance / replay / multi-workspace-cluster fall
+  to the package. Per-instance announcers don't use `pg`.
 - **Central dispatch gen_server (rejected):** the obvious "announce → call the
   bus → it sends to everyone" design self-deadlocks on reentrant
   `announceAndWait:` and serialises all events through one mailbox.
@@ -607,11 +615,12 @@ exists to stop.
   to deadlock or bottleneck; crash-survivable via ETS heir; monitored + isolated
   by construction; hot-reload-safe (process-rooted subs). Clean `telemetry`
   boundary preserved (§4).
-- `pg` membership + location-transparent send + cross-node monitors let
-  `SystemAnnouncer` deliver to a *connected* node in v1 with no package — useful
-  for the ADR-0091 LiveView front — subject to the two integration conditions in
-  Layer 1 (shared `beamtalk_pg` scope; front subscribes directly). Only
-  partition tolerance / replay / multi-workspace-cluster fall to the package.
+- Explicit-pid registration + location-transparent send + cross-node monitors
+  let `SystemAnnouncer` deliver to a *connected* node in v1 with no package —
+  useful for the ADR-0091 LiveView front, which subscribes its remote pid
+  through the normal subscribe path (Amendment BT-2530; `pg` groups are not
+  used for membership). Only partition tolerance / replay /
+  multi-workspace-cluster fall to the package.
 - The bus is **navigable in v1** (§7): `AnnouncementNavigation` + the
   `Announcer` self-inspection methods make subscriptions a first-class,
   walkable part of the runtime — the third sibling of `SystemNavigation` /

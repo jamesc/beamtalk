@@ -119,7 +119,8 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
     group_by_file/1,
     complete_flush/4,
     filter_shadowed_by_survivor/2,
-    renamed_target_keys/1
+    renamed_target_keys/1,
+    announce_flush_completed/1
 ]).
 
 -type filter() ::
@@ -846,6 +847,9 @@ complete_flush(Files, Renamed, Failed, Seqs) ->
     %% swallows missing-server errors so flush never fails on a downstream
     %% subscriber issue.
     beamtalk_flush_events:on_files_flushed(Files),
+    %% BT-2530: typed FlushCompleted announcement on the SystemAnnouncer bus,
+    %% emitted alongside the legacy broadcast above (which BT-2531 retires).
+    announce_flush_completed(Files),
     %% Catch any failure mode from the ChangeLog server — explicit {error, _}
     %% returns *or* gen_server crashes (the call exits with noproc/timeout
     %% when the server is unreachable). Files have already been written so
@@ -886,6 +890,29 @@ complete_flush(Files, Renamed, Failed, Seqs) ->
             },
             {ok, success_summary(Files, Renamed, [MarkerFailure | Failed])}
     end.
+
+%% Announce `FlushCompleted` on the `SystemAnnouncer` bus after a flush has
+%% written files to disk (ADR 0093 §2, BT-2530). `files` carries the absolute
+%% binary paths, matching the legacy `{flush_completed, Files}` broadcast.
+%% Skipped for an empty file list (parity with `on_files_flushed/1`). Guarded
+%% by a `whereis` check (the announcements worker may be absent on a minimal
+%% runtime) and wrapped in try/catch: announcing is a best-effort observability
+%% side effect and must never fail the flush.
+-spec announce_flush_completed([binary()]) -> ok.
+announce_flush_completed([]) ->
+    ok;
+announce_flush_completed(Files) ->
+    case erlang:whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _Pid ->
+            try
+                beamtalk_announcements:system_announce('FlushCompleted', #{files => Files})
+            catch
+                _:_ -> ok
+            end
+    end,
+    ok.
 
 %%% ----------------------------------------------------------------------------
 %%% Helpers

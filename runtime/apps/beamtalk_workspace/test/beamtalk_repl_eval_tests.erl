@@ -1736,3 +1736,58 @@ new_class_invalid() ->
         <<"Actor subclass: NewClsInvalid\n  v => 1">>, <<"/nonexistent/dir/x.bt">>
     ),
     ?assertMatch({error, _}, Result).
+
+%%====================================================================
+%% announce_binding_changed payload (ADR 0093 §2, BT-2530)
+%%====================================================================
+
+%% The BindingChanged payload carries the evaluating session's protocol id,
+%% read from the worker pdict seed (`beamtalk_repl_shell:seed_session_context/3`).
+%% Subscribed with a fun handler so the veneer async dispatch invokes it and we
+%% can assert on the full typed event map.
+announce_binding_changed_carries_session_id_test() ->
+    ok = beamtalk_announcements:ensure_started(),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'BindingChanged', self(), fun(E) -> Collector ! {binding_evt, E} end, false
+    ),
+    put(beamtalk_session_id, <<"sess-bt2530">>),
+    try
+        ok = beamtalk_repl_eval:announce_binding_changed(x, 42),
+        receive
+            {binding_evt, Event} ->
+                ?assertMatch(
+                    #{
+                        '$beamtalk_class' := 'BindingChanged',
+                        name := x,
+                        value := 42,
+                        sessionId := <<"sess-bt2530">>
+                    },
+                    Event
+                )
+        after 1000 -> ?assert(false)
+        end
+    after
+        erase(beamtalk_session_id),
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.
+
+%% Outside a shell-spawned worker (no pdict seed) sessionId degrades to nil
+%% rather than being omitted, so the typed field always exists.
+announce_binding_changed_session_id_nil_outside_worker_test() ->
+    ok = beamtalk_announcements:ensure_started(),
+    erase(beamtalk_session_id),
+    Collector = self(),
+    {ok, SubRef} = beamtalk_announcements:subscribe(
+        'BindingChanged', self(), fun(E) -> Collector ! {binding_evt_nil, E} end, false
+    ),
+    try
+        ok = beamtalk_repl_eval:announce_binding_changed(y, hello),
+        receive
+            {binding_evt_nil, Event} ->
+                ?assertMatch(#{name := y, value := hello, sessionId := nil}, Event)
+        after 1000 -> ?assert(false)
+        end
+    after
+        beamtalk_announcements:unsubscribe(SubRef)
+    end.

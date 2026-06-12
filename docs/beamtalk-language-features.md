@@ -3569,7 +3569,8 @@ The system event classes (all `Announcement` subclasses):
 | `ActorStopped` | `actorClass`, `pid`, `reason` | an actor stops |
 | `ClassLoaded` | `className` | a class is loaded into the image |
 | `ClassRemoved` | `className` | a class is removed |
-| `BindingChanged` | `name`, `value` | a workspace variable is assigned |
+| `BindingChanged` | `name`, `value`, `sessionId` | a workspace variable is assigned |
+| `FlushCompleted` | `files` | `Workspace flush` finishes writing source files |
 | `SupervisionChildAdded` | (see ADR 0092) | a supervised child is added |
 | `SupervisionChildCrashed` | (see ADR 0092) | a supervised child crashes |
 
