@@ -28,17 +28,46 @@ session_test_() ->
     ]}.
 
 setup() ->
-    %% Start supervisor
+    %% Defensively stop any supervisor a prior fixture/module left registered, so
+    %% this start_link/0 never hits {already_started, _} (BT-2523). Unlink the
+    %% fresh one so the cleanup shutdown below does not propagate to the runner.
+    stop_session_sup(),
     {ok, SupPid} = beamtalk_session_sup:start_link(),
+    unlink(SupPid),
     SupPid.
 
-cleanup(SupPid) ->
-    %% Unlink and kill supervisor
-    unlink(SupPid),
-    exit(SupPid, kill),
-    %% Wait for cleanup
-    timer:sleep(50),
+cleanup(_SupPid) ->
+    %% Synchronously stop the supervisor and wait until its registered name is
+    %% gone before the next fixture's setup runs. `exit(_, kill) + timer:sleep/1`
+    %% is a non-deterministic wait that, under CI load/ordering, can leave the
+    %% registered `beamtalk_session_sup` alive into the next test (BT-2523).
+    stop_session_sup(),
     ok.
+
+%% Stop the locally-registered session supervisor (and all supervised shells) if
+%% one is running, blocking until the registered name clears so a later fixture's
+%% start_link/0 never collides with {already_started, _}.
+stop_session_sup() ->
+    case whereis(beamtalk_session_sup) of
+        undefined ->
+            ok;
+        SupPid ->
+            Ref = erlang:monitor(process, SupPid),
+            exit(SupPid, shutdown),
+            receive
+                {'DOWN', Ref, process, SupPid, _} -> ok
+            after 5000 ->
+                %% Graceful shutdown stalled — force-kill and block on the DOWN so
+                %% the name is guaranteed clear before returning.
+                erlang:demonitor(Ref, [flush]),
+                Ref2 = erlang:monitor(process, SupPid),
+                exit(SupPid, kill),
+                receive
+                    {'DOWN', Ref2, process, SupPid, _} -> ok
+                after 5000 -> erlang:demonitor(Ref2, [flush])
+                end
+            end
+    end.
 
 %%% Session Creation Tests
 
