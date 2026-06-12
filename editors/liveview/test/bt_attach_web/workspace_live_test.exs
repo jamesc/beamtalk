@@ -70,6 +70,22 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       assert html =~ "Not authorized"
       assert Process.alive?(view.pid)
     end
+
+    test "an Observer can browse classes — browse is :read (BT-2491)", %{conn: conn} do
+      # Browse ops are :read capability (ADR 0091 Decision 4), so an Observer who
+      # cannot eval can still drive the System Browser: the pane renders and a
+      # crafted browse event is authorized (NOT refused like the eval above).
+      {:ok, view, html} = live(observer_conn(conn), "/")
+      assert html =~ "read-only (Observer)"
+      assert html =~ ~s(id="system-browser")
+      assert html =~ ~s(phx-click="browser_select_class")
+
+      # A class-tree click from an Observer re-renders without a "Not authorized"
+      # refusal — browse is a read op, so the read-only role may browse.
+      selected = render_hook(view, "browser_select_class", %{"class" => "Object"})
+      refute selected =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
   end
 
   test "eval round-trip renders the workspace result term", %{conn: conn} do
@@ -399,6 +415,168 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ ~s(data-tweak-value="mono")
     assert html =~ ~s(data-tweak-value="vivid")
     assert html =~ ~s(data-tweak-value="#b9711b")
+  end
+
+  # ── Phase 2 System Browser pane (BT-2491) ───────────────────────────────────
+
+  test "the System Browser renders the class tree with view + side toggles (BT-2491)", %{
+    conn: conn
+  } do
+    {:ok, _view, html} = live(conn, "/")
+
+    # The left column is the spike's System Browser: a Hierarchy / Category view
+    # toggle, a class tree, an instance/class side toggle, and a protocol/method
+    # pane — driven by the BT-2488 browse ops (ADR 0096). The placeholder copy is
+    # gone.
+    assert html =~ ~s(id="system-browser")
+    assert html =~ ~s(phx-click="browser_view")
+    assert html =~ ~s(phx-value-view="hierarchy")
+    assert html =~ ~s(phx-value-view="category")
+    assert html =~ ~s(phx-click="browser_side")
+    assert html =~ ~s(phx-value-side="instance")
+    assert html =~ ~s(phx-value-side="class")
+    assert html =~ ~s(phx-click="browser_select_class")
+    refute html =~ "Lands in a later Phase 1 issue."
+
+    # The class tree is populated from live browse-classes — a core class like
+    # Object is always in the image.
+    assert html =~ "Object"
+  end
+
+  test "selecting a class loads its protocols and methods (BT-2491)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "BrowseCounter#{suffix}"
+
+    # Define a real Actor subclass with two instance methods so the protocol +
+    # method list has something to render.
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+
+      value => self.value
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    # browse-classes is a live snapshot; re-render the LiveView so the new class
+    # appears in the tree, then click it to drive browse-protocols.
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+
+    html =
+      view
+      |> element(~s(div[phx-value-class="#{class}"]))
+      |> render_click()
+
+    # The method list now shows the class's instance selectors and the protocol
+    # filter row's "all" affordance.
+    assert html =~ "increment"
+    assert html =~ "value"
+    assert html =~ ">all<"
+    assert html =~ ~s(phx-click="browser_select_protocol")
+  end
+
+  test "the instance/class side toggle re-populates the method list (BT-2491)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "SideCounter#{suffix}"
+
+    # An instance method, then a class-side method added via the `>>` extension
+    # form (docs/beamtalk-language-features.md "Class-side live edit"), so the two
+    # sides differ.
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      instanceOnly => self.value
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{class} class >> classOnly => 42"})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+
+    # Instance side shows the instance method.
+    inst = view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+    assert inst =~ "instanceOnly"
+
+    # Flip to the class side: the method list re-populates from browse-protocols
+    # for the class side (the class-only method appears).
+    cls = view |> element(~s(button[phx-value-side="class"])) |> render_click()
+    assert cls =~ "classOnly"
+  end
+
+  test "the protocol filter narrows the method list; 'all' shows everything (BT-2491)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "FilterCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+
+      value => self.value
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # "all" (the default filter) shows every selector.
+    all = render(view)
+    assert all =~ "increment"
+    assert all =~ "value"
+
+    # The handler accepts the protocol filter event and stays alive; an empty
+    # value resets to "all" (the ∗ row), proving the filter round-trips.
+    assert render_hook(view, "browser_select_protocol", %{"protocol" => ""})
+    assert Process.alive?(view.pid)
+  end
+
+  test "selecting a method shows its source with a breadcrumb (BT-2491)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "SourceCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # Click the method row: browse-method-source drives the centre display with a
+    # `Class instance » selector` breadcrumb and the method source.
+    html =
+      view
+      |> element(~s(div[phx-value-selector="increment"]))
+      |> render_click()
+
+    assert html =~ ~s(id="browse-method-source")
+    assert html =~ class
+    assert html =~ "increment"
+    # The breadcrumb carries the instance side and the » separator (ADR-spec
+    # `Class instance » selector · category`).
+    assert html =~ "»"
+    assert html =~ "instance"
+    # The actual method body is shown read-only.
+    assert html =~ "self.value"
   end
 
   # ── Wave 4: multi-tab isolation / session resume / teardown (BT-2410) ────────

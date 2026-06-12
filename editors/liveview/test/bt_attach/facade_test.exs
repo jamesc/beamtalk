@@ -22,6 +22,11 @@ defmodule BtAttach.FacadeTest do
     def subscribe_transcript(pid), do: record({:sub_t, pid}) && :ok
     def subscribe_bindings(pid), do: record({:sub_b, pid}) && :ok
 
+    # ADR 0095 §5 (BT-2489): the live-Inspector per-object tracking ops.
+    def subscribe_object_changes(term, pid), do: record({:sub_obj, term, pid}) && :ok
+    def unsubscribe_object_changes(term, pid), do: record({:unsub_obj, term, pid}) && :ok
+    def pid_stats(term), do: record({:pid_stats, term}) && {:ok, %{"alive" => true}}
+
     # ADR 0095 (BT-2488): the four System Browser browse ops.
     def browse_classes, do: record({:browse_classes}) && {:value, [%{"name" => "Counter"}]}
 
@@ -53,6 +58,7 @@ defmodule BtAttach.FacadeTest do
       for read <- ~w(info inspect bindings actors processes sessions complete
                      subscribe_transcript subscribe_bindings subscribe_actors
                      subscribe_classes
+                     subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
                      browse_class_definition)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
@@ -105,6 +111,27 @@ defmodule BtAttach.FacadeTest do
       # yet — it must not silently no-op or hit the client.
       assert Facade.dispatch(:kill, %{}) == {:error, {:unsupported_op, :kill}}
       assert RecordingClient.calls() == []
+    end
+  end
+
+  describe "live-Inspector per-object tracking ops (ADR 0095 §5 / BT-2489)" do
+    test "subscribe/unsubscribe/pid_stats route to the client and return its term" do
+      term = {:beamtalk_object, :Counter, :counter, self()}
+
+      assert Facade.dispatch(:subscribe_object, %{term: term, pid: self()}) == :ok
+      assert Facade.dispatch(:unsubscribe_object, %{term: term, pid: self()}) == :ok
+      assert Facade.dispatch(:pid_stats, %{term: term}) == {:ok, %{"alive" => true}}
+
+      recorded = RecordingClient.calls() |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+      assert recorded == MapSet.new([:sub_obj, :unsub_obj, :pid_stats])
+    end
+
+    test "the observer role may track objects (read capability)" do
+      observer = %{role: :observer}
+      term = {:beamtalk_object, :Counter, :counter, self()}
+
+      assert Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, observer) == :ok
+      assert Facade.dispatch(:pid_stats, %{term: term}, observer) == {:ok, %{"alive" => true}}
     end
   end
 

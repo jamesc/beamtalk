@@ -18,6 +18,16 @@ TestCase subclass: SystemAnnouncementsTest
     self assert: (BindingChanged new isKindOf: Announcement) equals: true
     self assert: (SupervisionChildAdded new isKindOf: Announcement) equals: true
     self assert: (SupervisionChildCrashed new isKindOf: Announcement) equals: true
+    // ADR 0095 §5 / BT-2489: per-object change event.
+    self assert: (ObjectStateChanged new isKindOf: Announcement) equals: true
+
+  // --- ObjectStateChanged carries pid / actorClass / changedSlots (ADR 0095 §5) ---
+  testObjectStateChangedFields =>
+    // Default-constructed field values (the watched-actor push fills them in).
+    e := ObjectStateChanged new
+    self assert: e pid equals: nil
+    self assert: e actorClass equals: #unknown
+    self assert: e changedSlots equals: #()
 
   // --- ActorSpawned fires when an actor is spawned ---
   testActorSpawnedFiresOnSpawn =>
