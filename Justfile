@@ -13,6 +13,14 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 default:
     @just --list
 
+# Diagnose the dev environment (toolchain, cloud egress proxy, hex-bridge,
+# BEAM package-fetch reachability). Fast, safe to run anytime; the decisive
+# check is whether Erlang can actually fetch packages through the bridge —
+# `curl` working does NOT mean rebar3/mix will. See scripts/cloud-doctor.sh.
+[unix]
+doctor:
+    @bash scripts/cloud-doctor.sh
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Quick Commands (CI equivalents)
 # ═══════════════════════════════════════════════════════════════════════════
