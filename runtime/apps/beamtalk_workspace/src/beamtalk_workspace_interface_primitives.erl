@@ -82,6 +82,9 @@ into REPL session state. Workspace readiness is detected via
 -export([flush/0, flush/1]).
 %% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
 -export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1]).
+%% Clean-returning revert for non-FFI callers (the LiveView Attach client, ADR
+%% 0082 Phase 5, BT-2293).
+-export([revert_method/2]).
 -export([autoflush/0, setAutoflush/1]).
 %% Shared with beamtalk_repl_loader:new_class/2 to surface created classes to the
 %% REPL identically to a file load.
@@ -287,6 +290,34 @@ changeLogRevert(Entry) ->
             do_revert(ClassNameBin, SelectorAtom);
         {error, Err} ->
             beamtalk_error:raise(Err)
+    end.
+
+-doc """
+Revert a single method patch by `(Class, Selector)` binaries, returning a
+structured result instead of raising (ADR 0082 Phase 5, BT-2293).
+
+The message-send entry point `changeLogRevert/1` `error/1`-raises a wrapped
+`#beamtalk_error{}` on any failure, which crosses an `rpc:call/4` as an opaque
+`{badrpc, {'EXIT', _}}`. The LiveView Attach client (`BtAttach.Workspace`)
+needs the same clean `{ok, _} | {error, #beamtalk_error{}}` contract that
+`beamtalk_repl_eval:compile_method/6` and `new_class/2` already offer, so this
+wrapper catches the wrapped error and returns it directly. The `Selector` is
+the method-name binary carried by a `Workspace changes` row; a new-class entry
+(no selector) is rejected the same way as `changeLogRevert/1`, via `do_revert`.
+""".
+-spec revert_method(binary(), binary()) -> {ok, term()} | {error, #beamtalk_error{}}.
+revert_method(ClassNameBin, SelectorBin) when
+    is_binary(ClassNameBin), is_binary(SelectorBin)
+->
+    SelectorAtom = binary_to_atom(SelectorBin, utf8),
+    try
+        {ok, do_revert(ClassNameBin, SelectorAtom)}
+    catch
+        %% `beamtalk_error:raise/1` wraps the structured error in a
+        %% `#{'$beamtalk_class' => _, error => #beamtalk_error{}}` map and
+        %% `error/1`-raises it; unwrap back to the structured error.
+        error:#{error := #beamtalk_error{} = Err} ->
+            {error, Err}
     end.
 
 %% Pull the `(class, selector)` pair out of a ChangeEntry. The argument is

@@ -501,6 +501,30 @@
 .btn.ghost:hover { background: var(--hover); color: var(--ink); }
 .btn:disabled { opacity: .4; cursor: default; }
 
+/* inline text-button (ChangeLog revert, BT-2293): minimal affordance inside a
+   data-table row, not a full chrome button. */
+.btn-link {
+  cursor: pointer; border: none; background: none; padding: 0;
+  color: var(--accent-2); font-size: 12px; font-weight: 500; text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.btn-link:hover { color: var(--accent); }
+
+/* New File form (BT-2293): the System Browser's create-a-class affordance under
+   the method editor — a path input + a compact source box + submit. */
+.new-file-form {
+  display: grid; grid-template-columns: 1fr auto; gap: .5rem; margin-top: .75rem;
+  padding-top: .6rem; border-top: 1px solid var(--line-soft); align-items: start;
+}
+.new-file-label { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--ink); }
+.new-file-path, .new-file-source {
+  border: 1px solid var(--line); background: var(--code-bg); border-radius: 6px;
+  padding: 6px 9px; font-size: 12.5px; color: var(--ink); outline: none;
+}
+.new-file-path:focus, .new-file-source:focus { border-color: var(--accent); }
+.new-file-source { grid-column: 1; resize: vertical; }
+.new-file-form .btn { grid-column: 2; grid-row: 3; align-self: end; }
+
 .field {
   border: 1px solid var(--line); background: var(--code-bg); border-radius: 6px;
   padding: 6px 9px; font-family: var(--code-font, ui-monospace, monospace); font-size: 12.5px;

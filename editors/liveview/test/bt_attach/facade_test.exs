@@ -19,6 +19,11 @@ defmodule BtAttach.FacadeTest do
     def change_history, do: record({:changes}) && []
     def flush, do: record({:flush}) && {:ok, %{}}
     def save_method(c, s, src), do: record({:save, c, s, src}) && {:ok, c}
+
+    # ADR 0082 Phase 5 (BT-2293): the New File + ChangeLog revert affordances.
+    def new_class(src, path), do: record({:new_class, src, path}) && {:ok, path}
+    def revert(c, s), do: record({:revert, c, s}) && {:ok, c}
+
     def subscribe_transcript(pid), do: record({:sub_t, pid}) && :ok
     def subscribe_bindings(pid), do: record({:sub_b, pid}) && :ok
 
@@ -63,6 +68,9 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:eval) == :execute
       assert Facade.capability(:load_source) == :execute
       assert Facade.capability(:save) == :execute
+      # ADR 0082 Phase 5 (BT-2293): New File + revert install/run code → :execute.
+      assert Facade.capability(:new_class) == :execute
+      assert Facade.capability(:revert) == :execute
       assert Facade.capability(:flush) == :execute
       assert Facade.capability(:reload) == :execute
 
@@ -241,6 +249,39 @@ defmodule BtAttach.FacadeTest do
                {:value, %{"sites" => []}}
 
       assert Facade.dispatch(:symbols, %{scope: "all"}, observer) == {:value, %{"classes" => []}}
+    end
+  end
+
+  describe "New File + ChangeLog revert (ADR 0082 Phase 5, BT-2293)" do
+    test "new_class/revert route to the client and pass their args through" do
+      assert Facade.dispatch(:new_class, %{source: "Object subclass: G", path: "src/g.bt"}) ==
+               {:ok, "src/g.bt"}
+
+      assert Facade.dispatch(:revert, %{class: "Counter", selector: "value"}) == {:ok, "Counter"}
+
+      assert {:new_class, "Object subclass: G", "src/g.bt"} in RecordingClient.calls()
+      assert {:revert, "Counter", "value"} in RecordingClient.calls()
+    end
+
+    test "non-binary args are invalid params, with no dist call" do
+      assert Facade.dispatch(:new_class, %{source: "x", path: 42}) == {:error, :invalid_params}
+
+      assert Facade.dispatch(:revert, %{class: "Counter", selector: :value}) ==
+               {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role is denied new_class/revert (execute capability), with no dist call" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:new_class, %{source: "x", path: "src/g.bt"}, observer) ==
+               {:error, :unauthorized}
+
+      assert Facade.dispatch(:revert, %{class: "Counter", selector: "value"}, observer) ==
+               {:error, :unauthorized}
+
+      assert RecordingClient.calls() == []
     end
   end
 end

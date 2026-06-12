@@ -260,6 +260,96 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "Enter a class name"
   end
 
+  # ── Phase 5 save/flush affordances: New File + ChangeLog revert (BT-2293) ────
+
+  test "the ChangeLog viewer reverts a pending method patch end-to-end (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RevertMe#{suffix}"
+
+    # A class whose `greeting` method returns a distinct string sentinel, so the
+    # patched vs. reverted result is unambiguous (no substring overlap).
+    class_src = """
+    Actor subclass: #{class}
+      greeting => "ORIG"
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    # Patch `greeting` via the write-surface editor — this records a pending
+    # durable ChangeEntry for (class, greeting).
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "class" => class,
+        "selector" => "greeting",
+        "source" => ~s|greeting => "PATCHED"|
+      })
+
+    assert save_html =~ "Saved greeting on #{class}"
+
+    # A freshly-spawned actor observes the patched behaviour.
+    name = "rv_#{suffix}"
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+
+    assert eventually(fn ->
+             view |> form("#eval-form") |> render_submit(%{expr: "#{name} greeting"}) =~ "PATCHED"
+           end)
+
+    # The Changes pane carries a per-entry revert affordance for (class, greeting).
+    # Clicking it re-installs the recorded prior body (a fresh durable entry).
+    revert_html =
+      view
+      |> element(~s(button[phx-click="revert"][phx-value-selector="greeting"]))
+      |> render_click()
+
+    assert revert_html =~ "Reverted greeting on #{class}"
+
+    # The prior body is live again: a newly-spawned actor returns the original
+    # sentinel, not the patched one.
+    name2 = "rv2_#{suffix}"
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name2} := #{class} spawn"})
+
+    assert eventually(fn ->
+             html = view |> form("#eval-form") |> render_submit(%{expr: "#{name2} greeting"})
+             html =~ "ORIG" and not (html =~ "PATCHED")
+           end)
+  end
+
+  test "the New File form is present on the owner's connected render (BT-2293)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+
+    # The System Browser's "New File" affordance: a self-contained source + path
+    # form that drives `Workspace newClass:at:`.
+    assert html =~ ~s(id="new-file-form")
+    assert html =~ ~s(phx-submit="new_file")
+    assert html =~ ~s(name="path")
+    assert html =~ ~s(name="source")
+  end
+
+  test "New File validates an empty path before any create (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    html =
+      view
+      |> form("#new-file-form")
+      |> render_submit(%{"source" => "Object subclass: Greeter", "path" => ""})
+
+    assert html =~ "Enter a target path"
+  end
+
+  test "New File validates an empty source before any create (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    html =
+      view
+      |> form("#new-file-form")
+      |> render_submit(%{"source" => "", "path" => "src/greeter.bt"})
+
+    assert html =~ "Enter a class definition"
+  end
+
   # ── Phase 1 JS hook foundation (BT-2485) ────────────────────────────────────
 
   test "the editor hooks are present on the owner's connected render (BT-2485)", %{conn: conn} do

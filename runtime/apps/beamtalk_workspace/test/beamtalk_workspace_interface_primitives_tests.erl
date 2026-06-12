@@ -820,6 +820,19 @@ revert_rejects_new_class_entry_test() ->
         beamtalk_workspace_interface_primitives:changeLogRevert(NewClassEntry)
     ).
 
+revert_method_returns_structured_error_test() ->
+    %% The clean-returning wrapper (BT-2293) catches the wrapped error that
+    %% `changeLogRevert/1` would raise and returns it as a structured
+    %% `{error, #beamtalk_error{}}` — the contract the LiveView Attach client
+    %% relies on. With no active ChangeLog entry for the target, the revert
+    %% fails with a "nothing to revert" error rather than an opaque crash.
+    ?assertMatch(
+        {error, #beamtalk_error{}},
+        beamtalk_workspace_interface_primitives:revert_method(
+            <<"NoSuchClass">>, <<"noSuchSelector">>
+        )
+    ).
+
 flush_kinds_rejects_non_set_non_list_test() ->
     %% A non-Set/non-List argument surfaces a typed error.
     ?assertException(

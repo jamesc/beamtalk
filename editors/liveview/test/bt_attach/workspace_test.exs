@@ -185,4 +185,38 @@ defmodule BtAttach.WorkspaceTest do
       assert_raise FunctionClauseError, fn -> apply(Workspace, :symbol_index, [:all]) end
     end
   end
+
+  describe "save/flush write-surface wrappers (New File + revert, ADR 0082 Phase 5, BT-2293)" do
+    # No live workspace: the RPC targets an unconnected node, so the wrappers must
+    # surface `{:badrpc, :nodedown}` as `{:error, {:unreachable, _}}` (the same
+    # graceful degradation the read wrappers use), not crash.
+    test "new_class against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} =
+               Workspace.new_class("Object subclass: Greeter", "src/greeter.bt")
+    end
+
+    test "revert against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.revert("Counter", "increment")
+    end
+
+    test "the write wrappers reject non-binary arguments (guard contract)" do
+      # apply/3 keeps the deliberately mistyped arguments opaque to the compiler's
+      # type checker, which would otherwise warn against the binary() guards.
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :new_class, ["Object subclass: G", :path])
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :new_class, [42, "src/g.bt"])
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :revert, ["Counter", :increment])
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :revert, [:Counter, "increment"])
+      end
+    end
+  end
 end

@@ -673,6 +673,76 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Create a brand-new class from a source String at a target path (ADR 0082
+  Phase 5 `Workspace newClass:at:`, BT-2293). This is the System Browser's
+  "New File" action — the in-memory class install + a durable
+  `kind: "new-class"` ChangeLog entry; the `.bt` file itself is written later on
+  `flush/0`.
+
+  Like `save_method/3`, this calls the runtime install chokepoint directly —
+  `beamtalk_repl_eval:new_class/2`, which returns the same clean term contract
+  (`{ok, ClassObjects} | {error, Reason}`) rather than the raising FFI surface
+  (`beamtalk_workspace_interface_primitives:newClass/2`). `source` is the class
+  definition (e.g. `"Object subclass: Greeter"`), `path` the in-project target
+  (e.g. `"src/greeter.bt"`).
+
+  Returns:
+
+    * success → `{:ok, path}` — the path the new class is bound to (the created
+      class objects are not surfaced; the path is the actionable identity)
+    * error   → `{:error, reason_term}` — a structured `#beamtalk_error{}` for a
+      bad path / name clash / compile failure, or `{:unreachable, _}` if the
+      workspace is gone
+  """
+  def new_class(source, path) when is_binary(source) and is_binary(path) do
+    case rpc(:beamtalk_repl_eval, :new_class, [source, path]) do
+      {:ok, _class_objects} ->
+        {:ok, path}
+
+      {:error, reason} ->
+        {:error, structure_error(reason)}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  Revert one pending in-memory method patch by its `(class, selector)` (ADR 0082
+  Phase 5 `Workspace changes revert:`, BT-2293). This is the ChangeLog viewer's
+  per-entry "revert" action: it re-installs the recorded prior body of the most
+  recent active entry for that target, itself emitting a fresh durable
+  ChangeEntry (the original entry stays in the audit log).
+
+  Calls `beamtalk_workspace_interface_primitives:revert_method/2`, the
+  clean-returning wrapper over the FFI `changeLogRevert/1` (which would `error`-
+  raise across the dist boundary). `class` and `selector` are the binaries
+  carried by a `change_history/0` row.
+
+  Returns `{:ok, class}` on a successful revert, or `{:error, reason_term}` for
+  a non-revertable entry (new-class creation, class-side patch, no recorded
+  prior body, or no active entry) / an unreachable workspace.
+  """
+  def revert(class, selector) when is_binary(class) and is_binary(selector) do
+    case rpc(:beamtalk_workspace_interface_primitives, :revert_method, [class, selector]) do
+      {:ok, _class_object} ->
+        {:ok, class}
+
+      {:error, reason} ->
+        {:error, structure_error(reason)}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
   Flush the workspace's pending durable changes to disk (ADR 0082 `Workspace
   flush`). This is the "Save All to Disk" action — it replays the ChangeLog
   entries written by `save_method/3` into their `.bt` source files.
