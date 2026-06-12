@@ -69,11 +69,13 @@ so the dispatch path stops paying for it.
   itself unsubscribed. This is harmless for a refresh-trigger stream — a
   consumer must tolerate an `{object_changed, Pid, _}` for a pid it no longer
   tracks (ignore it).
-* **Congestion-tolerant delivery.** Pushes use `erlang:send/3` with `nosuspend`
-  so a slow or partitioned remote subscriber can never block this single
-  process (which fans out *every* watched actor's changes). A dropped trigger
-  just means the consumer re-reads on its next refresh tick — acceptable because
-  the message carries no irreplaceable data, only "something changed."
+* **Reliable refresh-trigger delivery.** Pushes use a plain send. An earlier
+  `nosuspend` send was abandoned: it silently drops whenever the dist link to the
+  subscriber would suspend the sender (a busy buffer, or a link still being
+  established), which lost the *first* push to a freshly-attached pane outright —
+  fatal for a single-write refresh trigger. Subscribers are monitored, responsive
+  LiveView pids; dist send-buffering provides backpressure rather than silent
+  loss, and a dead subscriber is reaped via its monitor.
 * **Crash resync is the client's job.** This is a supervised `one_for_one`
   worker; if it crashes and restarts, the watchers map and all monitors are
   lost and the public table comes back empty. Remote (dist-attached) subscribers
@@ -363,17 +365,21 @@ drop_subscriber(Subscriber, MonRef, State) ->
 
 -spec do_publish(pid(), atom(), [atom()], #state{}) -> ok.
 do_publish(Pid, ActorClass, ChangedSlots, #state{watchers = Watchers}) ->
-    %% Direct low-latency push to dist-attached subscribers (the Cockpit pane).
-    %% `nosuspend` so a slow/partitioned remote subscriber can never block this
-    %% single fan-out process — a dropped trigger is recovered on the consumer's
-    %% next refresh tick (the message carries no irreplaceable data).
+    %% Direct refresh-trigger push to dist-attached subscribers (the Cockpit pane).
+    %% A plain send — NOT `nosuspend`: `nosuspend` silently DROPS the message
+    %% whenever delivery would suspend the sender, which includes a dist link that
+    %% is busy *or still being brought up*. That dropped the very first push to a
+    %% freshly-attached pane (BT-2492) — and with no later write there is nothing
+    %% to recover it. Subscribers are monitored, responsive LiveView pids, so
+    %% reliable delivery of this low-frequency trigger is worth more than
+    %% guaranteeing this fan-out never blocks; dist send-buffering gives
+    %% backpressure rather than silent loss, and a truly dead subscriber is
+    %% reaped via its monitor.
     case maps:find(Pid, Watchers) of
         {ok, Subs} ->
             maps:foreach(
                 fun(Subscriber, _Ref) ->
-                    _ = erlang:send(
-                        Subscriber, {object_changed, Pid, ChangedSlots}, [nosuspend]
-                    )
+                    Subscriber ! {object_changed, Pid, ChangedSlots}
                 end,
                 Subs
             );
