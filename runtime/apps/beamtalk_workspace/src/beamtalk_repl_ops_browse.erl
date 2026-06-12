@@ -724,6 +724,8 @@ classify_by_prefix(Name, Keyword) ->
         {<<"has">>, <<"testing">>},
         {<<"includes">>, <<"testing">>},
         {<<"respondsTo">>, <<"testing">>},
+        {<<"print">>, <<"printing">>},
+        {<<"display">>, <<"printing">>},
         {<<"initialize">>, <<"initialization">>},
         {<<"init">>, <<"initialization">>},
         {<<"as">>, <<"converting">>},
