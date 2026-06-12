@@ -8,6 +8,7 @@
 
 # Distribution
 /dist/
+/dist-liveview/
 *.vsix
 
 # Cargo
@@ -93,8 +94,10 @@ cover/
 .dialyzer_plt
 .local_dialyzer_plt
 
-# Release artifacts
+# Release artifacts (rebar3/relx output). The LiveView app's rel/ is SOURCE —
+# mix release overlays (bin/server) — not an artifact, so re-include it.
 rel/
+!editors/liveview/rel/
 _rel/
 
 # Development

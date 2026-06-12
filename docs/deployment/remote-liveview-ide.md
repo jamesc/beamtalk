@@ -26,6 +26,12 @@ Three ways to get it, from most turnkey to most hands-on:
    ```sh
    tar -xzf beamtalk-ide-<version>-<platform>.tar.gz
    cd beamtalk-ide-<version>
+
+   # Workspace on this host: resolve its node + cookie by id, like `just web`
+   # (generates an ephemeral SECRET_KEY_BASE if unset — fine for a local trial)
+   bin/server <workspace-id>
+
+   # Remote workspace / explicit config: provision everything via env
    PHX_SERVER=true SECRET_KEY_BASE="$(openssl rand -base64 48)" \
    PHX_HOST=ide.example.com \
    BT_WORKSPACE_NODE=... BT_WORKSPACE_COOKIE=... \

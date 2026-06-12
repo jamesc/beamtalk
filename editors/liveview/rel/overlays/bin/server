@@ -1,0 +1,72 @@
+#!/bin/sh
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Convenience launcher for the bt_attach release (LiveView IDE).
+#
+# Usage:
+#   bin/server [<workspace-id>]
+#
+# With <workspace-id>, resolves BT_WORKSPACE_NODE and BT_WORKSPACE_COOKIE from
+# ~/.beamtalk/workspaces/<workspace-id>/ — the same files `just web` reads.
+# The workspace must already be running on this host:
+#
+#   beamtalk workspace create <workspace-id> --background --persistent
+#
+# Without it, BT_WORKSPACE_NODE / BT_WORKSPACE_COOKIE are taken from the
+# environment as-is (remote-workspace topology, ADR 0091). The cookie is an
+# infrastructure secret: provision it via env / secret management, never as a
+# command-line argument (argv is world-readable in `ps`).
+#
+# SECRET_KEY_BASE: if unset, an ephemeral one is generated for this boot —
+# fine for a local trial (browser sessions reset on restart); set it
+# explicitly for anything durable or remote (`mix phx.gen.secret`).
+# PHX_HOST and PORT pass through (defaults per config/runtime.exs).
+set -eu
+
+case "${1:-}" in
+-h | --help)
+    sed -n '6,24p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+esac
+
+if [ "$#" -gt 1 ]; then
+    echo "Usage: bin/server [<workspace-id>]  (see bin/server --help)" >&2
+    exit 64
+fi
+
+if [ "$#" -eq 1 ]; then
+    ws_dir="${HOME}/.beamtalk/workspaces/$1"
+    meta="${ws_dir}/metadata.json"
+    cookie_file="${ws_dir}/cookie"
+    if [ ! -f "${meta}" ] || [ ! -f "${cookie_file}" ]; then
+        echo "❌ No workspace '$1' under ~/.beamtalk/workspaces/." >&2
+        echo "   Start one first: beamtalk workspace create $1 --background --persistent" >&2
+        exit 1
+    fi
+    node=$(sed -n 's/.*"node_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "${meta}")
+    if [ -z "${node}" ]; then
+        echo "❌ Could not read node_name from ${meta}" >&2
+        exit 1
+    fi
+    BT_WORKSPACE_NODE="${node}"
+    BT_WORKSPACE_COOKIE=$(cat "${cookie_file}")
+    export BT_WORKSPACE_NODE BT_WORKSPACE_COOKIE
+    echo "🌐 LiveView IDE → ${BT_WORKSPACE_NODE} (workspace must be running)"
+fi
+
+if [ -z "${SECRET_KEY_BASE:-}" ]; then
+    if command -v openssl >/dev/null 2>&1; then
+        SECRET_KEY_BASE=$(openssl rand -base64 48)
+    else
+        SECRET_KEY_BASE=$(head -c 48 /dev/urandom | base64 | tr -d '\n')
+    fi
+    export SECRET_KEY_BASE
+    echo "⚠️  SECRET_KEY_BASE not set — generated an ephemeral one (sessions reset on restart)." >&2
+fi
+
+cd -P -- "$(dirname -- "$0")/.."
+PHX_SERVER=true
+export PHX_SERVER
+exec bin/bt_attach start

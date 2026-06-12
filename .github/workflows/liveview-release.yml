@@ -99,28 +99,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.platform }}-liveview-rel-
 
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      # Same recipe devs run locally (BT-2513) — single definition of the
+      # release build. Produces dist-liveview/ at the repo root.
       - name: Build release
-        working-directory: editors/liveview
-        run: |
-          export MIX_ENV=prod
-          mix deps.get --only prod
-          mix assets.setup
-          mix assets.deploy
-          mix release --overwrite
+        run: just dist-liveview
 
       # Boot the ERTS-embedded release without binding a socket — proves the
       # archive is self-contained and the prod config provider (runtime.exs,
       # incl. OIDC fail-closed resolution) loads. A full HTTP/attach smoke needs
       # a live workspace and is covered by the workspace-gated e2e (BT-2510).
       - name: Smoke test (release boots)
-        working-directory: editors/liveview
         env:
           # `eval` runs the prod config provider (runtime.exs), which requires a
           # signing secret. A throwaway one suffices — we never bind a socket.
           SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
         run: |
-          _build/prod/rel/bt_attach/bin/bt_attach version
-          _build/prod/rel/bt_attach/bin/bt_attach eval 'IO.puts("boot-ok " <> to_string(Application.spec(:bt_attach, :vsn)))'
+          test -x dist-liveview/bin/server  # launcher overlay present + executable
+          dist-liveview/bin/bt_attach version
+          dist-liveview/bin/bt_attach eval 'IO.puts("boot-ok " <> to_string(Application.spec(:bt_attach, :vsn)))'
 
       - name: Package archive
         id: package

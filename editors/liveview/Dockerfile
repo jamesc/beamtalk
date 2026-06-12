@@ -52,6 +52,9 @@ COPY config ./config
 RUN mix deps.compile
 
 # App sources + assets, then bundle (minified + digested) and cut the release.
+# Mirrors `just dist-liveview` but stays raw mix: the build context has no
+# Justfile, and the split RUN layers above cache deps independently of app
+# sources — collapsing into the recipe would rebuild deps on every change.
 COPY . ./
 RUN mix assets.setup \
  && mix assets.deploy \

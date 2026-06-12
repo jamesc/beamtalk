@@ -247,7 +247,7 @@ If your stdlib source files are outside the project root, set:
 A browser-based Smalltalk-style workspace (Workspace + live Transcript, Inspector, method editing) that attaches to a running Beamtalk workspace over Erlang distribution. It ships on its **own release lane** — a self-contained release archive and a Docker image (`ghcr.io/jamesc/beamtalk-ide`) — separate from the toolchain bundle.
 
 - From source (contributors): `just web <workspace>` — see [editors/liveview/README.md](editors/liveview/README.md).
-- Prebuilt archive / Docker, and remote (OIDC) deployment: [docs/deployment/remote-liveview-ide.md](docs/deployment/remote-liveview-ide.md).
+- Prebuilt archive: extract and run `bin/server <workspace-id>` — resolves the workspace's node + cookie like `just web` does. Archive/Docker install and remote (OIDC) deployment: [docs/deployment/remote-liveview-ide.md](docs/deployment/remote-liveview-ide.md).
 
 ### REPL Usage
 
