@@ -831,19 +831,27 @@ just web-setup    # mix deps.get + asset build
 just web <name>   # Start the LiveView IDE, connecting to workspace <name>
 ```
 
-**Current capabilities (Waves 1–4):**
+**Current capabilities (Cockpit UI):**
 
-- **Eval pane** — expression evaluation returning structured results, display-formatted with the same surface-shared rules as CLI / REPL / MCP
+- **Tabbed IDE shell** — Cockpit layout with Workspace/Transcript/Changes dock, docked Inspector, method editor, and tweaks panel. CSS-variable theming (theme/accent/syntax-highlight/density/fonts)
+- **Workspace pane** — expression evaluation (doIt/printIt/inspectIt) with display-formatted results, same surface-shared rules as CLI / REPL / MCP
 - **Transcript pane** — real-time captured output via `beamtalk_repl_subscriptions`
 - **Bindings pane** — live session bindings list, updated in real time via the bindings subscription stream; object-valued bindings offer an Inspect action
-- **Inspector pane** — structured field view of live objects; object-valued fields are drillable (follow references into nested objects)
-- **Method Editor pane** — edit, save, and compile methods via the write-surface (ADR 0082); failed compiles render the structured `#beamtalk_error{}`
+- **Inspector pane** — navigable `Inspector` cursor view (ADR 0095) with breadcrumb drill navigation, type/pid chips, and drillable reference-following into nested objects
+- **Method Editor pane** — tabbed editor with compile/save (⌘S), dirty tracking, breadcrumb navigation, and class definition view
 - **Changes pane** — ChangeLog view of pending edits; Flush persists all changes to disk
+- **System Browser backend** — four browse ops (`browse-classes`, `browse-protocols`, `browse-method-source`, `browse-class-definition`) through `beamtalk_repl_ops` — pure reflection, Observer-grantable `:read` capability (ADR 0096)
 - **Per-tab session isolation** — each browser tab gets its own workspace-supervised session via a per-tab `sessionStorage` token; bindings and loaded classes persist across evals
 - **Session resume** — reconnecting tabs (LiveView reconnect, page reload) resume their existing session within a grace window instead of starting fresh
 - **Hot-reload coherence** — a method saved in one tab is immediately visible to evals in all tabs (inherent to the shared workspace node in the Attach topology)
 
-**Requirements:** Elixir ≥ 1.17 on OTP 27. See `editors/liveview/README.md` and `CONTRIBUTING.md` for setup.
+**Packaging:** The IDE ships on its own release lane (separate from the `beamtalk` toolchain bundle). Three installation paths:
+
+- **From source** (contributors): `just web-setup && just web <name>` — requires Elixir ≥ 1.17 on OTP 27
+- **Release archive**: self-contained, ERTS-embedded `beamtalk-ide-<version>-<platform>.tar.gz` for `linux-x86_64`, `macos-arm64`, `macos-x86_64` — extract and run `bin/bt_attach start`
+- **Docker image**: `ghcr.io/jamesc/beamtalk-ide:<version>` bundles Elixir + OTP + built assets
+
+Version is derived from the repo `VERSION` file. See `editors/liveview/README.md` and [docs/deployment/remote-liveview-ide.md](deployment/remote-liveview-ide.md) for full setup and remote deployment.
 
 ## Testing Framework
 
