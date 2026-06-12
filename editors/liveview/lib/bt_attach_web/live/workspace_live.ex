@@ -61,9 +61,37 @@ defmodule BtAttachWeb.WorkspaceLive do
       spike `ivar-table`; object-valued slots are `drillable` rows carrying a
       `follow →` link that fires the existing `drill` event.
 
-  Phase-1 scope deliberately excludes the spike's live-tracking affordances
-  (field-flash, freeze/snapshot, pid stats, message poke) — those are
-  BT-2489/BT-2492, blocked on ADR BT-2397.
+  Phase-1 scope deliberately excluded the spike's live-tracking affordances
+  (field-flash, freeze/snapshot, pid stats, message poke); those land in
+  **Phase 3** below (BT-2489 backend + BT-2492 wiring).
+
+  ## Inspector live tracking (BT-2492, epic BT-2482 Phase 3)
+
+  The docked Inspector follows the inspected actor *live*, wiring the BT-2489
+  backend (ADR 0095 §5) onto the BT-2486 pane:
+
+    * **Field flash** — inspecting a pid-backed object subscribes this LiveView to
+      its per-object change stream (`subscribe_object`); each committed state
+      write pushes `{:object_changed, …}`, on which the pane re-reads the object's
+      fields + pid stats and bumps `:flash_gen`. The `FieldFlash` JS hook
+      (`assets/js/hooks/field_flash.js`) pulses only the value cells that changed.
+      A burst of writes is **coalesced** server-side (a single deferred re-read per
+      burst via `:refresh_pending`) so a hot actor pulses once per refresh — no
+      flash storm.
+    * **Pid-stats chips** — the head carries live process metrics (status, mailbox
+      depth, reductions) from the `pid_stats` read op, refreshed on every change
+      push: the spike's process-health line.
+    * **Freeze toggle** — the `insp-freeze` head button drops the change
+      subscription (holding the current snapshot) and re-subscribes + catches up on
+      unfreeze, the spike's live/frozen tell.
+    * **Owner poke** — an owner-only "send a message" bar eval's `<binding>
+      <message>` against the inspected actor (the existing `eval` facade op, so no
+      new server op and the existing RBAC gate applies — an Observer's poke is
+      refused and the bar is hidden for them). The change stream then flashes the
+      field the message mutated.
+
+  The watch is dropped on navigate-away (re-inspect rebinds onto the new term),
+  on freeze, and in `terminate/2`, so the workspace never pushes to a stale pane.
 
   ## JS hook foundation (BT-2485, epic BT-2482 Phase 1)
 
@@ -348,6 +376,35 @@ defmodule BtAttachWeb.WorkspaceLive do
       # carrying the live term so a crumb click re-inspects that level. Reset when
       # inspection starts from a binding, appended to when a field is drilled.
       |> assign(:inspect_crumbs, [])
+      # Live Inspector tracking (BT-2492, epic BT-2482 Phase 3): the per-object
+      # change subscription + pid stats + freeze toggle + owner poke wired onto
+      # the docked Inspector (backend BT-2489, ADR 0095 §5).
+      #
+      #   * `:inspect_watch` — the live `{:beamtalk_object, …}` term currently
+      #     subscribed for `{:object_changed, …}` pushes (nil = nothing watched,
+      #     e.g. a scalar target or a frozen pane). Held so we can unsubscribe it
+      #     exactly when the target changes / the pane freezes / the LiveView dies.
+      #   * `:inspect_stats` — the last `pid_stats` snapshot (binary-keyed metrics)
+      #     driving the mailbox/reductions/status chips; nil when none read yet.
+      #   * `:inspect_frozen` — when true the pane holds a snapshot: we drop the
+      #     change subscription so pushes stop re-reading, and the freeze toggle
+      #     re-subscribes + refreshes on unfreeze.
+      #   * `:flash_gen` — a monotonic counter bumped on each *live refresh*; it
+      #     rides the ivar table as `data-flash-gen` so the FieldFlash JS hook
+      #     flashes only the value cells that *changed* this refresh (debounced
+      #     client-side, no flash storm). Server-side the `{:object_changed, …}`
+      #     push is itself coalesced via `:refresh_pending` so a burst of writes
+      #     collapses into one re-read.
+      #   * `:poke_result` / `:poke_error` — the owner-only "send a message" quick
+      #     action's outcome (an `eval` of `<binding> <message>` against the
+      #     inspected actor); rendered under the poke bar.
+      |> assign(:inspect_watch, nil)
+      |> assign(:inspect_stats, nil)
+      |> assign(:inspect_frozen, false)
+      |> assign(:flash_gen, 0)
+      |> assign(:refresh_pending, false)
+      |> assign(:poke_result, nil)
+      |> assign(:poke_error, nil)
       # Method editor (Wave 3): the write-surface edit/save/flush pane.
       |> assign(:edit_class, "")
       |> assign(:edit_selector, "")
@@ -524,6 +581,32 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("crumb", _params, socket), do: {:noreply, socket}
+
+  # ── live Inspector tracking events (BT-2492, epic BT-2482 Phase 3) ───────────
+
+  # Freeze / unfreeze the Inspector's live tracking (the spike's `iw-freeze`
+  # toggle, inspector.jsx). Freezing drops the per-object change subscription so
+  # the pane holds the snapshot it has — no more field-flash, no re-reads.
+  # Unfreezing re-subscribes the *current* head object and refreshes its fields +
+  # stats immediately so the pane catches up to the live state. A toggle with no
+  # object inspected (or a scalar head) just flips the flag.
+  def handle_event("freeze_toggle", _params, socket) do
+    {:noreply, toggle_freeze(socket)}
+  end
+
+  # Owner-only "send a message" quick action (the spike's PokeBar / quick-pokes,
+  # inspector.jsx). Sends the typed Beamtalk message to the inspected actor by
+  # eval'ing `<binding> <message>` against the workspace session — the same `eval`
+  # facade op the Workspace dock uses, so poke invents no new server op and rides
+  # the existing RBAC gate (an Observer's `eval` is refused; the bar is also
+  # owner-gated in the markup). The object is addressed by its *binding name* (the
+  # head crumb / target label), which is the live handle's source-level name; a
+  # drilled field with no binding name can't be poked, so we say so.
+  def handle_event("poke", %{"message" => message}, socket) when is_binary(message) do
+    {:noreply, poke_object(socket, message)}
+  end
+
+  def handle_event("poke", _params, socket), do: {:noreply, socket}
 
   # ── method editor (Wave 3, write-surface ADR 0082) ──────────────────────────
 
@@ -727,7 +810,60 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, assign_bindings(socket, pid)}
   end
 
+  # Per-object change push (BT-2492, backend BT-2489): the watched actor committed
+  # a state write. Like the bindings stream this is a *refresh trigger*, not the
+  # data — re-read the object's fields + pid stats through the read-surface so the
+  # Inspector shows the live snapshot, and bump `:flash_gen` so the FieldFlash JS
+  # hook flashes the cells that changed.
+  #
+  # **Coalescing (no flash storm):** a hot actor can emit a burst of writes. Rather
+  # than re-read on every push (which would re-render — and re-flash — the whole
+  # table repeatedly), the first push schedules a single deferred refresh via a
+  # self-send and sets `:refresh_pending`; intervening pushes are dropped while the
+  # flag is set. The deferred `:do_object_refresh` then performs ONE re-read for
+  # the whole burst. We ignore the push entirely once frozen, once we've navigated
+  # off this object, or for a `pid` that isn't the currently-watched one — the
+  # watch server warns it may deliver one final push after we unsubscribe (a
+  # navigate-away/freeze race), so we drop a push whose pid doesn't match the head.
+  def handle_info({:object_changed, pid, _slots}, %{assigns: assigns} = socket) do
+    cond do
+      assigns.inspect_frozen or not watched_pid?(assigns.inspect_watch, pid) ->
+        {:noreply, socket}
+
+      assigns.refresh_pending ->
+        # A refresh is already queued for this burst — collapse this push into it.
+        {:noreply, socket}
+
+      true ->
+        Process.send_after(self(), :do_object_refresh, refresh_debounce_ms())
+        {:noreply, assign(socket, refresh_pending: true)}
+    end
+  end
+
+  # The coalesced refresh fired by `{:object_changed, …}`: re-read the watched
+  # object's fields + stats once for the whole burst, then clear the pending flag
+  # so the next burst schedules afresh. Guarded against a stale timer firing after
+  # the pane froze or navigated away (the watched term went nil / changed).
+  def handle_info(:do_object_refresh, %{assigns: %{inspect_watch: term}} = socket)
+      when not is_nil(term) do
+    {:noreply, refresh_inspector(assign(socket, refresh_pending: false), term)}
+  end
+
+  def handle_info(:do_object_refresh, socket) do
+    {:noreply, assign(socket, refresh_pending: false)}
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # True when `pid` is the pid backing the currently-watched object term — so a
+  # late push for an object we've since navigated away from (or never watched) is
+  # ignored rather than spuriously re-reading + flashing the current head. Kept
+  # below the `handle_info/2` clauses so they stay grouped (compiler warning).
+  defp watched_pid?({:beamtalk_object, _c, _m, watched}, pid)
+       when is_pid(watched) and is_pid(pid),
+       do: watched == pid
+
+  defp watched_pid?(_watch, _pid), do: false
 
   @impl true
   def terminate(_reason, socket) do
@@ -749,6 +885,17 @@ defmodule BtAttachWeb.WorkspaceLive do
     if socket.assigns[:connected] do
       Workspace.unsubscribe_transcript(self())
       Workspace.unsubscribe_bindings(self())
+
+      # Also drop any live per-object change subscription (BT-2492) so the watch
+      # server stops pushing to this dead pid. Belt-and-braces: the watch server
+      # monitors subscribers and auto-removes dead ones, same as the streams above.
+      case socket.assigns[:inspect_watch] do
+        {:beamtalk_object, _c, _m, pid} = term when is_pid(pid) ->
+          Workspace.unsubscribe_object_changes(term, self())
+
+        _ ->
+          :ok
+      end
 
       case socket.assigns[:token] do
         token when is_binary(token) ->
@@ -1346,15 +1493,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
         {:ok, fields} when is_map(fields) ->
-          assign(socket,
+          socket
+          |> assign(
             inspect_target: target_info(label, term),
             inspect_rows: field_rows(fields),
             inspect_crumbs: crumbs,
             inspect_error: nil
           )
+          |> track_object(term)
 
         {:ok, scalar} ->
-          assign(socket,
+          socket
+          |> assign(
             inspect_target: target_info(label, term),
             inspect_rows: [
               %{
@@ -1368,19 +1518,299 @@ defmodule BtAttachWeb.WorkspaceLive do
             inspect_crumbs: crumbs,
             inspect_error: nil
           )
+          |> track_object(term)
 
         {:error, reason} ->
-          assign(socket, inspect_error: Workspace.render_error(reason))
+          # A failed inspect leaves no coherent head: reset the crumbs + rows so a
+          # later freeze/poke doesn't act on a stale level, and drop any watch.
+          socket
+          |> assign(
+            inspect_target: nil,
+            inspect_rows: [],
+            inspect_crumbs: [],
+            inspect_error: Workspace.render_error(reason)
+          )
+          |> track_object(nil)
       end
     else
-      assign(socket,
+      socket
+      |> assign(
         inspect_target: target_info(label, term),
         inspect_rows: [],
         inspect_crumbs: crumbs,
         inspect_error: "#{label} is a #{scalar_kind(term)} — no fields to inspect"
       )
+      |> track_object(term)
     end
   end
+
+  # ── live Inspector tracking (BT-2492, backend BT-2489 / ADR 0095 §5) ─────────
+
+  # Arm (or tear down) the per-object change subscription + pid-stats read for the
+  # newly-inspected `term`, called on every `inspect_term/4` so re-inspecting a
+  # different object (a drill, a crumb walk-back, a fresh binding) rebinds the
+  # watch onto the *current* object and drops the previous one. The flow keeps the
+  # contract honest:
+  #
+  #   * A pid-backed object → subscribe THIS LiveView pid (over distribution) to
+  #     its `{:object_changed, …}` stream, read its pid stats now, and clear any
+  #     stale poke result. A frozen pane does NOT subscribe (it holds a snapshot)
+  #     but still reads stats once so the chips reflect the snapshot.
+  #   * A non-pid term (a scalar field, a drilled value) has nothing to watch:
+  #     drop any prior subscription and clear the stats/watch.
+  #
+  # The previously-watched term (`:inspect_watch`) is always unsubscribed first so
+  # the workspace never keeps pushing changes for an object we navigated away from.
+  defp track_object(socket, {:beamtalk_object, _class, _module, pid} = term) when is_pid(pid) do
+    # Reset any in-flight coalesced-refresh flag: a pending `:do_object_refresh`
+    # timer was scheduled for the *previous* object, so clearing the flag lets the
+    # NEW object's first change push schedule its own refresh immediately (the
+    # stale timer, if it still fires, is a harmless no-op on the fresh watch).
+    socket = unwatch(assign(socket, refresh_pending: false))
+
+    socket =
+      if socket.assigns.inspect_frozen do
+        # Frozen: hold the snapshot — no live subscription, but read stats once so
+        # the chips populate. `:inspect_watch` stays nil (nothing to unsubscribe).
+        assign(socket, inspect_watch: nil)
+      else
+        case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+          :ok -> assign(socket, inspect_watch: term)
+          # A non-:ok (term not watchable, dist hiccup) leaves the pane un-watched
+          # rather than claiming a live subscription that isn't there.
+          _ -> assign(socket, inspect_watch: nil)
+        end
+      end
+
+    socket
+    |> refresh_stats(term)
+    |> assign(poke_result: nil, poke_error: nil)
+  end
+
+  # Non-object target: nothing to track. Drop any prior watch and clear stats.
+  defp track_object(socket, _term) do
+    socket
+    |> unwatch()
+    |> assign(inspect_stats: nil, poke_result: nil, poke_error: nil)
+  end
+
+  # Drop the current per-object subscription (if any) and forget the watched term.
+  # Idempotent: a nil watch unsubscribes nothing.
+  defp unwatch(%{assigns: %{inspect_watch: term}} = socket)
+       when not is_nil(term) do
+    Facade.dispatch(:unsubscribe_object, %{term: term, pid: self()}, ctx(socket))
+    assign(socket, inspect_watch: nil)
+  end
+
+  defp unwatch(socket), do: assign(socket, inspect_watch: nil)
+
+  # Read the inspected actor's live process metrics (mailbox/reductions/status/…)
+  # and assign the snapshot for the head chips. A read failure clears the chips
+  # rather than rendering stale numbers — the change stream still drives the field
+  # flash, so the pane stays useful even when stats are momentarily unavailable.
+  defp refresh_stats(socket, term) do
+    case Facade.dispatch(:pid_stats, %{term: term}, ctx(socket)) do
+      {:ok, stats} when is_map(stats) -> assign(socket, inspect_stats: stats)
+      _ -> assign(socket, inspect_stats: nil)
+    end
+  end
+
+  # Re-read the *already-watched* object's fields + stats after a change push
+  # (BT-2492) WITHOUT re-arming the subscription — the watch is still live, so
+  # `track_object/2` would needlessly unsubscribe + resubscribe. The drill
+  # breadcrumb is preserved (same level); only the field values + stats refresh.
+  # `:flash_gen` bumps so the FieldFlash hook flashes the changed cells. The
+  # target label/crumbs come from the current head (the last crumb's label).
+  defp refresh_inspector(socket, {:beamtalk_object, _class, _module, pid} = term)
+       when is_pid(pid) do
+    label = current_inspect_label(socket)
+
+    case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+      {:ok, fields} when is_map(fields) ->
+        socket
+        |> assign(
+          inspect_target: target_info(label, term),
+          inspect_rows: field_rows(fields),
+          inspect_error: nil
+        )
+        |> refresh_stats(term)
+        |> bump_flash()
+
+      {:ok, _scalar} ->
+        # The object resolved to a scalar (no fields) — refresh stats + flash; the
+        # row already reflects the value the next render reads.
+        socket |> refresh_stats(term) |> bump_flash()
+
+      {:error, _reason} ->
+        # A transient read failure on a live refresh: keep the existing rows rather
+        # than blanking the pane mid-track; the next push retries.
+        socket
+    end
+  end
+
+  defp refresh_inspector(socket, _term), do: socket
+
+  # The label of the inspector head right now — the last drill crumb, falling back
+  # to the target label. Used so a live refresh re-renders the head with the same
+  # label the user navigated to.
+  defp current_inspect_label(socket) do
+    case List.last(socket.assigns.inspect_crumbs) do
+      %{label: label} -> label
+      _ -> (socket.assigns.inspect_target || %{})[:label] || "value"
+    end
+  end
+
+  defp bump_flash(socket), do: assign(socket, :flash_gen, socket.assigns.flash_gen + 1)
+
+  # The coalescing window for a burst of `{:object_changed, …}` pushes. A small
+  # delay collapses a flurry of rapid writes into a single re-read + flash. Kept as
+  # a function so a test can drive it deterministically if needed.
+  defp refresh_debounce_ms, do: 60
+
+  # Flip the freeze flag and (un)arm tracking accordingly. Freezing unsubscribes
+  # the live object change stream (the pane now holds a snapshot). Unfreezing
+  # re-subscribes the current head object and refreshes it so it catches up.
+  defp toggle_freeze(%{assigns: %{inspect_frozen: true}} = socket) do
+    # Unfreeze: re-arm tracking on the current head term (if any) and catch up.
+    # Clear any stale `refresh_pending` too: a timer scheduled before the freeze
+    # could otherwise fire a redundant second refresh (double flash) right after
+    # this catch-up re-read.
+    socket = assign(socket, inspect_frozen: false, refresh_pending: false)
+
+    case head_term(socket) do
+      {:beamtalk_object, _c, _m, pid} = term when is_pid(pid) ->
+        socket
+        |> rearm_watch(term)
+        |> refresh_inspector(term)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp toggle_freeze(socket) do
+    # Freeze: drop the subscription, keep the current rows/stats as the snapshot.
+    socket
+    |> unwatch()
+    |> assign(inspect_frozen: true)
+  end
+
+  # Subscribe the current head object for change pushes without touching the rows
+  # (used by unfreeze, which re-reads separately). A non-:ok result leaves the
+  # watch nil rather than claiming a live subscription.
+  defp rearm_watch(socket, term) do
+    case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+      :ok -> assign(socket, inspect_watch: term)
+      _ -> assign(socket, inspect_watch: nil)
+    end
+  end
+
+  # The live term at the current inspector head: the last drill crumb carries it.
+  # nil when nothing is inspected.
+  defp head_term(socket) do
+    case List.last(socket.assigns.inspect_crumbs) do
+      %{term: term} -> term
+      _ -> nil
+    end
+  end
+
+  # Send `message` to the inspected actor by eval'ing `<binding> <message>` against
+  # the session (the spike's poke). The actor is addressed by its binding name —
+  # the head crumb's label — so a poke only makes sense when the head IS a named
+  # binding (not a drilled field or the `→ result` of an inspectIt). A successful
+  # send renders a terse confirmation and lets the change stream flash the updated
+  # field; a failure renders the structured error.
+  defp poke_object(socket, message) do
+    message = String.trim(message)
+    pid = socket.assigns[:session_pid]
+    label = poke_target_label(socket)
+
+    cond do
+      not is_pid(pid) ->
+        assign(socket, poke_result: nil, poke_error: "not attached to workspace")
+
+      message == "" ->
+        assign(socket, poke_result: nil, poke_error: "Enter a message to send.")
+
+      is_nil(label) ->
+        assign(socket,
+          poke_result: nil,
+          poke_error: "Can only send to a bound object — inspect a binding to poke it."
+        )
+
+      true ->
+        send_poke(socket, pid, label, message)
+    end
+  end
+
+  defp send_poke(socket, pid, label, message) do
+    code = "#{label} #{message}"
+
+    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx(socket)) do
+      {:ok, term, _output, _warnings} ->
+        socket
+        |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)
+        # A poke is a user-initiated mutation — re-read the inspected object now so
+        # its fields reflect the write immediately, rather than waiting on the async
+        # `{:object_changed, …}` change-stream push (which is coalesced/delayed, and
+        # is the live-tracking path tracked separately by BT-2524). No-op when the
+        # pane is frozen or nothing is watched.
+        |> refresh_poked_inspector()
+
+      {:error, reason, _output, _warnings} ->
+        assign(socket, poke_result: nil, poke_error: Workspace.render_error(reason))
+
+      {:error, reason} ->
+        assign(socket, poke_result: nil, poke_error: facade_error(reason))
+    end
+  end
+
+  # Re-read the inspected object after a successful poke so the pane reflects the
+  # mutation synchronously. Only when an object is actively watched (a live,
+  # non-frozen pid-backed head) — a frozen pane holds its snapshot, and a
+  # non-object head has nothing to re-read.
+  defp refresh_poked_inspector(%{assigns: %{inspect_watch: term}} = socket)
+       when not is_nil(term) do
+    refresh_inspector(socket, term)
+  end
+
+  defp refresh_poked_inspector(socket), do: socket
+
+  # The binding name to address a poke to. A poke eval's `<receiver> <message>`
+  # against the session, so the receiver must be a *source-addressable* name — a
+  # session binding. That holds only at the inspection root (a single crumb whose
+  # label IS the binding the inspection started from): once you drill into a field
+  # the head is a referenced object with no session binding to name, and an
+  # inspectIt `→ result` has no name at all. So poke is offered only when there's a
+  # single crumb with a valid-identifier label; otherwise nil (the bar reports it
+  # can't send, and the markup can hide it). This keeps the eval well-formed and
+  # honest rather than sending to a name that isn't bound.
+  defp poke_target_label(socket), do: poke_label(socket.assigns)
+
+  # Whether the current Inspector head can be poked: a pid-backed object at the
+  # inspection root with a valid-identifier binding name. Takes the bare `assigns`
+  # so the render template can gate the poke bar with it directly.
+  defp pokeable?(assigns), do: poke_label(assigns) != nil
+
+  # The session-binding name to address a poke to, or nil (see `poke_target_label`).
+  defp poke_label(assigns) do
+    case assigns[:inspect_crumbs] do
+      [%{label: label}] when is_binary(label) ->
+        if valid_receiver?(label), do: label, else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  # A poke receiver must be a plain lowercase Beamtalk identifier (a binding name)
+  # — not the `→ result` synthetic label or anything with spaces/punctuation that
+  # would make `<label> <message>` ill-formed source. This is a well-formedness
+  # gate, not an injection guard: the poke eval is RBAC-gated (owner-only) and the
+  # label comes from the crumb the *server* set from the inspected binding name,
+  # never raw browser input. A pseudo-keyword binding (`self`/`nil`/…) that slips
+  # through just produces a normal eval that DNUs or no-ops — no escalation.
+  defp valid_receiver?(label), do: Regex.match?(~r/\A[a-z_][A-Za-z0-9_]*\z/, label)
 
   # Build the Inspector head's target descriptor: the binding/field label, the
   # live printString header, and the class/pid type chips. For a live actor the
@@ -1441,6 +1871,49 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp term_kind(term) when is_binary(term), do: "string"
   defp term_kind(term) when is_atom(term), do: "symbol"
   defp term_kind(_term), do: "value"
+
+  # ── pid-stats chip accessors (BT-2492) ──────────────────────────────────────
+  #
+  # The `pid_stats` op returns a binary-keyed map (`beamtalk_repl_ops_watch`):
+  # `status`, `queue_depth`, `memory_bytes`, `reductions`, `current_function`, plus
+  # `alive`. These read the head chips off that snapshot, returning nil when the
+  # stat is absent (so the chip's `:if` hides it) — a dead pid reports only
+  # `status: "dead"`, so the mailbox/reductions chips vanish rather than show 0.
+
+  # Process scheduling status (`running`/`waiting`/`runnable`/`dead`/…), always
+  # shown when stats are present — it's the live "is it ticking" tell.
+  defp stat_status(stats) when is_map(stats), do: Map.get(stats, "status")
+  defp stat_status(_), do: nil
+
+  # Mailbox (message queue) depth — only when the pid is alive (a dead pid has no
+  # queue, and the map omits it).
+  defp stat_mailbox(stats) when is_map(stats), do: Map.get(stats, "queue_depth")
+  defp stat_mailbox(_), do: nil
+
+  # Reduction count (a coarse "how much work has it done" gauge), thousands-
+  # separated for readability like the spike. Absent on a dead pid.
+  defp stat_reductions(stats) when is_map(stats) do
+    case Map.get(stats, "reductions") do
+      n when is_integer(n) -> format_thousands(n)
+      _ -> nil
+    end
+  end
+
+  defp stat_reductions(_), do: nil
+
+  # Group an integer with thousands separators (the spike's `toLocaleString()`),
+  # e.g. 1234567 → "1,234,567".
+  defp format_thousands(n) when is_integer(n) and n < 0, do: "-" <> format_thousands(-n)
+
+  defp format_thousands(n) when is_integer(n) do
+    n
+    |> Integer.to_string()
+    |> String.graphemes()
+    |> Enum.reverse()
+    |> Enum.chunk_every(3)
+    |> Enum.map_join(",", &Enum.join/1)
+    |> String.reverse()
+  end
 
   # ── Tweaks panel (BT-2487) ──────────────────────────────────────────────────
 
@@ -2248,12 +2721,29 @@ defmodule BtAttachWeb.WorkspaceLive do
                 <div id="inspector-panel" class="panel insp inspector-panel">
                   <div class="panel-head">
                     Inspector <span class="spacer"></span>
+                    <%!-- Freeze toggle (BT-2492, spike `iw-freeze`): live tracking
+                         subscribes to the object's change stream and flashes
+                         changed fields; freezing holds the current snapshot. Shown
+                         only for a pid-backed (watchable) target. --%>
+                    <button
+                      :if={@inspect_target && @inspect_target.pid}
+                      type="button"
+                      class={["insp-freeze", (@inspect_frozen && "frozen") || "live"]}
+                      phx-click="freeze_toggle"
+                      title={
+                        if @inspect_frozen,
+                          do: "Frozen snapshot — click to track live",
+                          else: "Tracking live (subscribed to changes) — click to freeze a snapshot"
+                      }
+                    >
+                      <span class="iwf-dot"></span>{(@inspect_frozen && "frozen") || "live"}
+                    </button>
                     <span :if={@inspect_target} class="count">following references</span>
                   </div>
                   <%= if @inspect_target do %>
                     <%!-- Spike Inspector head (inspector.jsx `InspectorContent`): a
                          drill breadcrumb of the references followed so far, the live
-                         printString, and class/pid type chips. Each crumb re-inspects
+                         printString, and class/pid/stats chips. Each crumb re-inspects
                          that level via the existing read-surface inspect path. The word
                          "Inspecting" is retained for the BT-2408 e2e assertion. --%>
                     <div class="insp-head">
@@ -2267,10 +2757,26 @@ defmodule BtAttachWeb.WorkspaceLive do
                         Inspecting <strong>{@inspect_target.label}</strong>
                         <span class="ps-header">{@inspect_target.header}</span>
                       </div>
+                      <%!-- class/pid chips plus the live pid-stats chips (BT-2492):
+                           process status, mailbox depth, reductions — read via the
+                           `pid_stats` op and refreshed on every change push, the
+                           spike's process-health line. --%>
                       <div class="proc-chips">
                         <span class="chip">class <b>{@inspect_target.class_name}</b></span>
                         <span :if={@inspect_target.pid} class="chip">
                           pid <b>{@inspect_target.pid}</b>
+                        </span>
+                        <span :if={stat_status(@inspect_stats)} class="chip pid-stat">
+                          <span class="dot"></span>{stat_status(@inspect_stats)}
+                        </span>
+                        <%!-- not is_nil, not truthiness: a mailbox depth of 0 (the
+                             actor drained) is the most reassuring reading and must
+                             still show, but 0 is falsy in a HEEx `:if`. --%>
+                        <span :if={not is_nil(stat_mailbox(@inspect_stats))} class="chip pid-stat">
+                          mailbox <b>{stat_mailbox(@inspect_stats)}</b>
+                        </span>
+                        <span :if={not is_nil(stat_reductions(@inspect_stats))} class="chip pid-stat">
+                          reductions <b>{stat_reductions(@inspect_stats)}</b>
                         </span>
                       </div>
                     </div>
@@ -2278,7 +2784,17 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <div class="panel-body">
                     <div :if={@inspect_error} class="io-block warn">{@inspect_error}</div>
                     <%= if @inspect_target && @inspect_rows != [] do %>
-                      <table class="ivar-table">
+                      <%!-- The FieldFlash hook (assets/js/hooks/field_flash.js) reads
+                           each cell's `data-flash-key`+`data-flash-val` and, when a
+                           value changes on a live refresh (`data-flash-gen` bumps),
+                           flashes only the changed cells — debounced so a burst can't
+                           storm. Server-side the change push is already coalesced. --%>
+                      <table
+                        id="inspector-fields"
+                        class="ivar-table"
+                        phx-hook="FieldFlash"
+                        data-flash-gen={@flash_gen}
+                      >
                         <tbody>
                           <tr
                             :for={{row, i} <- Enum.with_index(@inspect_rows)}
@@ -2287,7 +2803,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                             phx-value-index={row.drillable && i}
                           >
                             <td class="k">{row.name}</td>
-                            <td class={["v", row.kind]}>{row.value}</td>
+                            <td
+                              class={["v", row.kind]}
+                              data-flash-key={row.name}
+                              data-flash-val={row.value}
+                            >
+                              {row.value}
+                            </td>
                             <td class="follow">
                               <span :if={row.drillable} class="follow-link">follow →</span>
                             </td>
@@ -2300,6 +2822,34 @@ defmodule BtAttachWeb.WorkspaceLive do
                         follow its live references.
                       </p>
                     <% end %>
+                    <%!-- Owner-only poke bar (BT-2492, spike PokeBar): send a Beamtalk
+                         message to the inspected actor. Rendered only for a pid-backed
+                         target at a pokeable root (a single named-binding crumb) AND
+                         the owner role — an Observer's eval is refused by RBAC, so the
+                         bar is hidden for them (a crafted poke is still refused
+                         server-side), and a drilled field has no session binding to
+                         address. Sends `<binding> <message>` via eval. --%>
+                    <div
+                      :if={
+                        @inspect_target && @inspect_target.pid && @role == :owner &&
+                          pokeable?(assigns)
+                      }
+                      class="poke"
+                    >
+                      <div class="poke-label">Send a message to {@inspect_target.label}</div>
+                      <form class="poke-row" phx-submit="poke">
+                        <span class="poke-recv mono">‹recv›</span>
+                        <input
+                          class="field mono"
+                          name="message"
+                          autocomplete="off"
+                          placeholder="increment   ·   incrementBy: 10"
+                        />
+                        <button type="submit" class="btn">Send</button>
+                      </form>
+                      <div :if={@poke_result} class="poke-out ok mono">{@poke_result}</div>
+                      <div :if={@poke_error} class="poke-out warn mono">{@poke_error}</div>
+                    </div>
                   </div>
                 </div>
               </div>
