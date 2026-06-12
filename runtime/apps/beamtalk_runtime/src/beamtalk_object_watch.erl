@@ -61,7 +61,9 @@ so the dispatch path stops paying for it.
 ## Delivery guarantees & known gaps
 
 * **At-least-zero, possibly-one-stray.** `is_watched/1` reads the public table
-  directly on the actor's hot path, while subscribe/unsubscribe/publish are all
+  directly on the actor's hot path. `subscribe/2` is a synchronous `call` (its
+  registration is committed before it returns, so the *next* write is always
+  seen as watched — no first-write race), while unsubscribe/publish are
   serialised casts. So a change committed just as a subscriber unsubscribes may
   still deliver one final `{object_changed, ...}` after the client considers
   itself unsubscribed. This is harmless for a refresh-trigger stream — a
@@ -127,10 +129,19 @@ start_link() ->
 Subscribe `Subscriber` to committed state-change events on the actor `Pid`.
 The subscriber receives `{object_changed, Pid, ChangedSlots}` after each state
 write on `Pid`. Idempotent: re-subscribing the same pair is a no-op.
+
+Synchronous (`gen_server:call`): the `?WATCHED_TABLE` registration is committed
+before this returns, so a state write the caller makes *after* `subscribe/2`
+returns is guaranteed to be seen as watched and published — there is no
+first-write race between an async registration and the next dispatch. Returns
+`ok` (and is a no-op) when the server is not running.
 """.
 -spec subscribe(pid(), pid()) -> ok.
 subscribe(Pid, Subscriber) when is_pid(Pid), is_pid(Subscriber) ->
-    gen_server:cast(?SERVER, {subscribe, Pid, Subscriber}).
+    case erlang:whereis(?SERVER) of
+        undefined -> ok;
+        Server -> gen_server:call(Server, {subscribe, Pid, Subscriber})
+    end.
 
 -doc "Unsubscribe `Subscriber` from state-change events on the actor `Pid`.".
 -spec unsubscribe(pid(), pid()) -> ok.
@@ -186,11 +197,13 @@ init([]) ->
     _ = ets:new(?WATCHED_TABLE, [named_table, set, public, {read_concurrency, true}]),
     {ok, #state{}}.
 
+handle_call({subscribe, Pid, Subscriber}, _From, State) ->
+    %% Synchronous so the watched-table registration is committed before the
+    %% caller's next state write — closes the first-write race (BT-2492).
+    {reply, ok, do_subscribe(Pid, Subscriber, State)};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-handle_cast({subscribe, Pid, Subscriber}, State) ->
-    {noreply, do_subscribe(Pid, Subscriber, State)};
 handle_cast({unsubscribe, Pid, Subscriber}, State) ->
     {noreply, do_unsubscribe(Pid, Subscriber, State)};
 handle_cast({publish_change, Pid, ActorClass, ChangedSlots}, State) ->
