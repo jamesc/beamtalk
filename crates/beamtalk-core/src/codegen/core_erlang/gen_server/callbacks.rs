@@ -1213,7 +1213,17 @@ impl CoreErlangGenerator {
                 docvec![
                     line(),
                     "<{'reply', _CastResult, CastNewState}> when 'true' ->",
-                    nest(INDENT, docvec![line(), "{'noreply', CastNewState}"]),
+                    nest(
+                        INDENT,
+                        docvec![
+                            // BT-2524: same per-object change push as handle_call, for
+                            // a state write committed via a fire-and-forget cast.
+                            line(),
+                            "let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CastNewState) in",
+                            line(),
+                            "{'noreply', CastNewState}",
+                        ]
+                    ),
                     line(),
                     // BT-943: Log error but don't crash — caller expects no reply
                     // BT-1822: Destructure error triple to log stacktrace
@@ -1373,7 +1383,16 @@ impl CoreErlangGenerator {
                     "<{'reply', Result, NewState}> when 'true' ->",
                     nest(
                         INDENT,
-                        docvec![line(), "{'reply', {'ok', Result}, NewState}",]
+                        docvec![
+                            // BT-2524: notify the per-object change substrate so a
+                            // watched compiled actor's committed state write pushes
+                            // {object_changed, …} to the live Inspector — the runtime
+                            // beamtalk_actor path does this via log_dispatch_complete.
+                            line(),
+                            "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, NewState) in",
+                            line(),
+                            "{'reply', {'ok', Result}, NewState}",
+                        ]
                     ),
                     // Error case: pass error (now includes stacktrace) opaquely to caller
                     line(),

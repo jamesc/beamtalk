@@ -627,11 +627,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "data-flash-gen"
   end
 
-  # Deferred to BT-2524: the cross-node {:object_changed, …} push from
-  # beamtalk_object_watch (workspace node) does not reach the LiveView Inspector
-  # (bt_attach node) on the e2e lane, so flash-gen never bumps. The other live
-  # features (chips/freeze/poke) pass; only the async-push flash is affected.
-  @tag skip: "BT-2524: cross-node object_changed push not delivered in e2e"
+  # BT-2524: a committed state write on a watched actor now pushes
+  # {:object_changed, …} from the workspace node to the LiveView Inspector, so
+  # flash-gen bumps and the changed field re-reads. The push fires because the
+  # compiled actor's generated handle_call/handle_cast call
+  # beamtalk_actor:notify_state_change/2 after committing new state (previously
+  # only the runtime beamtalk_actor dispatch path did, via log_dispatch_complete).
   test "a committed state write flashes the changed field and bumps flash-gen (BT-2492)", %{
     conn: conn
   } do
