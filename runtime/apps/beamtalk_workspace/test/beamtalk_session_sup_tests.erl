@@ -122,9 +122,26 @@ supervisor_count_children_test() ->
 stop_session_unknown_pid_returns_not_found_test() ->
     {ok, Sup} = beamtalk_session_sup:start_link(),
     try
-        %% A pid that is not a child of this supervisor cannot be terminated by it.
-        Dead = spawn(fun() -> ok end),
-        ?assertEqual({error, not_found}, beamtalk_session_sup:stop_session(Dead))
+        %% A *live* pid that is not a child of this supervisor. It must stay alive
+        %% for the duration of the call: for a `simple_one_for_one` supervisor,
+        %% `supervisor:terminate_child/2` only reports `{error, not_found}` for a
+        %% pid it can see is still alive. A pid that has already exited is treated
+        %% as an already-terminated child and yields a harmless `ok`
+        %% (`supervisor:find_child/2` → `is_process_alive/1` → `false` branch). The
+        %% previous `spawn(fun() -> ok end)` raced that exit: under scheduler load
+        %% the process was usually dead by the time `stop_session/1` ran, so the
+        %% call returned `ok` and this assertion flaked (BT-2523). Keep `Other`
+        %% blocked until the assertion has run, then release it.
+        Other = spawn(fun() ->
+            receive
+                stop -> ok
+            end
+        end),
+        try
+            ?assertEqual({error, not_found}, beamtalk_session_sup:stop_session(Other))
+        after
+            Other ! stop
+        end
     after
         stop_sup(Sup)
     end.
