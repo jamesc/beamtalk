@@ -421,6 +421,69 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Subscribe the given `subscriber` (the LiveView process) to *per-object* state
+  changes on the inspected actor `term` — the live-Inspector push of Cockpit
+  Phase 3 (ADR 0095 §5, BT-2489).
+
+  Unlike the system-wide Transcript/bindings streams, this watches a single
+  actor: after each committed state write the subscriber receives
+  `{:object_changed, pid, changed_slots}` — a *refresh trigger* (mirroring the
+  bindings stream), on which the LiveView re-issues `inspect_value/1` and
+  `pid_stats/1` to read the fresh snapshot, keeping actor opacity intact.
+
+  Opt-in by subscription: the runtime only *publishes* while at least one watcher
+  is registered for the pid (see `beamtalk_object_watch`), so an unwatched actor's
+  dispatch pays only a single cheap membership read. The watched actor pid is
+  extracted from the object handle; only pid-backed objects are watchable (the
+  `inspectable?/1` contract). Returns `{:error, :not_inspectable}` for any other
+  term.
+
+  A live consumer must re-issue `subscribe_object_changes/2` on dist reconnect
+  (the watch server is supervised; a crash resets its subscription table and
+  remote subscribers are not re-armed automatically — see `beamtalk_object_watch`).
+  """
+  def subscribe_object_changes({:beamtalk_object, _class, _module, pid} = _term, subscriber)
+      when is_pid(pid) and is_pid(subscriber) do
+    rpc(:beamtalk_repl_subscriptions, :subscribe_object, [pid, subscriber])
+  end
+
+  def subscribe_object_changes(_term, subscriber) when is_pid(subscriber),
+    do: {:error, :not_inspectable}
+
+  @doc "Unsubscribe `subscriber` from per-object state changes on the actor `term`."
+  def unsubscribe_object_changes({:beamtalk_object, _class, _module, pid} = _term, subscriber)
+      when is_pid(pid) and is_pid(subscriber) do
+    rpc(:beamtalk_repl_subscriptions, :unsubscribe_object, [pid, subscriber])
+  end
+
+  def unsubscribe_object_changes(_term, subscriber) when is_pid(subscriber),
+    do: {:error, :not_inspectable}
+
+  @doc """
+  Read live process metrics for the inspected actor `term` via the `pid-stats`
+  read op (ADR 0095 §5, BT-2489) — message queue depth, memory, reductions,
+  scheduling status, and current function. The companion read to the per-object
+  change stream: the Inspector pane re-issues it on each `{:object_changed, ...}`
+  push (or a refresh timer) to keep the process-health line live.
+
+  Like `inspect_value/1`, the pid is formatted **on the workspace node** (where it
+  is local) so the textual `<0.X.Y>` form round-trips through the op's
+  `list_to_pid/1`. Returns `{:ok, stats_map}` (binary-keyed metrics) or
+  `{:error, reason}`; `{:error, :not_inspectable}` for a non-pid-backed term.
+  """
+  def pid_stats({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
+    case rpc(:erlang, :pid_to_list, [pid]) do
+      pid_chars when is_list(pid_chars) ->
+        dispatch_pid_stats_result(dispatch_pid_stats(to_string(pid_chars)))
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+    end
+  end
+
+  def pid_stats(_term), do: {:error, :not_inspectable}
+
+  @doc """
   List the current workspace bindings for `session_pid` as `{name, term}` pairs.
 
   Reads the session's live binding map through the read-surface
@@ -711,6 +774,34 @@ defmodule BtAttach.Workspace do
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
         # inspect ignores SessionPid; pass self() purely to satisfy dispatch/4.
         rpc(:beamtalk_repl_ops, :dispatch, ["inspect", params, msg, self()])
+
+      other ->
+        other
+    end
+  end
+
+  defp dispatch_pid_stats_result(result) do
+    case result do
+      # The pid-stats op returns `{:value, stats_map}` (already wire-shaped,
+      # binary-keyed) — the dist path returns the term directly, no JSON encode.
+      {:value, stats} when is_map(stats) -> {:ok, stats}
+      {:error, reason} -> {:error, reason}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # Build the `pid-stats` request as a flat map (`actor` top-level, mirroring
+  # `dispatch_inspect/1`), decode it on the workspace node, and dispatch through
+  # the term-returning op layer so the metrics map stays a live term.
+  defp dispatch_pid_stats(pid_str) do
+    request = %{"op" => "pid-stats", "actor" => pid_str}
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        # pid-stats ignores SessionPid; pass self() to satisfy dispatch/4.
+        rpc(:beamtalk_repl_ops, :dispatch, ["pid-stats", params, msg, self()])
 
       other ->
         other

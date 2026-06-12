@@ -96,6 +96,12 @@ system_announce_delivers_each_event_test_() ->
             ),
             ?_test(check_system_event('ClassLoaded', #{className => 'Counter'})),
             ?_test(check_system_event('ClassRemoved', #{className => 'Counter'})),
+            %% ADR 0095 §5 / BT-2489: per-object change push event.
+            ?_test(
+                check_system_event('ObjectStateChanged', #{
+                    actorClass => 'Counter', changedSlots => [count]
+                })
+            ),
             ?_test(check_system_event('BindingChanged', #{name => x, value => 5})),
             ?_test(
                 check_system_event('SupervisionChildAdded', #{
