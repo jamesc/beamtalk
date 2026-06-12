@@ -9,6 +9,13 @@ set -euo pipefail
 # Installs the same dependencies as .devcontainer/Dockerfile for use in
 # cloud environments (e.g. Claude Code cloud sessions).
 #
+# The BEAM toolchain (Erlang/OTP, Elixir, rebar3) is installed via mise, pinned
+# by the repo-root .tool-versions — the single source of truth shared with CI's
+# setup-beam and the devcontainer Dockerfile, so the cloud toolchain never
+# drifts from what CI compiles with. (Previously this script apt-installed
+# OTP 27 + a hand-pinned Elixir/rebar3, which silently fell behind the
+# .tool-versions pin to OTP 28.5 / Elixir 1.20.1-otp-28 / rebar 3.27.0.)
+#
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/setup-cloud.sh | bash
 #
@@ -16,19 +23,25 @@ set -euo pipefail
 #   ./scripts/setup-cloud.sh
 #
 # Environment variables:
-#   REBAR3_VERSION  - rebar3 version to install (default: 3.26.0)
-#   ELIXIR_VERSION  - Elixir version to install (default: 1.18.4, built for OTP 27)
+#   MISE_VERSION    - mise version to install (default: v2026.6.3, matches Dockerfile)
 #   SKIP_RUST_TOOLS - set to 1 to skip cargo tool installation
-#   SKIP_ERLANG     - set to 1 to skip Erlang installation
-#   SKIP_ELIXIR     - set to 1 to skip Elixir installation
+#   SKIP_ERLANG     - set to 1 to skip Erlang installation (mise erlang)
+#   SKIP_ELIXIR     - set to 1 to skip Elixir installation (mise elixir)
 #   SKIP_NODE       - set to 1 to skip Node.js installation
 #   SKIP_SKILLS     - set to 1 to skip Claude Code skills setup
 
-REBAR3_VERSION="${REBAR3_VERSION:-3.26.0}"
-# BT-2401: Elixir for the editors/liveview Mix project. Pinned to a release
-# precompiled for OTP 27 — the distro `elixir` package pins erlang < 26 and
-# conflicts with Beamtalk's OTP 27, so we never use apt for Elixir.
-ELIXIR_VERSION="${ELIXIR_VERSION:-1.18.4}"
+MISE_VERSION="${MISE_VERSION:-v2026.6.3}"
+# mise installs the world-readable toolchain here (mirrors the Dockerfile's
+# MISE_DATA_DIR) so its shims can sit on PATH for every shell.
+MISE_DATA_DIR="${MISE_DATA_DIR:-/usr/local/share/mise}"
+export MISE_DATA_DIR
+MISE_SHIMS="${MISE_DATA_DIR}/shims"
+
+# Repo root (the directory containing .tool-versions). The hook invokes this
+# script from the checkout; fall back to the script's own location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
 
 # --- Helpers ---
 
@@ -85,49 +98,87 @@ info "Beamtalk cloud environment setup"
 echo "  OS: ${OS_ID} ${OS_VERSION}"
 echo ""
 
-# --- Erlang/OTP 27 ---
+# --- BEAM toolchain (Erlang + Elixir + rebar3) via mise ---
+#
+# Pinned by repo-root .tool-versions (OTP 28.5 / Elixir 1.20.1-otp-28 /
+# rebar 3.27.0 at time of writing). mise fetches precompiled BEAM builds — no
+# source compile — exactly like the Dockerfile. We never apt-install erlang or
+# the distro `elixir` package (it pins an old erlang).
 
-if [ "${SKIP_ERLANG:-}" = "1" ]; then
-  warn "Skipping Erlang (SKIP_ERLANG=1)"
-elif have erl; then
-  OTP_VSN=$(erl -eval 'io:format("~s",[erlang:system_info(otp_release)]),halt().' -noshell 2>/dev/null || echo "unknown")
-  ok "Erlang/OTP already installed (OTP ${OTP_VSN})"
+if [ "${SKIP_ERLANG:-}" = "1" ] && [ "${SKIP_ELIXIR:-}" = "1" ]; then
+  warn "Skipping BEAM toolchain (SKIP_ERLANG=1, SKIP_ELIXIR=1)"
+elif [ ! -f "${TOOL_VERSIONS}" ]; then
+  fail "No .tool-versions at ${TOOL_VERSIONS} — cannot resolve BEAM toolchain pins"
+  exit 1
 else
-  info "Installing Erlang/OTP 27..."
+  # 1. mise itself.
+  if have mise; then
+    MISE_BIN="$(command -v mise)"
+    ok "mise already installed ($("${MISE_BIN}" --version 2>/dev/null | head -1))"
+  elif [ -x /usr/local/bin/mise ]; then
+    MISE_BIN=/usr/local/bin/mise
+    ok "mise already installed ($("${MISE_BIN}" --version 2>/dev/null | head -1))"
+  else
+    info "Installing mise ${MISE_VERSION}..."
+    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 https://mise.run \
+      | MISE_VERSION="${MISE_VERSION}" MISE_INSTALL_PATH=/usr/local/bin/mise sh
+    MISE_BIN=/usr/local/bin/mise
+    ok "mise installed"
+  fi
+
+  # 2. Erlang + Elixir from .tool-versions. A GITHUB_TOKEN (if a valid one is in
+  #    the env) lifts the unauthenticated GitHub API rate limit mise hits while
+  #    resolving release lists; it degrades gracefully without one.
+  export GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+  MISE_TOOLS=""
+  [ "${SKIP_ERLANG:-}" = "1" ] || MISE_TOOLS="${MISE_TOOLS} erlang"
+  [ "${SKIP_ELIXIR:-}" = "1" ] || MISE_TOOLS="${MISE_TOOLS} elixir"
+  info "Installing BEAM toolchain via mise (${MISE_TOOLS# }) — pinned by .tool-versions..."
+  # shellcheck disable=SC2086
+  (cd "${REPO_ROOT}" && "${MISE_BIN}" install ${MISE_TOOLS}) \
+    || warn "mise install reported issues (continuing — erlang/elixir may still be present)"
+  (cd "${REPO_ROOT}" && "${MISE_BIN}" reshim >/dev/null 2>&1) || true
+
+  # 3. Put the mise shims first on PATH so erl/elixir/mix resolve to the pinned
+  #    OTP — both for the rest of this script and (persisted below) every shell.
+  case ":${PATH}:" in *":${MISE_SHIMS}:"*) ;; *) export PATH="${MISE_SHIMS}:${PATH}" ;; esac
+  hash -r 2>/dev/null || true
+
+  # 4. rebar3 — install the pinned escript directly. mise's rebar backend lists
+  #    releases through the GitHub *API* (rate-limited to 60/h without a token);
+  #    the release *asset* download URL is not rate-limited, so this is the
+  #    reliable path in a token-less sandbox.
+  REBAR3_PIN="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}")"
+  if [ -z "${REBAR3_PIN}" ]; then
+    warn "No 'rebar' pin in .tool-versions — skipping rebar3 install"
+  elif rebar3 --version 2>/dev/null | grep -q "rebar ${REBAR3_PIN} "; then
+    ok "rebar3 ${REBAR3_PIN} already installed"
+  else
+    info "Installing rebar3 ${REBAR3_PIN} (escript)..."
+    require_sudo
+    _REBAR3_TMP="$(mktemp)"
+    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+      "https://github.com/erlang/rebar3/releases/download/${REBAR3_PIN}/rebar3" -o "${_REBAR3_TMP}"
+    $SUDO install -m 755 "${_REBAR3_TMP}" /usr/local/bin/rebar3
+    rm -f "${_REBAR3_TMP}"
+    hash -r 2>/dev/null || true
+    ok "rebar3 ${REBAR3_PIN} installed"
+  fi
+
+  # 5. Persist MISE_DATA_DIR + shims PATH + the Elixir UTF-8 guard for every
+  #    future shell. The setup script's filesystem changes are snapshotted by
+  #    the cloud cache, so this lands the toolchain on PATH at session start.
   require_sudo
-  case "$OS_ID" in
-    ubuntu|debian)
-      $SUDO apt-get update -qq
-      $SUDO apt-get install -y -qq --no-install-recommends ca-certificates gnupg curl
-      $SUDO mkdir -p /etc/apt/keyrings
-      # Remove any stale erlang-solutions list from a previous partial run
-      $SUDO rm -f /etc/apt/sources.list.d/erlang-solutions.list
-      curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
-        https://binaries2.erlang-solutions.com/GPG-KEY-pmanager.asc \
-        -o /tmp/GPG-KEY-pmanager.asc
-      $SUDO rm -f /etc/apt/keyrings/erlang-solutions.gpg
-      gpg --batch --dearmor -o /tmp/erlang-solutions.gpg /tmp/GPG-KEY-pmanager.asc
-      $SUDO mv /tmp/erlang-solutions.gpg /etc/apt/keyrings/erlang-solutions.gpg
-      rm -f /tmp/GPG-KEY-pmanager.asc
-      # Erlang Solutions only publishes Debian codenames (not Ubuntu ones).
-      # Map Ubuntu codenames to the closest Debian base.
-      case "${VERSION_CODENAME:-}" in
-        noble|jammy|focal) CODENAME="bookworm" ;;
-        mantic|lunar)      CODENAME="bookworm" ;;
-        *)                 CODENAME="${VERSION_CODENAME:-bookworm}" ;;
-      esac
-      echo "deb [signed-by=/etc/apt/keyrings/erlang-solutions.gpg] https://binaries2.erlang-solutions.com/debian/ ${CODENAME}-esl-erlang-27 contrib" \
-        | $SUDO tee /etc/apt/sources.list.d/erlang-solutions.list > /dev/null
-      $SUDO apt-get update -qq
-      $SUDO apt-get install -y -qq --no-install-recommends esl-erlang
-      ok "Erlang/OTP 27 installed"
-      ;;
-    *)
-      fail "Unsupported OS for Erlang installation: ${OS_ID}"
-      fail "Install Erlang/OTP 27 manually and re-run with SKIP_ERLANG=1"
-      exit 1
-      ;;
-  esac
+  $SUDO tee /etc/profile.d/beamtalk-mise.sh > /dev/null << PROFILE
+# Beamtalk BEAM toolchain (managed by scripts/setup-cloud.sh) — do not edit.
+export MISE_DATA_DIR="${MISE_DATA_DIR}"
+case ":\${PATH}:" in
+  *":${MISE_SHIMS}:"*) ;;
+  *) export PATH="${MISE_SHIMS}:\${PATH}" ;;
+esac
+export ELIXIR_ERL_OPTIONS="\${ELIXIR_ERL_OPTIONS:-+fnu}"
+PROFILE
+  ok "Toolchain PATH persisted to /etc/profile.d/beamtalk-mise.sh"
 fi
 
 # --- System packages ---
@@ -267,54 +318,6 @@ else
   else
     warn "streamlinear-cli installation failed — Linear skills won't be available"
   fi
-fi
-
-# --- rebar3 ---
-
-if have rebar3; then
-  ok "rebar3 already installed ($(rebar3 --version))"
-else
-  info "Installing rebar3 v${REBAR3_VERSION}..."
-  require_sudo
-  REBAR3_TMPDIR="$(mktemp -d)"
-  trap 'rm -rf "${REBAR3_TMPDIR}"' EXIT
-  git clone --depth 1 --branch "${REBAR3_VERSION}" https://github.com/erlang/rebar3.git "$REBAR3_TMPDIR/rebar3"
-  (cd "$REBAR3_TMPDIR/rebar3" && ./bootstrap)
-  $SUDO install -m 755 "$REBAR3_TMPDIR/rebar3/rebar3" /usr/local/bin/rebar3
-  rm -rf "$REBAR3_TMPDIR"
-  trap - EXIT
-  ok "rebar3 v${REBAR3_VERSION} installed"
-fi
-
-# --- Elixir (precompiled for OTP 27) ---
-#
-# BT-2401: the LiveView app (editors/liveview) is a Mix project. We install a
-# precompiled Elixir release built for OTP 27 — NOT the distro `elixir` package,
-# which pins erlang < 26 and conflicts with Beamtalk's OTP 27.
-
-if [ "${SKIP_ELIXIR:-}" = "1" ]; then
-  warn "Skipping Elixir (SKIP_ELIXIR=1)"
-elif have mix && have elixir; then
-  ok "Elixir already installed ($(elixir --version 2>/dev/null | tail -1))"
-elif ! have erl; then
-  warn "Erlang not present — skipping Elixir (install Erlang/OTP 27 first)"
-else
-  info "Installing Elixir v${ELIXIR_VERSION} (precompiled for OTP 27)..."
-  require_sudo
-  ELIXIR_TMPDIR="$(mktemp -d)"
-  trap 'rm -rf "${ELIXIR_TMPDIR}"' EXIT
-  curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
-    "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-27.zip" \
-    -o "${ELIXIR_TMPDIR}/elixir-otp-27.zip"
-  $SUDO rm -rf /opt/elixir
-  $SUDO mkdir -p /opt/elixir
-  $SUDO unzip -q "${ELIXIR_TMPDIR}/elixir-otp-27.zip" -d /opt/elixir
-  for _bin in elixir elixirc mix iex; do
-    $SUDO ln -sf "/opt/elixir/bin/${_bin}" "/usr/local/bin/${_bin}"
-  done
-  rm -rf "${ELIXIR_TMPDIR}"
-  trap - EXIT
-  ok "Elixir $(elixir --version 2>/dev/null | tail -1) installed"
 fi
 
 # Install Hex + register the system rebar3 with Mix so `mix deps.get` works with
