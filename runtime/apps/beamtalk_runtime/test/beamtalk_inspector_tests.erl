@@ -370,7 +370,12 @@ remote_pid_degrades_to_unavailable_test() ->
 a_remote_pid() ->
     NodeBin = atom_to_binary('inspector_remote@nohost', utf8),
     Len = byte_size(NodeBin),
-    binary_to_term(<<131, 88, 119, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
+    %% 118 = ATOM_UTF8_EXT (2-byte length, matching Len:16). Tag 119
+    %% (SMALL_ATOM_UTF8_EXT) takes a 1-byte length — pairing it with Len:16
+    %% decodes the node as the empty atom '' (still remote-shaped, but not the
+    %% intended node name). Fixed alongside the same bug in
+    %% beamtalk_announcements_tests (BT-2530 review).
+    binary_to_term(<<131, 88, 118, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
 
 %%====================================================================
 %% evaluate: — actor/foreign return actor_eval_unsupported (ADR 0095 §7)

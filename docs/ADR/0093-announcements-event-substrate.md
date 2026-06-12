@@ -227,9 +227,10 @@ gen_server is not in the dispatch path.**
   `take`, not the walk.) Single-node guarantee; weakens under the package's
   distributed path, noted there.
 
-This reverses BT-2193's "no pg / ETS-per-announcer" choice *only* for the
-shared `SystemAnnouncer` (where cluster-wide membership is worth having);
-per-instance announcers keep the lean ETS model BT-2193 specced.
+The original design reversed BT-2193's "no pg / ETS-per-announcer" choice for
+the shared `SystemAnnouncer`; as built (Amendment BT-2530) the reversal never
+materialised — the system bus and per-instance announcers alike use the lean
+ETS model BT-2193 specced, and cross-node subscribers register explicit pids.
 
 ### 2. Layer 2 — stdlib typed veneer
 
@@ -522,8 +523,8 @@ bt> "dead subscriber process is auto-removed via monitor — no manual cleanup"
 |---|---|---|
 | **Pharo Announcements + `SystemAnnouncer`** | Typed `Announcement` subclasses, `when:do:` / `when:send:to:`, subclass dispatch; `SystemAnnouncer uniqueInstance` is **core image**, the system publishes class/method change events through it. | **Take:** the whole typed-Observer protocol *and the it-lives-in-the-core decision*. This ADR's central move is recognising Beamtalk is in the same position. **Adapt:** weak refs → BEAM `monitor`. |
 | **GemStone Announcements** | Same family, server-side. | Confirms the model scales to a shared multi-client image — our exact LiveView situation. |
-| **Phoenix.PubSub** | topic-string + cluster broadcast over `pg2`/`pg`. | **Take:** `pg` for cluster-wide membership (free connected-node delivery in v1; partition tolerance to the package — Layer 1/3). **Leave:** topic *strings* — we want typed events + MRO, not stringly-typed topics. |
-| **Erlang `gen_event`** | Serialised handler dispatch in one process. | **Leave:** single-process serialisation is a bottleneck and a shared failure domain; `pg` fan-out + isolated handlers is more BEAM-idiomatic. |
+| **Phoenix.PubSub** | topic-string + cluster broadcast over `pg2`/`pg`. | **Take (original design):** `pg` for cluster-wide membership. **(Amendment BT-2530:** as built, membership is the local ETS table and cross-node delivery is explicit-pid registration — see Layer 1; partition tolerance still to the package.**)** **Leave:** topic *strings* — we want typed events + MRO, not stringly-typed topics. |
+| **Erlang `gen_event`** | Serialised handler dispatch in one process. | **Leave:** single-process serialisation is a bottleneck and a shared failure domain; caller-side ETS fan-out + isolated handlers is more BEAM-idiomatic. |
 | **Erlang `telemetry`** (ADR 0069) | Untyped measurement bus. | **Leave** as the measurement layer; **bridge** to it from the package. Explicitly *not* the typed Observer. |
 | **ROS typed topics / Akka EventStream** | Typed publish/subscribe by message class. | Confirms type-keyed (not string-keyed) subscription is the ergonomic choice for domain events. |
 
@@ -666,8 +667,9 @@ exists to stop.
   (after `beamtalk_bootstrap`) and ~6 stdlib classes (`Announcement`,
   `Announcer`, `SystemAnnouncer`, `Subscription`, `AnnouncementNavigation`,
   `SubscriptionNode`) + a handful of system `Announcement` subclasses.
-- `pg` gains a second use (class-registry membership *and* `SystemAnnouncer`
-  subscriber membership); both are ordinary `pg` group usage.
+- `pg` gains only the dedicated `beamtalk_pg` scope, started by the bus
+  (Amendment BT-2530: subscriber membership is the ETS subscription table, not
+  pg groups — the scope is standing infrastructure with no group joins today).
 - `announceAndWait:` is `spawn_monitor`-per-handler — N transient processes per
   sync announce; acceptable for the low-frequency sync path, not the async one.
 

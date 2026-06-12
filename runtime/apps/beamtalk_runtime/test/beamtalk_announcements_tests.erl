@@ -1407,7 +1407,11 @@ heir_rearm_with_remote_subscriber_impl() ->
 a_remote_pid() ->
     NodeBin = atom_to_binary('announcements_remote@nohost', utf8),
     Len = byte_size(NodeBin),
-    binary_to_term(<<131, 88, 119, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
+    %% 118 = ATOM_UTF8_EXT (2-byte length, matching Len:16). The superficially
+    %% similar SMALL_ATOM_UTF8_EXT (119) takes a 1-byte length — pairing it with
+    %% Len:16 decodes the node as the empty atom '' (still remote-shaped, but
+    %% not the intended node name).
+    binary_to_term(<<131, 88, 118, Len:16, NodeBin/binary, 1:32, 0:32, 0:32>>).
 
 %% Insert a subscription row directly into both public ETS tables (system
 %% announcer namespace), bypassing the gen_server. Used by the remote-pid tests:
