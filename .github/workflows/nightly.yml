@@ -85,8 +85,8 @@ jobs:
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
-          otp-version: '27.0'
-          rebar3-version: '3.27'
+          version-file: .tool-versions
+          version-type: strict
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -102,9 +102,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-arm64-erlang-otp-27.0-rebar3-3.27-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
-            nightly-${{ runner.os }}-arm64-erlang-otp-27.0-rebar3-3.27-
+            nightly-${{ runner.os }}-arm64-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Build
         run: just build
@@ -169,8 +169,8 @@ jobs:
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
-          otp-version: '27.0'
-          rebar3-version: '3.27'
+          version-file: .tool-versions
+          version-type: strict
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -185,9 +185,9 @@ jobs:
           path: |
             ~/AppData/Local/rebar3
             runtime/_build
-          key: nightly-${{ runner.os }}-erlang-otp-27.0-rebar3-3.27-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
-            nightly-${{ runner.os }}-erlang-otp-27.0-rebar3-3.27-
+            nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Build
         run: just build
@@ -253,8 +253,8 @@ jobs:
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
-          otp-version: '27.0'
-          rebar3-version: '3.27'
+          version-file: .tool-versions
+          version-type: strict
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -270,9 +270,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-x86_64-erlang-otp-27.0-rebar3-3.27-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
-            nightly-${{ runner.os }}-x86_64-erlang-otp-27.0-rebar3-3.27-
+            nightly-${{ runner.os }}-x86_64-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Build and install distribution
         run: just install dist
@@ -312,8 +312,8 @@ jobs:
       - name: Install Erlang/OTP
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
-          otp-version: '27.0'
-          rebar3-version: '3.27'
+          version-file: .tool-versions
+          version-type: strict
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Just
@@ -329,9 +329,9 @@ jobs:
             ~/.cache/rebar3
             runtime/_build
             ~/.rebar3
-          key: nightly-${{ runner.os }}-erlang-otp-27.0-rebar3-3.27-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
           restore-keys: |
-            nightly-${{ runner.os }}-erlang-otp-27.0-rebar3-3.27-
+            nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: Build distribution
         run: just dist

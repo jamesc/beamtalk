@@ -11,15 +11,16 @@ Be kind, respectful, and constructive. We're building something fun — let's ke
 ### Prerequisites
 
 - **Rust** (latest stable) — compiler is written in Rust
-- **Erlang/OTP 27+** — runtime target; `erlc` must be on your PATH
+- **Erlang/OTP** — runtime target; `erlc` must be on your PATH. The supported
+  version is pinned in the repo-root `.tool-versions` (with Elixir and rebar3)
+  — `mise install` (or asdf) sets up all three; CI installs from the same file
 - **Docker Desktop** — for devcontainer support (recommended)
 - **VS Code** — with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
 
 > **Optional — LiveView IDE (`editors/liveview`):** the web IDE is a Phoenix/Mix
-> project and needs **Elixir ≥ 1.17 built for OTP 27**. Install a precompiled
-> release or use asdf (`asdf install elixir 1.18.4-otp-27`) — **not** the distro
-> `elixir` package, which pins `erlang < 26` and conflicts with OTP 27. The
-> devcontainer and `scripts/setup-cloud.sh` install this for you. See
+> project. The pinned Elixir from `.tool-versions` covers it — **never** the
+> distro `elixir` package, which pins an old `erlang`. The devcontainer
+> installs it for you. See
 > [`editors/liveview/README.md`](editors/liveview/README.md).
 
 ### Development Environment
@@ -45,16 +46,16 @@ The devcontainer includes all tools pre-configured: Rust toolchain, Erlang/OTP, 
 If you prefer a local setup:
 
 1. Install Rust via [rustup](https://rustup.rs/)
-2. Install Erlang/OTP 27+ (e.g., via [asdf](https://github.com/asdf-vm/asdf-erlang) or your package manager)
+2. Install Erlang/OTP, Elixir, and rebar3 with [mise](https://mise.jdx.dev)
+   (or asdf): `mise install` from the repo root reads the pinned versions in
+   `.tool-versions`
 3. Install [Just](https://github.com/casey/just): `cargo install just`
-4. Install [rebar3](https://rebar3.org/)
-5. Build and test:
+4. Build and test:
    ```bash
    just ci
    ```
-6. _(Optional, for the LiveView IDE)_ Install Elixir ≥ 1.17 **built for OTP 27**
-   — a precompiled release or `asdf install elixir 1.18.4-otp-27`, never the
-   distro `elixir` package. Then `just web-setup`.
+5. _(Optional, for the LiveView IDE)_ `just web-setup` — the pinned Elixir
+   from step 2 covers it; never use the distro `elixir` package.
 
 ## Building & Testing
 

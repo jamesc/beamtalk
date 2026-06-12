@@ -26,16 +26,18 @@ This is the productionised successor to the BT-2394 spike
 
 ## Toolchain
 
-Requires **Elixir ≥ 1.17 built for OTP 27** — *not* the distro `elixir`
-package, which pins `erlang < 26` and conflicts with Beamtalk's OTP 27. Use a
-precompiled release or asdf:
+Erlang and Elixir versions are pinned in the repo-root `.tool-versions` — the
+single source of truth shared by mise (dev machines, devcontainer) and CI's
+`setup-beam`. Never use the distro `elixir` package, which pins an old
+`erlang`. With [mise](https://mise.jdx.dev) (or asdf) installed:
 
 ```bash
-asdf install elixir 1.18.4-otp-27   # or download elixir-otp-27.zip
+mise install        # from the repo root; reads .tool-versions
 ```
 
-The devcontainer (`.devcontainer/Dockerfile`) and `scripts/setup-cloud.sh`
-install a matching Elixir automatically.
+The devcontainer (`.devcontainer/Dockerfile`) installs the same pinned
+toolchain automatically; `scripts/setup-cloud.sh` installs a working (older)
+toolchain for cloud sessions.
 
 Assets are built by a real **esbuild + tailwind** pipeline (no vendored
 `*.min.js`). The standalone binaries are downloaded on first use by
