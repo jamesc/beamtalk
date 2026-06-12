@@ -10,6 +10,8 @@
 //   SelectionTracker  — reports a textarea's selection (selection vs buffer)
 //   TweaksPanel       — appearance panel (theme/accent/syntax/density/fonts);
 //                       flips :root CSS vars + persists to localStorage (BT-2487)
+//   FieldFlash        — pulses the Inspector's changed ivar cells on a live
+//                       per-object change refresh (BT-2492, backend BT-2489)
 //
 // The Workspace dock and method editor (later Phase 1 issues) build on these.
 
@@ -17,10 +19,12 @@ import { CodeEditor } from "./code_editor"
 import { KeyboardShortcuts } from "./keyboard_shortcuts"
 import { SelectionTracker } from "./selection_tracker"
 import { TweaksPanel } from "./tweaks_panel"
+import { FieldFlash } from "./field_flash"
 
 export const Hooks = {
   CodeEditor,
   KeyboardShortcuts,
   SelectionTracker,
   TweaksPanel,
+  FieldFlash,
 }
