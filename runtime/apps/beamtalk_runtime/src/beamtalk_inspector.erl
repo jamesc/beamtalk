@@ -26,9 +26,15 @@ It is the runtime half of the design; the navigation API and rendering live in
   subject  => term(),            %% the value itself, or the captured snapshot (actors)
   page     => non_neg_integer(), %% 0-based window index (collections only; 0 elsewhere)
   parent   => inspector() | nil, %% the cursor drilled from (nil at root)
-  path     => [term()]           %% breadcrumb of drilled names from root
+  path     => [term()],          %% breadcrumb of drilled names from root
+  provenance => beamtalk | foreign %% scope for value-rendering heuristics (BT-2511)
 }
 ```
+
+`provenance` is `foreign` for a `#foreign` cursor and everything drilled beneath
+it; `beamtalk` for native subjects. It scopes the charlist→`String` heuristic
+(an Erlang string in foreign OTP state is a list of code points, but a Beamtalk
+`#(72, 73)` is a genuine Integer `List`) to foreign state only.
 
 The handle is immutable: `at:`, `page:`, and `refresh` return *new* handles.
 
@@ -92,8 +98,18 @@ compile-time dependency); actor evaluate-in-context is a deferred follow-up
     subject := term(),
     page := non_neg_integer(),
     parent := inspector() | nil,
-    path := [term()]
+    path := [term()],
+    provenance := provenance()
 }.
+
+%% Where a cursor's subject came from, scoping value-rendering heuristics that
+%% must not leak across the boundary (BT-2511). `foreign` marks a subject read
+%% from a non-Beamtalk OTP process (`#foreign` state / `process_info`, and every
+%% cursor drilled beneath it); `beamtalk` is everything native. The only such
+%% heuristic today: a printable charlist (an Erlang string `[$h, $i]`) renders as
+%% a `String` under `foreign`, but a legitimate Beamtalk integer `List` (`#(72,
+%% 73)`) is left untouched under `beamtalk`.
+-type provenance() :: beamtalk | foreign.
 
 %% Default collection window size (ADR 0095 §6 — matches ADR 0094's width cap).
 -define(PAGE_SIZE, 50).
@@ -175,7 +191,9 @@ actor_cursor_from_state(Pid, State, Parent, Path) ->
         subject => State,
         page => 0,
         parent => Parent,
-        path => Path
+        path => Path,
+        %% An actor's own state is native Beamtalk — never foreign-scoped.
+        provenance => beamtalk
     }.
 
 %% Build a root cursor (no parent) for a subject, classifying kind and capturing
@@ -192,7 +210,22 @@ root_cursor(Subject, Path) ->
 %% `Bag` is `#collection`. Everything else (including a tagged `Value`) is
 %% `#value`.
 -spec cursor(term(), inspector() | nil, [term()]) -> inspector().
-cursor(#beamtalk_object{pid = Pid} = Obj, Parent, Path) when is_pid(Pid) ->
+cursor(Subject, Parent, Path) ->
+    %% Drilled children inherit their parent's provenance, so a charlist reached
+    %% beneath a `#foreign` cursor is still foreign-scoped (BT-2511). Coerce the
+    %% subject *before* classifying so a foreign charlist becomes a `String` leaf
+    %% (a binary) rather than an Integer `#collection`.
+    Prov = child_provenance(Parent),
+    classify(coerce_foreign_value(Subject, Prov), Parent, Path, Prov).
+
+%% Classify a (provenance-coerced) subject into its cursor kind (ADR 0095 §3).
+%% An actor/foreign subject arrives either as a bare pid or — the usual Beamtalk
+%% handle — a `#beamtalk_object{}` wrapping the pid (resolving a `{registered,
+%% Name}` ref to the live pid); a Beamtalk actor pid is `#actor`, a genuinely
+%% foreign OTP pid is `#foreign`. A `List`/`Array`/`Set`/`Dictionary`/`Bag` is
+%% `#collection`. Everything else (including a tagged `Value`) is `#value`.
+-spec classify(term(), inspector() | nil, [term()], provenance()) -> inspector().
+classify(#beamtalk_object{pid = Pid} = Obj, Parent, Path, Prov) when is_pid(Pid) ->
     %% A class object (e.g. `Counter`) is a `#beamtalk_object{}` whose `pid` field
     %% holds its *class registry* gen_server — a live but unrelated pid. Without
     %% this guard it would classify as `#foreign` and surface the registry
@@ -202,20 +235,20 @@ cursor(#beamtalk_object{pid = Pid} = Obj, Parent, Path) when is_pid(Pid) ->
     %% a tagged map — a correct, non-leaky `Inspector(Counter class)`). An actor
     %% *instance* handle (not a class object) falls through to `process_cursor`.
     case beamtalk_class_registry:is_class_object(Obj) of
-        true -> value_cursor(Obj, Parent, Path);
+        true -> value_cursor(Obj, Parent, Path, Prov);
         false -> process_cursor(Pid, Parent, Path)
     end;
-cursor(#beamtalk_object{pid = {registered, Name}}, Parent, Path) ->
+classify(#beamtalk_object{pid = {registered, Name}}, Parent, Path, Prov) ->
     case erlang:whereis(Name) of
         Pid when is_pid(Pid) -> process_cursor(Pid, Parent, Path);
-        _ -> value_cursor(unavailable, Parent, Path)
+        _ -> value_cursor(unavailable, Parent, Path, Prov)
     end;
-cursor(Subject, Parent, Path) when is_pid(Subject) ->
+classify(Subject, Parent, Path, _Prov) when is_pid(Subject) ->
     process_cursor(Subject, Parent, Path);
-cursor(Subject, Parent, Path) ->
+classify(Subject, Parent, Path, Prov) ->
     case is_collection(Subject) of
-        true -> collection_cursor(Subject, 0, Parent, Path);
-        false -> value_cursor(Subject, Parent, Path)
+        true -> collection_cursor(Subject, 0, Parent, Path, Prov);
+        false -> value_cursor(Subject, Parent, Path, Prov)
     end.
 
 %% Classify a live pid: a Beamtalk actor is `#actor` (guarded snapshot), any other
@@ -248,7 +281,8 @@ remote_cursor(Pid, Parent, Path) ->
         subject => Pid,
         page => 0,
         parent => Parent,
-        path => Path
+        path => Path,
+        provenance => foreign
     }.
 
 %% Mint an `#actor` cursor over a live pid: capture the guarded snapshot now
@@ -271,7 +305,9 @@ actor_cursor(Pid, Parent, Path) ->
         subject => Snapshot,
         page => 0,
         parent => Parent,
-        path => Path
+        path => Path,
+        %% An actor's own state is native Beamtalk — never foreign-scoped.
+        provenance => beamtalk
     }.
 
 %% Mint a `#foreign` cursor over a non-Beamtalk OTP pid. No state is captured at
@@ -289,14 +325,18 @@ foreign_cursor(Pid, Parent, Path) ->
         subject => Pid,
         page => 0,
         parent => Parent,
-        path => Path
+        path => Path,
+        %% Foreign OTP state is provenance-scoped: charlists in its fields (and
+        %% any cursor drilled beneath) render as `String`, not Integer lists.
+        provenance => foreign
     }.
 
 %% Mint a `#collection` cursor windowed at page `Page` (0-based). The subject is
 %% the live collection term (list/tagged map); `fieldsOf` materialises only the
 %% current window (ADR 0095 §6).
--spec collection_cursor(term(), non_neg_integer(), inspector() | nil, [term()]) -> inspector().
-collection_cursor(Subject, Page, Parent, Path) ->
+-spec collection_cursor(term(), non_neg_integer(), inspector() | nil, [term()], provenance()) ->
+    inspector().
+collection_cursor(Subject, Page, Parent, Path, Prov) ->
     #{
         '$beamtalk_class' => 'Inspector',
         kind => collection,
@@ -305,13 +345,14 @@ collection_cursor(Subject, Page, Parent, Path) ->
         subject => Subject,
         page => Page,
         parent => Parent,
-        path => Path
+        path => Path,
+        provenance => Prov
     }.
 
 %% Mint a `#value` cursor: pure structural subject, no process contact (always
 %% available).
--spec value_cursor(term(), inspector() | nil, [term()]) -> inspector().
-value_cursor(Subject, Parent, Path) ->
+-spec value_cursor(term(), inspector() | nil, [term()], provenance()) -> inspector().
+value_cursor(Subject, Parent, Path, Prov) ->
     #{
         '$beamtalk_class' => 'Inspector',
         kind => value,
@@ -320,12 +361,25 @@ value_cursor(Subject, Parent, Path) ->
         subject => Subject,
         page => 0,
         parent => Parent,
-        path => Path
+        path => Path,
+        provenance => Prov
     }.
 
 %% Liveness for a pid. Callers (`foreign_cursor`) only ever pass a `pid()`.
 -spec process_alive(pid()) -> boolean().
 process_alive(Pid) -> erlang:is_process_alive(Pid).
+
+%% A cursor's provenance, defaulting to `beamtalk` for any (forged/legacy) cursor
+%% map lacking the key — keeping the accessor total without an unreachable clause.
+-spec provenance_of(inspector()) -> provenance().
+provenance_of(Cursor) -> maps:get(provenance, Cursor, beamtalk).
+
+%% The provenance a child cursor inherits from its parent: a root (`nil` parent)
+%% is `beamtalk`; otherwise the child carries the parent's scope, so a value
+%% reached beneath a `#foreign` cursor stays foreign-scoped (BT-2511).
+-spec child_provenance(inspector() | nil) -> provenance().
+child_provenance(nil) -> beamtalk;
+child_provenance(Parent) -> provenance_of(Parent).
 
 %%====================================================================
 %% Identity accessors
@@ -366,11 +420,11 @@ fieldsOf(#{kind := foreign, available := false}) ->
     [unavailable_field()];
 fieldsOf(#{kind := foreign, pid := Pid}) ->
     foreign_fields(Pid);
-fieldsOf(#{kind := collection, subject := Subject, page := Page}) ->
-    collection_fields(Subject, Page);
-fieldsOf(#{subject := Subject}) ->
+fieldsOf(#{kind := collection, subject := Subject, page := Page} = Cursor) ->
+    collection_fields(Subject, Page, provenance_of(Cursor));
+fieldsOf(#{subject := Subject} = Cursor) ->
     case beamtalk_tagged_map:is_tagged(Subject) of
-        true -> slot_fields(Subject);
+        true -> slot_fields(Subject, provenance_of(Cursor));
         false -> []
     end.
 
@@ -387,12 +441,15 @@ sizeOf(_) ->
 
 %% Build a sorted list of `InspectorField` records from a tagged map's user
 %% slots (ADR-0094 sort order — `user_field_keys/1` is unsorted, so we sort).
--spec slot_fields(map()) -> [field_map()].
-slot_fields(State) ->
+%% `Prov` scopes the charlist→`String` heuristic (BT-2511): native Beamtalk slots
+%% (`beamtalk`) never reinterpret an integer list; foreign-scoped slots do.
+-spec slot_fields(map(), provenance()) -> [field_map()].
+slot_fields(State, Prov) ->
     Keys = lists:sort(beamtalk_tagged_map:user_field_keys(State)),
-    [field_record(K, maps:get(K, State, nil)) || K <- Keys].
+    [field_record(K, coerce_foreign_value(maps:get(K, State, nil), Prov)) || K <- Keys].
 
-%% A `#slot` InspectorField for one field key/value pair.
+%% A `#slot` InspectorField for one field key/value pair (value already
+%% provenance-coerced by the caller).
 -spec field_record(term(), term()) -> field_map().
 field_record(Key, Value) ->
     inspector_field(Key, label_for(Key), Value, slot, is_drillable(Value)).
@@ -486,6 +543,33 @@ is_proper_list([]) -> true;
 is_proper_list([_ | T]) -> is_proper_list(T);
 is_proper_list(_) -> false.
 
+%% Reinterpret a foreign-scoped charlist as a `String` (BT-2511). An Erlang string
+%% is a list of code points, so in *foreign* OTP state a printable charlist
+%% (`"hi"` = `[$h, $i]`) is far likelier a string than a Beamtalk integer `List`.
+%% Rewriting it to a binary makes it classify, render, and drill as a `String`
+%% leaf. This is scoped to `foreign` provenance precisely so a legitimate Beamtalk
+%% integer list (`#(72, 73)`) is left as-is under `beamtalk` — the global heuristic
+%% (excluding `printable_list/1` from `is_collection/1`) would mis-render that as
+%% `"HI"`, a worse regression than the original (BT-2509 review finding).
+-spec coerce_foreign_value(term(), provenance()) -> term().
+coerce_foreign_value(Value, foreign) ->
+    case is_printable_charlist(Value) of
+        true -> unicode:characters_to_binary(Value);
+        false -> Value
+    end;
+coerce_foreign_value(Value, _Prov) ->
+    Value.
+
+%% True for a non-empty proper list of printable (Unicode) code points — an Erlang
+%% string. The empty list is excluded: `#()` is already a leaf and must not become
+%% an empty `String`. Improper lists are rejected before `io_lib` to uphold the
+%% inspector's "never raises" contract.
+-spec is_printable_charlist(term()) -> boolean().
+is_printable_charlist([_ | _] = L) ->
+    is_proper_list(L) andalso io_lib:printable_unicode_list(L);
+is_printable_charlist(_) ->
+    false.
+
 %% The cheap full element count of a collection — never a window walk. Lists use
 %% `length/1`; Array/Set delegate to their stdlib backers; a Dictionary is its
 %% user-key count; a Bag is the sum of its counts.
@@ -515,16 +599,19 @@ dictionary_size(Map) ->
 %% (0-based). Ordered collections (List/Array/Set) emit `#element` fields keyed by
 %% their absolute 1-based index; keyed collections (Dictionary/Bag) emit
 %% `#association` fields keyed by the entry key. Only the window is materialised.
--spec collection_fields(term(), non_neg_integer()) -> [field_map()].
-collection_fields(Subject, Page) ->
+-spec collection_fields(term(), non_neg_integer(), provenance()) -> [field_map()].
+collection_fields(Subject, Page, Prov) ->
     case keyed_collection_pairs(Subject) of
         {ok, Pairs} ->
             Window = window(Pairs, Page),
-            [association_field(K, V) || {K, V} <- Window];
+            [association_field(K, coerce_foreign_value(V, Prov)) || {K, V} <- Window];
         not_keyed ->
             Offset = Page * ?PAGE_SIZE,
             Window = ordered_window(Subject, Page),
-            [element_field(Offset + I, E) || {I, E} <- enumerate(Window)]
+            [
+                element_field(Offset + I, coerce_foreign_value(E, Prov))
+             || {I, E} <- enumerate(Window)
+            ]
     end.
 
 %% The page-`Page` window of an ordered collection's elements, materialising only
@@ -706,7 +793,10 @@ foreign_fields(Pid) ->
     InfoFields =
         case erlang:process_info(Pid, ?FOREIGN_INFO_KEYS) of
             Items when is_list(Items) ->
-                [process_info_field(K, V) || {K, V} <- Items, V =/= []];
+                [
+                    process_info_field(K, coerce_foreign_value(V, foreign))
+                 || {K, V} <- Items, V =/= []
+                ];
             undefined ->
                 [unavailable_field()]
         end,
@@ -718,7 +808,10 @@ foreign_fields(Pid) ->
 -spec foreign_state_fields(pid()) -> [field_map()].
 foreign_state_fields(Pid) ->
     case beamtalk_process_navigation:guarded_state(Pid) of
-        {ok, State} ->
+        {ok, State0} ->
+            %% Foreign-scoped: a charlist state (an Erlang string) renders as a
+            %% `String` leaf, not a drillable Integer `#collection` (BT-2511).
+            State = coerce_foreign_value(State0, foreign),
             [inspector_field(state, <<"state">>, State, processInfo, is_drillable(State))];
         unavailable ->
             []
@@ -823,10 +916,12 @@ preserves `parent` and `path`; the original is unchanged (immutable). Sending
 `page:` to a non-collection cursor is a `not_a_collection` error.
 """.
 -spec page(inspector(), term()) -> {ok, inspector()} | {error, #beamtalk_error{}}.
-page(#{kind := collection, subject := Subject, parent := Parent, path := Path}, PageNum) when
+page(
+    #{kind := collection, subject := Subject, parent := Parent, path := Path} = Cursor, PageNum
+) when
     is_integer(PageNum), PageNum >= 1
 ->
-    {ok, collection_cursor(Subject, PageNum - 1, Parent, Path)};
+    {ok, collection_cursor(Subject, PageNum - 1, Parent, Path, provenance_of(Cursor))};
 page(#{kind := collection}, _PageNum) ->
     {error,
         beamtalk_error:new(
@@ -862,8 +957,10 @@ refresh(#{kind := actor, pid := Pid, parent := Parent, path := Path}) ->
     actor_cursor(Pid, Parent, Path);
 refresh(#{kind := foreign, pid := Pid, parent := Parent, path := Path}) ->
     cursor(Pid, Parent, Path);
-refresh(#{kind := collection, subject := Subject, page := Page, parent := Parent, path := Path}) ->
-    collection_cursor(Subject, Page, Parent, Path);
+refresh(
+    #{kind := collection, subject := Subject, page := Page, parent := Parent, path := Path} = Cursor
+) ->
+    collection_cursor(Subject, Page, Parent, Path, provenance_of(Cursor));
 refresh(#{subject := Subject, parent := Parent, path := Path}) ->
     cursor(Subject, Parent, Path).
 
@@ -933,6 +1030,11 @@ drillable field's own fields recursively. A **pid-keyed seen-set** guards actor
 descents: revisiting an already-expanded actor pid emits a back-reference marker
 (`↩ Actor(...)`) instead of recursing (ADR 0095 Cycle handling). Pure value
 sub-trees cannot cycle (ADR 0042) and are bounded by `Depth`.
+
+A plain (untagged) collection nested in a `#foreign` cursor's state is summarised
+inline (not recursed into), so its charlists are reinterpreted as `String`s under
+foreign provenance — the same provenance scoping the navigable `at:` path uses
+(BT-2519/BT-2511). Native sub-trees are never reinterpreted.
 """.
 -spec printString(inspector(), integer()) -> binary().
 printString(Cursor, Depth) ->
@@ -952,8 +1054,13 @@ render(Cursor, Depth, Indent, Seen0) ->
         true ->
             [pad(Indent), Header];
         false ->
+            %% The cursor's provenance scopes the charlist→`String` heuristic in
+            %% the inline field summaries below (BT-2519): a foreign collection
+            %% one-lined via `value_string` deep-coerces its nested charlists,
+            %% while a native sub-tree is left untouched.
+            Prov = provenance_of(Cursor),
             FieldLines = [
-                render_field(F, Depth, Indent + 1, Seen)
+                render_field(F, Depth, Indent + 1, Seen, Prov)
              || F <- fieldsOf(Cursor)
             ],
             [pad(Indent), Header, FieldLines]
@@ -969,8 +1076,10 @@ mark_seen(_, Seen) ->
 %% Render one field line, expanding drillable children when depth remains. A
 %% drilled value that is an actor pid already on the ancestor path yields a
 %% back-reference marker rather than recursing (the pid-keyed cycle guard).
--spec render_field(map(), integer(), non_neg_integer(), map()) -> iolist().
-render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent, Seen) when
+%% `Prov` is the parent cursor's provenance, scoping the charlist→`String`
+%% heuristic for any value summarised inline (BT-2519).
+-spec render_field(map(), integer(), non_neg_integer(), map(), provenance()) -> iolist().
+render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent, Seen, Prov) when
     Depth > 1
 ->
     case actor_pid(Value) of
@@ -979,19 +1088,22 @@ render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent
                 true ->
                     [$\n, pad(Indent), Label, <<": ">>, back_reference(Pid)];
                 false ->
-                    expand_field(Label, Value, Depth, Indent, Seen)
+                    expand_field(Label, Value, Depth, Indent, Seen, Prov)
             end;
         not_actor ->
-            expand_field(Label, Value, Depth, Indent, Seen)
+            expand_field(Label, Value, Depth, Indent, Seen, Prov)
     end;
-render_field(#{label := Label, value := Value}, _Depth, Indent, _Seen) ->
-    scalar_field_line(Label, Value, Indent).
+render_field(#{label := Label, value := Value}, _Depth, Indent, _Seen, Prov) ->
+    scalar_field_line(Label, Value, Indent, Prov).
 
 %% Expand a drillable field into its own (depth-1) sub-tree, or fall back to a
 %% scalar line for a non-navigable leaf. The ancestor `Seen` set is passed down
-%% unchanged; the child adds itself for its own descent only.
--spec expand_field(binary(), term(), integer(), non_neg_integer(), map()) -> iolist().
-expand_field(Label, Value, Depth, Indent, Seen) ->
+%% unchanged; the child adds itself for its own descent only. A plain (untagged)
+%% foreign collection is *not* a recursable sub-cursor, so it falls to the scalar
+%% line — where `Prov` makes its inline summary foreign-charlist-aware (BT-2519).
+-spec expand_field(binary(), term(), integer(), non_neg_integer(), map(), provenance()) ->
+    iolist().
+expand_field(Label, Value, Depth, Indent, Seen, Prov) ->
     case beamtalk_tagged_map:is_tagged(Value) orelse actor_pid(Value) =/= not_actor of
         true ->
             Child = root_cursor(Value, []),
@@ -1004,7 +1116,7 @@ expand_field(Label, Value, Depth, Indent, Seen) ->
                 string:trim(iolist_to_binary(ChildIo), leading)
             ];
         false ->
-            scalar_field_line(Label, Value, Indent)
+            scalar_field_line(Label, Value, Indent, Prov)
     end.
 
 %% The cycle back-reference marker for a revisited actor pid, e.g.
@@ -1019,9 +1131,9 @@ back_reference(Pid) ->
         <<")">>
     ].
 
--spec scalar_field_line(binary(), term(), non_neg_integer()) -> iolist().
-scalar_field_line(Label, Value, Indent) ->
-    [$\n, pad(Indent), Label, <<": ">>, value_string(Value)].
+-spec scalar_field_line(binary(), term(), non_neg_integer(), provenance()) -> iolist().
+scalar_field_line(Label, Value, Indent, Prov) ->
+    [$\n, pad(Indent), Label, <<": ">>, value_string(Value, Prov)].
 
 %% The header line for a cursor, e.g. `Inspector(Point)` or
 %% `Inspector(Counter)` / `Inspector(Integer = 3)` for a scalar leaf.
@@ -1096,6 +1208,64 @@ value_string(Value) ->
     catch
         _:_ -> iolist_to_binary(io_lib:format("~p", [Value]))
     end.
+
+%% Provenance-scoped leaf summary (BT-2519). Under `foreign` provenance every
+%% printable charlist nested in the value is reinterpreted as a `String` *before*
+%% delegating to the provenance-unaware `print_string`, so the inline one-line
+%% summary of a foreign collection shows strings (`#{#name => "bob"}`), not Integer
+%% lists (`#{#name => #(98, 111, 98)}`) — matching what drilling the same value
+%% shows (BT-2511). The native `beamtalk` path is untouched, so a genuine Beamtalk
+%% integer `List` (`#(72, 73)`) still prints as itself, never `"HI"`.
+-spec value_string(term(), provenance()) -> binary().
+value_string(Value, foreign) ->
+    %% `deep_coerce_foreign/1` is total for well-formed terms, but foreign OTP
+    %% state is arbitrary; a coercion failure must degrade to the plain summary
+    %% rather than break `printString`'s "never raises" contract (ADR 0095).
+    Coerced =
+        try
+            deep_coerce_foreign(Value)
+        catch
+            _:_ -> Value
+        end,
+    value_string(Coerced);
+value_string(Value, _Prov) ->
+    value_string(Value).
+
+%% Recursively reinterpret every printable charlist nested in a foreign-scoped
+%% value as a `String` (binary) for the text-tree summary (BT-2519). Walks proper
+%% lists, maps, and tuples; every other term passes through unchanged. This is the
+%% *deep* counterpart of the shallow per-level `coerce_foreign_value/2` the
+%% navigable `at:` path uses (BT-2511) — needed only here because `value_string/1`
+%% one-lines a whole nested foreign collection in a single call rather than
+%% drilling it level by level. Scoped to the foreign summary path, so native
+%% printing stays intact.
+-spec deep_coerce_foreign(term()) -> term().
+deep_coerce_foreign(Value) ->
+    case is_printable_charlist(Value) of
+        true -> unicode:characters_to_binary(Value);
+        false -> deep_coerce_compound(Value)
+    end.
+
+%% Recurse into the compound parts of a non-charlist value. A *proper* list that
+%% is not itself a charlist has each element coerced; an improper list is left
+%% as-is (it carries no string to fix and must not crash the walk). A map coerces
+%% both keys and values (a foreign map may key on a string); a tuple (routine in
+%% foreign OTP/record state) coerces each element. Scalars pass through.
+-spec deep_coerce_compound(term()) -> term().
+deep_coerce_compound(Value) when is_list(Value) ->
+    case is_proper_list(Value) of
+        true -> [deep_coerce_foreign(E) || E <- Value];
+        false -> Value
+    end;
+deep_coerce_compound(Value) when is_map(Value) ->
+    maps:from_list([
+        {deep_coerce_foreign(K), deep_coerce_foreign(V)}
+     || {K, V} <- maps:to_list(Value)
+    ]);
+deep_coerce_compound(Value) when is_tuple(Value) ->
+    list_to_tuple([deep_coerce_foreign(E) || E <- tuple_to_list(Value)]);
+deep_coerce_compound(Value) ->
+    Value.
 
 %%====================================================================
 %% Wire form — asDictionaries / asDictionary (ADR 0095 §7)
