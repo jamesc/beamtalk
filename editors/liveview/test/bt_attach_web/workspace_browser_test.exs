@@ -361,6 +361,106 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has(".nav-popover .nav-pop-head", text: "Implementors")
   end
 
+  # ── Phase 3 floating inspector windows / overlay mode (BT-2493) ─────────────
+  #
+  # The Float toggle, opening / drilling / closing a floating window, and
+  # click-to-front (z-order) are connected-render JS behaviours: the WindowDrag
+  # hook (`window_drag.js`) drags a window by its title bar and raises it on a
+  # press, and the window content re-renders live over distribution. The drag
+  # *motion* is hard to assert deterministically (a manual/best-effort check per
+  # the issue), but the open → drill → close flow and click-to-front are covered
+  # here. `Phoenix.LiveViewTest` never loads `app.js`, so these MUST run in a real
+  # browser (the e2e lane).
+
+  test "Float mode opens a draggable inspector window, which drills then closes (BT-2493)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-source")
+    # A live object graph: a Boxx actor holding a Leaf actor (same shape as the
+    # docked breadcrumb test), so the floating window has a reference to drill.
+    |> eval_do("Actor subclass: WinLeaf\n  state: n = 99\n\n  n => self.n")
+    |> eval_do(
+      "Actor subclass: WinBoxx\n  state: item = nil\n\n  setItem: x => self.item := x\n  item => self.item"
+    )
+    |> eval_do("winleaf := WinLeaf spawn")
+    |> eval_do("winbox := WinBoxx spawn")
+    |> eval_do("winbox setItem: winleaf")
+    |> assert_has("#bindings-panel .bname", text: "winbox")
+    # Flip the top-bar Dock/Float toggle to Float.
+    |> click(".insp-mode button[phx-value-mode='float']")
+    # Inspecting the binding now opens a FLOATING window (the overlay layer), not
+    # the docked pane — a connected-render path driven by the inspector_mode assign.
+    |> click(".obj-row[phx-value-name='winbox'] .obj-inspect")
+    |> assert_has("#inspector-overlay .insp-window", text: "Inspecting")
+    |> assert_has(".insp-window .ivar-table", text: "WinLeaf")
+    # Drill into the referenced Leaf inside the window: its own field (n = 99) reads
+    # live over distribution. This is the window's independent drill stack.
+    |> click(".insp-window tr.drillable")
+    |> assert_has(".insp-window .ivar-table", text: "99")
+    # Walk back via the window's own breadcrumb to box's `item` field.
+    |> click(".insp-window .insp-crumbs .c[phx-value-index='0']")
+    |> assert_has(".insp-window .ivar-table", text: "item")
+    # Close the window via its × button: the overlay empties (the window is gone).
+    |> click(".insp-window .iw-close")
+    |> evaluate("new Promise((resolve) => setTimeout(resolve, 250))")
+    |> evaluate("document.querySelectorAll('.insp-window').length", fn count ->
+      assert count == 0, "closing the window did not remove it from the overlay"
+    end)
+  end
+
+  test "clicking a floating window brings it to the front (z-order) (BT-2493)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-source")
+    |> eval_do("Actor subclass: ZCounter\n  state: value = 0\n\n  value => self.value")
+    |> eval_do("za := ZCounter spawn")
+    |> eval_do("zb := ZCounter spawn")
+    |> assert_has("#bindings-panel .bname", text: "za")
+    |> assert_has("#bindings-panel .bname", text: "zb")
+    |> click(".insp-mode button[phx-value-mode='float']")
+    # Open two floating windows. The second-opened starts on top (higher z-index).
+    |> click(".obj-row[phx-value-name='za'] .obj-inspect")
+    |> click(".obj-row[phx-value-name='zb'] .obj-inspect")
+    |> assert_has("#inspector-window-win-1")
+    |> assert_has("#inspector-window-win-2")
+    |> evaluate(
+      """
+      (() => {
+        const z = (id) => parseInt(getComputedStyle(document.getElementById(id)).zIndex || "0", 10);
+        return z("inspector-window-win-2") > z("inspector-window-win-1");
+      })()
+      """,
+      fn second_on_top ->
+        assert second_on_top, "the second-opened window should start on top"
+      end
+    )
+    # Press the FIRST window's title bar: the WindowDrag hook pushes window_focus,
+    # the server bumps its z above the max, and it now overlays the second — z-order
+    # follows focus (the click-to-front behaviour, a connected-render JS path).
+    |> evaluate("""
+    (() => {
+      const bar = document.querySelector("#inspector-window-win-1 [data-window-drag-handle]");
+      bar.dispatchEvent(new MouseEvent("mousedown", {bubbles: true, button: 0}));
+      bar.dispatchEvent(new MouseEvent("mouseup", {bubbles: true, button: 0}));
+    })()
+    """)
+    |> evaluate("new Promise((resolve) => setTimeout(resolve, 250))")
+    |> evaluate(
+      """
+      (() => {
+        const z = (id) => parseInt(getComputedStyle(document.getElementById(id)).zIndex || "0", 10);
+        return z("inspector-window-win-1") > z("inspector-window-win-2");
+      })()
+      """,
+      fn first_now_on_top ->
+        assert first_now_on_top,
+               "clicking the first window did not raise it to the front (z-order follows focus)"
+      end
+    )
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   # Type `query` into the omni search input and fire the `keyup` event the server

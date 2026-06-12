@@ -15,6 +15,9 @@
 //   OmniSearch        — top-bar symbol search keyboard nav (arrow/enter/escape);
 //                       filtering is server-side, the hook drives the highlight
 //                       + open (BT-2495, epic BT-2482 Phase 3)
+//   WindowDrag        — drags a floating inspector window by its title bar and
+//                       raises it to the front on click; reports the final
+//                       position on drop (BT-2493, epic BT-2482 Phase 3)
 //
 // The Workspace dock and method editor (later Phase 1 issues) build on these.
 
@@ -24,6 +27,7 @@ import { SelectionTracker } from "./selection_tracker"
 import { TweaksPanel } from "./tweaks_panel"
 import { FieldFlash } from "./field_flash"
 import { OmniSearch } from "./omni_search"
+import { WindowDrag } from "./window_drag"
 
 export const Hooks = {
   CodeEditor,
@@ -32,4 +36,5 @@ export const Hooks = {
   TweaksPanel,
   FieldFlash,
   OmniSearch,
+  WindowDrag,
 }

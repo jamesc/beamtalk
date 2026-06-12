@@ -455,6 +455,27 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:omni_results, [])
       |> assign(:omni_open, false)
       |> assign(:nav_popover, nil)
+      # Floating inspector windows (BT-2493, epic BT-2482 Phase 3): the spike's
+      # Dock/Float toggle (spikes/cockpit-ux-spike/app.jsx). In `"float"` mode a
+      # binding click / Inspect-it opens a *floating, draggable, stackable*
+      # inspector window instead of driving the docked pane; `"docked"` (the
+      # default) keeps the single right-column Inspector.
+      #
+      #   * `:inspector_mode` — `"docked"` | `"float"`. Persisted in LV state so it
+      #     survives re-render; the top-bar toggle flips it.
+      #   * `:windows` — the open floating windows, each a self-contained inspector
+      #     (its own drill `crumbs`, `rows`, `target`, live `watch`/`stats`/`frozen`
+      #     + `flash_gen`, and `x`/`y`/`z` placement). The window list (id + drill
+      #     stack + content) lives server-side; only x/y/z are client-reported by
+      #     the WindowDrag hook on drop / focus, so there is no per-mousemove
+      #     round-trip and positions survive an unrelated re-render.
+      #   * `:next_window_id` — a monotonic counter minting unique window ids.
+      #   * `:window_z` — the running max z-index; a click bumps the focused window
+      #     to `window_z + 1` so z-order follows focus (the spike's stacking).
+      |> assign(:inspector_mode, "docked")
+      |> assign(:windows, [])
+      |> assign(:next_window_id, 1)
+      |> assign(:window_z, 10)
       |> assign_browser_classes()
       |> assign_bindings(pid)
       |> assign_changes()
@@ -556,11 +577,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   def handle_event("dock_tab", _params, socket), do: {:noreply, socket}
 
   # Inspect a binding by name: look up its live term and drill into it via the
-  # read-surface `inspect` op. Reference-following starts here.
+  # read-surface `inspect` op. Reference-following starts here. In `"float"` mode
+  # (BT-2493) the click opens a *new floating window* on the binding instead of
+  # driving the docked pane; in `"docked"` mode it drives the docked Inspector as
+  # before. Docked is the default, so the existing single-pane flow is untouched
+  # unless the user flipped the top-bar Dock/Float toggle.
   @impl true
   def handle_event("inspect", %{"name" => name}, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    {:noreply, inspect_binding(socket, pid, name)}
+    if socket.assigns.inspector_mode == "float" do
+      {:noreply, open_window(socket, pid, name)}
+    else
+      {:noreply, inspect_binding(socket, pid, name)}
+    end
   end
 
   # Drill into an object-valued field of the currently-inspected object: the
@@ -622,6 +651,107 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("poke", _params, socket), do: {:noreply, socket}
+
+  # ── floating inspector windows (BT-2493, epic BT-2482 Phase 3) ───────────────
+
+  # Flip the Inspector between docked and floating ("overlay") modes (the spike's
+  # Dock/Float toggle). Switching to docked leaves the open windows alone — they
+  # stay in state and reappear if the user flips back — so a misclick doesn't tear
+  # down a desk full of inspectors and their subscriptions. Only an explicit
+  # window close releases a window's watch.
+  def handle_event("set_inspector_mode", %{"mode" => mode}, socket)
+      when mode in ~w(docked float) do
+    {:noreply, assign(socket, inspector_mode: mode)}
+  end
+
+  def handle_event("set_inspector_mode", _params, socket), do: {:noreply, socket}
+
+  # Drill into an object-valued field of a *floating window* (BT-2493): the field
+  # term is carried by index against that window's current rows, exactly like the
+  # docked `"drill"` event but scoped to one window. Defensive against a malformed
+  # id/index so a crafted event can't crash the LiveView.
+  def handle_event("window_drill", %{"id" => id, "index" => index}, socket) do
+    with %{} = win <- find_window(socket, id),
+         {i, ""} when i >= 0 <- Integer.parse(index),
+         %{term: term, name: name} <- Enum.at(win.rows, i) do
+      crumbs = win.crumbs ++ [%{label: to_string(name), term: term}]
+
+      {:noreply,
+       update_window(socket, id, fn w -> inspect_window(socket, w, name, term, crumbs) end)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("window_drill", _params, socket), do: {:noreply, socket}
+
+  # Walk a floating window's drill breadcrumb back to an earlier level: truncate
+  # its crumb trail at the clicked index and re-inspect that level's live term.
+  def handle_event("window_crumb", %{"id" => id, "index" => index}, socket) do
+    with %{} = win <- find_window(socket, id),
+         {i, ""} when i >= 0 <- Integer.parse(index),
+         %{term: term, label: label} <- Enum.at(win.crumbs, i) do
+      crumbs = Enum.take(win.crumbs, i + 1)
+
+      {:noreply,
+       update_window(socket, id, fn w -> inspect_window(socket, w, label, term, crumbs) end)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("window_crumb", _params, socket), do: {:noreply, socket}
+
+  # Close a floating window: drop it from the list and release its per-object
+  # change subscription (BT-2493 acceptance: "Close removes the window and releases
+  # any subscriptions"). Idempotent — closing an unknown id is a no-op.
+  def handle_event("window_close", %{"id" => id}, socket) do
+    {:noreply, close_window(socket, id)}
+  end
+
+  def handle_event("window_close", _params, socket), do: {:noreply, socket}
+
+  # Bring a floating window to the front (z-order follows focus, the spike's
+  # stacking). The WindowDrag JS hook fires this on a mousedown anywhere in the
+  # window; we bump the clicked window's z above the current max so it overlays the
+  # others. Pure view state — no workspace round-trip.
+  def handle_event("window_focus", %{"id" => id}, socket) do
+    {:noreply, focus_window(socket, id)}
+  end
+
+  def handle_event("window_focus", _params, socket), do: {:noreply, socket}
+
+  # Persist a floating window's final position after a drag (BT-2493): the
+  # WindowDrag hook reports x/y ONCE on drop (no per-mousemove round-trip), so the
+  # position lives in LV state and survives an unrelated re-render. Coordinates are
+  # clamped to non-negative integers so a crafted payload can't place a window off
+  # into NaN-land.
+  def handle_event("window_moved", %{"id" => id, "x" => x, "y" => y}, socket) do
+    {:noreply,
+     update_window(socket, id, fn w -> %{w | x: clamp_coord(x), y: clamp_coord(y)} end)}
+  end
+
+  def handle_event("window_moved", _params, socket), do: {:noreply, socket}
+
+  # Freeze / unfreeze a single floating window's live tracking (per-window freeze,
+  # mirroring the docked `"freeze_toggle"`). Each window watches independently, so
+  # one frozen window holds its snapshot while others keep tracking.
+  def handle_event("window_freeze", %{"id" => id}, socket) do
+    {:noreply, update_window(socket, id, fn w -> toggle_window_freeze(socket, w) end)}
+  end
+
+  def handle_event("window_freeze", _params, socket), do: {:noreply, socket}
+
+  # Owner-only per-window poke (the docked `"poke"`, scoped to one window): send
+  # the typed message to that window's inspected actor by eval'ing
+  # `<binding> <message>`. Rides the same RBAC-gated eval op + well-formedness gate
+  # as the docked poke; a window not at a named-binding root reports it can't send.
+  def handle_event("window_poke", %{"id" => id, "message" => message}, socket)
+      when is_binary(message) do
+    {:noreply, update_window(socket, id, fn w -> poke_window(socket, w, message) end)}
+  end
+
+  def handle_event("window_poke", _params, socket), do: {:noreply, socket}
 
   # ── method editor (Wave 3, write-surface ADR 0082) ──────────────────────────
 
@@ -922,18 +1052,26 @@ defmodule BtAttachWeb.WorkspaceLive do
   # watch server warns it may deliver one final push after we unsubscribe (a
   # navigate-away/freeze race), so we drop a push whose pid doesn't match the head.
   def handle_info({:object_changed, pid, _slots}, %{assigns: assigns} = socket) do
-    cond do
-      assigns.inspect_frozen or not watched_pid?(assigns.inspect_watch, pid) ->
-        {:noreply, socket}
+    # The push fans out to TWO independent watchers: the docked Inspector (its
+    # `:inspect_watch`) and any floating windows watching this same pid (BT-2493).
+    # Each coalesces its own burst, so we schedule the docked refresh here and let
+    # `notify_windows_changed/2` schedule a per-pid window refresh — a single push
+    # can pulse both the docked pane and a float window on the same actor.
+    docked =
+      cond do
+        assigns.inspect_frozen or not watched_pid?(assigns.inspect_watch, pid) ->
+          socket
 
-      assigns.refresh_pending ->
-        # A refresh is already queued for this burst — collapse this push into it.
-        {:noreply, socket}
+        assigns.refresh_pending ->
+          # A refresh is already queued for this burst — collapse this push into it.
+          socket
 
-      true ->
-        Process.send_after(self(), :do_object_refresh, refresh_debounce_ms())
-        {:noreply, assign(socket, refresh_pending: true)}
-    end
+        true ->
+          Process.send_after(self(), :do_object_refresh, refresh_debounce_ms())
+          assign(socket, refresh_pending: true)
+      end
+
+    {:noreply, notify_windows_changed(docked, pid)}
   end
 
   # The coalesced refresh fired by `{:object_changed, …}`: re-read the watched
@@ -949,6 +1087,37 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, assign(socket, refresh_pending: false)}
   end
 
+  # The coalesced per-window refresh fired by `notify_windows_changed/2` for one
+  # `pid`: re-read every floating window whose watched head is that pid, clearing
+  # ONLY those windows' pending flags so the burst collapses into one re-read +
+  # flash per window. A window watching a *different* pid keeps its own
+  # `:refresh_pending` untouched — its own `{:do_window_refresh, otherpid}` timer
+  # is still in flight and must not be pre-empted (else that window's refresh would
+  # be silently dropped). A window that froze or navigated off this pid since the
+  # timer armed no longer matches `watched_pid?/2`, so it is left as-is.
+  def handle_info({:do_window_refresh, pid}, socket) do
+    windows =
+      Enum.map(socket.assigns.windows, fn w ->
+        cond do
+          # Pending refresh for this pid: re-read + flash, clearing the flag.
+          w.refresh_pending and watched_pid?(w.watch, pid) ->
+            refresh_window(%{w | refresh_pending: false}, socket, w.watch)
+
+          # Still watching this pid but not pending (already serviced / never
+          # scheduled): clear any stale flag so it can't wedge future refreshes.
+          watched_pid?(w.watch, pid) ->
+            %{w | refresh_pending: false}
+
+          # A different pid (or no watch): leave it untouched — its own timer (if
+          # any) is still in flight and must not be pre-empted.
+          true ->
+            w
+        end
+      end)
+
+    {:noreply, assign(socket, :windows, windows)}
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   # True when `pid` is the pid backing the currently-watched object term — so a
@@ -960,6 +1129,18 @@ defmodule BtAttachWeb.WorkspaceLive do
        do: watched == pid
 
   defp watched_pid?(_watch, _pid), do: false
+
+  # The distinct live terms watched by the open floating windows (BT-2493) — the
+  # set we must unsubscribe on terminate. Deduped on the watched pid so two windows
+  # on the same actor unsubscribe it once.
+  defp window_watched_terms(nil), do: []
+
+  defp window_watched_terms(windows) when is_list(windows) do
+    windows
+    |> Enum.map(& &1.watch)
+    |> Enum.filter(&match?({:beamtalk_object, _c, _m, p} when is_pid(p), &1))
+    |> Enum.uniq_by(fn {:beamtalk_object, _c, _m, pid} -> pid end)
+  end
 
   @impl true
   def terminate(_reason, socket) do
@@ -991,6 +1172,14 @@ defmodule BtAttachWeb.WorkspaceLive do
 
         _ ->
           :ok
+      end
+
+      # And drop every floating window's per-object subscription (BT-2493). The
+      # watch server keys subscriptions by `(pid, subscriber)` so one unsubscribe
+      # per distinct watched pid suffices even if several windows share an actor —
+      # `Enum.uniq` over the watched terms avoids a redundant (harmless) RPC.
+      for term <- window_watched_terms(socket.assigns[:windows]) do
+        Workspace.unsubscribe_object_changes(term, self())
       end
 
       case socket.assigns[:token] do
@@ -1064,14 +1253,22 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp eval_success(socket, "inspect_it", term, output, expr) do
-    socket
-    |> assign(
-      result: Workspace.render_term(term),
-      output: present(output),
-      error: nil,
-      expr: expr
-    )
-    |> inspect_term("→ result", term, [%{label: "→ result", term: term}])
+    socket =
+      assign(socket,
+        result: Workspace.render_term(term),
+        output: present(output),
+        error: nil,
+        expr: expr
+      )
+
+    # In `"float"` mode (BT-2493) Inspect-it opens a floating window on the
+    # `→ result` term rather than driving the docked pane; docked mode keeps the
+    # original single-pane behaviour.
+    if socket.assigns.inspector_mode == "float" do
+      open_window_for_term(socket, "→ result", term)
+    else
+      inspect_term(socket, "→ result", term, [%{label: "→ result", term: term}])
+    end
   end
 
   # print_it (and the historical default).
@@ -1873,15 +2070,35 @@ defmodule BtAttachWeb.WorkspaceLive do
     |> assign(inspect_stats: nil, poke_result: nil, poke_error: nil)
   end
 
-  # Drop the current per-object subscription (if any) and forget the watched term.
-  # Idempotent: a nil watch unsubscribes nothing.
+  # Drop the docked Inspector's per-object subscription (if any) and forget the
+  # watched term. Idempotent: a nil watch unsubscribes nothing.
+  #
+  # Reference-aware (BT-2493): the workspace keys subscriptions by `(pid,
+  # subscriber)` and our subscriber is always this LiveView, so one unsubscribe
+  # would silence EVERY this-pid watcher in this process. If a floating window
+  # still watches the same actor, we must NOT unsubscribe here — the window still
+  # needs the push. (Before floating windows existed the docked pane was the sole
+  # watcher, so this collapses to the original unconditional unsubscribe.)
   defp unwatch(%{assigns: %{inspect_watch: term}} = socket)
        when not is_nil(term) do
-    Facade.dispatch(:unsubscribe_object, %{term: term, pid: self()}, ctx(socket))
+    unless docked_pid_watched_by_window?(socket, term) do
+      Facade.dispatch(:unsubscribe_object, %{term: term, pid: self()}, ctx(socket))
+    end
+
     assign(socket, inspect_watch: nil)
   end
 
   defp unwatch(socket), do: assign(socket, inspect_watch: nil)
+
+  # True when the pid backing the docked pane's `term` is also watched by an open
+  # floating window — so the docked pane releasing it must keep the subscription
+  # alive for the window.
+  defp docked_pid_watched_by_window?(socket, {:beamtalk_object, _c, _m, pid})
+       when is_pid(pid) do
+    Enum.any?(socket.assigns[:windows] || [], fn w -> watched_pid?(w.watch, pid) end)
+  end
+
+  defp docked_pid_watched_by_window?(_socket, _term), do: false
 
   # Read the inspected actor's live process metrics (mailbox/reductions/status/…)
   # and assign the snapshot for the head chips. A read failure clears the chips
@@ -1945,6 +2162,477 @@ defmodule BtAttachWeb.WorkspaceLive do
   # delay collapses a flurry of rapid writes into a single re-read + flash. Kept as
   # a function so a test can drive it deterministically if needed.
   defp refresh_debounce_ms, do: 60
+
+  # ── floating inspector windows (BT-2493, epic BT-2482 Phase 3) ───────────────
+  #
+  # Each floating window is a self-contained inspector: its own drill `crumbs`,
+  # `rows`, `target`, live `watch`/`stats`/`frozen` and a `flash_gen`, plus its
+  # `x`/`y`/`z` placement (client-reported by the WindowDrag hook on drop / focus).
+  # The window-list lives in `:windows`; helpers below open / drill / close / focus
+  # / freeze a window by id and route change pushes to the right window. They reuse
+  # the same read-surface ops (`:inspect`, `:subscribe_object`, `:pid_stats`) and
+  # the same `target_info` / `field_rows` builders as the docked pane (BT-2486), so
+  # a window's content is the docked Inspector parameterised by window id.
+
+  # The window placement step (px): each new window is offset down-right from the
+  # last so a burst of opens cascades rather than stacking dead-on (the spike's
+  # `+24` cascade). The first window opens near the top-left of the overlay.
+  defp window_origin_x, do: 120
+  defp window_origin_y, do: 96
+  defp window_cascade, do: 28
+
+  # Open a floating window on a session binding selected by name: resolve its live
+  # term (same path as the docked `inspect_binding/3`), then build a window on it.
+  # A binding that no longer resolves opens a window showing the error rather than
+  # silently doing nothing.
+  defp open_window(socket, pid, name) do
+    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
+      pairs when is_list(pairs) ->
+        case List.keyfind(pairs, name, 0) do
+          {^name, term} -> open_window_for_term(socket, to_string(name), term)
+          nil -> open_window_error(socket, to_string(name), "binding not found: #{name}")
+        end
+
+      {:error, reason} ->
+        open_window_error(socket, to_string(name), Workspace.render_error(reason))
+    end
+  end
+
+  # Open a floating window on an already-resolved live `term` (used by Inspect-it,
+  # whose head is the `→ result`, and by `open_window/3`). Mints a fresh id +
+  # cascade position, fills its first inspector level, and arms its watch.
+  defp open_window_for_term(socket, label, term) do
+    {id, socket} = mint_window_id(socket)
+    {x, y, socket} = next_window_pos(socket)
+    z = socket.assigns.window_z + 1
+
+    win = %{
+      id: id,
+      label: to_string(label),
+      crumbs: [%{label: to_string(label), term: term}],
+      target: nil,
+      rows: [],
+      error: nil,
+      watch: nil,
+      stats: nil,
+      frozen: false,
+      refresh_pending: false,
+      flash_gen: 0,
+      poke_result: nil,
+      poke_error: nil,
+      x: x,
+      y: y,
+      z: z
+    }
+
+    win = inspect_window(socket, win, label, term, win.crumbs)
+
+    socket
+    |> assign(:windows, socket.assigns.windows ++ [win])
+    |> assign(:window_z, z)
+  end
+
+  # Open a window that carries only an error head (a binding that vanished): still
+  # gives the user a closable window explaining what happened rather than a no-op.
+  defp open_window_error(socket, label, message) do
+    {id, socket} = mint_window_id(socket)
+    {x, y, socket} = next_window_pos(socket)
+    z = socket.assigns.window_z + 1
+
+    win = %{
+      id: id,
+      label: to_string(label),
+      crumbs: [],
+      target: nil,
+      rows: [],
+      error: message,
+      watch: nil,
+      stats: nil,
+      frozen: false,
+      refresh_pending: false,
+      flash_gen: 0,
+      poke_result: nil,
+      poke_error: nil,
+      x: x,
+      y: y,
+      z: z
+    }
+
+    socket
+    |> assign(:windows, socket.assigns.windows ++ [win])
+    |> assign(:window_z, z)
+  end
+
+  # Inspect a live `term` into a window `w` (parameterised twin of the docked
+  # `inspect_term/4`): read the object's fields via the read-surface, set the
+  # window's target/rows/crumbs/error, then (re)arm its per-object watch + stats.
+  # A re-inspect (drill / crumb walk-back) rebinds the watch onto the new head and
+  # releases the previous one — but only if no OTHER watcher (window or docked
+  # pane) still needs that pid (so closing one of two windows on the same actor
+  # doesn't silence the other).
+  defp inspect_window(socket, w, label, term, crumbs) do
+    if Workspace.inspectable?(term) do
+      case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+        {:ok, fields} when is_map(fields) ->
+          %{
+            w
+            | target: target_info(label, term),
+              rows: field_rows(fields),
+              crumbs: crumbs,
+              error: nil
+          }
+          |> track_window(socket, term)
+
+        {:ok, scalar} ->
+          %{
+            w
+            | target: target_info(label, term),
+              rows: [
+                %{
+                  name: "value",
+                  value: Workspace.format_value(scalar),
+                  term: scalar,
+                  drillable: false,
+                  kind: term_kind(scalar)
+                }
+              ],
+              crumbs: crumbs,
+              error: nil
+          }
+          |> track_window(socket, scalar)
+
+        {:error, reason} ->
+          %{
+            w
+            | target: nil,
+              rows: [],
+              crumbs: [],
+              error: Workspace.render_error(reason)
+          }
+          |> track_window(socket, nil)
+      end
+    else
+      %{
+        w
+        | target: target_info(label, term),
+          rows: [],
+          crumbs: crumbs,
+          error: "#{label} is a #{scalar_kind(term)} — no fields to inspect"
+      }
+      |> track_window(socket, term)
+    end
+  end
+
+  # Arm (or tear down) a window's per-object change subscription + pid-stats read
+  # for `term`, called on every `inspect_window/5`. Mirrors the docked
+  # `track_object/2` but scoped to one window's `watch`. The previously-watched
+  # term is released first (guarded so a pid another watcher still needs is kept
+  # subscribed), then a non-frozen pid-backed head re-subscribes + reads stats.
+  defp track_window(w, socket, {:beamtalk_object, _c, _m, pid} = term) when is_pid(pid) do
+    w = unwatch_window(w, socket)
+
+    w =
+      if w.frozen do
+        %{w | watch: nil}
+      else
+        case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+          :ok -> %{w | watch: term}
+          _ -> %{w | watch: nil}
+        end
+      end
+
+    %{w | refresh_pending: false}
+    |> refresh_window_stats(socket, term)
+    |> Map.merge(%{poke_result: nil, poke_error: nil})
+  end
+
+  defp track_window(w, socket, _term) do
+    w
+    |> unwatch_window(socket)
+    |> Map.merge(%{stats: nil, poke_result: nil, poke_error: nil})
+  end
+
+  # Drop a window's per-object subscription, unless the same pid is still watched
+  # by another window or the docked pane (reference-aware unsubscribe). Idempotent.
+  defp unwatch_window(%{watch: nil} = w, _socket), do: w
+
+  defp unwatch_window(%{watch: term} = w, socket) do
+    unless pid_watched_elsewhere?(socket, term, w.id) do
+      Facade.dispatch(:unsubscribe_object, %{term: term, pid: self()}, ctx(socket))
+    end
+
+    %{w | watch: nil}
+  end
+
+  # True when the pid backing `term` is still watched by some watcher OTHER than
+  # window `except_id` — another floating window, or the docked Inspector. Used to
+  # avoid unsubscribing a pid a sibling watcher still depends on (the workspace
+  # keys subscriptions by `(pid, subscriber)`, so one unsubscribe would silence all
+  # this-pid watchers in this LiveView).
+  defp pid_watched_elsewhere?(socket, {:beamtalk_object, _c, _m, pid}, except_id)
+       when is_pid(pid) do
+    docked = watched_pid?(socket.assigns[:inspect_watch], pid)
+
+    windowed =
+      Enum.any?(socket.assigns.windows, fn w ->
+        w.id != except_id and watched_pid?(w.watch, pid)
+      end)
+
+    docked or windowed
+  end
+
+  defp pid_watched_elsewhere?(_socket, _term, _except_id), do: false
+
+  # Read a window's inspected actor's live pid stats for its head chips. A failure
+  # clears the chips rather than rendering stale numbers (same contract as the
+  # docked `refresh_stats/2`).
+  defp refresh_window_stats(w, socket, term) do
+    case Facade.dispatch(:pid_stats, %{term: term}, ctx(socket)) do
+      {:ok, stats} when is_map(stats) -> %{w | stats: stats}
+      _ -> %{w | stats: nil}
+    end
+  end
+
+  # Re-read a window's *already-watched* object after a change push WITHOUT
+  # re-arming the subscription (the watch is still live). Bumps the window's
+  # `flash_gen` so its FieldFlash hook flashes the changed cells. Mirrors the
+  # docked `refresh_inspector/2`.
+  defp refresh_window(w, socket, {:beamtalk_object, _c, _m, pid} = term) when is_pid(pid) do
+    label = window_label(w)
+
+    case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+      {:ok, fields} when is_map(fields) ->
+        %{
+          w
+          | target: target_info(label, term),
+            rows: field_rows(fields),
+            error: nil
+        }
+        |> refresh_window_stats(socket, term)
+        |> bump_window_flash()
+
+      {:ok, _scalar} ->
+        w |> refresh_window_stats(socket, term) |> bump_window_flash()
+
+      {:error, _reason} ->
+        w
+    end
+  end
+
+  defp refresh_window(w, _socket, _term), do: w
+
+  # The label at a window's current head: its last drill crumb, falling back to its
+  # target label.
+  defp window_label(w) do
+    case List.last(w.crumbs) do
+      %{label: label} -> label
+      _ -> (w.target || %{})[:label] || "value"
+    end
+  end
+
+  defp bump_window_flash(w), do: %{w | flash_gen: w.flash_gen + 1}
+
+  # Per-window freeze toggle (the docked `toggle_freeze/1`, scoped to one window).
+  # Unfreeze re-arms the window's watch on its current head and catches up; freeze
+  # drops its subscription (reference-aware) and holds the snapshot.
+  defp toggle_window_freeze(socket, %{frozen: true} = w) do
+    w = %{w | frozen: false, refresh_pending: false}
+
+    case window_head_term(w) do
+      {:beamtalk_object, _c, _m, pid} = term when is_pid(pid) ->
+        w
+        |> rearm_window_watch(socket, term)
+        |> refresh_window(socket, term)
+
+      _ ->
+        w
+    end
+  end
+
+  defp toggle_window_freeze(socket, w) do
+    w
+    |> unwatch_window(socket)
+    |> Map.put(:frozen, true)
+  end
+
+  defp rearm_window_watch(w, socket, term) do
+    case Facade.dispatch(:subscribe_object, %{term: term, pid: self()}, ctx(socket)) do
+      :ok -> %{w | watch: term}
+      _ -> %{w | watch: nil}
+    end
+  end
+
+  # The live term at a window's current head (its last crumb), or nil.
+  defp window_head_term(w) do
+    case List.last(w.crumbs) do
+      %{term: term} -> term
+      _ -> nil
+    end
+  end
+
+  # Send `message` to a window's inspected actor by eval'ing `<binding> <message>`
+  # against the session (the docked `poke_object/2`, scoped to one window). The
+  # actor is addressed by its window's single-crumb binding label; a window not at
+  # a named-binding root can't be poked. On success the window re-reads so its
+  # fields reflect the write synchronously (the docked `refresh_poked_inspector`).
+  defp poke_window(socket, w, message) do
+    message = String.trim(message)
+    pid = socket.assigns[:session_pid]
+    label = window_poke_label(w)
+
+    cond do
+      not is_pid(pid) ->
+        %{w | poke_result: nil, poke_error: "not attached to workspace"}
+
+      message == "" ->
+        %{w | poke_result: nil, poke_error: "Enter a message to send."}
+
+      is_nil(label) ->
+        %{
+          w
+          | poke_result: nil,
+            poke_error: "Can only send to a bound object — inspect a binding to poke it."
+        }
+
+      true ->
+        send_window_poke(socket, w, pid, label, message)
+    end
+  end
+
+  defp send_window_poke(socket, w, pid, label, message) do
+    code = "#{label} #{message}"
+
+    case Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx(socket)) do
+      {:ok, term, _output, _warnings} ->
+        w = %{w | poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil}
+
+        case w.watch do
+          {:beamtalk_object, _c, _m, p} = watched when is_pid(p) ->
+            refresh_window(w, socket, watched)
+
+          _ ->
+            w
+        end
+
+      {:error, reason, _output, _warnings} ->
+        %{w | poke_result: nil, poke_error: Workspace.render_error(reason)}
+
+      {:error, reason} ->
+        %{w | poke_result: nil, poke_error: facade_error(reason)}
+    end
+  end
+
+  # The binding name to address a window poke to (its single-crumb root label), or
+  # nil — the same well-formedness gate as the docked `poke_label/1`.
+  defp window_poke_label(%{crumbs: [%{label: label}]}) when is_binary(label) do
+    if valid_receiver?(label), do: label, else: nil
+  end
+
+  defp window_poke_label(_w), do: nil
+
+  # ── window-list manipulation (pure view state, no workspace round-trip) ──────
+
+  # Mint the next unique window id (a string so it rides DOM ids + phx-value cleanly)
+  # and advance the counter.
+  defp mint_window_id(socket) do
+    n = socket.assigns.next_window_id
+    {"win-#{n}", assign(socket, :next_window_id, n + 1)}
+  end
+
+  # The cascade position for the next window: offset down-right by one step per
+  # already-open window, wrapping after a few so a long-lived session doesn't march
+  # windows off-screen. Returns {x, y, socket} (socket unchanged — kept symmetric
+  # with `mint_window_id/1` for a tidy call site).
+  defp next_window_pos(socket) do
+    step = rem(length(socket.assigns.windows), 8)
+    x = window_origin_x() + step * window_cascade()
+    y = window_origin_y() + step * window_cascade()
+    {x, y, socket}
+  end
+
+  # Look up a window by id, or nil.
+  defp find_window(socket, id), do: Enum.find(socket.assigns.windows, &(&1.id == id))
+
+  # Replace the window `id` with `fun.(window)`, leaving the list order (and so the
+  # DOM order) stable — z-order is carried by each window's `:z`, not list position,
+  # so an update never reshuffles the windows and resets their drag positions.
+  defp update_window(socket, id, fun) do
+    windows =
+      Enum.map(socket.assigns.windows, fn w ->
+        if w.id == id, do: fun.(w), else: w
+      end)
+
+    assign(socket, :windows, windows)
+  end
+
+  # Close a window: release its watch (reference-aware) and drop it from the list.
+  defp close_window(socket, id) do
+    case find_window(socket, id) do
+      nil ->
+        socket
+
+      w ->
+        _ = unwatch_window(w, socket)
+        assign(socket, :windows, Enum.reject(socket.assigns.windows, &(&1.id == id)))
+    end
+  end
+
+  # Bring window `id` to the front: bump its z above the current max so it overlays
+  # the others. No-op for an unknown id.
+  defp focus_window(socket, id) do
+    case find_window(socket, id) do
+      nil ->
+        socket
+
+      _w ->
+        z = socket.assigns.window_z + 1
+
+        socket
+        |> assign(:window_z, z)
+        |> update_window(id, fn w -> %{w | z: z} end)
+    end
+  end
+
+  # Clamp a client-reported drag coordinate to a non-negative integer (a crafted
+  # payload could send a float/NaN/negative).
+  defp clamp_coord(n) when is_integer(n) and n >= 0, do: n
+  defp clamp_coord(n) when is_float(n) and n >= 0.0, do: trunc(n)
+
+  defp clamp_coord(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, _} when i >= 0 -> i
+      _ -> 0
+    end
+  end
+
+  defp clamp_coord(_), do: 0
+
+  # Route an `{:object_changed, pid, …}` push to every open floating window whose
+  # watched head is that pid (a non-frozen, currently-watching window). Each such
+  # window coalesces its own burst via its `:refresh_pending` flag and schedules a
+  # per-window deferred refresh. Windows watching a different pid (or frozen) are
+  # untouched. Returns the updated socket.
+  defp notify_windows_changed(socket, pid) do
+    {windows, scheduled} =
+      Enum.map_reduce(socket.assigns.windows, false, fn w, sched ->
+        cond do
+          w.frozen or not watched_pid?(w.watch, pid) ->
+            {w, sched}
+
+          w.refresh_pending ->
+            {w, sched}
+
+          true ->
+            {%{w | refresh_pending: true}, true}
+        end
+      end)
+
+    if scheduled do
+      Process.send_after(self(), {:do_window_refresh, pid}, refresh_debounce_ms())
+    end
+
+    assign(socket, :windows, windows)
+  end
 
   # Flip the freeze flag and (un)arm tracking accordingly. Freezing unsubscribes
   # the live object change stream (the pane now holds a snapshot). Unfreezing
@@ -2632,6 +3320,23 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
           </div>
           <span class="spacer"></span>
+          <%!-- Dock/Float toggle (BT-2493, the spike's mode switch): in Float mode
+               a binding click / Inspect-it opens a floating, draggable inspector
+               window instead of the docked pane. Docked is the default. Shown only
+               once attached, since it governs the connected Inspector. --%>
+          <div :if={@connected} class="seg insp-mode" role="tablist" aria-label="Inspector mode">
+            <button
+              :for={{mode, label} <- [{"docked", "Dock"}, {"float", "Float"}]}
+              type="button"
+              role="tab"
+              class={[@inspector_mode == mode && "on"]}
+              aria-selected={to_string(@inspector_mode == mode)}
+              phx-click="set_inspector_mode"
+              phx-value-mode={mode}
+            >
+              {label}
+            </button>
+          </div>
           <%= if @connected do %>
             <div class="attach">
               <span class="dot live"></span>
@@ -3225,6 +3930,15 @@ defmodule BtAttachWeb.WorkspaceLive do
               </div>
             </div>
           </div>
+          <%!-- Floating inspector windows (BT-2493): the overlay layer of draggable,
+               stackable inspector windows opened in Float mode. Rendered whenever
+               windows are open — even if the user has since flipped back to Docked,
+               so their state + positions persist — but pointer-inert (the layer is
+               `pointer-events:none`; each window re-enables its own) so it never
+               eats clicks on the cockpit beneath when empty. Each window reuses the
+               docked Inspector's content (target/crumbs/rows/chips/poke) keyed by
+               its id, with its own drag handle, close button and z-order. --%>
+          <.inspector_windows :if={@windows != []} windows={@windows} role={@role} />
           <%!-- The Changes (ChangeLog) viewer and the live Transcript stream now
                live in the tabbed Workspace dock above (BT-2490), not a separate
                full-width footer. --%>
@@ -3254,4 +3968,179 @@ defmodule BtAttachWeb.WorkspaceLive do
     </div>
     """
   end
+
+  # ── floating inspector windows (BT-2493, epic BT-2482 Phase 3) ───────────────
+  #
+  # The overlay layer: one draggable, stackable inspector window per `:windows`
+  # entry. The layer itself is pointer-inert so it never eats clicks on the
+  # cockpit beneath; each window re-enables pointer events on itself. Window
+  # position (`left`/`top`) and stacking (`z-index`) come straight from the
+  # per-window state the WindowDrag hook reports on drop / focus, so they survive an
+  # unrelated re-render. Each window's content reuses the docked Inspector's markup
+  # (head + breadcrumb + chips + ivar table + poke), parameterised by window id so
+  # its drill/crumb/close/freeze/poke events carry the id back to the right window.
+
+  attr :windows, :list, required: true
+  attr :role, :atom, required: true
+
+  defp inspector_windows(assigns) do
+    ~H"""
+    <div class="insp-overlay" id="inspector-overlay">
+      <.inspector_window :for={w <- @windows} win={w} role={@role} />
+    </div>
+    """
+  end
+
+  attr :win, :map, required: true
+  attr :role, :atom, required: true
+
+  defp inspector_window(assigns) do
+    ~H"""
+    <section
+      class="insp-window"
+      id={"inspector-window-#{@win.id}"}
+      style={"left:#{@win.x}px;top:#{@win.y}px;z-index:#{@win.z};"}
+      phx-hook="WindowDrag"
+      data-window-id={@win.id}
+    >
+      <%!-- Title bar: the drag handle (`.iw-title`, grabbed by the WindowDrag hook)
+           plus the live freeze toggle and the close button. Dragging the bar moves
+           the window client-side; the hook reports the final x/y on drop. --%>
+      <header class="iw-bar" data-window-drag-handle>
+        <span class="iw-title mono">
+          {(@win.target && @win.target.label) || @win.label}
+        </span>
+        <span class="spacer"></span>
+        <button
+          :if={@win.target && @win.target.pid}
+          type="button"
+          class={["insp-freeze", (@win.frozen && "frozen") || "live"]}
+          phx-click="window_freeze"
+          phx-value-id={@win.id}
+          title={
+            if @win.frozen,
+              do: "Frozen snapshot — click to track live",
+              else: "Tracking live (subscribed to changes) — click to freeze a snapshot"
+          }
+        >
+          <span class="iwf-dot"></span>{(@win.frozen && "frozen") || "live"}
+        </button>
+        <button
+          type="button"
+          class="iw-close"
+          phx-click="window_close"
+          phx-value-id={@win.id}
+          title="Close window"
+          aria-label="Close window"
+        >
+          ×
+        </button>
+      </header>
+      <div class="iw-body">
+        <%= if @win.target do %>
+          <div class="insp-head">
+            <div :if={length(@win.crumbs) > 1} class="insp-crumbs">
+              <%= for {crumb, i} <- Enum.with_index(@win.crumbs) do %>
+                <span :if={i > 0} class="sep">›</span>
+                <span
+                  class="c"
+                  phx-click="window_crumb"
+                  phx-value-id={@win.id}
+                  phx-value-index={i}
+                >
+                  {crumb.label}
+                </span>
+              <% end %>
+            </div>
+            <div class="ps mono">
+              Inspecting <strong>{@win.target.label}</strong>
+              <span class="ps-header">{@win.target.header}</span>
+            </div>
+            <div class="proc-chips">
+              <span class="chip">class <b>{@win.target.class_name}</b></span>
+              <span :if={@win.target.pid} class="chip">
+                pid <b>{@win.target.pid}</b>
+              </span>
+              <span :if={stat_status(@win.stats)} class="chip pid-stat">
+                <span class="dot"></span>{stat_status(@win.stats)}
+              </span>
+              <span :if={not is_nil(stat_mailbox(@win.stats))} class="chip pid-stat">
+                mailbox <b>{stat_mailbox(@win.stats)}</b>
+              </span>
+              <span :if={not is_nil(stat_reductions(@win.stats))} class="chip pid-stat">
+                reductions <b>{stat_reductions(@win.stats)}</b>
+              </span>
+            </div>
+          </div>
+        <% end %>
+        <div class="iw-content">
+          <div :if={@win.error} class="io-block warn">{@win.error}</div>
+          <%= if @win.target && @win.rows != [] do %>
+            <table
+              id={"inspector-window-fields-#{@win.id}"}
+              class="ivar-table"
+              phx-hook="FieldFlash"
+              data-flash-gen={@win.flash_gen}
+            >
+              <tbody>
+                <tr
+                  :for={{row, i} <- Enum.with_index(@win.rows)}
+                  class={row.drillable && "drillable"}
+                  phx-click={row.drillable && "window_drill"}
+                  phx-value-id={row.drillable && @win.id}
+                  phx-value-index={row.drillable && i}
+                >
+                  <td class="k">{row.name}</td>
+                  <td
+                    class={["v", row.kind]}
+                    data-flash-key={row.name}
+                    data-flash-val={row.value}
+                  >
+                    {row.value}
+                  </td>
+                  <td class="follow">
+                    <span :if={row.drillable} class="follow-link">follow →</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          <% else %>
+            <p :if={@win.target == nil && @win.error == nil} class="empty">
+              Nothing to inspect.
+            </p>
+          <% end %>
+          <%!-- Owner-only poke bar (BT-2492), per-window: pokeable only at a single
+               named-binding crumb root (the same well-formedness gate the docked
+               pane uses), and only for the owner role. --%>
+          <div
+            :if={@win.target && @win.target.pid && @role == :owner && window_pokeable?(@win)}
+            class="poke"
+          >
+            <div class="poke-label">Send a message to {@win.target.label}</div>
+            <form class="poke-row" phx-submit="window_poke" phx-value-id={@win.id}>
+              <span class="poke-recv mono">‹recv›</span>
+              <input
+                class="field mono"
+                name="message"
+                autocomplete="off"
+                placeholder="increment   ·   incrementBy: 10"
+              />
+              <button type="submit" class="btn">Send</button>
+            </form>
+            <div :if={@win.poke_result} class="poke-out ok mono">{@win.poke_result}</div>
+            <div :if={@win.poke_error} class="poke-out warn mono">{@win.poke_error}</div>
+          </div>
+        </div>
+      </div>
+    </section>
+    """
+  end
+
+  # Whether a floating window's head can be poked: a pid-backed object at the
+  # inspection root with a valid-identifier binding name (the same contract as the
+  # docked `pokeable?/1`, scoped to one window's crumbs).
+  defp window_pokeable?(%{crumbs: [%{label: label}]}) when is_binary(label),
+    do: valid_receiver?(label)
+
+  defp window_pokeable?(_w), do: false
 end

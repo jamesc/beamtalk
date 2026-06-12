@@ -720,3 +720,48 @@
   border-radius: 3px; padding: 0 4px; margin: 0 3px;
 }
 .nav-loc { font-size: 10.5px; color: var(--faint); }
+
+/* ── floating inspector windows (BT-2493, epic BT-2482 Phase 3) ──────────────
+   The Float-mode overlay: draggable, stackable inspector windows. The overlay
+   layer fills the app and is pointer-inert so it never eats clicks on the
+   cockpit beneath; each window re-enables pointer events on itself. Window
+   position (left/top) + stacking (z-index) are set inline from server state
+   (the WindowDrag hook reports them on drop / focus). Each window reuses the
+   docked Inspector's head/crumbs/chips/ivar-table/poke styles. */
+.insp-overlay {
+  position: fixed; inset: 0; z-index: 50; pointer-events: none;
+}
+.insp-window {
+  position: absolute; pointer-events: auto;
+  width: 340px; max-height: 70vh; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: 0 8px 28px rgba(40, 28, 10, .28);
+  overflow: hidden;
+}
+.insp-window.dragging { box-shadow: 0 14px 38px rgba(40, 28, 10, .38); }
+/* title bar: the drag handle. `grab`/`grabbing` cursor signals the affordance. */
+.insp-window .iw-bar {
+  flex: none; display: flex; align-items: center; gap: 7px;
+  height: 30px; padding: 0 8px 0 12px;
+  background: var(--panel-2); border-bottom: 1px solid var(--line);
+  cursor: grab; user-select: none;
+}
+.insp-window.dragging .iw-bar { cursor: grabbing; }
+.insp-window .iw-bar .spacer { flex: 1; }
+.insp-window .iw-title {
+  font-size: 12px; font-weight: 600; color: var(--accent-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.insp-window .iw-close {
+  flex: none; border: 0; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 17px; line-height: 1; padding: 0 4px;
+}
+.insp-window .iw-close:hover { color: var(--ink); }
+.insp-window .iw-body { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.insp-window .iw-content { overflow: auto; min-height: 0; }
+/* the freeze toggle on a window's title bar must not start a drag — the hook
+   already excludes buttons, but keep the default cursor over it too. */
+.insp-window .iw-bar .insp-freeze { cursor: pointer; }
+
+/* Dock/Float mode toggle in the top bar (reuses the `.seg` segmented control). */
+.topbar .insp-mode { flex: none; }

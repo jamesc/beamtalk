@@ -741,6 +741,315 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert Process.alive?(view.pid)
   end
 
+  # ── Phase 3: floating inspector windows / overlay mode (BT-2493) ─────────────
+  #
+  # The window-list lifecycle — open / drill / close / focus (z-order) / mode
+  # toggle — is server-side LiveView state, fully exercisable through
+  # `Phoenix.LiveViewTest`: we drive the events the WindowDrag hook pushes and
+  # assert the resulting render. (The drag *motion* + click-to-front interaction
+  # need a real browser and are covered by the Playwright lane.) Window ids are
+  # minted deterministically per session from 1, so a freshly-opened window is
+  # always `#inspector-window-win-1`, the next `win-2`, … — which lets these
+  # assert on the rendered DOM rather than poking the LiveView's internal state.
+
+  # Spawn + bind a live Counter actor in `view`'s session WITHOUT inspecting it,
+  # returning its binding name. In Float mode the inspect click opens a window
+  # rather than the docked pane, so the window tests open windows themselves.
+  defp spawn_counter(view) do
+    suffix = System.unique_integer([:positive])
+    class = "WinCounter#{suffix}"
+    name = "wc_#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      value => self.value
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    assert eventually(fn -> render(view) =~ name end)
+    name
+  end
+
+  # Put `view` in Float mode and open a floating window on binding `name`. Returns
+  # the deterministic window id of the just-opened window.
+  defp open_float_window(view, name) do
+    render_hook(view, "set_inspector_mode", %{"mode" => "float"})
+    view |> element("button[phx-value-name='#{name}']") |> render_click()
+    # The most-recently-opened window is the last `inspector-window-win-N` in the
+    # render; derive its id so the test can address it without internal state.
+    ids = Regex.scan(~r/inspector-window-(win-\d+)"/, render(view))
+    assert ids != [], "expected a floating window to be open"
+    ids |> List.last() |> Enum.at(1)
+  end
+
+  test "the Dock/Float toggle flips inspector mode and is reflected in the render (BT-2493)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+
+    # Docked is the default — the top-bar toggle is present and no floating overlay
+    # exists yet.
+    html = render(view)
+    assert html =~ ~s(phx-click="set_inspector_mode")
+    refute html =~ ~s(id="inspector-overlay")
+
+    # Flip to Float: the toggle marks Float selected (aria-selected on its tab). No
+    # windows yet, so still no overlay until one opens.
+    html = render_hook(view, "set_inspector_mode", %{"mode" => "float"})
+    assert html =~ ~s(phx-value-mode="float")
+    refute html =~ ~s(id="inspector-overlay")
+
+    # A bad mode is ignored, not a crash.
+    render_hook(view, "set_inspector_mode", %{"mode" => "bogus"})
+    assert Process.alive?(view.pid)
+  end
+
+  test "in Float mode an inspect click opens a floating window on the binding (BT-2493)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    name = spawn_counter(view)
+
+    render_hook(view, "set_inspector_mode", %{"mode" => "float"})
+
+    # The bindings pane's Inspect button fires "inspect"; in Float mode that opens a
+    # floating window rather than driving the docked pane.
+    html = view |> element("button[phx-value-name='#{name}']") |> render_click()
+
+    assert html =~ ~s(id="inspector-overlay")
+    assert html =~ ~s(id="inspector-window-win-1")
+    assert html =~ "Inspecting"
+    # The window's title bar carries the binding label and the window renders its
+    # live field (value = 0).
+    assert html =~ "iw-title"
+    assert html =~ "value"
+  end
+
+  test "multiple windows target objects independently, each with its own breadcrumb (BT-2493)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    a = spawn_counter(view)
+    b = spawn_counter(view)
+
+    render_hook(view, "set_inspector_mode", %{"mode" => "float"})
+    view |> element("button[phx-value-name='#{a}']") |> render_click()
+    html = view |> element("button[phx-value-name='#{b}']") |> render_click()
+
+    # Two independent windows in the overlay, with distinct deterministic ids.
+    assert html =~ ~s(id="inspector-window-win-1")
+    assert html =~ ~s(id="inspector-window-win-2")
+    # Each window addresses its own drill/close events by its id.
+    assert html =~ ~s(phx-value-id="win-1")
+    assert html =~ ~s(phx-value-id="win-2")
+  end
+
+  test "drilling a floating window extends only that window's breadcrumb (BT-2493)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    leaf = "WLeaf#{suffix}"
+    boxx = "WBoxx#{suffix}"
+    name = "wbox_#{suffix}"
+
+    view
+    |> form("#eval-form")
+    |> render_submit(%{expr: "Actor subclass: #{leaf}\n  state: n = 99\n\n  n => self.n"})
+
+    view
+    |> form("#eval-form")
+    |> render_submit(%{
+      expr:
+        "Actor subclass: #{boxx}\n  state: item = nil\n\n  setItem: x => self.item := x\n  item => self.item"
+    })
+
+    view |> form("#eval-form") |> render_submit(%{expr: "wleaf_#{suffix} := #{leaf} spawn"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{boxx} spawn"})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} setItem: wleaf_#{suffix}"})
+    assert eventually(fn -> render(view) =~ name end)
+
+    id = open_float_window(view, name)
+
+    # The window shows box's `item` (a live Leaf reference). Drill into it (index 0,
+    # the sole drillable row): the referenced Leaf's own field (n = 99) renders and
+    # the window's breadcrumb now has two levels (a back-crumb at index 0).
+    html = render_hook(view, "window_drill", %{"id" => id, "index" => "0"})
+    assert html =~ "99"
+    assert html =~ ~s(phx-value-index="0")
+
+    # Walk back via the window's breadcrumb (crumb 0): back to box's `item` field.
+    html = render_hook(view, "window_crumb", %{"id" => id, "index" => "0"})
+    assert html =~ "item"
+  end
+
+  test "closing a floating window removes it from the overlay (BT-2493)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    name = spawn_counter(view)
+
+    id = open_float_window(view, name)
+    assert render(view) =~ ~s(id="inspector-window-#{id}")
+
+    # Close it: the window is dropped from the list (releasing its subscription —
+    # the window no longer exists to receive pushes). The overlay empties.
+    html = render_hook(view, "window_close", %{"id" => id})
+    refute html =~ ~s(id="inspector-window-#{id}")
+    refute html =~ ~s(id="inspector-overlay")
+
+    # Closing an unknown id is a harmless no-op.
+    render_hook(view, "window_close", %{"id" => "win-does-not-exist"})
+    assert Process.alive?(view.pid)
+  end
+
+  test "clicking a window brings it to the front (z-order follows focus) (BT-2493)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    a = spawn_counter(view)
+    b = spawn_counter(view)
+
+    render_hook(view, "set_inspector_mode", %{"mode" => "float"})
+    view |> element("button[phx-value-name='#{a}']") |> render_click()
+    view |> element("button[phx-value-name='#{b}']") |> render_click()
+
+    # The second-opened window (win-2) starts on top: a higher inline z-index.
+    assert window_z(render(view), "win-2") > window_z(render(view), "win-1")
+
+    # Focus the FIRST window: its z is bumped above the current max, so it now wins.
+    render_hook(view, "window_focus", %{"id" => "win-1"})
+    html = render(view)
+    assert window_z(html, "win-1") > window_z(html, "win-2")
+    # The DOM order is unchanged — only z moved, so a focus never reshuffles windows
+    # (which would reset their drag positions): win-1 still precedes win-2.
+    assert window_dom_index(html, "win-1") < window_dom_index(html, "win-2")
+  end
+
+  test "a drag-drop persists a window's position and it survives re-render (BT-2493)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    name = spawn_counter(view)
+    id = open_float_window(view, name)
+
+    # The WindowDrag hook reports the final position on drop; the server persists it
+    # into the window's inline left/top.
+    html = render_hook(view, "window_moved", %{"id" => id, "x" => 412, "y" => 233})
+    assert html =~ "left:412px"
+    assert html =~ "top:233px"
+
+    # The position survives an unrelated re-render (a bindings re-read from another
+    # eval) — positions are not reset on unrelated state changes.
+    view
+    |> form("#eval-form")
+    |> render_submit(%{expr: "unrelated_#{System.unique_integer([:positive])} := 1"})
+
+    html = render(view)
+    assert html =~ "left:412px"
+    assert html =~ "top:233px"
+
+    # A crafted non-numeric / negative payload clamps rather than crashing.
+    render_hook(view, "window_moved", %{"id" => id, "x" => "bogus", "y" => -5})
+    assert Process.alive?(view.pid)
+  end
+
+  test "windows persist when toggling back to Docked mode (BT-2493)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    name = spawn_counter(view)
+    id = open_float_window(view, name)
+    assert render(view) =~ ~s(id="inspector-window-#{id}")
+
+    # Flipping back to Docked does NOT tear down open windows — they stay rendered
+    # (and keep their subscriptions) so a misclick can't destroy a desk of
+    # inspectors.
+    html = render_hook(view, "set_inspector_mode", %{"mode" => "docked"})
+    assert html =~ ~s(id="inspector-window-#{id}")
+  end
+
+  test "a per-window freeze toggle holds that window's snapshot (BT-2493)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    name = spawn_counter(view)
+    id = open_float_window(view, name)
+
+    # Tracking is live by default — the window's freeze button reads "live".
+    assert render(view) =~ "insp-freeze live"
+
+    # Freeze: the window drops its subscription and holds the snapshot ("frozen").
+    html = render_hook(view, "window_freeze", %{"id" => id})
+    assert html =~ "insp-freeze frozen"
+
+    # Unfreeze: re-arm the watch + catch up; the button reads "live" again.
+    html = render_hook(view, "window_freeze", %{"id" => id})
+    assert html =~ "insp-freeze live"
+  end
+
+  test "crafted window events with bad ids/indexes are ignored, not crashes (BT-2493)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+
+    # No windows open: every window event is a safe no-op (no overlay, no crash).
+    render_hook(view, "window_drill", %{"id" => "win-x", "index" => "0"})
+    render_hook(view, "window_crumb", %{"id" => "win-x", "index" => "3"})
+    render_hook(view, "window_focus", %{"id" => "win-x"})
+    render_hook(view, "window_moved", %{"id" => "win-x", "x" => 1, "y" => 2})
+    render_hook(view, "window_freeze", %{"id" => "win-x"})
+    render_hook(view, "window_close", %{"id" => "win-x"})
+    # Malformed payloads (missing keys) hit the catch-all clauses.
+    render_hook(view, "window_drill", %{"garbage" => true})
+    render_hook(view, "window_poke", %{"id" => "win-x"})
+    assert Process.alive?(view.pid)
+    refute render(view) =~ ~s(id="inspector-overlay")
+  end
+
+  test "two windows on the same actor are independent; closing one keeps the other (BT-2493)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    name = spawn_counter(view)
+
+    # Open TWO floating windows on the SAME binding. The workspace keys per-object
+    # subscriptions by (pid, subscriber) and our subscriber is this one LiveView, so
+    # both windows share the single underlying subscription — the reference-aware
+    # unwatch must NOT release it while the other window still needs it.
+    render_hook(view, "set_inspector_mode", %{"mode" => "float"})
+    view |> element("button[phx-value-name='#{name}']") |> render_click()
+    view |> element("button[phx-value-name='#{name}']") |> render_click()
+
+    html = render(view)
+    assert html =~ ~s(id="inspector-window-win-1")
+    assert html =~ ~s(id="inspector-window-win-2")
+
+    # Close the first window: the second stays open and live (its watch is intact —
+    # the guard kept the shared subscription rather than silencing window 2).
+    html = render_hook(view, "window_close", %{"id" => "win-1"})
+    refute html =~ ~s(id="inspector-window-win-1")
+    assert html =~ ~s(id="inspector-window-win-2")
+    assert html =~ "insp-freeze live"
+    assert Process.alive?(view.pid)
+  end
+
+  # The inline z-index of the floating window `id` (`win-N`), parsed out of the
+  # render — the server-authoritative stacking the WindowDrag hook reads.
+  defp window_z(html, id) do
+    case Regex.run(~r/id="inspector-window-#{id}"[^>]*style="[^"]*z-index:(\d+)/, html) do
+      [_, n] -> String.to_integer(n)
+      _ -> 0
+    end
+  end
+
+  # The byte offset of window `id`'s `<section>` in the render — a proxy for DOM
+  # order, so a test can assert focus did NOT reshuffle the windows.
+  defp window_dom_index(html, id) do
+    case :binary.match(html, "inspector-window-#{id}") do
+      {pos, _len} -> pos
+      :nomatch -> -1
+    end
+  end
+
   # ── Wave 4: multi-tab isolation / session resume / teardown (BT-2410) ────────
 
   test "two tabs map to two isolated workspace sessions (BT-2410)", %{conn: conn} do
