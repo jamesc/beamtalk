@@ -70,6 +70,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Number"
             | "OS"
             | "Object"
+            | "ObjectStateChanged"
             | "Package"
             | "Pid"
             | "Port"
@@ -2033,6 +2034,30 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "isKindOf:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Boolean".into()), param_types: vec![None], doc: Some("Test if the receiver is an instance of aClass or any of its subclasses.\n\nFor class-object receivers, follows Smalltalk semantics: `self class`\nis the metaclass, so the check walks the *parallel metaclass hierarchy*.\nThe parallel chain is grounded at `ProtoObject class superclass == Class`\n(ADR 0036), so the metaclass tower merges into the instance-side\n`Class → Behaviour → Object → ProtoObject` chain. As a result,\n`Integer isKindOf: Object` and `Integer isKindOf: Class` both return `true`.\n\n## Examples\n```beamtalk\n42 isKindOf: Integer        // => true\n42 isKindOf: Object         // => true\n#foo isKindOf: Symbol       // => true\n#foo isKindOf: String       // => false\nInteger isKindOf: Number    // => false (metaclass chain, not instance chain)\nInteger isKindOf: Number class  // => true  (Number class is in the parallel chain)\nInteger isKindOf: Object    // => true (grounded — Object is reachable via the metaclass tower)\nInteger isKindOf: Class     // => true (Integer class inherits from Class)\n```".into()) },
                 MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Object".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Never".into()), param_types: vec![Some("String".into())], doc: Some("Raise an error with the given message.\n\n## Examples\n```beamtalk\nself error: \"something went wrong\"\n```".into()) },
             ],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "ObjectStateChanged".into(),
+        ClassInfo {
+            name: "ObjectStateChanged".into(),
+            superclass: Some("Announcement".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec!["pid".into(), "actorClass".into(), "changedSlots".into()],
+            state_types: HashMap::from([("pid".into(), "Pid | Nil".into()), ("actorClass".into(), "Symbol".into()), ("changedSlots".into(), "List".into())]),
+            state_has_default: HashMap::from([("pid".into(), true), ("actorClass".into(), true), ("changedSlots".into(), true)]),
+            methods: vec![],
             class_methods: vec![],
             class_variables: vec![],
             type_params: vec![],

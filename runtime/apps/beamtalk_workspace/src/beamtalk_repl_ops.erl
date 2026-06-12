@@ -170,6 +170,10 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"export-traces">>
 ->
     beamtalk_repl_ops_perf:handle_term(Op, Params, Msg, SessionPid);
+dispatch(<<"pid-stats">>, Params, Msg, SessionPid) ->
+    %% ADR 0095 §5 / BT-2489 (Cockpit Phase 3): live-Inspector process metrics
+    %% read, the request/response companion to the `object` push stream.
+    beamtalk_repl_ops_watch:handle_term(<<"pid-stats">>, Params, Msg, SessionPid);
 dispatch(<<"nav-query">>, Params, Msg, SessionPid) ->
     beamtalk_repl_ops_nav:handle_term(<<"nav-query">>, Params, Msg, SessionPid);
 dispatch(<<"nav-symbols">>, Params, Msg, SessionPid) ->
