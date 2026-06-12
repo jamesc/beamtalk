@@ -150,4 +150,29 @@ defmodule BtAttach.WorkspaceTest do
       end
     end
   end
+
+  describe "navigation-surface wrappers (Senders/Implementors + omni search, BT-2495)" do
+    # No live workspace: the RPC targets an unconnected node, so the wrappers must
+    # surface `{:badrpc, :nodedown}` as `{:error, {:unreachable, _}}` through
+    # `dispatch_browse/2` (the same graceful degradation the browse wrappers use),
+    # not crash.
+    test "senders_of against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.senders_of("increment")
+    end
+
+    test "implementors_of against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.implementors_of("increment")
+    end
+
+    test "symbol_index against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.symbol_index()
+      assert {:error, {:unreachable, _}} = Workspace.symbol_index("user")
+    end
+
+    test "the navigation wrappers reject non-binary arguments (guard contract)" do
+      assert_raise FunctionClauseError, fn -> Workspace.senders_of(:increment) end
+      assert_raise FunctionClauseError, fn -> Workspace.implementors_of(42) end
+      assert_raise FunctionClauseError, fn -> Workspace.symbol_index(:all) end
+    end
+  end
 end

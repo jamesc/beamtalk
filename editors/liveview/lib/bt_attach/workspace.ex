@@ -266,6 +266,57 @@ defmodule BtAttach.Workspace do
   def browse_class_definition(class) when is_binary(class),
     do: dispatch_browse("browse-class-definition", %{"class" => class})
 
+  # ── navigation-surface: senders/implementors + omni-search index ────────────
+  #
+  # BT-2495 (Cockpit Phase 3): two navigation aids ride the SAME term-returning
+  # read ops the LSP/MCP navigation channel already exposes (ADR 0096 thin facade,
+  # no new runtime work) — `nav-query` (senders/implementors call sites, backed by
+  # the maintained `beamtalk_xref` index, BT-2201/BT-2239) and `nav-symbols` (the
+  # bulk class+method outline, BT-2244). Both go through `dispatch_browse/2`, so a
+  # `{:badrpc, :nodedown}` degrades to `{:error, {:unreachable, _}}` like every
+  # other Attach read, and the `{:value, _}` rows arrive live (no JSON edge).
+
+  @doc """
+  Return the call sites that **send** `selector` (`nav-query` `kind=senders`,
+  BT-2495) — the Senders popover's data source. Each row in the `"sites"` list
+  carries `class`, `class_side`, `method`, `line`, and `source_file`
+  (`null` for a sourceless class). Backed by the `beamtalk_xref` index, so an
+  unknown selector resolves to an empty site list, not an error.
+
+  Returns the live `{:value, %{"sites" => rows}}` term verbatim, or
+  `{:error, reason}` on a dispatch failure.
+  """
+  @spec senders_of(String.t()) :: {:value, term()} | {:error, term()}
+  def senders_of(selector) when is_binary(selector),
+    do: dispatch_browse("nav-query", %{"kind" => "senders", "selector" => selector})
+
+  @doc """
+  Return the classes that **implement** `selector` (`nav-query`
+  `kind=implementors`, BT-2495) — the Implementors popover's data source. One row
+  per implementing class/metaclass in `"sites"` (`class`, `class_side`, `method`,
+  `line`, `source_file`). Like `senders_of/1`, an unknown selector yields an
+  empty list rather than an error.
+  """
+  @spec implementors_of(String.t()) :: {:value, term()} | {:error, term()}
+  def implementors_of(selector) when is_binary(selector),
+    do: dispatch_browse("nav-query", %{"kind" => "implementors", "selector" => selector})
+
+  @doc """
+  Return the workspace symbol outline (`nav-symbols`, BT-2495) — the omni-search
+  index over every loaded class **and** its locally-defined selectors. The result
+  carries `"classes"` (one row per class: `name`, `source_file`, `line`, and a
+  `methods` list of `%{"selector", "class_side", "line"}`), the single read the
+  top-bar omni search filters to match classes + selectors.
+
+  `scope` is `"all"` (every loaded class, including REPL-only / source-less — the
+  omni-search default so a freshly-defined class is findable) or `"user"`
+  (source-backed classes only). Returns the live `{:value, %{"classes" => rows}}`
+  term verbatim, or `{:error, reason}`.
+  """
+  @spec symbol_index(String.t()) :: {:value, term()} | {:error, term()}
+  def symbol_index(scope \\ "all") when is_binary(scope),
+    do: dispatch_browse("nav-symbols", %{"scope" => scope})
+
   # Build the browse request as a plain map, decode it to a `protocol_msg()` on
   # the workspace node, then dispatch through the term-returning op layer. The
   # browse ops ignore the session pid (they are workspace-global reflection), so

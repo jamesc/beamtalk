@@ -38,6 +38,17 @@ defmodule BtAttach.FacadeTest do
 
     def browse_class_definition(class),
       do: record({:browse_class_definition, class}) && {:value, %{"class" => class}}
+
+    # BT-2495: the navigation aids — senders/implementors (nav-query) + the
+    # omni-search symbol index (nav-symbols).
+    def senders_of(selector),
+      do: record({:senders_of, selector}) && {:value, %{"sites" => []}}
+
+    def implementors_of(selector),
+      do: record({:implementors_of, selector}) && {:value, %{"sites" => []}}
+
+    def symbol_index(scope),
+      do: record({:symbol_index, scope}) && {:value, %{"classes" => []}}
   end
 
   setup do
@@ -60,7 +71,8 @@ defmodule BtAttach.FacadeTest do
                      subscribe_classes
                      subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
-                     browse_class_definition)a do
+                     browse_class_definition
+                     senders implementors symbols)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
       end
 
@@ -182,6 +194,50 @@ defmodule BtAttach.FacadeTest do
                {:error, :unauthorized}
 
       refute Enum.any?(RecordingClient.calls(), &(elem(&1, 0) == :eval))
+    end
+  end
+
+  describe "navigation aids (Senders/Implementors + omni search, BT-2495)" do
+    test "senders/implementors/symbols route to the client and return the live term" do
+      assert Facade.dispatch(:senders, %{selector: "increment"}) == {:value, %{"sites" => []}}
+      assert Facade.dispatch(:implementors, %{selector: "increment"}) == {:value, %{"sites" => []}}
+      assert Facade.dispatch(:symbols, %{scope: "all"}) == {:value, %{"classes" => []}}
+
+      recorded = RecordingClient.calls() |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+      assert recorded == MapSet.new([:senders_of, :implementors_of, :symbol_index])
+    end
+
+    test "senders/implementors pass the selector and symbols passes the scope through" do
+      Facade.dispatch(:senders, %{selector: "at:put:"})
+      Facade.dispatch(:implementors, %{selector: "printOn:"})
+      Facade.dispatch(:symbols, %{scope: "user"})
+
+      assert {:senders_of, "at:put:"} in RecordingClient.calls()
+      assert {:implementors_of, "printOn:"} in RecordingClient.calls()
+      assert {:symbol_index, "user"} in RecordingClient.calls()
+    end
+
+    test "symbols defaults to the all scope when omitted" do
+      assert Facade.dispatch(:symbols, %{}) == {:value, %{"classes" => []}}
+      assert {:symbol_index, "all"} in RecordingClient.calls()
+    end
+
+    test "a non-binary selector is invalid params, with no dist call" do
+      assert Facade.dispatch(:senders, %{selector: :increment}) == {:error, :invalid_params}
+      assert Facade.dispatch(:implementors, %{selector: 42}) == {:error, :invalid_params}
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may use the navigation aids (read capability)" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:senders, %{selector: "increment"}, observer) ==
+               {:value, %{"sites" => []}}
+
+      assert Facade.dispatch(:implementors, %{selector: "increment"}, observer) ==
+               {:value, %{"sites" => []}}
+
+      assert Facade.dispatch(:symbols, %{scope: "all"}, observer) == {:value, %{"classes" => []}}
     end
   end
 end
