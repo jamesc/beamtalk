@@ -38,16 +38,27 @@ fi
 git config core.hooksPath .githooks 2>/dev/null || true
 
 # --- Hex bridge proxy for cloud environments ---
-# Erlang's httpc can't verify TLS through egress proxies that do MITM
-# interception, AND doesn't respect no_proxy for localhost. Start a local
-# HTTP-to-HTTPS bridge so rebar3/hex can fetch packages.
+# Start a local HTTP-to-HTTPS bridge so rebar3/hex/mix can fetch packages.
+# The bridge terminates TLS in Python and hands plaintext to the BEAM over
+# loopback, because the BEAM's own HTTP client cannot reach the network here.
+#
+# ROOT CAUSE (verified 2026-06, OTP 27, cloud_default sandbox — do not "simplify"
+# the bridge away without re-checking this):
+#   It is NOT primarily a cert-trust problem. On OTP 27, `public_key:cacerts_get()`
+#   already trusts the system-installed MITM root, so Erlang's TLS *verifies fine*
+#   (no "Unknown CA"). The real blocker is that the egress proxy REJECTS the BEAM's
+#   TLS client at the upstream-connect layer: `erl`/`httpc` gets Envoy 502/503
+#   ("upstream connect error … connection termination") on EVERY https host, while
+#   `curl`/Python/`git` succeed on the same URLs (likely TLS-fingerprint allowlisting).
+#   So `curl works` is NOT evidence that rebar3/mix will work — only a fetch
+#   *through this bridge* is. `scripts/cloud-doctor.sh` probes exactly that.
+#   (Older note claimed httpc "rejects the MITM cert"; that rationale is obsolete.)
 #
 # Two trigger modes:
 #   1. Authenticated upstream proxy (older sandbox)   — HTTP_PROXY contains creds
 #   2. Transparent TLS interception (Claude Code cloud) — CLAUDE_CODE_REMOTE=true
-#      In mode 2 there is no HTTP_PROXY, but Erlang still rejects hex.pm's
-#      MITM-issued cert ("Unknown CA"); the bridge solves it by terminating
-#      TLS in Python (which trusts the system-installed MITM root).
+#      In mode 2 there is no HTTP_PROXY; the bridge routes BEAM egress through
+#      Python, which the proxy accepts where the BEAM's TLS client is refused.
 #
 # The rebar3 wrapper / Node --use-env-proxy bits are ONLY needed in mode 1
 # (to stop httpc routing localhost through the proxy and to make Node fetch
@@ -218,6 +229,17 @@ PROFBLOCK
   # Method 3: ~/.zshenv (always sourced by zsh, even non-interactive)
   if [[ "$(basename "${SHELL:-bash}")" == "zsh" ]]; then
     _hb_install_block "${HOME}/.zshenv" 0
+  fi
+fi
+
+# --- Environment health summary (cloud/proxy sandboxes only) ---
+# Print a one-line doctor verdict so a broken env (dead bridge, blocked BEAM
+# egress, missing tool) is visible NOW instead of failing mid-build. Bounded
+# by a timeout and fully best-effort — never blocks or fails the session.
+if (( _HAS_AUTH_PROXY || _IN_CLOUD_SANDBOX )); then
+  _DOCTOR="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/cloud-doctor.sh"
+  if [[ -x "${_DOCTOR}" ]]; then
+    timeout 25 bash "${_DOCTOR}" --summary 2>/dev/null || true
   fi
 fi
 
