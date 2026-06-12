@@ -840,15 +840,6 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # True when `pid` is the pid backing the currently-watched object term — so a
-  # late push for an object we've since navigated away from (or never watched) is
-  # ignored rather than spuriously re-reading + flashing the current head.
-  defp watched_pid?({:beamtalk_object, _c, _m, watched}, pid)
-       when is_pid(watched) and is_pid(pid),
-       do: watched == pid
-
-  defp watched_pid?(_watch, _pid), do: false
-
   # The coalesced refresh fired by `{:object_changed, …}`: re-read the watched
   # object's fields + stats once for the whole burst, then clear the pending flag
   # so the next burst schedules afresh. Guarded against a stale timer firing after
@@ -863,6 +854,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # True when `pid` is the pid backing the currently-watched object term — so a
+  # late push for an object we've since navigated away from (or never watched) is
+  # ignored rather than spuriously re-reading + flashing the current head. Kept
+  # below the `handle_info/2` clauses so they stay grouped (compiler warning).
+  defp watched_pid?({:beamtalk_object, _c, _m, watched}, pid)
+       when is_pid(watched) and is_pid(pid),
+       do: watched == pid
+
+  defp watched_pid?(_watch, _pid), do: false
 
   @impl true
   def terminate(_reason, socket) do
