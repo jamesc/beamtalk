@@ -1,0 +1,5 @@
+# BEAM toolchain versions live in .tool-versions; Rust is pinned in
+# rust-toolchain.toml. This setting makes mise read rust-toolchain.toml
+# directly so there is a single source of truth for the Rust version.
+[settings]
+idiomatic_version_file_enable_tools = ["rust"]
