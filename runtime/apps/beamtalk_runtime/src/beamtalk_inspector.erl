@@ -1030,6 +1030,11 @@ drillable field's own fields recursively. A **pid-keyed seen-set** guards actor
 descents: revisiting an already-expanded actor pid emits a back-reference marker
 (`↩ Actor(...)`) instead of recursing (ADR 0095 Cycle handling). Pure value
 sub-trees cannot cycle (ADR 0042) and are bounded by `Depth`.
+
+A plain (untagged) collection nested in a `#foreign` cursor's state is summarised
+inline (not recursed into), so its charlists are reinterpreted as `String`s under
+foreign provenance — the same provenance scoping the navigable `at:` path uses
+(BT-2519/BT-2511). Native sub-trees are never reinterpreted.
 """.
 -spec printString(inspector(), integer()) -> binary().
 printString(Cursor, Depth) ->
@@ -1049,8 +1054,13 @@ render(Cursor, Depth, Indent, Seen0) ->
         true ->
             [pad(Indent), Header];
         false ->
+            %% The cursor's provenance scopes the charlist→`String` heuristic in
+            %% the inline field summaries below (BT-2519): a foreign collection
+            %% one-lined via `value_string` deep-coerces its nested charlists,
+            %% while a native sub-tree is left untouched.
+            Prov = provenance_of(Cursor),
             FieldLines = [
-                render_field(F, Depth, Indent + 1, Seen)
+                render_field(F, Depth, Indent + 1, Seen, Prov)
              || F <- fieldsOf(Cursor)
             ],
             [pad(Indent), Header, FieldLines]
@@ -1066,8 +1076,10 @@ mark_seen(_, Seen) ->
 %% Render one field line, expanding drillable children when depth remains. A
 %% drilled value that is an actor pid already on the ancestor path yields a
 %% back-reference marker rather than recursing (the pid-keyed cycle guard).
--spec render_field(map(), integer(), non_neg_integer(), map()) -> iolist().
-render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent, Seen) when
+%% `Prov` is the parent cursor's provenance, scoping the charlist→`String`
+%% heuristic for any value summarised inline (BT-2519).
+-spec render_field(map(), integer(), non_neg_integer(), map(), provenance()) -> iolist().
+render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent, Seen, Prov) when
     Depth > 1
 ->
     case actor_pid(Value) of
@@ -1076,19 +1088,22 @@ render_field(#{label := Label, value := Value, drillable := true}, Depth, Indent
                 true ->
                     [$\n, pad(Indent), Label, <<": ">>, back_reference(Pid)];
                 false ->
-                    expand_field(Label, Value, Depth, Indent, Seen)
+                    expand_field(Label, Value, Depth, Indent, Seen, Prov)
             end;
         not_actor ->
-            expand_field(Label, Value, Depth, Indent, Seen)
+            expand_field(Label, Value, Depth, Indent, Seen, Prov)
     end;
-render_field(#{label := Label, value := Value}, _Depth, Indent, _Seen) ->
-    scalar_field_line(Label, Value, Indent).
+render_field(#{label := Label, value := Value}, _Depth, Indent, _Seen, Prov) ->
+    scalar_field_line(Label, Value, Indent, Prov).
 
 %% Expand a drillable field into its own (depth-1) sub-tree, or fall back to a
 %% scalar line for a non-navigable leaf. The ancestor `Seen` set is passed down
-%% unchanged; the child adds itself for its own descent only.
--spec expand_field(binary(), term(), integer(), non_neg_integer(), map()) -> iolist().
-expand_field(Label, Value, Depth, Indent, Seen) ->
+%% unchanged; the child adds itself for its own descent only. A plain (untagged)
+%% foreign collection is *not* a recursable sub-cursor, so it falls to the scalar
+%% line — where `Prov` makes its inline summary foreign-charlist-aware (BT-2519).
+-spec expand_field(binary(), term(), integer(), non_neg_integer(), map(), provenance()) ->
+    iolist().
+expand_field(Label, Value, Depth, Indent, Seen, Prov) ->
     case beamtalk_tagged_map:is_tagged(Value) orelse actor_pid(Value) =/= not_actor of
         true ->
             Child = root_cursor(Value, []),
@@ -1101,7 +1116,7 @@ expand_field(Label, Value, Depth, Indent, Seen) ->
                 string:trim(iolist_to_binary(ChildIo), leading)
             ];
         false ->
-            scalar_field_line(Label, Value, Indent)
+            scalar_field_line(Label, Value, Indent, Prov)
     end.
 
 %% The cycle back-reference marker for a revisited actor pid, e.g.
@@ -1116,9 +1131,9 @@ back_reference(Pid) ->
         <<")">>
     ].
 
--spec scalar_field_line(binary(), term(), non_neg_integer()) -> iolist().
-scalar_field_line(Label, Value, Indent) ->
-    [$\n, pad(Indent), Label, <<": ">>, value_string(Value)].
+-spec scalar_field_line(binary(), term(), non_neg_integer(), provenance()) -> iolist().
+scalar_field_line(Label, Value, Indent, Prov) ->
+    [$\n, pad(Indent), Label, <<": ">>, value_string(Value, Prov)].
 
 %% The header line for a cursor, e.g. `Inspector(Point)` or
 %% `Inspector(Counter)` / `Inspector(Integer = 3)` for a scalar leaf.
@@ -1193,6 +1208,64 @@ value_string(Value) ->
     catch
         _:_ -> iolist_to_binary(io_lib:format("~p", [Value]))
     end.
+
+%% Provenance-scoped leaf summary (BT-2519). Under `foreign` provenance every
+%% printable charlist nested in the value is reinterpreted as a `String` *before*
+%% delegating to the provenance-unaware `print_string`, so the inline one-line
+%% summary of a foreign collection shows strings (`#{#name => "bob"}`), not Integer
+%% lists (`#{#name => #(98, 111, 98)}`) — matching what drilling the same value
+%% shows (BT-2511). The native `beamtalk` path is untouched, so a genuine Beamtalk
+%% integer `List` (`#(72, 73)`) still prints as itself, never `"HI"`.
+-spec value_string(term(), provenance()) -> binary().
+value_string(Value, foreign) ->
+    %% `deep_coerce_foreign/1` is total for well-formed terms, but foreign OTP
+    %% state is arbitrary; a coercion failure must degrade to the plain summary
+    %% rather than break `printString`'s "never raises" contract (ADR 0095).
+    Coerced =
+        try
+            deep_coerce_foreign(Value)
+        catch
+            _:_ -> Value
+        end,
+    value_string(Coerced);
+value_string(Value, _Prov) ->
+    value_string(Value).
+
+%% Recursively reinterpret every printable charlist nested in a foreign-scoped
+%% value as a `String` (binary) for the text-tree summary (BT-2519). Walks proper
+%% lists, maps, and tuples; every other term passes through unchanged. This is the
+%% *deep* counterpart of the shallow per-level `coerce_foreign_value/2` the
+%% navigable `at:` path uses (BT-2511) — needed only here because `value_string/1`
+%% one-lines a whole nested foreign collection in a single call rather than
+%% drilling it level by level. Scoped to the foreign summary path, so native
+%% printing stays intact.
+-spec deep_coerce_foreign(term()) -> term().
+deep_coerce_foreign(Value) ->
+    case is_printable_charlist(Value) of
+        true -> unicode:characters_to_binary(Value);
+        false -> deep_coerce_compound(Value)
+    end.
+
+%% Recurse into the compound parts of a non-charlist value. A *proper* list that
+%% is not itself a charlist has each element coerced; an improper list is left
+%% as-is (it carries no string to fix and must not crash the walk). A map coerces
+%% both keys and values (a foreign map may key on a string); a tuple (routine in
+%% foreign OTP/record state) coerces each element. Scalars pass through.
+-spec deep_coerce_compound(term()) -> term().
+deep_coerce_compound(Value) when is_list(Value) ->
+    case is_proper_list(Value) of
+        true -> [deep_coerce_foreign(E) || E <- Value];
+        false -> Value
+    end;
+deep_coerce_compound(Value) when is_map(Value) ->
+    maps:from_list([
+        {deep_coerce_foreign(K), deep_coerce_foreign(V)}
+     || {K, V} <- maps:to_list(Value)
+    ]);
+deep_coerce_compound(Value) when is_tuple(Value) ->
+    list_to_tuple([deep_coerce_foreign(E) || E <- tuple_to_list(Value)]);
+deep_coerce_compound(Value) ->
+    Value.
 
 %%====================================================================
 %% Wire form — asDictionaries / asDictionary (ADR 0095 §7)

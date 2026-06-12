@@ -505,3 +505,42 @@ foreign_empty_list_stays_leaf_test() ->
     ?assertEqual([], maps:get(value, TagsF)),
     ?assertEqual(false, maps:get(drillable, TagsF)),
     gen_server:stop(Pid).
+
+%%====================================================================
+%% Foreign-state charlist rendering in the printString text tree
+%% (BT-2519, provenance-scoped deep summary)
+%%====================================================================
+
+%% The `printString` text tree one-lines a `#foreign` cursor's plain (untagged)
+%% state map inline rather than recursing into it; under foreign provenance a
+%% charlist *nested* in that summary is reinterpreted as a `String`, not an
+%% Integer `List` — the gap BT-2511 left in the navigable-only fix.
+foreign_nested_charlist_text_tree_renders_as_string_test() ->
+    Pid = start_foreign(#{name => "bob"}),
+    I = beamtalk_inspector:on(Pid),
+    Out = beamtalk_inspector:printString(I, 3),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"\"bob\""/utf8>>)),
+    ?assertEqual(nomatch, binary:match(Out, <<"#(98, 111, 98)">>)),
+    gen_server:stop(Pid).
+
+%% The deep summary reaches charlists nested under tuples too (records/tuples are
+%% routine in foreign OTP state): a `{ok, "hi"}` state map value summarises with
+%% the charlist as a `String`.
+foreign_nested_charlist_in_tuple_text_tree_renders_as_string_test() ->
+    Pid = start_foreign(#{result => {ok, "hi"}}),
+    I = beamtalk_inspector:on(Pid),
+    Out = beamtalk_inspector:printString(I, 3),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"\"hi\""/utf8>>)),
+    ?assertEqual(nomatch, binary:match(Out, <<"#(104, 105)">>)),
+    gen_server:stop(Pid).
+
+%% Guard: a native Beamtalk Value whose slot is a printable integer `List`
+%% (`#(72, 73)`) is **unchanged** in the text tree — the provenance scope keeps
+%% the heuristic off the native path, so it never regresses to `"HI"`.
+beamtalk_nested_integer_list_text_tree_not_coerced_test() ->
+    Pid = start_actor(#{'$beamtalk_class' => 'Holder', items => [72, 73]}),
+    I = beamtalk_inspector:on(Pid),
+    Out = beamtalk_inspector:printString(I, 3),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"#(72, 73)">>)),
+    ?assertEqual(nomatch, binary:match(Out, <<"\"HI\""/utf8>>)),
+    gen_server:stop(Pid).
