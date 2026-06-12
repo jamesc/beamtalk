@@ -8,16 +8,17 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
 
   ## Why a real browser (and not LiveViewTest)
 
-  The cockpit's client behaviour rides five LiveView JS hooks — `CodeEditor`,
-  `KeyboardShortcuts`, `SelectionTracker` (BT-2485), `TweaksPanel` (BT-2487) and
-  `FieldFlash` (BT-2492). `Phoenix.LiveViewTest` renders the LiveView server-side
-  against a floki DOM and **never loads `app.js`**, so none of that JavaScript
-  runs there. These tests exercise it in an actual browser: the highlight overlay
-  repaints as you type, ⌘/Ctrl chords submit the eval + method forms, the
-  bindings pane and Inspector re-render live over distribution, the Tweaks panel
-  reskins the IDE via CSS variables + `localStorage`, and the Inspector flashes
-  changed fields + tracks/freezes a live actor — none of which a server-side
-  render can observe.
+  The cockpit's client behaviour rides six LiveView JS hooks — `CodeEditor`,
+  `KeyboardShortcuts`, `SelectionTracker` (BT-2485), `TweaksPanel` (BT-2487),
+  `FieldFlash` (BT-2492) and `OmniSearch` (BT-2495). `Phoenix.LiveViewTest`
+  renders the LiveView server-side against a floki DOM and **never loads
+  `app.js`**, so none of that JavaScript runs there. These tests exercise it in an
+  actual browser: the highlight overlay repaints as you type, ⌘/Ctrl chords submit
+  the eval + method forms, the bindings pane and Inspector re-render live over
+  distribution, the Tweaks panel reskins the IDE via CSS variables + `localStorage`,
+  the Inspector flashes changed fields + tracks/freezes a live actor, and the
+  top-bar omni search walks its results with the arrow keys + opens the active one
+  on Enter — none of which a server-side render can observe.
 
   ## What they require (double-gated)
 
@@ -295,7 +296,108 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has("#inspector-fields td[data-flash-key='value']", text: "1")
   end
 
+  # ── Phase 3 navigation aids (BT-2495) ───────────────────────────────────────
+  #
+  # The omni-search keyboard nav (arrow highlight + Enter open) and the
+  # Senders/Implementors popovers are connected-render behaviours: the `OmniSearch`
+  # hook (`omni_search.js`) moves the `.active` highlight + opens the active row on
+  # real `keydown`s, and the popover content is fetched live over distribution.
+  # `Phoenix.LiveViewTest` never loads `app.js`, so these MUST run in a real
+  # browser (the e2e lane).
+
+  test "omni search filters classes/selectors and arrow+enter opens a result (BT-2495)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-source")
+    # Define a class so a known, image-present selector exists to search for.
+    |> eval_do(
+      "Actor subclass: OmniCounter\n  state: value = 0\n\n  bumpValue => self.value := self.value + 1"
+    )
+    # Type into the top-bar omni search; the server filters the nav-symbols index
+    # and renders the results popover (a class row + the selector rows).
+    |> omni_type("OmniCounter")
+    |> assert_has("#omni-search ~ .omni-results .omni-row")
+    # The first row is highlighted by default; ArrowDown moves the highlight to the
+    # next row. `omni_key` also fires the keyup (→ phx-keyup with the unchanged
+    # query), so this asserts the highlight SURVIVES the same-query re-render
+    # instead of snapping back to row 0 — the regression the hybrid hook guards.
+    |> omni_key("ArrowDown")
+    |> evaluate(
+      "document.querySelectorAll('.omni-results .omni-row').length > 0 && document.querySelectorAll('.omni-results .omni-row')[1] && document.querySelectorAll('.omni-results .omni-row')[1].classList.contains('active')",
+      fn moved ->
+        assert moved, "OmniSearch hook did not move the .active highlight on ArrowDown"
+      end
+    )
+    # Search specifically for the selector so Enter opens a method tab.
+    |> omni_type("bumpValue")
+    |> assert_has(".omni-results .omni-row", text: "bumpValue")
+    |> omni_key("Enter")
+    # Enter opens the active result — a selector row opens an editable method tab,
+    # so the editor breadcrumb/tab strip now shows bumpValue.
+    |> assert_has("#method-editor .tabstrip", text: "bumpValue")
+  end
+
+  test "the Senders/Implementors popover lists sites and opens one (BT-2495)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-source")
+    # Define a class whose method sends a selector we can then trace. The starter
+    # tab targets Counter#increment; define both so a real implementor exists.
+    |> eval_do(
+      "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
+    )
+    # Select the starter method tab so the active selector is `increment`, then
+    # open the Implementors popover for it.
+    |> click(".tabstrip button[role='tab']")
+    |> set_text("textarea[name='source']", "increment => self.value := self.value + 1")
+    |> press("textarea[name='source']", "Control+s")
+    |> assert_has("#method-editor", text: "Saved increment on Counter")
+    # Implementors of `increment`: the popover opens over the nav-query result. We
+    # assert it renders (header + either site rows or the empty state) rather than
+    # coupling to exact image contents.
+    |> click("button[phx-click='implementors']")
+    |> assert_has(".nav-popover .nav-pop-head", text: "Implementors")
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  # Type `query` into the omni search input and fire the `keyup` event the server
+  # listens for (phx-keyup="omni_search"), so the results popover re-renders.
+  defp omni_type(conn, query) do
+    conn
+    |> evaluate("new Promise((resolve) => setTimeout(resolve, 200))")
+    |> evaluate("""
+    (() => {
+      const el = document.querySelector("#omni-search");
+      el.focus();
+      el.value = #{Jason.encode!(query)};
+      el.dispatchEvent(new KeyboardEvent("keyup", {bubbles: true, key: "x"}));
+    })()
+    """)
+  end
+
+  # Dispatch a real `keydown` AND `keyup` for `key` on the omni input. The
+  # keydown drives the OmniSearch hook (arrow highlight / Enter open / Escape
+  # close); the keyup fires `phx-keyup="omni_search"` with the unchanged query,
+  # forcing the server to re-render the SAME result list — the exact path that
+  # must NOT snap the arrow highlight back to row 0 (the hook's `updated/0`
+  # preserves it when the query text is unchanged). Firing both here keeps the
+  # keyboard-nav test honest about that race.
+  defp omni_key(conn, key) do
+    conn
+    |> evaluate("""
+    (() => {
+      const el = document.querySelector("#omni-search");
+      el.focus();
+      const opts = {bubbles: true, cancelable: true, key: #{Jason.encode!(key)}};
+      el.dispatchEvent(new KeyboardEvent("keydown", opts));
+      el.dispatchEvent(new KeyboardEvent("keyup", opts));
+    })()
+    """)
+    |> evaluate("new Promise((resolve) => setTimeout(resolve, 200))")
+  end
 
   # Evaluate `code` against the workspace for its side effects (the "Do it"
   # action), used to stage session state (class defs, spawns, bindings).

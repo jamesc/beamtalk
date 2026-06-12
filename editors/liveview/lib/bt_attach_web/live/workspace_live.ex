@@ -440,6 +440,21 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:browser_protocols, [])
       |> assign(:browser_method, nil)
       |> assign(:browser_error, nil)
+      # Navigation aids (BT-2495, epic BT-2482 Phase 3): the top-bar omni search
+      # and the method-editor Senders/Implementors popovers. Both ride thin
+      # `:read` facade ops over the navigation channel (ADR 0096), so they work
+      # for the Observer role too.
+      #   * `:omni_query` — the live search box text; `:omni_results` the filtered
+      #     class/selector matches; `:omni_open` whether the results popover shows.
+      #     The OmniSearch JS hook handles arrow/enter keyboard nav client-side
+      #     (Phoenix.LiveViewTest can't see it — hence the Playwright coverage) and
+      #     pushes `omni_open` on enter/click to open the chosen result.
+      #   * `:nav_popover` — the Senders/Implementors result popover: `nil` when
+      #     closed, else `%{kind, selector, sites}` for the open list.
+      |> assign(:omni_query, "")
+      |> assign(:omni_results, [])
+      |> assign(:omni_open, false)
+      |> assign(:nav_popover, nil)
       |> assign_browser_classes()
       |> assign_bindings(pid)
       |> assign_changes()
@@ -756,6 +771,87 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("browser_select_method", _params, socket), do: {:noreply, socket}
 
+  # ── omni search (BT-2495, epic BT-2482 Phase 3) ─────────────────────────────
+
+  # Filter the workspace symbol index (classes + selectors) against the live
+  # search box text. The OmniSearch hook's `keyup` reports the query; we fetch
+  # the symbol outline once and filter it server-side into ranked rows the
+  # results popover walks. An empty query closes the popover. The hook owns the
+  # arrow/enter highlight client-side, so the server only re-renders the list.
+  # An unchanged-query keyup is a no-op: `phx-keyup` fires on EVERY key release,
+  # including the arrow/enter keys the OmniSearch hook drives. Re-rendering the
+  # identical result list on those would patch the popover and snap the hook's
+  # keyboard highlight back to the top — so a keyup whose value matches the
+  # current query must not round-trip. (The hook's `updated/0` also guards this,
+  # but skipping the re-render entirely is cheaper and removes the race at source.)
+  def handle_event("omni_search", %{"value" => query}, socket) when is_binary(query) do
+    if query == socket.assigns.omni_query do
+      {:noreply, socket}
+    else
+      {:noreply, run_omni_search(socket, query)}
+    end
+  end
+
+  def handle_event("omni_search", _params, socket), do: {:noreply, socket}
+
+  # Open an omni-search result: a class opens in the System Browser; a selector
+  # opens its (first) implementor in the method-editor tab strip. The chosen
+  # result's identity rides the click/enter from the hook. Closes the popover.
+  def handle_event(
+        "omni_open",
+        %{"kind" => "class", "class" => class},
+        socket
+      )
+      when is_binary(class) do
+    {:noreply, socket |> open_class(class) |> close_omni()}
+  end
+
+  def handle_event(
+        "omni_open",
+        %{"kind" => "selector", "class" => class, "side" => side, "selector" => selector},
+        socket
+      )
+      when is_binary(class) and is_binary(side) and is_binary(selector) do
+    {:noreply, socket |> open_method_tab(class, side, selector) |> close_omni()}
+  end
+
+  def handle_event("omni_open", _params, socket), do: {:noreply, close_omni(socket)}
+
+  # Dismiss the omni-search popover (Escape / blur, reported by the hook) without
+  # opening anything.
+  def handle_event("omni_close", _params, socket), do: {:noreply, close_omni(socket)}
+
+  # ── senders / implementors popovers (BT-2495) ───────────────────────────────
+
+  # The method editor's Senders / Implementors buttons: query the navigation
+  # channel for the active tab's selector and open the result popover. Both ride
+  # the same `nav-query` read (kinds `senders` / `implementors`); a missing
+  # selector (e.g. a class-definition tab) is ignored so the buttons no-op
+  # gracefully rather than querying an empty selector.
+  def handle_event("senders", _params, socket) do
+    {:noreply, run_nav_query(socket, :senders)}
+  end
+
+  def handle_event("implementors", _params, socket) do
+    {:noreply, run_nav_query(socket, :implementors)}
+  end
+
+  # Open a site from the Senders/Implementors popover in the method-editor tab
+  # strip (its class + selector + side), then close the popover.
+  def handle_event(
+        "nav_open",
+        %{"class" => class, "side" => side, "selector" => selector},
+        socket
+      )
+      when is_binary(class) and is_binary(side) and is_binary(selector) do
+    {:noreply, socket |> open_method_tab(class, side, selector) |> assign(nav_popover: nil)}
+  end
+
+  def handle_event("nav_open", _params, socket), do: {:noreply, assign(socket, nav_popover: nil)}
+
+  # Dismiss the Senders/Implementors popover.
+  def handle_event("nav_close", _params, socket), do: {:noreply, assign(socket, nav_popover: nil)}
+
   # Selection tracking (BT-2485): the SelectionTracker JS hook reports the
   # method-editor textarea's current selection (text + offsets). We hold it in
   # `edit_selection` so a later pane can evaluate the selected expression rather
@@ -923,6 +1019,10 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp facade_error(:forbidden_op), do: "Operation not permitted."
   defp facade_error(reason), do: Workspace.render_error(reason)
+
+  # The Senders/Implementors popover heading for a nav kind (BT-2495).
+  defp nav_kind_label(:senders), do: "Senders"
+  defp nav_kind_label(:implementors), do: "Implementors"
 
   # ── Workspace dock actions (BT-2490) ────────────────────────────────────────
 
@@ -1199,6 +1299,185 @@ defmodule BtAttachWeb.WorkspaceLive do
       if Enum.any?(selectors, &(Map.get(&1, "selector") == selector)),
         do: Map.get(proto, "name")
     end)
+  end
+
+  # ── navigation aids: omni search + senders/implementors (BT-2495) ───────────
+
+  # Filter the workspace symbol index (`nav-symbols`) against the live query and
+  # open the results popover. The index — every loaded class plus its locally
+  # defined selectors — is fetched per search (the search is debounced, and a live
+  # re-read keeps a mid-session class definition findable) and flattened into
+  # ranked rows. An empty query closes the popover; the OmniSearch hook walks the
+  # `.active` highlight over `:omni_results` client-side.
+  defp run_omni_search(socket, query) do
+    trimmed = String.trim(query)
+
+    if trimmed == "" do
+      close_omni(assign(socket, omni_query: query))
+    else
+      results = omni_filter(symbol_rows(socket), trimmed)
+      assign(socket, omni_query: query, omni_results: results, omni_open: true)
+    end
+  end
+
+  # Flatten the `nav-symbols` outline into search rows: one row per class, plus
+  # one per locally-defined selector (instance- and class-side). Each row carries
+  # the identity the popover needs to open it — a class row opens the System
+  # Browser, a selector row opens an editable method tab. A dispatch failure /
+  # RBAC denial yields an empty index rather than crashing the search.
+  defp symbol_rows(socket) do
+    case Facade.dispatch(:symbols, %{scope: "all"}, ctx(socket)) do
+      {:value, %{"classes" => classes}} when is_list(classes) ->
+        Enum.flat_map(classes, &class_symbol_rows/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp class_symbol_rows(%{"name" => name} = class) when is_binary(name) do
+    class_row = %{
+      kind: "class",
+      label: name,
+      class: name,
+      side: "instance",
+      selector: nil
+    }
+
+    method_rows =
+      for m <- Map.get(class, "methods", []),
+          sel = Map.get(m, "selector"),
+          is_binary(sel) do
+        # Match the boolean exactly: a string "false" would be truthy and mis-tag
+        # every instance-side method as class-side (wrong tab + wrong source read).
+        side = if Map.get(m, "class_side") == true, do: "class", else: "instance"
+
+        %{
+          kind: "selector",
+          label: name <> " » " <> sel <> side_suffix(side),
+          class: name,
+          side: side,
+          selector: sel
+        }
+      end
+
+    [class_row | method_rows]
+  end
+
+  defp class_symbol_rows(_), do: []
+
+  defp side_suffix("class"), do: " (class)"
+  defp side_suffix(_), do: ""
+
+  # Case-insensitive substring match, ranked prefix-first then alphabetically, and
+  # capped so a one-letter query can't render thousands of rows into the popover.
+  defp omni_filter(rows, query) do
+    q = String.downcase(query)
+
+    rows
+    |> Enum.filter(&String.contains?(String.downcase(&1.label), q))
+    |> Enum.sort_by(fn row ->
+      label = String.downcase(row.label)
+      {if(String.starts_with?(label, q), do: 0, else: 1), label}
+    end)
+    |> Enum.take(30)
+  end
+
+  # Close the omni-search popover and clear its results.
+  defp close_omni(socket), do: assign(socket, omni_open: false, omni_results: [])
+
+  # Open a class in the System Browser (the omni-search "class" result): select it
+  # in the tree and load its protocols for the current side, exactly as a click in
+  # the class tree would.
+  defp open_class(socket, class) do
+    socket
+    |> assign(selected_class: class, selected_protocol: nil, browser_method: nil)
+    |> load_protocols(class, socket.assigns.browser_side)
+  end
+
+  # Open (or re-focus) an *editable* method tab for class/side/selector — the
+  # shared open path for an omni-search selector result and a senders/implementors
+  # site. Mirrors `open_definition/1`'s find-or-create-then-focus shape; the tab id
+  # is the same `method:Class:side:selector` key the editor already uses, so
+  # opening the same method twice de-dupes. The buffer is seeded with the method's
+  # image-accurate source so editing starts from the live body.
+  defp open_method_tab(socket, class, side, selector) do
+    id = "method:" <> class <> ":" <> side <> ":" <> selector
+
+    case find_tab(socket, id) do
+      %{} ->
+        activate_tab(socket, id)
+
+      nil ->
+        source = method_source_text(socket, class, side, selector)
+
+        tab = %{
+          id: id,
+          kind: :method,
+          class: class,
+          side: side,
+          selector: selector,
+          source: source,
+          base: source,
+          dirty: false
+        }
+
+        socket
+        |> assign(:tabs, socket.assigns.tabs ++ [tab])
+        |> assign(:active_tab, id)
+        |> sync_active(tab)
+    end
+  end
+
+  # Just the method's source string (`browse-method-source`), or "" for a
+  # sourceless runtime method / error — so opening it gives an empty editable
+  # buffer rather than crashing.
+  defp method_source_text(socket, class, side, selector) do
+    case Facade.dispatch(
+           :browse_method_source,
+           %{class: class, side: side, selector: selector},
+           ctx(socket)
+         ) do
+      {:value, %{"source" => source}} when is_binary(source) -> source
+      _ -> ""
+    end
+  end
+
+  # Query senders/implementors of the active method's selector (`nav-query`) and
+  # open the result popover. A tab with no selector (a class-definition tab) is a
+  # graceful no-op — there is nothing to query. `kind` is `:senders` |
+  # `:implementors`; the facade op name matches.
+  defp run_nav_query(socket, kind) do
+    selector = active_tab(socket.assigns).selector
+
+    if is_binary(selector) and selector != "" do
+      case Facade.dispatch(kind, %{selector: selector}, ctx(socket)) do
+        {:value, %{"sites" => sites}} when is_list(sites) ->
+          assign(socket, nav_popover: %{kind: kind, selector: selector, sites: sites})
+
+        {:value, _other} ->
+          assign(socket, nav_popover: %{kind: kind, selector: selector, sites: []})
+
+        {:error, reason} ->
+          assign(socket,
+            nav_popover: %{kind: kind, selector: selector, sites: [], error: facade_error(reason)}
+          )
+
+        # Any other shape (version skew, an unexpected reply) degrades to an empty
+        # popover with a generic message rather than crashing the LiveView.
+        _other ->
+          assign(socket,
+            nav_popover: %{
+              kind: kind,
+              selector: selector,
+              sites: [],
+              error: "Navigation unavailable."
+            }
+          )
+      end
+    else
+      socket
+    end
   end
 
   # ── System Browser view helpers (BT-2491) ───────────────────────────────────
@@ -2308,6 +2587,50 @@ defmodule BtAttachWeb.WorkspaceLive do
             <span class="mark"><b>Beam</b>talk</span>
             <span class="ver">Cockpit</span>
           </div>
+          <%!-- Omni search (BT-2495): a symbol search over classes + selectors
+               (the `nav-symbols` index, ADR 0096 `:read` op). Filtering/ranking
+               is server-side; the OmniSearch hook drives the arrow/enter/escape
+               keyboard nav over the results popover (a connected-render JS
+               behaviour the e2e lane covers). Shown only once attached, since the
+               index is read live from the workspace. `phx-click-away` dismisses
+               the popover when focus moves elsewhere. --%>
+          <div :if={@connected} class="omni" phx-click-away="omni_close">
+            <input
+              id="omni-search"
+              class="omni-input mono"
+              type="text"
+              name="q"
+              value={@omni_query}
+              placeholder="Search classes & selectors…"
+              autocomplete="off"
+              spellcheck="false"
+              phx-hook="OmniSearch"
+              phx-keyup="omni_search"
+              phx-debounce="120"
+            />
+            <div :if={@omni_open and @omni_results != []} class="omni-results" role="listbox">
+              <button
+                :for={{r, idx} <- Enum.with_index(@omni_results)}
+                type="button"
+                role="option"
+                class={["omni-row", idx == 0 && "active"]}
+                aria-selected={to_string(idx == 0)}
+                data-kind={r.kind}
+                data-class={r.class}
+                data-side={r.side}
+                data-selector={r.selector}
+              >
+                <span class={"omni-kind #{r.kind}"}>{if r.kind == "class", do: "C", else: "ƒ"}</span>
+                <span class="omni-label mono">{r.label}</span>
+              </button>
+            </div>
+            <div
+              :if={@omni_open and @omni_results == [] and String.trim(@omni_query) != ""}
+              class="omni-results"
+            >
+              <div class="omni-empty">No matches</div>
+            </div>
+          </div>
           <span class="spacer"></span>
           <%= if @connected do %>
             <div class="attach">
@@ -2668,6 +2991,53 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <div :if={@save_error} class="io-block err">{@save_error}</div>
                   <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
                   <div :if={@flush_error} class="io-block err">{@flush_error}</div>
+
+                  <%!-- Senders / Implementors (BT-2495): navigate the active
+                       method's selector across the image. Both ride the
+                       `nav-query` `:read` op (xref index, ADR 0096), so they work
+                       for the Observer role too — rendered OUTSIDE the owner-only
+                       edit form. They no-op on a class-definition tab (no
+                       selector). The result popover anchors to this panel
+                       (`.editor-panel` is `position: relative`). --%>
+                  <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                    <button class="btn" type="button" phx-click="senders">
+                      Senders
+                    </button>
+                    <button class="btn" type="button" phx-click="implementors">
+                      Implementors
+                    </button>
+                  </div>
+
+                  <div :if={@nav_popover} class="nav-popover" phx-click-away="nav_close">
+                    <div class="nav-pop-head">
+                      <b>{nav_kind_label(@nav_popover.kind)}</b>
+                      <span class="mono">{@nav_popover.selector}</span>
+                      <span class="spacer"></span>
+                      <button class="x" type="button" phx-click="nav_close" title="Close">×</button>
+                    </div>
+                    <div :if={@nav_popover[:error]} class="io-block err">{@nav_popover.error}</div>
+                    <div :if={!@nav_popover[:error] and @nav_popover.sites == []} class="nav-empty">
+                      No {nav_kind_label(@nav_popover.kind)} found.
+                    </div>
+                    <button
+                      :for={site <- @nav_popover.sites}
+                      type="button"
+                      class="nav-site"
+                      phx-click="nav_open"
+                      phx-value-class={site["class"]}
+                      phx-value-side={if site["class_side"] == true, do: "class", else: "instance"}
+                      phx-value-selector={site["method"]}
+                    >
+                      <span class="nav-site-name mono">
+                        {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
+                          "method"
+                        ]}
+                      </span>
+                      <span :if={site["source_file"]} class="nav-loc mono">
+                        {site["source_file"]}:{site["line"]}
+                      </span>
+                    </button>
+                  </div>
                 </div>
               </div>
 
