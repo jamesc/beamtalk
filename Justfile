@@ -227,10 +227,11 @@ web-remote name:
     exec mix phx.server
 
 # Build a self-contained, ERTS-embedded release of the LiveView IDE (BT-2513).
-# Bundles JS+CSS (minified, digested) and produces
-# editors/liveview/_build/prod/rel/bt_attach — runnable with no Elixir/Mix on
-# the host. This is the artifact the packaging lane ships (BT-2515 archive,
-# BT-2516 Docker), separate from the core `just dist` bundle (BT-2512).
+# Bundles JS+CSS (minified, digested) and produces a runnable release in
+# dist-liveview/ at the repo root — no Elixir/Mix needed on the host. This is
+# the artifact the packaging lane ships (BT-2515 archive, BT-2516 Docker),
+# separate from the core `just dist` bundle (BT-2512), which is why it does
+# not share the dist/ directory (`just dist` wipes it).
 #   just dist-liveview
 [unix]
 [working-directory: 'editors/liveview']
@@ -241,10 +242,16 @@ dist-liveview:
     export MIX_ENV=prod
     echo "📦 Building LiveView IDE release (bt_attach)..."
     mix deps.get --only prod
+    mix assets.setup
     mix assets.deploy
-    mix release --overwrite
-    echo "✅ LiveView IDE release at editors/liveview/_build/prod/rel/bt_attach"
-    echo "   Run: PHX_SERVER=true SECRET_KEY_BASE=... _build/prod/rel/bt_attach/bin/bt_attach start"
+    rm -rf ../../dist-liveview
+    mix release --overwrite --path ../../dist-liveview
+    # phx.digest (part of assets.deploy) writes digested copies and
+    # cache_manifest.json into priv/static/ alongside the tracked originals.
+    # The release embeds its own copies, so restore the source tree.
+    mix phx.digest.clean --all
+    echo "✅ LiveView IDE release ready in dist-liveview/"
+    echo "   Run: PHX_SERVER=true SECRET_KEY_BASE=... dist-liveview/bin/bt_attach start"
 
 # Build Erlang runtime
 [working-directory: 'runtime']

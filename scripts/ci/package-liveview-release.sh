@@ -15,8 +15,8 @@
 # Platform should be one of: linux-x86_64, macos-x86_64, macos-arm64.
 # (Windows is out of scope — the remote IDE host is Linux/macOS per ADR 0091.)
 #
-# Expects the prod release at editors/liveview/_build/prod/rel/bt_attach
-# (run `just dist-liveview` or `MIX_ENV=prod mix release` first).
+# Expects the prod release at dist-liveview/ at the repo root (run
+# `just dist-liveview` first).
 #
 # Outputs (to $GITHUB_OUTPUT if set, else stdout):
 #   archive=beamtalk-ide-0.4.0-linux-x86_64.tar.gz
@@ -26,7 +26,7 @@ set -euo pipefail
 VERSION="${1:?Usage: package-liveview-release.sh <version> <platform>}"
 PLATFORM="${2:?Usage: package-liveview-release.sh <version> <platform>}"
 
-REL_DIR="editors/liveview/_build/prod/rel/bt_attach"
+REL_DIR="dist-liveview"
 if [ ! -d "${REL_DIR}" ] || [ ! -x "${REL_DIR}/bin/bt_attach" ]; then
     echo "❌ Release not found at ${REL_DIR}. Run 'just dist-liveview' first."
     exit 1

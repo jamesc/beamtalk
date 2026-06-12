@@ -8,6 +8,7 @@
 
 # Distribution
 /dist/
+/dist-liveview/
 *.vsix
 
 # Cargo
