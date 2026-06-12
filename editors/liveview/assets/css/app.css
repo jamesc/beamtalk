@@ -257,7 +257,8 @@
 }
 
 /* center column splits between editor and the workspace dock */
-.editor-panel { flex: 1; min-height: 0; }
+/* position: relative anchors the BT-2495 Senders/Implementors popover. */
+.editor-panel { flex: 1; min-height: 0; position: relative; }
 .dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; }
 .dock .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
@@ -441,6 +442,48 @@
 .follow-link { font-size: 10.5px; color: var(--accent-2); font-weight: 600; opacity: 0; }
 .ivar-table tr.drillable:hover .follow-link { opacity: 1; }
 
+/* Live Inspector tracking (BT-2492) — pid-stats chips, field flash, freeze, poke */
+
+/* pid-stats chips: a status dot + mailbox/reductions, alongside the class/pid
+   chips. The dot is the "is it ticking" tell from the spike. */
+.proc-chips .pid-stat .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent); display: inline-block; flex: none;
+}
+
+/* field flash: a changed ivar value cell pulses on a live refresh (the
+   "subscribed, tracking live" tell). The FieldFlash hook adds `.vflash`. */
+.ivar-table td.v.vflash { animation: vflash 700ms ease-out; }
+@keyframes vflash {
+  0%   { background: var(--accent-soft); }
+  100% { background: transparent; }
+}
+
+/* freeze toggle in the Inspector head: live (subscribed) vs frozen (snapshot). */
+.insp-freeze {
+  display: inline-flex; align-items: center; gap: 5px; flex: none; cursor: pointer;
+  font-size: 10px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase;
+  border: 1px solid var(--line); border-radius: 5px; padding: 2px 7px;
+  background: var(--panel); color: var(--muted);
+}
+.insp-freeze .iwf-dot {
+  width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex: none;
+  background: var(--accent);
+}
+.insp-freeze.frozen { color: var(--accent-2); border-color: var(--accent-soft); }
+.insp-freeze.frozen .iwf-dot { background: var(--accent-2); }
+.insp-freeze:hover { background: var(--hover); }
+
+/* owner poke bar: send a Beamtalk message to the inspected actor. */
+.poke { padding: 11px 14px; border-top: 1px solid var(--line); }
+.poke-label { font-size: 11px; color: var(--muted); margin-bottom: 7px; }
+.poke-row { display: flex; align-items: center; gap: 7px; }
+.poke-row .field { flex: 1; min-width: 0; }
+.poke-recv { color: var(--accent); font-weight: 700; flex: none; font-size: 11px; }
+.poke-out { margin-top: 7px; font-size: 11.5px; }
+.poke-out.ok { color: var(--accent-2); }
+.poke-out.warn { color: var(--t-keyword); }
+
 .empty { padding: 28px 16px; text-align: center; color: var(--faint); font-size: 12px; }
 
 /* generic controls reused across panes */
@@ -611,3 +654,69 @@
 .twk-select.mono { font-family: var(--code-font, ui-monospace, monospace); }
 
 .twk-note { color: var(--faint); font-size: 11px; margin: 2px 0 0; }
+
+/* ── omni search (BT-2495): top-bar class+selector search + results popover ── */
+.omni { position: relative; flex: 0 1 320px; max-width: 360px; }
+.omni-input {
+  width: 100%; height: 28px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--code-bg);
+  color: var(--ink); font: inherit; font-size: 12px; outline: none;
+}
+.omni-input::placeholder { color: var(--faint); }
+.omni-input:focus { border-color: var(--accent); }
+.omni-results {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 40;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: var(--shadow), 0 6px 18px rgba(40,30,10,.18);
+  max-height: 320px; overflow-y: auto; padding: 4px;
+}
+.omni-row {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 5px 8px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--ink); cursor: pointer; text-align: left; font-size: 12px;
+}
+.omni-row:hover { background: var(--hover); }
+.omni-row.active { background: var(--accent-soft); }
+.omni-kind {
+  flex: none; width: 16px; height: 16px; border-radius: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700;
+}
+.omni-kind.class { background: var(--accent-soft); color: var(--accent-2); }
+.omni-kind.selector { background: var(--panel-3); color: var(--muted); }
+.omni-label { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omni-empty { padding: 8px 10px; color: var(--faint); font-size: 12px; }
+
+/* ── senders / implementors popover (BT-2495), anchored to the editor panel ── */
+.nav-actions { display: flex; gap: .5rem; margin-top: .5rem; }
+.nav-popover {
+  position: absolute; right: 12px; bottom: 12px; z-index: 40; width: min(420px, 92%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: var(--shadow), 0 8px 22px rgba(40,30,10,.22);
+  max-height: 320px; overflow-y: auto; padding: 8px;
+}
+.nav-pop-head {
+  display: flex; align-items: center; gap: 8px; padding: 2px 4px 8px;
+  border-bottom: 1px solid var(--line); margin-bottom: 6px; font-size: 12px;
+}
+.nav-pop-head b { color: var(--accent-2); }
+.nav-pop-head .mono { color: var(--muted); }
+.nav-pop-head .x {
+  border: 0; background: transparent; color: var(--muted); cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 2px;
+}
+.nav-pop-head .x:hover { color: var(--ink); }
+.nav-empty { padding: 8px 6px; color: var(--faint); font-size: 12px; }
+.nav-site {
+  display: flex; flex-direction: column; gap: 1px; width: 100%;
+  padding: 6px 8px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--ink); cursor: pointer; text-align: left;
+}
+.nav-site:hover { background: var(--hover); }
+.nav-site-name { font-size: 12px; }
+.nav-side-tag {
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  color: var(--accent-2); background: var(--accent-soft);
+  border-radius: 3px; padding: 0 4px; margin: 0 3px;
+}
+.nav-loc { font-size: 10.5px; color: var(--faint); }

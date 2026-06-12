@@ -10,28 +10,37 @@
 #
 # GitHub Copilot CLI and workspace setup are handled by devcontainer.json features.
 
-FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
+# trixie: mise's precompiled OTP 28 builds need glibc >= 2.38 (bookworm has
+# 2.36), and it matches the Debian base of the shipped IDE image
+# (editors/liveview/Dockerfile).
+FROM mcr.microsoft.com/devcontainers/rust:1-trixie
 
-# Install Erlang Solutions repository, Erlang/OTP, git, and networking/debugging tools
+# Install git and networking/debugging tools
 RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     && apt-get install -y --no-install-recommends \
         ca-certificates gnupg \
-    && mkdir -p /etc/apt/keyrings \
-    && curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
-        https://binaries2.erlang-solutions.com/GPG-KEY-pmanager.asc \
-        -o /tmp/GPG-KEY-pmanager.asc \
-    && grep -q "BEGIN PGP PUBLIC KEY BLOCK" /tmp/GPG-KEY-pmanager.asc \
-    && gpg --dearmor -o /etc/apt/keyrings/erlang-solutions.gpg /tmp/GPG-KEY-pmanager.asc \
-    && rm -f /tmp/GPG-KEY-pmanager.asc \
-    && echo "deb [signed-by=/etc/apt/keyrings/erlang-solutions.gpg] http://binaries2.erlang-solutions.com/debian/ bookworm-esl-erlang-27 contrib" \
-        > /etc/apt/sources.list.d/erlang-solutions.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends \
-        esl-erlang git gettext-base \
+        git gettext-base \
         socat netcat-openbsd lsof unzip \
         curl wget jq htop strace \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Erlang/OTP + Elixir via mise, pinned by the repo-root .tool-versions
+# (the same single source of truth dev machines and CI's setup-beam use, so
+# the devcontainer toolchain never drifts from what CI compiles with).
+# mise fetches precompiled BEAM builds — no source compile.
+#
+# .tool-versions is copied to / so mise resolves the pins from any directory
+# (it walks up from $PWD; the workspace checkout carries the same file).
+# MISE_DATA_DIR is world-readable so the vscode user runs the root-installed
+# toolchain via the shims on PATH.
+ARG MISE_VERSION=v2026.6.3
+ENV MISE_DATA_DIR=/usr/local/share/mise
+ENV PATH="/usr/local/share/mise/shims:${PATH}"
+COPY .tool-versions /.tool-versions
+RUN curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 https://mise.run \
+        | MISE_VERSION=${MISE_VERSION} MISE_INSTALL_PATH=/usr/local/bin/mise sh \
+    && mise install
 
 # Install Node.js (LTS) via NodeSource
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
@@ -77,32 +86,14 @@ RUN echo 'export PATH="/home/vscode/.amp/bin:/home/vscode/.local/bin:$PATH"' > /
     && chmod +x /etc/profile.d/amp.sh
 ENV PATH="/home/vscode/.amp/bin:/home/vscode/.local/bin:${PATH}"
 
-# Install rebar3 (pinned version for reproducible builds)
-ARG REBAR3_VERSION=3.26.0
-RUN git clone --depth 1 --branch ${REBAR3_VERSION} https://github.com/erlang/rebar3.git /tmp/rebar3 \
-    && cd /tmp/rebar3 \
-    && ./bootstrap \
-    && install -m 755 rebar3 /usr/local/bin/rebar3 \
-    && cd / \
-    && rm -rf /tmp/rebar3
-
-# Install Elixir (precompiled for OTP 27) for the editors/liveview Mix project.
-# BT-2401: NOT the distro `elixir` package — it pins erlang < 26 and conflicts
-# with OTP 27. We unzip a release built for OTP 27 and install Hex + rebar3 so
-# `mix deps.get` works out of the box.
-ARG ELIXIR_VERSION=1.18.4
-RUN curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
-        "https://github.com/elixir-lang/elixir/releases/download/v${ELIXIR_VERSION}/elixir-otp-27.zip" \
-        -o /tmp/elixir-otp-27.zip \
-    && mkdir -p /opt/elixir \
-    && unzip -q /tmp/elixir-otp-27.zip -d /opt/elixir \
-    && rm -f /tmp/elixir-otp-27.zip \
-    && ln -sf /opt/elixir/bin/elixir /usr/local/bin/elixir \
-    && ln -sf /opt/elixir/bin/elixirc /usr/local/bin/elixirc \
-    && ln -sf /opt/elixir/bin/mix /usr/local/bin/mix \
-    && ln -sf /opt/elixir/bin/iex /usr/local/bin/iex \
-    && ELIXIR_ERL_OPTIONS="+fnu" mix local.hex --force \
-    && ELIXIR_ERL_OPTIONS="+fnu" mix local.rebar rebar3 /usr/local/bin/rebar3 --force
+# Erlang, Elixir, and rebar3 all come from mise (see the .tool-versions block
+# above — never the distro `elixir` package, which pins an old erlang).
+# Install Hex + rebar3 for the vscode remoteUser so `mix deps.get` works out
+# of the box.
+USER vscode
+RUN ELIXIR_ERL_OPTIONS="+fnu" mix local.hex --force \
+    && ELIXIR_ERL_OPTIONS="+fnu" mix local.rebar rebar3 /usr/local/share/mise/shims/rebar3 --force
+USER root
 
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \

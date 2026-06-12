@@ -79,13 +79,14 @@ jobs:
         shell: bash
         run: echo "version=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_OUTPUT"
 
-      # setup-beam installs an Elixir precompiled for OTP 27 — the supported
-      # toolchain (never the distro `elixir`, which pins erlang < 26).
+      # Erlang/Elixir versions come from the repo-root .tool-versions — the
+      # single source of truth shared with mise (dev machines, devcontainer),
+      # so the release is built with the same toolchain CI tested.
       - name: Install Erlang/OTP + Elixir
         uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
         with:
-          otp-version: '27.0'
-          elixir-version: '1.18'
+          version-file: .tool-versions
+          version-type: strict
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Mix deps and build

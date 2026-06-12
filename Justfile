@@ -147,7 +147,7 @@ dev-deploy-vscode: build-vscode
 [working-directory: 'editors/liveview']
 web-setup:
     @echo "📦 Fetching LiveView (editors/liveview) deps..."
-    mix deps.get
+    ELIXIR_ERL_OPTIONS="${ELIXIR_ERL_OPTIONS:-+fnu}" mix deps.get
     @echo "✅ Deps fetched. Run 'cd editors/liveview && mix assets.setup' once to"
     @echo "   install the esbuild + tailwind binaries (downloaded on first use)."
 
@@ -177,6 +177,7 @@ web name:
     fi
     export BT_WORKSPACE_NODE="${node}"
     export BT_WORKSPACE_COOKIE="$(cat "${cookie_file}")"
+    export ELIXIR_ERL_OPTIONS="${ELIXIR_ERL_OPTIONS:-+fnu}"
     echo "🌐 LiveView IDE → ${node}  (http://localhost:4000)"
     cd editors/liveview
     exec mix phx.server
@@ -214,6 +215,7 @@ web-remote name:
     # it is never placed in a page, assign, or URL (browser ↔ Phoenix is HTTPS).
     export BT_WORKSPACE_NODE="${node}"
     export BT_WORKSPACE_COOKIE="$(cat "${cookie_file}")"
+    export ELIXIR_ERL_OPTIONS="${ELIXIR_ERL_OPTIONS:-+fnu}"
     export PHX_SERVER=true
     export MIX_ENV=prod
     export PORT="${PORT:-8443}"
@@ -235,6 +237,7 @@ web-remote name:
 dist-liveview:
     #!/usr/bin/env bash
     set -euo pipefail
+    export ELIXIR_ERL_OPTIONS="${ELIXIR_ERL_OPTIONS:-+fnu}"
     export MIX_ENV=prod
     echo "📦 Building LiveView IDE release (bt_attach)..."
     mix deps.get --only prod

@@ -39,7 +39,6 @@ defmodule BtAttach.IdeConfig do
       }
   """
 
-  require Logger
   import Bitwise, only: [&&&: 2]
 
   @default_groups_claim "groups"
