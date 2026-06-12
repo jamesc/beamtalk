@@ -2814,7 +2814,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                          server-side), and a drilled field has no session binding to
                          address. Sends `<binding> <message>` via eval. --%>
                     <div
-                      :if={@inspect_target && @inspect_target.pid && @role == :owner && pokeable?(assigns)}
+                      :if={
+                        @inspect_target && @inspect_target.pid && @role == :owner &&
+                          pokeable?(assigns)
+                      }
                       class="poke"
                     >
                       <div class="poke-label">Send a message to {@inspect_target.label}</div>
