@@ -353,6 +353,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> eval_do(
       "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
     )
+    # Define Counter itself: the Ctrl+S save below compiles `Counter >> increment`,
+    # which requires the class to EXIST in the workspace. Tests share one
+    # persistent workspace and ExUnit shuffles order per seed, so relying on
+    # another test (the Ctrl+S one) to have defined Counter is a seed-dependent
+    # flake — the exact failure seen on main + BT-2493 CI runs.
+    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
     # Select the starter method tab so the active selector is `increment`, then
     # open the Implementors popover for it.
     |> click(".tabstrip button[role='tab']")

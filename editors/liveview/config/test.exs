@@ -22,7 +22,14 @@ config :phoenix_test,
   endpoint: BtAttachWeb.Endpoint,
   playwright: [
     browser: :chromium,
-    headless: System.get_env("PLAYWRIGHT_HEADLESS", "true") != "false"
+    headless: System.get_env("PLAYWRIGHT_HEADLESS", "true") != "false",
+    # The 4s default is too tight for a cold Chromium spawn on slower dev
+    # machines (e.g. WSL2); CI launches well under either value. The pool must
+    # be declared explicitly: the global key only merges into browser_pools
+    # entries that are present in config (the implicit default pool keeps the
+    # 4s default — phoenix_test_playwright 0.14.0 Config.global/1).
+    browser_launch_timeout: 30_000,
+    browser_pools: [[id: :default_pool, browser_launch_timeout: 30_000]]
   ]
 
 # Print only warnings and errors during test
