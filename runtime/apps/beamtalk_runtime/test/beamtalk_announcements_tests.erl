@@ -1077,6 +1077,32 @@ announce_with_remote_subscriber_test_() ->
         end)
     end}.
 
+%% The production subscribe path: registering a remote pid through the real
+%% gen_server must not crash the bus — `arm_monitor/2` runs `erlang:monitor/2`
+%% inside the bus process, which (verified empirically) does not raise for a
+%% remote pid even on a non-distributed node; it delivers an immediate
+%% `noconnection` DOWN instead, which auto-prunes the row. Both halves of that
+%% contract are asserted here.
+subscribe_remote_pid_through_gen_server_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            RemotePid = a_remote_pid(),
+            ?assert(node(RemotePid) =/= node()),
+            BusPid = whereis(beamtalk_announcements),
+            {ok, SubRef} = beamtalk_announcements:subscribe(
+                'RemoteSubEvent', RemotePid, remote_h, false
+            ),
+            %% The bus survived arming the cross-node monitor.
+            ?assert(is_process_alive(BusPid)),
+            %% Without a dist connection the monitor's immediate `noconnection`
+            %% DOWN prunes the subscription — the documented cleanup path.
+            ok = wait_until(fun() ->
+                not beamtalk_announcements:is_active(SubRef)
+            end),
+            ?assertEqual([], beamtalk_announcements:subscribers_of('RemoteSubEvent'))
+        end)
+    end}.
+
 %% Synchronous gather: `do_announce_and_wait` must not crash on the remote row,
 %% and the remote subscription's handler still runs (handlers run in local
 %% transient processes regardless of where the subscriber pid lives).
@@ -1084,6 +1110,7 @@ announce_and_wait_with_remote_subscriber_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         ?_test(begin
             RemotePid = a_remote_pid(),
+            ?assert(node(RemotePid) =/= node()),
             Collector = self(),
             Handler = fun(Event) -> Collector ! {remote_handler_ran, Event} end,
             _RemoteRef = insert_subscription_row('RemoteSyncEvent', RemotePid, Handler, false),
@@ -1101,6 +1128,7 @@ system_announce_with_remote_subscriber_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         ?_test(begin
             RemotePid = a_remote_pid(),
+            ?assert(node(RemotePid) =/= node()),
             Collector = self(),
             Handler = fun(Event) -> Collector ! {veneer_handler_ran, Event} end,
             _RemoteRef = insert_subscription_row('RemoteVeneerEvent', RemotePid, Handler, false),
@@ -1330,8 +1358,10 @@ heir_rearm_with_remote_subscriber_impl() ->
                     ),
                     %% Inserted directly (not via subscribe) so no monitor exists —
                     %% exactly the crash→restart-gap shape rearm_monitors sees.
+                    RemotePid = a_remote_pid(),
+                    ?assert(node(RemotePid) =/= node()),
                     _RemoteRef = insert_subscription_row(
-                        'RemoteRearmEvent', a_remote_pid(), remote_h, false
+                        'RemoteRearmEvent', RemotePid, remote_h, false
                     ),
                     ?assertEqual(2, beamtalk_announcements:subscription_count()),
 
