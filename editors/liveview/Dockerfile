@@ -21,8 +21,11 @@
 # Phoenix<->workspace Erlang distribution link off untrusted networks
 # (co-located / private interface) — never expose epmd/dist publicly.
 
-ARG ELIXIR_IMAGE=elixir:1.18-otp-27
-ARG RUNTIME_IMAGE=debian:bookworm-slim
+# Tracks the repo-root .tool-versions pins (erlang/elixir). The runtime image
+# must stay on the same Debian release as the build image's base (erlang:28 is
+# trixie-based) — the release embeds ERTS built against that glibc.
+ARG ELIXIR_IMAGE=elixir:1.20.1-otp-28
+ARG RUNTIME_IMAGE=debian:trixie-slim
 
 # ─── Build stage ─────────────────────────────────────────────────────────
 FROM ${ELIXIR_IMAGE} AS build

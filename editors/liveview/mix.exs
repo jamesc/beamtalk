@@ -20,6 +20,9 @@ defmodule BtAttach.MixProject do
       version: @version,
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
+      # Warnings-as-errors for our own code only — deps compile with their
+      # upstream settings and routinely warn under newer Elixir releases.
+      elixirc_options: [warnings_as_errors: true],
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
@@ -100,6 +103,9 @@ defmodule BtAttach.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "assets.setup", "assets.build"],
+      # Test .exs files compile at ExUnit runtime, outside elixirc_options —
+      # this flag is the only way to hold them to warnings-as-errors.
+      test: ["test --warnings-as-errors"],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["tailwind bt_attach", "esbuild bt_attach"],
       "assets.deploy": [
