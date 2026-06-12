@@ -202,12 +202,15 @@ streams_lists_all_five_push_streams_test() ->
     ).
 
 subscribe_all_returns_ok_test() ->
-    %% The underlying event servers are not running in unit tests; gen_server:cast
-    %% to an unregistered name is a silent no-op, so the facade still returns ok.
+    %% BT-2531: the bus-backed streams register on the SystemAnnouncer bus, so it
+    %% must be running; the transcript stream is a tolerant cast. The facade
+    %% returns ok across every stream.
+    ensure_announcements_bus(),
     ?assertEqual(ok, beamtalk_repl_subscriptions:subscribe_all()),
     ?assertEqual(ok, beamtalk_repl_subscriptions:unsubscribe_all()).
 
 subscribe_single_stream_returns_ok_test() ->
+    ensure_announcements_bus(),
     [
         ?assertEqual(ok, beamtalk_repl_subscriptions:subscribe(S))
      || S <- beamtalk_repl_subscriptions:streams()
@@ -216,3 +219,14 @@ subscribe_single_stream_returns_ok_test() ->
         ?assertEqual(ok, beamtalk_repl_subscriptions:unsubscribe(S))
      || S <- beamtalk_repl_subscriptions:streams()
     ].
+
+%% Start the announcements bus if not already running (supervised in the full
+%% runtime; standalone here).
+ensure_announcements_bus() ->
+    case whereis(beamtalk_announcements) of
+        undefined ->
+            {ok, _} = beamtalk_announcements:start_link(),
+            ok;
+        _ ->
+            ok
+    end.

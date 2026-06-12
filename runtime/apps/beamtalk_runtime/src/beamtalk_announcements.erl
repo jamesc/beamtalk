@@ -104,6 +104,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     subscribe/4,
     subscribe/5,
     unsubscribe/1,
+    system_unsubscribe/2,
     is_active/1
 ]).
 
@@ -313,6 +314,39 @@ subscription.
 unsubscribe(SubRef) when is_reference(SubRef) ->
     gen_server:call(?MODULE, {unsubscribe, SubRef});
 unsubscribe(_SubRef) ->
+    ok.
+
+-doc """
+Remove every subscription held by `SubscriberPid` to exactly `AnnouncementClass`
+on the shared system announcer namespace (`?SYSTEM_ANNOUNCER_REF`).
+
+The stream→class detach primitive for `beamtalk_repl_subscriptions` (BT-2531): a
+workspace push-stream consumer subscribes its pid to each of a stream's
+announcement classes with an inert handler, and unsubscribing a single stream
+removes exactly that pid's rows for the stream's classes. Reads the primary table
+directly to find the matching `SubRef`s, then removes each through the serialised
+`unsubscribe/1` write so monitor bookkeeping stays correct. Idempotent — no
+matching rows (or a never-started bus) is a no-op that returns `ok`.
+""".
+-spec system_unsubscribe(announcement_class(), pid()) -> ok.
+system_unsubscribe(AnnouncementClass, SubscriberPid) when
+    is_atom(AnnouncementClass), is_pid(SubscriberPid)
+->
+    case ets:whereis(?SUBS_TABLE) of
+        undefined ->
+            ok;
+        _ ->
+            Rows = ets:match_object(
+                ?SUBS_TABLE,
+                {'_', ?SYSTEM_ANNOUNCER_REF, AnnouncementClass, SubscriberPid, '_', '_'}
+            ),
+            lists:foreach(
+                fun({SubRef, _Ann, _Class, _Pid, _Handler, _Once}) -> unsubscribe(SubRef) end,
+                Rows
+            ),
+            ok
+    end;
+system_unsubscribe(_AnnouncementClass, _SubscriberPid) ->
     ok.
 
 -doc """
@@ -1377,15 +1411,28 @@ the event's `$beamtalk_class` key and dispatches.
 Dispatch `Event` (an announcement payload map) asynchronously to every veneer
 subscriber of `EventClass` *or any of its ancestors* (MRO match).
 
-For the stdlib veneer, handlers are invoked caller-side rather than by sending
-raw `{beamtalk_announcement, ...}` messages to subscriber mailboxes: the raw
-`announce/2` requires a Beamtalk actor message loop to process, but a veneer
-handler is a Block / `{send, ...}` tuple. Each handler runs in its own transient
-process (fire-and-forget) so a slow or crashing handler never blocks the
-publisher or its siblings — async semantics (ADR 0093 §1), mirroring the sync
-path's `spawn_monitor` minus the gather. Shared by `announceOn/2` (per-instance
-announcers) and `system_announce/2` (the system bus). Scoped to `AnnouncerRef`
-(BT-2454): only subscriptions on that announcer match.
+For the stdlib veneer, *runnable* handlers (a Block / `{send, ...}` tuple) are
+invoked caller-side rather than by sending raw `{beamtalk_announcement, ...}`
+messages to subscriber mailboxes: the raw `announce/2` requires a Beamtalk actor
+message loop to process, but a veneer handler is a Block / `{send, ...}` tuple.
+Each runnable handler runs in its own transient process (fire-and-forget) so a
+slow or crashing handler never blocks the publisher or its siblings — async
+semantics (ADR 0093 §1), mirroring the sync path's `spawn_monitor` minus the
+gather.
+
+An **inert / opaque handler** (anything `run_handler/2` would treat as a no-op —
+a bare atom, a tuple that is not `{send, ...}`, etc.) is instead delivered the
+native `{beamtalk_announcement, SubRef, EventClass, Handler, Event}` message to
+its mailbox, exactly as the raw `deliver/3` async path does. This is the contract
+the workspace push-stream consumers rely on (BT-2531): `beamtalk_repl_subscriptions`
+registers external subscribers (the browser WS handler, the dist-attached
+LiveView) with an inert handler term and receives the announcement tuple natively,
+re-encoding it downstream. A Beamtalk veneer subscriber never registers an inert
+handler, so this branch only ever serves those external consumers.
+
+Shared by `announceOn/2` (per-instance announcers) and `system_announce/2` (the
+system bus). Scoped to `AnnouncerRef` (BT-2454): only subscriptions on that
+announcer match.
 """.
 -spec dispatch_veneer_async(announcer_ref(), announcement_class(), term()) -> ok.
 dispatch_veneer_async(AnnouncerRef, EventClass, Event) ->
@@ -1395,14 +1442,7 @@ dispatch_veneer_async(AnnouncerRef, EventClass, Event) ->
                 {ok, _Class, SubscriberPid, Handler, _Once} ->
                     case subscriber_alive(SubscriberPid) of
                         true ->
-                            _ = spawn(fun() ->
-                                try
-                                    run_handler(Handler, Event)
-                                catch
-                                    _:_ -> ok
-                                end
-                            end),
-                            ok;
+                            dispatch_one_veneer(SubRef, EventClass, Event, SubscriberPid, Handler);
                         false ->
                             ok
                     end;
@@ -1413,6 +1453,44 @@ dispatch_veneer_async(AnnouncerRef, EventClass, Event) ->
         collect_matching(AnnouncerRef, EventClass)
     ),
     ok.
+
+-doc """
+Dispatch a single claimed subscription on the async veneer path. A runnable
+handler (block / `{send, ...}`) runs in its own transient fire-and-forget
+process; an inert / opaque handler is delivered the native announcement message
+to the subscriber's mailbox (the raw `deliver/3` contract — used by the workspace
+push-stream consumers, BT-2531).
+""".
+-spec dispatch_one_veneer(sub_ref(), announcement_class(), term(), pid(), handler()) -> ok.
+dispatch_one_veneer(SubRef, EventClass, Event, SubscriberPid, Handler) ->
+    case is_runnable_handler(Handler) of
+        true ->
+            _ = spawn(fun() ->
+                try
+                    run_handler(Handler, Event)
+                catch
+                    _:_ -> ok
+                end
+            end),
+            ok;
+        false ->
+            SubscriberPid ! {beamtalk_announcement, SubRef, EventClass, Handler, Event},
+            ok
+    end.
+
+-doc """
+Whether a stored handler term is something `run_handler/2` can *execute* (a
+zero/one-arg block, or a `{send, Selector, Receiver}` tuple). Anything else is an
+inert / opaque handler that the veneer path delivers as a native announcement
+message instead (see `dispatch_one_veneer/5`).
+""".
+-spec is_runnable_handler(handler()) -> boolean().
+is_runnable_handler(Handler) when is_function(Handler, 0); is_function(Handler, 1) ->
+    true;
+is_runnable_handler({send, Selector, _Receiver}) when is_atom(Selector) ->
+    true;
+is_runnable_handler(_Handler) ->
+    false.
 
 -doc """
 Announce a well-known system event on the singleton `SystemAnnouncer` (ADR 0093

@@ -1025,12 +1025,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, stream_insert(socket, :transcript, line)}
   end
 
-  # Bindings-changed push (BT-2399 `bindings` stream): a *signal*, not the data.
-  # An eval on any session in the workspace may have changed binding values, so
-  # re-read this session's bindings through the read-surface and re-render the
-  # pane. This is the "updating live as bindings change" acceptance criterion,
-  # driven by the facade subscription rather than polling.
-  def handle_info({:bindings_changed, _session_id}, %{assigns: %{session_pid: pid}} = socket)
+  # Bindings-changed push (`bindings` stream): a *signal*, not the data. Since
+  # BT-2531 this rides the SystemAnnouncer bus as a `BindingChanged` announcement
+  # delivered natively over distribution:
+  # `{:beamtalk_announcement, sub_ref, :BindingChanged, handler, event}`. An eval
+  # on any session in the workspace may have changed binding values, so re-read
+  # this session's bindings through the read-surface and re-render the pane. This
+  # is the "updating live as bindings change" acceptance criterion, driven by the
+  # facade subscription rather than polling.
+  def handle_info(
+        {:beamtalk_announcement, _sub_ref, :BindingChanged, _handler, _event},
+        %{assigns: %{session_pid: pid}} = socket
+      )
       when is_pid(pid) do
     {:noreply, assign_bindings(socket, pid)}
   end

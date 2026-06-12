@@ -346,7 +346,6 @@ handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% (singletons + bind:as: names) are no longer copied into the session map, so
     %% there is nothing to re-inject — they remain available via lazy resolution.
     NewState = beamtalk_repl_state:clear_bindings(State),
-    beamtalk_bindings_events:on_bindings_changed(SessionId),
     {reply, ok, {SessionId, NewState, Worker}};
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load(Path, State) of
@@ -475,7 +474,6 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             %% it).  Success path applies all queued ops, including `clear`.
             FinalState0 = apply_pending_removals(ShellState, WorkerState),
             FinalState = apply_pending_mutations(ShellState, FinalState0),
-            beamtalk_bindings_events:on_bindings_changed(SessionId),
             {noreply, {SessionId, FinalState, undefined}};
         {error, Reason, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_error, Reason, Output, Warnings}),
@@ -485,7 +483,6 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             %% must not wipe every local because the line after `clear` failed.
             MergedState0 = apply_pending_removals(ShellState, WorkerState),
             MergedState = apply_pending_mutations_no_clear(ShellState, MergedState0),
-            beamtalk_bindings_events:on_bindings_changed(SessionId),
             {noreply, {SessionId, MergedState, undefined}}
     end;
 %% Worker process crashed (BT-666)
