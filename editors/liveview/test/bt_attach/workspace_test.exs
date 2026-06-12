@@ -142,11 +142,18 @@ defmodule BtAttach.WorkspaceTest do
     end
 
     test "the browse wrappers reject non-binary arguments (guard contract)" do
-      assert_raise FunctionClauseError, fn -> Workspace.browse_protocols(:Counter, "instance") end
-      assert_raise FunctionClauseError, fn -> Workspace.browse_class_definition(:Counter) end
+      # apply/3 keeps the deliberately mistyped arguments opaque to the
+      # compiler's type checker, which would otherwise warn on these calls.
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :browse_protocols, [:Counter, "instance"])
+      end
 
       assert_raise FunctionClauseError, fn ->
-        Workspace.browse_method_source("Counter", :instance, "increment")
+        apply(Workspace, :browse_class_definition, [:Counter])
+      end
+
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :browse_method_source, ["Counter", :instance, "increment"])
       end
     end
   end
