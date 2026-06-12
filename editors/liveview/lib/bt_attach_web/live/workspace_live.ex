@@ -727,8 +727,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # clamped to non-negative integers so a crafted payload can't place a window off
   # into NaN-land.
   def handle_event("window_moved", %{"id" => id, "x" => x, "y" => y}, socket) do
-    {:noreply,
-     update_window(socket, id, fn w -> %{w | x: clamp_coord(x), y: clamp_coord(y)} end)}
+    {:noreply, update_window(socket, id, fn w -> %{w | x: clamp_coord(x), y: clamp_coord(y)} end)}
   end
 
   def handle_event("window_moved", _params, socket), do: {:noreply, socket}
@@ -4042,12 +4041,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             <div :if={length(@win.crumbs) > 1} class="insp-crumbs">
               <%= for {crumb, i} <- Enum.with_index(@win.crumbs) do %>
                 <span :if={i > 0} class="sep">›</span>
-                <span
-                  class="c"
-                  phx-click="window_crumb"
-                  phx-value-id={@win.id}
-                  phx-value-index={i}
-                >
+                <span class="c" phx-click="window_crumb" phx-value-id={@win.id} phx-value-index={i}>
                   {crumb.label}
                 </span>
               <% end %>
@@ -4091,11 +4085,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   phx-value-index={row.drillable && i}
                 >
                   <td class="k">{row.name}</td>
-                  <td
-                    class={["v", row.kind]}
-                    data-flash-key={row.name}
-                    data-flash-val={row.value}
-                  >
+                  <td class={["v", row.kind]} data-flash-key={row.name} data-flash-val={row.value}>
                     {row.value}
                   </td>
                   <td class="follow">
