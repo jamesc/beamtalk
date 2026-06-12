@@ -61,8 +61,7 @@ TestCase subclass: InspectorTest
   testInspectorOnReturnsInspector =>
     self assert: (self.i isKindOf: Inspector) equals: true
 
-  testValueKindClassifiedAsValue =>
-    self assert: self.i kind equals: #value
+  testValueKindClassifiedAsValue => self assert: self.i kind equals: #value
 
   testActorKindClassifiedAsActor =>
     c := Counter spawn
@@ -70,8 +69,7 @@ TestCase subclass: InspectorTest
     self assert: i kind equals: #actor
 
   // === #value: structural field derivation (ADR 0094 sort order) ===
-  testValueFieldsAreSlots =>
-    self assert: self.i fields size equals: 2
+  testValueFieldsAreSlots => self assert: self.i fields size equals: 2
 
   testValueFieldsSortedByName =>
     // ADR 0094 sort order: fields come back sorted by name (x before y).
@@ -113,11 +111,9 @@ TestCase subclass: InspectorTest
     self assert: result error kind equals: #no_such_field
 
   // === Immutable cursor: parent / root / path ===
-  testRootCursorParentIsNil =>
-    self assert: self.i parent equals: nil
+  testRootCursorParentIsNil => self assert: self.i parent equals: nil
 
-  testRootCursorPathIsEmpty =>
-    self assert: self.i path equals: #()
+  testRootCursorPathIsEmpty => self assert: self.i path equals: #()
 
   testChildPathExtendsByDrilledName =>
     child := (self.i at: #x) unwrap
