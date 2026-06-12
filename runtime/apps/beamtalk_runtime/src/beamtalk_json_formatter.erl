@@ -251,22 +251,29 @@ extract_report_fields(#{label := {proc_lib, crash}, report := CrashInfo}, _Meta)
 extract_report_fields(_Report, _Meta) ->
     undefined.
 
+-doc "Extract and format a beamtalk error from a term. Returns the formatted message, or undefined if Term contains no beamtalk error or extraction fails.".
+-spec try_format_bt_error(term()) -> binary() | undefined.
+try_format_bt_error(Term) ->
+    try
+        case beamtalk_error:extract_beamtalk_error(Term, 4) of
+            undefined -> undefined;
+            BtError -> beamtalk_error:format(BtError)
+        end
+    catch
+        _:_ -> undefined
+    end.
+
 -doc """
 Build a human-readable message, appending any beamtalk error found in
 the OTP crash reason. Falls back to the raw reason if no beamtalk error.
 """.
 -spec format_reason_with_bt_error(iolist(), term()) -> binary().
 format_reason_with_bt_error(Prefix, Reason) ->
-    try
-        case beamtalk_error:extract_beamtalk_error(Reason, 4) of
-            undefined ->
-                safe_to_binary(io_lib:format("~ts: ~tp", [Prefix, Reason]));
-            BtError ->
-                BtMsg = beamtalk_error:format(BtError),
-                safe_to_binary(io_lib:format("~ts: ~ts", [Prefix, BtMsg]))
-        end
-    catch
-        _:_ -> safe_to_binary(io_lib:format("~ts: ~tp", [Prefix, Reason]))
+    case try_format_bt_error(Reason) of
+        undefined ->
+            safe_to_binary(io_lib:format("~ts: ~tp", [Prefix, Reason]));
+        BtMsg ->
+            safe_to_binary(io_lib:format("~ts: ~ts", [Prefix, BtMsg]))
     end.
 
 -doc """
@@ -275,15 +282,9 @@ Extracts beamtalk error message if present, otherwise uses ~tp.
 """.
 -spec format_reason_concise(term()) -> binary().
 format_reason_concise(Reason) ->
-    try
-        case beamtalk_error:extract_beamtalk_error(Reason, 4) of
-            undefined ->
-                safe_to_binary(io_lib:format("~tp", [Reason]));
-            BtError ->
-                beamtalk_error:format(BtError)
-        end
-    catch
-        _:_ -> safe_to_binary(io_lib:format("~tp", [Reason]))
+    case try_format_bt_error(Reason) of
+        undefined -> safe_to_binary(io_lib:format("~tp", [Reason]));
+        BtMsg -> BtMsg
     end.
 
 -doc "Format a report using the report callback or fallback.".
@@ -397,16 +398,11 @@ format_extra_value(stacktrace, Stack) when is_list(Stack) ->
 format_extra_value(stacktrace, Stack) ->
     %% Non-list stacktrace (e.g., tuple from Core Erlang catch).
     %% Try to extract a beamtalk error for a useful message, then append raw term.
-    try
-        case beamtalk_error:extract_beamtalk_error(Stack, 4) of
-            undefined ->
-                safe_to_binary(io_lib:format("~tp", [Stack]));
-            BtError ->
-                ErrorMsg = beamtalk_error:format(BtError),
-                safe_to_binary(io_lib:format("~ts\n  raw: ~tp", [ErrorMsg, Stack]))
-        end
-    catch
-        _:_ -> safe_to_binary(io_lib:format("~tp", [Stack]))
+    case try_format_bt_error(Stack) of
+        undefined ->
+            safe_to_binary(io_lib:format("~tp", [Stack]));
+        ErrorMsg ->
+            safe_to_binary(io_lib:format("~ts\n  raw: ~tp", [ErrorMsg, Stack]))
     end;
 format_extra_value(_Key, Value) when is_binary(Value) ->
     Value;

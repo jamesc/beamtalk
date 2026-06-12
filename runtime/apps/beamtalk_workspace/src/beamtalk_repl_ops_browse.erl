@@ -198,7 +198,7 @@ selector_row(ClassName, ClassSide, Selector, SourceFile) ->
         <<"source_status">> => atom_to_binary(SourceStatus, utf8),
         <<"origin">> => origin_for_provenance(Provenance, SourceFile),
         %% carried internally for grouping; stripped before emit
-        '__protocol__' => protocol_for_provenance(Provenance)
+        '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus)
     }.
 
 -spec info_fields(beamtalk_xref:method_info() | undefined) ->
@@ -211,9 +211,10 @@ info_fields(_) ->
     {null, unindexed_runtime_fun, put_method}.
 
 %% Group selector rows into sorted protocol buckets. The protocol of a selector
-%% is derived from its xref provenance (ADR 0096): class_body / extension map to
-%% concrete buckets, everything else falls into "as yet unclassified" (Pharo
-%% convention). Selectors within a protocol are sorted; protocols are sorted.
+%% is decided by `protocol_for_selector/4` (ADR 0096): a declared category if
+%% one exists, else the xref-extension source fact, else a Pharo-convention
+%% selector-name heuristic; unrecognised selectors fall into "as yet
+%% unclassified". Selectors within a protocol are sorted; protocols are sorted.
 -spec group_by_protocol([map()]) -> [map()].
 group_by_protocol(SelectorRows) ->
     Folded = lists:foldl(
@@ -593,12 +594,194 @@ first_line(Doc) when is_binary(Doc) ->
         [] -> Doc
     end.
 
-%% Map xref provenance to a browser protocol bucket (ADR 0096). class_body and
-%% extension are the two source-bearing provenances; runtime-installed selectors
-%% (put_method, class_builder) fall into "as yet unclassified" (Pharo).
--spec protocol_for_provenance(beamtalk_xref:provenance()) -> binary().
-protocol_for_provenance(extension) -> <<"extensions">>;
-protocol_for_provenance(_) -> <<"as yet unclassified">>.
+%% Decide a selector's browser protocol bucket (ADR 0096 §"Protocol of a
+%% selector": *the xref row's provenance plus the method's declared protocol
+%% category*). The decision is layered, most-authoritative source first — a
+%% declared category is a fact, a provenance is a fact, a name match is a guess:
+%%
+%%   1. **Pragma** — the method's *declared* protocol category. This is the
+%%      ground truth a class author assigns (the spike's hand-written categories:
+%%      "operations", "accessing", "instance creation", …). Beamtalk method
+%%      metadata does not yet carry a category field — `beamtalk_xref:method_info/3`
+%%      returns only line / source_status / provenance (no category) — so
+%%      `declared_protocol/1` reads the (currently absent) `category` key off the
+%%      xref `method_info` map: it is the single wiring point for when xref adds
+%%      one (a `<category: ...>`-style pragma or an xref `category` field). Until
+%%      then the key is absent, the lookup is `undefined`, and the decision falls
+%%      through to the source-fact / name tiers.
+%%   2. **xref-extension source** — `provenance = extension` (ADR 0066 package
+%%      extension) is a *source* fact: the selector was added to this class from
+%%      another package, so it belongs in the "extensions" bucket regardless of
+%%      its name. This outranks the name heuristic (a fact beats a guess).
+%%   3. **Heuristic** — a Pharo-convention bucket derived from the *selector name*
+%%      (accessors → "accessing", `is`/`has` tests → "testing", `print*` →
+%%      "printing", …). This is what gives ordinary `class_body` methods a
+%%      meaningful protocol instead of collapsing every non-extension selector
+%%      into one bucket. Selectors that match no convention fall into Pharo's
+%%      "as yet unclassified".
+-spec protocol_for_selector(
+    atom(),
+    beamtalk_xref:method_info() | undefined,
+    beamtalk_xref:provenance(),
+    beamtalk_xref:source_status()
+) -> binary().
+protocol_for_selector(Selector, Info, Provenance, SourceStatus) ->
+    case declared_protocol(Info) of
+        Category when is_binary(Category) ->
+            %% Tier 1 — declared category (author ground truth).
+            Category;
+        undefined ->
+            protocol_from_source(Selector, Provenance, SourceStatus)
+    end.
+
+%% Tier 1 hook: the method's declared protocol category, or `undefined` when none
+%% is declared. Beamtalk's `beamtalk_xref:method_info/3` does not carry a category
+%% field today (see `protocol_for_selector/4`), so the `category` key is absent
+%% and this returns `undefined`. It is the one place to wire a real category once
+%% xref (or a method pragma) surfaces one — reading it here keeps the decision
+%% precedence (declared > provenance > name) in a single function with no other
+%% call-site change. ADR 0096 §"Protocol of a selector".
+-spec declared_protocol(beamtalk_xref:method_info() | undefined) -> binary() | undefined.
+declared_protocol(Info) when is_map(Info) ->
+    case maps:get(category, Info, undefined) of
+        Cat when is_binary(Cat), byte_size(Cat) > 0 -> Cat;
+        _ -> undefined
+    end;
+declared_protocol(_Info) ->
+    undefined.
+
+%% Tiers 2–3: no declared category, so decide from the source facts we do have.
+%% A compiler-generated accessor (source_status = synthetic) is "accessing" by
+%% construction. An extension-provenance selector is "extensions" (source fact).
+%% Otherwise fall to the selector-name heuristic.
+-spec protocol_from_source(
+    atom(), beamtalk_xref:provenance(), beamtalk_xref:source_status()
+) -> binary().
+protocol_from_source(_Selector, _Provenance, synthetic) ->
+    %% Synthetic methods are compiler-generated field accessors (ADR 0087) —
+    %% "accessing" by construction, no name inspection needed.
+    <<"accessing">>;
+protocol_from_source(_Selector, extension, _SourceStatus) ->
+    %% Tier 2 — package-extension provenance (ADR 0066) is a source fact that
+    %% outranks the name heuristic.
+    <<"extensions">>;
+protocol_from_source(Selector, _Provenance, _SourceStatus) ->
+    %% Tier 3 — Pharo-convention name heuristic.
+    protocol_from_name(Selector).
+
+%% Pharo-convention protocol buckets derived from the selector name. Mirrors the
+%% category vocabulary the spike (`spikes/cockpit-ux-spike/image.js`) and Pharo's
+%% default protocols use. A guess, not a fact — only reached when no declared
+%% category and no source-fact bucket applies. Unrecognised selectors land in
+%% "as yet unclassified" (Pharo's name for the default bucket).
+-spec protocol_from_name(atom()) -> binary().
+protocol_from_name(Selector) ->
+    Name = atom_to_binary(Selector, utf8),
+    classify_name(Name).
+
+-spec classify_name(binary()) -> binary().
+classify_name(Name) ->
+    Keyword = binary:match(Name, <<":">>) =/= nomatch,
+    case Name of
+        %% Object protocol / printing.
+        _ when
+            Name =:= <<"printString">>;
+            Name =:= <<"displayString">>;
+            Name =:= <<"printOn:">>;
+            Name =:= <<"displayOn:">>
+        ->
+            <<"printing">>;
+        %% Equality / comparison.
+        _ when
+            Name =:= <<"=">>;
+            Name =:= <<"==">>;
+            Name =:= <<"~=">>;
+            Name =:= <<"hash">>;
+            Name =:= <<"<">>;
+            Name =:= <<">">>;
+            Name =:= <<"<=">>;
+            Name =:= <<">=">>;
+            Name =:= <<"<=>">>
+        ->
+            <<"comparing">>;
+        _ ->
+            classify_by_prefix(Name, Keyword)
+    end.
+
+%% Prefix / shape conventions (checked after the exact-name special cases).
+%%
+%% Prefix matches respect camelCase *word boundaries* via `has_word_prefix/2`:
+%% the prefix must be followed by an uppercase letter (`asString`, `toArray`) or
+%% end the selector (`do:`, `add:`). This avoids the classic false positives a
+%% naive `binary:match` prefix check produces — `toggle` is not a conversion,
+%% `address` is not adding, `island` / `issue` are not tests, `domain` is not
+%% enumeration. A guess remains a guess, but a disciplined one.
+-spec classify_by_prefix(binary(), boolean()) -> binary().
+classify_by_prefix(Name, Keyword) ->
+    Prefixes = [
+        %% {prefix, protocol} — first boundary-respecting match wins.
+        {<<"is">>, <<"testing">>},
+        {<<"has">>, <<"testing">>},
+        {<<"includes">>, <<"testing">>},
+        {<<"respondsTo">>, <<"testing">>},
+        {<<"initialize">>, <<"initialization">>},
+        {<<"init">>, <<"initialization">>},
+        {<<"as">>, <<"converting">>},
+        {<<"to">>, <<"converting">>},
+        {<<"do">>, <<"enumerating">>},
+        {<<"collect">>, <<"enumerating">>},
+        {<<"select">>, <<"enumerating">>},
+        {<<"reject">>, <<"enumerating">>},
+        {<<"detect">>, <<"enumerating">>},
+        {<<"inject">>, <<"enumerating">>},
+        {<<"add">>, <<"adding">>},
+        {<<"remove">>, <<"removing">>}
+    ],
+    case match_prefix(Name, Prefixes) of
+        {ok, Protocol} -> Protocol;
+        nomatch -> classify_shape(Name, Keyword)
+    end.
+
+%% First prefix in the list that matches `Name` at a camelCase word boundary.
+-spec match_prefix(binary(), [{binary(), binary()}]) -> {ok, binary()} | nomatch.
+match_prefix(_Name, []) ->
+    nomatch;
+match_prefix(Name, [{Prefix, Protocol} | Rest]) ->
+    case has_word_prefix(Name, Prefix) of
+        true -> {ok, Protocol};
+        false -> match_prefix(Name, Rest)
+    end.
+
+%% True when `Name` starts with `Prefix` AND the prefix is a whole camelCase
+%% word: the next character is an uppercase ASCII letter (a new word starts) or a
+%% `:` (a keyword selector like `do:`), or the prefix consumes the whole name
+%% (`add`, `remove` as bare unary words). A lowercase continuation (`toggle`,
+%% `address`) is NOT a boundary and does not match.
+-spec has_word_prefix(binary(), binary()) -> boolean().
+has_word_prefix(Name, Prefix) ->
+    PLen = byte_size(Prefix),
+    case Name of
+        <<Prefix:PLen/binary>> ->
+            true;
+        <<Prefix:PLen/binary, Next, _/binary>> ->
+            (Next >= $A andalso Next =< $Z) orelse Next =:= $:;
+        _ ->
+            false
+    end.
+
+%% Final shape rule: a keyword selector (has a `:`) that matched no more specific
+%% convention reads as an "operations" message — the spike's default protocol for
+%% state-changing keyword sends (`setTo:`, `deposit:`). Everything else (a bare
+%% unary word, a binary operator) is left "as yet unclassified": guessing
+%% getter-vs-operation from a bare name like `increment` / `reset` / `value` is
+%% unreliable, so we do not (genuine field accessors are caught earlier via
+%% `source_status = synthetic`, which is a fact, not a guess). Pharo's default
+%% bucket name is "as yet unclassified".
+-spec classify_shape(binary(), boolean()) -> binary().
+classify_shape(_Name, true) ->
+    <<"operations">>;
+classify_shape(_Name, false) ->
+    <<"as yet unclassified">>.
 
 -spec side_to_binary(boolean()) -> binary().
 side_to_binary(true) -> <<"class">>;

@@ -111,22 +111,41 @@ definition_empty_class_is_error_test() ->
 %%====================================================================
 
 browse_setup() ->
-    %% Ensure a clean xref server.
+    %% Ensure the xref server is up. We never clear it globally: a unique class
+    %% name per invocation (below) isolates this fixture from any other class /
+    %% xref state, and cleanup purges only this class — so the fixture is
+    %% order-independent and safe to run alongside a populated index (CodeRabbit
+    %% BT-2506: no global xref-table clears, unique class per invocation).
     XrefPid =
         case whereis(beamtalk_xref) of
             undefined ->
-                {ok, P} = beamtalk_xref:start_link(),
-                P;
+                %% start-or-get: another fixture may win the race between the
+                %% whereis/1 above and start_link/0 here (CodeRabbit BT-2506).
+                case beamtalk_xref:start_link() of
+                    {ok, P} ->
+                        P;
+                    {error, {already_started, P}} ->
+                        P
+                end;
             P ->
                 P
         end,
-    clear_xref_tables(),
+
+    %% Unique class name + module per invocation. `erlang:unique_integer/1`
+    %% (positive, monotonic) guarantees no collision with a previous run, a
+    %% concurrent fixture, or a real class in the image — the names the System
+    %% Browser asserts against are bound into the context and threaded through
+    %% every test body, so nothing depends on a fixed `'BrowseCounter'` atom.
+    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    ClassName = list_to_atom("BrowseCounter_" ++ Uniq),
+    ClassNameBin = atom_to_binary(ClassName, utf8),
+    ModuleName = list_to_atom("bt@test@browse_counter_" ++ Uniq),
 
     %% A concrete class with two instance methods, a class-side method, fields
     %% with defaults, and a doc — the System Browser's canonical subject.
-    {BrowsePid, BrowseOwned} = start_browse_class('BrowseCounter', #{
-        name => 'BrowseCounter',
-        module => 'bt@test@browse_counter',
+    {BrowsePid, BrowseOwned} = start_browse_class(ClassName, #{
+        name => ClassName,
+        module => ModuleName,
         superclass => none,
         doc => <<"The canonical live object.\nSecond line ignored.">>,
         fields => [value, step],
@@ -148,12 +167,19 @@ browse_setup() ->
 
     %% Seed xref for the instance side so browse-protocols / -method-source get
     %% line + source_status + provenance from the index.
-    ok = beamtalk_xref:register_class('BrowseCounter', browse_xref()),
+    ok = beamtalk_xref:register_class(ClassName, browse_xref()),
 
-    #{xref => XrefPid, class => {'BrowseCounter', BrowsePid, BrowseOwned}}.
+    #{
+        xref => XrefPid,
+        class_name => ClassNameBin,
+        class => {ClassName, BrowsePid, BrowseOwned}
+    }.
 
-browse_cleanup(#{class := {_Name, Pid, Owned}}) ->
-    clear_xref_tables(),
+browse_cleanup(#{class := {Name, Pid, Owned}}) ->
+    %% Purge only this fixture's class from the xref index — never a global
+    %% `ets:delete_all_objects` that would wipe a concurrently-populated index
+    %% (CodeRabbit BT-2506). `purge_class/1` is idempotent.
+    catch beamtalk_xref:purge_class(Name),
     case Owned of
         true ->
             catch gen_server:stop(Pid);
@@ -168,53 +194,55 @@ start_browse_class(Name, Spec) ->
         {error, {already_started, Pid}} -> {Pid, false}
     end.
 
-clear_xref_tables() ->
-    try
-        sys:replace_state(beamtalk_xref, fun(S) ->
-            ets:delete_all_objects(beamtalk_xref_methods),
-            ets:delete_all_objects(beamtalk_xref_senders),
-            ets:delete_all_objects(beamtalk_xref_references),
-            ets:delete_all_objects(xref_class_gen),
-            S
-        end)
-    catch
-        _:_ -> ok
-    end.
-
-%% Instance-side xref rows for the two source-backed selectors.
+%% Instance-side xref rows. The first two are the source-backed selectors the
+%% original browse tests assert on; the rest exercise the BT-2506 protocol
+%% categorization decision (name heuristic, extension source fact, synthetic
+%% accessor). Listing selectors as atom literals here interns them so the op's
+%% `binary_to_existing_atom` resolution succeeds.
 browse_xref() ->
     [
-        #{
-            class_side => false,
-            selector => 'increment',
-            line => 68,
-            sends => [],
-            references => [],
-            source_status => indexed,
-            provenance => class_body
-        },
-        #{
-            class_side => false,
-            selector => 'value',
-            line => 80,
-            sends => [],
-            references => [],
-            source_status => indexed,
-            provenance => class_body
-        }
+        method_row('increment', 68, indexed, class_body),
+        method_row('value', 80, indexed, class_body),
+        %% Name-heuristic buckets (no declared category, not extension):
+        method_row('isEmpty', 90, indexed, class_body),
+        method_row('asString', 92, indexed, class_body),
+        method_row('printString', 94, indexed, class_body),
+        method_row('setTo:', 96, indexed, class_body),
+        %% Source fact: extension provenance → "extensions", outranks the name.
+        method_row('describe', 98, indexed, extension),
+        %% Synthetic compiler-generated accessor → "accessing" by construction.
+        method_row('step', 100, synthetic, class_body),
+        %% camelCase word-boundary guard: `address` must NOT match the `add`
+        %% prefix (no uppercase/`:` boundary), so it stays "as yet unclassified".
+        method_row('address', 102, indexed, class_body),
+        %% Precedence overlap: synthetic AND extension. The synthetic source
+        %% status (a compiler-generated accessor) is decided before the extension
+        %% provenance, so this must bucket "accessing", not "extensions".
+        method_row('syntheticExt', 104, synthetic, extension)
     ].
+
+method_row(Selector, Line, SourceStatus, Provenance) ->
+    #{
+        class_side => false,
+        selector => Selector,
+        line => Line,
+        sends => [],
+        references => [],
+        source_status => SourceStatus,
+        provenance => Provenance
+    }.
 
 browse_test_() ->
     {setup, fun browse_setup/0, fun browse_cleanup/1, fun browse_tests/1}.
 
-browse_tests(_Ctx) ->
+browse_tests(#{class_name := Class}) ->
     [
         {"browse-classes includes the registered class with required fields", fun() ->
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
             ),
             ?assert(is_list(Value)),
-            Row = find_class_row(Value, <<"BrowseCounter">>),
+            Row = find_class_row(Value, Class),
             ?assertNotEqual(undefined, Row),
             lists:foreach(
                 fun(Key) -> ?assert(maps:is_key(Key, Row)) end,
@@ -235,7 +263,7 @@ browse_tests(_Ctx) ->
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
             ),
-            Row = find_class_row(Value, <<"BrowseCounter">>),
+            Row = find_class_row(Value, Class),
             ?assertEqual(<<"The canonical live object.">>, maps:get(<<"comment">>, Row))
         end},
         {"browse-classes origin is runtime for a file-less class", fun() ->
@@ -244,7 +272,7 @@ browse_tests(_Ctx) ->
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
             ),
-            Row = find_class_row(Value, <<"BrowseCounter">>),
+            Row = find_class_row(Value, Class),
             ?assertEqual(null, maps:get(<<"source_file">>, Row)),
             ?assertEqual(<<"runtime">>, maps:get(<<"origin">>, Row))
         end},
@@ -252,12 +280,12 @@ browse_tests(_Ctx) ->
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
-                    #{<<"class">> => <<"BrowseCounter">>, <<"side">> => <<"instance">>},
+                    #{<<"class">> => Class, <<"side">> => <<"instance">>},
                     make_msg(),
                     self()
                 )
             ),
-            ?assertEqual(<<"BrowseCounter">>, maps:get(<<"class">>, Value)),
+            ?assertEqual(Class, maps:get(<<"class">>, Value)),
             ?assertEqual(<<"instance">>, maps:get(<<"side">>, Value)),
             Protocols = maps:get(<<"protocols">>, Value),
             ?assert(is_list(Protocols)),
@@ -269,10 +297,42 @@ browse_tests(_Ctx) ->
             ?assertEqual(68, maps:get(<<"line">>, IncRow)),
             ?assertEqual(<<"indexed">>, maps:get(<<"source_status">>, IncRow))
         end},
+        {"browse-protocols categorizes selectors by real protocol buckets", fun() ->
+            %% BT-2506: protocol_for_selector decides pragma → xref-extension
+            %% source → name heuristic. With no declared category, the seed
+            %% selectors land in meaningful buckets (not all "as yet
+            %% unclassified"): name conventions for is*/as*/print*, the
+            %% extension-provenance selector in "extensions", and a synthetic
+            %% accessor in "accessing".
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Class, <<"side">> => <<"instance">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            Protocols = maps:get(<<"protocols">>, Value),
+            ProtocolNames = [maps:get(<<"name">>, P) || P <- Protocols],
+            %% More than one bucket now — the v1 single-bucket collapse is gone.
+            ?assert(length(ProtocolNames) > 1),
+            ?assertEqual(<<"testing">>, protocol_of(Protocols, <<"isEmpty">>)),
+            ?assertEqual(<<"converting">>, protocol_of(Protocols, <<"asString">>)),
+            ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printString">>)),
+            ?assertEqual(<<"operations">>, protocol_of(Protocols, <<"setTo:">>)),
+            %% Source fact (extension provenance) outranks the name heuristic.
+            ?assertEqual(<<"extensions">>, protocol_of(Protocols, <<"describe">>)),
+            %% Synthetic source_status → "accessing" by construction.
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"step">>)),
+            %% Word-boundary discipline: `address` is not an `add` mutator.
+            ?assertEqual(<<"as yet unclassified">>, protocol_of(Protocols, <<"address">>)),
+            %% Precedence: synthetic status decided before extension provenance.
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"syntheticExt">>))
+        end},
         {"browse-protocols rejects a bad side", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-protocols">>,
-                #{<<"class">> => <<"BrowseCounter">>, <<"side">> => <<"klass">>},
+                #{<<"class">> => Class, <<"side">> => <<"klass">>},
                 make_msg(),
                 self()
             ),
@@ -282,7 +342,7 @@ browse_tests(_Ctx) ->
         {"browse-protocols missing side is an error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-protocols">>,
-                #{<<"class">> => <<"BrowseCounter">>},
+                #{<<"class">> => Class},
                 make_msg(),
                 self()
             ),
@@ -293,7 +353,7 @@ browse_tests(_Ctx) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-method-source">>,
                     #{
-                        <<"class">> => <<"BrowseCounter">>,
+                        <<"class">> => Class,
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"increment">>
                     },
@@ -315,7 +375,7 @@ browse_tests(_Ctx) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-method-source">>,
                     #{
-                        <<"class">> => <<"BrowseCounter">>,
+                        <<"class">> => Class,
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"increment">>
                     },
@@ -327,15 +387,17 @@ browse_tests(_Ctx) ->
         end},
         {"browse-method-source for unknown selector yields null source", fun() ->
             %% A selector the class does not define → no xref row, no stored
-            %% source: source null, status unindexed_runtime_fun. Uses an atom
-            %% that already exists so binary_to_existing_atom succeeds.
+            %% source: source null, status unindexed_runtime_fun. Whether the
+            %% name is an existing atom or not, the op resolves to the same
+            %% not-found result (an unknown name maps to a sentinel atom that
+            %% also has no xref row / stored source).
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-method-source">>,
                     #{
-                        <<"class">> => <<"BrowseCounter">>,
+                        <<"class">> => Class,
                         <<"side">> => <<"instance">>,
-                        <<"selector">> => <<"step">>
+                        <<"selector">> => <<"unknownBrowseSelector">>
                     },
                     make_msg(),
                     self()
@@ -348,12 +410,12 @@ browse_tests(_Ctx) ->
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-class-definition">>,
-                    #{<<"class">> => <<"BrowseCounter">>},
+                    #{<<"class">> => Class},
                     make_msg(),
                     self()
                 )
             ),
-            ?assertEqual(<<"BrowseCounter">>, maps:get(<<"class">>, Value)),
+            ?assertEqual(Class, maps:get(<<"class">>, Value)),
             State = maps:get(<<"state">>, Value),
             StateNames = [maps:get(<<"name">>, S) || S <- State],
             ?assert(lists:member(<<"value">>, StateNames)),
@@ -367,7 +429,7 @@ browse_tests(_Ctx) ->
             ?assertEqual(<<"runtime">>, maps:get(<<"origin">>, Value))
         end},
         {"no-user-code: browse never invokes a method whose body would crash", fun() ->
-            %% Every browse op runs against BrowseCounter, whose method bodies
+            %% Every browse op runs against the fixture class, whose method bodies
             %% raise `must_not_run` if invoked. If any browse path sent the
             %% method to a value, these calls would surface that error. They all
             %% succeed (status [done]) → reflection only (ADR 0091 Decision 4).
@@ -377,7 +439,7 @@ browse_tests(_Ctx) ->
             _ = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
-                    #{<<"class">> => <<"BrowseCounter">>, <<"side">> => <<"instance">>},
+                    #{<<"class">> => Class, <<"side">> => <<"instance">>},
                     make_msg(),
                     self()
                 )
@@ -386,7 +448,7 @@ browse_tests(_Ctx) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-method-source">>,
                     #{
-                        <<"class">> => <<"BrowseCounter">>,
+                        <<"class">> => Class,
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"increment">>
                     },
@@ -397,7 +459,7 @@ browse_tests(_Ctx) ->
             _ = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-class-definition">>,
-                    #{<<"class">> => <<"BrowseCounter">>},
+                    #{<<"class">> => Class},
                     make_msg(),
                     self()
                 )
@@ -422,5 +484,21 @@ all_selector_rows(Protocols) ->
 find_selector_row(Selectors, Name) ->
     case [S || S <- Selectors, maps:get(<<"selector">>, S) =:= Name] of
         [Row | _] -> Row;
+        [] -> undefined
+    end.
+
+%% The name of the protocol bucket a given selector landed in, or `undefined`.
+protocol_of(Protocols, Selector) ->
+    case
+        [
+            maps:get(<<"name">>, P)
+         || P <- Protocols,
+            lists:any(
+                fun(S) -> maps:get(<<"selector">>, S) =:= Selector end,
+                maps:get(<<"selectors">>, P)
+            )
+        ]
+    of
+        [ProtocolName | _] -> ProtocolName;
         [] -> undefined
     end.
