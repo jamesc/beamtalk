@@ -1748,10 +1748,14 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     case Facade.dispatch(:eval, %{session_pid: pid, code: code}, ctx(socket)) do
       {:ok, term, _output, _warnings} ->
-        assign(socket,
-          poke_result: "→ #{Workspace.render_term(term)}",
-          poke_error: nil
-        )
+        socket
+        |> assign(poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil)
+        # A poke is a user-initiated mutation — re-read the inspected object now so
+        # its fields reflect the write immediately, rather than waiting on the async
+        # `{:object_changed, …}` change-stream push (which is coalesced/delayed, and
+        # is the live-tracking path tracked separately by BT-2524). No-op when the
+        # pane is frozen or nothing is watched.
+        |> refresh_poked_inspector()
 
       {:error, reason, _output, _warnings} ->
         assign(socket, poke_result: nil, poke_error: Workspace.render_error(reason))
@@ -1760,6 +1764,17 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, poke_result: nil, poke_error: facade_error(reason))
     end
   end
+
+  # Re-read the inspected object after a successful poke so the pane reflects the
+  # mutation synchronously. Only when an object is actively watched (a live,
+  # non-frozen pid-backed head) — a frozen pane holds its snapshot, and a
+  # non-object head has nothing to re-read.
+  defp refresh_poked_inspector(%{assigns: %{inspect_watch: term}} = socket)
+       when not is_nil(term) do
+    refresh_inspector(socket, term)
+  end
+
+  defp refresh_poked_inspector(socket), do: socket
 
   # The binding name to address a poke to. A poke eval's `<receiver> <message>`
   # against the session, so the receiver must be a *source-addressable* name — a
