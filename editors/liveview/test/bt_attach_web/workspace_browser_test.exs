@@ -344,7 +344,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> visit("/")
     |> assert_has("#workspace-editor-source")
     # Define a class whose method sends a selector we can then trace. The starter
-    # tab targets Counter#increment; define both so a real implementor exists.
+    # tab targets Counter#increment, so `Counter` MUST exist before ⌘S can save
+    # `increment` onto it — define it here rather than leaning on another test
+    # having defined it first (the suite shares one workspace and runs in a
+    # seed-randomised order, so that ordering is not guaranteed: BT-2528). A
+    # second class (NavCounter) gives `increment` a real implementor to trace.
+    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
     |> eval_do(
       "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
     )
