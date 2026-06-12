@@ -205,11 +205,11 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   # pid_stats read only happen over the live socket. `Phoenix.LiveViewTest` never
   # loads `app.js`, so these MUST run in a real browser (the e2e lane).
 
-  # Deferred to BT-2524: the cross-node {:object_changed, …} push that drives the
-  # flash is not delivered to the LiveView on the e2e lane (the server-side
-  # assertion in workspace_live_test.exs is skipped for the same reason). The
-  # freeze/poke/chips browser cases below do not depend on the async push.
-  @tag skip: "BT-2524: cross-node object_changed push not delivered in e2e"
+  # BT-2524: the {:object_changed, …} push that drives the flash now fires for
+  # compiled actors (the generated gen_server callbacks call
+  # beamtalk_actor:notify_state_change/2 after a committed state write), so this
+  # Playwright case and its server-side counterpart in workspace_live_test.exs
+  # are both re-enabled.
   test "the Inspector flashes a field when the inspected actor changes (BT-2492)", %{conn: conn} do
     conn
     |> visit("/")
@@ -344,7 +344,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> visit("/")
     |> assert_has("#workspace-editor-source")
     # Define a class whose method sends a selector we can then trace. The starter
-    # tab targets Counter#increment; define both so a real implementor exists.
+    # tab targets Counter#increment, so `Counter` MUST exist before ⌘S can save
+    # `increment` onto it — define it here rather than leaning on another test
+    # having defined it first (the suite shares one workspace and runs in a
+    # seed-randomised order, so that ordering is not guaranteed: BT-2528). A
+    # second class (NavCounter) gives `increment` a real implementor to trace.
+    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
     |> eval_do(
       "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
     )

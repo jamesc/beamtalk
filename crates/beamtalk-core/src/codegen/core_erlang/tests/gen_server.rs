@@ -2534,6 +2534,39 @@ Actor subclass: Counter
 }
 
 #[test]
+fn test_bt2524_generated_callbacks_notify_state_change_substrate() {
+    // BT-2524: a compiled actor's generated handle_call/handle_cast must call
+    // beamtalk_actor:notify_state_change/2 after committing new state, so a
+    // *watched* actor's state writes push {object_changed,…} to the live
+    // Inspector. The runtime beamtalk_actor dispatch path does this via
+    // log_dispatch_complete/5; compiled actors run their own callbacks and would
+    // otherwise never publish (the changed field would never flash).
+    let src = "
+Actor subclass: Counter
+  state: value = 0
+  increment => self.value := self.value + 1
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    // handle_call commits NewState; the hook fires before returning the reply.
+    assert!(
+        code.contains("'beamtalk_actor':'notify_state_change'(State, NewState)"),
+        "handle_call must notify the per-object change substrate after committing \
+         state. Got:\n{code}"
+    );
+    // handle_cast (fire-and-forget) commits CastNewState; same hook.
+    assert!(
+        code.contains("'beamtalk_actor':'notify_state_change'(State, CastNewState)"),
+        "handle_cast must notify the per-object change substrate after committing \
+         state. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_bt1005_explicit_annotation_not_overwritten_by_writeback() {
     // BT-1005: An explicitly annotated method must NOT be changed by the writeback pass.
     let src = "

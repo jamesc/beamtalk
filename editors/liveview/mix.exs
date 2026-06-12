@@ -32,9 +32,11 @@ defmodule BtAttach.MixProject do
 
   # Self-contained, ERTS-embedded OTP release of the LiveView IDE (BT-2513).
   #
-  # `MIX_ENV=prod mix release` (see `just dist-liveview`) produces
-  # `_build/prod/rel/bt_attach`, runnable with `bin/bt_attach start` and no
-  # Elixir/Mix on the host. The server is enabled at boot by `PHX_SERVER=true`
+  # `MIX_ENV=prod mix release` produces `_build/prod/rel/bt_attach` (the
+  # Dockerfile builds it there; `just dist-liveview` — used locally and by the
+  # CI release lane — redirects it to `dist-liveview/` at the repo root via
+  # `--path`). Runnable with `bin/bt_attach start` and no Elixir/Mix on the
+  # host. The server is enabled at boot by `PHX_SERVER=true`
   # (config/runtime.exs); OIDC / workspace-attach env (ADR 0091) is read there
   # too, so the release honours the same configuration as `just web-remote`.
   # This is the artifact the packaging lane ships (BT-2515 archive, BT-2516

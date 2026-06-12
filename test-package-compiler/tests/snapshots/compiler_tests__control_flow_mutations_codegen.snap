@@ -126,6 +126,7 @@ module 'control_flow_mutations' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _CastDispatchResult of
                 <{'reply', _CastResult, CastNewState}> when 'true' ->
+                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CastNewState) in
                     {'noreply', CastNewState}
                 <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                     let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
@@ -149,6 +150,7 @@ module 'control_flow_mutations' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _CastDispatchResult of
                 <{'reply', _CastResult, CastNewState}> when 'true' ->
+                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CastNewState) in
                     {'noreply', CastNewState}
                 <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                     let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
@@ -179,6 +181,7 @@ module 'control_flow_mutations' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _DispatchResult of
                 <{'reply', Result, NewState}> when 'true' ->
+                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, NewState) in
                     {'reply', {'ok', Result}, NewState}
                 <{'error', Error, ErrState}> when 'true' ->
                     {'reply', {'error', Error}, ErrState}
@@ -196,6 +199,7 @@ module 'control_flow_mutations' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _DispatchResult of
                 <{'reply', Result, NewState}> when 'true' ->
+                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, NewState) in
                     {'reply', {'ok', Result}, NewState}
                 <{'error', Error, ErrState}> when 'true' ->
                     {'reply', {'error', Error}, ErrState}
