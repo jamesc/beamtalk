@@ -332,28 +332,28 @@ matching rows (or a never-started bus) is a no-op that returns `ok`.
 system_unsubscribe(AnnouncementClass, SubscriberPid) when
     is_atom(AnnouncementClass), is_pid(SubscriberPid)
 ->
-    case ets:whereis(?SUBS_TABLE) of
-        undefined ->
-            ok;
-        _ ->
-            Rows = ets:match_object(
-                ?SUBS_TABLE,
-                {'_', ?SYSTEM_ANNOUNCER_REF, AnnouncementClass, SubscriberPid, '_', '_'}
-            ),
-            %% `unsubscribe/1` is a `gen_server:call`; the tables can outlive the bus
-            %% on the supervisor heir (the crash→restart gap), so guard the call to
-            %% keep the documented no-op contract rather than exiting `noproc`.
-            lists:foreach(
-                fun({SubRef, _Ann, _Class, _Pid, _Handler, _Once}) ->
-                    try unsubscribe(SubRef) of
-                        _ -> ok
-                    catch
-                        exit:_ -> ok
-                    end
-                end,
-                Rows
-            ),
-            ok
+    %% Wrap the whole read+remove: the tables can outlive the bus on the supervisor
+    %% heir (the crash→restart gap), so both the `ets:match_object/2` read (a
+    %% `badarg` if the table is deleted in the window after `ets:whereis/1`) and the
+    %% `unsubscribe/1` `gen_server:call` (a `noproc` exit if the bus is down) must be
+    %% caught to keep the documented idempotent no-op contract.
+    try
+        case ets:whereis(?SUBS_TABLE) of
+            undefined ->
+                ok;
+            _ ->
+                Rows = ets:match_object(
+                    ?SUBS_TABLE,
+                    {'_', ?SYSTEM_ANNOUNCER_REF, AnnouncementClass, SubscriberPid, '_', '_'}
+                ),
+                lists:foreach(
+                    fun({SubRef, _Ann, _Class, _Pid, _Handler, _Once}) -> unsubscribe(SubRef) end,
+                    Rows
+                ),
+                ok
+        end
+    catch
+        _:_ -> ok
     end;
 system_unsubscribe(_AnnouncementClass, _SubscriberPid) ->
     ok.

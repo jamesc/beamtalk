@@ -101,6 +101,64 @@ unsubscribe_pid_removes_that_pid_test() ->
     end.
 
 %%% ===========================================================================
+%%% bindings stream carries the session id (BT-2531 review: clear/put/remove
+%%% refresh path uses announce_binding_changed/3 with an explicit session id)
+%%% ===========================================================================
+
+binding_changed_carries_explicit_session_id_test() ->
+    ensure_bus(),
+    Self = self(),
+    SubPid = spawn_collector(Self),
+    try
+        ok = beamtalk_repl_subscriptions:subscribe(bindings, SubPid),
+        %% The shell's clear / put / remove paths call this with an explicit session
+        %% id (the shell process has no `beamtalk_session_id` in its dictionary).
+        ok = beamtalk_repl_eval:announce_binding_changed(x, 42, <<"sess-xyz">>),
+        receive
+            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, Event}} ->
+                ?assertEqual(<<"sess-xyz">>, maps:get(sessionId, Event)),
+                ?assertEqual(x, maps:get(name, Event)),
+                ?assertEqual(42, maps:get(value, Event))
+        after 1000 -> ?assert(false)
+        end
+    after
+        beamtalk_repl_subscriptions:unsubscribe(bindings, SubPid),
+        stop_collector(SubPid)
+    end.
+
+%%% ===========================================================================
+%%% subscribe_bus is idempotent per pid+class (BT-2531 review: dedup re-mount)
+%%% ===========================================================================
+
+subscribe_twice_delivers_once_test() ->
+    ensure_bus(),
+    Self = self(),
+    SubPid = spawn_collector(Self),
+    try
+        %% Re-subscribing the same pid (as a fast re-mount would) must not leave a
+        %% duplicate subscription that double-delivers each event.
+        ok = beamtalk_repl_subscriptions:subscribe(bindings, SubPid),
+        ok = beamtalk_repl_subscriptions:subscribe(bindings, SubPid),
+
+        beamtalk_announcements:system_announce('BindingChanged', #{
+            name => y, value => 1, sessionId => <<"s">>
+        }),
+        receive
+            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, _Event}} -> ok
+        after 1000 -> ?assert(false)
+        end,
+        %% Exactly one delivery — no duplicate from the second subscribe.
+        receive
+            {got, {beamtalk_announcement, _R2, 'BindingChanged', ?PUSH_HANDLER, _E2}} ->
+                ?assert(false)
+        after 200 -> ok
+        end
+    after
+        beamtalk_repl_subscriptions:unsubscribe(bindings, SubPid),
+        stop_collector(SubPid)
+    end.
+
+%%% ===========================================================================
 %%% subscribe_all/1 covers every bus-backed stream for the given pid
 %%% ===========================================================================
 

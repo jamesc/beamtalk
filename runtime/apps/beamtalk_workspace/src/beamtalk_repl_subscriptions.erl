@@ -220,12 +220,17 @@ Register `Pid` on the SystemAnnouncer bus for every announcement class of
 `Stream`, with the inert `?PUSH_HANDLER` term so the bus delivers the native
 `{beamtalk_announcement, …}` message to `Pid`'s mailbox (BT-2531).
 
+Idempotent per pid+class: each class is detached (`system_unsubscribe/2`) before
+re-subscribing, so a LiveView that re-mounts within `net_ticktime` of a
+disconnect — before the bus monitor-prunes its old rows — does not accumulate
+duplicate subscriptions (which would deliver the same event twice).
+
 Tolerant of a momentarily-unavailable bus: registration is a `gen_server:call`
 to `beamtalk_announcements`, and this is on the WebSocket connect path
-(`subscribe_all/0` runs as the handler authenticates). A `noproc`/timeout there
-must **never** crash the connect — that would fail the workspace's WS health
+(`subscribe_all/0` runs as the handler authenticates). A `noproc`/timeout/error
+there must **never** crash the connect — that would fail the workspace's WS health
 check — so a missing bus is skipped (the consumer simply gets no pushes until it
-re-subscribes) and a mid-call exit is swallowed. This restores the
+re-subscribes) and any mid-call failure is swallowed. This restores the
 crash-immunity the legacy `gen_server:cast` channels had.
 """.
 -spec subscribe_bus(actors | classes | bindings | flush, pid()) -> ok.
@@ -236,10 +241,13 @@ subscribe_bus(Stream, Pid) ->
         _ ->
             lists:foreach(
                 fun(Class) ->
-                    try beamtalk_announcements:subscribe(Class, Pid, ?PUSH_HANDLER, false) of
+                    try
+                        beamtalk_announcements:system_unsubscribe(Class, Pid),
+                        beamtalk_announcements:subscribe(Class, Pid, ?PUSH_HANDLER, false)
+                    of
                         _ -> ok
                     catch
-                        exit:_ -> ok
+                        _:_ -> ok
                     end
                 end,
                 announcement_classes(Stream)
@@ -254,7 +262,7 @@ unsubscribe_bus(Stream, Pid) ->
             try beamtalk_announcements:system_unsubscribe(Class, Pid) of
                 _ -> ok
             catch
-                exit:_ -> ok
+                _:_ -> ok
             end
         end,
         announcement_classes(Stream)
