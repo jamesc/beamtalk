@@ -10,23 +10,22 @@
 // The mutation path (local writes / self-sends) was unaffected
 
 TestCase subclass: TimesRepeatSimpleTest
+  field: c = nil
+
+  setUp => self.c := Counter spawn
 
   testZeroTimesIsNoOp =>
-    c := Counter spawn
-    0 timesRepeat: [c increment]
-    self assert: c getValue equals: 0
+    0 timesRepeat: [self.c increment]
+    self assert: self.c getValue equals: 0
 
   testOneTimeRunsBlockOnce =>
-    c := Counter spawn
-    1 timesRepeat: [c increment]
-    self assert: c getValue equals: 1
+    1 timesRepeat: [self.c increment]
+    self assert: self.c getValue equals: 1
 
   testThreeTimesRunsBlockThreeTimes =>
-    c := Counter spawn
-    3 timesRepeat: [c increment]
-    self assert: c getValue equals: 3
+    3 timesRepeat: [self.c increment]
+    self assert: self.c getValue equals: 3
 
   testFiveTimesRunsBlockFiveTimes =>
-    c := Counter spawn
-    5 timesRepeat: [c increment]
-    self assert: c getValue equals: 5
+    5 timesRepeat: [self.c increment]
+    self assert: self.c getValue equals: 5
