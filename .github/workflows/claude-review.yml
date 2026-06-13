@@ -52,6 +52,43 @@ jobs:
           echo "full=${base}...${head}" >> "$GITHUB_OUTPUT"
           echo "incr=${incr}" >> "$GITHUB_OUTPUT"
 
+          # Pre-compute de-noised diffs the reviewer reads instead of running its own
+          # `git diff` over the whole range. Excluding lockfiles, generated Core Erlang,
+          # the generated beamtalk_stdlib.app.src, and test fixtures keeps token cost down
+          # with no loss of review-relevant signal (these match the prompt's DO-NOT-FLAG
+          # list). The other *.app.src files are hand-maintained config and are kept.
+          # -U20 gives generous context so the agent rarely needs to open full files.
+          excludes=(.
+            ':(exclude,glob)**/*.lock'
+            ':(exclude,glob)**/*.core'
+            ':(exclude,glob)**/beamtalk_stdlib.app.src'
+            ':(exclude,glob)**/fixtures/**'
+            ':(exclude,glob)**/test_fixtures/**')
+          git diff -U20 "${base}...${head}" -- "${excludes[@]}" \
+            > "${GITHUB_WORKSPACE}/.claude-review-full.diff" || true
+          git diff -U20 "${incr}" -- "${excludes[@]}" \
+            > "${GITHUB_WORKSPACE}/.claude-review-incr.diff" || true
+
+      - name: Select model
+        id: model
+        env:
+          FULL_RANGE: ${{ steps.ranges.outputs.full }}
+        run: |
+          # Config-only PRs get the cheaper Haiku model; anything touching code OR docs
+          # (incl. ADRs under docs/, whose review is valuable) stays on Sonnet. Unknown
+          # extensions default to Sonnet — never silently downgrade a substantive change.
+          model='claude-sonnet-4-6'
+          files="$(git diff --name-only "${FULL_RANGE}")"
+          # A file is "config" if it matches this pattern. If grep finds any changed file
+          # that does NOT match (and is non-empty), the PR touches code/docs → Sonnet.
+          # If every changed file is config → Haiku. Empty file list also stays Sonnet.
+          config_re='\.(toml|ya?ml|json|lock|cfg|ini|conf|config)$|(^|/)\.(gitignore|gitattributes|editorconfig|dockerignore)$|^$'
+          if [ -n "${files}" ] && ! printf '%s\n' "${files}" | grep -qvE "${config_re}"; then
+            model='claude-haiku-4-5'
+          fi
+          echo "Selected model: ${model}"
+          echo "model=${model}" >> "$GITHUB_OUTPUT"
+
       # The review prompt lives in .github/claude-review-prompt.md so it can be edited
       # without touching the workflow. The action's `prompt` input is a plain string and
       # ${{ }} does not interpolate inside an external file, so the diff ranges are injected
@@ -84,7 +121,7 @@ jobs:
           # mcp__github_inline_comment__create_inline_comment is the action's own tool
           # for line-anchored comments; it must be listed explicitly because
           # --allowedTools REPLACES the action's default tool set rather than extending it.
-          claude_args: '--max-turns 50 --model claude-sonnet-4-6 --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),mcp__github_inline_comment__create_inline_comment"'
+          claude_args: '--max-turns 50 --model ${{ steps.model.outputs.model }} --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),mcp__github_inline_comment__create_inline_comment"'
           prompt: ${{ steps.load_prompt.outputs.prompt }}
 
       - name: Post review summary

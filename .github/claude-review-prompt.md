@@ -8,13 +8,23 @@ reconnect, restart, empty/boundary input, or an unexpected message?" Correctness
 first; invariant and style checks come after.
 
 REVIEW SCOPE (read carefully — this drives review quality):
-- Review the FULL PR diff for correctness: run `git diff __FULL_RANGE__` and reason about
-  the entire change set. Your review depth must NOT depend on how much landed in the most
-  recent push — a small last commit is not an excuse for a shallow review.
-- For inline comments, run `git diff __INCR_RANGE__` and attach each finding within that
-  incremental range to the exact line using the create_inline_comment tool. Include a
-  ```suggestion block for concrete, mechanical fixes so the author can apply them in one
-  click; describe the change in prose when it is larger or needs judgement.
+- Two pre-computed diffs are waiting for you in the repo root; READ THESE rather than
+  running your own `git diff` over the whole range:
+  - `.claude-review-full.diff` — the FULL PR (`__FULL_RANGE__`), ±20 lines of context.
+  - `.claude-review-incr.diff` — the INCREMENTAL change since the last review
+    (`__INCR_RANGE__`), ±20 lines of context.
+  Both already exclude lockfiles, generated Core Erlang, the generated
+  `beamtalk_stdlib.app.src`, and test fixtures — do not flag their absence, and do NOT run a
+  whole-range `git diff` to "get them back" (it wastes tokens on noise you are told to
+  ignore). If you need more than ±20 lines on ONE file, read that file directly or run
+  `git diff __FULL_RANGE__ -- <that file>`.
+- Review the FULL diff for correctness and reason about the entire change set. Your review
+  depth must NOT depend on how much landed in the most recent push — a small last commit is
+  not an excuse for a shallow review.
+- For inline comments, use the INCREMENTAL diff and attach each finding within it to the
+  exact line using the create_inline_comment tool. Include a ```suggestion block for
+  concrete, mechanical fixes so the author can apply them in one click; describe the change
+  in prose when it is larger or needs judgement.
 - A finding in the full range but outside the incremental range goes in the summary (name
   any out-of-range Blocker explicitly). Never silently drop a finding because it is
   out-of-range.
