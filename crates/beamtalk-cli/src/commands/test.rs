@@ -29,6 +29,7 @@ use tracing::{debug, info, instrument, warn};
 
 use super::build_layout::BuildLayout;
 use super::manifest;
+use super::util;
 
 /// Per-package class module indexes: package root → (`class_module_index`, `class_superclass_index`).
 type PkgClassIndexes = HashMap<Utf8PathBuf, (HashMap<String, String>, HashMap<String, String>)>;
@@ -229,11 +230,7 @@ fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
     let stem = fixture_path
         .file_stem()
         .ok_or_else(|| miette::miette!("Fixture file has no name: {}", fixture_path))?;
-
-    Ok(format!(
-        "bt@{}",
-        beamtalk_core::codegen::core_erlang::to_module_name(stem)
-    ))
+    Ok(util::bt_module_name_from_stem(stem))
 }
 
 /// Build class → module name and class → superclass indexes from fixture files.

@@ -271,8 +271,10 @@ defmodule BtAttachWeb.WorkspaceLive do
           # Resume the tab's existing session if the registry still holds a live
           # one (reconnect within the grace window); otherwise start fresh.
           case resume_or_start(token, session_meta(socket)) do
-            {:ok, session_id, pid} ->
-              bind_session(socket, session_id, pid)
+            {:ok, session_id, pid, origin} ->
+              socket
+              |> bind_session(session_id, pid)
+              |> restore_windows(token, origin)
 
             {:error, reason} ->
               assign(socket,
@@ -301,7 +303,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     case token && SessionRegistry.checkout(token) do
       {:resumed, session_id, pid} ->
         if Workspace.session_alive?(pid) do
-          {:ok, session_id, pid}
+          {:ok, session_id, pid, :resumed}
         else
           # Stale entry (workspace restarted): discard it and start fresh.
           SessionRegistry.discard(token)
@@ -337,7 +339,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         # owns the close, keyed by the tab token (a nil token simply skips
         # registration — that session is non-resumable and closed in terminate/2).
         SessionRegistry.register(token, session_id, pid)
-        {:ok, session_id, pid}
+        {:ok, session_id, pid, :fresh}
 
       {:error, reason} ->
         {:error, reason}
@@ -731,6 +733,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("window_moved", _params, socket), do: {:noreply, socket}
+
+  # Bring every floating window back onto the default on-screen ladder (BT-2527
+  # #4): recovery for a window dragged/restored outside the visible viewport. Pure
+  # view state — positions only.
+  def handle_event("window_reset_positions", _params, socket) do
+    {:noreply, reset_window_positions(socket)}
+  end
 
   # Freeze / unfreeze a single floating window's live tracking (per-window freeze,
   # mirroring the docked `"freeze_toggle"`). Each window watches independently, so
@@ -1209,7 +1218,11 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       case socket.assigns[:token] do
         token when is_binary(token) ->
-          # Resumable session: defer teardown to the grace window.
+          # Resumable session: stash the open floating-inspector windows so a
+          # reconnect within the grace window rebuilds the desk (BT-2527 #3), then
+          # defer teardown to the grace window. The stash dies with the entry if
+          # no reconnect arrives, so a genuinely-closed tab leaves nothing behind.
+          SessionRegistry.stash_windows(token, build_window_stash(socket))
           SessionRegistry.release(token)
 
         _ ->
@@ -2341,6 +2354,88 @@ defmodule BtAttachWeb.WorkspaceLive do
     |> assign(:window_z, z)
   end
 
+  # ── reconnect persistence (BT-2527 #3) ──────────────────────────────────────
+  #
+  # A LiveView reconnect (transient socket drop / page reload) mounts a brand-new
+  # process whose assigns — including the open floating-window list — start empty,
+  # even though the underlying workspace session resumes with its bindings intact.
+  # Without help, a desk full of inspector windows silently vanishes on a blip. So
+  # `terminate/2` stashes the open windows' ROOTS in the registry (Phoenix-node
+  # memory that outlives the reconnect) and the resuming mount rebuilds them here.
+
+  # Snapshot the open floating windows into a resume stash: each window's root
+  # (its first crumb — label + live term) plus placement and freeze, alongside the
+  # inspector mode. Drilled levels are intentionally dropped — a resume restores
+  # each window to its root (the issue's "or at least the roots"). Error-only
+  # windows carry no root term, so there's nothing live to reopen — they're
+  # skipped by the crumb pattern.
+  defp build_window_stash(socket) do
+    roots =
+      for %{crumbs: [%{label: label, term: term} | _]} = w <- socket.assigns[:windows] || [] do
+        %{label: to_string(label), term: term, x: w.x, y: w.y, z: w.z, frozen: w.frozen}
+      end
+
+    %{windows: roots, mode: socket.assigns[:inspector_mode] || "docked"}
+  end
+
+  # Rebuild the stashed desk on a genuine session resume. A fresh session or a
+  # failed bind (not connected) leaves the empty desk untouched. Each stashed root
+  # is reopened from its still-live term — the inspected actor lives on the
+  # workspace node and survives the LiveView reconnect — which re-reads its fields
+  # and re-arms its per-object watch for the NEW LiveView pid, then it is placed at
+  # its saved position and re-frozen. The mode is restored too so a resumed Float
+  # desk comes back in Float.
+  defp restore_windows(socket, _token, :fresh), do: socket
+
+  defp restore_windows(socket, token, :resumed) do
+    with true <- socket.assigns[:connected],
+         %{windows: [_ | _] = roots, mode: mode} <- SessionRegistry.window_stash(token) do
+      socket = assign(socket, :inspector_mode, mode)
+      Enum.reduce(roots, socket, &restore_window/2)
+    else
+      _ -> socket
+    end
+  end
+
+  # Reopen one stashed root, then override the cascade position `open_window_for_term`
+  # assigned with the stashed placement and re-apply its freeze.
+  defp restore_window(root, socket) do
+    socket = open_window_for_term(socket, root.label, root.term)
+
+    case List.last(socket.assigns.windows) do
+      %{id: id} ->
+        socket
+        |> update_window(id, fn w -> %{w | x: root.x, y: root.y, z: root.z} end)
+        |> assign(:window_z, max(socket.assigns.window_z, root.z))
+        |> restore_window_freeze(id, root.frozen)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp restore_window_freeze(socket, _id, false), do: socket
+
+  defp restore_window_freeze(socket, id, true) do
+    update_window(socket, id, fn w -> toggle_window_freeze(socket, w) end)
+  end
+
+  # Re-cascade every open window back onto the default on-screen ladder (BT-2527
+  # #4): a recovery affordance for a window dragged to (or restored at) a spot
+  # outside the visible viewport. Positions only — drill state, watches, stats and
+  # freeze are untouched.
+  defp reset_window_positions(socket) do
+    {windows, _} =
+      Enum.map_reduce(socket.assigns.windows, 0, fn w, i ->
+        step = rem(i, 8)
+        x = window_origin_x() + step * window_cascade()
+        y = window_origin_y() + step * window_cascade()
+        {%{w | x: x, y: y}, i + 1}
+      end)
+
+    assign(socket, :windows, windows)
+  end
+
   # Inspect a live `term` into a window `w` (parameterised twin of the docked
   # `inspect_term/4`): read the object's fields via the read-surface, set the
   # window's target/rows/crumbs/error, then (re)arm its per-object watch + stats.
@@ -2582,6 +2677,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       {:ok, term, _output, _warnings} ->
         w = %{w | poke_result: "→ #{Workspace.render_term(term)}", poke_error: nil}
 
+        # Re-read only when this window is live (`watch` is a pid). A FROZEN window
+        # shows the poke result but deliberately does NOT re-read its field rows
+        # (BT-2527 #6, reviewed): frozen means "snapshot", and overriding it here
+        # would diverge from the docked poke, which is governed by the same rule —
+        # surface parity over a one-off exception. Unfreeze to see the new state.
         case w.watch do
           {:beamtalk_object, _c, _m, p} = watched when is_pid(p) ->
             refresh_window(w, socket, watched)
@@ -4106,6 +4206,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp inspector_windows(assigns) do
     ~H"""
     <div class="insp-overlay" id="inspector-overlay">
+      <%!-- Off-screen recovery (BT-2527 #4): re-cascade every window back onto the
+           visible ladder. Shown only when a desk is open so it never floats over
+           an empty cockpit. --%>
+      <button
+        :if={@windows != []}
+        type="button"
+        class="insp-tidy"
+        phx-click="window_reset_positions"
+        title="Bring all inspector windows back on-screen"
+      >
+        Tidy windows
+      </button>
       <.inspector_window :for={w <- @windows} win={w} role={@role} />
     </div>
     """

@@ -75,7 +75,15 @@ defmodule BtAttach.SessionRegistry do
   defmodule Entry do
     @moduledoc false
     @enforce_keys [:session_id, :session_pid]
-    defstruct [:session_id, :session_pid, :monitor_ref, :reap_timer, :reap_tag]
+    defstruct [
+      :session_id,
+      :session_pid,
+      :monitor_ref,
+      :reap_timer,
+      :reap_tag,
+      :window_stash,
+      :owner_pid
+    ]
   end
 
   ## Public API
@@ -128,17 +136,53 @@ defmodule BtAttach.SessionRegistry do
   def discard(server, token), do: GenServer.call(server, {:discard, token})
 
   @doc """
+  Stash `token`'s floating-inspector window roots so a resume can rebuild them.
+
+  Called from the LiveView's `terminate/2` alongside `release/1`. A LiveView
+  reconnect mounts a brand-new process whose assigns (including the open window
+  list) start empty, so a transient socket drop would otherwise tear down a desk
+  full of inspector windows even though the underlying session resumes (BT-2527
+  #3). The stash rides the registry entry — Phoenix-node memory that outlives the
+  reconnect — and is read back by `window_stash/2` on the resuming mount. A
+  `nil`/non-binary or unknown token is a harmless no-op; the stash dies with the
+  entry when the session is reaped, so a genuinely-closed tab leaves nothing.
+  """
+  @spec stash_windows(GenServer.server(), term(), term()) :: :ok
+  def stash_windows(server \\ __MODULE__, token, stash)
+  def stash_windows(_server, token, _stash) when not is_binary(token), do: :ok
+  def stash_windows(server, token, stash), do: GenServer.call(server, {:stash, token, stash})
+
+  @doc """
+  Read (and clear) `token`'s stashed window roots, or `nil` when there are none.
+
+  Read once by the resuming mount after `checkout/1` resumes the session; the
+  stash is cleared so a later re-render can't replay a stale desk. A
+  `nil`/non-binary or unknown token returns `nil`.
+  """
+  @spec window_stash(GenServer.server(), term()) :: term() | nil
+  def window_stash(server \\ __MODULE__, token)
+  def window_stash(_server, token) when not is_binary(token), do: nil
+  def window_stash(server, token), do: GenServer.call(server, {:take_stash, token})
+
+  @doc """
   Mark `token`'s session releasable: schedule a grace-period reap.
 
   Called from the LiveView's `terminate/2`. If the same tab reconnects within the
   grace window, the subsequent `checkout/1` cancels the reap and the session is
   resumed. Otherwise the registry closes the workspace session and forgets the
   token. A `nil`/non-binary or unknown token is a harmless no-op.
+
+  Synchronous, and **owner-guarded**: the reap is armed only when the *calling*
+  process still owns the session (it was the last to `register`/`checkout` it).
+  On a fast reconnect the new LiveView's `checkout/1` can be processed before the
+  old LiveView's `terminate/2` reaches here; that `checkout` takes ownership, so
+  this now-stale release from the superseded process is ignored rather than arming
+  a reap that would tear the just-resumed session down after the grace window.
   """
   @spec release(GenServer.server(), term()) :: :ok
   def release(server \\ __MODULE__, token)
   def release(_server, token) when not is_binary(token), do: :ok
-  def release(server, token), do: GenServer.cast(server, {:release, token})
+  def release(server, token), do: GenServer.call(server, {:release, token})
 
   ## GenServer callbacks
 
@@ -149,12 +193,15 @@ defmodule BtAttach.SessionRegistry do
   end
 
   @impl true
-  def handle_call({:checkout, token}, _from, state) do
+  def handle_call({:checkout, token}, {owner_pid, _ref}, state) do
     case Map.fetch(state.entries, token) do
       {:ok, %Entry{session_id: session_id, session_pid: pid} = entry} ->
         # Resume: cancel any pending reap so the session is not torn down out from
-        # under the reconnecting LiveView.
+        # under the reconnecting LiveView, and record the resuming LiveView as the
+        # new owner — so a stale `release` from the process being superseded can no
+        # longer arm a reap against this now-active session.
         entry = cancel_reap(entry)
+        entry = %Entry{entry | owner_pid: owner_pid}
         state = put_entry(state, token, entry)
         {:reply, {:resumed, session_id, pid}, state}
 
@@ -164,13 +211,20 @@ defmodule BtAttach.SessionRegistry do
   end
 
   @impl true
-  def handle_call({:register, token, session_id, session_pid}, _from, state) do
+  def handle_call({:register, token, session_id, session_pid}, {owner_pid, _ref}, state) do
     # If this token already had a session (e.g. a re-register without a clean
     # release), close the old one first so we never leak it.
     state = close_existing(state, token)
 
     ref = Process.monitor(session_pid)
-    entry = %Entry{session_id: session_id, session_pid: session_pid, monitor_ref: ref}
+
+    entry = %Entry{
+      session_id: session_id,
+      session_pid: session_pid,
+      monitor_ref: ref,
+      owner_pid: owner_pid
+    }
+
     {:reply, :ok, put_entry(state, token, entry)}
   end
 
@@ -180,20 +234,51 @@ defmodule BtAttach.SessionRegistry do
   end
 
   @impl true
-  def handle_cast({:release, token}, state) do
+  def handle_call({:stash, token, stash}, _from, state) do
     case Map.fetch(state.entries, token) do
-      {:ok, entry} ->
-        # Replace any existing reap timer (a release after a release just resets
+      {:ok, %Entry{} = entry} ->
+        {:reply, :ok, put_entry(state, token, %Entry{entry | window_stash: stash})}
+
+      :error ->
+        {:reply, :ok, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:take_stash, token}, _from, state) do
+    case Map.fetch(state.entries, token) do
+      {:ok, %Entry{window_stash: stash} = entry} ->
+        {:reply, stash, put_entry(state, token, %Entry{entry | window_stash: nil})}
+
+      :error ->
+        {:reply, nil, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:release, token}, {releaser, _ref}, state) do
+    case Map.fetch(state.entries, token) do
+      {:ok, %Entry{owner_pid: owner} = entry} when owner == releaser ->
+        # The releaser still owns the session (no newer LiveView has resumed it):
+        # replace any existing reap timer (a release after a release just resets
         # the window) and arm a fresh one. Tag the timer with a unique ref so a
         # stale {:reap, token, _} still in the mailbox (cancel_timer lost the
         # race with an already-fired timer) can't reap this newer window.
         entry = cancel_reap(entry)
         reap_tag = make_ref()
         timer = Process.send_after(self(), {:reap, token, reap_tag}, state.reap_after_ms)
-        {:noreply, put_entry(state, token, %Entry{entry | reap_timer: timer, reap_tag: reap_tag})}
+
+        {:reply, :ok,
+         put_entry(state, token, %Entry{entry | reap_timer: timer, reap_tag: reap_tag})}
+
+      {:ok, %Entry{}} ->
+        # A newer LiveView has since resumed this session and owns it now; this
+        # release is from the superseded process. Ignore it — arming a reap here
+        # would tear down the already-resumed, live session after the grace window.
+        {:reply, :ok, state}
 
       :error ->
-        {:noreply, state}
+        {:reply, :ok, state}
     end
   end
 

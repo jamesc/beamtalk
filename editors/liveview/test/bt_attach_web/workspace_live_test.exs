@@ -1121,12 +1121,100 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ ~s(id="inspector-window-win-2")
     assert html =~ "insp-freeze live"
     assert Process.alive?(view.pid)
+
+    # The "live" chip alone wouldn't catch a regression that wrongly unsubscribed
+    # the SHARED pid when window 1 closed — the chip is just window 2's frozen
+    # flag. So drive an actual state write on the shared actor and assert the push
+    # still reaches window 2 (its flash-gen bumps): proof the subscription was
+    # kept, not silently dropped (BT-2527 #5).
+    gen2_before = window_flash_gen(view, "win-2")
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} increment"})
+
+    assert eventually(fn -> window_flash_gen(view, "win-2") > gen2_before end)
+  end
+
+  test "a floating-window desk survives a socket reconnect (BT-2527)", %{conn: conn} do
+    # A transient socket drop must not wipe a desk full of inspector windows: the
+    # session resumes, and the stashed window roots are rebuilt on the reconnect
+    # (BT-2527 #3). Same token across two mounts simulates the drop + reconnect.
+    conn = with_token(conn, "win-resume-#{System.unique_integer([:positive])}")
+
+    {:ok, view1, _} = live(conn, "/")
+    name = spawn_counter(view1)
+    id = open_float_window(view1, name)
+    assert render(view1) =~ ~s(id="inspector-window-#{id}")
+
+    # Disconnect: terminate/2 stashes the open window and opens the grace window.
+    GenServer.stop(view1.pid)
+
+    # Reconnect inside the grace window: the desk is rebuilt from its root binding,
+    # back in Float mode, re-reading the live field — not a blank cockpit.
+    {:ok, view2, _} = live(conn, "/")
+    assert eventually(fn -> render(view2) =~ ~s(id="inspector-overlay") end)
+    html = render(view2)
+    # Window ids are re-minted from 1 on the fresh mount, so the lone restored
+    # window is win-1 again; assert the desk came back, on the binding, in Float.
+    assert html =~ ~s(id="inspector-window-win-1")
+    assert html =~ "value"
+    # Float mode was restored alongside the desk (not the docked default).
+    assert selected_inspector_mode(html) == "float"
+  end
+
+  test "Tidy windows re-cascades every window back on-screen (BT-2527)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    name = spawn_counter(view)
+    id = open_float_window(view, name)
+
+    # The recovery affordance renders once a desk is open.
+    assert render(view) =~ ~s(phx-click="window_reset_positions")
+
+    # Drag the window far off-screen — the server clamps only `>= 0`, so the
+    # off-screen position persists (this is exactly the stranding BT-2527 #4 is
+    # about; the client-side viewport max-clamp prevents it for live drags but the
+    # server can't know the viewport size).
+    render_hook(view, "window_moved", %{"id" => id, "x" => 4000, "y" => 4000})
+    assert window_pos(render(view), id) == {4000, 4000}
+
+    # Tidy: every window snaps back onto the default ladder (first at the origin).
+    html = render_hook(view, "window_reset_positions", %{})
+    assert window_pos(html, id) == {120, 96}
   end
 
   # The inline z-index of the floating window `id` (`win-N`), parsed out of the
   # render — the server-authoritative stacking the WindowDrag hook reads.
   defp window_z(html, id) do
     case Regex.run(~r/id="inspector-window-#{id}"[^>]*style="[^"]*z-index:(\d+)/, html) do
+      [_, n] -> String.to_integer(n)
+      _ -> 0
+    end
+  end
+
+  # The inspector-mode segment currently marked active (`"docked"` | `"float"`),
+  # read from the toggle button that carries the `on` class — every mode button
+  # renders unconditionally, so only the `on` class distinguishes the live one.
+  defp selected_inspector_mode(html) do
+    case Regex.run(~r/class="on"[^>]*aria-selected="true"[^>]*phx-value-mode="(\w+)"/, html) do
+      [_, mode] -> mode
+      _ -> nil
+    end
+  end
+
+  # The inline left/top of the floating window `id` (`win-N`), parsed out of the
+  # render — the server-authoritative position the WindowDrag hook reads.
+  defp window_pos(html, id) do
+    case Regex.run(~r/id="inspector-window-#{id}"[^>]*style="left:(\d+)px;top:(\d+)px/, html) do
+      [_, x, y] -> {String.to_integer(x), String.to_integer(y)}
+      _ -> nil
+    end
+  end
+
+  # Window `id`'s own `data-flash-gen` (the per-window live-refresh counter on its
+  # ivar table), parsed out of the render. 0 when that window has no field table
+  # yet. Scoped to the window's table id so two windows don't collide.
+  defp window_flash_gen(view, id) do
+    re = ~r/id="inspector-window-fields-#{id}"[\s\S]*?data-flash-gen="(\d+)"/
+
+    case Regex.run(re, render(view)) do
       [_, n] -> String.to_integer(n)
       _ -> 0
     end

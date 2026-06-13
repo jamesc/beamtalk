@@ -1,0 +1,131 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+name: Claude Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# Cancel an in-flight review if a newer push lands on the same PR.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Claude BeamTalk Review
+    runs-on: ubuntu-latest
+    # Restrict to same-repo PRs from jamesc only — prevents fork PRs from accessing
+    # CLAUDE_CODE_OAUTH_TOKEN (critical on a public repo; forks run in a separate context
+    # but the secret would still be exposed if the job ran on a fork-originated PR).
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == 'jamesc'
+    timeout-minutes: 20
+    permissions:
+      id-token: write       # OIDC token exchange for the OAuth subscription auth
+      contents: read        # checkout + read source; the reviewer never commits/pushes
+      pull-requests: write  # post inline review comments + suggestions
+      issues: write         # upsert the sticky summary comment
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute diff ranges
+        id: ranges
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          before="${{ github.event.before }}"
+          # opened/reopened/ready_for_review have no usable `before`; a force-push
+          # can leave `before` pointing at a vanished commit. Fall back to full range.
+          if [ -z "$before" ] \
+             || [ "$before" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+            incr="${base}...${head}"
+          else
+            incr="${before}...${head}"
+          fi
+          echo "full=${base}...${head}" >> "$GITHUB_OUTPUT"
+          echo "incr=${incr}" >> "$GITHUB_OUTPUT"
+
+      # The review prompt lives in .github/claude-review-prompt.md so it can be edited
+      # without touching the workflow. The action's `prompt` input is a plain string and
+      # ${{ }} does not interpolate inside an external file, so the diff ranges are injected
+      # here via __INCR_RANGE__ / __FULL_RANGE__ placeholders (ranges are git SHAs — no shell
+      # metacharacters), and the result is handed to the action through a step output.
+      - name: Load review prompt
+        id: load_prompt
+        env:
+          INCR_RANGE: ${{ steps.ranges.outputs.incr }}
+          FULL_RANGE: ${{ steps.ranges.outputs.full }}
+        run: |
+          prompt_file="${RUNNER_TEMP}/claude-review-prompt.txt"
+          sed -e "s|__INCR_RANGE__|${INCR_RANGE}|g" \
+              -e "s|__FULL_RANGE__|${FULL_RANGE}|g" \
+              .github/claude-review-prompt.md > "${prompt_file}"
+          {
+            echo 'prompt<<__BTPROMPTEOF__'
+            cat "${prompt_file}"
+            echo '__BTPROMPTEOF__'
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The reviewer never mutates the repo directly: it reads code, runs
+          # read-only git, posts inline review comments (incl. ```suggestion fixes),
+          # and writes the verdict/summary files with the Write tool (a default-allowed
+          # file op). No commit/push or arbitrary Bash is granted — proposed fixes are
+          # delivered as applyable GitHub suggestions, not pushed commits.
+          # mcp__github_inline_comment__create_inline_comment is the action's own tool
+          # for line-anchored comments; it must be listed explicitly because
+          # --allowedTools REPLACES the action's default tool set rather than extending it.
+          claude_args: '--max-turns 50 --model claude-sonnet-4-6 --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),mcp__github_inline_comment__create_inline_comment"'
+          prompt: ${{ steps.load_prompt.outputs.prompt }}
+
+      - name: Post review summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- claude-review-summary -->';
+            const read = (p) => { try { return fs.readFileSync(p, 'utf8').trim(); } catch { return null; } };
+
+            const summary = read('.claude-summary.md');
+            const verdict = read('.claude-verdict') || 'UNKNOWN';
+            const header = verdict === 'PASS' ? '### ✅ Claude Review — PASS'
+                         : verdict === 'BLOCK' ? '### ❌ Claude Review — BLOCK'
+                         : '### ⚠️ Claude Review — did not complete';
+            const body = summary
+              ? `${marker}\n${header}\n\n${summary}`
+              : `${marker}\n${header}\n\n_The review did not produce a summary (it may have failed before completing). See the workflow logs for details._`;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Gate on verdict
+        if: always()
+        run: |
+          if [ ! -f .claude-verdict ]; then
+            echo "::error::No verdict file written — treating as BLOCK"
+            exit 1
+          fi
+          verdict=$(tr -d '[:space:]' < .claude-verdict)
+          echo "Claude verdict: $verdict"
+          if [ "$verdict" != "PASS" ]; then
+            echo "::error::Claude found Blockers — merge is gated"
+            exit 1
+          fi
+          echo "No Blockers found — gate passed"

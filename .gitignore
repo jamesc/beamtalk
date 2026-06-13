@@ -127,6 +127,10 @@ _rel/
 *.swp
 *.swo
 
+# Claude review gate — written by CI, never committed
+.claude-verdict
+.claude-summary.md
+
 # Build outputs
 /build/
 /lib/build/
