@@ -857,7 +857,10 @@ revert_method_unknown_selector_does_not_leak_atoms_test() ->
         end,
         lists:seq(1, N)
     ),
-    ?assert(erlang:system_info(atom_count) - Before < N).
+    %% The fix interns ~zero atoms; the old binary_to_atom/2 would add ~N (50).
+    %% A small fixed slack tolerates incidental system-level interning while
+    %% still failing hard on a per-selector leak.
+    ?assert(erlang:system_info(atom_count) - Before < 10).
 
 flush_kinds_rejects_non_set_non_list_test() ->
     %% A non-Set/non-List argument surfaces a typed error.

@@ -1443,20 +1443,21 @@ defmodule BtAttachWeb.WorkspaceLive do
   # straight to the workspace newClass chokepoint and refreshes the Changes pane
   # so the durable `new-class` entry is visible (ChangeLog coherence).
   defp new_file(socket, source, path) do
+    # Trim both up front so the emptiness guards and the dispatched payload see
+    # the same normalised values (whitespace around a class definition or path
+    # is never significant).
+    source = String.trim(source)
     path = String.trim(path)
 
     cond do
-      String.trim(source) == "" ->
+      source == "" ->
         assign(socket, save_result: nil, save_error: "Enter a class definition to create a file.")
 
       path == "" ->
         assign(socket, save_result: nil, save_error: "Enter a target path to create a file.")
 
       true ->
-        # Trim the source to match `path` (already trimmed above): leading /
-        # trailing whitespace around a class definition is never significant, so
-        # this keeps the dispatched payload consistent with the emptiness guard.
-        case Facade.dispatch(:new_class, %{source: String.trim(source), path: path}, ctx(socket)) do
+        case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
           {:ok, created_path} ->
             socket
             |> assign(
