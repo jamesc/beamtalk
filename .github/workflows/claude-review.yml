@@ -33,6 +33,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Compute diff ranges
+        id: ranges
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          before="${{ github.event.before }}"
+          # opened/reopened/ready_for_review have no usable `before`; a force-push
+          # can leave `before` pointing at a vanished commit. Fall back to full range.
+          if [ -z "$before" ] \
+             || [ "$before" = "0000000000000000000000000000000000000000" ] \
+             || ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
+            incr="${base}...${head}"
+          else
+            incr="${before}...${head}"
+          fi
+          echo "full=${base}...${head}" >> "$GITHUB_OUTPUT"
+          echo "incr=${incr}" >> "$GITHUB_OUTPUT"
+
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -95,6 +113,15 @@ jobs:
             problems, skip praise. For design concerns, explain the invariant at stake,
             not just the line.
 
+            SCOPING:
+            - Run `git diff ${{ steps.ranges.outputs.incr }}` and post inline comments
+              ONLY on lines within that incremental range. Do not re-comment on code
+              outside it.
+            - Run `git diff ${{ steps.ranges.outputs.full }}` to assess the verdict.
+              A Blocker ANYWHERE in the full PR range means BLOCK, even if it falls
+              outside the incremental range and you cannot attach an inline comment to
+              it. In that case, name the unresolved out-of-range Blocker in your summary.
+
             At the very end of your response, write a single line to the file
             .claude-verdict in the repo root containing exactly one word: BLOCK if
             there are any Blockers, otherwise PASS. No other content in that file.
@@ -107,7 +134,7 @@ jobs:
             echo "::error::No verdict file written — treating as BLOCK"
             exit 1
           fi
-          verdict=$(cat .claude-verdict | tr -d '[:space:]')
+          verdict=$(tr -d '[:space:]' < .claude-verdict)
           echo "Claude verdict: $verdict"
           if [ "$verdict" != "PASS" ]; then
             echo "::error::Claude found Blockers — merge is gated"
