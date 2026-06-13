@@ -10,8 +10,15 @@ jobs:
   review:
     name: Claude BeamTalk Review
     runs-on: ubuntu-latest
+    # Restrict to same-repo PRs from jamesc only — prevents fork PRs from accessing
+    # CLAUDE_CODE_OAUTH_TOKEN (critical on a public repo; forks run in a separate context
+    # but the secret would still be exposed if the job ran on a fork-originated PR).
     # Skip when claude[bot] pushes a fix — the prior human-triggered run already passed.
-    if: github.event.pull_request.draft == false && github.actor != 'claude[bot]'
+    if: |
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.login == 'jamesc' &&
+      github.actor != 'claude[bot]'
     permissions:
       contents: write       # write .claude-verdict to the workspace
       pull-requests: write  # post inline review comments
