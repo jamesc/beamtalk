@@ -1,0 +1,105 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+name: Claude Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  review:
+    name: Claude BeamTalk Review
+    runs-on: ubuntu-latest
+    # Skip when claude[bot] pushes a fix — the prior human-triggered run already passed.
+    if: github.event.pull_request.draft == false && github.actor != 'claude[bot]'
+    permissions:
+      contents: write       # write .claude-verdict to the workspace
+      pull-requests: write  # post inline review comments
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: "--max-turns 8 --model claude-sonnet-4-6"
+          prompt: |
+            You are reviewing a PR for BeamTalk: a Smalltalk-inspired language that
+            compiles to the BEAM (Erlang VM), with a compiler/CLI written in Rust.
+            Review with two lenses depending on what the PR touches.
+
+            RUST TOOLCHAIN (compiler, CLI, LSP):
+            - Correctness of Rust→Core Erlang generation and the bytecode port boundary.
+            - Idiomatic error handling: surface real errors, don't swallow them.
+            - Flag panics on paths that should return Results to the caller.
+
+            BEAMTALK LANGUAGE & SEMANTICS — enforce these invariants:
+            - Two-entity model. Value Objects are immutable with auto-generated
+              accessors; Actors have OPAQUE state and communicate by message only.
+              Block anything that leaks Actor internals or adds mutable slots to a
+              Value Object.
+            - `initialize` is THE typed-slot verification boundary. Slot/type checks
+              belong there, not scattered through methods. Flag validation that has
+              drifted elsewhere.
+            - Three-tier visibility: sealed / internal / open. Flag changes that break
+              a seal or expose internal-only API to open consumers.
+            - Let-it-fail. Flag defensive try/rescue or nil-guards that mask failures a
+              supervisor should handle. New processes must sit under supervision.
+            - Erlang interop goes through the doesNotUnderstand: dynamic proxy. Flag
+              hand-written wrappers that duplicate what the proxy already provides.
+            - Categories are metadata, not syntax. Reject attempts to make them syntactic.
+
+            DESIGN PHILOSOPHY (weight heavily):
+            - YAGNI. Flag speculative generality, new keywords/syntax, or abstractions
+              added without a concrete present need. Minimal keyword surface is a goal,
+              not an accident — argue for removal when something earns its keep poorly.
+
+            DO NOT FLAG (legitimate patterns — stay quiet on these):
+            - Error handling at the Rust↔BEAM port boundary. The port can genuinely
+              fail (dead process, malformed bytecode); Result/try handling there is
+              correct, NOT a let-it-fail violation. Let-it-fail applies to BeamTalk
+              and OTP processes, not the Rust side talking to an external port.
+            - Auto-generated accessors on Value Objects. Expected by design — never
+              read these as "leaking state." Opacity is an Actor rule only.
+            - The doesNotUnderstand: proxy machinery itself, and ClassBuilder /
+              metaclass-as-process plumbing. This is the implementation OF the model,
+              not a violation of it. Don't call ClassBuilder "imperative class
+              construction" — that's its job.
+            - Test code reaching into internals, asserting private behavior, or using
+              defensive setup. Sealing and opacity rules do not apply to fixtures.
+            - Intentional crashes: `self error:` or contract-violation crashes are
+              correct. Do not request defensive guards around code meant to fail.
+            - Idiomatic Rust. Generics, traits, and builder patterns are not YAGNI
+              violations — the keyword-minimalism rule is about BeamTalk surface syntax,
+              not Rust internals. Verbose generated Core Erlang is expected output.
+            - Pre-existing code the diff doesn't touch, and abstractions the PR
+              description explicitly justifies. Review the change, not the world.
+            - Anything rustfmt / clippy / CI already enforces.
+
+            OUTPUT:
+            Categorize findings as Blockers / Suggestions / Nits. Be concise, surface
+            problems, skip praise. For design concerns, explain the invariant at stake,
+            not just the line.
+
+            At the very end of your response, write a single line to the file
+            .claude-verdict in the repo root containing exactly one word: BLOCK if
+            there are any Blockers, otherwise PASS. No other content in that file.
+            Use a shell command to write it: echo PASS > .claude-verdict
+
+      - name: Gate on verdict
+        if: always()
+        run: |
+          if [ ! -f .claude-verdict ]; then
+            echo "::error::No verdict file written — treating as BLOCK"
+            exit 1
+          fi
+          verdict=$(cat .claude-verdict | tr -d '[:space:]')
+          echo "Claude verdict: $verdict"
+          if [ "$verdict" != "PASS" ]; then
+            echo "::error::Claude found Blockers — merge is gated"
+            exit 1
+          fi
+          echo "No Blockers found — gate passed"
