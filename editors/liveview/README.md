@@ -41,9 +41,22 @@ toolchain for cloud sessions.
 
 Assets are built by a real **esbuild + tailwind** pipeline (no vendored
 `*.min.js`). The standalone binaries are downloaded on first use by
-`mix assets.setup`; npm is not required. `phoenix`, `phoenix_html`, and
-`phoenix_live_view` JavaScript are resolved from the Mix deps directory by
-esbuild via `NODE_PATH`, so they stay version-locked to the hex packages.
+`mix assets.setup`, which also runs `npm ci` to fetch the JS bundle's npm
+dependency (CodeMirror 6, which powers the code editor — BT-2538). **Node is a
+build-time requirement** (provisioned via the repo-root `.tool-versions` / mise);
+esbuild bundles CodeMirror straight into `app.js`, so the **shipped release
+stays npm-free** — only the build needs node. `phoenix`, `phoenix_html`, and
+`phoenix_live_view` JavaScript are still resolved from the Mix deps directory by
+esbuild via `NODE_PATH`, version-locked to the hex packages.
+
+The editor highlights Beamtalk with a small regex tokenizer
+(`assets/js/hooks/bt_highlight.js`) that shares its rules with the legacy
+overlay highlighter (`highlight.js`) and paints CodeMirror decorations using the
+themed `.tok-*` classes. (An earlier revision ran the VS Code TextMate grammar
+via oniguruma WASM; that added ~250 KB gzipped — more than CodeMirror itself —
+which was disproportionate for these small buffers. If structural features like
+folding or smart indent are ever needed, the CodeMirror-native path is a Lezer
+grammar, not WASM.)
 
 ## Setup
 

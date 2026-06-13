@@ -98,12 +98,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   The cockpit's client-side behaviour rides three LiveView JS hooks, registered
   on the `LiveSocket` in `assets/js/app.js` and referenced via `phx-hook`:
 
-    * `CodeEditor` — a syntax-highlighting editor overlay. A transparent
-      `<textarea>` sits over a `<pre>` the hook paints with the Beamtalk
-      highlighter (`assets/js/hooks/highlight.js`); `.tok-*` colours resolve the
-      themed `--t-*` CSS variables. The method-editor `source` field
-      (`#method-editor-overlay`) uses it; the Workspace dock's editor
-      (`#workspace-editor-overlay`, BT-2490) does too.
+    * `CmEditor` — the Workspace editor (`#workspace-editor-overlay`, BT-2538):
+      CodeMirror 6 mounted into an ignored host, highlighting Beamtalk with a
+      regex tokenizer (`assets/js/hooks/bt_highlight.js`) that shares its rules
+      with the legacy overlay highlighter. It mirrors its doc into a hidden
+      `<textarea name="expr">`, which stays the posted form field, so the `eval`
+      handler reads it unchanged. Token spans reuse the `.tok-*` classes below,
+      so the themed `--t-*` CSS variables still drive the colours.
+    * `CodeEditor` — the legacy syntax-highlighting overlay: a transparent
+      `<textarea>` over a `<pre>` the hook paints with the Beamtalk highlighter
+      (`assets/js/hooks/highlight.js`); `.tok-*` colours resolve the themed
+      `--t-*` CSS variables. The method-editor `source` field
+      (`#method-editor-overlay`) still uses it (CodeMirror migration in PR2).
     * `KeyboardShortcuts` — maps Cmd/Ctrl chords to actions from a
       `data-shortcuts` JSON map. The method-editor form binds ⌘S → `submit`
       (request-submits the form so class/selector/source ride the normal
@@ -133,16 +139,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   Transcript, and Changes panes into one panel switched by `dock_tab` (held in
   `:dock_tab`, default `"workspace"`):
 
-    * **Workspace** — a highlighted code editor (the BT-2485 `CodeEditor` overlay
-      + `SelectionTracker`) wrapped in the eval `<form>` (`#eval-form`,
+    * **Workspace** — a CodeMirror code editor (the BT-2538 `CmEditor` hook,
+      which also reports selection) wrapped in the eval `<form>` (`#eval-form`,
       `phx-submit="eval"`, field `expr`), with three actions that ride the same
       submit via an `action` field: **Do it** (⌘D — evaluate for side effects),
       **Print it** (⌘P — evaluate and show the result term), and **Inspect it**
       (⌘I — evaluate and open the result in the Inspector). All three reuse the
       existing `eval` op + `render_term`; inspectIt reuses `inspect_term/4`. They
-      evaluate the editor's tracked selection if there is one (its own
-      `SelectionTracker` → `select_workspace` → `:ws_selection`, kept separate
-      from the method editor's `:edit_selection`), else the whole buffer.
+      evaluate the editor's tracked selection if there is one (the `CmEditor`
+      hook's selection report → `select_workspace` → `:ws_selection`, kept
+      separate from the method editor's `:edit_selection`), else the whole buffer.
     * **Transcript** — the live `Transcript show:` stream (`#transcript`,
       `phx-update="stream"`), wired via the BT-2399 subscription facade, unchanged.
     * **Changes** — the workspace ChangeLog viewer (`Workspace changes`, ADR 0082).
@@ -3656,21 +3662,32 @@ defmodule BtAttachWeb.WorkspaceLive do
                         style="display:flex; flex-direction:column; height:100%;"
                       >
                         <input type="hidden" name="action" value="print_it" />
+                        <%!-- CodeMirror 6 editor (BT-2538). The CmEditor hook
+                             mounts CodeMirror into the ignored #workspace-editor-cm
+                             host and mirrors its doc into the hidden textarea, which
+                             stays the posted field (name="expr") so the `eval`
+                             handler and render_submit(%{expr: …}) read it unchanged.
+                             The textarea is phx-update="ignore" too: it's hook-owned,
+                             so an unrelated re-render can't make morphdom revert it
+                             to the last server @expr (which would wipe the editor and
+                             submit a stale value). ⌘D/⌘P/⌘I ride the form's
+                             KeyboardShortcuts hook (keydown bubbles out). --%>
                         <div
                           id="workspace-editor-overlay"
-                          class="bt-editor-wrap ws-wrap"
-                          phx-hook="CodeEditor"
+                          class="cm-wrap ws-wrap"
+                          phx-hook="CmEditor"
+                          data-select-event="select_workspace"
                         >
-                          <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
                           <textarea
                             id="workspace-editor-source"
-                            class="bt-editor-ta"
+                            class="cm-field"
                             name="expr"
-                            phx-hook="SelectionTracker"
-                            data-select-event="select_workspace"
                             spellcheck="false"
                             autocomplete="off"
+                            phx-update="ignore"
+                            hidden
                           ><%= @expr %></textarea>
+                          <div class="cm-host" id="workspace-editor-cm" phx-update="ignore"></div>
                         </div>
 
                         <div class="actionbar">

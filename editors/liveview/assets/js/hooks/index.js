@@ -5,7 +5,11 @@
 // on the `LiveSocket` in `app.js` under their PascalCase names, referenced from
 // the server markup via `phx-hook="<Name>"`:
 //
-//   CodeEditor        — syntax-highlighting editor overlay (highlight + Tab)
+//   CmEditor          — CodeMirror 6 code editor (BT-2538); replaces the
+//                       CodeEditor overlay + SelectionTracker on the workspace
+//                       eval input (method-editor tabs follow in PR2)
+//   CodeEditor        — legacy syntax-highlighting editor overlay (highlight +
+//                       Tab); still used by the method-editor tabs until PR2
 //   KeyboardShortcuts — Cmd/Ctrl chords → LiveView events (⌘S/⌘D/⌘P/⌘I)
 //   SelectionTracker  — reports a textarea's selection (selection vs buffer)
 //   TweaksPanel       — appearance panel (theme/accent/syntax/density/fonts);
@@ -22,6 +26,7 @@
 // The Workspace dock and method editor (later Phase 1 issues) build on these.
 
 import { CodeEditor } from "./code_editor"
+import { CmEditor } from "./cm_editor"
 import { KeyboardShortcuts } from "./keyboard_shortcuts"
 import { SelectionTracker } from "./selection_tracker"
 import { TweaksPanel } from "./tweaks_panel"
@@ -31,6 +36,7 @@ import { WindowDrag } from "./window_drag"
 
 export const Hooks = {
   CodeEditor,
+  CmEditor,
   KeyboardShortcuts,
   SelectionTracker,
   TweaksPanel,

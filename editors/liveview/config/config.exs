@@ -25,6 +25,9 @@ config :bt_attach, BtAttachWeb.Endpoint,
 config :esbuild,
   version: "0.21.5",
   bt_attach: [
+    # CodeMirror (BT-2538) resolves from assets/node_modules; the phoenix_* JS
+    # still resolves from the hex deps dir via NODE_PATH, version-locked to the
+    # hex packages.
     args:
       ~w(js/app.js --bundle --target=es2017 --outdir=../priv/static/assets --external:/fonts/* --external:/images/*),
     cd: Path.expand("../assets", __DIR__),

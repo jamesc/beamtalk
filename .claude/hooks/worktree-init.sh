@@ -8,29 +8,49 @@
 set -euo pipefail
 
 # --- Cloud environment bootstrap ---
-# Run setup-cloud.sh on first session (marker file prevents re-runs).
-# The setup script is idempotent so it's safe to run even if some tools exist.
+# Run setup-cloud.sh when the pinned toolchain isn't actually present. We gate on
+# BOTH a marker AND the real presence of mise/Elixir/mix: a cloud base snapshot
+# can carry the marker (setup "ran") yet still lack the BEAM toolchain if the
+# snapshot was built before the mise install took. Trusting the marker alone left
+# every session without elixir/mix (and on a stale system OTP). Re-running
+# setup-cloud.sh is idempotent — it skips already-installed tools and only fills
+# the gaps — and self-heals such snapshots; once the install persists into a new
+# snapshot, later sessions short-circuit here. Setup failure is non-fatal so the
+# rest of the hook (hex bridge, git sync) still runs.
 MARKER="${HOME}/.beamtalk-cloud-setup-done"
-if [[ ! -f "${MARKER}" ]]; then
+_need_cloud_setup() {
+  [[ -f "${MARKER}" ]] || return 0
+  command -v mise >/dev/null 2>&1 || return 0
+  command -v elixir >/dev/null 2>&1 || return 0
+  command -v mix >/dev/null 2>&1 || return 0
+  return 1
+}
+if _need_cloud_setup; then
   SETUP_SCRIPT="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/setup-cloud.sh"
   if [[ -f "${SETUP_SCRIPT}" ]]; then
-    echo "First session — running cloud environment setup..."
-    bash "${SETUP_SCRIPT}"
-    touch "${MARKER}"
+    echo "Toolchain incomplete — running cloud environment setup..."
+    if bash "${SETUP_SCRIPT}"; then
+      touch "${MARKER}"
+    else
+      echo "Warning: cloud setup did not complete cleanly — continuing (re-runs next session)."
+    fi
   else
     # Fallback: download from GitHub pinned to a known commit, verify integrity,
     # then execute. Trap ensures temp file is cleaned up even on failure.
-    echo "First session — fetching and running cloud environment setup..."
+    echo "Toolchain incomplete — fetching and running cloud environment setup..."
     _SETUP_TMP="$(mktemp)"
     trap 'rm -f "${_SETUP_TMP}"' EXIT
     SETUP_URL="https://raw.githubusercontent.com/jamesc/beamtalk/5c22fc5f7116fbe3cf7c8d3c919e6682f68c83ab/scripts/setup-cloud.sh"
     SETUP_SHA256="717b717108c25e310f4232158316ba2eddd2ba05ee530a5c0b6bb1b0c4b06312"
     curl -fsSL "${SETUP_URL}" -o "${_SETUP_TMP}"
     echo "${SETUP_SHA256}  ${_SETUP_TMP}" | sha256sum -c -
-    bash "${_SETUP_TMP}"
+    if bash "${_SETUP_TMP}"; then
+      touch "${MARKER}"
+    else
+      echo "Warning: cloud setup did not complete cleanly — continuing (re-runs next session)."
+    fi
     rm -f "${_SETUP_TMP}"
     trap - EXIT
-    touch "${MARKER}"
   fi
 fi
 

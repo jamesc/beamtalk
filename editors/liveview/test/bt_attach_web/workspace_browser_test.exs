@@ -8,12 +8,14 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
 
   ## Why a real browser (and not LiveViewTest)
 
-  The cockpit's client behaviour rides six LiveView JS hooks — `CodeEditor`,
-  `KeyboardShortcuts`, `SelectionTracker` (BT-2485), `TweaksPanel` (BT-2487),
-  `FieldFlash` (BT-2492) and `OmniSearch` (BT-2495). `Phoenix.LiveViewTest`
-  renders the LiveView server-side against a floki DOM and **never loads
-  `app.js`**, so none of that JavaScript runs there. These tests exercise it in an
-  actual browser: the highlight overlay repaints as you type, ⌘/Ctrl chords submit
+  The cockpit's client behaviour rides several LiveView JS hooks — `CmEditor`
+  (the CodeMirror Workspace editor, BT-2538), `CodeEditor` (the method-editor
+  overlay), `KeyboardShortcuts`, `SelectionTracker` (BT-2485), `TweaksPanel`
+  (BT-2487), `FieldFlash` (BT-2492) and `OmniSearch` (BT-2495).
+  `Phoenix.LiveViewTest` renders the LiveView server-side against a floki DOM and
+  **never loads `app.js`**, so none of that JavaScript runs there. These tests
+  exercise it in an actual browser: CodeMirror highlights as you type, ⌘/Ctrl
+  chords submit
   the eval + method forms, the bindings pane and Inspector re-render live over
   distribution, the Tweaks panel reskins the IDE via CSS variables + `localStorage`,
   the Inspector flashes changed fields + tracks/freezes a live actor, and the
@@ -67,36 +69,31 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # The connected-only panes that host the JS hooks are present.
     |> assert_has("#tweaks-panel")
     |> assert_has("#eval-form")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
   end
 
-  test "the CodeEditor hook repaints the highlight overlay as you type (BT-2485)", %{conn: conn} do
+  test "the CmEditor hook highlights Beamtalk as you type (BT-2538)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
-    # Type Beamtalk source into the transparent textarea. The CodeEditor hook's
-    # `input` handler re-runs the highlighter and paints the result into the
-    # sibling `<pre><code>` — a layer LiveViewTest's server render never touches.
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Drive the CodeMirror editor; it renders the doc into `.cm-content` — a layer
+    # LiveViewTest's server render never produces.
     |> set_source("Transcript show: 42")
     |> evaluate(
-      "document.querySelector('#workspace-editor-overlay pre.bt-editor-pre code').textContent",
+      "document.querySelector('#workspace-editor-overlay .cm-content').textContent",
       fn painted ->
         assert painted =~ "Transcript show: 42",
-               "CodeEditor hook did not mirror the typed source into the highlight overlay"
+               "CmEditor did not render the typed source into CodeMirror"
       end
     )
-    # And it tokenises — the highlighter emits `.tok-*` spans, so the overlay is
-    # not just a plain-text copy.
-    |> evaluate(
-      "document.querySelectorAll('#workspace-editor-overlay pre.bt-editor-pre code [class^=\"tok-\"]').length",
-      fn count -> assert count > 0, "highlighter produced no .tok-* token spans" end
-    )
+    # And it tokenises via the shared regex highlighter, emitting `.tok-*` spans.
+    |> assert_has("#workspace-editor-overlay .cm-content .tok-number", text: "42")
   end
 
   test "an eval round-trips through the real browser via the Print it button", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     |> set_source("3 + 4")
     # The primary action button submits the eval form (action=print_it) over the
     # live socket; the workspace evaluates and the result term renders.
@@ -107,19 +104,19 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the KeyboardShortcuts hook submits the eval on ⌘/Ctrl+P (BT-2485)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     |> set_source("10 + 5")
     # ⌘P / Ctrl+P is bound (data-shortcuts "mod+p" → "submit:print_it"): the hook
     # sets the hidden action field and request-submits the eval form — no button
     # click. Linux/CI uses Ctrl as the mod key.
-    |> press("#workspace-editor-source", "Control+p")
+    |> press("#workspace-editor-overlay .cm-content", "Control+p")
     |> assert_has(".ws-result .val", text: "15")
   end
 
   test "the bindings pane reflects a live eval (BT-2408)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     |> set_source("greeting := 42")
     |> click("button[value='do_it']")
     # Defining a binding fires the BT-2399 `bindings` push; the pane re-reads the
@@ -134,7 +131,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   } do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     # Build a live object graph: a Boxx actor holding a Leaf actor, both spawned on
     # the workspace node and bound in this session.
     |> eval_do("Actor subclass: Leaf\n  state: n = 99\n\n  n => self.n")
@@ -163,7 +160,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the KeyboardShortcuts hook compiles a method on ⌘/Ctrl+S (BT-2485)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     # Define the class the starter method tab targets, then select that tab so its
     # class/selector load into the method-editor fields.
     |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
@@ -218,7 +215,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the Inspector flashes a field when the inspected actor changes (BT-2492)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     # A live Counter actor with a mutator, spawned + bound in this session.
     |> eval_do(
       "Actor subclass: FlashCounter\n  state: value = 0\n\n  value => self.value\n\n  increment => self.value := self.value + 1"
@@ -245,7 +242,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the freeze toggle holds a snapshot, then resumes live tracking (BT-2492)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     |> eval_do(
       "Actor subclass: FreezeCounter\n  state: value = 0\n\n  value => self.value\n\n  increment => self.value := self.value + 1"
     )
@@ -271,7 +268,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the Inspector head shows live pid-stats chips (BT-2492)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     |> eval_do("Actor subclass: StatCounter\n  state: value = 0\n\n  value => self.value")
     |> eval_do("sc := StatCounter spawn")
     |> assert_has("#bindings-panel .bname", text: "sc")
@@ -286,7 +283,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "an owner can poke the inspected actor with a message (BT-2492)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     |> eval_do(
       "Actor subclass: PokeCounter\n  state: value = 0\n\n  value => self.value\n\n  increment => self.value := self.value + 1"
     )
@@ -315,7 +312,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   } do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     # Define a class so a known, image-present selector exists to search for.
     |> eval_do(
       "Actor subclass: OmniCounter\n  state: value = 0\n\n  bumpValue => self.value := self.value + 1"
@@ -347,7 +344,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the Senders/Implementors popover lists sites and opens one (BT-2495)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     # Define a class whose method sends a selector we can then trace. The starter
     # tab targets Counter#increment, so `Counter` MUST exist before ⌘S can save
     # `increment` onto it — define it here rather than leaning on another test
@@ -401,7 +398,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   } do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     # A live object graph: a Boxx actor holding a Leaf actor (same shape as the
     # docked breadcrumb test), so the floating window has a reference to drill.
     |> eval_do("Actor subclass: WinLeaf\n  state: n = 99\n\n  n => self.n")
@@ -437,7 +434,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "clicking a floating window brings it to the front (z-order) (BT-2493)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#workspace-editor-source")
+    |> assert_has("#workspace-editor-overlay .cm-content")
     |> eval_do("Actor subclass: ZCounter\n  state: value = 0\n\n  value => self.value")
     |> eval_do("za := ZCounter spawn")
     |> eval_do("zb := ZCounter spawn")
@@ -560,8 +557,37 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     )
   end
 
-  # Set the Workspace editor's contents to exactly `source`.
-  defp set_source(conn, source), do: set_text(conn, "#workspace-editor-source", source)
+  # Set the Workspace editor's contents to exactly `source`. The Workspace editor
+  # is CodeMirror (BT-2538), not a <textarea>, so we drive it through the view the
+  # CmEditor hook exposes on the wrapper (`el.cmView`): a doc-replace transaction
+  # fires the hook's update listener, which mirrors the text into the hidden form
+  # field and dispatches `input` — exactly the path real typing takes. We let any
+  # in-flight LiveView patch settle first (the editor ships a starter expression
+  # and each eval re-renders the form).
+  defp set_source(conn, source) do
+    # Poll for the CmEditor mount (`el.cmView`) rather than a fixed sleep: under
+    # parallel CI load CodeMirror's mount can outlast a 300 ms guard, and reading
+    # `.cmView` on an unmounted wrapper would throw a cryptic Playwright
+    # "evaluate" error instead of a clear timeout. Resolve once the view exists,
+    # then dispatch a doc-replace transaction.
+    evaluate(conn, """
+    new Promise((resolve, reject) => {
+      const start = Date.now();
+      const tick = () => {
+        const el = document.querySelector("#workspace-editor-overlay");
+        if (el && el.cmView) {
+          el.cmView.dispatch({
+            changes: { from: 0, to: el.cmView.state.doc.length, insert: #{Jason.encode!(source)} },
+          });
+          return resolve(true);
+        }
+        if (Date.now() - start > 5000) return reject(new Error("CmEditor (cmView) never mounted"));
+        requestAnimationFrame(tick);
+      };
+      tick();
+    })
+    """)
+  end
 
   # Replace a `<textarea>`'s contents with exactly `text`. Two wrinkles the
   # connected IDE forces us to handle: the editor ships a starter expression (so

@@ -29,11 +29,11 @@ bt_attach-*.tar
 # lives in assets/; only the build output under priv/static/assets/ is ignored.
 /priv/static/assets/
 
-# The esbuild/tailwind asset pipeline runs as standalone binaries (no npm). npm
-# is used in tests only — for the Playwright CLI the browser e2e suite drives —
-# so ignore the installed node_modules and any package-lock it mints.
+# esbuild/tailwind run as standalone binaries, but the JS bundle now has a real
+# npm dep (CodeMirror, BT-2538) that esbuild bundles into app.js — so
+# node_modules is build-only and ignored, while package-lock.json is COMMITTED
+# for reproducible `npm ci`.
 /assets/node_modules/
-/assets/package-lock.json
 
 # Browser e2e (Playwright) artifacts: screenshots, traces, and saved results.
 /screenshots/

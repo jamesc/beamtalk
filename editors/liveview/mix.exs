@@ -108,7 +108,16 @@ defmodule BtAttach.MixProject do
       # Test .exs files compile at ExUnit runtime, outside elixirc_options —
       # this flag is the only way to hold them to warnings-as-errors.
       test: ["test --warnings-as-errors"],
-      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.setup": [
+        "tailwind.install --if-missing",
+        "esbuild.install --if-missing",
+        # CodeMirror is bundled into app.js by esbuild (BT-2538); fetch it with
+        # `npm ci` from the committed lockfile. Node
+        # is provisioned via .tool-versions / mise (dev, CI) and the Dockerfile.
+        # --omit=dev skips the test-only `playwright` devDep (its postinstall
+        # downloads browsers); the e2e lane installs it separately.
+        "cmd npm ci --prefix assets --no-audit --no-fund --omit=dev"
+      ],
       "assets.build": ["tailwind bt_attach", "esbuild bt_attach"],
       "assets.deploy": [
         "tailwind bt_attach --minify",

@@ -64,6 +64,15 @@ jobs:
           version-type: strict
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Node builds the JS bundle (CodeMirror, BT-2538) and runs the Playwright
+      # CLI below. Version tracks .tool-versions.
+      - name: Install Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: editors/liveview/assets/package-lock.json
+
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
