@@ -864,7 +864,11 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, revert_change(socket, class, selector)}
   end
 
-  def handle_event("revert", _params, socket), do: {:noreply, socket}
+  # Malformed payload (missing keys / non-binary values): surface a validation
+  # error rather than silently no-op'ing, consistent with `new_file`/`save_method`.
+  def handle_event("revert", _params, socket) do
+    {:noreply, assign(socket, save_result: nil, save_error: "Invalid revert request.")}
+  end
 
   # ── System Browser (BT-2491, epic BT-2482 Phase 2) ──────────────────────────
 
@@ -3712,14 +3716,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <td>{c.author_kind}</td>
                             <%!-- Revert one pending method patch (ADR 0082
                                  Phase 5). Owner-only (`revert` is an :execute
-                                 op); a new-class entry (`kind == "new-class"`)
-                                 has no method body to revert, so its row shows no
-                                 button. Gating on the structured `kind` field —
-                                 not the `present_selector/1` display sentinel —
-                                 keeps the affordance decoupled from display text. --%>
+                                 op). Only *instance-side* method patches are
+                                 revertable: a new-class entry has no prior body,
+                                 and class-side reverts are not yet supported
+                                 (`do_revert/2` rejects them) — so the button is
+                                 hidden for both, gating on the structured `kind`
+                                 field rather than display text. --%>
                             <td :if={@role == :owner}>
                               <button
-                                :if={c.kind != "new-class"}
+                                :if={c.kind not in ["new-class", "class"]}
                                 class="btn-link"
                                 type="button"
                                 phx-click="revert"
