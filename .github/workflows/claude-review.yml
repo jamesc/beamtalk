@@ -25,9 +25,9 @@ jobs:
     timeout-minutes: 20
     permissions:
       id-token: write       # OIDC token exchange for the OAuth subscription auth
-      contents: write       # needed if the action pushes fix-commits
-      pull-requests: write  # post inline review comments
-      issues: write
+      contents: read        # checkout + read source; the reviewer never commits/pushes
+      pull-requests: write  # post inline review comments + suggestions
+      issues: write         # upsert the sticky summary comment
 
     steps:
       - uses: actions/checkout@v4
