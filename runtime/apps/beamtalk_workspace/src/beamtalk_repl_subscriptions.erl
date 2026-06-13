@@ -219,21 +219,44 @@ announcement_classes(flush) -> ['FlushCompleted'].
 Register `Pid` on the SystemAnnouncer bus for every announcement class of
 `Stream`, with the inert `?PUSH_HANDLER` term so the bus delivers the native
 `{beamtalk_announcement, …}` message to `Pid`'s mailbox (BT-2531).
+
+Tolerant of a momentarily-unavailable bus: registration is a `gen_server:call`
+to `beamtalk_announcements`, and this is on the WebSocket connect path
+(`subscribe_all/0` runs as the handler authenticates). A `noproc`/timeout there
+must **never** crash the connect — that would fail the workspace's WS health
+check — so a missing bus is skipped (the consumer simply gets no pushes until it
+re-subscribes) and a mid-call exit is swallowed. This restores the
+crash-immunity the legacy `gen_server:cast` channels had.
 """.
 -spec subscribe_bus(actors | classes | bindings | flush, pid()) -> ok.
 subscribe_bus(Stream, Pid) ->
-    lists:foreach(
-        fun(Class) ->
-            _ = beamtalk_announcements:subscribe(Class, Pid, ?PUSH_HANDLER, false)
-        end,
-        announcement_classes(Stream)
-    ).
+    case whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _ ->
+            lists:foreach(
+                fun(Class) ->
+                    try beamtalk_announcements:subscribe(Class, Pid, ?PUSH_HANDLER, false) of
+                        _ -> ok
+                    catch
+                        exit:_ -> ok
+                    end
+                end,
+                announcement_classes(Stream)
+            )
+    end.
 
 -doc "Remove `Pid`'s bus subscriptions for every announcement class of `Stream`.".
 -spec unsubscribe_bus(actors | classes | bindings | flush, pid()) -> ok.
 unsubscribe_bus(Stream, Pid) ->
     lists:foreach(
-        fun(Class) -> beamtalk_announcements:system_unsubscribe(Class, Pid) end,
+        fun(Class) ->
+            try beamtalk_announcements:system_unsubscribe(Class, Pid) of
+                _ -> ok
+            catch
+                exit:_ -> ok
+            end
+        end,
         announcement_classes(Stream)
     ).
 
