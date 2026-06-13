@@ -55,9 +55,14 @@ export const CmEditor = {
     // Mount into the dedicated host. NOT `[phx-update=ignore]` — the textarea
     // also carries that attribute (so morphdom can't revert it), and it comes
     // first in the DOM, so the attribute selector would mount CodeMirror into the
-    // textarea.
-    this.host = this.el.querySelector(".cm-host") || this.el
-    if (!this.field) return
+    // textarea. Fail loud rather than silently mounting into `this.el`: the
+    // wrapper is NOT phx-update=ignore, so every server patch would overwrite the
+    // editor — an intermittent corruption far harder to diagnose than this error.
+    this.host = this.el.querySelector(".cm-host")
+    if (!this.field || !this.host) {
+      console.error("CmEditor: expected a <textarea> and a .cm-host inside", this.el)
+      return
+    }
 
     this.selectEvent = this.el.dataset.selectEvent || null
     this.lastSelection = null

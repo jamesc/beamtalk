@@ -24,6 +24,15 @@ import { RangeSetBuilder } from "@codemirror/state"
 import { Decoration, ViewPlugin } from "@codemirror/view"
 import { RULES, RESERVED } from "./highlight"
 
+// Sticky (`y`) variants of the shared rules so the tokenizer scans in true O(n):
+// matching at an explicit `lastIndex` avoids the per-character `src.slice(i)`
+// (O(n²)) that the highlight.js `^`-anchored `.match()` would force here. The
+// leading `^` anchor is dropped — `y` already pins the match to `lastIndex`.
+const STICKY_RULES = RULES.map((rule) => ({
+  cls: rule.cls,
+  re: new RegExp(rule.re.source.replace(/^\^/, ""), "y"),
+}))
+
 const CLASSES = [
   "comment",
   "string",
@@ -79,10 +88,10 @@ function* tokenize(src) {
   let i = 0
   const n = src.length
   while (i < n) {
-    const rest = src.slice(i)
     let matched = false
-    for (const rule of RULES) {
-      const m = rest.match(rule.re)
+    for (const rule of STICKY_RULES) {
+      rule.re.lastIndex = i
+      const m = rule.re.exec(src)
       if (!m) continue
       const text = m[0]
       const start = i
