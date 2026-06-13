@@ -49,13 +49,23 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  host = System.get_env("PHX_HOST") || "example.com"
   port = String.to_integer(System.get_env("PORT") || "4000")
+
+  # The advertised URL (boot banner + generated absolute URLs) must match how
+  # the IDE is actually reached. An unset or empty PHX_HOST is the zero-config
+  # local-trial mode `bin/server` documents — advertise http://localhost:<port>,
+  # which is what `http:` binds below. A non-empty PHX_HOST means a real
+  # deployment terminating TLS in front of us, so advertise https://<host>:443.
+  {url_scheme, url_host, url_port} =
+    case System.get_env("PHX_HOST") do
+      host when is_binary(host) and host != "" -> {"https", host, 443}
+      _ -> {"http", "localhost", port}
+    end
 
   config :bt_attach, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   config :bt_attach, BtAttachWeb.Endpoint,
-    url: [host: host, port: 443, scheme: "https"],
+    url: [host: url_host, port: url_port, scheme: url_scheme],
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
