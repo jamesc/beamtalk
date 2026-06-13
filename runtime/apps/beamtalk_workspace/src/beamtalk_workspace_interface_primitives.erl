@@ -325,7 +325,26 @@ revert_method(ClassNameBin, SelectorBin) when
                 %% `#{'$beamtalk_class' => _, error => #beamtalk_error{}}` map
                 %% and `error/1`-raises it; unwrap back to the structured error.
                 error:#{error := #beamtalk_error{} = Err} ->
-                    {error, Err}
+                    {error, Err};
+                %% Any other exception is an internal contract violation (e.g. a
+                %% case_clause if find_revert_target/2 returned an unexpected
+                %% term). Without this arm it would escape as an `rpc:call/4`
+                %% `{badrpc, {'EXIT', _}}` and the Attach client would mislabel it
+                %% "workspace unreachable". Log it loudly (so the bug is not
+                %% hidden) and return an accurate structured error.
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(
+                        #{
+                            msg => "revert_method internal error",
+                            class => Class,
+                            reason => Reason,
+                            target_class => ClassNameBin,
+                            selector => SelectorAtom,
+                            stacktrace => Stacktrace
+                        },
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    {error, revert_state_error(<<"revert: internal error — see node logs">>)}
             end;
         error ->
             %% No atom exists for this selector, so no method by that name has

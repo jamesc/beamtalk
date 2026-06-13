@@ -86,6 +86,16 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       refute selected =~ "Not authorized"
       assert Process.alive?(view.pid)
     end
+
+    test "the New File form is hidden for an Observer (BT-2293)", %{conn: conn} do
+      # `new_class` is an :execute op, so the write-surface "New File" affordance
+      # is owner-gated in the template (same as the eval form) — an Observer must
+      # not see it.
+      {:ok, _view, html} = live(observer_conn(conn), "/")
+      assert html =~ "read-only (Observer)"
+      refute html =~ ~s(id="new-file-form")
+      refute html =~ ~s(phx-submit="new_file")
+    end
   end
 
   test "eval round-trip renders the workspace result term", %{conn: conn} do

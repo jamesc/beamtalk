@@ -3717,14 +3717,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <%!-- Revert one pending method patch (ADR 0082
                                  Phase 5). Owner-only (`revert` is an :execute
                                  op). Only *instance-side* method patches are
-                                 revertable: a new-class entry has no prior body,
-                                 and class-side reverts are not yet supported
-                                 (`do_revert/2` rejects them) — so the button is
-                                 hidden for both, gating on the structured `kind`
-                                 field rather than display text. --%>
+                                 revertable (`do_revert/2` rejects new-class and
+                                 class-side entries), so gate the button on a
+                                 positive `kind == "instance"` assertion: any
+                                 other / unanticipated kind hides the affordance
+                                 rather than offering one that always errors. --%>
                             <td :if={@role == :owner}>
                               <button
-                                :if={c.kind not in ["new-class", "class"]}
+                                :if={c.kind == "instance"}
                                 class="btn-link"
                                 type="button"
                                 phx-click="revert"
