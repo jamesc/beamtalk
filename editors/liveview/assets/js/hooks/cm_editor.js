@@ -15,17 +15,23 @@
 //   <div id="…" phx-hook="CmEditor"
 //        data-select-event="select_workspace"   (optional: report selection)
 //        data-placeholder="…">                  (optional)
-//     <textarea name="expr" hidden>…server value…</textarea>
-//     <div id="…-cm" phx-update="ignore"></div>
+//     <textarea name="expr" phx-update="ignore" hidden>…server value…</textarea>
+//     <div class="cm-host" id="…-cm" phx-update="ignore"></div>
 //   </div>
 //
-// The hidden <textarea> keeps its `name` (expr / source) and `phx-debounce`, so
-// the existing `eval` / `save_method` / `edit_source` handlers and the LiveView
-// tests that drive `render_submit(%{expr: …})` keep working unchanged. On every
-// edit we mirror CodeMirror's doc into that textarea and dispatch `input`, which
-// drives phx-change. `phx-update="ignore"` keeps morphdom from clobbering the
-// CodeMirror DOM, while the textarea (a direct child, not ignored) is still
-// server-patched — `updated()` syncs a server-pushed value back into the editor.
+// The hidden <textarea> keeps its `name` (expr / source) and is marked
+// `phx-update="ignore"`, so it is the hook's to own: CodeMirror is the source of
+// truth, and on every edit we mirror the doc into that textarea and dispatch
+// `input` (driving phx-change where the form wants it). Marking it ignore is
+// essential — otherwise an unrelated server re-render makes morphdom reset the
+// textarea to the last server value, silently reverting the editor and sending a
+// stale value on submit. The existing `eval` / `save_method` / `edit_source`
+// handlers and the LiveView tests driving `render_submit(%{expr: …})` are
+// unaffected (they read the form param / DOM value the hook keeps current).
+// `phx-update="ignore"` on the CodeMirror host likewise keeps morphdom off its
+// DOM. Server→editor pushes aren't needed: the server only ever echoes the
+// submitted value (which the editor already holds), and surfaces that load
+// distinct content (the method-editor tabs) by re-keying the element to remount.
 //
 // Keyboard chords (⌘D/⌘P/⌘I/⌘S) are intentionally NOT bound here: they live on
 // the surrounding <form>'s KeyboardShortcuts hook and a keydown inside the editor
@@ -46,7 +52,11 @@ import { beamtalkHighlighting } from "./bt_highlight"
 export const CmEditor = {
   mounted() {
     this.field = this.el.querySelector("textarea")
-    this.host = this.el.querySelector("[phx-update='ignore']") || this.el
+    // Mount into the dedicated host. NOT `[phx-update=ignore]` — the textarea
+    // also carries that attribute (so morphdom can't revert it), and it comes
+    // first in the DOM, so the attribute selector would mount CodeMirror into the
+    // textarea.
+    this.host = this.el.querySelector(".cm-host") || this.el
     if (!this.field) return
 
     this.selectEvent = this.el.dataset.selectEvent || null
@@ -81,18 +91,6 @@ export const CmEditor = {
     // (which dispatches a doc-replace transaction to set editor contents
     // deterministically — there is no <textarea> value to fill any more).
     this.el.cmView = this.view
-  },
-
-  // The LiveView may patch the hidden textarea (eval clears it, a server-pushed
-  // method loads into it). Push that value into CodeMirror when it actually
-  // differs, so we don't fight our own edits (which produce equal values).
-  updated() {
-    if (!this.view || !this.field) return
-    const incoming = this.field.value
-    if (incoming === this.view.state.doc.toString()) return
-    this.view.dispatch({
-      changes: { from: 0, to: this.view.state.doc.length, insert: incoming },
-    })
   },
 
   destroyed() {

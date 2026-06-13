@@ -623,7 +623,7 @@
    posted form field and is never shown.
    ========================================================================== */
 .cm-wrap { position: relative; overflow: hidden; background: var(--code-bg); }
-.cm-wrap > [phx-update="ignore"] { position: absolute; inset: 0; }
+.cm-wrap > .cm-host { position: absolute; inset: 0; }
 .cm-field { display: none; }
 
 .cm-wrap .cm-editor { height: 100%; background: transparent; }

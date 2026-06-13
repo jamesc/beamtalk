@@ -3667,8 +3667,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                              host and mirrors its doc into the hidden textarea, which
                              stays the posted field (name="expr") so the `eval`
                              handler and render_submit(%{expr: …}) read it unchanged.
-                             ⌘D/⌘P/⌘I still ride the form's KeyboardShortcuts hook
-                             (keydown bubbles out of the editor). --%>
+                             The textarea is phx-update="ignore" too: it's hook-owned,
+                             so an unrelated re-render can't make morphdom revert it
+                             to the last server @expr (which would wipe the editor and
+                             submit a stale value). ⌘D/⌘P/⌘I ride the form's
+                             KeyboardShortcuts hook (keydown bubbles out). --%>
                         <div
                           id="workspace-editor-overlay"
                           class="cm-wrap ws-wrap"
@@ -3681,9 +3684,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                             name="expr"
                             spellcheck="false"
                             autocomplete="off"
+                            phx-update="ignore"
                             hidden
                           ><%= @expr %></textarea>
-                          <div id="workspace-editor-cm" phx-update="ignore"></div>
+                          <div class="cm-host" id="workspace-editor-cm" phx-update="ignore"></div>
                         </div>
 
                         <div class="actionbar">
