@@ -24,6 +24,7 @@ jobs:
       github.event.pull_request.user.login == 'jamesc'
     timeout-minutes: 20
     permissions:
+      id-token: write       # OIDC token exchange for the OAuth subscription auth
       contents: write       # needed if the action pushes fix-commits
       pull-requests: write  # post inline review comments
       issues: write
