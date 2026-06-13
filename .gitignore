@@ -130,6 +130,7 @@ _rel/
 # Claude review gate — written by CI, never committed
 .claude-verdict
 .claude-summary.md
+.claude-review-*.diff
 
 # Build outputs
 /build/
