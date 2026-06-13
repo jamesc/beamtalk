@@ -127,9 +127,44 @@ jobs:
               outside the incremental range and you cannot attach an inline comment to
               it. In that case, name the unresolved out-of-range Blocker in your summary.
 
-            At the very end of your response, use the Write tool to create the file
-            .claude-verdict in the repo root containing exactly one word: BLOCK if
-            there are any Blockers, otherwise PASS. No other content in that file.
+            At the very end of your response, use the Write tool to create TWO files
+            in the repo root:
+            1. .claude-summary.md — a concise Markdown summary of this review for a
+               human reader: a one-line overall assessment, then findings grouped under
+               "Blockers" / "Suggestions" / "Nits" headings (omit empty groups). When
+               the PR is clean, say so explicitly (e.g. "No blocking issues found.").
+               This file is posted as a PR comment on EVERY run, including PASS, so it
+               must always be written even when there are no findings.
+            2. .claude-verdict — exactly one word: BLOCK if there are any Blockers,
+               otherwise PASS. No other content in this file.
+
+      - name: Post review summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- claude-review-summary -->';
+            const read = (p) => { try { return fs.readFileSync(p, 'utf8').trim(); } catch { return null; } };
+
+            const summary = read('.claude-summary.md');
+            const verdict = read('.claude-verdict') || 'UNKNOWN';
+            const header = verdict === 'PASS' ? '### ✅ Claude Review — PASS'
+                         : verdict === 'BLOCK' ? '### ❌ Claude Review — BLOCK'
+                         : '### ⚠️ Claude Review — did not complete';
+            const body = summary
+              ? `${marker}\n${header}\n\n${summary}`
+              : `${marker}\n${header}\n\n_The review did not produce a summary (it may have failed before completing). See the workflow logs for details._`;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
 
       - name: Gate on verdict
         if: always()
