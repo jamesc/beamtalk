@@ -66,6 +66,7 @@ export const CmEditor = {
 
     this.selectEvent = this.el.dataset.selectEvent || null
     this.lastSelection = null
+    this.hadSelection = false
     const readOnly = this.field.readOnly || this.el.dataset.readonly === "true"
     const placeholderText = this.el.dataset.placeholder || ""
 
@@ -119,6 +120,12 @@ export const CmEditor = {
 
   reportSelection(update) {
     const range = update.state.selection.main
+    // Skip cursor-only moves (range.empty): they'd push text:"" to the server on
+    // every keystroke — a no-op re-render (only the "evaluates buffer/selection"
+    // label). Still send ONE empty report when collapsing a prior non-empty
+    // selection, so `ws_selection` is cleared and eval falls back to the buffer.
+    if (range.empty && !this.hadSelection) return
+    this.hadSelection = !range.empty
     const text = update.state.sliceDoc(range.from, range.to)
     const key = range.from + ":" + range.to + ":" + text
     if (key === this.lastSelection) return

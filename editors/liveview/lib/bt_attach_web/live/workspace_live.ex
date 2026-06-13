@@ -1288,7 +1288,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # The code an action evaluates: the Workspace editor's tracked selection if
   # there is one (the spike's "evaluates selection"), else the whole entered
-  # buffer ("evaluates buffer"). The Workspace editor's SelectionTracker keeps
+  # buffer ("evaluates buffer"). The Workspace editor's CmEditor hook keeps
   # `ws_selection` current (distinct from the method editor's `edit_selection`);
   # an empty or whitespace-only selection falls back to the buffer.
   defp eval_target(expr, socket) do
