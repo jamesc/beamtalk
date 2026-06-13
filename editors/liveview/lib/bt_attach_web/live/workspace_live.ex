@@ -852,7 +852,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Malformed payload (missing keys / non-binary values): surface a validation
   # error rather than letting a crafted event crash the LiveView.
   def handle_event("new_file", _params, socket) do
-    {:noreply, assign(socket, save_result: nil, save_error: "Invalid new-file form payload.")}
+    {:noreply,
+     assign(socket,
+       save_result: nil,
+       save_error: "Invalid new-file form payload.",
+       flush_result: nil,
+       flush_error: nil
+     )}
   end
 
   # Revert one pending in-memory method patch (ADR 0082 Phase 5 `Workspace
@@ -867,7 +873,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Malformed payload (missing keys / non-binary values): surface a validation
   # error rather than silently no-op'ing, consistent with `new_file`/`save_method`.
   def handle_event("revert", _params, socket) do
-    {:noreply, assign(socket, save_result: nil, save_error: "Invalid revert request.")}
+    {:noreply,
+     assign(socket,
+       save_result: nil,
+       save_error: "Invalid revert request.",
+       flush_result: nil,
+       flush_error: nil
+     )}
   end
 
   # ── System Browser (BT-2491, epic BT-2482 Phase 2) ──────────────────────────
