@@ -49,13 +49,14 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
 
-    %% Should have 12 children: workspace_meta, workspace_changelog,
-    %% transcript_stream, actor_registry, class_events, bindings_events,
-    %% flush_events, workspace_bootstrap, repl_server, idle_monitor,
-    %% actor_sup, session_sup.
+    %% Should have 9 children: workspace_meta, workspace_changelog,
+    %% transcript_stream, actor_registry, workspace_bootstrap, repl_server,
+    %% idle_monitor, actor_sup, session_sup.
     %% BeamtalkInterface and WorkspaceInterface are value singletons (no gen_server).
-    %% `beamtalk_flush_events` was added in ADR 0082 Phase 3 (BT-2289).
-    ?assertEqual(12, length(ChildSpecs)).
+    %% BT-2531: the class_events / bindings_events / flush_events pub/sub
+    %% gen_servers were retired — those push streams now ride the SystemAnnouncer
+    %% bus (`beamtalk_announcements`, supervised under `beamtalk_runtime_sup`).
+    ?assertEqual(9, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
@@ -70,8 +71,10 @@ children_ids_test() ->
     ?assertNot(lists:member('bt@stdlib@beamtalk_interface', Ids)),
     ?assertNot(lists:member('bt@stdlib@workspace_interface', Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)),
-    ?assert(lists:member(beamtalk_class_events, Ids)),
-    ?assert(lists:member(beamtalk_bindings_events, Ids)),
+    %% BT-2531: class_events / bindings_events / flush_events retired.
+    ?assertNot(lists:member(beamtalk_class_events, Ids)),
+    ?assertNot(lists:member(beamtalk_bindings_events, Ids)),
+    ?assertNot(lists:member(beamtalk_flush_events, Ids)),
     ?assert(lists:member(beamtalk_repl_server, Ids)),
     ?assert(lists:member(beamtalk_idle_monitor, Ids)),
     ?assert(lists:member(beamtalk_actor_sup, Ids)),
@@ -266,15 +269,13 @@ all_children_alive_test() ->
 
         %% Verify each child has correct ID and is alive.
         %% BeamtalkInterface and WorkspaceInterface are value singletons — not children.
+        %% BT-2531: class_events / bindings_events / flush_events retired (those
+        %% push streams now ride the SystemAnnouncer bus).
         ExpectedIds = [
             beamtalk_workspace_meta,
             beamtalk_workspace_changelog,
             beamtalk_transcript_stream,
             beamtalk_actor_registry,
-            beamtalk_class_events,
-            beamtalk_bindings_events,
-            %% ADR 0082 Phase 3 (BT-2289): flush-completion pub/sub
-            beamtalk_flush_events,
             beamtalk_workspace_bootstrap,
             beamtalk_repl_server,
             beamtalk_idle_monitor,
@@ -484,11 +485,12 @@ run_mode_config() ->
 run_mode_children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
 
-    %% Run mode: 9 children (no repl_server, idle_monitor, session_sup).
+    %% Run mode: 6 children (no repl_server, idle_monitor, session_sup).
     %% workspace_meta, workspace_changelog, transcript_stream, actor_registry,
-    %% class_events, bindings_events, flush_events, workspace_bootstrap, actor_sup.
-    %% `beamtalk_flush_events` was added in ADR 0082 Phase 3 (BT-2289).
-    ?assertEqual(9, length(ChildSpecs)).
+    %% workspace_bootstrap, actor_sup.
+    %% BT-2531: class_events / bindings_events / flush_events retired (those push
+    %% streams now ride the SystemAnnouncer bus).
+    ?assertEqual(6, length(ChildSpecs)).
 
 run_mode_no_repl_server_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(run_mode_config()),
@@ -513,7 +515,6 @@ run_mode_required_children_present_test() ->
 
     Ids = [maps:get(id, S) || S <- ChildSpecs],
     ?assert(lists:member(beamtalk_workspace_meta, Ids)),
-    ?assert(lists:member(beamtalk_class_events, Ids)),
     ?assert(lists:member(beamtalk_workspace_bootstrap, Ids)),
     ?assert(lists:member(beamtalk_actor_sup, Ids)),
     ?assert(lists:member(beamtalk_actor_registry, Ids)).

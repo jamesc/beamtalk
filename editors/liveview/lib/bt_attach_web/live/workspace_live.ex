@@ -1064,14 +1064,29 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, stream_insert(socket, :transcript, line)}
   end
 
-  # Bindings-changed push (BT-2399 `bindings` stream): a *signal*, not the data.
-  # An eval on any session in the workspace may have changed binding values, so
-  # re-read this session's bindings through the read-surface and re-render the
-  # pane. This is the "updating live as bindings change" acceptance criterion,
-  # driven by the facade subscription rather than polling.
-  def handle_info({:bindings_changed, _session_id}, %{assigns: %{session_pid: pid}} = socket)
+  # Bindings-changed push (`bindings` stream): a *signal*, not the data. Since
+  # BT-2531 this rides the SystemAnnouncer bus as a `BindingChanged` announcement
+  # delivered natively over distribution:
+  # `{:beamtalk_announcement, sub_ref, :BindingChanged, handler, event}`. An eval
+  # on any session in the workspace may have changed binding values, so re-read
+  # this session's bindings through the read-surface and re-render the pane. This
+  # is the "updating live as bindings change" acceptance criterion, driven by the
+  # facade subscription rather than polling.
+  def handle_info(
+        {:beamtalk_announcement, _sub_ref, :BindingChanged, _handler, event},
+        %{assigns: %{session_id: session_id, session_pid: pid}} = socket
+      )
       when is_pid(pid) do
-    {:noreply, assign_bindings(socket, pid)}
+    # Bindings are per-session isolated (BT-2394: tab1 `x = 100` vs tab2 `x = 999`),
+    # so only re-read when the change is for *this* session — otherwise one session's
+    # eval would force every connected LiveView to re-render. The typed BindingChanged
+    # carries `sessionId` (BT-2530); a nil/unknown origin falls back to a refresh so a
+    # session-less event can never silently freeze the pane.
+    case Map.get(event, :sessionId) do
+      ^session_id -> {:noreply, assign_bindings(socket, pid)}
+      nil -> {:noreply, assign_bindings(socket, pid)}
+      _other_session -> {:noreply, socket}
+    end
   end
 
   # Per-object change push (BT-2492, backend BT-2489): the watched actor committed

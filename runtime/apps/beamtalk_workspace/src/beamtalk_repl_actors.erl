@@ -47,9 +47,6 @@ its class name, module, and spawn time.
     on_actor_spawned/4
 ]).
 
-%% Subscriber API (ADR 0017 — actor lifecycle push messages)
--export([subscribe/0, unsubscribe/0]).
-
 %% gen_server callbacks
 -export([
     init/1,
@@ -62,8 +59,7 @@ its class name, module, and spawn time.
 
 -record(state, {
     actors :: #{pid() => actor_metadata()},
-    monitors :: #{reference() => pid()},
-    subscribers :: #{pid() => reference()}
+    monitors :: #{reference() => pid()}
 }).
 
 -type actor_metadata() :: #{
@@ -81,21 +77,6 @@ its class name, module, and spawn time.
 -spec start_link(registered) -> {ok, pid()} | {error, term()}.
 start_link(registered) ->
     gen_server:start_link({local, beamtalk_actor_registry}, ?MODULE, [], []).
-
--doc """
-Subscribe the calling process to actor lifecycle events.
-Subscriber receives:
-  `{actor_spawned, Metadata}' when an actor registers
-  `{actor_stopped, #{pid => Pid, class => Class, reason => Reason}}' when an actor terminates
-""".
--spec subscribe() -> ok.
-subscribe() ->
-    gen_server:cast(beamtalk_actor_registry, {subscribe_lifecycle, self()}).
-
--doc "Unsubscribe the calling process from actor lifecycle events.".
--spec unsubscribe() -> ok.
-unsubscribe() ->
-    gen_server:cast(beamtalk_actor_registry, {unsubscribe_lifecycle, self()}).
 
 -doc """
 Register an actor with the registry.
@@ -216,7 +197,7 @@ get_pids_for_module(RegistryPid, ModuleName) ->
 %%% gen_server callbacks
 
 init([]) ->
-    {ok, #state{actors = #{}, monitors = #{}, subscribers = #{}}}.
+    {ok, #state{actors = #{}, monitors = #{}}}.
 
 handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
@@ -235,8 +216,9 @@ handle_call({register, ActorPid, ClassName, ModuleName}, _From, State) ->
     NewMonitors = Monitors#{MonitorRef => ActorPid},
 
     NewState = State#state{actors = NewActors, monitors = NewMonitors},
-    notify_subscribers({actor_spawned, Metadata}, NewState),
-
+    %% BT-2531: actor lifecycle is published as an `ActorSpawned` system
+    %% announcement from `beamtalk_actor`'s telemetry mirror, consumed via the
+    %% SystemAnnouncer bus — the registry no longer broadcasts to subscribers.
     {reply, ok, NewState};
 handle_call({unregister, ActorPid}, _From, State) ->
     #state{actors = Actors, monitors = Monitors} = State,
@@ -317,52 +299,22 @@ handle_call({pids_for_module, ModuleName}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-handle_cast({subscribe_lifecycle, Pid}, State) when is_pid(Pid) ->
-    #state{subscribers = Subs} = State,
-    case maps:is_key(Pid, Subs) of
-        true ->
-            {noreply, State};
-        false ->
-            Ref = erlang:monitor(process, Pid),
-            {noreply, State#state{subscribers = Subs#{Pid => Ref}}}
-    end;
-handle_cast({unsubscribe_lifecycle, Pid}, State) ->
-    #state{subscribers = Subs} = State,
-    case maps:find(Pid, Subs) of
-        {ok, Ref} ->
-            erlang:demonitor(Ref, [flush]),
-            {noreply, State#state{subscribers = maps:remove(Pid, Subs)}};
-        error ->
-            {noreply, State}
-    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-handle_info({'DOWN', MonitorRef, process, Pid, Reason}, State) ->
-    #state{actors = Actors, monitors = Monitors, subscribers = Subs} = State,
+handle_info({'DOWN', MonitorRef, process, _Pid, _Reason}, State) ->
+    #state{actors = Actors, monitors = Monitors} = State,
     case maps:find(MonitorRef, Monitors) of
         {ok, ActorPid} ->
-            %% Actor terminated — unregister and notify subscribers
-            StopInfo =
-                case maps:find(ActorPid, Actors) of
-                    {ok, #{class := ClassName}} ->
-                        #{pid => ActorPid, class => ClassName, reason => Reason};
-                    error ->
-                        #{pid => ActorPid, class => undefined, reason => Reason}
-                end,
+            %% Actor terminated — unregister. BT-2531: actor stop is published as
+            %% an `ActorStopped` system announcement from `beamtalk_actor`'s
+            %% telemetry mirror (consumed via the SystemAnnouncer bus); the
+            %% registry no longer broadcasts to subscribers.
             NewActors = maps:remove(ActorPid, Actors),
             NewMonitors = maps:remove(MonitorRef, Monitors),
-            NewState = State#state{actors = NewActors, monitors = NewMonitors},
-            notify_subscribers({actor_stopped, StopInfo}, NewState),
-            {noreply, NewState};
+            {noreply, State#state{actors = NewActors, monitors = NewMonitors}};
         error ->
-            %% Not an actor — check if it's a subscriber
-            case maps:is_key(Pid, Subs) of
-                true ->
-                    {noreply, State#state{subscribers = maps:remove(Pid, Subs)}};
-                false ->
-                    {noreply, State}
-            end
+            {noreply, State}
     end;
 handle_info(_Info, State) ->
     {noreply, State}.
@@ -379,17 +331,6 @@ terminate(_Reason, State) ->
     ok.
 
 %%% Internal Functions
-
--doc "Send lifecycle event to all subscribers.".
--spec notify_subscribers(term(), #state{}) -> ok.
-notify_subscribers(Event, #state{subscribers = Subs}) ->
-    maps:foreach(
-        fun(Pid, _Ref) ->
-            Pid ! Event
-        end,
-        Subs
-    ),
-    ok.
 
 code_change(OldVsn, State, Extra) ->
     beamtalk_runtime_api:hot_reload_code_change(OldVsn, State, Extra).

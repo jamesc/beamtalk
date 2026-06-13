@@ -150,6 +150,18 @@ So this ADR uses two mechanisms: `beamtalk_transcript_stream` for the
 `transcript` push, and `SystemAnnouncer` for the discrete
 `actor-spawned`/`actor-stopped` pushes.
 
+**Implemented in BT-2531.** The actor (`ActorSpawned`/`ActorStopped`), class
+(`ClassLoaded`/`ClassRemoved`), bindings (`BindingChanged`), and flush
+(`FlushCompleted`) push streams all ride `SystemAnnouncer`; the bespoke
+per-stream gen_servers were retired. `beamtalk_repl_subscriptions` registers the
+WebSocket handler (or a dist-attached LiveView pid) on the bus with an inert
+handler term and the handler receives the native
+`{beamtalk_announcement, SubRef, Class, Handler, Event}` message, re-encoding it
+to the JSON push frame. One consequence now visible to push consumers: a
+`classes`/`removed` frame fires on `ClassRemoved`, and the live `actors`/`spawned`
+frame no longer carries `spawned_at` (the typed `ActorSpawned` event has no such
+field — the connect snapshot, read from the actor registry, still does).
+
 **Message ordering:** Push messages (Transcript) and request responses (`eval` result) are independent streams. A Transcript push from another session may arrive between an eval request and its response. The browser frontend must handle messages by type (`push` vs `id`-correlated response), not by arrival order.
 
 ### Session Lifecycle and Reconnection
@@ -212,18 +224,21 @@ websocket_info({transcript_output, Text}, State) ->
                         <<"text">> => Text}),
     {[{text, Push}], State};
 
-%% Actor lifecycle push (delivered via SystemAnnouncer subscription, ADR 0093 —
-%% the handler subscribes to ActorSpawned/ActorStopped, not a bespoke registry)
-websocket_info({actor_spawned, Class, Pid}, State) ->
+%% Actor lifecycle push. Since BT-2531 the handler subscribes via
+%% beamtalk_repl_subscriptions (which registers on SystemAnnouncer, ADR 0093) and
+%% receives the native announcement tuple — it discriminates on the class atom and
+%% re-encodes to the JSON push frame. (Illustrative; the live frames carry a
+%% channel/event/data envelope — see beamtalk_ws_handler.)
+websocket_info({beamtalk_announcement, _SubRef, 'ActorSpawned', _H, Event}, State) ->
     Push = jsx:encode(#{<<"push">> => <<"actor-spawned">>,
-                        <<"class">> => atom_to_binary(Class, utf8),
-                        <<"pid">> => list_to_binary(pid_to_list(Pid))}),
+                        <<"class">> => atom_to_binary(maps:get(actorClass, Event), utf8),
+                        <<"pid">> => list_to_binary(pid_to_list(maps:get(pid, Event)))}),
     {[{text, Push}], State};
 
-websocket_info({actor_stopped, Class, Pid}, State) ->
+websocket_info({beamtalk_announcement, _SubRef, 'ActorStopped', _H, Event}, State) ->
     Push = jsx:encode(#{<<"push">> => <<"actor-stopped">>,
-                        <<"class">> => atom_to_binary(Class, utf8),
-                        <<"pid">> => list_to_binary(pid_to_list(Pid))}),
+                        <<"class">> => atom_to_binary(maps:get(actorClass, Event), utf8),
+                        <<"pid">> => list_to_binary(pid_to_list(maps:get(pid, Event)))}),
     {[{text, Push}], State};
 
 websocket_info(_Info, State) ->

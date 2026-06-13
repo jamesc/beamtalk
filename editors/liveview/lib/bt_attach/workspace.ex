@@ -456,11 +456,13 @@ defmodule BtAttach.Workspace do
 
   Like the Transcript stream, this uses the facade's explicit-pid form so the
   LiveView's own location-transparent pid is registered as the subscriber (not
-  the short-lived RPC proxy). The bindings stream is a *signal* stream: it pushes
-  `{:bindings_changed, session_id}` after each successful eval — a refresh
-  trigger, not the data itself. On that signal the LiveView re-reads the current
-  bindings via `list_bindings/1`, so the pane stays live without polling and
-  without a `{subscribe, self()}` cast at the gen_server.
+  the short-lived RPC proxy). The bindings stream is a *signal* stream and, since
+  BT-2531, rides the SystemAnnouncer bus: it pushes the native
+  `{:beamtalk_announcement, sub_ref, :BindingChanged, handler, event}` message
+  after a workspace variable is assigned — a refresh trigger, not the data itself.
+  On that signal the LiveView re-reads the current bindings via `list_bindings/1`,
+  so the pane stays live without polling. The bus prunes the subscription on dist
+  disconnect; the LiveView re-subscribes on its next (re)mount.
   """
   def subscribe_bindings(pid) when is_pid(pid) do
     rpc(:beamtalk_repl_subscriptions, :subscribe, [:bindings, pid])

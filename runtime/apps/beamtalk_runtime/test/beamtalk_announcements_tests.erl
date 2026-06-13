@@ -1141,6 +1141,62 @@ system_announce_with_remote_subscriber_test_() ->
     end}.
 
 %%====================================================================
+%% Veneer async path: inert handler is delivered the native message (BT-2531)
+%%====================================================================
+
+%% A subscriber registered with an inert / opaque handler term (not a block or
+%% `{send, ...}` tuple) on the `system_announce/2` veneer path must receive the
+%% native `{beamtalk_announcement, SubRef, EventClass, Handler, Event}` message in
+%% its mailbox — the contract the workspace push-stream consumers rely on. A
+%% runnable handler (a fun) is *invoked* instead and never delivered as a message.
+system_announce_inert_handler_delivers_native_message_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            Collector = self(),
+            Sub = spawn_subscriber(Collector),
+            try
+                {ok, SubRef} = beamtalk_announcements:subscribe(
+                    'InertEvent', Sub, push_marker, false
+                ),
+                ok = beamtalk_announcements:system_announce('InertEvent', #{k => v}),
+                %% The inert-handler subscriber receives the native tuple, with the
+                %% inert handler term riding along untouched.
+                {GotRef, 'InertEvent', push_marker, Event} = expect_received(),
+                ?assertEqual(SubRef, GotRef),
+                ?assertMatch(#{'$beamtalk_class' := 'InertEvent', k := v}, Event)
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+%% A runnable (block) handler on the veneer path is invoked, not delivered as a
+%% message — so an inert-handler subscriber and a block subscriber to the same
+%% class are dispatched by their two different mechanisms.
+system_announce_runnable_handler_is_invoked_not_delivered_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            Collector = self(),
+            Sub = spawn_subscriber(Collector),
+            try
+                {ok, _SubRef} = beamtalk_announcements:subscribe(
+                    'BlockEvent', Sub, fun(E) -> Collector ! {block_ran, E} end, false
+                ),
+                ok = beamtalk_announcements:system_announce('BlockEvent', #{k => v}),
+                %% The block handler runs (sends {block_ran, _}); the subscriber's
+                %% mailbox never receives a native announcement message.
+                receive
+                    {block_ran, #{k := v}} -> ok
+                after 1000 -> ?assert(false)
+                end,
+                refute_received()
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+%%====================================================================
 %% Heir crash-survival: live subscriptions survive, dead-in-gap pruned (BT-2442)
 %%====================================================================
 
@@ -1530,7 +1586,19 @@ stop_heir_process(existing) ->
     ok;
 stop_heir_process({fake, Pid}) ->
     unregister(beamtalk_runtime_sup),
+    Mon = erlang:monitor(process, Pid),
     exit(Pid, kill),
+    receive
+        {'DOWN', Mon, process, Pid, _} -> ok
+    after 1000 -> ok
+    end,
+    %% The fake heir *owned* the ETS tables (they were transferred to it when the
+    %% bus was killed in the crash-survival test), so killing it dropped them —
+    %% leaving the last restarted bus alive but tableless. That would crash the
+    %% next downstream suite that subscribes. Stop the stale bus and delete any
+    %% leftover tables so the next `setup/0` (or a bus consumer in another suite)
+    %% starts a fresh, healthy bus (BT-2531).
+    stop_existing_bus(),
     ok.
 
 heir_loop() ->

@@ -103,18 +103,33 @@ dist-attached clients consume the live terms directly with no JSON step.
 
 `dispatch/4` covers request/response ops. The workspace also pushes **live
 streams**. These are owned by `beamtalk_repl_subscriptions`, the stable
-subscription facade — rather than casting `{subscribe, self()}` tuples at the
-underlying gen_servers, a client calls the facade and the **calling process**
-becomes the subscriber. Over distribution a LiveView process subscribes its own
-location-transparent pid and receives the push messages natively.
+subscription facade — a client calls the facade and the **calling process** (or
+an explicit pid) becomes the subscriber. Over distribution a LiveView process
+subscribes its own location-transparent pid and receives the push messages
+natively.
 
-| Stream | Push message to the subscriber |
-|--------|--------------------------------|
-| `transcript` | `{transcript_output, Text :: binary()}` |
-| `actors` | `{actor_spawned, Meta}` / `{actor_stopped, StopInfo}` |
-| `classes` | `{class_loaded, ClassName :: atom()}` |
-| `bindings` | `{bindings_changed, SessionId :: binary()}` |
-| `flush` | `{flush_completed, Files :: [binary()]}` |
+Since BT-2531 the actor/class/bindings/flush streams ride the typed
+**SystemAnnouncer** bus (`beamtalk_announcements`, ADR 0093). The facade
+registers the subscriber pid against each stream's announcement class(es) with an
+**inert handler term**; the bus delivers the native announcement tuple to the
+subscriber's mailbox:
+
+```erlang
+{beamtalk_announcement, SubRef, EventClass, Handler, Event}
+```
+
+`EventClass` is the announced class atom and `Event` is the typed announcement
+payload (a tagged map). Consumers discriminate on `EventClass`. The `transcript`
+stream is line-rate and stays bespoke on `beamtalk_transcript_stream` (ADR 0093
+§5) — it is *not* on the bus.
+
+| Stream | Announcement class(es) | Native push message |
+|--------|------------------------|---------------------|
+| `transcript` | _(bespoke, not on the bus)_ | `{transcript_output, Text :: binary()}` |
+| `actors` | `ActorSpawned`, `ActorStopped` | `{beamtalk_announcement, SubRef, Class, Handler, Event}` |
+| `classes` | `ClassLoaded`, `ClassRemoved` | `{beamtalk_announcement, SubRef, Class, Handler, Event}` |
+| `bindings` | `BindingChanged` | `{beamtalk_announcement, SubRef, 'BindingChanged', Handler, Event}` |
+| `flush` | `FlushCompleted` | `{beamtalk_announcement, SubRef, 'FlushCompleted', Handler, Event}` |
 
 ```erlang
 %% Subscribe the calling process to everything the browser sees:
@@ -125,6 +140,14 @@ beamtalk_repl_subscriptions:subscribe(transcript).
 
 The browser edge (`beamtalk_ws_handler`) re-encodes these push messages to JSON
 push frames; dist clients consume the messages directly.
+
+**Reconnect (D5):** no replay — a dist-attached subscriber's rows are
+monitor-pruned on disconnect and the client re-subscribes on reconnect (the rule
+`beamtalk_object_watch` documents).
+
+**Ordering (D6):** dispatch is caller-side per announcer, so there is no
+cross-announcer ordering guarantee. Acceptable — every consumer is
+refresh-trigger driven.
 
 ### Subscribing a remote pid over RPC (Attach topology)
 
@@ -140,8 +163,11 @@ beamtalk_repl_subscriptions:subscribe_all(LiveViewPid).
 beamtalk_repl_subscriptions:subscribe(transcript, LiveViewPid).
 ```
 
-The facade still owns every `gen_server:cast`; clients pass only a `stream()`
-name and a pid, never an internal `{subscribe, …}` tuple (BT-2407).
+The facade still owns every registration — the bus subscribe call for the
+actor/class/bindings/flush streams, the transcript `gen_server:cast`. Clients pass
+only a `stream()` name and a pid, never a raw `beamtalk_announcements:subscribe/4`
+call or an internal `{subscribe, …}` tuple (BT-2407, BT-2531). It is the
+sanctioned entry point and the future ADR 0091 RBAC seam.
 
 ## Where this lives
 

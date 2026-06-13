@@ -108,14 +108,21 @@ websocket_info(
         io_capture_pid = undefined,
         stdin_ref = undefined
     }};
-%% Bindings-changed broadcast from beamtalk_bindings_events pub/sub
-websocket_info({bindings_changed, SessionId}, State = #ws_state{authenticated = true}) ->
+%% BT-2531: BindingChanged system announcement (SystemAnnouncer bus), re-encoded
+%% to the byte-identical `bindings`/`changed` push frame the legacy
+%% `beamtalk_bindings_events` broadcast produced. The frame carries only the
+%% session id (a refresh trigger); the typed event also carries name/value, which
+%% browser consumers ignore.
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'BindingChanged', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
     Push = iolist_to_binary(
         json:encode(#{
             <<"type">> => <<"push">>,
             <<"channel">> => <<"bindings">>,
             <<"event">> => <<"changed">>,
-            <<"data">> => #{<<"session">> => SessionId}
+            <<"data">> => #{<<"session">> => nullable(maps:get(sessionId, Event, nil))}
         })
     ),
     {[{text, Push}], State};
@@ -156,50 +163,87 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
         })
     ),
     {[{text, Push}], State};
-%% BT-690: Actor lifecycle push messages (ADR 0017 Phase 2)
-websocket_info({actor_spawned, Metadata}, State = #ws_state{authenticated = true}) ->
+%% BT-2531: actor / class / flush system announcements (SystemAnnouncer bus),
+%% re-encoded to the existing JSON push frames. The legacy bespoke channels
+%% (`beamtalk_repl_actors` lifecycle, `beamtalk_class_events`,
+%% `beamtalk_flush_events`) were retired; consumers now discriminate on the
+%% announced class atom.
+%%
+%% BT-690 (ADR 0017 Phase 2): actor lifecycle. The live `spawned` frame carries
+%% `{class, pid}` only — `spawned_at` is no longer on the live event (it is still
+%% present on the connect snapshot, read from the registry). `stopped` carries the
+%% normalized reason symbol (`#normal`/`#shutdown`/`#crashed`).
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'ActorSpawned', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
     Push = iolist_to_binary(
         json:encode(#{
             <<"type">> => <<"push">>,
             <<"channel">> => <<"actors">>,
             <<"event">> => <<"spawned">>,
-            <<"data">> => encode_actor_metadata(Metadata)
+            <<"data">> => encode_actor_spawned_event(Event)
         })
     ),
     {[{text, Push}], State};
-websocket_info({actor_stopped, StopInfo}, State = #ws_state{authenticated = true}) ->
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'ActorStopped', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
     Push = iolist_to_binary(
         json:encode(#{
             <<"type">> => <<"push">>,
             <<"channel">> => <<"actors">>,
             <<"event">> => <<"stopped">>,
-            <<"data">> => encode_stop_info(StopInfo)
+            <<"data">> => encode_actor_stopped_event(Event)
         })
     ),
     {[{text, Push}], State};
-%% BT-1020: Class-loaded push — broadcast when any session loads or reloads a class
-websocket_info({class_loaded, ClassName}, State = #ws_state{authenticated = true}) ->
+%% BT-1020: Class-loaded push — broadcast when any session loads or reloads a class.
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'ClassLoaded', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
     Push = iolist_to_binary(
         json:encode(#{
             <<"type">> => <<"push">>,
             <<"channel">> => <<"classes">>,
             <<"event">> => <<"loaded">>,
-            <<"data">> => #{<<"class">> => atom_to_binary(ClassName, utf8)}
+            <<"data">> => encode_class_event(Event)
+        })
+    ),
+    {[{text, Push}], State};
+%% BT-2531: Class-removed push — newly visible to push consumers now that the
+%% `classes` stream rides the bus (ADR 0093). Symmetric with the `loaded` frame.
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'ClassRemoved', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
+    Push = iolist_to_binary(
+        json:encode(#{
+            <<"type">> => <<"push">>,
+            <<"channel">> => <<"classes">>,
+            <<"event">> => <<"removed">>,
+            <<"data">> => encode_class_event(Event)
         })
     ),
     {[{text, Push}], State};
 %% ADR 0082 Phase 3 (BT-2289): Flush-completion push — broadcast after a
 %% `Workspace flush` writes one or more `.bt` source files. LSP clients use
 %% this to emit `workspace/applyEdit` so open editor buffers refresh against
-%% the new on-disk state. `Files` is the list of absolute paths that were
-%% renamed during the flush.
-websocket_info({flush_completed, Files}, State = #ws_state{authenticated = true}) ->
+%% the new on-disk state. `files` is the list of absolute paths renamed.
+websocket_info(
+    {beamtalk_announcement, _SubRef, 'FlushCompleted', _Handler, Event},
+    State = #ws_state{authenticated = true}
+) ->
     Push = iolist_to_binary(
         json:encode(#{
             <<"type">> => <<"push">>,
             <<"channel">> => <<"workspace">>,
             <<"event">> => <<"flush_completed">>,
-            <<"data">> => #{<<"files">> => normalise_files_for_push(Files)}
+            <<"data">> => #{
+                <<"files">> => normalise_files_for_push(maps:get(files, Event, []))
+            }
         })
     ),
     {[{text, Push}], State};
@@ -735,20 +779,53 @@ normalise_files_for_push(Files) when is_list(Files) ->
         Files
     ).
 
--doc "Encode actor stop info for push message JSON.".
-encode_stop_info(#{pid := Pid, class := Class, reason := Reason}) ->
-    %% Limit reason: cap nesting depth, then enforce max byte length
-    ReasonStr = iolist_to_binary(io_lib:format("~P", [Reason, 10])),
-    TruncatedReason = truncate_utf8(ReasonStr, 4096),
+-doc """
+BT-2531: Encode an `ActorSpawned` announcement payload for the `actors`/`spawned`
+push frame. The typed event carries `actorClass` (a Symbol) and `pid`; the live
+frame is `{class, pid}` — `spawned_at` is no longer present on the live event
+(the connect snapshot still carries it, read from the registry).
+""".
+-spec encode_actor_spawned_event(map()) -> map().
+encode_actor_spawned_event(Event) ->
     #{
-        <<"class">> =>
-            case Class of
-                undefined -> <<"unknown">>;
-                _ -> atom_to_binary(Class, utf8)
-            end,
-        <<"pid">> => list_to_binary(pid_to_list(Pid)),
-        <<"reason">> => TruncatedReason
+        <<"class">> => atom_to_binary(maps:get(actorClass, Event, unknown), utf8),
+        <<"pid">> => encode_event_pid(maps:get(pid, Event, nil))
     }.
+
+-doc """
+BT-2531: Encode an `ActorStopped` announcement payload for the `actors`/`stopped`
+push frame. `reason` is the typed, normalized stop symbol (`#normal` / `#shutdown`
+/ `#crashed`), encoded as its atom string — replacing the legacy raw `~P`-format.
+""".
+-spec encode_actor_stopped_event(map()) -> map().
+encode_actor_stopped_event(Event) ->
+    #{
+        <<"class">> => atom_to_binary(maps:get(actorClass, Event, unknown), utf8),
+        <<"pid">> => encode_event_pid(maps:get(pid, Event, nil)),
+        %% `reason` is always one of the atoms `normal | shutdown | crashed`:
+        %% `beamtalk_actor:normalize_stop_reason/1` maps every OTP stop reason onto
+        %% that closed set before the `ActorStopped` event is built, so
+        %% `atom_to_binary/2` here cannot raise `badarg` (no defensive guard needed).
+        <<"reason">> => atom_to_binary(maps:get(reason, Event, normal), utf8)
+    }.
+
+-doc """
+BT-2531: Encode a `ClassLoaded` / `ClassRemoved` announcement payload — both
+carry `className` (a Symbol) — for the `classes` push frame `{class}`.
+""".
+-spec encode_class_event(map()) -> map().
+encode_class_event(Event) ->
+    #{<<"class">> => atom_to_binary(maps:get(className, Event, unknown), utf8)}.
+
+-doc "Encode an announcement event pid for JSON, mapping a `nil` pid to `null`.".
+-spec encode_event_pid(pid() | nil) -> binary() | null.
+encode_event_pid(Pid) when is_pid(Pid) -> list_to_binary(pid_to_list(Pid));
+encode_event_pid(_) -> null.
+
+-doc "Map a `nil` value to JSON `null`, passing any other value through.".
+-spec nullable(term()) -> term().
+nullable(nil) -> null;
+nullable(Value) -> Value.
 
 -doc """
 BT-1235: Extract line/hint metadata from a compile error for inclusion in JSON response.
@@ -769,17 +846,6 @@ extract_compile_error_location({compile_error, [DiagMap | _]}) when is_map(DiagM
     end;
 extract_compile_error_location(_) ->
     #{}.
-
--doc "Truncate binary to at most MaxBytes, respecting UTF-8 boundaries.".
-truncate_utf8(Bin, MaxBytes) when byte_size(Bin) =< MaxBytes ->
-    Bin;
-truncate_utf8(Bin, MaxBytes) ->
-    Part = binary:part(Bin, 0, MaxBytes),
-    case unicode:characters_to_binary(Part, utf8, utf8) of
-        {incomplete, Valid, _} -> Valid;
-        {error, Valid, _} -> Valid;
-        Valid when is_binary(Valid) -> Valid
-    end.
 
 %%% Internal — Log streaming (BT-1433)
 
