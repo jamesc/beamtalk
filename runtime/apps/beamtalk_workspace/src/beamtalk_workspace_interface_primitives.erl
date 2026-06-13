@@ -311,6 +311,10 @@ rather than `binary_to_atom/2`: a never-compiled selector has no atom and
 therefore nothing to revert, and — critically — we must not mint a fresh atom
 per request, which would let a crafted loop exhaust the (un-GC'd) atom table and
 crash the node.
+
+`ClassNameBin` needs no such guard: it is used only as a binary comparison key
+(`find_revert_target/2` matches it against each entry's `#entry.class` binary and
+fails early for an unknown class), never converted to an atom.
 """.
 -spec revert_method(binary(), binary()) -> {ok, term()} | {error, #beamtalk_error{}}.
 revert_method(ClassNameBin, SelectorBin) when

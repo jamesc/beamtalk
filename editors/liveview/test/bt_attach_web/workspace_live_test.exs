@@ -366,6 +366,32 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "Enter a class definition"
   end
 
+  test "New File creates a class end-to-end via newClass:at: (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "Greeter#{suffix}"
+    # The declared class name must match the path basename (snake_cased); a
+    # single-word name + numeric suffix maps cleanly (`Greeter12` ↔ `greeter12`).
+    path = "src/greeter#{suffix}.bt"
+
+    # Drive a real `newClass:at:` round-trip — the success path the validation
+    # tests don't reach: button → `:new_class` facade op → workspace
+    # `beamtalk_repl_eval:new_class/2`. Phase 1 installs the class in memory and
+    # logs a durable new-class ChangeEntry; the `.bt` file is only written on
+    # flush, so this leaves no on-disk artifact. A wiring bug (wrong RPC module
+    # or transposed source/path args) would fail here, not just in validation.
+    html =
+      view
+      |> form("#new-file-form")
+      |> render_submit(%{"source" => "Object subclass: #{class}", "path" => path})
+
+    assert html =~ "Created new class — #{path}"
+    refute html =~ "beamtalk_error"
+    refute html =~ "{:error"
+    # ChangeLog coherence: the new-class entry is now in the Changes viewer.
+    assert html =~ class
+  end
+
   # ── Phase 1 JS hook foundation (BT-2485) ────────────────────────────────────
 
   test "the editor hooks are present on the owner's connected render (BT-2485)", %{conn: conn} do
