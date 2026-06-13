@@ -154,6 +154,39 @@ does not invalidate the user's live session cookies.
   same `:rpc` it does today.
 - It does **not** add per-session node targeting to `workspace.ex` (the
   rejected alternative below).
+- It does **not** attach to **remote, OIDC-authenticated** workspaces — see the
+  scope boundary below.
+
+### Scope boundary: remote / OIDC workspaces (out of scope — future, separate ADR)
+
+This ADR covers **local** workspaces only. Attaching to a *remote* workspace —
+one already fronted by an OIDC-authenticated Phoenix deployment per ADR 0091 —
+is a deliberately separate topology, because it reuses **none** of the broker
+designed here:
+
+| | Local (this ADR) | Remote + OIDC (future) |
+|---|---|---|
+| Who runs the front? | broker **spawns** one `bt_attach` per workspace | already running (Docker, ADR 0091); broker spawns **nothing** |
+| Transport | Erlang dist + cookie, loopback | HTTPS to a remote host |
+| Auth | none (single-user localhost, ADR 0020) | server-side OIDC in the front |
+| Desktop's job | process broker (spawn / port / reap) | a **persistent webview** pointed at `https://host` |
+| Cookie / port mgmt | yes | none |
+
+The OIDC flow is entirely **server-side and redirect-driven** in the front
+(`oidc_controller.ex`: `/oidc/auth` → 302 to IdP → `/oidc/callback` → session
+cookie). A desktop webview therefore implements **no OAuth itself** — it just
+follows redirects and persists the session cookie. The one real wrinkle: the IdP
+login page is a third-party origin, and several IdPs (notably Google) **reject
+OAuth from embedded webviews** (`disallowed_useragent`). The remote path would
+need a **system-browser handoff** for the IdP step, with a loopback / custom-
+scheme redirect back into the app — the classic desktop-OAuth pattern, which a
+Rust shell (Tauri) supports but the no-shell coordinator alternative could not.
+
+The two topologies meet only at the **connection picker**: one list offering
+local workspaces (attach = spawn) and remote endpoints (attach = open-webview-
+at-URL). That shared surface is the natural seam at which a future
+"desktop remote attach + OIDC" ADR would extend this one — it does not require
+revisiting any decision here.
 
 ### Decided sub-decisions
 
