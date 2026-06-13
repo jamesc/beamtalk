@@ -35,6 +35,34 @@ defmodule BtAttach.SessionRegistryTest do
     end)
   end
 
+  # A persistent stand-in for a LiveView process: it runs registry calls on demand
+  # so each call's `from` pid is THIS process. Lets a test drive the ownership race
+  # (register/checkout/release) with distinct caller identities.
+  defp spawn_caller do
+    spawn(fn -> caller_loop() end)
+  end
+
+  defp caller_loop do
+    receive do
+      {:call, fun, from} ->
+        send(from, {:called, fun.()})
+        caller_loop()
+
+      :stop ->
+        :ok
+    end
+  end
+
+  defp via(caller, fun) do
+    send(caller, {:call, fun, self()})
+
+    receive do
+      {:called, result} -> result
+    after
+      1000 -> flunk("caller process did not respond")
+    end
+  end
+
   test "checkout misses for an unknown or nil/non-binary token", %{reg: reg} do
     assert SessionRegistry.checkout(reg, "never-registered") == :miss
     assert SessionRegistry.checkout(reg, nil) == :miss
@@ -85,6 +113,39 @@ defmodule BtAttach.SessionRegistryTest do
     # Non-binary tokens never participate (resume disabled), matching checkout/3.
     assert :ok = SessionRegistry.stash_windows(reg, 123, %{windows: []})
     assert SessionRegistry.window_stash(reg, nil) == nil
+  end
+
+  test "a stale release from a superseded LiveView can't reap a resumed session", %{reg: reg} do
+    # The reconnect race (BT-2527 review): `release` (old LiveView's terminate) and
+    # `checkout` (new LiveView's mount) hit the registry from different processes.
+    # If checkout is processed first it resumes the session; a then-late release
+    # must NOT arm a reap, or it would tear the live, resumed session down after
+    # the grace window. The ownership guard makes the stale release a no-op.
+    session = fake_session()
+    old = spawn_caller()
+    new = spawn_caller()
+
+    # Old LiveView starts and owns the session.
+    assert :ok =
+             via(old, fn -> SessionRegistry.register(reg, "tab-race", "phoenix-race", session) end)
+
+    # Fast reconnect: the NEW LiveView resumes (checkout) BEFORE the old one's
+    # terminate releases — checkout wins the race and takes ownership.
+    assert {:resumed, "phoenix-race", ^session} =
+             via(new, fn -> SessionRegistry.checkout(reg, "tab-race") end)
+
+    # Now the OLD LiveView's terminate fires its (now-stale) release.
+    assert :ok = via(old, fn -> SessionRegistry.release(reg, "tab-race") end)
+
+    # Past the grace window the resumed session is STILL alive: the stale release
+    # was ignored because the old LiveView no longer owns the session.
+    Process.sleep(@reap_ms * 3)
+
+    assert {:resumed, "phoenix-race", ^session} =
+             via(new, fn -> SessionRegistry.checkout(reg, "tab-race") end)
+
+    send(old, :stop)
+    send(new, :stop)
   end
 
   test "release schedules a reap that drops the entry after the grace window", %{reg: reg} do
