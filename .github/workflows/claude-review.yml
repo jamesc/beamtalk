@@ -52,6 +52,27 @@ jobs:
           echo "full=${base}...${head}" >> "$GITHUB_OUTPUT"
           echo "incr=${incr}" >> "$GITHUB_OUTPUT"
 
+      # The review prompt lives in .github/claude-review-prompt.md so it can be edited
+      # without touching the workflow. The action's `prompt` input is a plain string and
+      # ${{ }} does not interpolate inside an external file, so the diff ranges are injected
+      # here via __INCR_RANGE__ / __FULL_RANGE__ placeholders (ranges are git SHAs — no shell
+      # metacharacters), and the result is handed to the action through a step output.
+      - name: Load review prompt
+        id: load_prompt
+        env:
+          INCR_RANGE: ${{ steps.ranges.outputs.incr }}
+          FULL_RANGE: ${{ steps.ranges.outputs.full }}
+        run: |
+          prompt_file="${RUNNER_TEMP}/claude-review-prompt.txt"
+          sed -e "s|__INCR_RANGE__|${INCR_RANGE}|g" \
+              -e "s|__FULL_RANGE__|${FULL_RANGE}|g" \
+              .github/claude-review-prompt.md > "${prompt_file}"
+          {
+            echo 'prompt<<__BTPROMPTEOF__'
+            cat "${prompt_file}"
+            echo '__BTPROMPTEOF__'
+          } >> "$GITHUB_OUTPUT"
+
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -64,89 +85,7 @@ jobs:
           # for line-anchored comments; it must be listed explicitly because
           # --allowedTools REPLACES the action's default tool set rather than extending it.
           claude_args: '--max-turns 25 --model claude-sonnet-4-6 --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),mcp__github_inline_comment__create_inline_comment"'
-          prompt: |
-            You are reviewing a PR for BeamTalk: a Smalltalk-inspired language that
-            compiles to the BEAM (Erlang VM), with a compiler/CLI written in Rust.
-            Review with two lenses depending on what the PR touches.
-
-            RUST TOOLCHAIN (compiler, CLI, LSP):
-            - Correctness of Rust→Core Erlang generation and the bytecode port boundary.
-            - Idiomatic error handling: surface real errors, don't swallow them.
-            - Flag panics on paths that should return Results to the caller.
-
-            BEAMTALK LANGUAGE & SEMANTICS — enforce these invariants:
-            - Two-entity model. Value Objects are immutable with auto-generated
-              accessors; Actors have OPAQUE state and communicate by message only.
-              Block anything that leaks Actor internals or adds mutable slots to a
-              Value Object.
-            - `initialize` is THE typed-slot verification boundary. Slot/type checks
-              belong there, not scattered through methods. Flag validation that has
-              drifted elsewhere.
-            - Three-tier visibility: sealed / internal / open. Flag changes that break
-              a seal or expose internal-only API to open consumers.
-            - Let-it-fail. Flag defensive try/rescue or nil-guards that mask failures a
-              supervisor should handle. New processes must sit under supervision.
-            - Erlang interop goes through the doesNotUnderstand: dynamic proxy. Flag
-              hand-written wrappers that duplicate what the proxy already provides.
-            - Categories are metadata, not syntax. Reject attempts to make them syntactic.
-
-            DESIGN PHILOSOPHY (weight heavily):
-            - YAGNI. Flag speculative generality, new keywords/syntax, or abstractions
-              added without a concrete present need. Minimal keyword surface is a goal,
-              not an accident — argue for removal when something earns its keep poorly.
-
-            DO NOT FLAG (legitimate patterns — stay quiet on these):
-            - Error handling at the Rust↔BEAM port boundary. The port can genuinely
-              fail (dead process, malformed bytecode); Result/try handling there is
-              correct, NOT a let-it-fail violation. Let-it-fail applies to BeamTalk
-              and OTP processes, not the Rust side talking to an external port.
-            - Auto-generated accessors on Value Objects. Expected by design — never
-              read these as "leaking state." Opacity is an Actor rule only.
-            - The doesNotUnderstand: proxy machinery itself, and ClassBuilder /
-              metaclass-as-process plumbing. This is the implementation OF the model,
-              not a violation of it. Don't call ClassBuilder "imperative class
-              construction" — that's its job.
-            - Test code reaching into internals, asserting private behavior, or using
-              defensive setup. Sealing and opacity rules do not apply to fixtures.
-            - Intentional crashes: `self error:` or contract-violation crashes are
-              correct. Do not request defensive guards around code meant to fail.
-            - Idiomatic Rust. Generics, traits, and builder patterns are not YAGNI
-              violations — the keyword-minimalism rule is about Beamtalk surface syntax,
-              not Rust internals. Verbose generated Core Erlang is expected output.
-            - Pre-existing code the diff doesn't touch, and abstractions the PR
-              description explicitly justifies. Review the change, not the world.
-            - Anything rustfmt / clippy / CI already enforces.
-
-            OUTPUT:
-            Categorize findings as Blockers / Suggestions / Nits. Be concise, surface
-            problems, skip praise. For design concerns, explain the invariant at stake,
-            not just the line.
-
-            SCOPING:
-            - Run `git diff ${{ steps.ranges.outputs.incr }}` and post inline comments
-              ONLY on lines within that incremental range. Do not re-comment on code
-              outside it. Attach each finding to the exact line it concerns using the
-              create_inline_comment tool — do not relegate an in-range finding to the
-              summary when it can be anchored to a line.
-            - When a fix is concrete and small, include a GitHub ```suggestion block in
-              the inline comment so the author can apply it in one click. Use suggestions
-              for clear, mechanical fixes; describe the change in prose when it is larger
-              or needs judgement.
-            - Run `git diff ${{ steps.ranges.outputs.full }}` to assess the verdict.
-              A Blocker ANYWHERE in the full PR range means BLOCK, even if it falls
-              outside the incremental range and you cannot attach an inline comment to
-              it. In that case, name the unresolved out-of-range Blocker in your summary.
-
-            At the very end of your response, use the Write tool to create TWO files
-            in the repo root:
-            1. .claude-summary.md — a concise Markdown summary of this review for a
-               human reader: a one-line overall assessment, then findings grouped under
-               "Blockers" / "Suggestions" / "Nits" headings (omit empty groups). When
-               the PR is clean, say so explicitly (e.g. "No blocking issues found.").
-               This file is posted as a PR comment on EVERY run, including PASS, so it
-               must always be written even when there are no findings.
-            2. .claude-verdict — exactly one word: BLOCK if there are any Blockers,
-               otherwise PASS. No other content in this file.
+          prompt: ${{ steps.load_prompt.outputs.prompt }}
 
       - name: Post review summary
         if: always()
