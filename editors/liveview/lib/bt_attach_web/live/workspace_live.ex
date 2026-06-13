@@ -1720,7 +1720,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           dirty: false,
           # Image-divergence snapshot at browse time (the badges the old
           # read-only pane carried): `disk_differs` = an unflushed live `>>`
-          # patch, `runtime_only` = no static source on disk.
+          # patch, `runtime_only` = no static source on disk. `disk_differs` is
+          # also re-set by `compile_clean/3` on a later in-memory compile;
+          # `runtime_only` stays the open-time value.
           disk_differs: info.disk_differs,
           runtime_only: info.runtime_only
         }
@@ -1885,7 +1887,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     source: live edit buffer,
   #     base: last-compiled source (dirty = source != base),
   #     dirty: boolean,
-  #     disk_differs: boolean,   # methods only — unflushed live `>>` patch at open
+  #     disk_differs: boolean,   # methods only — unflushed live `>>` patch; snapshot at open, re-set on compile
   #     runtime_only: boolean    # methods only — sourceless runtime method at open
   #   }
   #
