@@ -3929,7 +3929,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                         rows="2"
                         placeholder="Object subclass: Greeter"
                       ></textarea>
-                      <button class="btn" type="submit">New File</button>
+                      <button class="btn" type="submit" phx-disable-with="Creating…">
+                        New File
+                      </button>
                     </form>
                   <% else %>
                     <p class="muted-note">

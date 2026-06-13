@@ -436,6 +436,11 @@ do_revert(ClassNameBin, SelectorAtom) ->
                             >>
                         )
                     );
+                %% Any non-class kind installs the prior body. `'new-class'`
+                %% entries never reach here: find_revert_target/2 matches on
+                %% `#entry.selector =:= SelectorBin`, and a new-class entry stores
+                %% `selector = undefined`, which can never equal a binary
+                %% selector — so this `_` arm only ever sees instance-side kinds.
                 _ ->
                     install_revert_patch(ClassNameBin, SelectorAtom, PrevBody)
             end;
