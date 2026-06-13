@@ -734,6 +734,49 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     refute html =~ ~s(id="browse-method-source")
   end
 
+  test "compiling a browsed method shows the unflushed badge (BT-2539)", %{conn: conn} do
+    # An in-memory `>>` compile (⌘S) live-patches the method without flushing to
+    # disk, so the image now diverges from the on-disk body. The `disk_differs`
+    # snapshot is captured at browse time, so `compile_clean/3` must flip it for a
+    # `:method` tab — otherwise the `unflushed` breadcrumb badge never appears for
+    # a method that was in-sync when opened.
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "FlushCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # Open the method as an editable tab (browse-is-edit): now the active tab.
+    view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+    # Compile a new body via the save form, threading the active method tab id so
+    # `compile_clean/3` runs against it (the historical no-tab payload is a no-op).
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "class" => class,
+        "selector" => "increment",
+        "source" => "increment => self.value := self.value + 2",
+        "tab" => "method:#{class}:instance:increment"
+      })
+
+    assert save_html =~ "Saved increment on #{class}"
+    # The post-compile divergence surfaces as the `unflushed` breadcrumb badge.
+    assert save_html =~ "unflushed"
+  end
+
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
 
   # Spawn + bind a real Counter actor in `view`'s session and inspect it, returning

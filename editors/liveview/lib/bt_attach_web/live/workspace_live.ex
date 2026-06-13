@@ -2016,11 +2016,25 @@ defmodule BtAttachWeb.WorkspaceLive do
   # After a successful compile, clear the saved tab's dirty dot and re-base it on
   # the compiled source. `tab_id` is nil for the historical no-tab save payload —
   # then there's nothing to reconcile.
+  #
+  # A `:method` save is an in-memory live `>>` patch (logged to the ChangeLog) that
+  # is *not* flushed to disk, so a successful compile diverges the live body from
+  # its on-disk counterpart: flip `disk_differs` on so the `unflushed` breadcrumb
+  # badge appears. (Clearing it again on flush needs a `flush_completed`
+  # subscription — tracked as BT-2545.) A `:def` tab evaluates a whole class
+  # definition with no single on-disk method body to diverge, so leave its
+  # snapshot untouched.
   defp compile_clean(socket, nil, _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
     update_active_tab_by_id(socket, tab_id, fn tab ->
-      %{tab | source: source, base: source, dirty: false}
+      %{
+        tab
+        | source: source,
+          base: source,
+          dirty: false,
+          disk_differs: if(tab.kind == :method, do: true, else: tab.disk_differs)
+      }
     end)
   end
 
