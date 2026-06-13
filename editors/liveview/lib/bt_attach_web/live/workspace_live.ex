@@ -210,11 +210,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       row (`browser_select_protocol`; `nil` = "all" shows every selector,
       `filtered_methods/2`). Runtime-only (image-diverged) classes and methods
       carry a `runtime` badge (origin = `runtime`, ADR 0096 / BT-2483).
-    * **Method source** — selecting a method (`browser_select_method`) drives a
-      read-only centre display (`#browse-method-source`) of its image-accurate
-      source with a `Class instance » selector · category` breadcrumb and
-      image-diverged badges (`runtime` / unflushed `>>` patch). Read-only is
-      enough until the tabbed editor consumes the browse selection in a follow-up.
+    * **Method source** — selecting a method (`browser_select_method`) opens it
+      as an editable tab in the centre method editor (`open_method_tab`), seeded
+      with its image-accurate source. Browsing is editing (the Smalltalk idiom):
+      there is no separate read-only display, and the browser highlights whichever
+      method the focused editor tab is showing (`selected_method_ref`).
 
   The browse data path carries the wire-shaped live term verbatim over
   distribution (`{:value, json_value}`, BT-2399) — JSON only at the WebSocket
@@ -438,15 +438,15 @@ defmodule BtAttachWeb.WorkspaceLive do
       # tree between Hierarchy (indented by superclass) and Category (grouped by
       # annotation); `browser_side` is the instance/class toggle that
       # re-populates the protocol/method list; `selected_protocol` is the
-      # protocol filter (`nil` = "all"). Selecting a method drives the center
-      # method-source display (`browser_method`) with its breadcrumb. All four
-      # browse ops are `:read`, so the pane works for the Observer role too.
+      # protocol filter (`nil` = "all"). Selecting a method opens it in the method
+      # editor (`open_method_tab`); the browser highlights whatever the focused tab
+      # shows. All four browse ops are `:read`, so the pane works for the Observer
+      # role too.
       |> assign(:browser_view, "hierarchy")
       |> assign(:browser_side, "instance")
       |> assign(:selected_class, nil)
       |> assign(:selected_protocol, nil)
       |> assign(:browser_protocols, [])
-      |> assign(:browser_method, nil)
       |> assign(:browser_error, nil)
       # Navigation aids (BT-2495, epic BT-2482 Phase 3): the top-bar omni search
       # and the method-editor Senders/Implementors popovers. Both ride thin
@@ -892,11 +892,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Toggle the instance/class side. The protocol/method list is class-side
   # specific (a class's instance methods differ from its class methods), so
   # flipping the side re-fetches the selected class's protocols for the new side
-  # and clears the protocol filter + any open method source. Pure toggle when no
-  # class is selected yet.
+  # and clears the protocol filter. Pure toggle when no class is selected yet.
   def handle_event("browser_side", %{"side" => side}, socket)
       when side in ~w(instance class) do
-    socket = assign(socket, browser_side: side, selected_protocol: nil, browser_method: nil)
+    socket = assign(socket, browser_side: side, selected_protocol: nil)
 
     case socket.assigns.selected_class do
       nil -> {:noreply, assign(socket, browser_protocols: [])}
@@ -907,12 +906,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   def handle_event("browser_side", _params, socket), do: {:noreply, socket}
 
   # Select a class in the tree: fetch its protocols (for the current side) and
-  # reset the protocol filter + open method. A non-binary / absent class name is
-  # ignored rather than crashing the LiveView.
+  # reset the protocol filter. A non-binary / absent class name is ignored rather
+  # than crashing the LiveView.
   def handle_event("browser_select_class", %{"class" => class}, socket)
       when is_binary(class) do
     socket =
-      assign(socket, selected_class: class, selected_protocol: nil, browser_method: nil)
+      assign(socket, selected_class: class, selected_protocol: nil)
 
     {:noreply, load_protocols(socket, class, socket.assigns.browser_side)}
   end
@@ -930,17 +929,19 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("browser_select_protocol", _params, socket), do: {:noreply, socket}
 
-  # Select a method: fetch its image-accurate source and drive the center
-  # method-source display (read-only until the tabbed editor consumes it in a
-  # follow-up issue). The class/side/selector ride the click; a malformed payload
-  # is ignored.
+  # Select a method: open (or focus) it as a tab in the method editor, seeded with
+  # its image-accurate source. Browsing *is* editing — the Smalltalk idiom — so a
+  # browser click feeds the same write-surface the omni search and Senders /
+  # Implementors navigation already do (`open_method_tab`), rather than a separate
+  # read-only panel. The class/side/selector ride the click; a malformed payload is
+  # ignored.
   def handle_event(
         "browser_select_method",
         %{"class" => class, "side" => side, "selector" => selector},
         socket
       )
       when is_binary(class) and is_binary(side) and is_binary(selector) do
-    {:noreply, load_method_source(socket, class, side, selector)}
+    {:noreply, open_method_tab(socket, class, side, selector)}
   end
 
   def handle_event("browser_select_method", _params, socket), do: {:noreply, socket}
@@ -1598,39 +1599,6 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Load one method's image-accurate source (op 3, `browse-method-source`) for the
-  # center method-source display. The result carries `source` (`null` for a
-  # sourceless runtime method), `origin`, and `disk_differs` (an unflushed live
-  # patch) — all surfaced in the breadcrumb / badge. We keep the protocol of the
-  # selected selector for the breadcrumb's `· category` segment by looking it up
-  # in the already-loaded protocol tree.
-  defp load_method_source(socket, class, side, selector) do
-    case Facade.dispatch(
-           :browse_method_source,
-           %{class: class, side: side, selector: selector},
-           ctx(socket)
-         ) do
-      {:value, result} when is_map(result) ->
-        method = Map.put(result, "protocol", protocol_of(socket, selector))
-        assign(socket, browser_method: method, browser_error: nil)
-
-      {:error, reason} ->
-        assign(socket, browser_method: nil, browser_error: facade_error(reason))
-    end
-  end
-
-  # The protocol (method category) a selector belongs to, read from the loaded
-  # protocol tree — the breadcrumb's `· category` part. Falls back to nil when the
-  # selector isn't found (e.g. the tree hasn't loaded), which the breadcrumb omits.
-  defp protocol_of(socket, selector) do
-    Enum.find_value(socket.assigns.browser_protocols, fn proto ->
-      selectors = Map.get(proto, "selectors", [])
-
-      if Enum.any?(selectors, &(Map.get(&1, "selector") == selector)),
-        do: Map.get(proto, "name")
-    end)
-  end
-
   # ── navigation aids: omni search + senders/implementors (BT-2495) ───────────
 
   # Filter the workspace symbol index (`nav-symbols`) against the live query and
@@ -1721,7 +1689,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # the class tree would.
   defp open_class(socket, class) do
     socket
-    |> assign(selected_class: class, selected_protocol: nil, browser_method: nil)
+    |> assign(selected_class: class, selected_protocol: nil)
     |> load_protocols(class, socket.assigns.browser_side)
   end
 
@@ -2047,6 +2015,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The Class › side › selector breadcrumb label parts for the active tab.
   defp breadcrumb(%{kind: :def, class: class}), do: {class, nil, "class definition"}
   defp breadcrumb(%{class: class, side: side, selector: selector}), do: {class, side, selector}
+
+  # The method shown in the focused tab as a `%{class, side, selector}` ref (or nil
+  # for a class-definition tab), so the System Browser can highlight the matching
+  # method row. Takes bare `assigns` for the render template.
+  defp selected_method_ref(assigns) do
+    case active_tab(assigns) do
+      %{kind: :method, class: class, side: side, selector: selector} ->
+        %{class: class, side: side, selector: selector}
+
+      _ ->
+        nil
+    end
+  end
 
   # ── bindings + inspector helpers ────────────────────────────────────────────
 
@@ -3352,7 +3333,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :selected_protocol, :string, default: nil
   attr :selected_class, :string, default: nil
   attr :browser_side, :string, required: true
-  attr :browser_method, :map, default: nil
+  # The method open in the focused editor tab (`%{class, side, selector}`) or nil
+  # for a class-definition tab — drives the "sel" highlight so the browser tracks
+  # whatever the editor is showing.
+  attr :active_method, :map, default: nil
 
   defp system_browser_methods(assigns) do
     assigns =
@@ -3404,8 +3388,9 @@ defmodule BtAttachWeb.WorkspaceLive do
               :for={m <- @methods}
               class={[
                 "row method-row",
-                @browser_method && @browser_method["selector"] == m["selector"] &&
-                  @browser_method["side"] == @browser_side && "sel"
+                @active_method && @active_method.class == @selected_class &&
+                  @active_method.side == @browser_side &&
+                  @active_method.selector == m["selector"] && "sel"
               ]}
               phx-click="browser_select_method"
               phx-value-class={@selected_class}
@@ -3422,65 +3407,6 @@ defmodule BtAttachWeb.WorkspaceLive do
     </div>
     """
   end
-
-  # The center method-source display (BT-2491): the selected method's
-  # image-accurate source, read-only, with a `Class instance » selector ·
-  # category` breadcrumb and image-diverged badges (runtime-only / unflushed
-  # patch). Read-only is enough until the tabbed editor consumes it in a
-  # follow-up issue. Renders nothing until a method is selected.
-  attr :browser_method, :map, default: nil
-
-  defp browser_method_source(assigns) do
-    ~H"""
-    <div :if={@browser_method} id="browse-method-source" class="panel" style="order:3; flex:none;">
-      <div class="panel-head">
-        Method Source <span class="spacer"></span>
-        <span
-          :if={@browser_method["disk_differs"] == true}
-          class="runtime-tag"
-          title="unflushed live patch"
-        >
-          unflushed
-        </span>
-        <span
-          :if={runtime_only?(@browser_method)}
-          class="runtime-tag"
-          title="runtime-only (not on disk)"
-        >
-          runtime
-        </span>
-      </div>
-      <div class="editor-meta">
-        <% {bc_class, bc_side, bc_sel, bc_cat} = browse_breadcrumb(@browser_method) %>
-        <span class="crumb">
-          <b>{bc_class}</b>
-          <span class="mono sep-side">{bc_side}</span>
-          <span class="sep">»</span>
-          <span class="mono">{bc_sel}</span>
-          <span :if={bc_cat} class="meta-note">· {bc_cat}</span>
-        </span>
-      </div>
-      <div class="panel-body">
-        <%= if @browser_method["source"] do %>
-          <pre class="bt-source mono">{@browser_method["source"]}</pre>
-        <% else %>
-          <p class="muted-note">No source — runtime-only method (defined in the live image).</p>
-        <% end %>
-      </div>
-    </div>
-    """
-  end
-
-  # The breadcrumb parts for a selected method: `Class instance » selector ·
-  # category` (BT-2491, the spike's crumb at app.jsx:401). `side` renders as the
-  # word "class"/"instance"; `category` is the method's protocol (nil when
-  # unknown, then the breadcrumb omits the `· category` segment).
-  defp browse_breadcrumb(method) do
-    {method["class"], side_label(method["side"]), method["selector"], method["protocol"]}
-  end
-
-  defp side_label("class"), do: "class"
-  defp side_label(_), do: "instance"
 
   @impl true
   def render(assigns) do
@@ -3591,7 +3517,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   selected_protocol={@selected_protocol}
                   selected_class={@selected_class}
                   browser_side={@browser_side}
-                  browser_method={@browser_method}
+                  active_method={selected_method_ref(assigns)}
                 />
               </div>
 
@@ -3909,7 +3835,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <div
                         id={"method-editor-overlay-" <> @active_tab}
                         class="bt-editor-wrap field"
-                        style="display:block; height:6rem; padding:0;"
+                        style="padding:0;"
                         phx-hook="CodeEditor"
                       >
                         <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
@@ -4025,8 +3951,6 @@ defmodule BtAttachWeb.WorkspaceLive do
                   </div>
                 </div>
               </div>
-
-              <.browser_method_source browser_method={@browser_method} />
             </div>
 
             <%!-- RIGHT — Bindings + Inspector (348px), with ChangeLog + Transcript --%>

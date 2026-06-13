@@ -693,7 +693,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert Process.alive?(view.pid)
   end
 
-  test "selecting a method shows its source with a breadcrumb (BT-2491)", %{conn: conn} do
+  test "selecting a method opens it in the editor with a breadcrumb (BT-2491)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     suffix = System.unique_integer([:positive])
     class = "SourceCounter#{suffix}"
@@ -711,21 +711,20 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert eventually(fn -> render(view) =~ class end)
     view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
 
-    # Click the method row: browse-method-source drives the centre display with a
-    # `Class instance » selector` breadcrumb and the method source.
+    # Click the method row: it opens an editable tab in the method editor seeded
+    # with the method source, and a `Class › side › selector` breadcrumb.
     html =
       view
       |> element(~s(div[phx-value-selector="increment"]))
       |> render_click()
 
-    assert html =~ ~s(id="browse-method-source")
+    assert html =~ ~s(id="method-editor")
     assert html =~ class
     assert html =~ "increment"
-    # The breadcrumb carries the instance side and the » separator (ADR-spec
-    # `Class instance » selector · category`).
-    assert html =~ "»"
+    # The editor breadcrumb carries the instance side and the › separator.
+    assert html =~ "›"
     assert html =~ "instance"
-    # The actual method body is shown read-only.
+    # The method body is loaded into the editable buffer.
     assert html =~ "self.value"
   end
 

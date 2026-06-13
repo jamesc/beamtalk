@@ -243,24 +243,19 @@
 }
 .sb-protocols { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 
-/* read-only method-source display in the centre column */
-#browse-method-source { margin-top: 9px; max-height: 40%; }
-#browse-method-source .panel-head .runtime-tag {
-  font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
-  color: var(--t-symbol); flex: none;
-}
-#browse-method-source .crumb .sep-side { color: var(--faint); margin: 0 2px; }
-.bt-source {
-  margin: 0; font-family: var(--code-font, monospace); font-size: 12.5px;
-  white-space: pre-wrap; word-break: break-word; color: var(--ink);
-  background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: 6px; padding: 8px 10px;
-}
-
 /* center column splits between editor and the workspace dock */
 /* position: relative anchors the BT-2495 Senders/Implementors popover. */
 .editor-panel { flex: 1; min-height: 0; position: relative; }
 .dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; }
 .dock .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+/* The editor body and its method form fill the panel so a browsed method gets the
+   whole reclaimed height (the read-only Method Source panel is gone — browsing a
+   method opens it here). The highlighted-source overlay grows; the New File form
+   and nav actions stay compact below it. */
+.editor-panel .panel-body { display: flex; flex-direction: column; }
+#method-editor-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+#method-editor-form .bt-editor-wrap { flex: 1; min-height: 6rem; }
 
 /* ============================================================================
    Tabbed method editor — write-surface tab strip + breadcrumb (BT-2494)
