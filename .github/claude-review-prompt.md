@@ -34,6 +34,17 @@ downgrade them to Suggestions:
 - Security: unsafe atom creation, path traversal, injection, secret exposure.
 Suggestions = real improvements that are not merge-blocking. Nits = style / naming / docs.
 
+ACCEPTED-TRADEOFF CHECK (do this BEFORE you BLOCK on a robustness concern): a
+robustness / atomicity / ordering / idempotency concern is NOT a Blocker if the codebase
+explicitly accepts it as a design tradeoff. Before classifying such a concern as a Blocker,
+grep `docs/ADR/` (and the relevant module's doc comments) for a decision covering it — e.g.
+weaker-than-serialized ordering, fire-and-forget facades that return `ok`, self-healing on
+reconnect/restart, or "best-effort" refresh streams. If you find an accepting decision, do
+NOT block: note it as a Suggestion citing the ADR (or stay silent if fully addressed). This
+check applies ONLY to concerns you would otherwise BLOCK on — do not spelunk ADRs for nits.
+A genuine cross-session leak, data loss, or crash on a documented-safe path is still a
+Blocker regardless; an ADR cannot bless those.
+
 CORRECTNESS LENS (apply to every change, all languages):
 - Concurrency & lifecycle: races, idempotency of subscribe/unsubscribe/register,
   reconnect and restart windows, monitor/link gaps, message ordering and duplication.
@@ -100,6 +111,12 @@ DO NOT FLAG (legitimate patterns — stay quiet on these):
 - Idiomatic Rust. Generics, traits, and builder patterns are not YAGNI violations — the
   keyword-minimalism rule is about Beamtalk surface syntax, not Rust internals. Verbose
   generated Core Erlang is expected output.
+- Robustness / atomicity / ordering tradeoffs that an ADR (`docs/ADR/`) or module doc
+  explicitly accepts — e.g. a fire-and-forget facade that returns `ok` and self-heals on
+  reconnect, or a "best-effort" refresh stream with weaker-than-serialized ordering. A
+  documented, accepted tradeoff is not a bug. (If genuinely undocumented, it is still fair
+  game — and a cross-session leak, data loss, or documented-safe-path crash is a Blocker
+  even when an ADR exists, since those are bugs, not tradeoffs.)
 - Pre-existing code the diff doesn't touch, and abstractions the PR description explicitly
   justifies. Review the change, not the world.
 - Anything rustfmt / clippy / CI already enforces.
