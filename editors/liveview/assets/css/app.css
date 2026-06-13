@@ -300,6 +300,10 @@
 .editor-meta > .spacer { flex: 1; }
 .editor-meta .meta-note { flex: none; white-space: nowrap; color: var(--faint); }
 .editor-meta .meta-note.edited, .editor-meta .meta-note.read-only { color: var(--accent-2); }
+.editor-meta .runtime-tag {
+  flex: none; font-size: 9px; font-weight: 700; letter-spacing: .03em;
+  text-transform: uppercase; color: var(--t-symbol);
+}
 
 /* ============================================================================
    Workspace dock — tabbed Workspace / Transcript / Changes (BT-2490)

@@ -1707,7 +1707,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         activate_tab(socket, id)
 
       nil ->
-        source = method_source_text(socket, class, side, selector)
+        info = method_source_info(socket, class, side, selector)
 
         tab = %{
           id: id,
@@ -1715,9 +1715,14 @@ defmodule BtAttachWeb.WorkspaceLive do
           class: class,
           side: side,
           selector: selector,
-          source: source,
-          base: source,
-          dirty: false
+          source: info.source,
+          base: info.source,
+          dirty: false,
+          # Image-divergence snapshot at browse time (the badges the old
+          # read-only pane carried): `disk_differs` = an unflushed live `>>`
+          # patch, `runtime_only` = no static source on disk.
+          disk_differs: info.disk_differs,
+          runtime_only: info.runtime_only
         }
 
         socket
@@ -1727,17 +1732,26 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Just the method's source string (`browse-method-source`), or "" for a
-  # sourceless runtime method / error — so opening it gives an empty editable
-  # buffer rather than crashing.
-  defp method_source_text(socket, class, side, selector) do
+  # The method's image-accurate source (`browse-method-source`) plus the
+  # divergence flags the editor breadcrumb badges: `disk_differs` (unflushed live
+  # patch) and `runtime_only` (sourceless runtime method). `source` is "" for a
+  # sourceless method / error, so opening it gives an empty editable buffer rather
+  # than crashing.
+  defp method_source_info(socket, class, side, selector) do
     case Facade.dispatch(
            :browse_method_source,
            %{class: class, side: side, selector: selector},
            ctx(socket)
          ) do
-      {:value, %{"source" => source}} when is_binary(source) -> source
-      _ -> ""
+      {:value, result} when is_map(result) ->
+        %{
+          source: if(is_binary(result["source"]), do: result["source"], else: ""),
+          disk_differs: result["disk_differs"] == true,
+          runtime_only: runtime_only?(result)
+        }
+
+      _ ->
+        %{source: "", disk_differs: false, runtime_only: false}
     end
   end
 
@@ -1870,7 +1884,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     selector: "increment",          # methods only
   #     source: live edit buffer,
   #     base: last-compiled source (dirty = source != base),
-  #     dirty: boolean
+  #     dirty: boolean,
+  #     disk_differs: boolean,   # methods only — unflushed live `>>` patch at open
+  #     runtime_only: boolean    # methods only — sourceless runtime method at open
   #   }
   #
   # The cockpit opens with one starter method tab so the editor is never empty
@@ -1886,7 +1902,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       selector: "increment",
       source: "",
       base: "",
-      dirty: false
+      dirty: false,
+      disk_differs: false,
+      runtime_only: false
     }
 
     socket
@@ -1972,7 +1990,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           selector: nil,
           source: "",
           base: "",
-          dirty: false
+          dirty: false,
+          disk_differs: false,
+          runtime_only: false
         }
 
         socket
@@ -3773,6 +3793,24 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <span class="mono">{bc_sel}</span>
                   </span>
                   <span class="spacer"></span>
+                  <%!-- image-divergence badges carried from the browse snapshot
+                       (the indicators the old read-only Method Source pane showed):
+                       an unflushed live `>>` patch, or a sourceless runtime
+                       method. --%>
+                  <span
+                    :if={active_tab(assigns).disk_differs}
+                    class="runtime-tag"
+                    title="unflushed live patch (image differs from disk)"
+                  >
+                    unflushed
+                  </span>
+                  <span
+                    :if={active_tab(assigns).runtime_only}
+                    class="runtime-tag"
+                    title="runtime-only (no source on disk)"
+                  >
+                    runtime
+                  </span>
                   <span :if={@role != :owner} class="meta-note read-only">read-only · Observer</span>
                   <span :if={@role == :owner and active_tab(assigns).dirty} class="meta-note edited">
                     edited — ⌘S to compile

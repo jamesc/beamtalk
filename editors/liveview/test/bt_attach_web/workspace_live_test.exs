@@ -718,7 +718,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       |> element(~s(div[phx-value-selector="increment"]))
       |> render_click()
 
-    assert html =~ ~s(id="method-editor")
+    # A new editor tab is opened for the selected method — its stable tab id
+    # (`method:Class:side:selector`) proves the click actually created the tab,
+    # not just that the always-present `#method-editor` panel rendered.
+    assert html =~ ~s(phx-value-id="method:#{class}:instance:increment")
     assert html =~ class
     assert html =~ "increment"
     # The editor breadcrumb carries the instance side and the › separator.
@@ -726,6 +729,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "instance"
     # The method body is loaded into the editable buffer.
     assert html =~ "self.value"
+    # Regression guard: the old read-only Method Source pane is gone — browsing a
+    # method must route into the editor, not resurrect the separate pane.
+    refute html =~ ~s(id="browse-method-source")
   end
 
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
