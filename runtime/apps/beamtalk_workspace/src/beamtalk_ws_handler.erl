@@ -802,6 +802,10 @@ encode_actor_stopped_event(Event) ->
     #{
         <<"class">> => atom_to_binary(maps:get(actorClass, Event, unknown), utf8),
         <<"pid">> => encode_event_pid(maps:get(pid, Event, nil)),
+        %% `reason` is always one of the atoms `normal | shutdown | crashed`:
+        %% `beamtalk_actor:normalize_stop_reason/1` maps every OTP stop reason onto
+        %% that closed set before the `ActorStopped` event is built, so
+        %% `atom_to_binary/2` here cannot raise `badarg` (no defensive guard needed).
         <<"reason">> => atom_to_binary(maps:get(reason, Event, normal), utf8)
     }.
 
