@@ -89,6 +89,15 @@ jobs:
           version-type: strict
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Node is build-only: esbuild bundles CodeMirror (BT-2538) into app.js for
+      # the release. Version tracks .tool-versions.
+      - name: Install Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+          cache-dependency-path: editors/liveview/assets/package-lock.json
+
       - name: Cache Mix deps and build
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:

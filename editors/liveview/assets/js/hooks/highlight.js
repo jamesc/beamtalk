@@ -15,7 +15,10 @@
 //   - field access via self.field   - assignment :=   - early return ^
 //   - async send suffix !   - symbols #name   - maps and lists
 
-const RESERVED = new Set([
+// The reserved identifiers and token rules are exported so the CodeMirror
+// highlighter (bt_highlight.js, BT-2538) reuses the SAME regex grammar — one
+// definition feeds both the legacy <pre> overlay and the CodeMirror editor.
+export const RESERVED = new Set([
   "self",
   "super",
   "nil",
@@ -52,7 +55,7 @@ function hlString(text) {
   return '<span class="tok-string">' + out + "</span>"
 }
 
-const RULES = [
+export const RULES = [
   { cls: "comment", re: /^\/\/[^\n]*/ }, // // line comment
   { cls: "comment", re: /^\/\*[\s\S]*?\*\// }, // /* block comment */
   { cls: "_string", re: /^"(?:\\.|[^"\\])*"/ }, // "double quoted string"

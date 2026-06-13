@@ -33,6 +33,26 @@ FROM ${ELIXIR_IMAGE} AS build
 ENV MIX_ENV=prod \
     LANG=C.UTF-8
 
+# Node — only the BUILD needs it: esbuild bundles CodeMirror (BT-2538) into
+# app.js, after which the release is self-contained (the runtime image below has
+# no node). Pin tracks the repo-root .tool-versions; install the official binary
+# tarball so the version is exact, not whatever apt ships.
+ARG NODE_VERSION=22.22.2
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl xz-utils ca-certificates; \
+    rm -rf /var/lib/apt/lists/*; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) nodearch=x64 ;; \
+      arm64) nodearch=arm64 ;; \
+      *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${nodearch}.tar.xz"; \
+    tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
+    rm /tmp/node.tar.xz; \
+    node --version; npm --version
+
 # bt_attach version tracks the repo VERSION (BT-2514). The build context is the
 # editors/liveview dir, so it is injected and written where mix.exs reads it
 # (../../VERSION, relative to mix.exs at /src/app/mix.exs).

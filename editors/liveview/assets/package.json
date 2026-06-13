@@ -2,7 +2,13 @@
   "name": "bt_attach_assets",
   "version": "0.0.0",
   "private": true,
-  "description": "Test-only JS deps for editors/liveview. The esbuild + tailwind asset pipeline uses standalone binaries (no npm) — this exists solely for the Playwright CLI that phoenix_test_playwright drives in the browser e2e suite (mix test --only playwright). See README 'Browser e2e'.",
+  "description": "JS deps for editors/liveview. CodeMirror 6 powers the cockpit's code editor (BT-2538); it is BUNDLED into priv/static/assets/app.js by esbuild, so the shipped release stays npm-free — only the build needs node (provisioned via .tool-versions / mise). playwright is test-only, for the browser e2e suite (mix test --only playwright). See README 'Assets'.",
+  "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/language": "^6.10.8",
+    "@codemirror/state": "^6.5.0",
+    "@codemirror/view": "^6.36.1"
+  },
   "devDependencies": {
     "playwright": "1.55.1"
   }

@@ -590,6 +590,35 @@
 .tok-punct   { color: var(--t-punct); }
 
 /* ============================================================================
+   CodeMirror 6 editor (BT-2538) — the CmEditor hook mounts CodeMirror into an
+   ignored host inside `.cm-wrap`. Match the old `.bt-editor` font/size/padding
+   so the surface looks unchanged; token colours reuse the `.tok-*` classes
+   above (the TextMate highlighter emits them), so per-theme `--t-*` variables
+   and the TweaksPanel keep working. The hidden `.cm-field` textarea is the
+   posted form field and is never shown.
+   ========================================================================== */
+.cm-wrap { position: relative; overflow: hidden; background: var(--code-bg); }
+.cm-wrap > [phx-update="ignore"] { position: absolute; inset: 0; }
+.cm-field { display: none; }
+
+.cm-wrap .cm-editor { height: 100%; background: transparent; }
+.cm-wrap .cm-editor.cm-focused { outline: none; }
+.cm-wrap .cm-scroller {
+  font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12.5px; line-height: 1.6;
+}
+.cm-wrap .cm-content {
+  padding: 12px 0; caret-color: var(--accent); color: var(--ink);
+  tab-size: 2; -moz-tab-size: 2;
+}
+.cm-wrap .cm-line { padding: 0 14px; }
+.cm-wrap .cm-cursor, .cm-wrap .cm-dropCursor { border-left-color: var(--accent); }
+.cm-wrap .cm-selectionBackground,
+.cm-wrap .cm-content ::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.cm-wrap .cm-activeLine { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.cm-wrap .cm-placeholder { color: var(--muted); }
+
+/* ============================================================================
    Tweaks panel (BT-2487, epic BT-2482 Phase 1)
    ----------------------------------------------------------------------------
    The cockpit's appearance controls, ported from the spike's Tweaks panel

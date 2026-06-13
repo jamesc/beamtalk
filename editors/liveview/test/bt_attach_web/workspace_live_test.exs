@@ -275,6 +275,22 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "bt-editor-pre"
   end
 
+  test "the Workspace editor renders the CmEditor hook over a hidden expr field (BT-2538)", %{
+    conn: conn
+  } do
+    {:ok, _view, html} = live(conn, "/")
+
+    # The Workspace editor is CodeMirror (the CmEditor hook), mounted into an
+    # ignored host over a hidden `<textarea name="expr">` that stays the posted
+    # form field — so the `eval` handler and render_submit(%{expr: …}) read it
+    # unchanged. Selection is reported via select_workspace.
+    assert html =~ ~s(phx-hook="CmEditor")
+    assert html =~ ~s(id="workspace-editor-cm")
+    assert html =~ ~s(phx-update="ignore")
+    assert html =~ ~s(data-select-event="select_workspace")
+    assert html =~ ~s(name="expr")
+  end
+
   test "the SelectionTracker hook event is accepted and ignored when malformed (BT-2485)", %{
     conn: conn
   } do
