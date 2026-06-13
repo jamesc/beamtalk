@@ -375,21 +375,20 @@ fn generate_eunit_wrapper(
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Compile a fixture file referenced by `@load` directive.
+///
+/// Returns the BEAM module name (e.g. `bt@counter`) so callers do not have
+/// to recompute it from the path stem.
 fn compile_fixture(
     fixture_path: &Utf8Path,
     output_dir: &Utf8Path,
     suppress_warnings: bool,
     warnings_as_errors: bool,
-) -> Result<()> {
+) -> Result<String> {
     let stem = fixture_path
         .file_stem()
         .ok_or_else(|| miette::miette!("Fixture file has no name: {}", fixture_path))?;
 
-    // ADR 0016: User code modules use bt@ prefix
-    let module_name = format!(
-        "bt@{}",
-        beamtalk_core::codegen::core_erlang::to_module_name(stem)
-    );
+    let module_name = util::bt_module_name_from_stem(stem);
 
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -415,7 +414,7 @@ fn compile_fixture(
         .compile_batch(&[core_file])
         .wrap_err_with(|| format!("Failed to compile fixture BEAM for '{fixture_path}'"))?;
 
-    Ok(())
+    Ok(module_name)
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -661,20 +660,13 @@ pub(crate) fn compile_single_test_file(
                 test_file
             );
         }
-        compile_fixture(
+        let module_name = compile_fixture(
             &fixture_path,
             build_dir,
             suppress_warnings,
             warnings_as_errors,
         )?;
-        // Track fixture module name for code:ensure_loaded at runtime
-        if let Some(stem) = fixture_path.file_stem() {
-            let module_name = format!(
-                "bt@{}",
-                beamtalk_core::codegen::core_erlang::to_module_name(stem)
-            );
-            fixture_modules.push(module_name);
-        }
+        fixture_modules.push(module_name);
     }
 
     let file_stem = test_file
