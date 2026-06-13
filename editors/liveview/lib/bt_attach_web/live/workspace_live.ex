@@ -846,6 +846,36 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, flush_changes(socket)}
   end
 
+  # Create a brand-new class from the New File form's source + path ("New File",
+  # ADR 0082 Phase 5 `Workspace newClass:at:`, BT-2293). A successful create logs
+  # a durable `new-class` ChangeLog entry (written to disk later on flush) and
+  # appears in the Changes pane.
+  def handle_event("new_file", %{"source" => source, "path" => path}, socket)
+      when is_binary(source) and is_binary(path) do
+    {:noreply, new_file(socket, source, path)}
+  end
+
+  # Malformed payload (missing keys / non-binary values): surface a validation
+  # error rather than letting a crafted event crash the LiveView.
+  def handle_event("new_file", _params, socket) do
+    {:noreply, status_error(socket, "Invalid new-file form payload.")}
+  end
+
+  # Revert one pending in-memory method patch (ADR 0082 Phase 5 `Workspace
+  # changes revert:`, BT-2293), keyed by the `(class, selector)` carried on the
+  # ChangeLog row's revert button. Refreshes the Changes pane so the fresh
+  # revert entry is visible.
+  def handle_event("revert", %{"class" => class, "selector" => selector}, socket)
+      when is_binary(class) and is_binary(selector) do
+    {:noreply, revert_change(socket, class, selector)}
+  end
+
+  # Malformed payload (missing keys / non-binary values): surface a validation
+  # error rather than silently no-op'ing, consistent with `new_file`/`save_method`.
+  def handle_event("revert", _params, socket) do
+    {:noreply, status_error(socket, "Invalid revert request.")}
+  end
+
   # ── System Browser (BT-2491, epic BT-2482 Phase 2) ──────────────────────────
 
   # Toggle the class tree between Hierarchy (indented by superclass) and Category
@@ -1431,6 +1461,76 @@ defmodule BtAttachWeb.WorkspaceLive do
       {:error, reason} ->
         assign(socket, save_result: nil, save_error: facade_error(reason))
     end
+  end
+
+  # Create a new class from the New File form (BT-2293). Empty source/path is a
+  # local validation error (no round-trip); a real create threads source + path
+  # straight to the workspace newClass chokepoint and refreshes the Changes pane
+  # so the durable `new-class` entry is visible (ChangeLog coherence).
+  defp new_file(socket, source, path) do
+    # Trim both up front so the emptiness guards and the dispatched payload see
+    # the same normalised values (whitespace around a class definition or path
+    # is never significant).
+    source = String.trim(source)
+    path = String.trim(path)
+
+    cond do
+      source == "" ->
+        status_error(socket, "Enter a class definition to create a file.")
+
+      path == "" ->
+        status_error(socket, "Enter a target path to create a file.")
+
+      true ->
+        case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
+          {:ok, created_path} ->
+            socket
+            |> assign(
+              save_result: "Created new class — #{created_path}",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+            |> assign_changes()
+
+          {:error, reason} ->
+            status_error(socket, facade_error(reason))
+        end
+    end
+  end
+
+  # Revert one pending method patch (BT-2293). On success the prior body is
+  # re-installed (a fresh durable entry) and the Changes pane refreshes; a
+  # non-revertable entry (new-class, class-side, no prior body) renders the
+  # structured error the workspace returns.
+  defp revert_change(socket, class, selector) do
+    case Facade.dispatch(:revert, %{class: class, selector: selector}, ctx(socket)) do
+      {:ok, reverted_class} ->
+        socket
+        |> assign(
+          save_result: "Reverted #{selector} on #{reverted_class}",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil
+        )
+        |> assign_changes()
+
+      {:error, reason} ->
+        status_error(socket, facade_error(reason))
+    end
+  end
+
+  # Set the active error line, clearing the other three status assigns so only
+  # the most recent New File / revert outcome shows in the shared status area
+  # (BT-2293). Keeps the validation/error branches from leaving a stale flush
+  # banner visible — the success branches already clear all four inline.
+  defp status_error(socket, message) do
+    assign(socket,
+      save_result: nil,
+      save_error: message,
+      flush_result: nil,
+      flush_error: nil
+    )
   end
 
   # Drive the write-surface flush and render its summary, then refresh changes so
@@ -3644,6 +3744,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <th>Intent</th>
                             <th>Flushable</th>
                             <th>Author</th>
+                            <%!-- revert column (BT-2293): owner-only --%>
+                            <th :if={@role == :owner}></th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3653,6 +3755,27 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <td>{c.intent}</td>
                             <td>{if c.flushable, do: "yes", else: "no"}</td>
                             <td>{c.author_kind}</td>
+                            <%!-- Revert one pending method patch (ADR 0082
+                                 Phase 5). Owner-only (`revert` is an :execute
+                                 op). Only *instance-side* method patches are
+                                 revertable (`do_revert/2` rejects new-class and
+                                 class-side entries), so gate the button on a
+                                 positive `kind == "instance"` assertion: any
+                                 other / unanticipated kind hides the affordance
+                                 rather than offering one that always errors. --%>
+                            <td :if={@role == :owner}>
+                              <button
+                                :if={c.kind == "instance"}
+                                class="btn-link"
+                                type="button"
+                                phx-click="revert"
+                                phx-value-class={c.class}
+                                phx-value-selector={c.selector}
+                                phx-disable-with="Reverting…"
+                              >
+                                revert
+                              </button>
+                            </td>
                           </tr>
                         </tbody>
                       </table>
@@ -3808,6 +3931,34 @@ defmodule BtAttachWeb.WorkspaceLive do
                           Save All to Disk (flush)
                         </button>
                       </div>
+                    </form>
+
+                    <%!-- NEW FILE (BT-2293, ADR 0082 Phase 5): create a brand-new
+                         class from a source definition at a target `.bt` path
+                         (`Workspace newClass:at:`). Self-contained owner-only form
+                         (its own source + path), so it never depends on the method
+                         editor's tab state. The new-class entry appears in the
+                         Changes pane and is written to disk on the next flush. --%>
+                    <form id="new-file-form" phx-submit="new_file" class="new-file-form">
+                      <label class="new-file-label">
+                        New File <span class="muted-note">— create a class</span>
+                      </label>
+                      <input
+                        type="text"
+                        name="path"
+                        class="new-file-path mono"
+                        placeholder="src/greeter.bt"
+                        autocomplete="off"
+                      />
+                      <textarea
+                        name="source"
+                        class="new-file-source mono"
+                        rows="2"
+                        placeholder="Object subclass: Greeter"
+                      ></textarea>
+                      <button class="btn" type="submit" phx-disable-with="Creating…">
+                        New File
+                      </button>
                     </form>
                   <% else %>
                     <p class="muted-note">

@@ -86,6 +86,16 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       refute selected =~ "Not authorized"
       assert Process.alive?(view.pid)
     end
+
+    test "the New File form is hidden for an Observer (BT-2293)", %{conn: conn} do
+      # `new_class` is an :execute op, so the write-surface "New File" affordance
+      # is owner-gated in the template (same as the eval form) — an Observer must
+      # not see it.
+      {:ok, _view, html} = live(observer_conn(conn), "/")
+      assert html =~ "read-only (Observer)"
+      refute html =~ ~s(id="new-file-form")
+      refute html =~ ~s(phx-submit="new_file")
+    end
   end
 
   test "eval round-trip renders the workspace result term", %{conn: conn} do
@@ -258,6 +268,128 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       |> render_submit(%{"class" => "", "selector" => "value", "source" => "value => 1"})
 
     assert html =~ "Enter a class name"
+  end
+
+  # ── Phase 5 save/flush affordances: New File + ChangeLog revert (BT-2293) ────
+
+  test "the ChangeLog viewer's revert button round-trips through the workspace (BT-2293)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RevertMe#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      greeting => "ORIG"
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    # Patch `greeting` via the write-surface editor — records a pending durable
+    # ChangeEntry for (class, greeting), so a revert button appears for it.
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "class" => class,
+        "selector" => "greeting",
+        "source" => ~s|greeting => "PATCHED"|
+      })
+
+    assert save_html =~ "Saved greeting on #{class}"
+
+    # Click the per-entry revert affordance (ADR 0082 Phase 5). Scope the selector
+    # by class: the workspace ChangeLog is global + persistent, so entries from
+    # earlier runs share the `greeting` selector — only the per-test class name
+    # disambiguates this entry's button.
+    revert_html =
+      view
+      |> element(
+        ~s(button[phx-click="revert"][phx-value-class="#{class}"][phx-value-selector="greeting"])
+      )
+      |> render_click()
+
+    # The point under test is the end-to-end UI binding: the button dispatches the
+    # owner-gated `:revert` op, the workspace's `revert_method/2` runs, and the
+    # LiveView renders the **structured** result inline (never a raw error tuple)
+    # while staying live.
+    #
+    # This e2e patches an *eval-defined* class, which has no prior-body snapshot in
+    # the workspace's `changes/sources/` dir, so `revert_method/2` deterministically
+    # returns the structured ChangeLog explanation (message prefixed `revert:`)
+    # rather than restoring a body — we assert that exact outcome rather than an
+    # `or` over both branches, which would silently pass on the never-taken success
+    # arm. The body-restore success path is covered at the domain layer by the
+    # changelog suite (`find_revert_target_returns_prev_body`); the LiveView success
+    # branch of `revert_change/3` is the same `assign(save_result: …) |>
+    # assign_changes()` shape as the (covered) `save_method` success path.
+    assert revert_html =~ "revert:"
+    refute revert_html =~ "beamtalk_error"
+    refute revert_html =~ "{:error"
+
+    # The LiveView is still live and interactive after the revert (no crash /
+    # disconnect): a follow-up eval still round-trips.
+    assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
+  end
+
+  test "the New File form is present on the owner's connected render (BT-2293)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+
+    # The System Browser's "New File" affordance: a self-contained source + path
+    # form that drives `Workspace newClass:at:`.
+    assert html =~ ~s(id="new-file-form")
+    assert html =~ ~s(phx-submit="new_file")
+    assert html =~ ~s(name="path")
+    assert html =~ ~s(name="source")
+  end
+
+  test "New File validates an empty path before any create (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    html =
+      view
+      |> form("#new-file-form")
+      |> render_submit(%{"source" => "Object subclass: Greeter", "path" => ""})
+
+    assert html =~ "Enter a target path"
+  end
+
+  test "New File validates an empty source before any create (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    html =
+      view
+      |> form("#new-file-form")
+      |> render_submit(%{"source" => "", "path" => "src/greeter.bt"})
+
+    assert html =~ "Enter a class definition"
+  end
+
+  test "New File creates a class end-to-end via newClass:at: (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "Greeter#{suffix}"
+    # The declared class name must match the path basename (snake_cased); a
+    # single-word name + numeric suffix maps cleanly (`Greeter12` ↔ `greeter12`).
+    path = "src/greeter#{suffix}.bt"
+
+    # Drive a real `newClass:at:` round-trip — the success path the validation
+    # tests don't reach: button → `:new_class` facade op → workspace
+    # `beamtalk_repl_eval:new_class/2`. Phase 1 installs the class in memory and
+    # logs a durable new-class ChangeEntry; the `.bt` file is only written on
+    # flush, so this leaves no on-disk artifact. A wiring bug (wrong RPC module
+    # or transposed source/path args) would fail here, not just in validation.
+    html =
+      view
+      |> form("#new-file-form")
+      |> render_submit(%{"source" => "Object subclass: #{class}", "path" => path})
+
+    assert html =~ "Created new class — #{path}"
+    refute html =~ "beamtalk_error"
+    refute html =~ "{:error"
+    # ChangeLog coherence: the new-class entry is now in the Changes viewer.
+    assert html =~ class
   end
 
   # ── Phase 1 JS hook foundation (BT-2485) ────────────────────────────────────

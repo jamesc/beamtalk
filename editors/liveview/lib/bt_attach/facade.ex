@@ -37,6 +37,13 @@ defmodule BtAttach.Facade do
     eval: :execute,
     load_source: :execute,
     save: :execute,
+    # ADR 0082 Phase 5 (BT-2293): the System Browser save/flush affordances.
+    # `new_class` creates a brand-new class from source at a target path
+    # (`Workspace newClass:at:`); `revert` undoes one pending in-memory method
+    # patch (`Workspace changes revert:`). Both install/run code (compile +
+    # ChangeLog mutation), so they are `:execute` — Owner-only, like `save`.
+    new_class: :execute,
+    revert: :execute,
     flush: :execute,
     reload: :execute,
     info: :read,
@@ -218,6 +225,23 @@ defmodule BtAttach.Facade do
 
   defp invoke(:save, %{class: class, selector: selector, source: source}, _ctx),
     do: client().save_method(class, selector, source)
+
+  # ADR 0082 Phase 5 (BT-2293): create a new class from source at a path
+  # (`Workspace newClass:at:`). Both args are required binaries; a bad shape is
+  # `:invalid_params` with no dist call, matching the browse ops.
+  defp invoke(:new_class, %{source: source, path: path}, _ctx) do
+    if is_binary(source) and is_binary(path),
+      do: client().new_class(source, path),
+      else: {:error, :invalid_params}
+  end
+
+  # ADR 0082 Phase 5 (BT-2293): revert one pending in-memory method patch by its
+  # `(class, selector)` — the binaries carried by a `Workspace changes` row.
+  defp invoke(:revert, %{class: class, selector: selector}, _ctx) do
+    if is_binary(class) and is_binary(selector),
+      do: client().revert(class, selector),
+      else: {:error, :invalid_params}
+  end
 
   defp invoke(:subscribe_transcript, %{pid: pid}, _ctx), do: client().subscribe_transcript(pid)
   defp invoke(:subscribe_bindings, %{pid: pid}, _ctx), do: client().subscribe_bindings(pid)
