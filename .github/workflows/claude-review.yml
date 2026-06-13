@@ -55,7 +55,11 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: "--max-turns 25 --model claude-sonnet-4-6"
+          # Read-only investigation tools only. The reviewer never needs to mutate
+          # the repo: it reads code, runs read-only git, and emits inline comments.
+          # The verdict file is created with the Write tool (a default-allowed file
+          # operation), so no write or arbitrary Bash is granted.
+          claude_args: '--max-turns 25 --model claude-sonnet-4-6 --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*)"'
           prompt: |
             You are reviewing a PR for BeamTalk: a Smalltalk-inspired language that
             compiles to the BEAM (Erlang VM), with a compiler/CLI written in Rust.
@@ -123,10 +127,9 @@ jobs:
               outside the incremental range and you cannot attach an inline comment to
               it. In that case, name the unresolved out-of-range Blocker in your summary.
 
-            At the very end of your response, write a single line to the file
+            At the very end of your response, use the Write tool to create the file
             .claude-verdict in the repo root containing exactly one word: BLOCK if
             there are any Blockers, otherwise PASS. No other content in that file.
-            Use a shell command to write it: echo PASS > .claude-verdict
 
       - name: Gate on verdict
         if: always()
