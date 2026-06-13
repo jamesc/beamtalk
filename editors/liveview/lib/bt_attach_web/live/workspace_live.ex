@@ -852,13 +852,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Malformed payload (missing keys / non-binary values): surface a validation
   # error rather than letting a crafted event crash the LiveView.
   def handle_event("new_file", _params, socket) do
-    {:noreply,
-     assign(socket,
-       save_result: nil,
-       save_error: "Invalid new-file form payload.",
-       flush_result: nil,
-       flush_error: nil
-     )}
+    {:noreply, status_error(socket, "Invalid new-file form payload.")}
   end
 
   # Revert one pending in-memory method patch (ADR 0082 Phase 5 `Workspace
@@ -873,13 +867,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Malformed payload (missing keys / non-binary values): surface a validation
   # error rather than silently no-op'ing, consistent with `new_file`/`save_method`.
   def handle_event("revert", _params, socket) do
-    {:noreply,
-     assign(socket,
-       save_result: nil,
-       save_error: "Invalid revert request.",
-       flush_result: nil,
-       flush_error: nil
-     )}
+    {:noreply, status_error(socket, "Invalid revert request.")}
   end
 
   # ── System Browser (BT-2491, epic BT-2482 Phase 2) ──────────────────────────
@@ -1482,10 +1470,10 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     cond do
       source == "" ->
-        assign(socket, save_result: nil, save_error: "Enter a class definition to create a file.")
+        status_error(socket, "Enter a class definition to create a file.")
 
       path == "" ->
-        assign(socket, save_result: nil, save_error: "Enter a target path to create a file.")
+        status_error(socket, "Enter a target path to create a file.")
 
       true ->
         case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
@@ -1500,7 +1488,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             |> assign_changes()
 
           {:error, reason} ->
-            assign(socket, save_result: nil, save_error: facade_error(reason))
+            status_error(socket, facade_error(reason))
         end
     end
   end
@@ -1522,8 +1510,21 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> assign_changes()
 
       {:error, reason} ->
-        assign(socket, save_result: nil, save_error: facade_error(reason))
+        status_error(socket, facade_error(reason))
     end
+  end
+
+  # Set the active error line, clearing the other three status assigns so only
+  # the most recent New File / revert outcome shows in the shared status area
+  # (BT-2293). Keeps the validation/error branches from leaving a stale flush
+  # banner visible — the success branches already clear all four inline.
+  defp status_error(socket, message) do
+    assign(socket,
+      save_result: nil,
+      save_error: message,
+      flush_result: nil,
+      flush_error: nil
+    )
   end
 
   # Drive the write-surface flush and render its summary, then refresh changes so
