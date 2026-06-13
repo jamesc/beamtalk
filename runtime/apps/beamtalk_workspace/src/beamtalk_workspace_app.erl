@@ -31,9 +31,10 @@ start(_StartType, _StartArgs) ->
     %% This allows the runtime to notify us when actors spawn, enabling
     %% workspace-wide tracking without creating a compile-time dependency
     application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_repl_actors),
-    %% Register class load callback with runtime (BT-1020)
-    %% Allows the runtime to notify us when classes are loaded/reloaded
-    application:set_env(beamtalk_runtime, class_load_callback, beamtalk_class_events),
+    %% BT-2531: the class-loaded push stream now rides the SystemAnnouncer bus
+    %% (`ClassLoaded` / `ClassRemoved` announcements from `beamtalk_object_class`,
+    %% subscribed via `beamtalk_repl_subscriptions`), so the legacy
+    %% `class_load_callback` → `beamtalk_class_events` wiring was retired.
 
     %% Start the workspace supervisor tree
     beamtalk_workspace_app_sup:start_link().
@@ -43,8 +44,6 @@ start(_StartType, _StartArgs) ->
 stop(_State) ->
     %% Unregister actor spawn callback
     application:unset_env(beamtalk_runtime, actor_spawn_callback),
-    %% Unregister class load callback (BT-1020)
-    application:unset_env(beamtalk_runtime, class_load_callback),
     %% Remove WebSocket log handler (BT-1433)
     _ = logger:remove_handler(beamtalk_ws_log),
     ok.

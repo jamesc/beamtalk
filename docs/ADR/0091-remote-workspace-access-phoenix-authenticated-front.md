@@ -217,12 +217,14 @@ Note `complete` is **inference-only — it does not evaluate** (ADR 0045: "infer
 without evaluation"), so it is safe to grant a non-executing role.
 
 **The push facade is subscribe-only over `SystemAnnouncer` (ADR 0093) — it has no
-publish capability.** The three discrete push channels (actors / classes /
-bindings) are **not** bespoke subscribe/broadcast infrastructure built by this
-ADR: they are subscriptions on the shared typed event bus from ADR 0093 —
-`SystemAnnouncer current` emits `ActorSpawned` / `ActorStopped` / `ClassLoaded` /
-`ClassRemoved` / `BindingChanged` `Announcement` subclasses, and the facade
-forwards the curated subset to the authenticated browser. (Transcript line
+publish capability.** The discrete push channels (actors / classes / bindings /
+flush) are **not** bespoke subscribe/broadcast infrastructure built by this
+ADR: since BT-2531 they are subscriptions on the shared typed event bus from ADR
+0093 — `SystemAnnouncer current` emits `ActorSpawned` / `ActorStopped` /
+`ClassLoaded` / `ClassRemoved` / `BindingChanged` / `FlushCompleted`
+`Announcement` subclasses, and the facade (`beamtalk_repl_subscriptions`)
+forwards the curated subset to the authenticated browser or dist-attached
+LiveView. (Transcript line
 streaming stays on its own dedicated `beamtalk_transcript_stream` channel — a
 high-volume stream, not a discrete typed event — per ADR 0093 §5.) Per ADR 0093
 §6, **subscribing to `SystemAnnouncer` is a read capability**, so the facade

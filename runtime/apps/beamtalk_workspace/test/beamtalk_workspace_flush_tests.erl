@@ -1389,9 +1389,10 @@ del_tree(Path) ->
 %%====================================================================
 
 %% `announce_flush_completed/1` publishes the typed FlushCompleted event on the
-%% SystemAnnouncer bus with the flushed files, alongside the legacy
-%% `beamtalk_flush_events` broadcast. Subscribed with a fun handler so the
-%% veneer async dispatch invokes it and we can assert on the typed event map.
+%% SystemAnnouncer bus with the flushed files — the sole flush-completion push
+%% source since BT-2531 retired the legacy `beamtalk_flush_events` broadcast.
+%% Subscribed with a fun handler so the veneer async dispatch invokes it and we
+%% can assert on the typed event map.
 announce_flush_completed_emits_typed_event_test() ->
     ok = beamtalk_announcements:ensure_started(),
     Collector = self(),

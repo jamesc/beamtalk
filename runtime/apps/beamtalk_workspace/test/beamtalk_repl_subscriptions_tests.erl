@@ -6,16 +6,23 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Tests for the beamtalk_repl_subscriptions facade, focused on the explicit-pid
-forms (`subscribe/2`, `unsubscribe/2`, `subscribe_all/1`) added for the Attach
-topology (BT-2407). A dist-attached client (Phoenix LiveView) calls these over
-`rpc:call/4` and must register *its own* pid as the subscriber rather than the
-short-lived RPC proxy that `self()`-based forms would register.
+Tests for the `beamtalk_repl_subscriptions` facade after the BT-2531 migration of
+the actor/class/bindings/flush push streams onto the SystemAnnouncer bus
+(`beamtalk_announcements`).
 
-The `classes` stream (`beamtalk_class_events`) is used as the representative
-event server because it has the simplest fire API (`on_class_loaded/1`).
+Focused on the explicit-pid forms (`subscribe/2`, `unsubscribe/2`,
+`subscribe_all/1`) added for the Attach topology (BT-2407): a dist-attached client
+(Phoenix LiveView) calls these over `rpc:call/4` and must register *its own* pid as
+the subscriber. The `classes` stream (`ClassLoaded` / `ClassRemoved`) is the
+representative stream; the consumer receives the native
+`{beamtalk_announcement, SubRef, Class, Handler, Event}` message the inert-handler
+branch of the bus delivers.
 """.
 -include_lib("eunit/include/eunit.hrl").
+
+%% The inert handler term the facade registers for push-stream subscribers; it
+%% rides along inert in the delivered announcement message.
+-define(PUSH_HANDLER, repl_push_subscription).
 
 %%% ===========================================================================
 %%% streams/0
@@ -32,36 +39,44 @@ streams_lists_all_five_streams_test() ->
 %%% ===========================================================================
 
 subscribe_pid_registers_that_pid_test() ->
-    {ok, Server} = gen_server:start_link(
-        {local, beamtalk_class_events}, beamtalk_class_events, [], []
-    ),
+    ensure_bus(),
     Self = self(),
+    SubPid = spawn_collector(Self),
     try
-        SubPid = spawn(fun() ->
-            receive
-                {class_loaded, _} = Msg -> Self ! {got, Msg}
-            after 1000 -> Self ! timeout
-            end
-        end),
-
         %% Facade is called from *this* process but registers SubPid — the
         %% behaviour the Attach client depends on over RPC.
         ok = beamtalk_repl_subscriptions:subscribe(classes, SubPid),
-        sys:get_state(Server),
 
-        {state, Subs} = sys:get_state(Server),
-        ?assert(maps:is_key(SubPid, Subs)),
-        %% The caller is NOT registered — only the explicit pid.
-        ?assertNot(maps:is_key(Self, Subs)),
-
-        beamtalk_class_events:on_class_loaded('FacadeClass'),
+        beamtalk_announcements:system_announce('ClassLoaded', #{className => 'FacadeClass'}),
         receive
-            {got, {class_loaded, 'FacadeClass'}} -> ok
+            {got, {beamtalk_announcement, _Ref, 'ClassLoaded', ?PUSH_HANDLER, Event}} ->
+                ?assertEqual('FacadeClass', maps:get(className, Event))
         after 1000 -> ?assert(false)
         end
     after
-        gen_server:stop(Server),
-        flush_messages()
+        beamtalk_repl_subscriptions:unsubscribe(classes, SubPid),
+        stop_collector(SubPid)
+    end.
+
+%%% ===========================================================================
+%%% classes stream delivers ClassRemoved too (newly visible on the bus, BT-2531)
+%%% ===========================================================================
+
+subscribe_classes_delivers_class_removed_test() ->
+    ensure_bus(),
+    Self = self(),
+    SubPid = spawn_collector(Self),
+    try
+        ok = beamtalk_repl_subscriptions:subscribe(classes, SubPid),
+        beamtalk_announcements:system_announce('ClassRemoved', #{className => 'Gone'}),
+        receive
+            {got, {beamtalk_announcement, _Ref, 'ClassRemoved', ?PUSH_HANDLER, Event}} ->
+                ?assertEqual('Gone', maps:get(className, Event))
+        after 1000 -> ?assert(false)
+        end
+    after
+        beamtalk_repl_subscriptions:unsubscribe(classes, SubPid),
+        stop_collector(SubPid)
     end.
 
 %%% ===========================================================================
@@ -69,79 +84,144 @@ subscribe_pid_registers_that_pid_test() ->
 %%% ===========================================================================
 
 unsubscribe_pid_removes_that_pid_test() ->
-    {ok, Server} = gen_server:start_link(
-        {local, beamtalk_class_events}, beamtalk_class_events, [], []
-    ),
+    ensure_bus(),
     Self = self(),
+    SubPid = spawn_collector(Self),
     try
-        SubPid = spawn(fun() ->
-            receive
-                stop -> ok
-            after 2000 -> ok
-            end
-        end),
         ok = beamtalk_repl_subscriptions:subscribe(classes, SubPid),
-        sys:get_state(Server),
-        {state, SubsBefore} = sys:get_state(Server),
-        ?assert(maps:is_key(SubPid, SubsBefore)),
-
         ok = beamtalk_repl_subscriptions:unsubscribe(classes, SubPid),
-        sys:get_state(Server),
-        {state, SubsAfter} = sys:get_state(Server),
-        ?assertNot(maps:is_key(SubPid, SubsAfter)),
 
-        SubPid ! stop,
-        Self ! done,
+        beamtalk_announcements:system_announce('ClassLoaded', #{className => 'NotDelivered'}),
         receive
-            done -> ok
-        after 100 -> ok
+            {got, _} -> ?assert(false)
+        after 200 -> ok
         end
     after
-        gen_server:stop(Server),
-        flush_messages()
+        stop_collector(SubPid)
     end.
 
 %%% ===========================================================================
-%%% subscribe_all/1 covers every stream for the given pid
+%%% bindings stream carries the session id (BT-2531 review: clear/put/remove
+%%% refresh path uses announce_binding_changed/3 with an explicit session id)
 %%% ===========================================================================
 
-subscribe_all_pid_covers_classes_stream_test() ->
-    %% Only the classes server is started here; subscribe_all/1 must tolerate the
-    %% other streams' servers being absent (casts to unregistered names are
-    %% caught by gen_server:cast, which is a no-op when the name is unregistered).
-    {ok, Server} = gen_server:start_link(
-        {local, beamtalk_class_events}, beamtalk_class_events, [], []
-    ),
+binding_changed_carries_explicit_session_id_test() ->
+    ensure_bus(),
     Self = self(),
+    SubPid = spawn_collector(Self),
     try
-        SubPid = spawn(fun() ->
-            receive
-                {class_loaded, _} = Msg -> Self ! {got, Msg}
-            after 1000 -> Self ! timeout
-            end
-        end),
-
-        ok = beamtalk_repl_subscriptions:subscribe_all(SubPid),
-        sys:get_state(Server),
-        {state, Subs} = sys:get_state(Server),
-        ?assert(maps:is_key(SubPid, Subs)),
-
-        beamtalk_class_events:on_class_loaded('AllClass'),
+        ok = beamtalk_repl_subscriptions:subscribe(bindings, SubPid),
+        %% The shell's clear / put / remove paths call this with an explicit session
+        %% id (the shell process has no `beamtalk_session_id` in its dictionary).
+        ok = beamtalk_repl_eval:announce_binding_changed(x, 42, <<"sess-xyz">>),
         receive
-            {got, {class_loaded, 'AllClass'}} -> ok
+            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, Event}} ->
+                ?assertEqual(<<"sess-xyz">>, maps:get(sessionId, Event)),
+                ?assertEqual(x, maps:get(name, Event)),
+                ?assertEqual(42, maps:get(value, Event))
         after 1000 -> ?assert(false)
         end
     after
-        gen_server:stop(Server),
-        flush_messages()
+        beamtalk_repl_subscriptions:unsubscribe(bindings, SubPid),
+        stop_collector(SubPid)
+    end.
+
+%%% ===========================================================================
+%%% subscribe_bus is idempotent per pid+class (BT-2531 review: dedup re-mount)
+%%% ===========================================================================
+
+subscribe_twice_delivers_once_test() ->
+    ensure_bus(),
+    Self = self(),
+    SubPid = spawn_collector(Self),
+    try
+        %% Re-subscribing the same pid (as a fast re-mount would) must not leave a
+        %% duplicate subscription that double-delivers each event.
+        ok = beamtalk_repl_subscriptions:subscribe(bindings, SubPid),
+        ok = beamtalk_repl_subscriptions:subscribe(bindings, SubPid),
+
+        beamtalk_announcements:system_announce('BindingChanged', #{
+            name => y, value => 1, sessionId => <<"s">>
+        }),
+        receive
+            {got, {beamtalk_announcement, _Ref, 'BindingChanged', ?PUSH_HANDLER, _Event}} -> ok
+        after 1000 -> ?assert(false)
+        end,
+        %% Exactly one delivery — no duplicate from the second subscribe.
+        receive
+            {got, {beamtalk_announcement, _R2, 'BindingChanged', ?PUSH_HANDLER, _E2}} ->
+                ?assert(false)
+        after 200 -> ok
+        end
+    after
+        beamtalk_repl_subscriptions:unsubscribe(bindings, SubPid),
+        stop_collector(SubPid)
+    end.
+
+%%% ===========================================================================
+%%% subscribe_all/1 covers every bus-backed stream for the given pid
+%%% ===========================================================================
+
+subscribe_all_pid_covers_bus_streams_test() ->
+    ensure_bus(),
+    Self = self(),
+    SubPid = spawn_collector(Self),
+    try
+        ok = beamtalk_repl_subscriptions:subscribe_all(SubPid),
+
+        %% A representative event from each bus-backed stream is delivered.
+        beamtalk_announcements:system_announce('ClassLoaded', #{className => 'AllClass'}),
+        beamtalk_announcements:system_announce('BindingChanged', #{
+            name => x, value => 1, sessionId => <<"s">>
+        }),
+        beamtalk_announcements:system_announce('FlushCompleted', #{files => [<<"a.bt">>]}),
+
+        ?assert(received_class('ClassLoaded')),
+        ?assert(received_class('BindingChanged')),
+        ?assert(received_class('FlushCompleted'))
+    after
+        beamtalk_repl_subscriptions:unsubscribe_all(SubPid),
+        stop_collector(SubPid)
     end.
 
 %%% ===========================================================================
 %%% Internal helpers
 %%% ===========================================================================
 
-flush_messages() ->
+%% Start the announcements bus if it is not already running (it is a supervised
+%% worker in the full runtime; standalone in EUnit).
+ensure_bus() ->
+    case whereis(beamtalk_announcements) of
+        undefined ->
+            {ok, _} = beamtalk_announcements:start_link(),
+            ok;
+        _ ->
+            ok
+    end.
+
+%% Spawn a process that forwards every announcement message it receives to the
+%% test process tagged `{got, Msg}`, until told to stop.
+spawn_collector(Reporter) ->
+    spawn(fun() -> collector_loop(Reporter) end).
+
+collector_loop(Reporter) ->
     receive
-        _ -> flush_messages()
-    after 0 -> ok
+        stop ->
+            ok;
+        Msg ->
+            Reporter ! {got, Msg},
+            collector_loop(Reporter)
+    end.
+
+stop_collector(SubPid) ->
+    SubPid ! stop,
+    ok.
+
+%% Whether a `{got, {beamtalk_announcement, _, Class, _, _}}` for `Class` is in the
+%% test process mailbox within the timeout. Drains non-matching messages.
+received_class(Class) ->
+    receive
+        {got, {beamtalk_announcement, _Ref, Class, _Handler, _Event}} -> true;
+        {got, _Other} -> received_class(Class)
+    after 1000 -> false
     end.

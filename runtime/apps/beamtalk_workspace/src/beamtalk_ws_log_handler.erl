@@ -18,8 +18,9 @@ process terminates (via monitor).
 The handler is registered with OTP logger during workspace startup
 (`beamtalk_workspace_sup`) and removed on shutdown.
 
-Follows the same subscribe/unsubscribe pattern as
-`beamtalk_repl_actors`, `beamtalk_class_events`, etc.
+Follows a self-monitoring subscribe/unsubscribe pattern: a separate diagnostic
+log stream, distinct from the workspace push-stream facade
+(`beamtalk_repl_subscriptions`).
 
 ## Log Event Format
 

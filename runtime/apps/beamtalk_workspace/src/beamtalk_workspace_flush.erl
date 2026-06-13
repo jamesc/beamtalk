@@ -843,12 +843,13 @@ complete_flush(Files, Renamed, Failed, Seqs) ->
     %% `mark_flushed/1` so editor refresh fires reliably in the mixed-success
     %% case where renames succeeded but the ChangeLog server is unreachable —
     %% the files are already on disk at this point and the editor needs to
-    %% realign regardless of marker outcome. Fire-and-forget: the broadcaster
-    %% swallows missing-server errors so flush never fails on a downstream
+    %% realign regardless of marker outcome.
+    %%
+    %% BT-2531: the typed `FlushCompleted` announcement on the SystemAnnouncer
+    %% bus is now the sole flush-completion push source (the legacy
+    %% `beamtalk_flush_events` broadcast was retired). Fire-and-forget: the
+    %% announcer swallows missing-bus errors so flush never fails on a downstream
     %% subscriber issue.
-    beamtalk_flush_events:on_files_flushed(Files),
-    %% BT-2530: typed FlushCompleted announcement on the SystemAnnouncer bus,
-    %% emitted alongside the legacy broadcast above (which BT-2531 retires).
     announce_flush_completed(Files),
     %% Catch any failure mode from the ChangeLog server — explicit {error, _}
     %% returns *or* gen_server crashes (the call exits with noproc/timeout

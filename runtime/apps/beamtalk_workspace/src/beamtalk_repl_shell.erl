@@ -313,7 +313,7 @@ handle_call(interrupt, _From, {SessionId, State, {WorkerPid, MonRef, EvalFrom}})
     CleanState0 = drain_pending_removals(State),
     %% BT-2366 (ADR 0081 Phase 2): drain session-local mutations too — an
     %% interrupted eval's issued put/remove/clear edits are not lost.
-    CleanState = drain_pending_mutations(CleanState0),
+    CleanState = drain_pending_mutations(CleanState0, SessionId),
     {reply, ok, {SessionId, CleanState, undefined}};
 handle_call(interrupt, _From, {_SessionId, _State, undefined} = FullState) ->
     %% No eval in progress — nothing to interrupt
@@ -345,8 +345,13 @@ handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     %% BT-2365 (ADR 0081 Phase 1): clear only the session locals. Workspace globals
     %% (singletons + bind:as: names) are no longer copied into the session map, so
     %% there is nothing to re-inject — they remain available via lazy resolution.
+    ClearedKeys = maps:keys(beamtalk_repl_state:get_bindings(State)),
     NewState = beamtalk_repl_state:clear_bindings(State),
-    beamtalk_bindings_events:on_bindings_changed(SessionId),
+    %% BT-2531: the retired `beamtalk_bindings_events` channel pushed a refresh on
+    %% clear; restore it as a typed, session-scoped `BindingChanged` per cleared
+    %% local so the live bindings pane refreshes (each event is well-formed and the
+    %% LiveView's session filter routes it to the right pane).
+    announce_bindings_cleared(SessionId, ClearedKeys),
     {reply, ok, {SessionId, NewState, Worker}};
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
     case beamtalk_repl_eval:handle_load(Path, State) of
@@ -474,8 +479,7 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             %% own `x := …` is visible and a same-line `bindings at:put:` overrides
             %% it).  Success path applies all queued ops, including `clear`.
             FinalState0 = apply_pending_removals(ShellState, WorkerState),
-            FinalState = apply_pending_mutations(ShellState, FinalState0),
-            beamtalk_bindings_events:on_bindings_changed(SessionId),
+            FinalState = apply_pending_mutations(ShellState, FinalState0, SessionId),
             {noreply, {SessionId, FinalState, undefined}};
         {error, Reason, Output, Warnings, WorkerState} ->
             reply_eval(From, {eval_error, Reason, Output, Warnings}),
@@ -484,8 +488,7 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             %% expression) and DROP a queued `clear` — `Session current clear. typo`
             %% must not wipe every local because the line after `clear` failed.
             MergedState0 = apply_pending_removals(ShellState, WorkerState),
-            MergedState = apply_pending_mutations_no_clear(ShellState, MergedState0),
-            beamtalk_bindings_events:on_bindings_changed(SessionId),
+            MergedState = apply_pending_mutations_no_clear(ShellState, MergedState0, SessionId),
             {noreply, {SessionId, MergedState, undefined}}
     end;
 %% Worker process crashed (BT-666)
@@ -631,11 +634,13 @@ injected-key caveat now that the map is locals-only, BT-2365).  Mutations apply
 on top of the worker's returned bindings already merged into TargetState, so a
 same-line `bindings at:put:` overrides the worker's own assignment.
 """.
--spec apply_pending_mutations(beamtalk_repl_state:state(), beamtalk_repl_state:state()) ->
+-spec apply_pending_mutations(
+    beamtalk_repl_state:state(), beamtalk_repl_state:state(), binary() | nil
+) ->
     beamtalk_repl_state:state().
-apply_pending_mutations(ShellState, TargetState) ->
+apply_pending_mutations(ShellState, TargetState, SessionId) ->
     Mutations = beamtalk_repl_state:get_pending_mutations(ShellState),
-    fold_mutations(Mutations, TargetState).
+    fold_mutations(Mutations, TargetState, SessionId).
 
 -doc """
 BT-2366 (ADR 0081 Phase 2): apply queued session-local mutations on the error
@@ -647,12 +652,14 @@ failed.  `clear` applies only on the success path.  `put`/`remove` are explicit
 per-key edits the user issued, independent of the failed expression, so they
 take effect.
 """.
--spec apply_pending_mutations_no_clear(beamtalk_repl_state:state(), beamtalk_repl_state:state()) ->
+-spec apply_pending_mutations_no_clear(
+    beamtalk_repl_state:state(), beamtalk_repl_state:state(), binary() | nil
+) ->
     beamtalk_repl_state:state().
-apply_pending_mutations_no_clear(ShellState, TargetState) ->
+apply_pending_mutations_no_clear(ShellState, TargetState, SessionId) ->
     Mutations = beamtalk_repl_state:get_pending_mutations(ShellState),
     Kept = [M || M <- Mutations, element(1, M) =/= clear],
-    fold_mutations(Kept, TargetState).
+    fold_mutations(Kept, TargetState, SessionId).
 
 -doc """
 BT-2366 (ADR 0081 Phase 2): apply pending session-local mutations directly to
@@ -663,10 +670,11 @@ shell resumes using its own ShellState, so we fold the queue over that state's
 locals and reset the queue to `[]`.  All ops apply (interrupt is not an error
 path — the user's issued edits stand).
 """.
--spec drain_pending_mutations(beamtalk_repl_state:state()) -> beamtalk_repl_state:state().
-drain_pending_mutations(State) ->
+-spec drain_pending_mutations(beamtalk_repl_state:state(), binary() | nil) ->
+    beamtalk_repl_state:state().
+drain_pending_mutations(State, SessionId) ->
     Mutations = beamtalk_repl_state:get_pending_mutations(State),
-    fold_mutations(Mutations, State).
+    fold_mutations(Mutations, State, SessionId).
 
 -doc """
 BT-2366 (ADR 0081 Phase 2): fold a list of `{op, Key, Value}` mutations over the
@@ -674,26 +682,53 @@ locals map of State in order, then clear the pending-mutations queue.
 
 Returns State unchanged (apart from clearing the queue) when the list is empty.
 """.
--spec fold_mutations([beamtalk_repl_state:mutation()], beamtalk_repl_state:state()) ->
+-spec fold_mutations([beamtalk_repl_state:mutation()], beamtalk_repl_state:state(), binary() | nil) ->
     beamtalk_repl_state:state().
-fold_mutations([], State) ->
+fold_mutations([], State, _SessionId) ->
     %% Always reset the queue, even when empty, so the shell returns to idle with
     %% a clean slate regardless of which fold path ran.
     beamtalk_repl_state:clear_pending_mutations(State);
-fold_mutations(Mutations, State) ->
+fold_mutations(Mutations, State, SessionId) ->
     Bindings0 = beamtalk_repl_state:get_bindings(State),
-    Bindings1 = lists:foldl(fun apply_one_mutation/2, Bindings0, Mutations),
+    Bindings1 = lists:foldl(
+        fun(Mutation, Acc) -> apply_one_mutation(Mutation, Acc, SessionId) end,
+        Bindings0,
+        Mutations
+    ),
     State1 = beamtalk_repl_state:set_bindings(Bindings1, State),
     beamtalk_repl_state:clear_pending_mutations(State1).
 
--doc "BT-2366: apply a single {op, Key, Value} mutation to a locals map.".
--spec apply_one_mutation(beamtalk_repl_state:mutation(), map()) -> map().
-apply_one_mutation({put, Key, Value}, Bindings) ->
+-doc """
+BT-2366: apply a single {op, Key, Value} mutation to a locals map.
+
+BT-2531: each binding mutation also emits a typed, session-scoped `BindingChanged`
+so the `bindings` push stream refreshes on `bindings at:put:` / `removeKey:` /
+`clear` — not just on `:=` assignment — restoring the coarse refresh the retired
+`beamtalk_bindings_events` channel provided. `put` carries the new value; `remove`
+and `clear` carry `nil`; `clear` announces one event per local being removed.
+""".
+-spec apply_one_mutation(beamtalk_repl_state:mutation(), map(), binary() | nil) -> map().
+apply_one_mutation({put, Key, Value}, Bindings, SessionId) ->
+    beamtalk_repl_eval:announce_binding_changed(Key, Value, SessionId),
     Bindings#{Key => Value};
-apply_one_mutation({remove, Key, _}, Bindings) ->
+apply_one_mutation({remove, Key, _}, Bindings, SessionId) ->
+    beamtalk_repl_eval:announce_binding_changed(Key, nil, SessionId),
     maps:remove(Key, Bindings);
-apply_one_mutation({clear, _, _}, _Bindings) ->
+apply_one_mutation({clear, _, _}, Bindings, SessionId) ->
+    announce_bindings_cleared(SessionId, maps:keys(Bindings)),
     #{}.
+
+-doc """
+BT-2531: announce a `BindingChanged` (value `nil`) for each cleared local so push
+consumers refresh. One event per key keeps each announcement well-formed and lets
+the LiveView's session filter route it; an empty session announces nothing.
+""".
+-spec announce_bindings_cleared(binary() | nil, [atom()]) -> ok.
+announce_bindings_cleared(SessionId, Keys) ->
+    lists:foreach(
+        fun(Key) -> beamtalk_repl_eval:announce_binding_changed(Key, nil, SessionId) end,
+        Keys
+    ).
 
 -doc "BT-696: Dispatch eval result to sync caller or async subscriber.".
 reply_eval({async, Subscriber}, Msg) ->

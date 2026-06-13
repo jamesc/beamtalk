@@ -40,6 +40,12 @@ module loading to beamtalk_repl_loader (BT-863).
 %% dependency on beamtalk_workspace.
 -export([compile_method/4, compile_method/6]).
 
+%% BT-2531 — workspace binding-mutation announcement with an explicit session id.
+%% Called from `beamtalk_repl_shell` for the clear / pending put/remove paths,
+%% whose shell gen_server process does not carry `beamtalk_session_id` in its
+%% process dictionary (that is seeded only in eval workers).
+-export([announce_binding_changed/3]).
+
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
@@ -764,15 +770,32 @@ observability side effect and must never fail or delay the eval reply.
 """.
 -spec announce_binding_changed(atom(), term()) -> ok.
 announce_binding_changed(VarName, Value) ->
+    SessionId =
+        case get(beamtalk_session_id) of
+            undefined -> nil;
+            Id -> Id
+        end,
+    announce_binding_changed(VarName, Value, SessionId).
+
+-doc """
+As `announce_binding_changed/2`, but with an explicit `SessionId` rather than
+reading it from the process dictionary (BT-2531).
+
+Used by `beamtalk_repl_shell` for the workspace binding-mutation paths — `Session
+clear` (`handle_call(clear_bindings, …)`) and the pending `put`/`remove`/`clear`
+edits applied after a worker returns. Those run in the shell gen_server process,
+which does **not** carry `beamtalk_session_id` (it is seeded only in eval
+workers), so the session id is threaded from the shell's state tuple. This keeps
+the `bindings` push stream refreshing on every binding change, not just on `:=`
+assignment, restoring the coarse refresh the retired `beamtalk_bindings_events`
+channel provided — now as a typed, session-scoped `BindingChanged`.
+""".
+-spec announce_binding_changed(atom(), term(), binary() | nil) -> ok.
+announce_binding_changed(VarName, Value, SessionId) ->
     case erlang:whereis(beamtalk_announcements) of
         undefined ->
             ok;
         _Pid ->
-            SessionId =
-                case get(beamtalk_session_id) of
-                    undefined -> nil;
-                    Id -> Id
-                end,
             try
                 beamtalk_announcements:system_announce('BindingChanged', #{
                     name => VarName, value => Value, sessionId => SessionId
