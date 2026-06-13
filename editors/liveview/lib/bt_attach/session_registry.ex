@@ -211,7 +211,7 @@ defmodule BtAttach.SessionRegistry do
   @impl true
   def handle_call({:stash, token, stash}, _from, state) do
     case Map.fetch(state.entries, token) do
-      {:ok, entry} ->
+      {:ok, %Entry{} = entry} ->
         {:reply, :ok, put_entry(state, token, %Entry{entry | window_stash: stash})}
 
       :error ->
