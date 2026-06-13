@@ -6,6 +6,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Cancel an in-flight review if a newer push lands on the same PR.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     name: Claude BeamTalk Review
@@ -13,12 +18,10 @@ jobs:
     # Restrict to same-repo PRs from jamesc only — prevents fork PRs from accessing
     # CLAUDE_CODE_OAUTH_TOKEN (critical on a public repo; forks run in a separate context
     # but the secret would still be exposed if the job ran on a fork-originated PR).
-    # Skip when claude[bot] pushes a fix — the prior human-triggered run already passed.
     if: |
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.user.login == 'jamesc' &&
-      github.actor != 'claude[bot]'
+      github.event.pull_request.user.login == 'jamesc'
     timeout-minutes: 20
     permissions:
       contents: write       # needed if the action pushes fix-commits
@@ -30,7 +33,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Claude's fix commits push as you (a user PAT), so they re-trigger this
+      # workflow. Detect the loop's own commits by an in-band marker rather than
+      # by actor/author, which can't tell your manual push from the automated one.
+      - name: Detect automated fix commit
+        id: marker
+        run: |
+          msg=$(git log -1 --pretty=%B "${{ github.event.pull_request.head.sha }}")
+          if printf '%s' "$msg" | grep -qF '[skip-review]'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: anthropics/claude-code-action@v1
+        if: steps.marker.outputs.skip == 'false'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--max-turns 8 --model claude-sonnet-4-6"
@@ -81,7 +98,7 @@ jobs:
             - Intentional crashes: `self error:` or contract-violation crashes are
               correct. Do not request defensive guards around code meant to fail.
             - Idiomatic Rust. Generics, traits, and builder patterns are not YAGNI
-              violations — the keyword-minimalism rule is about BeamTalk surface syntax,
+              violations — the keyword-minimalism rule is about Beamtalk surface syntax,
               not Rust internals. Verbose generated Core Erlang is expected output.
             - Pre-existing code the diff doesn't touch, and abstractions the PR
               description explicitly justifies. Review the change, not the world.
@@ -100,6 +117,12 @@ jobs:
       - name: Gate on verdict
         if: always()
         run: |
+          # Automated fix commits short-circuit to green so the required check
+          # stays present and passing without re-reviewing Claude's own fixes.
+          if [ "${{ steps.marker.outputs.skip }}" = "true" ]; then
+            echo "Automated fix commit ([skip-review]) — gate auto-passes."
+            exit 0
+          fi
           if [ ! -f .claude-verdict ]; then
             echo "::error::No verdict file written — treating as BLOCK"
             exit 1
