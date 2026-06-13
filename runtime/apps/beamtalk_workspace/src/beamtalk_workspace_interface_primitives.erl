@@ -304,20 +304,54 @@ needs the same clean `{ok, _} | {error, #beamtalk_error{}}` contract that
 wrapper catches the wrapped error and returns it directly. The `Selector` is
 the method-name binary carried by a `Workspace changes` row; a new-class entry
 (no selector) is rejected the same way as `changeLogRevert/1`, via `do_revert`.
+
+`SelectorBin` is owner-controlled (it rides the `phx-value-selector` attribute
+over the LiveSocket), so the binary is resolved with `binary_to_existing_atom/2`
+rather than `binary_to_atom/2`: a never-compiled selector has no atom and
+therefore nothing to revert, and — critically — we must not mint a fresh atom
+per request, which would let a crafted loop exhaust the (un-GC'd) atom table and
+crash the node.
 """.
 -spec revert_method(binary(), binary()) -> {ok, term()} | {error, #beamtalk_error{}}.
 revert_method(ClassNameBin, SelectorBin) when
     is_binary(ClassNameBin), is_binary(SelectorBin)
 ->
-    SelectorAtom = binary_to_atom(SelectorBin, utf8),
+    case existing_selector_atom(SelectorBin) of
+        {ok, SelectorAtom} ->
+            try
+                {ok, do_revert(ClassNameBin, SelectorAtom)}
+            catch
+                %% `beamtalk_error:raise/1` wraps the structured error in a
+                %% `#{'$beamtalk_class' => _, error => #beamtalk_error{}}` map
+                %% and `error/1`-raises it; unwrap back to the structured error.
+                error:#{error := #beamtalk_error{} = Err} ->
+                    {error, Err}
+            end;
+        error ->
+            %% No atom exists for this selector, so no method by that name has
+            %% ever been compiled — there is nothing to revert. Surface the same
+            %% "nothing to revert" error `do_revert` raises for `no_entry`.
+            {error,
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: no active ChangeEntry found for ">>,
+                        ClassNameBin,
+                        <<">>">>,
+                        SelectorBin,
+                        <<" — nothing to revert">>
+                    ])
+                )}
+    end.
+
+%% Resolve a selector binary to its atom WITHOUT minting a new one. Returns
+%% `error` when no such atom exists (the selector was never compiled), so the
+%% caller can reject owner-supplied junk without growing the atom table.
+-spec existing_selector_atom(binary()) -> {ok, atom()} | error.
+existing_selector_atom(SelectorBin) ->
     try
-        {ok, do_revert(ClassNameBin, SelectorAtom)}
+        {ok, binary_to_existing_atom(SelectorBin, utf8)}
     catch
-        %% `beamtalk_error:raise/1` wraps the structured error in a
-        %% `#{'$beamtalk_class' => _, error => #beamtalk_error{}}` map and
-        %% `error/1`-raises it; unwrap back to the structured error.
-        error:#{error := #beamtalk_error{} = Err} ->
-            {error, Err}
+        error:badarg -> error
     end.
 
 %% Pull the `(class, selector)` pair out of a ChangeEntry. The argument is

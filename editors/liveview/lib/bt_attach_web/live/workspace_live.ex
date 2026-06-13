@@ -1453,7 +1453,10 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, save_result: nil, save_error: "Enter a target path to create a file.")
 
       true ->
-        case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
+        # Trim the source to match `path` (already trimmed above): leading /
+        # trailing whitespace around a class definition is never significant, so
+        # this keeps the dispatched payload consistent with the emptiness guard.
+        case Facade.dispatch(:new_class, %{source: String.trim(source), path: path}, ctx(socket)) do
           {:ok, created_path} ->
             socket
             |> assign(
@@ -3708,11 +3711,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <td>{c.author_kind}</td>
                             <%!-- Revert one pending method patch (ADR 0082
                                  Phase 5). Owner-only (`revert` is an :execute
-                                 op); a new-class entry has no selector to revert
-                                 (`"(class)"`), so its row shows no button. --%>
+                                 op); a new-class entry (`kind == "new-class"`)
+                                 has no method body to revert, so its row shows no
+                                 button. Gating on the structured `kind` field —
+                                 not the `present_selector/1` display sentinel —
+                                 keeps the affordance decoupled from display text. --%>
                             <td :if={@role == :owner}>
                               <button
-                                :if={c.selector != "(class)"}
+                                :if={c.kind != "new-class"}
                                 class="btn-link"
                                 type="button"
                                 phx-click="revert"

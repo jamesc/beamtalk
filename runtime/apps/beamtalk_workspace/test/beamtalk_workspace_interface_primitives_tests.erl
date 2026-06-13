@@ -824,14 +824,40 @@ revert_method_returns_structured_error_test() ->
     %% The clean-returning wrapper (BT-2293) catches the wrapped error that
     %% `changeLogRevert/1` would raise and returns it as a structured
     %% `{error, #beamtalk_error{}}` — the contract the LiveView Attach client
-    %% relies on. With no active ChangeLog entry for the target, the revert
-    %% fails with a "nothing to revert" error rather than an opaque crash.
+    %% relies on. The selector here already exists as an atom (we mint it first),
+    %% so it resolves past `binary_to_existing_atom/2` and fails downstream in
+    %% `do_revert` with a "nothing to revert" error rather than an opaque crash.
+    _ = binary_to_atom(<<"revertProbeSelector">>, utf8),
     ?assertMatch(
         {error, #beamtalk_error{}},
         beamtalk_workspace_interface_primitives:revert_method(
-            <<"NoSuchClass">>, <<"noSuchSelector">>
+            <<"NoSuchClass">>, <<"revertProbeSelector">>
         )
     ).
+
+revert_method_unknown_selector_does_not_leak_atoms_test() ->
+    %% Security (PR #2573 review): the selector binary is owner-controlled
+    %% (phx-value-selector over the LiveSocket), so a never-seen selector must
+    %% NOT mint a fresh atom (atom-table-exhaustion DoS) — it is resolved with
+    %% `binary_to_existing_atom/2`. Each bogus selector still yields a clean
+    %% structured error, but interns no atom. Driving many unique selectors makes
+    %% the contrast unambiguous: the old `binary_to_atom/2` would add ~N atoms,
+    %% the fixed code adds none (a small slack tolerates unrelated interning).
+    N = 50,
+    Before = erlang:system_info(atom_count),
+    lists:foreach(
+        fun(I) ->
+            Unique = integer_to_binary(erlang:unique_integer([positive])),
+            Selector =
+                <<"nonexistent_selector_", (integer_to_binary(I))/binary, "_", Unique/binary>>,
+            ?assertMatch(
+                {error, #beamtalk_error{}},
+                beamtalk_workspace_interface_primitives:revert_method(<<"NoSuchClass">>, Selector)
+            )
+        end,
+        lists:seq(1, N)
+    ),
+    ?assert(erlang:system_info(atom_count) - Before < N).
 
 flush_kinds_rejects_non_set_non_list_test() ->
     %% A non-Set/non-List argument surfaces a typed error.

@@ -303,12 +303,18 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # The point under test is the end-to-end UI binding: the button dispatches the
     # owner-gated `:revert` op, the workspace's `revert_method/2` runs, and the
     # LiveView renders the **structured** result inline (never a raw error tuple)
-    # while staying live. Reverting the recorded prior body to disk is exercised
-    # by the changelog suite (`find_revert_target_returns_prev_body`); for this
-    # in-memory-only patch on a file-less class the workspace has no prior-body
-    # snapshot, so it returns the ChangeLog `revert:` explanation rather than
-    # "Reverted …" — either way the rendered term is structured + human-readable.
-    assert revert_html =~ "Reverted greeting on #{class}" or revert_html =~ "revert:"
+    # while staying live.
+    #
+    # This e2e patches an *eval-defined* class, which has no prior-body snapshot in
+    # the workspace's `changes/sources/` dir, so `revert_method/2` deterministically
+    # returns the structured ChangeLog explanation (message prefixed `revert:`)
+    # rather than restoring a body — we assert that exact outcome rather than an
+    # `or` over both branches, which would silently pass on the never-taken success
+    # arm. The body-restore success path is covered at the domain layer by the
+    # changelog suite (`find_revert_target_returns_prev_body`); the LiveView success
+    # branch of `revert_change/3` is the same `assign(save_result: …) |>
+    # assign_changes()` shape as the (covered) `save_method` success path.
+    assert revert_html =~ "revert:"
     refute revert_html =~ "beamtalk_error"
     refute revert_html =~ "{:error"
 
