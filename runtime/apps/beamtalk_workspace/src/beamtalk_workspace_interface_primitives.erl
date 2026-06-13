@@ -436,12 +436,15 @@ do_revert(ClassNameBin, SelectorAtom) ->
                             >>
                         )
                     );
-                %% Any non-class kind installs the prior body. `'new-class'`
-                %% entries never reach here: find_revert_target/2 matches on
-                %% `#entry.selector =:= SelectorBin`, and a new-class entry stores
-                %% `selector = undefined`, which can never equal a binary
-                %% selector — so this `_` arm only ever sees instance-side kinds.
-                _ ->
+                %% Only instance-side method patches are re-installable. Match
+                %% `instance` explicitly (not a `_` wildcard): `'new-class'`
+                %% entries already can't reach here (find_revert_target/2 matches
+                %% on the binary selector, and they store `selector = undefined`),
+                %% and any *future* kind should fail loudly — an unmatched kind
+                %% raises a `case_clause` that the `revert_method/2` catch-all
+                %% turns into a logged, structured error, rather than silently
+                %% attempting a method re-install on a non-method entry.
+                instance ->
                     install_revert_patch(ClassNameBin, SelectorAtom, PrevBody)
             end;
         {error, no_entry} ->

@@ -3745,6 +3745,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                                 phx-click="revert"
                                 phx-value-class={c.class}
                                 phx-value-selector={c.selector}
+                                phx-disable-with="Reverting…"
                               >
                                 revert
                               </button>
