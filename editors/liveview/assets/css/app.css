@@ -593,7 +593,7 @@
    CodeMirror 6 editor (BT-2538) — the CmEditor hook mounts CodeMirror into an
    ignored host inside `.cm-wrap`. Match the old `.bt-editor` font/size/padding
    so the surface looks unchanged; token colours reuse the `.tok-*` classes
-   above (the TextMate highlighter emits them), so per-theme `--t-*` variables
+   above (the regex tokenizer in `bt_highlight.js` emits them), so per-theme `--t-*` variables
    and the TweaksPanel keep working. The hidden `.cm-field` textarea is the
    posted form field and is never shown.
    ========================================================================== */

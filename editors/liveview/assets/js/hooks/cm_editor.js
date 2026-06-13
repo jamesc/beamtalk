@@ -60,6 +60,11 @@ export const CmEditor = {
       highlightActiveLine(),
       indentUnit.of("  "),
       EditorState.tabSize.of(2),
+      // ⌘D/⌘P/⌘I are NOT bound here: they're the Workspace's Do-it/Print-it/
+      // Inspect-it chords, handled by the form's KeyboardShortcuts hook when the
+      // keydown bubbles out of the editor. defaultKeymap has no Mod-d/p/i binding
+      // (selectNextOccurrence lives in @codemirror/search, which we don't bundle),
+      // so these chords pass straight through. Tab indents; Enter stays a newline.
       keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
       beamtalkHighlighting(),
       EditorView.editable.of(!readOnly),

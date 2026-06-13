@@ -565,15 +565,27 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   # in-flight LiveView patch settle first (the editor ships a starter expression
   # and each eval re-renders the form).
   defp set_source(conn, source) do
-    conn
-    |> evaluate("new Promise((resolve) => setTimeout(resolve, 300))")
-    |> evaluate("""
-    (() => {
-      const view = document.querySelector("#workspace-editor-overlay").cmView;
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: #{Jason.encode!(source)} },
-      });
-    })()
+    # Poll for the CmEditor mount (`el.cmView`) rather than a fixed sleep: under
+    # parallel CI load CodeMirror's mount can outlast a 300 ms guard, and reading
+    # `.cmView` on an unmounted wrapper would throw a cryptic Playwright
+    # "evaluate" error instead of a clear timeout. Resolve once the view exists,
+    # then dispatch a doc-replace transaction.
+    evaluate(conn, """
+    new Promise((resolve, reject) => {
+      const start = Date.now();
+      const tick = () => {
+        const el = document.querySelector("#workspace-editor-overlay");
+        if (el && el.cmView) {
+          el.cmView.dispatch({
+            changes: { from: 0, to: el.cmView.state.doc.length, insert: #{Jason.encode!(source)} },
+          });
+          return resolve(true);
+        }
+        if (Date.now() - start > 5000) return reject(new Error("CmEditor (cmView) never mounted"));
+        requestAnimationFrame(tick);
+      };
+      tick();
+    })
     """)
   end
 

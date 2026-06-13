@@ -36,19 +36,24 @@ ENV MIX_ENV=prod \
 # Node — only the BUILD needs it: esbuild bundles CodeMirror (BT-2538) into
 # app.js, after which the release is self-contained (the runtime image below has
 # no node). Pin tracks the repo-root .tool-versions; install the official binary
-# tarball so the version is exact, not whatever apt ships.
+# tarball so the version is exact, not whatever apt ships. The per-arch SHA256
+# (from nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt) is verified so the
+# supply-chain check matches worktree-init.sh's pinned-download path.
 ARG NODE_VERSION=22.22.2
+ARG NODE_SHA256_x64=88fd1ce767091fd8d4a99fdb2356e98c819f93f3b1f8663853a2dee9b438068a
+ARG NODE_SHA256_arm64=e9e1930fd321a470e29bb68f30318bf58e3ecb4acb4f1533fb19c58328a091fe
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl xz-utils ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \
-      amd64) nodearch=x64 ;; \
-      arm64) nodearch=arm64 ;; \
+      amd64) nodearch=x64;   nodesha="${NODE_SHA256_x64}" ;; \
+      arm64) nodearch=arm64; nodesha="${NODE_SHA256_arm64}" ;; \
       *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
     esac; \
     curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${nodearch}.tar.xz"; \
+    echo "${nodesha}  /tmp/node.tar.xz" | sha256sum -c -; \
     tar -xJf /tmp/node.tar.xz -C /usr/local --strip-components=1 --no-same-owner; \
     rm /tmp/node.tar.xz; \
     node --version; npm --version

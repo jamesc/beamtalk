@@ -266,7 +266,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     {:ok, _view, html} = live(conn, "/")
 
     # CodeEditor overlay (highlight <pre> behind the transparent <textarea>),
-    # KeyboardShortcuts (⌘S → submit) and SelectionTracker (select_source).
+    # KeyboardShortcuts (⌘S → submit) and SelectionTracker (select_source). These
+    # now belong to the METHOD editor — the Workspace pane moved to CodeMirror
+    # (CmEditor, BT-2538), covered by its own test below.
     assert html =~ ~s(phx-hook="CodeEditor")
     assert html =~ ~s(phx-hook="KeyboardShortcuts")
     assert html =~ ~s(phx-hook="SelectionTracker")
