@@ -82,6 +82,9 @@ into REPL session state. Workspace readiness is detected via
 -export([flush/0, flush/1]).
 %% ChangeLog Phase 4 operations and autoflush setting (ADR 0082 Phase 4, BT-2290)
 -export([changeLogRevert/1, changeLogClear/0, changeLogFlushKinds/1]).
+%% Clean-returning revert for non-FFI callers (the LiveView Attach client, ADR
+%% 0082 Phase 5, BT-2293).
+-export([revert_method/2]).
 -export([autoflush/0, setAutoflush/1]).
 %% Shared with beamtalk_repl_loader:new_class/2 to surface created classes to the
 %% REPL identically to a file load.
@@ -289,6 +292,91 @@ changeLogRevert(Entry) ->
             beamtalk_error:raise(Err)
     end.
 
+-doc """
+Revert a single method patch by `(Class, Selector)` binaries, returning a
+structured result instead of raising (ADR 0082 Phase 5, BT-2293).
+
+The message-send entry point `changeLogRevert/1` `error/1`-raises a wrapped
+`#beamtalk_error{}` on any failure, which crosses an `rpc:call/4` as an opaque
+`{badrpc, {'EXIT', _}}`. The LiveView Attach client (`BtAttach.Workspace`)
+needs the same clean `{ok, _} | {error, #beamtalk_error{}}` contract that
+`beamtalk_repl_eval:compile_method/6` and `new_class/2` already offer, so this
+wrapper catches the wrapped error and returns it directly. The `Selector` is
+the method-name binary carried by a `Workspace changes` row; a new-class entry
+(no selector) is rejected the same way as `changeLogRevert/1`, via `do_revert`.
+
+`SelectorBin` is owner-controlled (it rides the `phx-value-selector` attribute
+over the LiveSocket), so the binary is resolved with `binary_to_existing_atom/2`
+rather than `binary_to_atom/2`: a never-compiled selector has no atom and
+therefore nothing to revert, and — critically — we must not mint a fresh atom
+per request, which would let a crafted loop exhaust the (un-GC'd) atom table and
+crash the node.
+
+`ClassNameBin` needs no such guard: it is used only as a binary comparison key
+(`find_revert_target/2` matches it against each entry's `#entry.class` binary and
+fails early for an unknown class), never converted to an atom.
+""".
+-spec revert_method(binary(), binary()) -> {ok, term()} | {error, #beamtalk_error{}}.
+revert_method(ClassNameBin, SelectorBin) when
+    is_binary(ClassNameBin), is_binary(SelectorBin)
+->
+    case existing_selector_atom(SelectorBin) of
+        {ok, SelectorAtom} ->
+            try
+                {ok, do_revert(ClassNameBin, SelectorAtom)}
+            catch
+                %% `beamtalk_error:raise/1` wraps the structured error in a
+                %% `#{'$beamtalk_class' => _, error => #beamtalk_error{}}` map
+                %% and `error/1`-raises it; unwrap back to the structured error.
+                error:#{error := #beamtalk_error{} = Err} ->
+                    {error, Err};
+                %% Any other exception is an internal contract violation (e.g. a
+                %% case_clause if find_revert_target/2 returned an unexpected
+                %% term). Without this arm it would escape as an `rpc:call/4`
+                %% `{badrpc, {'EXIT', _}}` and the Attach client would mislabel it
+                %% "workspace unreachable". Log it loudly (so the bug is not
+                %% hidden) and return an accurate structured error.
+                Class:Reason:Stacktrace ->
+                    ?LOG_ERROR(
+                        #{
+                            msg => "revert_method internal error",
+                            class => Class,
+                            reason => Reason,
+                            target_class => ClassNameBin,
+                            selector => SelectorAtom,
+                            stacktrace => Stacktrace
+                        },
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    {error, revert_state_error(<<"revert: internal error — see node logs">>)}
+            end;
+        error ->
+            %% No atom exists for this selector, so no method by that name has
+            %% ever been compiled — there is nothing to revert. Surface the same
+            %% "nothing to revert" error `do_revert` raises for `no_entry`.
+            {error,
+                revert_state_error(
+                    iolist_to_binary([
+                        <<"revert: no active ChangeEntry found for ">>,
+                        ClassNameBin,
+                        <<">>">>,
+                        SelectorBin,
+                        <<" — nothing to revert">>
+                    ])
+                )}
+    end.
+
+%% Resolve a selector binary to its atom WITHOUT minting a new one. Returns
+%% `error` when no such atom exists (the selector was never compiled), so the
+%% caller can reject owner-supplied junk without growing the atom table.
+-spec existing_selector_atom(binary()) -> {ok, atom()} | error.
+existing_selector_atom(SelectorBin) ->
+    try
+        {ok, binary_to_existing_atom(SelectorBin, utf8)}
+    catch
+        error:badarg -> error
+    end.
+
 %% Pull the `(class, selector)` pair out of a ChangeEntry. The argument is
 %% normally the `$beamtalk_class => ChangeEntry`-tagged map produced by the FFI
 %% surface, so the keys are atoms (`className`, `selector`). We also accept the
@@ -344,7 +432,7 @@ do_revert(ClassNameBin, SelectorAtom) ->
                         revert_kind_error(
                             <<
                                 "revert: this entry is a class-side patch. "
-                                "Class-side reverts are not yet supported in Phase 4 — "
+                                "Class-side reverts are not yet supported — "
                                 "the underlying compile:source: path synthesises an "
                                 "instance-side expression. Track follow-up work for the "
                                 "class-side install entry, or use `Workspace changes "
@@ -352,7 +440,15 @@ do_revert(ClassNameBin, SelectorAtom) ->
                             >>
                         )
                     );
-                _ ->
+                %% Only instance-side method patches are re-installable. Match
+                %% `instance` explicitly (not a `_` wildcard): `'new-class'`
+                %% entries already can't reach here (find_revert_target/2 matches
+                %% on the binary selector, and they store `selector = undefined`),
+                %% and any *future* kind should fail loudly — an unmatched kind
+                %% raises a `case_clause` that the `revert_method/2` catch-all
+                %% turns into a logged, structured error, rather than silently
+                %% attempting a method re-install on a non-method entry.
+                instance ->
                     install_revert_patch(ClassNameBin, SelectorAtom, PrevBody)
             end;
         {error, no_entry} ->

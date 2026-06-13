@@ -820,6 +820,52 @@ revert_rejects_new_class_entry_test() ->
         beamtalk_workspace_interface_primitives:changeLogRevert(NewClassEntry)
     ).
 
+revert_method_returns_structured_error_test() ->
+    %% The clean-returning wrapper (BT-2293) catches the wrapped error that
+    %% `changeLogRevert/1` would raise and returns it as a structured
+    %% `{error, #beamtalk_error{}}` — the contract the LiveView Attach client
+    %% relies on. The selector here already exists as an atom (we mint it first),
+    %% so it resolves past `binary_to_existing_atom/2` and fails downstream in
+    %% `do_revert` with a "nothing to revert" error rather than an opaque crash.
+    _ = binary_to_atom(<<"revertProbeSelector">>, utf8),
+    ?assertMatch(
+        {error, #beamtalk_error{}},
+        beamtalk_workspace_interface_primitives:revert_method(
+            <<"NoSuchClass">>, <<"revertProbeSelector">>
+        )
+    ).
+
+revert_method_unknown_selector_does_not_leak_atoms_test() ->
+    %% Security (PR #2573 review): the selector binary is owner-controlled
+    %% (phx-value-selector over the LiveSocket), so a never-seen selector must
+    %% NOT mint a fresh atom (atom-table-exhaustion DoS) — it is resolved with
+    %% `binary_to_existing_atom/2`. Each bogus selector still yields a clean
+    %% structured error, but interns no atom.
+    Selectors = [
+        <<"nonexistent_selector_", (integer_to_binary(I))/binary, "_",
+            (integer_to_binary(erlang:unique_integer([positive])))/binary>>
+     || I <- lists:seq(1, 50)
+    ],
+    lists:foreach(
+        fun(Selector) ->
+            ?assertMatch(
+                {error, #beamtalk_error{}},
+                beamtalk_workspace_interface_primitives:revert_method(<<"NoSuchClass">>, Selector)
+            )
+        end,
+        Selectors
+    ),
+    %% Deterministic leak check: each bogus selector must STILL have no atom
+    %% afterwards (`binary_to_existing_atom/2` raises `badarg`). This proves the
+    %% old `binary_to_atom/2` behaviour is gone without depending on a node-global
+    %% `atom_count` delta, which a concurrent test could perturb.
+    lists:foreach(
+        fun(Selector) ->
+            ?assertError(badarg, binary_to_existing_atom(Selector, utf8))
+        end,
+        Selectors
+    ).
+
 flush_kinds_rejects_non_set_non_list_test() ->
     %% A non-Set/non-List argument surfaces a typed error.
     ?assertException(
