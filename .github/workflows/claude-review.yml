@@ -33,21 +33,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Claude's fix commits push as you (a user PAT), so they re-trigger this
-      # workflow. Detect the loop's own commits by an in-band marker rather than
-      # by actor/author, which can't tell your manual push from the automated one.
-      - name: Detect automated fix commit
-        id: marker
-        run: |
-          msg=$(git log -1 --pretty=%B "${{ github.event.pull_request.head.sha }}")
-          if printf '%s' "$msg" | grep -qF '[skip-review]'; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: anthropics/claude-code-action@v1
-        if: steps.marker.outputs.skip == 'false'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: "--max-turns 8 --model claude-sonnet-4-6"
@@ -117,12 +103,6 @@ jobs:
       - name: Gate on verdict
         if: always()
         run: |
-          # Automated fix commits short-circuit to green so the required check
-          # stays present and passing without re-reviewing Claude's own fixes.
-          if [ "${{ steps.marker.outputs.skip }}" = "true" ]; then
-            echo "Automated fix commit ([skip-review]) — gate auto-passes."
-            exit 0
-          fi
           if [ ! -f .claude-verdict ]; then
             echo "::error::No verdict file written — treating as BLOCK"
             exit 1
