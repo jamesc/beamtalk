@@ -340,8 +340,17 @@ system_unsubscribe(AnnouncementClass, SubscriberPid) when
                 ?SUBS_TABLE,
                 {'_', ?SYSTEM_ANNOUNCER_REF, AnnouncementClass, SubscriberPid, '_', '_'}
             ),
+            %% `unsubscribe/1` is a `gen_server:call`; the tables can outlive the bus
+            %% on the supervisor heir (the crash→restart gap), so guard the call to
+            %% keep the documented no-op contract rather than exiting `noproc`.
             lists:foreach(
-                fun({SubRef, _Ann, _Class, _Pid, _Handler, _Once}) -> unsubscribe(SubRef) end,
+                fun({SubRef, _Ann, _Class, _Pid, _Handler, _Once}) ->
+                    try unsubscribe(SubRef) of
+                        _ -> ok
+                    catch
+                        exit:_ -> ok
+                    end
+                end,
                 Rows
             ),
             ok
