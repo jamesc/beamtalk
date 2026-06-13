@@ -840,27 +840,31 @@ revert_method_unknown_selector_does_not_leak_atoms_test() ->
     %% (phx-value-selector over the LiveSocket), so a never-seen selector must
     %% NOT mint a fresh atom (atom-table-exhaustion DoS) — it is resolved with
     %% `binary_to_existing_atom/2`. Each bogus selector still yields a clean
-    %% structured error, but interns no atom. Driving many unique selectors makes
-    %% the contrast unambiguous: the old `binary_to_atom/2` would add ~N atoms,
-    %% the fixed code adds none (a small slack tolerates unrelated interning).
-    N = 50,
-    Before = erlang:system_info(atom_count),
+    %% structured error, but interns no atom.
+    Selectors = [
+        <<"nonexistent_selector_", (integer_to_binary(I))/binary, "_",
+            (integer_to_binary(erlang:unique_integer([positive])))/binary>>
+     || I <- lists:seq(1, 50)
+    ],
     lists:foreach(
-        fun(I) ->
-            Unique = integer_to_binary(erlang:unique_integer([positive])),
-            Selector =
-                <<"nonexistent_selector_", (integer_to_binary(I))/binary, "_", Unique/binary>>,
+        fun(Selector) ->
             ?assertMatch(
                 {error, #beamtalk_error{}},
                 beamtalk_workspace_interface_primitives:revert_method(<<"NoSuchClass">>, Selector)
             )
         end,
-        lists:seq(1, N)
+        Selectors
     ),
-    %% The fix interns ~zero atoms; the old binary_to_atom/2 would add ~N (50).
-    %% A small fixed slack tolerates incidental system-level interning while
-    %% still failing hard on a per-selector leak.
-    ?assert(erlang:system_info(atom_count) - Before < 10).
+    %% Deterministic leak check: each bogus selector must STILL have no atom
+    %% afterwards (`binary_to_existing_atom/2` raises `badarg`). This proves the
+    %% old `binary_to_atom/2` behaviour is gone without depending on a node-global
+    %% `atom_count` delta, which a concurrent test could perturb.
+    lists:foreach(
+        fun(Selector) ->
+            ?assertError(badarg, binary_to_existing_atom(Selector, utf8))
+        end,
+        Selectors
+    ).
 
 flush_kinds_rejects_non_set_non_list_test() ->
     %% A non-Set/non-List argument surfaces a typed error.

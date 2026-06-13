@@ -432,7 +432,7 @@ do_revert(ClassNameBin, SelectorAtom) ->
                         revert_kind_error(
                             <<
                                 "revert: this entry is a class-side patch. "
-                                "Class-side reverts are not yet supported in Phase 4 — "
+                                "Class-side reverts are not yet supported — "
                                 "the underlying compile:source: path synthesises an "
                                 "instance-side expression. Track follow-up work for the "
                                 "class-side install entry, or use `Workspace changes "
