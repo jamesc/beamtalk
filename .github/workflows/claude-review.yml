@@ -19,8 +19,9 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.user.login == 'jamesc' &&
       github.actor != 'claude[bot]'
+    timeout-minutes: 20
     permissions:
-      contents: write       # write .claude-verdict to the workspace
+      contents: write       # needed if the action pushes fix-commits
       pull-requests: write  # post inline review comments
       issues: write
 
