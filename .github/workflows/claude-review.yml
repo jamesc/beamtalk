@@ -25,9 +25,9 @@ jobs:
     timeout-minutes: 20
     permissions:
       id-token: write       # OIDC token exchange for the OAuth subscription auth
-      contents: write       # needed if the action pushes fix-commits
-      pull-requests: write  # post inline review comments
-      issues: write
+      contents: read        # checkout + read source; the reviewer never commits/pushes
+      pull-requests: write  # post inline review comments + suggestions
+      issues: write         # upsert the sticky summary comment
 
     steps:
       - uses: actions/checkout@v4
@@ -55,11 +55,15 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # Read-only investigation tools only. The reviewer never needs to mutate
-          # the repo: it reads code, runs read-only git, and emits inline comments.
-          # The verdict file is created with the Write tool (a default-allowed file
-          # operation), so no write or arbitrary Bash is granted.
-          claude_args: '--max-turns 25 --model claude-sonnet-4-6 --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*)"'
+          # The reviewer never mutates the repo directly: it reads code, runs
+          # read-only git, posts inline review comments (incl. ```suggestion fixes),
+          # and writes the verdict/summary files with the Write tool (a default-allowed
+          # file op). No commit/push or arbitrary Bash is granted — proposed fixes are
+          # delivered as applyable GitHub suggestions, not pushed commits.
+          # mcp__github_inline_comment__create_inline_comment is the action's own tool
+          # for line-anchored comments; it must be listed explicitly because
+          # --allowedTools REPLACES the action's default tool set rather than extending it.
+          claude_args: '--max-turns 25 --model claude-sonnet-4-6 --allowedTools "Read,Grep,Glob,Write,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(cat:*),Bash(ls:*),Bash(find:*),mcp__github_inline_comment__create_inline_comment"'
           prompt: |
             You are reviewing a PR for BeamTalk: a Smalltalk-inspired language that
             compiles to the BEAM (Erlang VM), with a compiler/CLI written in Rust.
@@ -121,7 +125,13 @@ jobs:
             SCOPING:
             - Run `git diff ${{ steps.ranges.outputs.incr }}` and post inline comments
               ONLY on lines within that incremental range. Do not re-comment on code
-              outside it.
+              outside it. Attach each finding to the exact line it concerns using the
+              create_inline_comment tool — do not relegate an in-range finding to the
+              summary when it can be anchored to a line.
+            - When a fix is concrete and small, include a GitHub ```suggestion block in
+              the inline comment so the author can apply it in one click. Use suggestions
+              for clear, mechanical fixes; describe the change in prose when it is larger
+              or needs judgement.
             - Run `git diff ${{ steps.ranges.outputs.full }}` to assess the verdict.
               A Blocker ANYWHERE in the full PR range means BLOCK, even if it falls
               outside the incremental range and you cannot attach an inline comment to
