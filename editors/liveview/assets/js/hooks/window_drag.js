@@ -25,6 +25,9 @@
 // front (focus) but does not drag, so the close button, breadcrumb and ivar rows
 // stay clickable.
 
+// Clamp `n` into the inclusive `[lo, hi]` box.
+const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n))
+
 export const WindowDrag = {
   mounted() {
     this.id = this.el.dataset.windowId
@@ -44,6 +47,21 @@ export const WindowDrag = {
 
     this.el.addEventListener("mousedown", this.onFocusDown)
     this.handle.addEventListener("mousedown", this.onDown)
+  },
+
+  updated() {
+    // A server re-render re-emits the window's `left`/`top` from the server's
+    // authoritative x/y. The window_focus z-bump fired at drag-start (and any
+    // sibling open/close, coalesced field refresh, or poke result) lands here
+    // mid-gesture, carrying the PRE-drag position — without re-asserting, that
+    // patch snaps the window back to where the drag began until the next
+    // mousemove (a visible flicker, BT-2527 #1/#2). While a drag is in flight,
+    // re-assert the live drag position so the window stays under the cursor; the
+    // authoritative x/y is still reported once on drop.
+    if (this.drag) {
+      this.el.style.left = `${this.drag.x}px`
+      this.el.style.top = `${this.drag.y}px`
+    }
   },
 
   destroyed() {
@@ -80,6 +98,12 @@ export const WindowDrag = {
       offsetY: e.clientY - rect.top,
       parentLeft: parentRect.left,
       parentTop: parentRect.top,
+      // Upper drag bounds: keep the window fully within its offset parent (the
+      // viewport-filling overlay) so it can't be stranded off-screen and become
+      // unreachable (BT-2527 #4). Captured at drag-start — the window's size is
+      // stable for the duration of a drag.
+      maxX: Math.max(0, parentRect.width - rect.width),
+      maxY: Math.max(0, parentRect.height - rect.height),
       x: this.el.offsetLeft,
       y: this.el.offsetTop,
     }
@@ -93,10 +117,12 @@ export const WindowDrag = {
     if (!this.drag) return
     e.preventDefault()
 
-    // New top-left, relative to the offset parent, clamped to non-negative so a
-    // window can't be dragged off the top/left edge into oblivion.
-    const x = Math.max(0, e.clientX - this.drag.parentLeft - this.drag.offsetX)
-    const y = Math.max(0, e.clientY - this.drag.parentTop - this.drag.offsetY)
+    // New top-left, relative to the offset parent, clamped to the viewport box
+    // [0, parent − window] so a window can't be dragged off any edge into
+    // oblivion (lower bound keeps the top/left on-screen, upper bound the
+    // bottom/right — BT-2527 #4).
+    const x = clamp(e.clientX - this.drag.parentLeft - this.drag.offsetX, 0, this.drag.maxX)
+    const y = clamp(e.clientY - this.drag.parentTop - this.drag.offsetY, 0, this.drag.maxY)
 
     this.drag.x = Math.round(x)
     this.drag.y = Math.round(y)

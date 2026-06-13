@@ -731,6 +731,18 @@
 .insp-overlay {
   position: fixed; inset: 0; z-index: 50; pointer-events: none;
 }
+/* Off-screen recovery affordance (BT-2527 #4): a small pill, bottom-right, that
+   re-cascades every window back on-screen. Re-enables pointer events on itself
+   (the overlay layer is inert) and sits above the windows so it's always
+   reachable even when a window is stranded. */
+.insp-tidy {
+  position: absolute; right: 14px; bottom: 14px; z-index: 9999; pointer-events: auto;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel-2); color: var(--muted);
+  font-size: 11px; padding: 4px 12px; cursor: pointer;
+  box-shadow: 0 4px 14px rgba(40, 28, 10, .22);
+}
+.insp-tidy:hover { background: var(--hover); color: var(--ink); }
 .insp-window {
   position: absolute; pointer-events: auto;
   width: 340px; max-height: 70vh; display: flex; flex-direction: column;

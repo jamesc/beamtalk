@@ -173,7 +173,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # data-shortcuts "mod+s" → submit): the hook request-submits the form so
     # class/selector/source ride the normal save_method — no button click.
     |> press("textarea[name='source']", "Control+s")
-    |> assert_has("#method-editor", text: "Saved increment on Counter")
+    # The save is a server round-trip (WorkspaceLive compiles `Counter >>
+    # increment` before assigning `save_result`); under parallel CI load that
+    # can outlast the 2s default assertion poll. Wait on the banner explicitly
+    # with a generous window (BT-2529) — the assertion returns the instant the
+    # text appears, so passing runs are not slowed.
+    |> assert_has("#method-editor", text: "Saved increment on Counter", timeout: 10_000)
   end
 
   test "the TweaksPanel hook reskins the IDE client-side and persists it (BT-2487)", %{conn: conn} do
@@ -364,7 +369,15 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> click(".tabstrip button[role='tab']")
     |> set_text("textarea[name='source']", "increment => self.value := self.value + 1")
     |> press("textarea[name='source']", "Control+s")
-    |> assert_has("#method-editor", text: "Saved increment on Counter")
+    # The Ctrl+S save is a server round-trip: WorkspaceLive compiles `Counter >>
+    # increment` (a real backend op via Facade.dispatch(:save, …)) before it
+    # assigns `save_result` and the success banner renders. Under parallel CI
+    # load that compile + re-render regularly outlasts the 2s default assertion
+    # poll, so the banner lands late and the assertion misses `#method-editor`
+    # (BT-2529). Wait on the banner explicitly with a generous window instead of
+    # racing the default — the assertion still returns the instant the text
+    # appears, so passing runs are not slowed.
+    |> assert_has("#method-editor", text: "Saved increment on Counter", timeout: 10_000)
     # Implementors of `increment`: the popover opens over the nav-query result. We
     # assert it renders (header + either site rows or the empty state) rather than
     # coupling to exact image contents.
