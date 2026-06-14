@@ -1587,15 +1587,64 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Drive the write-surface flush and render its summary, then refresh changes so
   # the (now-flushed) entries drop out of the active view.
+  #
+  # The flush reconciles every pending live `>>` patch with its on-disk body, so an
+  # open `:method` tab whose patch was just written is no longer divergent — clear
+  # its `unflushed` (`disk_differs`) breadcrumb badge (BT-2545). We diff the
+  # pending method set captured *before* the flush against the set still pending
+  # *after* (`assign_changes/1` already refreshed it): the difference is exactly
+  # what this flush wrote, so a conflicted / non-flushable method keeps its badge
+  # and a method untouched by this flush is never cleared.
   defp flush_changes(socket) do
+    was_pending = pending_method_keys(socket.assigns.changes)
+
     case Facade.dispatch(:flush, %{}, ctx(socket)) do
       {:ok, summary} ->
         socket
         |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
         |> assign_changes()
+        |> clear_flushed_badges(was_pending)
 
       {:error, reason} ->
         assign(socket, flush_result: nil, flush_error: facade_error(reason))
+    end
+  end
+
+  # The `(class, selector)` set of the active ChangeLog rows — the methods with an
+  # unflushed live `>>` patch. Keyed by `(class, selector)` only; the ChangeLog
+  # carries no instance/class side, so that is the finest granularity available.
+  # A `changes_error` leaves `changes: []`, yielding an empty set (no reconcile).
+  defp pending_method_keys(changes) when is_list(changes) do
+    for %{class: class, selector: selector} <- changes,
+        is_binary(class),
+        is_binary(selector),
+        into: MapSet.new(),
+        do: {class, selector}
+  end
+
+  defp pending_method_keys(_), do: MapSet.new()
+
+  # Clear the `disk_differs` badge on any open `:method` tab whose patch this flush
+  # wrote to disk: it was pending before (`was_pending`) and is no longer pending
+  # now (`socket.assigns.changes`, refreshed by `assign_changes/1`). Anything still
+  # pending — a conflict or a non-flushable skip — falls outside the difference and
+  # keeps its badge, so there are no spurious clears (BT-2545).
+  defp clear_flushed_badges(socket, was_pending) do
+    flushed = MapSet.difference(was_pending, pending_method_keys(socket.assigns.changes))
+
+    if MapSet.size(flushed) == 0 do
+      socket
+    else
+      tabs =
+        Enum.map(socket.assigns.tabs, fn tab ->
+          if tab.kind == :method and MapSet.member?(flushed, {tab.class, tab.selector}) do
+            %{tab | disk_differs: false}
+          else
+            tab
+          end
+        end)
+
+      assign(socket, :tabs, tabs)
     end
   end
 

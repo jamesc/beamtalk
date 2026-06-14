@@ -816,6 +816,50 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert save_html =~ "unflushed"
   end
 
+  test "flushing the ChangeLog clears the unflushed badge on the open method tab (BT-2545)", %{
+    conn: conn
+  } do
+    # Complement of the BT-2539 case: an in-memory `>>` compile diverges the image
+    # from disk (the `unflushed` badge appears); flushing reconciles the patch to
+    # disk, so the badge must clear on the open `:method` tab rather than lingering
+    # until the tab is closed and re-browsed.
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "FlushBadge#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+    view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+    save_html =
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_submit(%{
+        "class" => class,
+        "selector" => "increment",
+        "source" => "increment => self.value := self.value + 2",
+        "tab" => "method:#{class}:instance:increment"
+      })
+
+    # Precondition: the compile leaves the tab showing `unflushed`.
+    assert save_html =~ "unflushed"
+
+    # Flushing the ChangeLog writes the patch to disk and reconciles the open tab.
+    flush_html = view |> element(~s(button[phx-click="flush"])) |> render_click()
+
+    refute flush_html =~ "unflushed"
+  end
+
   test "re-clicking an open method row re-fetches without blanking the buffer (BT-2547)", %{
     conn: conn
   } do
