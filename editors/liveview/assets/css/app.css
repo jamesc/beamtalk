@@ -99,8 +99,8 @@
 }
 
 /* density */
-[data-density="compact"] { --row-h: 22px; --pad: 5px; --gap: 6px; }
-:root { --row-h: 26px; --pad: 7px; --gap: 9px; }
+[data-density="compact"] { --row-h: 22px; --pad: 5px; --gap: 6px; --panel-pad: 8px 10px; }
+:root { --row-h: 26px; --pad: 7px; --gap: 9px; --panel-pad: 10px 12px; }
 
 /* ---------- Cockpit base ---------- */
 .bt-cockpit, .bt-cockpit * { box-sizing: border-box; }
@@ -122,7 +122,7 @@
 .bt-cockpit .app {
   position: fixed; inset: 0; z-index: 1;
   height: 100vh; display: flex; flex-direction: column;
-  padding: 9px; gap: 9px;
+  padding: var(--pad); gap: var(--gap);
   background: var(--bg);
 }
 
@@ -165,10 +165,10 @@
 
 /* main grid: System Browser | editor + workspace dock | bindings + inspector */
 .cockpit {
-  flex: 1; min-height: 0; display: grid; gap: 9px;
+  flex: 1; min-height: 0; display: grid; gap: var(--gap);
   grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) var(--inspector-w, 348px);
 }
-.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 9px; }
+.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
 
 /* panel chrome */
 .panel {
@@ -185,7 +185,7 @@
 }
 .panel-head .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none; }
 .panel-head .spacer { flex: 1; }
-.panel-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; padding: var(--panel-pad); }
 
 /* placeholder copy for not-yet-built Phase 1 panes */
 .placeholder {
@@ -199,7 +199,7 @@
 /* ---------- System Browser (BT-2491, ported from the spike) ---------- */
 
 /* the left column splits between the class tree and the method list */
-.browser-split { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
+.browser-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
 .browser-split .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* segmented control (view + side toggles) */
@@ -338,7 +338,7 @@
    is always reachable. The old below-editor `.ws-result` success bubble is gone
    (results now land inline in the buffer); `.ws-result` survives only for the
    capped error strip, so a long error can't squeeze the editor either. */
-.ws-pane { padding: 10px 12px; }
+.ws-pane { padding: var(--panel-pad); }
 .ws-pane > form { flex: 1; min-height: 0; }
 .ws-wrap { flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: 7px; }
 .ws-result {
@@ -401,7 +401,7 @@
 .kbdhint { font-size: 10.5px; color: var(--faint); }
 
 /* right column splits between bindings and inspector */
-.right-split { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
+.right-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
 .bindings-panel { flex: 1; min-height: 0; }
 .inspector-panel { flex: 1; min-height: 0; }
 
@@ -421,7 +421,7 @@
 .bt-cockpit .bindings-panel .panel-body { padding: 4px 0; }
 .obj-list { display: flex; flex-direction: column; }
 .obj-row {
-  display: flex; align-items: center; gap: 7px; padding: 0 10px; min-height: 28px;
+  display: flex; align-items: center; gap: 7px; padding: 0 10px; min-height: var(--row-h, 28px);
 }
 .obj-row.drillable { cursor: pointer; }
 .obj-row.drillable:hover { background: var(--hover); }
@@ -475,7 +475,7 @@
 .ivar-table tr { border-bottom: 1px solid var(--line-soft); cursor: default; }
 .ivar-table tr.drillable { cursor: pointer; }
 .ivar-table tr.drillable:hover { background: var(--hover); }
-.ivar-table td { padding: 6px 12px; vertical-align: top; }
+.ivar-table td { padding: var(--pad) 12px; vertical-align: top; }
 .ivar-table .k { font-family: var(--code-font, ui-monospace, monospace); color: var(--accent-2); width: 38%; }
 .ivar-table .v { font-family: var(--code-font, ui-monospace, monospace); color: var(--ink); }
 .ivar-table .v.string { color: var(--t-string); }
@@ -726,6 +726,14 @@
   color: #fff; font-size: 13px; font-weight: 700;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
 }
+/* Accent swatches disabled on dusk — dusk keeps its built-in accent. */
+.twk-swatches[data-accent-disabled="1"] .twk-swatch {
+  opacity: .35; cursor: not-allowed; pointer-events: none;
+}
+.twk-accent-note {
+  color: var(--faint); font-size: 10.5px; margin-top: 3px; display: none;
+}
+.twk-swatches[data-accent-disabled="1"] ~ .twk-accent-note { display: block; }
 
 /* dropdowns (UI font / code font) reuse the shared `.field` look */
 .twk-select {

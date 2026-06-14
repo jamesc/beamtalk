@@ -230,6 +230,48 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     end)
   end
 
+  test "density toggle produces a measurable layout delta (BT-2551)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#tweaks-panel")
+    # Default density is 'cozy' — the app shell padding uses --pad (7px) and
+    # --gap (9px). Read the computed panel-body padding as a measurable proxy.
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.panel-body')).paddingTop",
+      fn pt -> assert pt == "10px", "Expected cozy panel-body paddingTop=10px, got #{pt}" end
+    )
+    # Switch to compact — --pad shrinks to 5px, --gap to 6px.
+    |> click("[data-tweak='density'][data-tweak-value='compact']")
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.panel-body')).paddingTop",
+      fn pt -> assert pt == "8px", "Expected compact panel-body paddingTop=8px, got #{pt}" end
+    )
+    # The app shell padding also shrinks.
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.app')).paddingTop",
+      fn pt -> assert pt == "5px", "Expected compact app paddingTop=5px, got #{pt}" end
+    )
+  end
+
+  test "accent swatches are disabled on dusk theme (BT-2551)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#tweaks-panel")
+    # On paper (default), accent swatches are enabled.
+    |> evaluate(
+      "document.querySelector('.twk-swatches').dataset.accentDisabled",
+      fn disabled -> assert disabled != "1", "Swatches should be enabled on paper" end
+    )
+    # Switch to dusk — swatches should be marked disabled.
+    |> click("[data-tweak='theme'][data-tweak-value='dusk']")
+    |> evaluate(
+      "document.querySelector('.twk-swatches').dataset.accentDisabled",
+      fn disabled -> assert disabled == "1", "Swatches should be disabled on dusk" end
+    )
+    # The hint text should be visible.
+    |> assert_has(".twk-accent-note", text: "Dusk uses its built-in accent")
+  end
+
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
   #
   # Field-flash, the freeze toggle, and the pid-stats chips are connected-render

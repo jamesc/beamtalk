@@ -3315,6 +3315,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
             </button>
           </div>
+          <span class="twk-accent-note">Dusk uses its built-in accent</span>
         </div>
 
         <%!-- Syntax → the --t-* token palette (warm/mono/vivid) --%>
