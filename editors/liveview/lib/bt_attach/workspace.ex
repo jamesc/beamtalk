@@ -317,6 +317,47 @@ defmodule BtAttach.Workspace do
   def symbol_index(scope \\ "all") when is_binary(scope),
     do: dispatch_browse("nav-symbols", %{"scope" => scope})
 
+  # ── completion-surface: backend-driven autocomplete (BT-2544) ───────────────
+
+  @doc """
+  Return backend completion candidates for `code` — the current editor line up
+  to the caret — in `session_pid`'s live context (BT-2544). This is the
+  CodeMirror editors' autocomplete data source.
+
+  Reuses the REPL `complete` op (BT-783), so the cockpit shares the CLI REPL's
+  receiver-aware ranking rather than forking it: a bare prefix completes class
+  names / keywords; a recognised receiver (`Integer `, a bound actor variable)
+  completes its selectors. Binding-aware completion works because `session_pid`
+  is passed as the op's session, so instance-method completion resolves the
+  session's live bindings (BT-1045). Completion runs **no user code** (pure
+  reflection / index), consistent with the facade's `:read` capability — so the
+  Observer role completes too.
+
+  `code` is the line text up to the caret; the op infers receiver + prefix from
+  it. The cursor offset is the end of that text, passed so the op takes its
+  context-aware path (BT-783).
+
+  Returns the live `{completions, _}` term as `{:ok, [String.t()]}` (ranked,
+  possibly empty), or `{:error, reason}` on a dispatch failure — JSON never
+  crosses the Attach path here either.
+  """
+  @spec complete(pid(), String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def complete(session_pid, code) when is_pid(session_pid) and is_binary(code) do
+    case dispatch_complete(session_pid, code) do
+      {:completions, list} when is_list(list) ->
+        {:ok, Enum.map(list, &to_string/1)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
   # Build the browse request as a plain map, decode it to a `protocol_msg()` on
   # the workspace node, then dispatch through the term-returning op layer. The
   # browse ops ignore the session pid (they are workspace-global reflection), so
@@ -362,6 +403,26 @@ defmodule BtAttach.Workspace do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
         rpc(:beamtalk_repl_ops, :dispatch, ["eval", params, msg, session_pid])
+
+      other ->
+        other
+    end
+  end
+
+  # Build the `complete` request as a flat map (`code` + `cursor` top-level,
+  # mirroring `dispatch_eval`), decode it on the workspace node, and dispatch
+  # through the term-returning op layer so the `{completions, _}` term arrives
+  # live (no JSON edge). `session_pid` is passed as `dispatch/4`'s SessionPid so
+  # the op resolves the session's bindings for instance-method completion
+  # (BT-1045); `cursor` (the byte length of the line prefix) makes the op take
+  # its context-aware path (BT-783) rather than bare-prefix completion.
+  defp dispatch_complete(session_pid, code) do
+    request = %{"op" => "complete", "code" => code, "cursor" => byte_size(code)}
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        rpc(:beamtalk_repl_ops, :dispatch, ["complete", params, msg, session_pid])
 
       other ->
         other

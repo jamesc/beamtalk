@@ -54,6 +54,10 @@ defmodule BtAttach.FacadeTest do
 
     def symbol_index(scope),
       do: record({:symbol_index, scope}) && {:value, %{"classes" => []}}
+
+    # BT-2544: backend-driven autocomplete for the CodeMirror editors.
+    def complete(pid, code),
+      do: record({:complete, pid, code}) && {:ok, ["size", "sizeWith:"]}
   end
 
   setup do
@@ -249,6 +253,33 @@ defmodule BtAttach.FacadeTest do
                {:value, %{"sites" => []}}
 
       assert Facade.dispatch(:symbols, %{scope: "all"}, observer) == {:value, %{"classes" => []}}
+    end
+  end
+
+  describe "backend-driven autocomplete (BT-2544)" do
+    test "complete routes to the client and passes the session pid + line through" do
+      assert Facade.dispatch(:complete, %{session_pid: self(), code: "Integer fa"}) ==
+               {:ok, ["size", "sizeWith:"]}
+
+      assert {:complete, self(), "Integer fa"} in RecordingClient.calls()
+    end
+
+    test "a bad shape is invalid params, with no dist call" do
+      # Non-pid session, non-binary code → no completion round-trip.
+      assert Facade.dispatch(:complete, %{session_pid: :nope, code: "x"}) ==
+               {:error, :invalid_params}
+
+      assert Facade.dispatch(:complete, %{session_pid: self(), code: 42}) ==
+               {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may complete (read capability)" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:complete, %{session_pid: self(), code: "s"}, observer) ==
+               {:ok, ["size", "sizeWith:"]}
     end
   end
 

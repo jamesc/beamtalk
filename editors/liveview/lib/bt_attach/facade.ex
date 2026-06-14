@@ -221,6 +221,17 @@ defmodule BtAttach.Facade do
       else: {:error, :invalid_params}
   end
 
+  # BT-2544: backend-driven autocomplete for the CodeMirror editors. `code` is
+  # the current line up to the caret; the client reuses the REPL `complete` op
+  # (receiver-aware, binding-aware) and returns `{:ok, [String.t()]}`. Capability
+  # is `:read` (completion runs no user code), so the Observer role completes
+  # too. A bad shape is `:invalid_params` with no dist call, matching the nav ops.
+  defp invoke(:complete, %{session_pid: pid, code: code}, _ctx) do
+    if is_pid(pid) and is_binary(code),
+      do: client().complete(pid, code),
+      else: {:error, :invalid_params}
+  end
+
   defp invoke(:flush, _params, _ctx), do: client().flush()
 
   defp invoke(:save, %{class: class, selector: selector, source: source}, _ctx),
