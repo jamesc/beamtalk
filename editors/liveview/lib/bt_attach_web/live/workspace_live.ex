@@ -1946,6 +1946,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       edit_class: tab.class,
       edit_selector: tab.selector || "",
       edit_source: tab.source,
+      # Drop the previous tab's selection: switching tabs remounts the editor, so
+      # the old `{text, start, end}` no longer points at anything live. Without
+      # this, a future consumer of `:edit_selection` could act on stale coords
+      # from the tab the user just left.
+      edit_selection: nil,
       save_result: nil,
       save_error: nil,
       flush_result: nil,

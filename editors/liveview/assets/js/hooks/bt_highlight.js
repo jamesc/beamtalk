@@ -157,10 +157,11 @@ function* tokenize(src) {
       }
       break
     }
-    // Safety fallback, NOT dead code: in non-dotall mode `other: /^./` doesn't
-    // match line terminators, so a char no rule claims would loop forever without
-    // this advance. Newlines are normally consumed by the `ws` run; this only
-    // fires for exotic terminators that `.` excludes (e.g. U+2028, U+2029).
+    // Defensive guard against an infinite loop: advance past a char no rule
+    // claimed. With the current rules this never actually fires — `ws` (`\s+`,
+    // and `\s` includes the line terminators `.` skips in non-dotall mode) plus
+    // `other` (`/^./`) together match every code unit — but it keeps the scan
+    // safe if the rule set ever stops being total.
     if (!matched) i += 1
   }
 }
