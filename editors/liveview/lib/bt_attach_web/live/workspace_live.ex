@@ -1943,15 +1943,86 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Drive the write-surface flush and render its summary, then refresh changes so
   # the (now-flushed) entries drop out of the active view.
+  #
+  # The flush reconciles every pending live `>>` patch with its on-disk body, so an
+  # open `:method` tab whose patch was just written is no longer divergent — clear
+  # its `unflushed` (`disk_differs`) breadcrumb badge (BT-2545). We diff the
+  # pending method set captured *before* the flush against the set still pending
+  # *after* (`assign_changes/1` already refreshed it): the difference is exactly
+  # what this flush wrote, so a conflicted / non-flushable method keeps its badge
+  # and a method untouched by this flush is never cleared.
   defp flush_changes(socket) do
+    was_pending = pending_method_keys(socket.assigns.changes)
+
     case Facade.dispatch(:flush, %{}, ctx(socket)) do
       {:ok, summary} ->
         socket
         |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
         |> assign_changes()
+        |> clear_flushed_badges(was_pending)
 
       {:error, reason} ->
         assign(socket, flush_result: nil, flush_error: facade_error(reason))
+    end
+  end
+
+  @doc false
+  # The `(class, selector)` set of the active ChangeLog rows — the methods with an
+  # unflushed live `>>` patch. Keyed by `(class, selector)` only; the ChangeLog
+  # carries no instance/class side, so that is the finest granularity available.
+  # Pure; unit-tested directly (cf. `Workspace.format_flush_summary/1`).
+  def pending_method_keys(changes) when is_list(changes) do
+    for %{class: class, selector: selector} <- changes,
+        is_binary(class),
+        is_binary(selector),
+        into: MapSet.new(),
+        do: {class, selector}
+  end
+
+  def pending_method_keys(_), do: MapSet.new()
+
+  @doc false
+  # The `(class, selector)` keys this flush actually wrote: pending before
+  # (`was_pending`) and gone from the refreshed `changes` after. A failed post-flush
+  # refresh assigns `changes: []` *alongside* a `changes_error`; that empty set
+  # means "couldn't read the ChangeLog", not "everything flushed", so the difference
+  # would collapse to the full before-set and clear every badge — including
+  # conflicts / skips never written to disk. On an errored refresh we therefore
+  # return the empty set and clear nothing (it self-heals on the next clean
+  # refresh). Pure; unit-tested.
+  def flushed_method_keys(_was_pending, _changes, changes_error) when not is_nil(changes_error),
+    do: MapSet.new()
+
+  def flushed_method_keys(was_pending, changes, _changes_error),
+    do: MapSet.difference(was_pending, pending_method_keys(changes))
+
+  @doc false
+  # Clear the `unflushed` (`disk_differs`) badge on every open `:method` tab whose
+  # `(class, selector)` is in `flushed` — the methods this flush reconciled to disk.
+  # Other tabs are returned unchanged: a still-pending conflict/skip (outside
+  # `flushed`), an untouched method, or a `:def` tab (the `:method` guard
+  # short-circuits before reading its absent `selector`). Pure; unit-tested.
+  def clear_disk_differs(tabs, flushed) do
+    Enum.map(tabs, fn tab ->
+      if tab.kind == :method and MapSet.member?(flushed, {tab.class, tab.selector}) do
+        %{tab | disk_differs: false}
+      else
+        tab
+      end
+    end)
+  end
+
+  # After a flush, clear the `unflushed` badge on the `:method` tabs this flush wrote
+  # to disk (BT-2545), scoped by `flushed_method_keys/3` so conflicts / skips keep
+  # their badge and methods untouched by this flush are never cleared.
+  defp clear_flushed_badges(socket, was_pending) do
+    flushed =
+      flushed_method_keys(was_pending, socket.assigns.changes, socket.assigns[:changes_error])
+
+    if MapSet.size(flushed) == 0 do
+      socket
+    else
+      assign(socket, :tabs, clear_disk_differs(socket.assigns.tabs, flushed))
     end
   end
 

@@ -594,7 +594,13 @@ reload_compile_and_load(Source, Path, ModuleNameOverride, ExpectedClassName) ->
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
     CombinedSource = ClassSource ++ "\n" ++ Expression,
-    SourceBin = list_to_binary(CombinedSource),
+    %% Source may carry non-Latin1 characters (em dash, arrows, smart quotes in
+    %% doc comments) — `unicode:characters_to_binary/1' produces the UTF-8 the
+    %% compiler expects, where `list_to_binary/1' crashes with `badarg' on any
+    %% codepoint > 255. Both inputs are already-validated source (the stored class
+    %% source and a just-compiled expression), so the conversion always yields a
+    %% binary here — never the `{error,_,_}' tuple of malformed input.
+    SourceBin = unicode:characters_to_binary(CombinedSource),
     %% BT-907: Include superclass index so cross-file inheritance resolves correctly.
     SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
     Options0 = #{stdlib_mode => false, workspace_mode => true},

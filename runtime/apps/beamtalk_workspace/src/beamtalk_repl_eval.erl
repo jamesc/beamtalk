@@ -461,6 +461,22 @@ a ChangeLog entry tagged with `Intent' and the author metadata. Returns
     {ok, binary()} | {error, term()}.
 compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
     SelectorBin = beamtalk_repl_protocol:to_binary(Selector),
+    %% Obey project mode: a built-in (stdlib) class is compiled in stdlib mode and
+    %% its bodies may use `@intrinsic'/`@primitive', which the workspace's
+    %% project-mode recompile cannot reproduce. Refuse the patch up front with a
+    %% clear error rather than attempt a recompile that cannot succeed.
+    case stdlib_class_module(ClassNameBin) of
+        {ok, _Module} ->
+            {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
+        none ->
+            do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind)
+    end.
+
+-spec do_compile_method(
+    binary(), binary(), binary(), durable | ephemeral, binary(), human | agent
+) ->
+    {ok, binary()} | {error, term()}.
+do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind) ->
     SourceStr = unicode:characters_to_list(normalize_method_source(SelectorBin, Source)),
     Expression =
         unicode:characters_to_list(<<ClassNameBin/binary, " >> ">>) ++ SourceStr,
@@ -478,7 +494,11 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
                 intent => Intent,
                 author => Author,
                 author_kind => AuthorKind,
-                expression => list_to_binary(Expression)
+                %% `unicode:characters_to_binary/1', not `list_to_binary/1': the
+                %% expression may carry non-Latin1 characters (em dash, arrows,
+                %% smart quotes in doc comments) that crash `list_to_binary' with
+                %% `badarg'.
+                expression => unicode:characters_to_binary(Expression)
             },
             case
                 beamtalk_repl_loader:reload_method_definition(
@@ -496,6 +516,58 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
             {error, Reason}
     end.
 
+%% `{ok, Module}' when `ClassNameBin' names a loaded built-in (stdlib) class,
+%% `none' otherwise. Stdlib classes load from `bt@stdlib@' modules
+%% (`beamtalk_class_registry:is_stdlib_module/1'); an unknown / not-yet-loaded
+%% class is `none' so the normal compile path surfaces its own error.
+-spec stdlib_class_module(binary()) -> {ok, module()} | none.
+stdlib_class_module(ClassNameBin) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
+        {ok, ClassName} ->
+            try
+                case beamtalk_runtime_api:whereis_class(ClassName) of
+                    undefined ->
+                        none;
+                    Pid ->
+                        Module = beamtalk_runtime_api:module_name(Pid),
+                        case beamtalk_class_registry:is_stdlib_module(Module) of
+                            true -> {ok, Module};
+                            false -> none
+                        end
+                end
+            catch
+                %% The class process can die between whereis_class/1 and the
+                %% module_name/1 gen_server:call — treat a vanished class as "not
+                %% stdlib" and let the normal compile path surface its own error.
+                exit:_ -> none
+            end;
+        {error, _} ->
+            none
+    end.
+
+%% Structured rejection for a method patch against a built-in class. Mirrors the
+%% stdlib-protection error raised by `classRemoveFromSystemByName' so both
+%% "can't touch stdlib" refusals read consistently.
+-spec stdlib_method_read_only_error(binary(), binary()) -> #beamtalk_error{}.
+stdlib_method_read_only_error(ClassNameBin, SelectorBin) ->
+    %% stdlib_class_module/1 found the class, so the atom already exists.
+    ClassName = binary_to_existing_atom(ClassNameBin, utf8),
+    Err0 = beamtalk_error:new(runtime_error, ClassName),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        iolist_to_binary([
+            <<"Cannot recompile '">>,
+            SelectorBin,
+            <<"' on stdlib class '">>,
+            ClassNameBin,
+            <<"': built-in methods are read-only in the workspace">>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Err1,
+        <<"Built-in (stdlib) classes ship with the standard library; edit them in the Beamtalk source tree and rebuild, not from the workspace.">>
+    ).
+
 %% A `compile:source:' body may be a full method definition or a bare body. When
 %% it is a bare body, prepend the canonical `selector => ' header so the
 %% synthesized `>>' expression parses as a method definition. We only treat the
@@ -503,13 +575,61 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
 %% token is followed by a header form — an argument list / argument name and/or
 %% whitespace up to the `=>' arrow. A bare expression such as `incremented + 1'
 %% for selector `increment' shares no such header and is correctly prefixed.
+%%
+%% Leading doc comments (`///') and line comments (`//') precede the header in
+%% stored method source, so we look past them before testing for a header. The
+%% `>>' form attaches them to the synthesized method, so a documented full
+%% definition is left intact; a documented bare body keeps its comments ahead of
+%% the inserted `=>' arrow.
 -spec normalize_method_source(binary(), binary()) -> binary().
 normalize_method_source(SelectorBin, Source) ->
-    Trimmed = string:trim(Source, leading),
+    Body = skip_leading_comments(Source),
     Head = first_token(SelectorBin),
-    case has_method_header(Trimmed, Head) of
-        true -> Source;
-        false -> <<SelectorBin/binary, " => ", Source/binary>>
+    case has_method_header(Body, Head) of
+        true ->
+            Source;
+        false ->
+            PrefixLen = byte_size(Source) - byte_size(Body),
+            <<Prefix:PrefixLen/binary, _/binary>> = Source,
+            %% A leading `//' comment with no trailing newline (a comment-only
+            %% source) would otherwise glue the injected `selector => ' onto the
+            %% comment line, swallowing the header. Insert a newline when the
+            %% prefix ends mid-comment so the header starts fresh and the compiler
+            %% can report the empty body clearly.
+            Sep = header_separator(Prefix),
+            <<Prefix/binary, Sep/binary, SelectorBin/binary, " => ", Body/binary>>
+    end.
+
+%% Separator between a consumed comment/whitespace prefix and the injected
+%% `selector => ' header. Empty when the prefix already ends at a line or
+%% statement boundary (newline / whitespace / no prefix); a newline only when the
+%% prefix ends in comment text (a `//' comment without a trailing newline).
+-spec header_separator(binary()) -> binary().
+header_separator(<<>>) ->
+    <<>>;
+header_separator(Prefix) ->
+    case binary:last(Prefix) of
+        $\n -> <<>>;
+        $\s -> <<>>;
+        $\t -> <<>>;
+        $\r -> <<>>;
+        _ -> <<"\n">>
+    end.
+
+%% Skip leading whitespace and full-line `//'/`///' comments, returning the first
+%% suffix of `Source' that begins a real expression or method header. `Body' is
+%% always a suffix of `Source', so the consumed prefix can be recovered by length.
+-spec skip_leading_comments(binary()) -> binary().
+skip_leading_comments(Source) ->
+    Trimmed = string:trim(Source, leading),
+    case Trimmed of
+        <<"//", _/binary>> ->
+            case binary:split(Trimmed, <<"\n">>) of
+                [_Comment, Rest] -> skip_leading_comments(Rest);
+                [_Comment] -> <<>>
+            end;
+        _ ->
+            Trimmed
     end.
 
 %% True iff `Trimmed' starts with the selector token `Head' followed by a valid
