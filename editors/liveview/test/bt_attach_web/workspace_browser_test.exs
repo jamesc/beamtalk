@@ -92,6 +92,22 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has("#workspace-editor-overlay .cm-content .tok-number", text: "42")
   end
 
+  test "the CmEditor offers backend completions as you type (BT-2544)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Real typing (not a doc-replace transaction) so CodeMirror's autocomplete
+    # activates on input the way a user triggers it. `Integ` is a bare prefix, so
+    # the backend `complete` op offers matching class names — `Integer` is a
+    # stdlib class always present in the live image, so the assertion does not
+    # depend on a freshly-defined class. The candidates come from the live session
+    # over the term-seam (`complete` event → `Workspace.complete/2`), then render
+    # in CodeMirror's autocomplete tooltip. A small inter-key delay lets the
+    # completion debounce + the server round-trip settle; `assert_has` also polls.
+    |> type("#workspace-editor-overlay .cm-content", "Integ", delay: 60)
+    |> assert_has(".cm-tooltip-autocomplete", text: "Integer")
+  end
+
   test "an eval round-trips through the real browser via the Print it button", %{conn: conn} do
     conn
     |> visit("/")

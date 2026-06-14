@@ -49,6 +49,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { indentUnit } from "@codemirror/language"
 import { beamtalkHighlighting } from "./bt_highlight"
 import { inlineResultsField, addInlineResult } from "./inline_results"
+import { backendCompletion, completionQuery } from "./cm_autocomplete"
 
 export const CmEditor = {
   mounted() {
@@ -81,6 +82,11 @@ export const CmEditor = {
     // scrollback, and it diverges further (Enter submits, ↑/↓ recall history), so
     // it ships as a sibling hook (repl_input.js) rather than a flag here.
     this.inlineResults = this.el.dataset.inlineResults === "true"
+    // Opt-in to backend-driven autocomplete (BT-2544). The Workspace editor sets
+    // data-autocomplete; the method-editor tabs can adopt it by adding the same
+    // attribute (the completion source is editor-agnostic — it round-trips the
+    // current line to the live image). Never enabled for a read-only editor.
+    const autocomplete = this.el.dataset.autocomplete === "true"
     const readOnly = this.field.readOnly || this.el.dataset.readonly === "true"
     const placeholderText = this.el.dataset.placeholder || ""
 
@@ -103,6 +109,11 @@ export const CmEditor = {
     ]
     if (placeholderText) extensions.push(placeholderExt(placeholderText))
     if (this.inlineResults) extensions.push(inlineResultsField)
+    // Backend-driven autocomplete (BT-2544): candidates come from the live image
+    // via the `complete` LiveView event. Read-only editors never complete.
+    if (autocomplete && !readOnly) {
+      extensions.push(backendCompletion(completionQuery(this.pushEvent.bind(this))))
+    }
 
     this.view = new EditorView({
       state: EditorState.create({ doc: this.field.value, extensions }),
