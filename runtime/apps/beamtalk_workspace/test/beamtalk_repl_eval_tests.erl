@@ -1530,6 +1530,60 @@ normalize_method_source_leading_whitespace_test() ->
         beamtalk_repl_eval:normalize_method_source(<<"increment">>, Source)
     ).
 
+-doc """
+A bare body with leading whitespace keeps that whitespace *ahead* of the
+synthesised header (the prefix is preserved, the header inserted after it), so
+the result still parses. Documents the post-fix behaviour, which differs from the
+old `<<Selector/binary, " => ", Source/binary>>' prepend.
+""".
+normalize_method_source_bare_body_leading_whitespace_test() ->
+    ?assertEqual(
+        <<"   increment => self.value + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"   self.value + 1">>)
+    ).
+
+-doc """
+Regression (BT-2553 compile bug): a full definition fronted by `///' doc
+comments must be recognised as already-headed and left intact, not double-headed.
+The doc comments push the `selector => ' header down, so a whitespace-only skip
+would miss it and wrongly prepend a second header.
+""".
+normalize_method_source_doc_comment_full_definition_test() ->
+    Source =
+        <<"/// Decrease the counter by one.\n///\ndecrement => self.value := self.value - 1">>,
+    ?assertEqual(
+        Source,
+        beamtalk_repl_eval:normalize_method_source(<<"decrement">>, Source)
+    ).
+
+-doc "A bare body fronted by doc comments keeps the comments ahead of the header.".
+normalize_method_source_doc_comment_bare_body_test() ->
+    ?assertEqual(
+        <<"/// doc\nincrement => self.value + 1">>,
+        beamtalk_repl_eval:normalize_method_source(
+            <<"increment">>, <<"/// doc\nself.value + 1">>
+        )
+    ).
+
+-doc "A plain `//' line comment before a full definition is also skipped.".
+normalize_method_source_line_comment_full_definition_test() ->
+    Source = <<"// note\nincrement => self.value + 1">>,
+    ?assertEqual(
+        Source,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Source)
+    ).
+
+-doc """
+A comment-only source with no trailing newline must not glue the injected header
+onto the comment line (which would swallow it). A separator newline is inserted
+so the header starts fresh; the empty body is then reported by the compiler.
+""".
+normalize_method_source_comment_only_no_newline_test() ->
+    ?assertEqual(
+        <<"/// just a comment\nincrement => ">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"/// just a comment">>)
+    ).
+
 %%====================================================================
 %% Success-path tests (require the beamtalk_compiler + beamtalk_runtime apps)
 %%
@@ -1578,6 +1632,8 @@ eval_success_test_() ->
         {"compile_method on unrecorded class returns error", fun compile_method_unrecorded/0},
         {"compile_method invalid body returns error", fun compile_method_invalid_body/0},
         {"compile_method non-method expression rejected", fun compile_method_not_a_method/0},
+        {"doc-commented method body parses (regression)",
+            fun compile_method_doc_commented_parses/0},
         {"do_show_codegen with binding known var", fun do_show_codegen_with_binding/0},
         {"reload_class_file/1 missing file", fun reload_class_file_arity1/0},
         {"handle_load/3 missing file delegates", fun handle_load3_missing/0},
@@ -1706,6 +1762,45 @@ compile_method_not_a_method() ->
     ),
     ?assertMatch({error, _}, Result).
 
+compile_method_doc_commented_parses() ->
+    %% Regression (compile bug): a method body with leading `///' doc comments
+    %% must reach the compiler as a single method_definition. Before the
+    %% normalize_method_source fix the doc comments hid the `decrement => ' header,
+    %% so a second header was prepended and the synthesized
+    %% `Object >> decrement => /// ... decrement => ...' expression failed to
+    %% parse with "Unexpected token: expected expression, found =>".
+    %%
+    %% We assert via the wrapped expression the way compile_method builds it: the
+    %% real compiler classifies it as a method_definition (parses cleanly) rather
+    %% than returning a parse error.
+    %% Exercise the exact shape stored for the example Counter methods: leading
+    %% `///' doc comments followed by a `-> ReturnType' header (BT-2547 / counter.bt).
+    Sources = [
+        {<<"decrement">>, <<"/// Decrease the counter by one.\n///\ndecrement => self.value - 1">>},
+        {<<"increment">>,
+            <<"/// Increase the counter by one.\n///\n/// ## Examples\n",
+                "increment -> Integer => self.value := self.value + 1">>}
+    ],
+    lists:foreach(
+        fun({Selector, Source}) ->
+            Wrapped =
+                unicode:characters_to_list(<<"Object >> ">>) ++
+                    unicode:characters_to_list(
+                        beamtalk_repl_eval:normalize_method_source(Selector, Source)
+                    ),
+            Result = beamtalk_repl_compiler:compile_expression(
+                Wrapped, 'beamtalk_compile_method_doc_test', #{}
+            ),
+            ?assertMatch({ok, method_definition, _MethodInfo, _Warnings}, Result),
+            %% The doc comment must round-trip into the recovered method_source so
+            %% saved methods keep their documentation (it is not stripped).
+            {ok, method_definition, MethodInfo, _} = Result,
+            MethodSource = maps:get(method_source, MethodInfo),
+            ?assert(binary:match(MethodSource, <<"///">>) =/= nomatch)
+        end,
+        Sources
+    ).
+
 do_show_codegen_with_binding() ->
     %% A non-internal binding key is forwarded as a known var to the codegen
     %% compiler (exercises the KnownVars comprehension in do_show_codegen).
@@ -1791,3 +1886,43 @@ announce_binding_changed_session_id_nil_outside_worker_test() ->
     after
         beamtalk_announcements:unsubscribe(SubRef)
     end.
+
+%%====================================================================
+%% Stdlib method-patch gate
+%%
+%% compile_method must refuse to recompile a built-in (stdlib) class: its
+%% `@intrinsic'/`@primitive' bodies only compile in stdlib mode, so a
+%% workspace-mode recompile cannot succeed. The refusal short-circuits before any
+%% compile and is a clean structured #beamtalk_error{}, not a crash or a raw
+%% compiler error.
+%%====================================================================
+
+stdlib_gate_test_() ->
+    {setup, fun stdlib_gate_setup/0, fun stdlib_gate_cleanup/1, [
+        {"compile_method on a stdlib class is refused", fun compile_method_stdlib_refused/0}
+    ]}.
+
+stdlib_gate_setup() ->
+    application:ensure_all_started(beamtalk_runtime),
+    application:ensure_all_started(beamtalk_stdlib),
+    %% Let the stdlib classes (ErlangModule, ...) register before patching.
+    timer:sleep(1500),
+    ok.
+
+stdlib_gate_cleanup(_) ->
+    %% Intentional no-op: beamtalk_runtime / beamtalk_stdlib are left running for
+    %% the rest of the shared EUnit node (same convention as eval_teardown, which
+    %% only stops the compiler). Nothing here owns those apps exclusively.
+    ok.
+
+compile_method_stdlib_refused() ->
+    %% ErlangModule is a sealed stdlib class loaded from a `bt@stdlib@' module and
+    %% its DNU body is `@intrinsic erlangApply'. The gate rejects the patch up
+    %% front rather than crashing on the project-mode recompile.
+    ?assert(beamtalk_runtime_api:whereis_class('ErlangModule') =/= undefined),
+    Result = beamtalk_repl_eval:compile_method(
+        <<"ErlangModule">>, <<"doesNotUnderstand:args:">>, <<"@intrinsic erlangApply">>, ephemeral
+    ),
+    ?assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result),
+    {error, #beamtalk_error{message = Msg}} = Result,
+    ?assert(binary:match(Msg, <<"read-only">>) =/= nomatch).
