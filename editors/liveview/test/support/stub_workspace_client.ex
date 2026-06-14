@@ -31,7 +31,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     case Agent.stop(__MODULE__.State, :normal, timeout) do
       :ok -> :ok
       {:error, :no_process} -> :ok
-      {:error, :timeout} -> :ok
+      {:error, :timeout} -> raise "StubWorkspaceClient.State timed out shutting down"
     end
   end
 
@@ -179,6 +179,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def senders_of(_selector), do: {:value, %{"sites" => []}}
   def implementors_of(_selector), do: {:value, %{"sites" => []}}
   def symbol_index(_scope), do: {:value, %{"classes" => []}}
+
+  def complete(_pid, _code), do: {:ok, []}
 
   # ── Supervision tree ─────────────────────────────────────────────────────
 
