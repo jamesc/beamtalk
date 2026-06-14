@@ -823,32 +823,44 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # from disk (the `unflushed` badge appears); flushing reconciles the patch to
     # disk, so the badge must clear on the open `:method` tab rather than lingering
     # until the tab is closed and re-browsed.
+    #
+    # The method must be *file-backed* for a flush to actually reconcile it — a
+    # runtime-only (eval-defined) method has no on-disk body, so its patch is
+    # non-flushable and stays pending. We therefore create the class through the
+    # New File flow (`newClass:at:`), which assigns a `.bt` path that flush writes
+    # (and whose parent dir flush's `filelib:ensure_dir` creates), so the patch is
+    # genuinely flushable.
     {:ok, view, _html} = live(conn, "/")
     suffix = System.unique_integer([:positive])
-    class = "FlushBadge#{suffix}"
+    class = "Flushable#{suffix}"
+    # The declared class name must match the path basename (snake_cased); a
+    # single-word name + numeric suffix maps cleanly (`Flushable12` ↔ `flushable12`).
+    path = "src/flushable#{suffix}.bt"
 
     class_src = """
-    Actor subclass: #{class}
-      state: value = 0
+    Object subclass: #{class}
 
-      increment => self.value := self.value + 1
+      answer => 42
     """
 
-    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#new-file-form") |> render_submit(%{"source" => class_src, "path" => path})
 
+    # Reload so the fresh browser tree picks up the newly-installed class (New File
+    # refreshes the Changes pane, not the class tree). The class lives on the shared
+    # workspace node, so it survives the new session.
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
     view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
-    view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+    view |> element(~s(div[phx-value-selector="answer"])) |> render_click()
 
     save_html =
       view
       |> form("form[phx-submit='save_method']")
       |> render_submit(%{
         "class" => class,
-        "selector" => "increment",
-        "source" => "increment => self.value := self.value + 2",
-        "tab" => "method:#{class}:instance:increment"
+        "selector" => "answer",
+        "source" => "answer => 43",
+        "tab" => "method:#{class}:instance:answer"
       })
 
     # Precondition: the compile leaves the tab showing `unflushed`.
