@@ -258,7 +258,8 @@ browse_tests(#{class_name := Class}) ->
                     <<"abstract">>,
                     <<"internal">>,
                     <<"source_file">>,
-                    <<"origin">>
+                    <<"origin">>,
+                    <<"source_origin">>
                 ]
             )
         end},
@@ -278,6 +279,19 @@ browse_tests(#{class_name := Class}) ->
             Row = find_class_row(Value, Class),
             ?assertEqual(null, maps:get(<<"source_file">>, Row)),
             ?assertEqual(<<"runtime">>, maps:get(<<"origin">>, Row))
+        end},
+        {"browse-classes source_origin is present for all rows", fun() ->
+            %% BT-2552: source_origin field classifies project/dependency/stdlib.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Class),
+            SourceOrigin = maps:get(<<"source_origin">>, Row),
+            ?assert(is_binary(SourceOrigin)),
+            ?assert(
+                lists:member(SourceOrigin, [<<"stdlib">>, <<"project">>, <<"dependency">>]) orelse
+                    binary:match(SourceOrigin, <<"dependency:">>) =/= nomatch
+            )
         end},
         {"browse-protocols groups selectors with line and source_status", fun() ->
             Value = decode_value(
