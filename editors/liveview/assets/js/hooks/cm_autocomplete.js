@@ -56,7 +56,10 @@ export function backendCompletion(requestCompletions) {
           return null
         }
 
-        const candidates = await requestCompletions(linePrefix)
+        // Pass `context` so the query settles on abort (more typing supersedes
+        // this query, or the editor is destroyed on LiveView disconnect) instead
+        // of leaking a pending Promise when the server reply never arrives.
+        const candidates = await requestCompletions(linePrefix, context)
         if (!candidates || candidates.length === 0) return null
 
         // Empty prefix (receiver-trailing space) inserts at the caret; otherwise
@@ -79,14 +82,24 @@ export function backendCompletion(requestCompletions) {
   return [config, Prec.high(keymap.of(completionKeymap))]
 }
 
-// Wrap a hook's `pushEvent` into the Promise<string[]> contract the source
-// expects. The LiveView `complete` handler replies `{completions: [...]}` on the
-// same event (a `{:reply, …}` from `handle_event`), which resolves the callback.
-// A dropped reply (workspace unreachable, no session) yields `[]`, so the popup
-// simply shows nothing rather than hanging.
+// Wrap a hook's `pushEvent` into the `(linePrefix, context) => Promise<string[]>`
+// contract the source expects. The LiveView `complete` handler replies
+// `{completions: [...]}` on the same event (a `{:reply, …}` from `handle_event`),
+// resolving the callback. A reply that arrives but carries no session / an
+// unreachable workspace resolves to `[]` (the handler still replies `[]`).
+//
+// The reply callback only fires if a reply actually arrives — if the channel
+// drops mid-flight it never does, which would leak a pending Promise per
+// in-flight request. CodeMirror's `CompletionContext` fires an `abort` event
+// when it abandons the query (the user types more, or the editor is destroyed —
+// which is exactly what happens to the hook on a LiveView disconnect), so we
+// settle to `[]` on abort and the Promise can't hang. `context.aborted` is a
+// boolean getter, NOT a Promise, so we register the event listener rather than
+// `.then()`-ing it.
 export function completionQuery(pushEvent) {
-  return (linePrefix) =>
+  return (linePrefix, context) =>
     new Promise((resolve) => {
+      if (context) context.addEventListener("abort", () => resolve([]))
       pushEvent("complete", { code: linePrefix }, (reply) => {
         resolve((reply && reply.completions) || [])
       })
