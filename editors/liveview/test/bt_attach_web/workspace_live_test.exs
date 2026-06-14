@@ -777,6 +777,54 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert save_html =~ "unflushed"
   end
 
+  test "re-browsing a method patched out-of-band refreshes the unflushed badge (BT-2547)", %{
+    conn: conn
+  } do
+    # A method patched out-of-band (an in-memory `>>` extension, NOT through the open
+    # tab's save form) while its editor tab sits open and clean must surface the
+    # `unflushed` badge when the row is re-clicked: `open_method_tab/4` re-fetches the
+    # live image on re-activation instead of reusing the stale open-time snapshot.
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RebrowseCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # Open the method tab: in sync with disk, so no `unflushed` badge yet.
+    open_html =
+      view
+      |> element(~s(div[phx-value-selector="increment"]))
+      |> render_click()
+
+    refute open_html =~ "unflushed"
+
+    # Patch the body out-of-band via an in-memory `>>` extension. This diverges the
+    # live image from the disk source without touching the open tab's snapshot.
+    view
+    |> form("#eval-form")
+    |> render_submit(%{expr: "#{class} >> increment => self.value := self.value + 99"})
+
+    # Re-click the same row: the already-open clean tab re-fetches the live image, so
+    # the freshly-diverged body now raises the badge.
+    rebrowse_html =
+      view
+      |> element(~s(div[phx-value-selector="increment"]))
+      |> render_click()
+
+    assert rebrowse_html =~ "unflushed"
+  end
+
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
 
   # Spawn + bind a real Counter actor in `view`'s session and inspect it, returning

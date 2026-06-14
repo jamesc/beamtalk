@@ -1703,8 +1703,35 @@ defmodule BtAttachWeb.WorkspaceLive do
     id = "method:" <> class <> ":" <> side <> ":" <> selector
 
     case find_tab(socket, id) do
-      %{} ->
+      %{dirty: true} ->
+        # Unsaved edits live in the buffer — just refocus; never re-seed source or
+        # clobber the user's in-progress work.
         activate_tab(socket, id)
+
+      %{} = existing ->
+        # Tab already open and clean: re-fetch the live image so the breadcrumb
+        # badges reflect an out-of-band patch (REPL `>>`, MCP `save_method`) that
+        # landed while the tab sat open, instead of the snapshot taken at first open.
+        # Safe because a clean tab has `source == base`, so re-seeding both to the
+        # current image cannot lose edits.
+        info = method_source_info(socket, class, side, selector)
+
+        refreshed = %{
+          existing
+          | source: info.source,
+            base: info.source,
+            # Pick up *new* divergence (false → true) from an out-of-band patch, but
+            # never clear a divergence already set locally by an in-memory compile
+            # (`compile_clean/3`): clearing on flush is BT-2545's path, not this one.
+            # Keeps the false → true invariant the `nil ->` branch documents.
+            disk_differs: existing.disk_differs or info.disk_differs,
+            runtime_only: info.runtime_only
+        }
+
+        socket
+        |> update_active_tab_by_id(id, fn _ -> refreshed end)
+        |> assign(:active_tab, id)
+        |> sync_active(refreshed)
 
       nil ->
         info = method_source_info(socket, class, side, selector)
@@ -1721,9 +1748,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           # Image-divergence snapshot at browse time (the badges the old
           # read-only pane carried): `disk_differs` = an unflushed live `>>`
           # patch, `runtime_only` = no static source on disk. `disk_differs` is
-          # also set to `true` by `compile_clean/3` on a later in-memory compile
-          # (it only ever goes false → true here); `runtime_only` stays the
-          # open-time value.
+          # later set to `true` by `compile_clean/3` on an in-memory compile, and
+          # both flags are re-derived from the live image when a clean tab is
+          # re-activated (see the `%{} = existing` branch above).
           disk_differs: info.disk_differs,
           runtime_only: info.runtime_only
         }
@@ -1753,10 +1780,25 @@ defmodule BtAttachWeb.WorkspaceLive do
           runtime_only: runtime_only?(result)
         }
 
+      # Facade returned a value but not the expected map (sourceless / malformed
+      # payload): open an empty editable buffer with no badges.
+      {:value, _non_map} ->
+        empty_source_info()
+
+      # Facade error (class/method missing, dispatch failure): same empty-buffer
+      # fallback, kept as its own arm so the error origin stays distinguishable
+      # when debugging.
+      {:error, _reason} ->
+        empty_source_info()
+
       _ ->
-        %{source: "", disk_differs: false, runtime_only: false}
+        empty_source_info()
     end
   end
+
+  # Defaults for a method with no resolvable image source: an empty editable buffer
+  # and no divergence badges.
+  defp empty_source_info, do: %{source: "", disk_differs: false, runtime_only: false}
 
   # Query senders/implementors of the active method's selector (`nav-query`) and
   # open the result popover. A tab with no selector (a class-definition tab) is a
