@@ -1613,7 +1613,6 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The `(class, selector)` set of the active ChangeLog rows — the methods with an
   # unflushed live `>>` patch. Keyed by `(class, selector)` only; the ChangeLog
   # carries no instance/class side, so that is the finest granularity available.
-  # A `changes_error` leaves `changes: []`, yielding an empty set (no reconcile).
   defp pending_method_keys(changes) when is_list(changes) do
     for %{class: class, selector: selector} <- changes,
         is_binary(class),
@@ -1623,6 +1622,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp pending_method_keys(_), do: MapSet.new()
+
+  # A failed post-flush refresh assigns `changes: []` *alongside* a `changes_error`.
+  # That empty set means "couldn't read the ChangeLog", not "everything flushed", so
+  # the difference below would collapse to the full before-set and clear every
+  # badge — including conflicts / skips never written to disk. Leave badges
+  # untouched until a clean refresh re-derives the truth (it self-heals on reload).
+  defp clear_flushed_badges(%{assigns: %{changes_error: error}} = socket, _was_pending)
+       when not is_nil(error),
+       do: socket
 
   # Clear the `disk_differs` badge on any open `:method` tab whose patch this flush
   # wrote to disk: it was pending before (`was_pending`) and is no longer pending
