@@ -4245,7 +4245,6 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <div :if={@save_error} class="io-block err">{@save_error}</div>
                   <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
                   <div :if={@flush_error} class="io-block err">{@flush_error}</div>
-
                 </div>
               </div>
             </div>
