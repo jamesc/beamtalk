@@ -2445,8 +2445,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp source_origin_label(_), do: ""
 
   defp source_origin_title(%{"source_origin" => "stdlib"}), do: "Standard library"
+
   defp source_origin_title(%{"source_origin" => <<"dependency:", pkg::binary>>}),
     do: "Dependency: #{pkg}"
+
   defp source_origin_title(_), do: "Project"
 
   # ── tabbed method editor data model (BT-2494) ───────────────────────────────
@@ -3936,7 +3938,11 @@ defmodule BtAttachWeb.WorkspaceLive do
     >
       <span class="twig">{if class["superclass"], do: "→", else: "●"}</span>
       <span class="cls">{class["name"]}</span>
-      <span :if={class["source_origin"] && class["source_origin"] != "project"} class={"source-origin-tag #{source_origin_class(class)}"} title={source_origin_title(class)}>
+      <span
+        :if={class["source_origin"] && class["source_origin"] != "project"}
+        class={"source-origin-tag #{source_origin_class(class)}"}
+        title={source_origin_title(class)}
+      >
         {source_origin_label(class)}
       </span>
       <span :if={runtime_only?(class)} class="runtime-tag" title="runtime-only (not on disk)">
@@ -4023,7 +4029,11 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
               <span class="twig" style="color: var(--accent);">ƒ</span>
               <span class="mname mono">{m["selector"]}</span>
-              <span :if={m["source_origin"] && m["source_origin"] != "project"} class={"source-origin-tag #{source_origin_class(m)}"} title={source_origin_title(m)}>
+              <span
+                :if={m["source_origin"] && m["source_origin"] != "project"}
+                class={"source-origin-tag #{source_origin_class(m)}"}
+                title={source_origin_title(m)}
+              >
                 {source_origin_label(m)}
               </span>
               <span :if={runtime_only?(m)} class="runtime-tag" title="runtime-only">⚡</span>
