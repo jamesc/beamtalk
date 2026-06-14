@@ -419,11 +419,11 @@ origin_of(SourceFile) when is_binary(SourceFile) -> <<"both">>.
 %% or the stdlib. Used for IDE badges (BT-2552). For dependencies, the package
 %% name is included (e.g. <<"dependency:cowboy">>).
 -spec source_origin_of(atom(), binary() | null) -> binary().
-source_origin_of(ModName, _SourceFile) when is_atom(ModName) ->
+source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
     case beamtalk_class_registry:is_stdlib_module(ModName) of
         true -> <<"stdlib">>;
         false ->
-            case source_file_of(ModName) of
+            case SourceFile of
                 null -> <<"project">>;
                 SourceFile ->
                     case classify_source_origin(SourceFile) of
@@ -449,6 +449,8 @@ package_of_module(ModName) when is_atom(ModName) ->
     end.
 
 %% Determine if a source file belongs to the project or a dependency.
+%% Falls back to `project` when metadata is unavailable (startup, no workspace)
+%% — a wrong "project" badge is less confusing than a wrong "dependency" badge.
 -spec classify_source_origin(binary()) -> project | dependency.
 classify_source_origin(SourceFile) ->
     SourceStr = binary_to_list(SourceFile),
@@ -463,7 +465,7 @@ classify_source_origin(SourceFile) ->
                 false -> dependency
             end;
         _ ->
-            dependency
+            project
     end.
 
 %% Per-selector origin from xref provenance: a runtime-installed selector
