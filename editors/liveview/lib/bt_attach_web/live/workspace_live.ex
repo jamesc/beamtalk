@@ -244,9 +244,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # All RBAC-relevant workspace ops go through the curated facade (ADR 0091
   # Decision 3) — never a raw Workspace/:rpc call from an event handler. Pure
   # transport/display/lifecycle helpers (connect, render_term, session start)
-  # go through the injectable workspace client so the mount path is testable
-  # without a live node (BT-2554). `ctx/1` carries the request identity the
-  # facade audits / RBAC gates on (BT-2421).
+  # go through the injectable workspace client so the mount and session-start
+  # paths are testable without a live node (BT-2554). `ctx/1` carries the
+  # request identity the facade audits / RBAC gates on (BT-2421).
   defp ctx(socket),
     do: %{user: socket.assigns[:current_user], role: socket.assigns[:role] || :owner}
 

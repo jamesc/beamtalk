@@ -39,7 +39,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
     {:ok, _} = BtAttachWeb.StubWorkspaceClient.start_state()
 
     on_exit(fn ->
-      BtAttachWeb.StubWorkspaceClient.stop_state()
+      BtAttachWeb.StubWorkspaceClient.stop_state(2_000)
       Application.delete_env(:bt_attach, :workspace_client)
       Application.delete_env(:bt_attach, :oidc)
       Application.delete_env(:bt_attach, :session_ttl_secs)

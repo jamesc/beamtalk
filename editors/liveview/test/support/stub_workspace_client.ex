@@ -27,8 +27,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   @doc "Stop the state Agent. Call in on_exit."
-  def stop_state do
-    case Agent.stop(__MODULE__.State, :normal, 100) do
+  def stop_state(timeout \\ 100) do
+    case Agent.stop(__MODULE__.State, :normal, timeout) do
       :ok -> :ok
       {:error, :no_process} -> :ok
       {:error, :timeout} -> :ok
@@ -45,6 +45,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def connect, do: :ok
 
   def start_session(_session_id, _meta) do
+    # Returns a stub pid. Safe only when the caller uses a nil token, which
+    # short-circuits SessionRegistry.register/3 before any monitor is set up.
+    # A non-nil token would cause the immediately-exiting process to trigger a
+    # :DOWN drop — see register/3 guard in session_registry.ex.
     spawn(fn -> :ok end)
   end
 
@@ -179,6 +183,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Supervision tree ─────────────────────────────────────────────────────
 
   def supervision_tree(_pid, _scope), do: {:ok, []}
+  def pid_stats(_term), do: {:ok, %{}}
 
   # ── Pure utilities (delegated to real Workspace) ─────────────────────────
 
