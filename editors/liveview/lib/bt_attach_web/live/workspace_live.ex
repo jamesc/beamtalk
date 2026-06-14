@@ -3918,7 +3918,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                           class="cm-host"
                           id={"method-editor-cm-" <> @active_tab}
                           phx-update="ignore"
-                        ></div>
+                        >
+                        </div>
                       </div>
                       <div style="display:flex; gap:.5rem; margin-top:.5rem;">
                         <button class="btn primary" type="submit">
