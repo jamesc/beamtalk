@@ -779,6 +779,49 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert save_html =~ "unflushed"
   end
 
+  test "re-clicking an open method row re-fetches without blanking the buffer (BT-2547)", %{
+    conn: conn
+  } do
+    # Re-activating an already-open, clean method tab routes through the
+    # `%{} = existing` branch of `open_method_tab/4`, which re-fetches the live image.
+    # The refreshed buffer must still hold the method source — a re-browse must never
+    # blank a tab the user is looking at.
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RebrowseCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # First click opens the tab seeded with the method body.
+    open_html =
+      view
+      |> element(~s(div[phx-value-selector="increment"]))
+      |> render_click()
+
+    assert open_html =~ "self.value"
+
+    # Re-click the same row: the existing clean tab is re-activated and re-fetched. The
+    # body must still be present (not clobbered with an empty buffer).
+    rebrowse_html =
+      view
+      |> element(~s(div[phx-value-selector="increment"]))
+      |> render_click()
+
+    assert rebrowse_html =~ "self.value"
+    assert rebrowse_html =~ ~s(phx-value-id="method:#{class}:instance:increment")
+  end
+
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
 
   # Spawn + bind a real Counter actor in `view`'s session and inspect it, returning

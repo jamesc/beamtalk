@@ -1282,3 +1282,125 @@ fn test_value_type_do_non_literal_callable_seeds_empty_state() {
         "ValueType non-literal do: should seed wrapper with ~{{}}~ (empty map). Got:\n{code}"
     );
 }
+
+// ── reject: ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_reject_pure_generates_negated_filter() {
+    // Pure reject: (no mutations) wraps the predicate in an `erlang:not` negating fun
+    // and delegates to lists:filter. An is_list guard routes non-list receivers to
+    // beamtalk_primitive:send with 'reject:' selector.
+    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items reject: [:item | item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'filter'"),
+        "Pure reject: should generate lists:filter (negated). Got:\n{code}"
+    );
+    // The predicate is wrapped with erlang:not to invert the inclusion decision.
+    assert!(
+        code.contains("call 'erlang':'not'"),
+        "Pure reject: must wrap predicate with erlang:not. Got:\n{code}"
+    );
+    // Runtime fallback selector must be 'reject:' (not 'select:' or 'filter').
+    assert!(
+        code.contains("'reject:'"),
+        "Runtime fallback for reject: should use 'reject:' selector. Got:\n{code}"
+    );
+    // Pure path must NOT fall through to the stateful foldl path.
+    assert!(
+        !code.contains("'lists':'foldl'"),
+        "Pure reject: must NOT use lists:foldl. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_list_reject_with_field_mutation_uses_foldl() {
+    // reject: with a field mutation cannot use the pure negating-filter path; it must
+    // thread state via lists:foldl. The negate=true flag produces `call 'erlang':'not'`
+    // around the predicate result in the filter condition (BodyKind::FoldlFilter{negate:true}).
+    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items reject: [:item | self.n := self.n + 1. item > 0]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "reject: with field mutation should use lists:foldl. Got:\n{code}"
+    );
+    // negate=true: the fold body uses erlang:not to invert the predicate in the case expression.
+    assert!(
+        code.contains("call 'erlang':'not'"),
+        "reject: with field mutation should emit erlang:not for the negate=true condition. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'put'('n'"),
+        "reject: body should update 'n' field via maps:put. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_list_reject_with_local_mutation_uses_tuple_acc() {
+    // BT-1276 + BT-2342: reject: with only a local variable mutation uses the
+    // tuple-accumulator path: {ResultList, Var1, ...}. Locals are unpacked via
+    // element(2, AccSt) inside the lambda, and the result is wrapped via
+    // from_list_like for string-aware reconstruction — parity with select:.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    items reject: [:item | count := count + 1. item > 0]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "reject: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    // ResultList is at element(1, AccSt); 'count' is the first threaded local at element(2, ...).
+    assert!(
+        code.contains("let Count = call 'erlang':'element'(2, "),
+        "reject: tuple-acc should extract 'count' via element(2, AccSt) inside lambda. Got:\n{code}"
+    );
+    // negate=true: the tuple-acc case expression wraps the predicate with erlang:not.
+    assert!(
+        code.contains("call 'erlang':'not'"),
+        "reject: with local mutation should emit erlang:not for the negate=true case condition. Got:\n{code}"
+    );
+    // BT-2342: result must be reconstructed via from_list_like (String → binary, Array → Array).
+    assert!(
+        code.contains("'beamtalk_collection':'from_list_like'("),
+        "reject: with local mutation should use from_list_like for string-aware result. Got:\n{code}"
+    );
+}
+
+// ── sort: pure path ───────────────────────────────────────────────────
+
+#[test]
+fn test_sort_pure_generates_beamtalk_list_sort_with() {
+    // Pure sort: (no mutations) delegates to beamtalk_list:sort_with/2 with an
+    // is_list guard. Non-list receivers fall back to beamtalk_primitive:send with
+    // 'sort:' selector. The mutation path (lists:sort + process-dict) must NOT appear.
+    let src =
+        "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items sort: [:a :b | a < b]\n";
+    let code = codegen(src);
+    assert!(
+        code.contains("'beamtalk_list':'sort_with'"),
+        "Pure sort: should generate beamtalk_list:sort_with. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'erlang':'is_list'("),
+        "Pure sort: should guard with erlang:is_list. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_primitive':'send'("),
+        "Pure sort: should fall back to beamtalk_primitive:send for non-lists. Got:\n{code}"
+    );
+    // Runtime fallback selector is 'sort:' (consistent with 'select:' / 'reject:' pattern).
+    assert!(
+        code.contains("'sort:'"),
+        "Pure sort: runtime fallback should use 'sort:' selector. Got:\n{code}"
+    );
+    // lists:sort is used only in the mutation path (process-dictionary state threading).
+    assert!(
+        !code.contains("'lists':'sort'"),
+        "Pure sort: should NOT use lists:sort (that is the mutation path). Got:\n{code}"
+    );
+}
