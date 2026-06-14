@@ -229,13 +229,15 @@ source_file_of(ClassName) ->
 -spec source_origin_of(atom()) -> binary().
 source_origin_of(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
-        undefined -> <<"project">>;
+        undefined ->
+            <<"project">>;
         ClassPid ->
             ModName = beamtalk_object_class:module_name(ClassPid),
-            SourceFile = case beamtalk_reflection:source_file_from_module(ModName) of
-                nil -> null;
-                Path when is_binary(Path) -> Path
-            end,
+            SourceFile =
+                case beamtalk_reflection:source_file_from_module(ModName) of
+                    nil -> null;
+                    Path when is_binary(Path) -> Path
+                end,
             beamtalk_repl_ops_browse:source_origin_of(ModName, SourceFile)
     end.
 

@@ -182,7 +182,10 @@ browse_protocols(ClassName, ClassSide) ->
     Selectors = beamtalk_xref:defined_selectors(ClassName, ClassSide),
     SourceFile = source_file_for_class(ClassName),
     ModName = mod_name_for_class(ClassName),
-    SelectorRows = [selector_row(ClassName, ClassSide, Sel, SourceFile, ModName) || Sel <- Selectors],
+    SelectorRows = [
+        selector_row(ClassName, ClassSide, Sel, SourceFile, ModName)
+     || Sel <- Selectors
+    ],
     Grouped = group_by_protocol(SelectorRows),
     {value, #{
         <<"class">> => atom_to_binary(ClassName, utf8),
@@ -421,13 +424,16 @@ origin_of(SourceFile) when is_binary(SourceFile) -> <<"both">>.
 -spec source_origin_of(atom(), binary() | null) -> binary().
 source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
     case beamtalk_class_registry:is_stdlib_module(ModName) of
-        true -> <<"stdlib">>;
+        true ->
+            <<"stdlib">>;
         false ->
             case SourceFile of
-                null -> <<"project">>;
+                null ->
+                    <<"project">>;
                 Bin when is_binary(Bin) ->
                     case classify_source_origin(Bin) of
-                        project -> <<"project">>;
+                        project ->
+                            <<"project">>;
                         dependency ->
                             case package_of_module(ModName) of
                                 nil -> <<"dependency">>;
