@@ -1789,8 +1789,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # protocols. Used when a method is opened from *outside* the browser (a
   # Senders/Implementors jump to another class) so the pane tracks the focused
   # tab, per the "browser highlights whatever the focused tab shows" design.
-   defp navigate_browser(socket, class, side)
-        when is_binary(class) and is_binary(side) do
+  defp navigate_browser(socket, class, side)
+       when is_binary(class) and is_binary(side) do
     socket
     |> assign(selected_class: class, browser_side: side, selected_protocol: nil)
     |> load_protocols(class, side)
@@ -3730,7 +3730,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                primary workspace pane. The panel stays mounted (so the TweaksPanel
                hook applies the saved theme on load); the gear only toggles the
                dropdown. Click-away / Escape close it. --%>
-           <div :if={@connected} class="settings-menu" phx-click-away={if @show_settings, do: "close_settings"}>
+          <div
+            :if={@connected}
+            class="settings-menu"
+            phx-click-away={if @show_settings, do: "close_settings"}
+          >
             <button
               type="button"
               class="settings-gear"
