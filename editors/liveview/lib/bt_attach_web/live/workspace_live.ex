@@ -120,8 +120,9 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   ## Tweaks panel (BT-2487, epic BT-2482 Phase 1)
 
-  The left column carries a **Tweaks** panel (`tweaks_panel/1`) — the cockpit's
-  appearance controls, ported from the spike (`spikes/cockpit-ux-spike`): a
+  A top-bar gear opens the **Tweaks** dropdown (`tweaks_panel/1`, toggled by
+  `:show_settings`) — the cockpit's appearance controls, ported from the spike
+  (`spikes/cockpit-ux-spike`): a
   theme picker (paper/squeak/dusk), accent swatches, syntax-palette mode
   (warm/mono/vivid), density (cozy/compact), and UI-font + code-font dropdowns.
   It is **pure presentation** — the `TweaksPanel` JS hook
@@ -467,6 +468,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:omni_results, [])
       |> assign(:omni_open, false)
       |> assign(:nav_popover, nil)
+      # Appearance/settings menu (the Tweaks panel): a top-bar gear opens it as a
+      # dropdown rather than a permanent sidebar panel. The panel stays mounted
+      # whenever the cockpit is (the `TweaksPanel` hook applies the saved theme on
+      # mount); `:show_settings` only toggles the dropdown's visibility.
+      |> assign(:show_settings, false)
       # Floating inspector windows (BT-2493, epic BT-2482 Phase 3): the spike's
       # Dock/Float toggle (spikes/cockpit-ux-spike/app.jsx). In `"float"` mode a
       # binding click / Inspect-it opens a *floating, draggable, stackable*
@@ -677,6 +683,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("set_inspector_mode", _params, socket), do: {:noreply, socket}
+
+  # Open / close the top-bar appearance (Tweaks) dropdown. Pure view state — the
+  # panel itself stays mounted (see `:show_settings` in `mount/3`); this only
+  # flips the dropdown's visibility. `close_settings` is the click-away / Escape
+  # path.
+  def handle_event("toggle_settings", _params, socket) do
+    {:noreply, assign(socket, show_settings: !socket.assigns.show_settings)}
+  end
+
+  def handle_event("close_settings", _params, socket) do
+    {:noreply, assign(socket, show_settings: false)}
+  end
 
   # Drill into an object-valued field of a *floating window* (BT-2493): the field
   # term is carried by index against that window's current rows, exactly like the
@@ -1016,14 +1034,22 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Open a site from the Senders/Implementors popover in the method-editor tab
-  # strip (its class + selector + side), then close the popover.
+  # strip (its class + selector + side) and point the System Browser at that
+  # class/side too, so a jump to another class navigates the tree alongside the
+  # editor, then close the popover.
   def handle_event(
         "nav_open",
         %{"class" => class, "side" => side, "selector" => selector},
         socket
       )
       when is_binary(class) and is_binary(side) and is_binary(selector) do
-    {:noreply, socket |> open_method_tab(class, side, selector) |> assign(nav_popover: nil)}
+    socket =
+      socket
+      |> open_method_tab(class, side, selector)
+      |> navigate_browser(class, side)
+      |> assign(nav_popover: nil)
+
+    {:noreply, socket}
   end
 
   def handle_event("nav_open", _params, socket), do: {:noreply, assign(socket, nav_popover: nil)}
@@ -1757,6 +1783,20 @@ defmodule BtAttachWeb.WorkspaceLive do
     |> assign(selected_class: class, selected_protocol: nil)
     |> load_protocols(class, socket.assigns.browser_side)
   end
+
+  # Point the System Browser at a class/side — select it in the tree, flip the
+  # instance/class toggle to match, clear the protocol filter, and load its
+  # protocols. Used when a method is opened from *outside* the browser (a
+  # Senders/Implementors jump to another class) so the pane tracks the focused
+  # tab, per the "browser highlights whatever the focused tab shows" design.
+  defp navigate_browser(socket, class, side)
+       when is_binary(class) and is_binary(side) do
+    socket
+    |> assign(selected_class: class, browser_side: side, selected_protocol: nil)
+    |> load_protocols(class, side)
+  end
+
+  defp navigate_browser(socket, _class, _side), do: socket
 
   # Open (or re-focus) an *editable* method tab for class/side/selector — the
   # shared open path for an omni-search selector result and a senders/implementors
@@ -3256,7 +3296,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # accent), UI-font and code-font options — exactly the sets the spike offers.
   @tweak_accents ~w(#b9711b #a8324e #2c6e8e #5d7a2e #7a4ea8)
   @tweak_ui_fonts ["Hanken Grotesk", "Inter Tight", "Public Sans", "Schibsted Grotesk"]
-  @tweak_code_fonts ["IBM Plex Mono", "JetBrains Mono", "Spline Sans Mono", "Courier Prime"]
+  @tweak_code_fonts ["Cascadia Code", "Monaspace", "JetBrains Mono"]
 
   # The appearance panel: a pure-client control surface. The `TweaksPanel` hook
   # owns all behaviour — each control declares the tweak it drives via
@@ -3315,6 +3355,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
             </button>
           </div>
+          <span class="twk-accent-note">Dusk uses its built-in accent</span>
         </div>
 
         <%!-- Syntax → the --t-* token palette (warm/mono/vivid) --%>
@@ -3403,7 +3444,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           </button>
         </div>
       </div>
-      <div class="panel-body">
+      <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
         <div :if={@browser_error} class="io-block err">{@browser_error}</div>
         <%= if @browser_classes == [] do %>
           <p :if={!@browser_error} class="muted-note">No classes in the image yet.</p>
@@ -3564,6 +3605,55 @@ defmodule BtAttachWeb.WorkspaceLive do
     """
   end
 
+  # Senders / Implementors result popover (BT-2495). Rendered as a child of the
+  # `.nav-actions` group (which is `position: relative`) so it anchors to — and
+  # pops up directly above — the buttons that opened it, rather than floating in
+  # a fixed panel corner. Shared by the owner and observer button rows via a
+  # function component (one source of truth). Closes on click-away, the × button,
+  # or Escape (`phx-window-keydown` is live only while the popover is mounted).
+  attr :nav, :map, default: nil
+
+  defp nav_popover(assigns) do
+    ~H"""
+    <div
+      :if={@nav}
+      class="nav-popover"
+      phx-click-away="nav_close"
+      phx-window-keydown="nav_close"
+      phx-key="Escape"
+    >
+      <div class="nav-pop-head">
+        <b>{nav_kind_label(@nav.kind)}</b>
+        <span class="mono">{@nav.selector}</span>
+        <span class="spacer"></span>
+        <button class="x" type="button" phx-click="nav_close" title="Close">×</button>
+      </div>
+      <div :if={@nav[:error]} class="io-block err">{@nav.error}</div>
+      <div :if={!@nav[:error] and @nav.sites == []} class="nav-empty">
+        No {nav_kind_label(@nav.kind)} found.
+      </div>
+      <button
+        :for={site <- @nav.sites}
+        type="button"
+        class="nav-site"
+        phx-click="nav_open"
+        phx-value-class={site["class"]}
+        phx-value-side={if site["class_side"] == true, do: "class", else: "instance"}
+        phx-value-selector={site["method"]}
+      >
+        <span class="nav-site-name mono">
+          {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
+            "method"
+          ]}
+        </span>
+        <span :if={site["source_file"]} class="nav-loc mono">
+          {site["source_file"]}:{site["line"]}
+        </span>
+      </button>
+    </div>
+    """
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -3637,6 +3727,33 @@ defmodule BtAttachWeb.WorkspaceLive do
               {label}
             </button>
           </div>
+          <%!-- Appearance settings (BT-2487): the Tweaks panel moved off the
+               sidebar into a top-bar gear dropdown — it reads as settings, not a
+               primary workspace pane. The panel stays mounted (so the TweaksPanel
+               hook applies the saved theme on load); the gear only toggles the
+               dropdown. Click-away / Escape close it. --%>
+          <div :if={@connected} class="settings-menu" phx-click-away="close_settings">
+            <button
+              type="button"
+              class="settings-gear"
+              phx-click="toggle_settings"
+              aria-haspopup="true"
+              aria-expanded={to_string(@show_settings)}
+              title="Appearance settings"
+            >
+              ⚙
+            </button>
+            <div
+              :if={@show_settings}
+              phx-window-keydown="close_settings"
+              phx-key="Escape"
+              style="display:none"
+            >
+            </div>
+            <div class={["settings-popover", @show_settings && "open"]}>
+              <.tweaks_panel />
+            </div>
+          </div>
           <%= if @connected do %>
             <div class="attach">
               <span class="dot live"></span>
@@ -3655,10 +3772,11 @@ defmodule BtAttachWeb.WorkspaceLive do
         <%= if @connected do %>
           <%!-- ── three-column cockpit grid ──────────────────────────────── --%>
           <div class="cockpit">
-            <%!-- LEFT — System Browser (BT-2491, 286px) + Tweaks panel.
+            <%!-- LEFT — System Browser (BT-2491, 286px).
                  A class tree (Hierarchy / Category views, instance/class side
                  toggle) over a protocol-grouped method list, driven by the
-                 BT-2488 browse ops (ADR 0096). --%>
+                 BT-2488 browse ops (ADR 0096). The Tweaks panel that used to sit
+                 below it now lives in the top-bar settings dropdown. --%>
             <div class="col">
               <div class="browser-split">
                 <.system_browser_classes
@@ -3676,8 +3794,6 @@ defmodule BtAttachWeb.WorkspaceLive do
                   active_method={selected_method_ref(assigns)}
                 />
               </div>
-
-              <.tweaks_panel />
             </div>
 
             <%!-- CENTER — editor placeholder + workspace dock --%>
@@ -4054,7 +4170,22 @@ defmodule BtAttachWeb.WorkspaceLive do
                         >
                         </div>
                       </div>
-                      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+                      <%!-- Single action row (BT-2495): Senders / Implementors on
+                           the left, Compile / Save All pushed to the right. The nav
+                           buttons are type="button" (they fire phx-click, never
+                           submit) and only show on a method tab. Observers get the
+                           same nav row in the read-only branch below. --%>
+                      <div class="editor-actions">
+                        <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                          <button class="btn" type="button" phx-click="senders">
+                            Senders
+                          </button>
+                          <button class="btn" type="button" phx-click="implementors">
+                            Implementors
+                          </button>
+                          <.nav_popover nav={@nav_popover} />
+                        </div>
+                        <span class="spacer"></span>
                         <button class="btn primary" type="submit">
                           Compile <span class="k">⌘S</span>
                         </button>
@@ -4097,6 +4228,17 @@ defmodule BtAttachWeb.WorkspaceLive do
                       still browse bindings, follow references in the Inspector, and watch
                       the live Transcript.
                     </p>
+                    <%!-- Observers still get Senders / Implementors navigation
+                         (BT-2495); both ride the read-only `nav-query` op. --%>
+                    <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                      <button class="btn" type="button" phx-click="senders">
+                        Senders
+                      </button>
+                      <button class="btn" type="button" phx-click="implementors">
+                        Implementors
+                      </button>
+                      <.nav_popover nav={@nav_popover} />
+                    </div>
                   <% end %>
 
                   <div :if={@save_result} class="io-block ok">{@save_result}</div>
@@ -4104,52 +4246,6 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
                   <div :if={@flush_error} class="io-block err">{@flush_error}</div>
 
-                  <%!-- Senders / Implementors (BT-2495): navigate the active
-                       method's selector across the image. Both ride the
-                       `nav-query` `:read` op (xref index, ADR 0096), so they work
-                       for the Observer role too — rendered OUTSIDE the owner-only
-                       edit form. They no-op on a class-definition tab (no
-                       selector). The result popover anchors to this panel
-                       (`.editor-panel` is `position: relative`). --%>
-                  <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                    <button class="btn" type="button" phx-click="senders">
-                      Senders
-                    </button>
-                    <button class="btn" type="button" phx-click="implementors">
-                      Implementors
-                    </button>
-                  </div>
-
-                  <div :if={@nav_popover} class="nav-popover" phx-click-away="nav_close">
-                    <div class="nav-pop-head">
-                      <b>{nav_kind_label(@nav_popover.kind)}</b>
-                      <span class="mono">{@nav_popover.selector}</span>
-                      <span class="spacer"></span>
-                      <button class="x" type="button" phx-click="nav_close" title="Close">×</button>
-                    </div>
-                    <div :if={@nav_popover[:error]} class="io-block err">{@nav_popover.error}</div>
-                    <div :if={!@nav_popover[:error] and @nav_popover.sites == []} class="nav-empty">
-                      No {nav_kind_label(@nav_popover.kind)} found.
-                    </div>
-                    <button
-                      :for={site <- @nav_popover.sites}
-                      type="button"
-                      class="nav-site"
-                      phx-click="nav_open"
-                      phx-value-class={site["class"]}
-                      phx-value-side={if site["class_side"] == true, do: "class", else: "instance"}
-                      phx-value-selector={site["method"]}
-                    >
-                      <span class="nav-site-name mono">
-                        {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
-                          "method"
-                        ]}
-                      </span>
-                      <span :if={site["source_file"]} class="nav-loc mono">
-                        {site["source_file"]}:{site["line"]}
-                      </span>
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
