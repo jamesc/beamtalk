@@ -1513,8 +1513,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # The active method-editor tab id, read from the CmEditor element's stamp
   # (`data-tab-id`) — the same value a real selection push carries (BT-2549).
   defp active_tab_id(html) do
-    [_, id] = Regex.run(~r/data-tab-id="([^"]+)"/, html)
-    id
+    case Regex.run(~r/data-tab-id="([^"]+)"/, html) do
+      [_, id] -> id
+      nil -> raise "data-tab-id not rendered in HTML"
+    end
   end
 
   # The internal `:edit_selection` assign — no rendered consumer yet (BT-2549),

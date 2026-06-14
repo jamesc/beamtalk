@@ -1054,8 +1054,10 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Malformed payload, or one carrying no tab-id stamp: ignore rather than crash
-  # the LiveView (the payload is client-supplied).
+  # Malformed payload (missing text, non-binary, or missing the "tab_id" key):
+  # ignore rather than crash the LiveView (the payload is client-supplied). A
+  # present-but-mismatched stamp (incl. `tab_id: null`) is handled by the guarded
+  # clause above, which drops it when it doesn't match the active tab.
   def handle_event("select_source", _params, socket), do: {:noreply, socket}
 
   # Selection tracking for the Workspace dock's editor (BT-2490). Tracked in a
