@@ -33,6 +33,7 @@ import { TweaksPanel } from "./tweaks_panel"
 import { FieldFlash } from "./field_flash"
 import { OmniSearch } from "./omni_search"
 import { WindowDrag } from "./window_drag"
+import { ScrollToSelected } from "./scroll_to_selected"
 
 export const Hooks = {
   CmEditor,
@@ -42,4 +43,5 @@ export const Hooks = {
   FieldFlash,
   OmniSearch,
   WindowDrag,
+  ScrollToSelected,
 }

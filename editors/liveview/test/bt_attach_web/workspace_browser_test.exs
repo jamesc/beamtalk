@@ -66,8 +66,10 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # proof the real browser handshook the LiveSocket and the workspace attach
     # over distribution succeeded (not merely the disconnected HTTP render).
     |> assert_has(".att-label", text: "attached")
-    # The connected-only panes that host the JS hooks are present.
-    |> assert_has("#tweaks-panel")
+    # The connected-only panes that host the JS hooks are present. The Tweaks
+    # panel now lives behind the top-bar settings gear (still mounted in the DOM
+    # so its hook applies the saved theme on load).
+    |> assert_has(".settings-gear")
     |> assert_has("#eval-form")
     |> assert_has("#workspace-editor-overlay .cm-content")
   end
@@ -212,7 +214,10 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the TweaksPanel hook reskins the IDE client-side and persists it (BT-2487)", %{conn: conn} do
     conn
     |> visit("/")
-    |> assert_has("#tweaks-panel")
+    # The Tweaks panel is mounted on load (so the saved theme applies) but hidden
+    # behind the top-bar gear; open the settings dropdown to reach its controls.
+    |> click(".settings-gear")
+    |> assert_has(".settings-popover.open")
     # The IDE boots on the default 'paper' theme (data-theme on <html>).
     |> evaluate("document.documentElement.getAttribute('data-theme')", fn theme ->
       assert theme == "paper"
@@ -228,6 +233,50 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
       assert is_binary(stored) and stored =~ "dusk",
              "TweaksPanel did not persist the theme to localStorage"
     end)
+  end
+
+  test "density toggle produces a measurable layout delta (BT-2551)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> click(".settings-gear")
+    |> assert_has(".settings-popover.open")
+    # Default density is 'cozy' — the app shell padding uses --pad (7px) and
+    # --gap (9px). Read the computed panel-body padding as a measurable proxy.
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.panel-body')).paddingTop",
+      fn pt -> assert pt == "10px", "Expected cozy panel-body paddingTop=10px, got #{pt}" end
+    )
+    # Switch to compact — --pad shrinks to 5px, --gap to 6px.
+    |> click("[data-tweak='density'][data-tweak-value='compact']")
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.panel-body')).paddingTop",
+      fn pt -> assert pt == "8px", "Expected compact panel-body paddingTop=8px, got #{pt}" end
+    )
+    # The app shell padding also shrinks.
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.app')).paddingTop",
+      fn pt -> assert pt == "5px", "Expected compact app paddingTop=5px, got #{pt}" end
+    )
+  end
+
+  test "accent swatches are disabled on dusk theme (BT-2551)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> click(".settings-gear")
+    |> assert_has(".settings-popover.open")
+    # On paper (default), accent swatches are enabled.
+    |> evaluate(
+      "document.querySelector('.twk-swatches').dataset.accentDisabled",
+      fn disabled -> assert disabled != "1", "Swatches should be enabled on paper" end
+    )
+    # Switch to dusk — swatches should be marked disabled.
+    |> click("[data-tweak='theme'][data-tweak-value='dusk']")
+    |> evaluate(
+      "document.querySelector('.twk-swatches').dataset.accentDisabled",
+      fn disabled -> assert disabled == "1", "Swatches should be disabled on dusk" end
+    )
+    # The hint text should be visible.
+    |> assert_has(".twk-accent-note", text: "Dusk uses its built-in accent")
   end
 
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
