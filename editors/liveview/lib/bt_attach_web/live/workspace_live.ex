@@ -95,29 +95,28 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   ## JS hook foundation (BT-2485, epic BT-2482 Phase 1)
 
-  The cockpit's client-side behaviour rides three LiveView JS hooks, registered
+  The cockpit's client-side behaviour rides these LiveView JS hooks, registered
   on the `LiveSocket` in `assets/js/app.js` and referenced via `phx-hook`:
 
-    * `CmEditor` — the Workspace editor (`#workspace-editor-overlay`, BT-2538):
-      CodeMirror 6 mounted into an ignored host, highlighting Beamtalk with a
-      regex tokenizer (`assets/js/hooks/bt_highlight.js`) that shares its rules
-      with the legacy overlay highlighter. It mirrors its doc into a hidden
-      `<textarea name="expr">`, which stays the posted form field, so the `eval`
-      handler reads it unchanged. Token spans reuse the `.tok-*` classes below,
-      so the themed `--t-*` CSS variables still drive the colours.
-    * `CodeEditor` — the legacy syntax-highlighting overlay: a transparent
-      `<textarea>` over a `<pre>` the hook paints with the Beamtalk highlighter
-      (`assets/js/hooks/highlight.js`); `.tok-*` colours resolve the themed
-      `--t-*` CSS variables. The method-editor `source` field
-      (`#method-editor-overlay`) still uses it (CodeMirror migration in PR2).
+    * `CmEditor` — the cockpit's code editor (BT-2538, BT-2539): a CodeMirror 6
+      editor mounted into an ignored host, highlighting Beamtalk with a regex
+      tokenizer (`assets/js/hooks/bt_highlight.js`). It powers BOTH the Workspace
+      eval input (`#workspace-editor-overlay`, field `expr`) and the tabbed
+      method editor (`#method-editor-overlay-<tab>`, field `source`). CodeMirror
+      owns the text/selection/history; the hook mirrors its doc into a hidden
+      `<textarea>` (the posted form field, kept `phx-update="ignore"` so a
+      re-render can't revert it) and, where `data-select-event` is set, reports
+      the selection (`{text, start, end}`) — `select_workspace` →
+      `:ws_selection` for the eval input, `select_source` → `:edit_selection`
+      for the method editor. Token spans reuse the `.tok-*` classes below, so the
+      themed `--t-*` CSS variables still drive the colours. This retired the old
+      transparent-textarea-over-`<pre>` overlay (CodeEditor) and the separate
+      SelectionTracker hook, both folded into CmEditor.
     * `KeyboardShortcuts` — maps Cmd/Ctrl chords to actions from a
       `data-shortcuts` JSON map. The method-editor form binds ⌘S → `submit`
       (request-submits the form so class/selector/source ride the normal
       `save_method` `phx-submit`); the Workspace dock binds ⌘D/⌘P/⌘I →
       `submit:<action>` (BT-2490), riding the eval form's hidden `action` field.
-    * `SelectionTracker` — reports the editor textarea's selection
-      (`{text, start, end}`) via the `select_source` event, held in
-      `:edit_selection` so a later pane can evaluate the selection vs the buffer.
 
   ## Tweaks panel (BT-2487, epic BT-2482 Phase 1)
 
@@ -162,7 +161,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   The center `#method-editor` panel is the spike's **tabbed write-surface**
   (`spikes/cockpit-ux-spike/app.jsx`, ADR 0082): a tab strip over a breadcrumb
-  over the BT-2485 highlighted editor. The open-tab list is `:tabs` (each a map
+  over the CmEditor CodeMirror editor (BT-2539). The open-tab list is `:tabs` (each a map
   with `id`, `kind` (`:method | :def`), `class`, `side`, `selector`, `source`,
   `base`, `dirty`) and the focused id is `:active_tab`:
 
@@ -180,13 +179,14 @@ defmodule BtAttachWeb.WorkspaceLive do
       `eval`s its whole definition (compiling the class) — neither invents a new
       server op. The historical no-tab payload (`tab` absent) takes the method
       path unchanged.
-    * **Dirty tracking** — the form's `phx-debounce`d `phx-change="edit_source"`
-      reports live edits; `track_edit/2` flips the active tab's `dirty` when its
-      `source` diverges from the last-compiled `base`, and a successful compile
-      (`compile_clean/3`) clears the dot + re-bases. To avoid caret-jump we do
-      NOT echo the live value back into the textarea on change — the element is
-      re-keyed on `@active_tab`, so switching tabs remounts it with the new tab's
-      source.
+    * **Dirty tracking** — the CmEditor hook mirrors its doc into the hidden
+      `source` textarea and fires `input`, driving the form's `phx-debounce`d
+      `phx-change="edit_source"`; `track_edit/2` flips the active tab's `dirty`
+      when its `source` diverges from the last-compiled `base`, and a successful
+      compile (`compile_clean/3`) clears the dot + re-bases. We do NOT echo the
+      live value back (the textarea is `phx-update="ignore"`, so CodeMirror owns
+      the text); switching tabs re-keys the element on `@active_tab`, remounting
+      the editor with the new tab's source.
     * **Breadcrumb** — `Class › side › selector` for the active tab (a class
       definition shows `Class › class definition`).
 
@@ -423,9 +423,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       # source/base/dirty so switching tabs swaps the whole edit buffer, and a
       # dirty dot per tab tracks unsaved edits (cleared on a successful compile).
       |> init_tabs()
-      # Method-editor selection (BT-2485), reported by the SelectionTracker hook.
+      # Method-editor selection (BT-2485, BT-2539), reported by the CmEditor hook.
       |> assign(:edit_selection, nil)
-      # Workspace-editor selection (BT-2490): the dock's own SelectionTracker,
+      # Workspace-editor selection (BT-2490): the dock's own CmEditor hook,
       # kept separate so the method editor's selection can't leak into an eval.
       |> assign(:ws_selection, nil)
       |> assign(:save_result, nil)
@@ -1027,8 +1027,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Dismiss the Senders/Implementors popover.
   def handle_event("nav_close", _params, socket), do: {:noreply, assign(socket, nav_popover: nil)}
 
-  # Selection tracking (BT-2485): the SelectionTracker JS hook reports the
-  # method-editor textarea's current selection (text + offsets). We hold it in
+  # Selection tracking (BT-2485, BT-2539): the method-editor CmEditor hook
+  # reports the editor's current selection (text + offsets). We hold it in
   # `edit_selection` so a later pane can evaluate the selected expression rather
   # than the whole buffer (the spike's "evaluates selection" vs "evaluates
   # buffer" distinction). The payload is client-supplied, so accept only the
@@ -1351,7 +1351,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp present(output) when is_binary(output), do: output
 
   # Normalise a client-supplied selection offset to a non-negative integer (or
-  # nil). The SelectionTracker hook sends integer offsets, but the payload is
+  # nil). The CmEditor hook sends integer offsets, but the payload is
   # untrusted, so a missing / negative / non-integer value collapses to nil.
   defp clamp_offset(n) when is_integer(n) and n >= 0, do: n
   defp clamp_offset(_), do: nil
@@ -1994,6 +1994,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       edit_class: tab.class,
       edit_selector: tab.selector || "",
       edit_source: tab.source,
+      # Drop the previous tab's selection: switching tabs remounts the editor, so
+      # the old `{text, start, end}` no longer points at anything live. Without
+      # this, a future consumer of `:edit_selection` could act on stale coords
+      # from the tab the user just left.
+      edit_selection: nil,
       save_result: nil,
       save_error: nil,
       flush_result: nil,
@@ -2055,11 +2060,12 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Record a keystroke edit on the active tab and recompute its dirty flag
   # (source != last-compiled base). We deliberately do NOT re-assign
-  # `:edit_source` here: echoing the live value back would make LiveView patch
-  # the textarea mid-typing and jump the caret. The tab's `source` is the truth
-  # the next compile / tab-switch reads; `:edit_source` is only the *initial*
-  # textarea value, re-synced when a tab is (re)focused (the element is re-keyed
-  # on `@active_tab`, so a fresh mount picks it up).
+  # `:edit_source` here: it is only the *initial* value CodeMirror reads when the
+  # CmEditor hook mounts (the hidden `source` textarea is `phx-update="ignore"`,
+  # so the editor owns the live text and a server echo can't reach it anyway).
+  # The tab's `source` is the truth the next compile / tab-switch reads;
+  # `:edit_source` is re-synced when a tab is (re)focused — the element is re-keyed
+  # on `@active_tab`, so a fresh mount picks it up.
   defp track_edit(socket, source) do
     update_active_tab(socket, fn tab -> %{tab | source: source, dirty: source != tab.base} end)
   end
@@ -3651,9 +3657,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <%!-- WORKSPACE tab: highlighted editor + doIt/printIt/inspectIt --%>
                   <div class="dock-pane ws-pane" hidden={@dock_tab != "workspace"}>
                     <%= if @role == :owner do %>
-                      <%!-- eval form: the FIRST <form> on the page. The CodeEditor
-                           overlay (BT-2485) highlights the entered code; the
-                           textarea keeps name="expr" so the existing `eval`
+                      <%!-- eval form: the FIRST <form> on the page. The CmEditor
+                           (CodeMirror, BT-2538) highlights the entered code; the
+                           hidden textarea keeps name="expr" so the existing `eval`
                            handler (and the e2e `render_submit(%{expr: …})`) read
                            it. The three actions ride the SAME submit via the
                            hidden `action` field — Print it is the plain submit
@@ -3930,31 +3936,43 @@ defmodule BtAttachWeb.WorkspaceLive do
                           />
                         </div>
                       <% end %>
-                      <%!-- syntax-highlighting editor overlay (BT-2485). Re-keyed
-                           on the active tab id (`@active_tab`) so switching tabs
-                           replaces the element and the textarea picks up the new
-                           tab's source. The textarea keeps name="source" so
-                           save_method reads it. --%>
+                      <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
+                           tab id (`@active_tab`) so switching tabs remounts the
+                           CmEditor hook and the editor picks up the new tab's
+                           source. The hidden <textarea name="source"> stays the
+                           posted form field (so save_method reads it) and is
+                           phx-update="ignore" (hook-owned): the hook mirrors the
+                           doc into it and fires `input`, driving the
+                           phx-change="edit_source" dirty-dot tracking with the
+                           300 ms debounce. Selection reports ride select_source
+                           via data-select-event, kept in `:edit_selection`. --%>
                       <div
                         id={"method-editor-overlay-" <> @active_tab}
-                        class="bt-editor-wrap field"
-                        style="padding:0;"
-                        phx-hook="CodeEditor"
+                        class="cm-wrap field"
+                        phx-hook="CmEditor"
+                        data-select-event="select_source"
+                        data-placeholder={
+                          if active_tab(assigns).kind == :def,
+                            do: "Actor subclass: Counter\n  state: value = 0",
+                            else: "increment => self.value := self.value + 1"
+                        }
                       >
-                        <pre class="bt-editor-pre" aria-hidden="true"><code></code></pre>
                         <textarea
                           id={"method-editor-source-" <> @active_tab}
-                          class="bt-editor-ta"
+                          class="cm-field"
                           name="source"
+                          spellcheck="false"
+                          autocomplete="off"
                           phx-debounce="300"
-                          phx-hook="SelectionTracker"
-                          data-select-event="select_source"
-                          placeholder={
-                            if active_tab(assigns).kind == :def,
-                              do: "Actor subclass: Counter\n  state: value = 0",
-                              else: "increment => self.value := self.value + 1"
-                          }
+                          phx-update="ignore"
+                          hidden
                         ><%= @edit_source %></textarea>
+                        <div
+                          class="cm-host"
+                          id={"method-editor-cm-" <> @active_tab}
+                          phx-update="ignore"
+                        >
+                        </div>
                       </div>
                       <div style="display:flex; gap:.5rem; margin-top:.5rem;">
                         <button class="btn primary" type="submit">

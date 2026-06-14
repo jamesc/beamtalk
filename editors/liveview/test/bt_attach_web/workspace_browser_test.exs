@@ -9,9 +9,9 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   ## Why a real browser (and not LiveViewTest)
 
   The cockpit's client behaviour rides several LiveView JS hooks — `CmEditor`
-  (the CodeMirror Workspace editor, BT-2538), `CodeEditor` (the method-editor
-  overlay), `KeyboardShortcuts`, `SelectionTracker` (BT-2485), `TweaksPanel`
-  (BT-2487), `FieldFlash` (BT-2492) and `OmniSearch` (BT-2495).
+  (the CodeMirror editor behind both the Workspace eval input and the
+  method-editor tabs, BT-2538 / BT-2539), `KeyboardShortcuts` (BT-2485),
+  `TweaksPanel` (BT-2487), `FieldFlash` (BT-2492) and `OmniSearch` (BT-2495).
   `Phoenix.LiveViewTest` renders the LiveView server-side against a floki DOM and
   **never loads `app.js`**, so none of that JavaScript runs there. These tests
   exercise it in an actual browser: CodeMirror highlights as you type, ⌘/Ctrl
@@ -165,11 +165,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # class/selector load into the method-editor fields.
     |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
     |> click(".tabstrip button[role='tab']")
-    |> set_text("textarea[name='source']", "increment => self.value := self.value + 1")
+    |> set_method_source("increment => self.value := self.value + 1")
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
-    # data-shortcuts "mod+s" → submit): the hook request-submits the form so
+    # data-shortcuts "mod+s" → submit): the keydown bubbles out of CodeMirror to
+    # the form's KeyboardShortcuts hook, which request-submits the form so
     # class/selector/source ride the normal save_method — no button click.
-    |> press("textarea[name='source']", "Control+s")
+    |> press("[id^='method-editor-overlay-'] .cm-content", "Control+s")
     # The save is a server round-trip (WorkspaceLive compiles `Counter >>
     # increment` before assigning `save_result`); under parallel CI load that
     # can outlast the 2s default assertion poll. Wait on the banner explicitly
@@ -364,8 +365,8 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # Select the starter method tab so the active selector is `increment`, then
     # open the Implementors popover for it.
     |> click(".tabstrip button[role='tab']")
-    |> set_text("textarea[name='source']", "increment => self.value := self.value + 1")
-    |> press("textarea[name='source']", "Control+s")
+    |> set_method_source("increment => self.value := self.value + 1")
+    |> press("[id^='method-editor-overlay-'] .cm-content", "Control+s")
     # The Ctrl+S save is a server round-trip: WorkspaceLive compiles `Counter >>
     # increment` (a real backend op via Facade.dispatch(:save, …)) before it
     # assigns `save_result` and the success banner renders. Under parallel CI
@@ -557,24 +558,32 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     )
   end
 
-  # Set the Workspace editor's contents to exactly `source`. The Workspace editor
-  # is CodeMirror (BT-2538), not a <textarea>, so we drive it through the view the
-  # CmEditor hook exposes on the wrapper (`el.cmView`): a doc-replace transaction
-  # fires the hook's update listener, which mirrors the text into the hidden form
-  # field and dispatches `input` — exactly the path real typing takes. We let any
-  # in-flight LiveView patch settle first (the editor ships a starter expression
-  # and each eval re-renders the form).
-  defp set_source(conn, source) do
+  # Set the Workspace editor's contents to exactly `source`.
+  defp set_source(conn, source), do: set_cm_source(conn, "#workspace-editor-overlay", source)
+
+  # Set the tabbed method editor's contents to exactly `source`. Its CmEditor
+  # wrapper is re-keyed per active tab (`#method-editor-overlay-<tab>`), so match
+  # it by id prefix — there is only ever one method editor mounted at a time.
+  defp set_method_source(conn, source),
+    do: set_cm_source(conn, "[id^='method-editor-overlay-']", source)
+
+  # Replace a CmEditor's contents with exactly `source`. Both editors are
+  # CodeMirror (BT-2538 / BT-2539), not a <textarea>, so we drive them through the
+  # view the CmEditor hook exposes on the wrapper (`el.cmView`): a doc-replace
+  # transaction fires the hook's update listener, which mirrors the text into the
+  # hidden form field and dispatches `input` — exactly the path real typing takes.
+  defp set_cm_source(conn, selector, source) do
     # Poll for the CmEditor mount (`el.cmView`) rather than a fixed sleep: under
     # parallel CI load CodeMirror's mount can outlast a 300 ms guard, and reading
     # `.cmView` on an unmounted wrapper would throw a cryptic Playwright
     # "evaluate" error instead of a clear timeout. Resolve once the view exists,
-    # then dispatch a doc-replace transaction.
+    # then dispatch a doc-replace transaction. (Selecting a method-editor tab
+    # remounts the wrapper, so this also waits out the re-key.)
     evaluate(conn, """
     new Promise((resolve, reject) => {
       const start = Date.now();
       const tick = () => {
-        const el = document.querySelector("#workspace-editor-overlay");
+        const el = document.querySelector(#{Jason.encode!(selector)});
         if (el && el.cmView) {
           el.cmView.dispatch({
             changes: { from: 0, to: el.cmView.state.doc.length, insert: #{Jason.encode!(source)} },
@@ -589,14 +598,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     """)
   end
 
-  # Replace a `<textarea>`'s contents with exactly `text`. Two wrinkles the
-  # connected IDE forces us to handle: the editor ships a starter expression (so
-  # it is never empty — `WorkspaceLive` `bind_session/3` / `init_tabs/1`), and
-  # each eval re-renders the form (LiveView patches `@expr`/`@edit_source` back
-  # in). So we let any in-flight patch settle, then set the value + fire the
-  # `input` event the CodeEditor hook listens for in one atomic step — which
-  # *replaces* the contents deterministically, unlike select-all + type, whose
-  # caret/selection timing raced under CI load.
+  # Replace a plain form control's value with exactly `text` (e.g. the Inspector
+  # poke bar's `<input>`). We let any in-flight LiveView patch settle, then set the
+  # value + fire `input` in one atomic step — which *replaces* the contents
+  # deterministically, unlike select-all + type whose caret/selection timing raced
+  # under CI load. (Not for the CodeMirror editors — those go through
+  # `set_cm_source/3`, which has no real <textarea> to fill.)
   defp set_text(conn, selector, text) do
     conn
     |> evaluate("new Promise((resolve) => setTimeout(resolve, 300))")
