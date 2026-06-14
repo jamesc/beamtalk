@@ -608,6 +608,30 @@ defmodule BtAttachWeb.WorkspaceLive do
      assign(socket, result: nil, output: nil, error: "not attached to workspace", expr: expr)}
   end
 
+  # Backend-driven autocomplete (BT-2544): the CodeMirror editors' autocomplete
+  # CompletionSource round-trips the current line up to the caret; we answer with
+  # ranked candidates from the live session via the `complete` op (receiver-aware:
+  # class names, selectors for a known receiver, session bindings, pseudo-vars).
+  # `:read` capability — completion runs no user code — so the Observer role
+  # completes too. We `{:reply, …}` on the same event so CodeMirror resolves its
+  # async source; an unreachable workspace, a denied op, or a missing session all
+  # degrade to an empty list (autocomplete simply shows nothing).
+  @impl true
+  def handle_event("complete", %{"code" => code}, %{assigns: %{session_pid: pid}} = socket)
+      when is_pid(pid) and is_binary(code) do
+    completions =
+      case Facade.dispatch(:complete, %{session_pid: pid, code: code}, ctx(socket)) do
+        {:ok, list} when is_list(list) -> list
+        _ -> []
+      end
+
+    {:reply, %{"completions" => completions}, socket}
+  end
+
+  def handle_event("complete", _params, socket) do
+    {:reply, %{"completions" => []}, socket}
+  end
+
   # Switch the Workspace dock's active tab (Workspace / REPL / Transcript /
   # Changes, BT-2490, REPL added BT-2543). Pure view state — no workspace
   # round-trip; an unknown tab is ignored rather than rendered, so a crafted
@@ -4267,6 +4291,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           phx-hook="CmEditor"
                           data-select-event="select_workspace"
                           data-inline-results="true"
+                          data-autocomplete="true"
                         >
                           <textarea
                             id="workspace-editor-source"
