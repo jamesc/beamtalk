@@ -663,27 +663,41 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def handle_event("repl_eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    if String.trim(expr) == "" do
-      # Empty submit (bare Enter) is a no-op — never append a blank entry or
-      # disturb the history cursor.
-      {:noreply, socket}
-    else
-      socket =
-        case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
-          {:ok, term, _output, _warnings} ->
-            repl_append_ok(socket, expr, term)
+    trimmed = String.trim(expr)
 
-          {:error, reason, _output, _warnings} ->
-            repl_append_error(socket, expr, Workspace.render_error(reason))
+    cond do
+      trimmed == "" ->
+        # Empty submit (bare Enter) is a no-op — never append a blank entry or
+        # disturb the history cursor.
+        {:noreply, socket}
 
-          # Facade short-circuit (RBAC denial / off-vocabulary op) — a 2-tuple the
-          # eval contract never produces; render it as the entry's response rather
-          # than crashing the LiveView.
-          {:error, reason} ->
-            repl_append_error(socket, expr, facade_error(reason))
-        end
+      meta = repl_meta_command(trimmed) ->
+        # A `:`-prefixed meta-command (BT-2543 follow-up). The IDE handles these
+        # itself — driving the matching pane or pointing at it — and NEVER sends
+        # them to `eval`, which would choke trying to compile `:h` as Beamtalk.
+        {:noreply,
+         socket
+         |> handle_repl_meta(meta, expr)
+         |> repl_record_history(expr)
+         |> repl_clear_input()}
 
-      {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
+      true ->
+        socket =
+          case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+            {:ok, term, _output, _warnings} ->
+              socket |> repl_append_ok(expr, term) |> repl_help_followup(expr)
+
+            {:error, reason, _output, _warnings} ->
+              repl_append_error(socket, expr, Workspace.render_error(reason))
+
+            # Facade short-circuit (RBAC denial / off-vocabulary op) — a 2-tuple the
+            # eval contract never produces; render it as the entry's response rather
+            # than crashing the LiveView.
+            {:error, reason} ->
+              repl_append_error(socket, expr, facade_error(reason))
+          end
+
+        {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
     end
   end
 
@@ -1788,6 +1802,176 @@ defmodule BtAttachWeb.WorkspaceLive do
   # set it by pushing to the ReplInput hook.
   defp repl_clear_input(socket) do
     push_event(socket, "repl_set_input", %{text: ""})
+  end
+
+  # ── REPL meta-commands (BT-2543 follow-up) ──────────────────────────────────
+  #
+  # The CLI REPL parses `:`-prefixed meta-commands client-side (see
+  # crates/beamtalk-cli/src/commands/repl/mod.rs); the LiveView REPL historically
+  # forwarded them straight to `eval`, which choked trying to compile `:h` as a
+  # Beamtalk expression. In a graphical IDE most of those commands map onto a pane
+  # that already exists (the System Browser, the Bindings pane, the Changes tab),
+  # so rather than re-implement the CLI's command DSL we recognise the leading
+  # colon and either DRIVE the matching pane (`:help X` focuses the System
+  # Browser) or POINT the user at it. Input without a leading colon is real code
+  # and falls through to `eval` untouched.
+  #
+  # Returns `nil` for non-meta input (the overwhelmingly common path) so the
+  # caller's `cond` falls through to eval; otherwise a parsed `{kind, …}` tuple
+  # `handle_repl_meta/3` routes.
+  defp repl_meta_command(input) do
+    if String.starts_with?(input, ":") do
+      case String.split(input, ~r/\s+/, parts: 2, trim: true) do
+        [cmd | rest] -> repl_meta_dispatch(cmd, meta_arg(rest))
+        # A bare ":" with nothing after it — treat as an unknown command rather
+        # than letting it reach `eval`.
+        [] -> {:unknown, ":"}
+      end
+    else
+      nil
+    end
+  end
+
+  # First whitespace-delimited token of a meta-command's argument, with a leading
+  # `#` stripped so `:help #Counter` and `:help Counter` agree. `nil` when the
+  # command had no argument.
+  defp meta_arg([]), do: nil
+
+  defp meta_arg([arg]) do
+    case String.split(arg, ~r/\s+/, parts: 2, trim: true) do
+      [token | _] -> String.trim_leading(token, "#")
+      [] -> nil
+    end
+  end
+
+  defp repl_meta_dispatch(cmd, arg) when cmd in [":help", ":h", ":?"], do: {:help, arg}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":bindings", ":b"],
+    do:
+      {:point,
+       "Bindings are listed live in the Bindings pane on the right — click one to inspect it."}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":changes", ":dirty"],
+    do: {:point, "Pending changes are shown in the Changes tab of this dock."}
+
+  defp repl_meta_dispatch(":flush", _),
+    do: {:point, "Use the Flush control in the Changes tab to write pending changes to disk."}
+
+  defp repl_meta_dispatch(":sync", _),
+    do: {:point, "The IDE tracks the live image as you work — there is no manual sync step."}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":test", ":t"],
+    do:
+      {:point,
+       "A test-runner pane is coming to the IDE (BT-2557). For now, run tests from the CLI with `beamtalk test`."}
+
+  defp repl_meta_dispatch(":clear", _),
+    do:
+      {:point,
+       "Session bindings clear with the workspace; there is no separate clear control yet."}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":exit", ":quit", ":q"],
+    do:
+      {:point,
+       "Close the browser tab to disconnect — there is no REPL process to exit in the IDE."}
+
+  defp repl_meta_dispatch(cmd, _), do: {:unknown, cmd}
+
+  # Route a parsed meta-command. `:help X` drives the System Browser; everything
+  # else appends an informational scrollback entry (a third `kind`, `:info`, the
+  # template styles muted rather than as an error).
+  defp handle_repl_meta(socket, {:help, nil}, expr),
+    do: repl_append_info(socket, expr, repl_help_text())
+
+  defp handle_repl_meta(socket, {:help, class}, expr),
+    do: repl_focus_class(socket, expr, class)
+
+  defp handle_repl_meta(socket, {:point, message}, expr),
+    do: repl_append_info(socket, expr, message)
+
+  defp handle_repl_meta(socket, {:unknown, cmd}, expr) do
+    repl_append_info(
+      socket,
+      expr,
+      "Unknown command #{cmd}. This is the IDE REPL — type :help for what's available, " <>
+        ":help <Class> to open a class in the System Browser, or just evaluate an expression."
+    )
+  end
+
+  # Focus the System Browser on `class` (the GUI equivalent of the CLI's
+  # `:help Class` → `Beamtalk help: Class`). We validate against the live symbol
+  # index first so an unknown name gives a clean message instead of pointing the
+  # browser at a class that doesn't exist.
+  defp repl_focus_class(socket, expr, class) do
+    if class in browser_class_names(socket) do
+      socket
+      |> open_class(class)
+      |> repl_append_info(expr, "Opened #{class} in the System Browser ◂")
+    else
+      repl_append_error(
+        socket,
+        expr,
+        "No class named #{class}. Browse classes in the System Browser, or search with the omni bar (top)."
+      )
+    end
+  end
+
+  # The class names known to the live image, from the same symbol index the omni
+  # search uses. An empty index (dispatch failure / RBAC denial) just means every
+  # `:help X` reports "no such class" rather than crashing.
+  defp browser_class_names(socket) do
+    socket
+    |> symbol_rows()
+    |> Enum.filter(&(&1.kind == "class"))
+    |> Enum.map(& &1.class)
+  end
+
+  # `:help` with no argument: a short tour of where the CLI REPL's commands live
+  # in the IDE, so a muscle-memory `:h` lands somewhere useful instead of erroring.
+  defp repl_help_text do
+    """
+    IDE REPL — evaluate any expression (Enter runs it, ↑/↓ recall history).
+    :help <Class>   open a class in the System Browser (left)
+    :bindings       → Bindings pane (right)
+    :changes        → Changes tab (this dock)
+    :test           test-runner pane coming soon (BT-2557)
+    Inspect results with the Inspect button; browse classes/methods on the left.\
+    """
+  end
+
+  # After a successful eval, if the expression was a `Beamtalk help: Class` send
+  # (the CLI's `:help` desugaring, and a natural thing to type directly), focus
+  # the System Browser on that class too — the help text stays in the scrollback
+  # AND the browser navigates to the subject. Non-help evals pass through
+  # untouched.
+  defp repl_help_followup(socket, expr) do
+    case Regex.run(~r/^\s*Beamtalk\s+help:\s+#?([A-Z]\w*)/, expr) do
+      [_, class] -> open_class(socket, class)
+      _ -> socket
+    end
+  end
+
+  # Append an informational meta-command response (`kind: :info`): no live term,
+  # so no Inspect affordance and nothing stashed. Mirrors `repl_append_error/3`'s
+  # bookkeeping (seq bump + term-map eviction in lockstep with the scrollback cap).
+  defp repl_append_info(socket, request, message) do
+    seq = socket.assigns.repl_seq + 1
+    id = repl_entry_id(seq)
+
+    entry = %{
+      id: id,
+      request: request,
+      kind: :info,
+      response: message,
+      inspectable: false,
+      long: repl_long?(message)
+    }
+
+    socket
+    |> assign(:repl_seq, seq)
+    |> update(:repl_terms, &repl_evict(&1, seq))
+    |> stream_insert(:repl, entry, limit: -@repl_scrollback_limit)
+    |> repl_scroll_to_bottom()
   end
 
   # ── method editor helpers (Wave 3) ──────────────────────────────────────────
@@ -4406,7 +4590,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <div
                         :for={{dom_id, entry} <- @streams.repl}
                         id={dom_id}
-                        class={["repl-entry", entry.kind == :error && "err"]}
+                        class={[
+                          "repl-entry",
+                          entry.kind == :error && "err",
+                          entry.kind == :info && "meta"
+                        ]}
                       >
                         <div class="repl-req">
                           <span class="repl-mark">›</span>

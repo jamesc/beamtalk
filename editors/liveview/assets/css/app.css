@@ -397,6 +397,8 @@
 .repl-arrow { color: var(--accent); font-weight: 700; flex: none; }
 .repl-val { color: var(--accent-2); white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; flex: 1; }
 .repl-entry.err .repl-arrow, .repl-entry.err .repl-val { color: var(--err); }
+/* Meta-command responses (`:help`, pane pointers): muted, not a result. */
+.repl-entry.meta .repl-arrow, .repl-entry.meta .repl-val { color: var(--muted); }
 
 /* Long responses collapse within their entry (capped open height, scroll past
    it) so one verbose result can't flood the scrollback. */
