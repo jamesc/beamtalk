@@ -1610,10 +1610,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  @doc false
   # The `(class, selector)` set of the active ChangeLog rows — the methods with an
   # unflushed live `>>` patch. Keyed by `(class, selector)` only; the ChangeLog
   # carries no instance/class side, so that is the finest granularity available.
-  defp pending_method_keys(changes) when is_list(changes) do
+  # Pure; unit-tested directly (cf. `Workspace.format_flush_summary/1`).
+  def pending_method_keys(changes) when is_list(changes) do
     for %{class: class, selector: selector} <- changes,
         is_binary(class),
         is_binary(selector),
@@ -1621,38 +1623,50 @@ defmodule BtAttachWeb.WorkspaceLive do
         do: {class, selector}
   end
 
-  defp pending_method_keys(_), do: MapSet.new()
+  def pending_method_keys(_), do: MapSet.new()
 
-  # A failed post-flush refresh assigns `changes: []` *alongside* a `changes_error`.
-  # That empty set means "couldn't read the ChangeLog", not "everything flushed", so
-  # the difference below would collapse to the full before-set and clear every
-  # badge — including conflicts / skips never written to disk. Leave badges
-  # untouched until a clean refresh re-derives the truth (it self-heals on reload).
-  defp clear_flushed_badges(%{assigns: %{changes_error: error}} = socket, _was_pending)
-       when not is_nil(error),
-       do: socket
+  @doc false
+  # The `(class, selector)` keys this flush actually wrote: pending before
+  # (`was_pending`) and gone from the refreshed `changes` after. A failed post-flush
+  # refresh assigns `changes: []` *alongside* a `changes_error`; that empty set
+  # means "couldn't read the ChangeLog", not "everything flushed", so the difference
+  # would collapse to the full before-set and clear every badge — including
+  # conflicts / skips never written to disk. On an errored refresh we therefore
+  # return the empty set and clear nothing (it self-heals on the next clean
+  # refresh). Pure; unit-tested.
+  def flushed_method_keys(_was_pending, _changes, changes_error) when not is_nil(changes_error),
+    do: MapSet.new()
 
-  # Clear the `disk_differs` badge on any open `:method` tab whose patch this flush
-  # wrote to disk: it was pending before (`was_pending`) and is no longer pending
-  # now (`socket.assigns.changes`, refreshed by `assign_changes/1`). Anything still
-  # pending — a conflict or a non-flushable skip — falls outside the difference and
-  # keeps its badge, so there are no spurious clears (BT-2545).
+  def flushed_method_keys(was_pending, changes, _changes_error),
+    do: MapSet.difference(was_pending, pending_method_keys(changes))
+
+  @doc false
+  # Clear the `unflushed` (`disk_differs`) badge on every open `:method` tab whose
+  # `(class, selector)` is in `flushed` — the methods this flush reconciled to disk.
+  # Other tabs are returned unchanged: a still-pending conflict/skip (outside
+  # `flushed`), an untouched method, or a `:def` tab (the `:method` guard
+  # short-circuits before reading its absent `selector`). Pure; unit-tested.
+  def clear_disk_differs(tabs, flushed) do
+    Enum.map(tabs, fn tab ->
+      if tab.kind == :method and MapSet.member?(flushed, {tab.class, tab.selector}) do
+        %{tab | disk_differs: false}
+      else
+        tab
+      end
+    end)
+  end
+
+  # After a flush, clear the `unflushed` badge on the `:method` tabs this flush wrote
+  # to disk (BT-2545), scoped by `flushed_method_keys/3` so conflicts / skips keep
+  # their badge and methods untouched by this flush are never cleared.
   defp clear_flushed_badges(socket, was_pending) do
-    flushed = MapSet.difference(was_pending, pending_method_keys(socket.assigns.changes))
+    flushed =
+      flushed_method_keys(was_pending, socket.assigns.changes, socket.assigns[:changes_error])
 
     if MapSet.size(flushed) == 0 do
       socket
     else
-      tabs =
-        Enum.map(socket.assigns.tabs, fn tab ->
-          if tab.kind == :method and MapSet.member?(flushed, {tab.class, tab.selector}) do
-            %{tab | disk_differs: false}
-          else
-            tab
-          end
-        end)
-
-      assign(socket, :tabs, tabs)
+      assign(socket, :tabs, clear_disk_differs(socket.assigns.tabs, flushed))
     end
   end
 
