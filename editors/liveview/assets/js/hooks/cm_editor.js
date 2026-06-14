@@ -139,6 +139,9 @@ export const CmEditor = {
   // sees the result and "evaluate buffer" stays pure code.
   insertInlineResult(payload) {
     if (!this.view || !payload || typeof payload.text !== "string") return
+    // push_event is page-wide; honour the server's element-id target so only the
+    // intended editor inserts even if a second editor also registered the handler.
+    if (payload.target && payload.target !== this.el.id) return
     const state = this.view.state
     const main = state.selection.main
     // Prefer the server-echoed anchor (the evaluated selection's end at submit

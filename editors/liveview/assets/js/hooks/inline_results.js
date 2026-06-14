@@ -76,6 +76,9 @@ class ResultWidget extends WidgetType {
         view.dispatch({ effects: toggleInlineResult.of(this.id) })
       })
     } else {
+      // Deliberate asymmetry vs the collapsed strip: when expanded, only the ▾
+      // button collapses — the body is NOT a click target, so the user can
+      // select/copy the result text without it folding away under the click.
       const body = document.createElement("span")
       body.className = "cm-inline-result-body"
       body.textContent = `→ ${this.text}`

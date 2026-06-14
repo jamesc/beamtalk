@@ -1350,9 +1350,17 @@ defmodule BtAttachWeb.WorkspaceLive do
     # explicit and survives a future pipe stage that might clear the selection.
     anchor = ws_anchor(socket)
 
+    # `push_event` is page-wide — every CmEditor hook that registered the
+    # handler receives it. Scope it to the Workspace editor by element id (must
+    # match the `#workspace-editor-overlay` host in the template) so a second
+    # inline editor (BT-2543) can't also insert this result.
     socket
     |> eval_status("→ " <> rendered, output, expr)
-    |> push_event("ws_insert_result", %{text: rendered, anchor: anchor})
+    |> push_event("ws_insert_result", %{
+      text: rendered,
+      anchor: anchor,
+      target: "workspace-editor-overlay"
+    })
   end
 
   # The doc offset to anchor an inline result after: the end of the tracked
@@ -1362,7 +1370,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # distribution node) can't drop the widget on the wrong line.
   defp ws_anchor(socket) do
     if ws_selection?(socket.assigns) do
-      case socket.assigns.ws_selection.end do
+      case socket.assigns.ws_selection[:end] do
         offset when is_integer(offset) -> offset
         _ -> nil
       end
@@ -3776,7 +3784,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                          result lands inline in the buffer (print_it) or the
                          Inspector (inspect_it); this is the momentary echo. Keyed
                          by `eval_seq` so its fade restarts on each eval. --%>
-                    <div :if={@result} id={"eval-status-#{@eval_seq}"} class="eval-status">
+                    <div
+                      :if={@result}
+                      id={"eval-status-#{@eval_seq}"}
+                      class="eval-status"
+                      aria-live="polite"
+                    >
                       <span class="val">{@result}</span>
                     </div>
                     <div :if={@error} class="ws-result err">
