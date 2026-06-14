@@ -1165,17 +1165,31 @@ defmodule BtAttachWeb.WorkspaceLive do
   # than the whole buffer (the spike's "evaluates selection" vs "evaluates
   # buffer" distinction). The payload is client-supplied, so accept only the
   # well-formed shape and ignore anything else rather than crash the LiveView.
-  def handle_event("select_source", %{"text" => text} = params, socket)
+  def handle_event("select_source", %{"text" => text, "tab_id" => tab_id} = params, socket)
       when is_binary(text) do
-    selection = %{
-      text: text,
-      start: clamp_offset(params["start"]),
-      end: clamp_offset(params["end"])
-    }
+    # Stale/in-flight selection guard (BT-2549): a departing CmEditor can dispatch
+    # one final `select_source` via `pushEvent` just before its `destroyed()`
+    # callback runs; that event can land *after* `sync_active/2` cleared
+    # `:edit_selection` on the tab switch, re-populating it with coordinates from
+    # the closed tab. The editor instance stamps each push with the tab it edits
+    # (data-tab-id), so ignore any stamp that no longer matches the active tab.
+    if tab_id == socket.assigns.active_tab do
+      selection = %{
+        text: text,
+        start: clamp_offset(params["start"]),
+        end: clamp_offset(params["end"])
+      }
 
-    {:noreply, assign(socket, edit_selection: selection)}
+      {:noreply, assign(socket, edit_selection: selection)}
+    else
+      {:noreply, socket}
+    end
   end
 
+  # Malformed payload (missing text, non-binary, or missing the "tab_id" key):
+  # ignore rather than crash the LiveView (the payload is client-supplied). A
+  # present-but-mismatched stamp (incl. `tab_id: null`) is handled by the guarded
+  # clause above, which drops it when it doesn't match the active tab.
   def handle_event("select_source", _params, socket), do: {:noreply, socket}
 
   # Selection tracking for the Workspace dock's editor (BT-2490). Tracked in a
@@ -4378,6 +4392,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                         class="cm-wrap field"
                         phx-hook="CmEditor"
                         data-select-event="select_source"
+                        data-tab-id={@active_tab}
                         data-placeholder={
                           if active_tab(assigns).kind == :def,
                             do: "Actor subclass: Counter\n  state: value = 0",
