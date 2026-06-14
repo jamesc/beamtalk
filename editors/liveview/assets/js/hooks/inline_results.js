@@ -25,6 +25,11 @@ import { Decoration, EditorView, WidgetType } from "@codemirror/view"
 const COLLAPSE_LINES = 4
 // One-line summary truncation width.
 const SUMMARY_WIDTH = 60
+// Sliding-window cap on retained inline results. Without a bound `items` would
+// grow for the life of the session (no clear path), so the oldest results are
+// dropped past this many — the buffer is finite anyway. Also keeps the rebuild
+// on add/toggle O(cap) rather than O(session length).
+const MAX_RESULTS = 50
 
 // Monotonic id so a result keeps its identity (and collapsed state) across the
 // decoration rebuilds that follow every transaction.
@@ -99,9 +104,12 @@ class ResultWidget extends WidgetType {
   }
 
   // Let the widget handle its own clicks (toggling) rather than the editor
-  // treating them as cursor placement.
+  // treating them as cursor placement. CodeMirror skips its own mouse handling
+  // (posAtCoords → cursor move) only when ignoreEvent returns TRUE; returning
+  // false would snap the caret to the adjacent line on every collapsed-strip
+  // click. (This matches WidgetType's own default of `return true`.)
   ignoreEvent() {
-    return false
+    return true
   }
 }
 
@@ -131,13 +139,19 @@ export const inlineResultsField = StateField.define({
 
   update(value, tr) {
     let items = value.items
-    let changed = false
+    let deco = value.deco
+    // Adding/toggling a result changes the widget set, so the decorations must
+    // be rebuilt from `items`. A pure doc edit (every keystroke) only shifts
+    // positions: map the existing decoration set through the changes instead —
+    // O(changes), no sort, no widget recreation.
+    let rebuild = false
 
     if (tr.docChanged) {
       // Keep each result anchored as the user edits around it (assoc 1: stay put
-      // when text is inserted exactly at the anchor).
+      // when text is inserted exactly at the anchor). Map `items` and the
+      // decoration set with the same association so they stay in step.
       items = items.map((it) => ({ ...it, pos: tr.changes.mapPos(it.pos, 1) }))
-      changed = true
+      deco = deco.map(tr.changes)
     }
 
     for (const effect of tr.effects) {
@@ -146,17 +160,20 @@ export const inlineResultsField = StateField.define({
           ...items,
           { id: nextId++, pos: effect.value.pos, text: effect.value.text, collapsed: true },
         ]
-        changed = true
+        // Drop the oldest results past the sliding-window cap.
+        if (items.length > MAX_RESULTS) items = items.slice(items.length - MAX_RESULTS)
+        rebuild = true
       } else if (effect.is(toggleInlineResult)) {
         items = items.map((it) =>
           it.id === effect.value ? { ...it, collapsed: !it.collapsed } : it,
         )
-        changed = true
+        rebuild = true
       }
     }
 
-    if (!changed) return value
-    return { items, deco: buildDecorations(items) }
+    if (rebuild) deco = buildDecorations(items)
+    else if (!tr.docChanged) return value
+    return { items, deco }
   },
 
   provide: (field) => EditorView.decorations.from(field, (value) => value.deco),
