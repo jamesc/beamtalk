@@ -120,8 +120,9 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   ## Tweaks panel (BT-2487, epic BT-2482 Phase 1)
 
-  The left column carries a **Tweaks** panel (`tweaks_panel/1`) — the cockpit's
-  appearance controls, ported from the spike (`spikes/cockpit-ux-spike`): a
+  A top-bar gear opens the **Tweaks** dropdown (`tweaks_panel/1`, toggled by
+  `:show_settings`) — the cockpit's appearance controls, ported from the spike
+  (`spikes/cockpit-ux-spike`): a
   theme picker (paper/squeak/dusk), accent swatches, syntax-palette mode
   (warm/mono/vivid), density (cozy/compact), and UI-font + code-font dropdowns.
   It is **pure presentation** — the `TweaksPanel` JS hook
@@ -135,8 +136,8 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   The center-bottom region (`#workspace-dock`) is the spike's **tabbed dock**
   (`spikes/cockpit-ux-spike/app.jsx`), merging the previously-separate eval area,
-  Transcript, and Changes panes into one panel switched by `dock_tab` (held in
-  `:dock_tab`, default `"workspace"`):
+  REPL, Transcript, and Changes panes into one panel switched by `dock_tab` (held
+  in `:dock_tab`, default `"workspace"`):
 
     * **Workspace** — a CodeMirror code editor (the BT-2538 `CmEditor` hook,
       which also reports selection) wrapped in the eval `<form>` (`#eval-form`,
@@ -148,6 +149,17 @@ defmodule BtAttachWeb.WorkspaceLive do
       evaluate the editor's tracked selection if there is one (the `CmEditor`
       hook's selection report → `select_workspace` → `:ws_selection`, kept
       separate from the method editor's `:edit_selection`), else the whole buffer.
+    * **REPL** (BT-2543) — the conversational, line-at-a-time sibling of the
+      Workspace: a classic TUI request→response scrollback (the `:repl` stream)
+      above a bottom-pinned CodeMirror composer (the `ReplInput` hook, `#repl-form`,
+      `phx-submit="repl_eval"`, field `expr`). Submitting shares the SAME `eval`
+      op + session + `render_term` as the Workspace — it only differs in
+      presentation: each submit appends a `› request` / `→ response` pair rather
+      than inserting inline. Enter submits (terminal convention, confirmed BT-2543
+      divergence from the Workspace newline); ↑/↓ recall the `:repl_history` ring
+      at the composer's edges; each `→ response` keeps an Inspect affordance into
+      the Inspector (the term is stashed in `:repl_terms`). Ambient `Transcript
+      show:` output streams to the Transcript pane, never duplicated here.
     * **Transcript** — the live `Transcript show:` stream (`#transcript`,
       `phx-update="stream"`), wired via the BT-2399 subscription facade, unchanged.
     * **Changes** — the workspace ChangeLog viewer (`Workspace changes`, ADR 0082).
@@ -379,8 +391,21 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:output, nil)
       |> assign(:error, nil)
       |> assign(:expr, "3 + 4")
-      # Workspace dock active tab (BT-2490): Workspace | Transcript | Changes.
+      # Workspace dock active tab (BT-2490): Workspace | REPL | Transcript |
+      # Changes (REPL added in BT-2543).
       |> assign(:dock_tab, "workspace")
+      # REPL tab (BT-2543): a classic TUI request→response scrollback with the
+      # input pinned at the bottom. `:repl` is the scrollback stream (so long
+      # history never bloats the assigns/diff); `:repl_seq` mints stable entry
+      # ids; `:repl_terms` holds each `→ result` term server-side so a later
+      # Inspect click re-opens the live object in the Inspector (the entry in the
+      # DOM is display-only). `:repl_history` is the recall ring (most-recent
+      # first) with `:repl_history_pos` the ↑/↓ cursor into it (nil = at the live
+      # input, not recalling).
+      |> assign(:repl_seq, 0)
+      |> assign(:repl_terms, %{})
+      |> assign(:repl_history, [])
+      |> assign(:repl_history_pos, nil)
       |> assign(:inspect_target, nil)
       |> assign(:inspect_rows, [])
       |> assign(:inspect_error, nil)
@@ -467,6 +492,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:omni_results, [])
       |> assign(:omni_open, false)
       |> assign(:nav_popover, nil)
+      # Appearance/settings menu (the Tweaks panel): a top-bar gear opens it as a
+      # dropdown rather than a permanent sidebar panel. The panel stays mounted
+      # whenever the cockpit is (the `TweaksPanel` hook applies the saved theme on
+      # mount); `:show_settings` only toggles the dropdown's visibility.
+      |> assign(:show_settings, false)
       # Floating inspector windows (BT-2493, epic BT-2482 Phase 3): the spike's
       # Dock/Float toggle (spikes/cockpit-ux-spike/app.jsx). In `"float"` mode a
       # binding click / Inspect-it opens a *floating, draggable, stackable*
@@ -492,6 +522,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign_bindings(pid)
       |> assign_changes()
       |> stream(:transcript, [])
+      |> stream(:repl, [])
     else
       other ->
         Logger.error("subscribe failed: #{inspect(other)}")
@@ -577,16 +608,128 @@ defmodule BtAttachWeb.WorkspaceLive do
      assign(socket, result: nil, output: nil, error: "not attached to workspace", expr: expr)}
   end
 
-  # Switch the Workspace dock's active tab (Workspace / Transcript / Changes,
-  # BT-2490). Pure view state — no workspace round-trip; an unknown tab is
-  # ignored rather than rendered, so a crafted value can't blank the dock.
+  # Switch the Workspace dock's active tab (Workspace / REPL / Transcript /
+  # Changes, BT-2490, REPL added BT-2543). Pure view state — no workspace
+  # round-trip; an unknown tab is ignored rather than rendered, so a crafted
+  # value can't blank the dock.
   @impl true
   def handle_event("dock_tab", %{"tab" => tab}, socket)
-      when tab in ~w(workspace transcript changes) do
+      when tab in ~w(workspace repl transcript changes) do
     {:noreply, assign(socket, dock_tab: tab)}
   end
 
   def handle_event("dock_tab", _params, socket), do: {:noreply, socket}
+
+  # ── REPL tab (BT-2543) ───────────────────────────────────────────────────────
+  #
+  # The REPL is the *conversational, line-at-a-time* idiom (distinct from the
+  # editor-primary Workspace and the ambient-log Transcript): a request→response
+  # scrollback with the input pinned at the bottom. Submitting shares the SAME
+  # `eval` facade op + session as the Workspace — same structured result, same
+  # surface-shared `render_term` display rules — and only differs in presentation:
+  # each submit appends a `› request` / `→ response` pair to the `:repl` stream
+  # instead of inserting inline. Ambient `Transcript show:` output keeps streaming
+  # to the Transcript tab over the existing subscription; it is NOT duplicated
+  # into the scrollback here. Per the BT-2543 confirmation, Enter submits in the
+  # REPL (terminal convention) while Shift/⌘-Enter inserts a newline — the
+  # divergence is enforced by the ReplInput hook, not here.
+  @impl true
+  def handle_event("repl_eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
+      when is_pid(pid) do
+    if String.trim(expr) == "" do
+      # Empty submit (bare Enter) is a no-op — never append a blank entry or
+      # disturb the history cursor.
+      {:noreply, socket}
+    else
+      socket =
+        case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+          {:ok, term, _output, _warnings} ->
+            repl_append_ok(socket, expr, term)
+
+          {:error, reason, _output, _warnings} ->
+            repl_append_error(socket, expr, Workspace.render_error(reason))
+
+          # Facade short-circuit (RBAC denial / off-vocabulary op) — a 2-tuple the
+          # eval contract never produces; render it as the entry's response rather
+          # than crashing the LiveView.
+          {:error, reason} ->
+            repl_append_error(socket, expr, facade_error(reason))
+        end
+
+      {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
+    end
+  end
+
+  # No session — the first clause's `is_pid(pid)` guard only fails when
+  # bind_session never ran, so the REPL stream + assigns (`:repl_seq`,
+  # `:repl_terms`, `:repl_history`, `:repl_history_pos`) don't exist and the pane
+  # isn't rendered. A crafted `repl_eval` during the attach-failure window must
+  # NOT touch the REPL helpers (which read those assigns) — that would KeyError /
+  # crash the LiveView. Guard on the assigns' presence and no-op when absent,
+  # otherwise surface the "not attached" entry (the defensive path for any future
+  # state where the assigns exist but the session pid is gone).
+  def handle_event("repl_eval", %{"expr" => expr}, socket) do
+    cond do
+      not Map.has_key?(socket.assigns, :repl_seq) ->
+        {:noreply, socket}
+
+      String.trim(expr) == "" ->
+        {:noreply, socket}
+
+      true ->
+        {:noreply,
+         socket
+         |> repl_append_error(expr, "not attached to workspace")
+         |> repl_record_history(expr)
+         |> repl_clear_input()}
+    end
+  end
+
+  def handle_event("repl_eval", _params, socket), do: {:noreply, socket}
+
+  # ↑/↓ history recall (BT-2543). The ReplInput hook only fires these at the
+  # composer's edges (↑ on the first line, ↓ on the last), so mid-buffer cursor
+  # navigation is untouched. `repl_history_pos` walks the most-recent-first ring:
+  # ↑ moves further back (toward older entries), ↓ moves toward the present and
+  # past the newest restores the empty live input. The recalled text is pushed to
+  # the hook (the input is hook-owned / phx-update=ignore, so the server can't set
+  # it through morphdom).
+  @impl true
+  def handle_event("repl_history_prev", _params, socket) do
+    {:noreply, repl_recall(socket, :prev)}
+  end
+
+  def handle_event("repl_history_next", _params, socket) do
+    {:noreply, repl_recall(socket, :next)}
+  end
+
+  # Inspect a `→ result` term in the Inspector (BT-2543): results stay live
+  # objects even in the terminal idiom. The term was stashed server-side under the
+  # entry id at append time (the scrollback DOM is display-only); look it up and
+  # drive the same `inspect_term` path bindings/Print-it use. In `"float"` mode
+  # (BT-2493) it opens a floating window instead of the docked pane. An unknown id
+  # (a stale entry after a reconnect dropped the term map) is ignored.
+  @impl true
+  def handle_event("repl_inspect", %{"id" => id}, %{assigns: %{repl_terms: terms}} = socket) do
+    case Map.fetch(terms, id) do
+      {:ok, term} ->
+        label = "REPL result"
+
+        socket =
+          if socket.assigns.inspector_mode == "float" do
+            open_window_for_term(socket, label, term)
+          else
+            inspect_term(socket, label, term, [%{label: label, term: term}])
+          end
+
+        {:noreply, socket}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("repl_inspect", _params, socket), do: {:noreply, socket}
 
   # Inspect a binding by name: look up its live term and drill into it via the
   # read-surface `inspect` op. Reference-following starts here. In `"float"` mode
@@ -677,6 +820,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("set_inspector_mode", _params, socket), do: {:noreply, socket}
+
+  # Open / close the top-bar appearance (Tweaks) dropdown. Pure view state — the
+  # panel itself stays mounted (see `:show_settings` in `mount/3`); this only
+  # flips the dropdown's visibility. `close_settings` is the click-away / Escape
+  # path.
+  def handle_event("toggle_settings", _params, socket) do
+    {:noreply, assign(socket, show_settings: !socket.assigns.show_settings)}
+  end
+
+  def handle_event("close_settings", _params, socket) do
+    {:noreply, assign(socket, show_settings: false)}
+  end
 
   # Drill into an object-valued field of a *floating window* (BT-2493): the field
   # term is carried by index against that window's current rows, exactly like the
@@ -1016,14 +1171,22 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Open a site from the Senders/Implementors popover in the method-editor tab
-  # strip (its class + selector + side), then close the popover.
+  # strip (its class + selector + side) and point the System Browser at that
+  # class/side too, so a jump to another class navigates the tree alongside the
+  # editor, then close the popover.
   def handle_event(
         "nav_open",
         %{"class" => class, "side" => side, "selector" => selector},
         socket
       )
       when is_binary(class) and is_binary(side) and is_binary(selector) do
-    {:noreply, socket |> open_method_tab(class, side, selector) |> assign(nav_popover: nil)}
+    socket =
+      socket
+      |> open_method_tab(class, side, selector)
+      |> navigate_browser(class, side)
+      |> assign(nav_popover: nil)
+
+    {:noreply, socket}
   end
 
   def handle_event("nav_open", _params, socket), do: {:noreply, assign(socket, nav_popover: nil)}
@@ -1421,6 +1584,185 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp clamp_offset(n) when is_integer(n) and n >= 0, do: n
   defp clamp_offset(_), do: nil
 
+  # ── REPL helpers (BT-2543) ───────────────────────────────────────────────────
+
+  # Cap on the REPL scrollback depth: the client keeps the most recent N entries
+  # (via `stream_insert(:repl, …, limit: -N)`) and `repl_terms` is evicted in
+  # lockstep, so a long session can't grow the DOM or the assigns map unbounded.
+  @repl_scrollback_limit 200
+
+  # Append a successful `› request` / `→ response` pair to the scrollback and
+  # stash the live result term under the entry id so a later Inspect click can
+  # re-open it. The response is the surface-shared `render_term` rendering — the
+  # SAME string the Workspace `→ result` shows — so the two surfaces stay
+  # display-consistent. Long responses are marked so the template can collapse
+  # them within the entry rather than letting one result flood the scrollback.
+  defp repl_append_ok(socket, request, term) do
+    seq = socket.assigns.repl_seq + 1
+    id = repl_entry_id(seq)
+    response = Workspace.render_term(term)
+
+    entry = %{
+      id: id,
+      request: request,
+      kind: :ok,
+      response: response,
+      inspectable: true,
+      long: repl_long?(response)
+    }
+
+    socket
+    |> assign(:repl_seq, seq)
+    # `repl_terms` is bounded in step with the scrollback (below): stash this
+    # term, then evict the one that just scrolled past the depth cap. Each entry
+    # is a small reference (the object lives in the workspace process), but a long
+    # session would still grow the map unboundedly without this.
+    |> update(:repl_terms, fn terms -> terms |> Map.put(id, term) |> repl_evict(seq) end)
+    |> stream_insert(:repl, entry, limit: -@repl_scrollback_limit)
+    |> repl_scroll_to_bottom()
+  end
+
+  # Append an error entry: the `→ response` carries the rendered error and there
+  # is no live term to inspect, so no Inspect affordance and nothing stashed.
+  defp repl_append_error(socket, request, message) do
+    seq = socket.assigns.repl_seq + 1
+    id = repl_entry_id(seq)
+
+    entry = %{
+      id: id,
+      request: request,
+      kind: :error,
+      response: message,
+      inspectable: false,
+      long: repl_long?(message)
+    }
+
+    socket
+    |> assign(:repl_seq, seq)
+    # An error entry stashes no term, but still bump the cap so an OK term that
+    # scrolled past the depth limit (counting errors too) is evicted in step.
+    |> update(:repl_terms, &repl_evict(&1, seq))
+    |> stream_insert(:repl, entry, limit: -@repl_scrollback_limit)
+    |> repl_scroll_to_bottom()
+  end
+
+  # Cap the scrollback depth (client DOM via `stream_insert(limit:)`) and the
+  # `repl_terms` map in lockstep. Entry ids are monotonic (`repl-entry-N`, N =
+  # seq), so the entry now `@repl_scrollback_limit` positions back is exactly the
+  # one the client dropped — evict its term (a no-op for an error entry, which
+  # was never stashed).
+  defp repl_evict(terms, seq) do
+    evicted = seq - @repl_scrollback_limit
+    if evicted > 0, do: Map.delete(terms, repl_entry_id(evicted)), else: terms
+  end
+
+  # Scroll the scrollback to the newest entry on each append (classic terminal
+  # behaviour): a new submission should reveal its result even if the user had
+  # scrolled up to read older output. The scroll is a pure client effect, so it
+  # rides a push to the ReplInput hook rather than a re-render.
+  defp repl_scroll_to_bottom(socket) do
+    push_event(socket, "repl_scroll_bottom", %{})
+  end
+
+  defp repl_entry_id(seq), do: "repl-entry-#{seq}"
+
+  # DOM id of the REPL input editor host — the single source of truth shared by
+  # the template element and the `repl_set_input` push target, so a rename can't
+  # silently break history recall / submit-clear. (There is a single ReplInput
+  # instance on the page; `push_event/3` reaches every hook registered for the
+  # event, so this id is for template/push-target consistency, not filtering.)
+  defp repl_input_id, do: "repl-input"
+
+  # First-line (capped) preview shown in a collapsed long response's `<summary>`:
+  # enough to recognise the result without expanding, with an ellipsis when the
+  # full text is longer.
+  defp repl_preview(text) when is_binary(text) do
+    first = text |> String.split("\n", parts: 2) |> hd()
+
+    cond do
+      String.length(first) > 80 -> String.slice(first, 0, 80) <> "…"
+      first != text -> first <> " …"
+      true -> first
+    end
+  end
+
+  # A response is "long" (worth collapsing within its entry) when it spills past a
+  # handful of lines or a few hundred chars — the threshold that keeps a single
+  # verbose result from pushing the rest of the scrollback off-screen.
+  defp repl_long?(text) when is_binary(text) do
+    # `parts: 7` short-circuits the split after 6 newlines instead of
+    # materialising every line just to count past six.
+    String.length(text) > 320 or length(String.split(text, "\n", parts: 7)) > 6
+  end
+
+  # Record a submitted expression at the head of the recall ring and reset the
+  # ↑/↓ cursor to the live input. Every prior occurrence of the expression is
+  # dropped first so re-running the same expression doesn't bloat the ring (all
+  # earlier copies collapse onto the new head, shell `HISTCONTROL=erasedups`
+  # style — not just consecutive runs); the ring is capped so a long session
+  # can't grow the assigns unbounded.
+  @repl_history_limit 100
+  defp repl_record_history(socket, expr) do
+    history =
+      [expr | Enum.reject(socket.assigns.repl_history, &(&1 == expr))]
+      |> Enum.take(@repl_history_limit)
+
+    assign(socket, repl_history: history, repl_history_pos: nil)
+  end
+
+  # Walk the recall ring and push the recalled text to the input. `:prev` (↑)
+  # moves toward older entries; `:next` (↓) moves toward the present, and stepping
+  # past the newest restores the empty live input (pos = nil). An empty ring or a
+  # ↓ while already at the live input is a no-op (no push, so the hook keeps the
+  # in-progress text the user was typing).
+  #
+  # The first clause also covers the attach-failure window: when bind_session
+  # never ran, `:repl_history` is absent, so a crafted ↑/↓ must NOT fall through
+  # to `socket.assigns.repl_history` (a KeyError that would crash the LiveView) —
+  # `is_map_key/2` guards it to a no-op.
+  defp repl_recall(socket, _dir) when not is_map_key(socket.assigns, :repl_history),
+    do: socket
+
+  defp repl_recall(%{assigns: %{repl_history: []}} = socket, _dir), do: socket
+
+  defp repl_recall(socket, dir) do
+    history = socket.assigns.repl_history
+    pos = socket.assigns.repl_history_pos
+    last = length(history) - 1
+
+    new_pos =
+      case {dir, pos} do
+        {:prev, nil} -> 0
+        {:prev, p} -> min(p + 1, last)
+        {:next, nil} -> :live
+        {:next, 0} -> nil
+        {:next, p} -> p - 1
+      end
+
+    case new_pos do
+      :live ->
+        # ↓ at the live input: nothing to recall, leave the user's draft alone.
+        socket
+
+      nil ->
+        socket
+        |> assign(:repl_history_pos, nil)
+        |> push_event("repl_set_input", %{text: ""})
+
+      p ->
+        socket
+        |> assign(:repl_history_pos, p)
+        |> push_event("repl_set_input", %{text: Enum.at(history, p)})
+    end
+  end
+
+  # Clear the REPL input after a submit (REPL convention: submit empties the
+  # composer). The input is hook-owned (phx-update=ignore), so the server can only
+  # set it by pushing to the ReplInput hook.
+  defp repl_clear_input(socket) do
+    push_event(socket, "repl_set_input", %{text: ""})
+  end
+
   # ── method editor helpers (Wave 3) ──────────────────────────────────────────
 
   # Compile (⌘S) the active tab's source. A class-definition tab evals its whole
@@ -1756,6 +2098,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(selected_class: class, selected_protocol: nil)
     |> load_protocols(class, socket.assigns.browser_side)
+  end
+
+  # Point the System Browser at a class/side — select it in the tree, flip the
+  # instance/class toggle to match, clear the protocol filter, and load its
+  # protocols. Used when a method is opened from *outside* the browser (a
+  # Senders/Implementors jump to another class) so the pane tracks the focused
+  # tab, per the "browser highlights whatever the focused tab shows" design.
+  defp navigate_browser(socket, class, side)
+       when is_binary(class) and is_binary(side) do
+    socket
+    |> assign(selected_class: class, browser_side: side, selected_protocol: nil)
+    |> load_protocols(class, side)
   end
 
   # Open (or re-focus) an *editable* method tab for class/side/selector — the
@@ -3249,14 +3603,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     syntax: "warm",
     density: "cozy",
     uiFont: "Hanken Grotesk",
-    codeFont: "IBM Plex Mono"
+    codeFont: "Cascadia Code"
   }
 
   # The curated accent swatches (paper/squeak only — dusk keeps its built-in
   # accent), UI-font and code-font options — exactly the sets the spike offers.
   @tweak_accents ~w(#b9711b #a8324e #2c6e8e #5d7a2e #7a4ea8)
   @tweak_ui_fonts ["Hanken Grotesk", "Inter Tight", "Public Sans", "Schibsted Grotesk"]
-  @tweak_code_fonts ["IBM Plex Mono", "JetBrains Mono", "Spline Sans Mono", "Courier Prime"]
+  @tweak_code_fonts ["Cascadia Code", "Monaspace", "JetBrains Mono"]
 
   # The appearance panel: a pure-client control surface. The `TweaksPanel` hook
   # owns all behaviour — each control declares the tweak it drives via
@@ -3315,6 +3669,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
             </button>
           </div>
+          <span class="twk-accent-note">Dusk uses its built-in accent</span>
         </div>
 
         <%!-- Syntax → the --t-* token palette (warm/mono/vivid) --%>
@@ -3403,7 +3758,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           </button>
         </div>
       </div>
-      <div class="panel-body">
+      <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
         <div :if={@browser_error} class="io-block err">{@browser_error}</div>
         <%= if @browser_classes == [] do %>
           <p :if={!@browser_error} class="muted-note">No classes in the image yet.</p>
@@ -3564,6 +3919,55 @@ defmodule BtAttachWeb.WorkspaceLive do
     """
   end
 
+  # Senders / Implementors result popover (BT-2495). Rendered as a child of the
+  # `.nav-actions` group (which is `position: relative`) so it anchors to — and
+  # pops up directly above — the buttons that opened it, rather than floating in
+  # a fixed panel corner. Shared by the owner and observer button rows via a
+  # function component (one source of truth). Closes on click-away, the × button,
+  # or Escape (`phx-window-keydown` is live only while the popover is mounted).
+  attr :nav, :map, default: nil
+
+  defp nav_popover(assigns) do
+    ~H"""
+    <div
+      :if={@nav}
+      class="nav-popover"
+      phx-click-away="nav_close"
+      phx-window-keydown="nav_close"
+      phx-key="Escape"
+    >
+      <div class="nav-pop-head">
+        <b>{nav_kind_label(@nav.kind)}</b>
+        <span class="mono">{@nav.selector}</span>
+        <span class="spacer"></span>
+        <button class="x" type="button" phx-click="nav_close" title="Close">×</button>
+      </div>
+      <div :if={@nav[:error]} class="io-block err">{@nav.error}</div>
+      <div :if={!@nav[:error] and @nav.sites == []} class="nav-empty">
+        No {nav_kind_label(@nav.kind)} found.
+      </div>
+      <button
+        :for={site <- @nav.sites}
+        type="button"
+        class="nav-site"
+        phx-click="nav_open"
+        phx-value-class={site["class"]}
+        phx-value-side={if site["class_side"] == true, do: "class", else: "instance"}
+        phx-value-selector={site["method"]}
+      >
+        <span class="nav-site-name mono">
+          {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
+            "method"
+          ]}
+        </span>
+        <span :if={site["source_file"]} class="nav-loc mono">
+          {site["source_file"]}:{site["line"]}
+        </span>
+      </button>
+    </div>
+    """
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -3637,6 +4041,38 @@ defmodule BtAttachWeb.WorkspaceLive do
               {label}
             </button>
           </div>
+          <%!-- Appearance settings (BT-2487): the Tweaks panel moved off the
+               sidebar into a top-bar gear dropdown — it reads as settings, not a
+               primary workspace pane. The panel stays mounted (so the TweaksPanel
+               hook applies the saved theme on load); the gear only toggles the
+               dropdown. Click-away / Escape close it. --%>
+          <div
+            :if={@connected}
+            class="settings-menu"
+            phx-click-away={if @show_settings, do: "close_settings"}
+          >
+            <button
+              type="button"
+              class="settings-gear"
+              phx-click="toggle_settings"
+              aria-haspopup="true"
+              aria-expanded={to_string(@show_settings)}
+              title="Appearance settings"
+            >
+              ⚙
+            </button>
+            <%!-- Escape listener: phx-window-keydown works even on display:none elements --%>
+            <div
+              :if={@show_settings}
+              phx-window-keydown="close_settings"
+              phx-key="Escape"
+              style="display:none"
+            >
+            </div>
+            <div class={["settings-popover", @show_settings && "open"]}>
+              <.tweaks_panel />
+            </div>
+          </div>
           <%= if @connected do %>
             <div class="attach">
               <span class="dot live"></span>
@@ -3655,10 +4091,11 @@ defmodule BtAttachWeb.WorkspaceLive do
         <%= if @connected do %>
           <%!-- ── three-column cockpit grid ──────────────────────────────── --%>
           <div class="cockpit">
-            <%!-- LEFT — System Browser (BT-2491, 286px) + Tweaks panel.
+            <%!-- LEFT — System Browser (BT-2491, 286px).
                  A class tree (Hierarchy / Category views, instance/class side
                  toggle) over a protocol-grouped method list, driven by the
-                 BT-2488 browse ops (ADR 0096). --%>
+                 BT-2488 browse ops (ADR 0096). The Tweaks panel that used to sit
+                 below it now lives in the top-bar settings dropdown. --%>
             <div class="col">
               <div class="browser-split">
                 <.system_browser_classes
@@ -3676,8 +4113,6 @@ defmodule BtAttachWeb.WorkspaceLive do
                   active_method={selected_method_ref(assigns)}
                 />
               </div>
-
-              <.tweaks_panel />
             </div>
 
             <%!-- CENTER — editor placeholder + workspace dock --%>
@@ -3699,6 +4134,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                         :for={
                           {tab, label} <- [
                             {"workspace", "Workspace"},
+                            {"repl", "REPL"},
                             {"transcript", "Transcript"},
                             {"changes", "Changes"}
                           ]
@@ -3820,6 +4256,88 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <span class="arrow">→</span>
                       <span class="val">{@error}</span>
                     </div>
+                  </div>
+
+                  <%!-- REPL tab (BT-2543): a classic TUI request→response
+                       scrollback ABOVE a bottom-pinned input. The scrollback
+                       stream is always in the DOM (like the transcript) so
+                       stream_insert lands regardless of the active tab. The
+                       input form is emitted AFTER the Workspace eval form, so
+                       `form("#eval-form")` / `form("form")` still resolve to the
+                       Workspace form the existing e2e tests submit. --%>
+                  <div class="dock-pane repl-pane" hidden={@dock_tab != "repl"}>
+                    <%!-- empty-state hint: shown until the first entry is
+                         appended (`repl_seq` bumps per entry). Kept OUTSIDE the
+                         stream container, which must hold only stream items. --%>
+                    <p :if={@repl_seq == 0} class="muted-note repl-empty">
+                      Evaluate an expression below — Enter runs it, ↑/↓ recall history.
+                    </p>
+                    <div id="repl-scrollback" class="repl-scrollback" phx-update="stream">
+                      <div
+                        :for={{dom_id, entry} <- @streams.repl}
+                        id={dom_id}
+                        class={["repl-entry", entry.kind == :error && "err"]}
+                      >
+                        <div class="repl-req">
+                          <span class="repl-mark">›</span>
+                          <span class="repl-expr">{entry.request}</span>
+                        </div>
+                        <div class="repl-res">
+                          <span class="repl-arrow">→</span>
+                          <%= if entry.long do %>
+                            <details class="repl-collapse">
+                              <summary class="repl-summary">{repl_preview(entry.response)}</summary>
+                              <span class="repl-val">{entry.response}</span>
+                            </details>
+                          <% else %>
+                            <span class="repl-val">{entry.response}</span>
+                          <% end %>
+                          <button
+                            :if={entry.inspectable}
+                            type="button"
+                            class="repl-inspect"
+                            phx-click="repl_inspect"
+                            phx-value-id={entry.id}
+                            title="Inspect this result in the Inspector"
+                          >
+                            Inspect
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <%= if @role == :owner do %>
+                      <%!-- bottom-pinned composer: a thin, growing CodeMirror
+                           input (the ReplInput hook — a CmEditor variant where
+                           Enter submits and ↑/↓ recall history at the edges). The
+                           hidden textarea keeps name="expr" so the `repl_eval`
+                           handler and `render_submit(%{expr: …})` read it, exactly
+                           like the Workspace eval form. --%>
+                      <form id="repl-form" class="repl-input-form" phx-submit="repl_eval">
+                        <div
+                          id={repl_input_id()}
+                          class="cm-wrap repl-wrap"
+                          phx-hook="ReplInput"
+                          data-placeholder="Evaluate an expression…"
+                        >
+                          <textarea
+                            id="repl-input-source"
+                            class="cm-field"
+                            name="expr"
+                            spellcheck="false"
+                            autocomplete="off"
+                            phx-update="ignore"
+                            hidden
+                          ></textarea>
+                          <div class="cm-host" id="repl-input-cm" phx-update="ignore"></div>
+                        </div>
+                      </form>
+                    <% else %>
+                      <p class="muted-note">
+                        Your role is read-only — REPL evaluation is disabled. You can still watch the
+                        live Transcript and review pending Changes in the tabs above.
+                      </p>
+                    <% end %>
                   </div>
 
                   <%!-- TRANSCRIPT tab: the live stream (always in the DOM so
@@ -4054,7 +4572,22 @@ defmodule BtAttachWeb.WorkspaceLive do
                         >
                         </div>
                       </div>
-                      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+                      <%!-- Single action row (BT-2495): Senders / Implementors on
+                           the left, Compile / Save All pushed to the right. The nav
+                           buttons are type="button" (they fire phx-click, never
+                           submit) and only show on a method tab. Observers get the
+                           same nav row in the read-only branch below. --%>
+                      <div class="editor-actions">
+                        <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                          <button class="btn" type="button" phx-click="senders">
+                            Senders
+                          </button>
+                          <button class="btn" type="button" phx-click="implementors">
+                            Implementors
+                          </button>
+                          <.nav_popover nav={@nav_popover} />
+                        </div>
+                        <span class="spacer"></span>
                         <button class="btn primary" type="submit">
                           Compile <span class="k">⌘S</span>
                         </button>
@@ -4097,59 +4630,23 @@ defmodule BtAttachWeb.WorkspaceLive do
                       still browse bindings, follow references in the Inspector, and watch
                       the live Transcript.
                     </p>
+                    <%!-- Observers still get Senders / Implementors navigation
+                         (BT-2495); both ride the read-only `nav-query` op. --%>
+                    <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                      <button class="btn" type="button" phx-click="senders">
+                        Senders
+                      </button>
+                      <button class="btn" type="button" phx-click="implementors">
+                        Implementors
+                      </button>
+                      <.nav_popover nav={@nav_popover} />
+                    </div>
                   <% end %>
 
                   <div :if={@save_result} class="io-block ok">{@save_result}</div>
                   <div :if={@save_error} class="io-block err">{@save_error}</div>
                   <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
                   <div :if={@flush_error} class="io-block err">{@flush_error}</div>
-
-                  <%!-- Senders / Implementors (BT-2495): navigate the active
-                       method's selector across the image. Both ride the
-                       `nav-query` `:read` op (xref index, ADR 0096), so they work
-                       for the Observer role too — rendered OUTSIDE the owner-only
-                       edit form. They no-op on a class-definition tab (no
-                       selector). The result popover anchors to this panel
-                       (`.editor-panel` is `position: relative`). --%>
-                  <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                    <button class="btn" type="button" phx-click="senders">
-                      Senders
-                    </button>
-                    <button class="btn" type="button" phx-click="implementors">
-                      Implementors
-                    </button>
-                  </div>
-
-                  <div :if={@nav_popover} class="nav-popover" phx-click-away="nav_close">
-                    <div class="nav-pop-head">
-                      <b>{nav_kind_label(@nav_popover.kind)}</b>
-                      <span class="mono">{@nav_popover.selector}</span>
-                      <span class="spacer"></span>
-                      <button class="x" type="button" phx-click="nav_close" title="Close">×</button>
-                    </div>
-                    <div :if={@nav_popover[:error]} class="io-block err">{@nav_popover.error}</div>
-                    <div :if={!@nav_popover[:error] and @nav_popover.sites == []} class="nav-empty">
-                      No {nav_kind_label(@nav_popover.kind)} found.
-                    </div>
-                    <button
-                      :for={site <- @nav_popover.sites}
-                      type="button"
-                      class="nav-site"
-                      phx-click="nav_open"
-                      phx-value-class={site["class"]}
-                      phx-value-side={if site["class_side"] == true, do: "class", else: "instance"}
-                      phx-value-selector={site["method"]}
-                    >
-                      <span class="nav-site-name mono">
-                        {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
-                          "method"
-                        ]}
-                      </span>
-                      <span :if={site["source_file"]} class="nav-loc mono">
-                        {site["source_file"]}:{site["line"]}
-                      </span>
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
