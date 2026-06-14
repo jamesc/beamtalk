@@ -43,6 +43,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 ERLANG_STAMP="$REPO_ROOT/.lint-erlang-stamp"
 JS_STAMP="$REPO_ROOT/.lint-js-stamp"
 BT_STAMP="$REPO_ROOT/.lint-beamtalk-stamp"
+ELIXIR_STAMP="$REPO_ROOT/.lint-elixir-stamp"
 
 # Compute a fingerprint of tracked files matching the given patterns.
 fingerprint() {
@@ -83,6 +84,15 @@ else
   echo "🔍 Running lint-beamtalk..."
   just lint-beamtalk
   echo "$BT_FP" > "$BT_STAMP"
+fi
+
+ELIXIR_FP="$(fingerprint 'editors/liveview/**/*.ex' 'editors/liveview/**/*.exs')"
+if stamp_matches "$ELIXIR_STAMP" "$ELIXIR_FP"; then
+  echo "⏭️  lint-elixir: no Elixir changes since last lint, skipping"
+else
+  echo "🔬 Running lint-elixir..."
+  just lint-elixir
+  echo "$ELIXIR_FP" > "$ELIXIR_STAMP"
 fi
 
 echo "✅ All lint checks passed"

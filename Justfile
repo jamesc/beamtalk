@@ -392,8 +392,11 @@ bench:
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Lint Elixir: format check
+lint-elixir: fmt-check-elixir
+
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-beamtalk lint-workaround-comments
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments
 
 # Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
 # reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders
@@ -441,11 +444,18 @@ fmt-check-rust:
     @echo "📋 Checking Rust formatting..."
     cargo fmt --all -- --check
 
+# Check Elixir code formatting (LiveView IDE)
+[working-directory: 'editors/liveview']
+fmt-check-elixir:
+    @echo "📋 Checking Elixir formatting..."
+    mix format --check-formatted
+    @echo "✅ Elixir formatting check passed"
+
 # Check all code formatting
 [unix]
-fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk
+fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk fmt-check-elixir
 
-# Windows: skip Erlang and JS format checks (platform-agnostic, covered by Linux CI)
+# Windows: skip Erlang, JS, and Elixir format checks (platform-agnostic, covered by Linux CI)
 [windows]
 fmt-check: fmt-check-rust fmt-check-beamtalk
 
@@ -454,8 +464,15 @@ fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
 
-# Format all code (Rust + Erlang + JS + Beamtalk stdlib/test sources)
-fmt: fmt-rust fmt-erlang fmt-js fmt-beamtalk
+# Format Elixir code (LiveView IDE)
+[working-directory: 'editors/liveview']
+fmt-elixir:
+    @echo "✨ Formatting Elixir code..."
+    mix format
+    @echo "✅ Elixir formatting complete"
+
+# Format all code (Rust + Erlang + JS + Elixir + Beamtalk stdlib/test sources)
+fmt: fmt-rust fmt-erlang fmt-js fmt-elixir fmt-beamtalk
 
 # Check JS/TS formatting (Biome)
 [working-directory: 'editors/vscode']

@@ -181,8 +181,19 @@
 .cockpit {
   flex: 1; min-height: 0; display: grid; gap: var(--gap);
   grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) var(--inspector-w, 348px);
+  transition: grid-template-columns 200ms ease;
 }
-.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
+.cockpit.browser-hidden {
+  grid-template-columns: 0px minmax(0, 1fr) var(--inspector-w, 348px);
+}
+.cockpit.inspector-hidden {
+  grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) 0px;
+}
+.cockpit.browser-hidden.inspector-hidden {
+  grid-template-columns: 0px minmax(0, 1fr) 0px;
+}
+.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); overflow: hidden; }
+.col.hidden { display: none; }
 
 /* panel chrome */
 .panel {
@@ -199,6 +210,22 @@
 }
 .panel-head .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none; }
 .panel-head .spacer { flex: 1; }
+.panel-head .panel-close {
+  border: 0; background: transparent; cursor: pointer; color: var(--faint);
+  font-size: 14px; padding: 0 4px; line-height: 1; border-radius: 4px;
+  flex: none;
+}
+.panel-head .panel-close:hover { color: var(--ink); background: var(--hover); }
+
+/* top-bar panel toggle buttons */
+.topbar .panel-toggles { display: flex; gap: 4px; }
+.topbar .panel-toggle {
+  border: 1px solid var(--line); background: var(--panel-2); cursor: pointer;
+  color: var(--muted); font-size: 11px; font-weight: 600; padding: 4px 10px;
+  border-radius: 6px; white-space: nowrap;
+}
+.topbar .panel-toggle:hover { background: var(--hover); color: var(--ink); }
+.topbar .panel-toggle.on { background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent); }
 .panel-body { flex: 1; min-height: 0; overflow: auto; padding: var(--panel-pad); }
 
 /* placeholder copy for not-yet-built Phase 1 panes */
@@ -267,8 +294,26 @@
 /* center column splits between editor and the workspace dock */
 /* position: relative anchors the BT-2495 Senders/Implementors popover. */
 .editor-panel { flex: 1; min-height: 0; position: relative; }
-.dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; }
+.dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; transition: height 200ms ease, opacity 150ms ease; overflow: hidden; }
 .dock .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.dock.collapsed { height: 0; opacity: 0; pointer-events: none; }
+.dock .dock-collapse-toggle {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  border: 1px solid var(--line); background: var(--panel-2); cursor: pointer;
+  color: var(--faint); font-size: 10px; padding: 2px 8px; border-radius: 4px;
+  z-index: 10; opacity: 0; transition: opacity 150ms ease;
+}
+.dock:hover .dock-collapse-toggle { opacity: 1; }
+.dock .dock-collapse-toggle:hover { color: var(--ink); background: var(--hover); }
+/* collapsed state: show a thin restore bar at the bottom */
+.dock-bar {
+  flex: none; height: 28px; display: none; align-items: center; justify-content: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: var(--shadow); cursor: pointer; color: var(--faint); font-size: 11px;
+  font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+}
+.dock-bar:hover { color: var(--ink); background: var(--hover); }
+.dock-bar.visible { display: flex; }
 
 /* The editor body and its method form fill the panel so a browsed method gets the
    whole reclaimed height (the read-only Method Source panel is gone — browsing a

@@ -518,6 +518,12 @@ defmodule BtAttachWeb.WorkspaceLive do
       #   * `:window_z` — the running max z-index; a click bumps the focused window
       #     to `window_z + 1` so z-order follows focus (the spike's stacking).
       |> assign(:inspector_mode, "docked")
+      # Panel visibility toggles (BT-2559): dismissable side panels + collapsible
+      # dock. Each panel can be hidden via a close button; toggle buttons in the
+      # top bar re-show them. The dock can be collapsed/expanded.
+      |> assign(:show_browser, true)
+      |> assign(:show_inspector, true)
+      |> assign(:show_dock, true)
       |> assign(:windows, [])
       |> assign(:next_window_id, 1)
       |> assign(:window_z, 10)
@@ -872,6 +878,27 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("close_settings", _params, socket) do
     {:noreply, assign(socket, show_settings: false)}
+  end
+
+  # Panel visibility toggles (BT-2559): close/toggle side panels and dock.
+  def handle_event("toggle_browser", _params, socket) do
+    {:noreply, assign(socket, show_browser: !socket.assigns.show_browser)}
+  end
+
+  def handle_event("toggle_inspector", _params, socket) do
+    {:noreply, assign(socket, show_inspector: !socket.assigns.show_inspector)}
+  end
+
+  def handle_event("toggle_dock", _params, socket) do
+    {:noreply, assign(socket, show_dock: !socket.assigns.show_dock)}
+  end
+
+  def handle_event("close_browser", _params, socket) do
+    {:noreply, assign(socket, show_browser: false)}
+  end
+
+  def handle_event("close_inspector", _params, socket) do
+    {:noreply, assign(socket, show_inspector: false)}
   end
 
   # Drill into an object-valued field of a *floating window* (BT-2493): the field
@@ -4069,6 +4096,9 @@ defmodule BtAttachWeb.WorkspaceLive do
     <div id="system-browser" class="panel" style="flex:1;">
       <div class="panel-head">
         System Browser <span class="spacer"></span>
+        <button type="button" class="panel-close" phx-click="close_browser" title="Close panel">
+          ×
+        </button>
         <div class="seg" role="tablist" aria-label="Class tree view">
           <button
             :for={{view, label} <- [{"hierarchy", "Hier"}, {"category", "Cats"}]}
@@ -4363,6 +4393,33 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
           </div>
           <span class="spacer"></span>
+          <%!-- Panel toggle buttons (BT-2559): show/hide side panels and dock. --%>
+          <div :if={@connected} class="panel-toggles">
+            <button
+              type="button"
+              class={["panel-toggle", @show_browser && "on"]}
+              phx-click="toggle_browser"
+              title="Toggle System Browser"
+            >
+              Browser
+            </button>
+            <button
+              type="button"
+              class={["panel-toggle", @show_inspector && "on"]}
+              phx-click="toggle_inspector"
+              title="Toggle Inspector"
+            >
+              Inspector
+            </button>
+            <button
+              type="button"
+              class={["panel-toggle", @show_dock && "on"]}
+              phx-click="toggle_dock"
+              title="Toggle Workspace Dock"
+            >
+              Dock
+            </button>
+          </div>
           <%!-- Dock/Float toggle (BT-2493, the spike's mode switch): in Float mode
                a binding click / Inspect-it opens a floating, draggable inspector
                window instead of the docked pane. Docked is the default. Shown only
@@ -4428,14 +4485,18 @@ defmodule BtAttachWeb.WorkspaceLive do
         </div>
 
         <%= if @connected do %>
-          <%!-- ── three-column cockpit grid ──────────────────────────────── --%>
-          <div class="cockpit">
+          <%!-- ── three-column cockpit grid (BT-2559: collapsible panels) --%>
+          <div class={[
+            "cockpit",
+            !@show_browser && "browser-hidden",
+            !@show_inspector && "inspector-hidden"
+          ]}>
             <%!-- LEFT — System Browser (BT-2491, 286px).
                  A class tree (Hierarchy / Category views, instance/class side
                  toggle) over a protocol-grouped method list, driven by the
                  BT-2488 browse ops (ADR 0096). The Tweaks panel that used to sit
                  below it now lives in the top-bar settings dropdown. --%>
-            <div class="col">
+            <div class={["col", !@show_browser && "hidden"]}>
               <div class="browser-split">
                 <.system_browser_classes
                   browser_view={@browser_view}
@@ -4465,7 +4526,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                    `hidden`, not removed) so the `#transcript` stream container is
                    always in the DOM for `stream_insert` regardless of the active
                    tab. --%>
-              <div class="dock" style="order:2;">
+              <div class={["dock", !@show_dock && "collapsed"]} style="order:2;">
                 <div id="workspace-dock" class="panel">
                   <div class="panel-head">
                     <span class="dock-tabs" role="tablist">
@@ -4492,6 +4553,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <span :if={@dock_tab == "workspace"} class="count">
                       {if ws_selection?(assigns), do: "evaluates selection", else: "evaluates buffer"}
                     </span>
+                    <button
+                      type="button"
+                      class="panel-close"
+                      phx-click="toggle_dock"
+                      title="Collapse dock"
+                    >
+                      ▾
+                    </button>
                   </div>
 
                   <%!-- WORKSPACE tab: highlighted editor + doIt/printIt/inspectIt --%>
@@ -4745,6 +4814,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                   </div>
                 </div>
               </div>
+              <%!-- Dock restore bar: shown when dock is collapsed --%>
+              <div
+                :if={!@show_dock}
+                class="dock-bar visible"
+                phx-click="toggle_dock"
+                title="Expand dock"
+              >
+                Workspace ▴
+              </div>
 
               <%!-- TABBED METHOD EDITOR (BT-2494): the spike's write-surface.
                    A tab strip (methods + class definitions) over a breadcrumb
@@ -4996,7 +5074,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
 
             <%!-- RIGHT — Bindings + Inspector (348px), with ChangeLog + Transcript --%>
-            <div class="col">
+            <div class={["col", !@show_inspector && "hidden"]}>
               <div class="right-split">
                 <div id="bindings-panel" class="panel bindings-panel">
                   <div class="panel-head">
@@ -5060,6 +5138,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <span class="iwf-dot"></span>{(@inspect_frozen && "frozen") || "live"}
                     </button>
                     <span :if={@inspect_target} class="count">following references</span>
+                    <button
+                      type="button"
+                      class="panel-close"
+                      phx-click="close_inspector"
+                      title="Close panel"
+                    >
+                      ×
+                    </button>
                   </div>
                   <%= if @inspect_target do %>
                     <%!-- Spike Inspector head (inspector.jsx `InspectorContent`): a
