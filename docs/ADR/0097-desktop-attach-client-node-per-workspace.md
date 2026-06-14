@@ -46,7 +46,7 @@ The `bt_attach` front is hardwired to a **single** workspace, fixed at boot:
 | Target node | `workspace.ex:54` (`node_name/0`) | reads `BT_WORKSPACE_NODE` env **once**, module-global |
 | Cookie | `workspace.ex:951` `set_cookie/0` | reads `BT_WORKSPACE_COOKIE` env, calls `Node.set_cookie(node_name(), token)` — the **per-peer** arity (`erlang:set_cookie(Node, Cookie)`), scoped to the one target node |
 | Self node name | `workspace.ex:936` `ensure_distributed/0` | the front starts its *own* distribution via `:net_kernel.start([:"bt_attach_#{System.unique_integer([:positive])}@localhost", :shortnames])` — it does **not** use `RELEASE_NODE` |
-| Every RPC | `workspace.ex:966` | `:rpc.call(node_name(), …)` — always the one global target |
+| Every RPC | `workspace.ex:966` `rpc/3` | `:rpc.call(node_name(), …)` — always the one global target |
 | Launcher | `rel/overlays/bin/server <id>` | resolves `node_name` from `~/.beamtalk/workspaces/<id>/metadata.json` + the sibling `cookie` file, exports the two env vars, runs `bin/bt_attach start` |
 
 So today: **one front node, bound to one workspace, for the life of the
@@ -113,8 +113,10 @@ PORT=<free-port> bin/server <id>
   processes could in principle generate the same sname and collide on epmd.
   Seeding the name with the workspace id — a one-line change to
   `ensure_distributed/0` (or a `BT_ATTACH_NODE_SUFFIX` env it reads) — makes it
-  collision-free across processes. This is the only `workspace.ex` touch the
-  design needs.
+  collision-free across processes. This is the smallest of the front-side
+  touches; the design also needs a `BT_ATTACH_BIND_IP` hook in
+  `config/runtime.exs` and a minimal `/readiness` endpoint (both below) — all
+  small and additive, but not literally "one line."
 
 Each front holds the cookie for exactly **one** workspace. As noted above this
 is a *choice*, not a VM constraint — but holding one cookie per process is what
@@ -131,21 +133,38 @@ untouched.
    via `beamtalk workspace status` (or a dist ping).
 2. **Attach** — pick a free port, spawn the node as above pinned to a **loopback
    bind** and the **unauthenticated cookie-only** path (see local-only posture
-   below), **attach-health probe** it (not just a bare HTTP 200 — distribution
-   starts lazily on first `connect/0`, so the probe must force a workspace round
-   trip to surface a bad cookie / dead workspace *before* the window opens),
-   then open a window at `localhost:<port>`.
+   below), then probe for readiness before opening the window. Note the probe is
+   **two-stage**, because an external (non-BEAM) broker cannot trigger the lazy
+   `connect/0` from outside the VM: (a) poll the HTTP port to confirm Phoenix is
+   up; (b) hit a small **attach-health endpoint** — `GET /readiness` — that forces
+   `connect/0` + one cheap RPC to the workspace and returns 200 only on success,
+   so a bad cookie / dead workspace surfaces *before* the window opens rather than
+   on the user's first eval. That endpoint does **not** exist today; it is a
+   small, explicit addition to the front's router + a thin controller (see
+   Implementation §1) — not free, but contained.
 3. **Detach / quit** — terminate that node's child process; the window closes.
 
-**Local-only posture (security).** The broker spawns each front with an explicit
-loopback bind (override the prod endpoint's all-interfaces default,
-`runtime.exs:74`) and must **refuse to spawn, with a clear error, if OIDC config
-is present** (`~/.beamtalk/ide.toml` / `BT_OIDC_*`) — the desktop tool is the
-single-user localhost lane (ADR 0091 §"Local dev stays zero-config"), not a place
-to silently half-enforce remote auth. It also provisions a **stable
-`SECRET_KEY_BASE` per workspace** (persisted under the workspace dir) rather than
-inheriting `bin/server`'s ephemeral-per-boot key, so a front crash + respawn
-does not invalidate the user's live session cookies.
+**Local-only posture (security).** Three things the broker must pin, none of
+which the remote-shaped release does for it:
+
+- **Loopback bind.** The prod endpoint hardcodes `ip: {0,0,0,0,0,0,0,0}`
+  (`runtime.exs:74`) with **no env hook today**, so "the broker passes a bind
+  address" is not yet possible — closing this needs a small `config/runtime.exs`
+  change: read a `BT_ATTACH_BIND_IP` env (defaulting to the current
+  all-interfaces value, so remote deploys are unchanged) and have the broker set
+  it to `127.0.0.1`/`::1`. Naming the mechanism here so the spike (§6d) doesn't
+  discover it late.
+- **No OIDC.** Refuse to spawn, with a clear error, if OIDC config is present
+  (`~/.beamtalk/ide.toml` / `BT_OIDC_*`) — the desktop tool is the single-user
+  localhost lane (ADR 0091 §"Local dev stays zero-config"), not a place to
+  silently half-enforce remote auth. (`runtime.exs:31` runs `IdeConfig.load!()`
+  for every non-test boot, so a stray config would otherwise take effect.)
+- **Stable, locked-down secret.** Provision a **stable `SECRET_KEY_BASE` per
+  workspace** (rather than inheriting `bin/server`'s ephemeral-per-boot key) so a
+  front crash + respawn doesn't invalidate the user's live session cookies. This
+  secret signs session cookies — a forged cookie is RCE-equivalent — so it is
+  stored `0600` under the (already `0700`) workspace dir; the same "get it wrong
+  and you expose the workspace" failure-mode framing applies as to the bind.
 
 ### What this is NOT
 
@@ -364,9 +383,11 @@ to what's already running" use case.
 ## Consequences
 
 ### Positive
-- **Near-zero change to `workspace.ex` / the attach client.** Reuses the shipped
-  boot-time global-env model and `bin/server` discovery; the only possible touch
-  is a one-line self-node-name seed for cross-process uniqueness (Impl §1).
+- **Small, additive front changes — the attach client's core is untouched.**
+  Reuses the shipped boot-time global-env model and `bin/server` discovery; the
+  RPC/eval path is unchanged. The new front-side work is three small, additive
+  pieces (Impl §1): a one-line sname seed, a `BT_ATTACH_BIND_IP` env hook in
+  `config/runtime.exs`, and a minimal `/readiness` endpoint.
 - **Blast-radius and crash isolation** — one workspace's cookie per process, one
   window per front.
 - **One shipped artifact** (the `bt_attach` ERTS release); no Rust toolchain
@@ -400,14 +421,19 @@ to what's already running" use case.
 
 ## Implementation
 
-1. **Sname uniqueness + `PORT` per instance** — seed `ensure_distributed/0`'s
-   sname with the workspace id (or read a `BT_ATTACH_NODE_SUFFIX` env) so two
-   front processes can't collide on epmd; confirm `PORT` passthrough. One-line
-   `workspace.ex` change + `bin/server` env. (~S)
+1. **Front-side hooks (three small, additive changes).** (a) seed
+   `ensure_distributed/0`'s sname with the workspace id (or a
+   `BT_ATTACH_NODE_SUFFIX` env) so two front processes can't collide on epmd;
+   (b) read `BT_ATTACH_BIND_IP` in `config/runtime.exs` (default = today's
+   all-interfaces) so the broker can pin loopback; (c) add a `/readiness`
+   endpoint (router + thin controller) that forces `connect/0` + one cheap RPC
+   and returns 200 only when the workspace is actually reachable. Confirm `PORT`
+   passthrough. (~S)
 2. **Broker core (desktop main process)** — discovery of
-   `~/.beamtalk/workspaces/*`, free-port selection, spawn with `PORT` + cookie
-   env, readiness probe (poll the HTTP port; note distribution starts lazily on
-   first mount), child-exit reaping. (~M)
+   `~/.beamtalk/workspaces/*`, free-port selection, spawn with `PORT` +
+   `BT_ATTACH_BIND_IP` + cookie env, **two-stage readiness probe** (HTTP port up,
+   then `GET /readiness` for true workspace reachability — distribution starts
+   lazily, so HTTP-up alone is not enough), child-exit reaping. (~M)
 3. **Picker / launcher UI** — native list of live workspaces, attach/detach,
    disconnected-state handling. (~M)
 4. **Window-per-workspace wiring** — one window per attached front. (~S)
@@ -423,11 +449,13 @@ to what's already running" use case.
    CI lane (§5) if the broker responsibilities prove they need to live outside
    the BEAM. (~M, was ~S — this is the load-bearing spike, not a warm-up.)
 
-Rough total: ~2 weeks, low risk — one-line `workspace.ex` touch at most.
+Rough total: ~2 weeks, low risk — the front changes are small and additive; the
+attach client's RPC/eval core is untouched.
 
 Affected components: desktop shell (new), `editors/liveview/rel/overlays/bin/`,
-a one-line seed in `workspace.ex` (`ensure_distributed/0`), CI release lanes.
-**Not** affected: the wire/RPC layer, the Rust toolchain.
+three small front-side additions (`ensure_distributed/0` sname seed,
+`config/runtime.exs` `BT_ATTACH_BIND_IP`, a `/readiness` router + controller),
+CI release lanes. **Not** affected: the wire/RPC/eval layer, the Rust toolchain.
 
 ## References
 - Related issues: BT-XXX (to be filed via `/plan-adr`)
