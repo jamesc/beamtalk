@@ -66,11 +66,20 @@ export const CmEditor = {
     }
 
     this.selectEvent = this.el.dataset.selectEvent || null
+    // Tab-id stamp (BT-2549): the method editor re-keys this element per active
+    // tab, so `data-tab-id` captures the tab THIS editor instance edits. We send
+    // it with every selection push; the server ignores any push whose stamp ≠ the
+    // active tab, so a `select_source` the departing editor dispatched just before
+    // `destroyed()` can't re-populate `:edit_selection` with stale coordinates
+    // after a tab switch. Absent (Workspace editor) → null, which that handler
+    // doesn't read.
+    this.tabId = this.el.dataset.tabId || null
     this.lastSelection = null
     this.hadSelection = false
     // Opt-in to inline eval results (BT-2542). Only the Workspace editor sets
-    // data-inline-results; a future REPL input (BT-2543) is a CmEditor too but
-    // shows results in its own scrollback, so it leaves this off.
+    // data-inline-results; the REPL input (BT-2543) shows results in its own
+    // scrollback, and it diverges further (Enter submits, ↑/↓ recall history), so
+    // it ships as a sibling hook (repl_input.js) rather than a flag here.
     this.inlineResults = this.el.dataset.inlineResults === "true"
     const readOnly = this.field.readOnly || this.el.dataset.readonly === "true"
     const placeholderText = this.el.dataset.placeholder || ""
@@ -172,6 +181,11 @@ export const CmEditor = {
     const key = range.from + ":" + range.to + ":" + text
     if (key === this.lastSelection) return
     this.lastSelection = key
-    this.pushEvent(this.selectEvent, { text, start: range.from, end: range.to })
+    this.pushEvent(this.selectEvent, {
+      text,
+      start: range.from,
+      end: range.to,
+      tab_id: this.tabId,
+    })
   },
 }

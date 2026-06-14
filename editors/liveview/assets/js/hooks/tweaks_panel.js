@@ -163,12 +163,19 @@ export const TweaksPanel = {
 
     // Accent is a per-theme override on paper/squeak; dusk uses its own built-in
     // accent (clear the override so the theme's value shows through).
-    if ((theme === "paper" || theme === "squeak") && v.accent) {
+    const isDusk = theme === "dusk"
+    if (!isDusk && v.accent) {
       r.style.setProperty("--accent", v.accent)
       r.style.setProperty("--accent-2", shade(v.accent, -22))
     } else {
       r.style.removeProperty("--accent")
       r.style.removeProperty("--accent-2")
+    }
+
+    // Mark accent swatches as disabled on dusk so they look inert.
+    const swatches = this.el.querySelector(".twk-swatches")
+    if (swatches) {
+      swatches.dataset.accentDisabled = isDusk ? "1" : "0"
     }
 
     // Syntax palette: clear any previous --t-* overrides, then set the mode's.

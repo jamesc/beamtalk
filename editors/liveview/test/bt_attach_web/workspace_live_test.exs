@@ -467,20 +467,68 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "the select_source hook event is accepted and ignored when malformed (BT-2485)", %{
     conn: conn
   } do
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, html} = live(conn, "/")
 
-    # A well-formed selection payload must not crash the LiveView (the assign is
-    # internal, so we just prove the handler accepts it and re-renders).
+    # A well-formed selection payload stamped with the *active* tab id is stored
+    # (BT-2549: the stamp is what the guard matches against).
+    tab_id = active_tab_id(html)
+
     assert render_hook(view, "select_source", %{
              "text" => "self.value",
              "start" => 0,
-             "end" => 10
+             "end" => 10,
+             "tab_id" => tab_id
            })
+
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
 
     # A malformed payload (no text key, or non-binary) is ignored, not a crash —
     # the LiveView keeps rendering, proving the defensive clause holds.
     assert render_hook(view, "select_source", %{"garbage" => true})
     assert render_hook(view, "select_source", %{"text" => 123})
+  end
+
+  test "select_source ignores a stale stamp from a departing tab (BT-2549)", %{conn: conn} do
+    {:ok, view, html} = live(conn, "/")
+    active = active_tab_id(html)
+
+    # Seed a real selection for the active tab so we can prove the stale event
+    # doesn't clobber *or* overwrite it.
+    render_hook(view, "select_source", %{
+      "text" => "self.value",
+      "start" => 0,
+      "end" => 10,
+      "tab_id" => active
+    })
+
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
+
+    # The race: a `select_source` the *departing* CmEditor dispatched just before
+    # its `destroyed()` ran lands carrying the previous tab's id. Its stamp no
+    # longer matches `active_tab`, so the handler drops it — `:edit_selection`
+    # keeps the live tab's coordinates rather than stale ones from the closed tab.
+    render_hook(view, "select_source", %{
+      "text" => "stale.from.closed.tab",
+      "start" => 99,
+      "end" => 123,
+      "tab_id" => active <> ":stale"
+    })
+
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
+
+    # A payload with no tab-id stamp at all is likewise ignored (defensive: a
+    # client that never stamps can't poison the assign).
+    render_hook(view, "select_source", %{"text" => "no.stamp", "start" => 1, "end" => 2})
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
+  end
+
+  # The method editor stamps its CmEditor element with the active tab id so each
+  # selection push can be matched against the live tab (BT-2549).
+  test "the method editor stamps its CmEditor with the active tab id (BT-2549)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ ~s(data-select-event="select_source")
+    assert html =~ ~s(data-tab-id="#{active_tab_id(html)}")
   end
 
   # ── Phase 2 tabbed method editor (BT-2494) ──────────────────────────────────
@@ -1492,6 +1540,159 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert eventually(fn -> BtAttach.Workspace.session_count() == before end)
   end
 
+  # ── REPL tab (BT-2543) ───────────────────────────────────────────────────────
+  #
+  # The REPL is the conversational, line-at-a-time sibling of the Workspace: a
+  # request→response scrollback with a bottom-pinned input that shares the SAME
+  # eval session + structured result. These exercise the server side of that
+  # (the `repl_eval` / history / inspect handlers + the scrollback stream); the
+  # browser-only behaviour (Enter submits, ↑/↓ at line edges, the CodeMirror
+  # composer) lives in workspace_browser_test.exs.
+
+  test "the REPL tab is present in the dock alongside the other surfaces", %{conn: conn} do
+    {:ok, view, html} = live(conn, "/")
+    # The new tab and its bottom-input form are in the connected render.
+    assert html =~ ~s(phx-value-tab="repl")
+    assert has_element?(view, ~s(button[phx-value-tab="repl"]), "REPL")
+    assert has_element?(view, "#repl-form")
+    # And it has NOT displaced the existing surfaces.
+    assert has_element?(view, ~s(button[phx-value-tab="workspace"]))
+    assert has_element?(view, ~s(button[phx-value-tab="transcript"]))
+    assert has_element?(view, ~s(button[phx-value-tab="changes"]))
+  end
+
+  test "switching to the REPL tab preserves the Workspace surface state", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    # All dock panes stay in the DOM (toggled with `hidden`), so switching tabs is
+    # pure view state and never tears a surface down — the eval form survives.
+    render_hook(view, "dock_tab", %{"tab" => "repl"})
+    assert has_element?(view, "#eval-form")
+    assert has_element?(view, "#repl-form")
+  end
+
+  test "submitting appends a › request / → response pair to the scrollback", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> form("#repl-form") |> render_submit(%{expr: "3 + 4"})
+    # One entry, carrying both the echoed request and the computed response.
+    assert view |> element(".repl-entry .repl-expr") |> render() =~ "3 + 4"
+    assert view |> element(".repl-entry .repl-val") |> render() =~ "7"
+    refute has_element?(view, ".repl-entry.err")
+  end
+
+  test "the scrollback accumulates one entry per submit (request→response history)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> form("#repl-form") |> render_submit(%{expr: "1 + 1"})
+    view |> form("#repl-form") |> render_submit(%{expr: "2 + 2"})
+    html = render(view)
+    assert html =~ "1 + 1"
+    assert html =~ "2 + 2"
+  end
+
+  test "submitting clears the REPL input (terminal convention)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> form("#repl-form") |> render_submit(%{expr: "3 + 4"})
+    # The input is hook-owned (phx-update=ignore), so the clear is a server push.
+    assert_push_event(view, "repl_set_input", %{text: ""})
+  end
+
+  test "a bare/blank submit is a no-op — no entry, no clear push", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> form("#repl-form") |> render_submit(%{expr: "   "})
+    refute has_element?(view, ".repl-entry")
+  end
+
+  test "↑/↓ walk the history ring and push the recalled text", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+
+    view |> form("#repl-form") |> render_submit(%{expr: "11 * 2"})
+    assert_push_event(view, "repl_set_input", %{text: ""})
+    view |> form("#repl-form") |> render_submit(%{expr: "33 + 9"})
+    assert_push_event(view, "repl_set_input", %{text: ""})
+
+    # History is most-recent-first: ↑ recalls the newest, then older; ↓ walks back
+    # toward the present and past the newest restores the empty live input.
+    render_hook(view, "repl_history_prev", %{})
+    assert_push_event(view, "repl_set_input", %{text: "33 + 9"})
+    render_hook(view, "repl_history_prev", %{})
+    assert_push_event(view, "repl_set_input", %{text: "11 * 2"})
+    render_hook(view, "repl_history_next", %{})
+    assert_push_event(view, "repl_set_input", %{text: "33 + 9"})
+    render_hook(view, "repl_history_next", %{})
+    assert_push_event(view, "repl_set_input", %{text: ""})
+  end
+
+  test "an eval error appends an error entry, it does not crash the REPL", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    # A malformed expression: the workspace returns an error, which lands as an
+    # `err` scrollback entry rather than crashing the LiveView.
+    view |> form("#repl-form") |> render_submit(%{expr: "1 +"})
+    assert has_element?(view, ".repl-entry.err")
+    assert Process.alive?(view.pid)
+  end
+
+  test "a REPL result stays a live object — Inspect opens it in the Inspector", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    class = "ReplBox#{System.unique_integer([:positive])}"
+
+    class_src =
+      "Actor subclass: #{class}\n  state: n = 7\n\n  n => self.n"
+
+    view |> form("#repl-form") |> render_submit(%{expr: class_src})
+    # Spawn a live actor IN the REPL; its `→ result` entry carries an Inspect
+    # affordance into the cockpit Inspector (object soul preserved in the terminal).
+    view |> form("#repl-form") |> render_submit(%{expr: "#{class} spawn"})
+
+    button = view |> element(".repl-entry:last-child .repl-inspect")
+    assert has_element?(button)
+    html = render_click(button)
+    # The Inspector now heads on the REPL result and reads its live field.
+    assert html =~ "REPL result"
+    assert html =~ "n"
+  end
+
+  describe "REPL tab — read-only Observer (BT-2421)" do
+    setup %{conn: conn} do
+      Application.put_env(:bt_attach, :oidc, %{
+        issuer: "https://idp",
+        client_id: "id",
+        redirect_uri: "https://ide/callback",
+        groups_claim: "groups",
+        client_secret: "x",
+        roles: %{"owner" => ["beamtalk-owners"], "observer" => ["beamtalk-observers"]}
+      })
+
+      Application.put_env(:bt_attach, :session_ttl_secs, 3600)
+
+      on_exit(fn ->
+        Application.delete_env(:bt_attach, :oidc)
+        Application.delete_env(:bt_attach, :session_ttl_secs)
+      end)
+
+      conn =
+        Plug.Test.init_test_session(conn, %{
+          "bt_user" => %{"sub" => "obs", "groups" => ["beamtalk-observers"]},
+          "bt_logged_in_at" => System.system_time(:second)
+        })
+
+      {:ok, conn: conn}
+    end
+
+    test "the REPL input is hidden for an Observer", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/")
+      assert html =~ "read-only (Observer)"
+      refute html =~ ~s(phx-submit="repl_eval")
+    end
+
+    test "a crafted repl_eval from an Observer is refused, not crashed", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+      # The input is gated away, but a crafted client event must still be refused by
+      # the facade/RBAC and surfaced as an error entry, not crash the LiveView.
+      html = render_hook(view, "repl_eval", %{"expr" => "3 + 4"})
+      assert html =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
+  end
+
   # Set the per-tab resume token on the conn so the connected mount reads it back
   # via `get_connect_params/1` — the test analogue of the `sessionStorage` token
   # the browser replays on the LiveSocket params.
@@ -1507,6 +1708,21 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       [_, n] -> String.to_integer(n)
       _ -> 0
     end
+  end
+
+  # The active method-editor tab id, read from the CmEditor element's stamp
+  # (`data-tab-id`) — the same value a real selection push carries (BT-2549).
+  defp active_tab_id(html) do
+    case Regex.run(~r/data-tab-id="([^"]+)"/, html) do
+      [_, id] -> id
+      nil -> raise "data-tab-id not rendered in HTML"
+    end
+  end
+
+  # The internal `:edit_selection` assign — no rendered consumer yet (BT-2549),
+  # so peek at the LiveView's socket to assert the selection-guard behaviour.
+  defp edit_selection(view) do
+    :sys.get_state(view.pid).socket.assigns.edit_selection
   end
 
   # ~6s total — generous for cross-node async transcript delivery under CI load.

@@ -2,6 +2,17 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
+/* Bundled code fonts */
+@font-face { font-family: "Cascadia Code"; src: url("/fonts/CascadiaCode-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Cascadia Code"; src: url("/fonts/CascadiaCode-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; }
+@font-face { font-family: "Cascadia Code"; src: url("/fonts/CascadiaCode-Italic.woff2") format("woff2"); font-weight: 400; font-style: italic; }
+@font-face { font-family: "Monaspace"; src: url("/fonts/MonaspaceNeon-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Monaspace"; src: url("/fonts/MonaspaceNeon-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; }
+@font-face { font-family: "Monaspace"; src: url("/fonts/MonaspaceNeon-Italic.woff2") format("woff2"); font-weight: 400; font-style: italic; }
+@font-face { font-family: "JetBrains Mono"; src: url("/fonts/JetBrainsMono-Regular.woff2") format("woff2"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "JetBrains Mono"; src: url("/fonts/JetBrainsMono-Bold.woff2") format("woff2"); font-weight: 700; font-style: normal; }
+@font-face { font-family: "JetBrains Mono"; src: url("/fonts/JetBrainsMono-Italic.woff2") format("woff2"); font-weight: 400; font-style: italic; }
+
 /* This file is for your main application CSS */
 
 /* ============================================================================
@@ -98,9 +109,12 @@
   --t-send:#f0ad4e; --t-cascade:#bcae8e; --t-punct:#8a7d64;
 }
 
-/* density */
-[data-density="compact"] { --row-h: 22px; --pad: 5px; --gap: 6px; }
-:root { --row-h: 26px; --pad: 7px; --gap: 9px; }
+/* density — the compact override needs a higher specificity than the :root
+   defaults below it: both target <html> with equal weight, so a bare
+   [data-density] selector loses to the later :root rule and never applies.
+   `:root[data-density="compact"]` (two simple selectors) outranks `:root`. */
+:root { --row-h: 26px; --pad: 7px; --gap: 9px; --panel-pad: 10px 12px; }
+:root[data-density="compact"] { --row-h: 22px; --pad: 5px; --gap: 6px; --panel-pad: 8px 10px; }
 
 /* ---------- Cockpit base ---------- */
 .bt-cockpit, .bt-cockpit * { box-sizing: border-box; }
@@ -122,7 +136,7 @@
 .bt-cockpit .app {
   position: fixed; inset: 0; z-index: 1;
   height: 100vh; display: flex; flex-direction: column;
-  padding: 9px; gap: 9px;
+  padding: var(--pad); gap: var(--gap);
   background: var(--bg);
 }
 
@@ -165,10 +179,10 @@
 
 /* main grid: System Browser | editor + workspace dock | bindings + inspector */
 .cockpit {
-  flex: 1; min-height: 0; display: grid; gap: 9px;
+  flex: 1; min-height: 0; display: grid; gap: var(--gap);
   grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) var(--inspector-w, 348px);
 }
-.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 9px; }
+.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
 
 /* panel chrome */
 .panel {
@@ -185,7 +199,7 @@
 }
 .panel-head .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none; }
 .panel-head .spacer { flex: 1; }
-.panel-body { flex: 1; min-height: 0; overflow: auto; padding: 10px 12px; }
+.panel-body { flex: 1; min-height: 0; overflow: auto; padding: var(--panel-pad); }
 
 /* placeholder copy for not-yet-built Phase 1 panes */
 .placeholder {
@@ -199,7 +213,7 @@
 /* ---------- System Browser (BT-2491, ported from the spike) ---------- */
 
 /* the left column splits between the class tree and the method list */
-.browser-split { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
+.browser-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
 .browser-split .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
 /* segmented control (view + side toggles) */
@@ -338,7 +352,7 @@
    is always reachable. The old below-editor `.ws-result` success bubble is gone
    (results now land inline in the buffer); `.ws-result` survives only for the
    capped error strip, so a long error can't squeeze the editor either. */
-.ws-pane { padding: 10px 12px; }
+.ws-pane { padding: var(--panel-pad); }
 .ws-pane > form { flex: 1; min-height: 0; }
 .ws-wrap { flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: 7px; }
 .ws-result {
@@ -351,6 +365,60 @@
 .ws-result .val { color: var(--ink); min-width: 0; }
 .ws-result.err { border-color: color-mix(in oklab, var(--err) 35%, var(--line)); }
 .ws-result.err .arrow, .ws-result.err .val { color: var(--err); }
+
+/* REPL tab (BT-2543): a classic TUI request→response scrollback ABOVE a thin
+   bottom-pinned composer. The pane is a flex column — the scrollback flexes and
+   scrolls (flex:1, overflow:auto) while the input stays pinned (flex:none), so a
+   long response never pushes the input off-screen. */
+.repl-pane { padding: 0; }
+.repl-scrollback {
+  flex: 1; min-height: 0; overflow: auto; padding: 10px 12px;
+  font-family: var(--code-font, ui-monospace, monospace); font-size: 12.5px;
+  background: var(--code-bg);
+}
+/* The empty-state hint (shown until the first entry; `:if`-gated server-side). */
+.repl-empty { flex: none; margin: 10px 12px; }
+
+.repl-entry { margin: 0 0 10px 0; }
+.repl-entry:last-child { margin-bottom: 0; }
+.repl-req { display: flex; gap: 8px; align-items: flex-start; color: var(--ink); }
+.repl-mark { color: var(--muted); font-weight: 700; flex: none; }
+.repl-expr { white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; }
+.repl-res {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 2px; padding-left: 0;
+}
+.repl-arrow { color: var(--accent); font-weight: 700; flex: none; }
+.repl-val { color: var(--accent-2); white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; flex: 1; }
+.repl-entry.err .repl-arrow, .repl-entry.err .repl-val { color: var(--err); }
+
+/* Long responses collapse within their entry (capped open height, scroll past
+   it) so one verbose result can't flood the scrollback. */
+.repl-collapse { flex: 1; min-width: 0; }
+.repl-summary { cursor: pointer; color: var(--accent-2); list-style: revert; }
+.repl-collapse[open] .repl-summary { color: var(--muted); margin-bottom: 4px; }
+.repl-collapse .repl-val { display: block; max-height: 16em; overflow: auto; }
+
+/* Inspect affordance: results stay live objects even in the terminal idiom. */
+.repl-inspect {
+  flex: none; align-self: flex-start; margin-left: auto; padding: 1px 7px;
+  font-size: 11px; color: var(--muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 5px; cursor: pointer;
+}
+.repl-inspect:hover { color: var(--ink); border-color: var(--accent); }
+
+/* Bottom-pinned composer: a thin, growing CodeMirror input (the ReplInput hook).
+   Mirrors `.cm-wrap`/`.ws-wrap` chrome but caps its growth so the scrollback
+   keeps the bulk of the pane. */
+.repl-input-form { flex: none; padding: 8px 12px; border-top: 1px solid var(--line); }
+/* Unlike the Workspace editor (which fills a fixed pane via an absolute host),
+   the REPL composer grows with its content between a one-line floor and a small
+   cap, scrolling internally past the cap — a chat-composer feel. */
+.repl-wrap {
+  min-height: 2.2em; border: 1px solid var(--line); border-radius: 7px;
+}
+.repl-wrap .cm-host { position: relative; inset: auto; }
+.repl-wrap .cm-editor { height: auto; }
+.repl-wrap .cm-scroller { max-height: 9em; }
 
 /* Transient eval-status line (BT-2542): a thin, one-line confirmation of the
    last eval (`→ 7`, or `✓ evaluated` for Do it). It never wraps or grows, so it
@@ -401,7 +469,7 @@
 .kbdhint { font-size: 10.5px; color: var(--faint); }
 
 /* right column splits between bindings and inspector */
-.right-split { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
+.right-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
 .bindings-panel { flex: 1; min-height: 0; }
 .inspector-panel { flex: 1; min-height: 0; }
 
@@ -421,7 +489,7 @@
 .bt-cockpit .bindings-panel .panel-body { padding: 4px 0; }
 .obj-list { display: flex; flex-direction: column; }
 .obj-row {
-  display: flex; align-items: center; gap: 7px; padding: 0 10px; min-height: 28px;
+  display: flex; align-items: center; gap: 7px; padding: 0 10px; min-height: var(--row-h, 28px);
 }
 .obj-row.drillable { cursor: pointer; }
 .obj-row.drillable:hover { background: var(--hover); }
@@ -475,7 +543,7 @@
 .ivar-table tr { border-bottom: 1px solid var(--line-soft); cursor: default; }
 .ivar-table tr.drillable { cursor: pointer; }
 .ivar-table tr.drillable:hover { background: var(--hover); }
-.ivar-table td { padding: 6px 12px; vertical-align: top; }
+.ivar-table td { padding: var(--pad) 12px; vertical-align: top; }
 .ivar-table .k { font-family: var(--code-font, ui-monospace, monospace); color: var(--accent-2); width: 38%; }
 .ivar-table .v { font-family: var(--code-font, ui-monospace, monospace); color: var(--ink); }
 .ivar-table .v.string { color: var(--t-string); }
@@ -687,6 +755,28 @@
    ========================================================================== */
 .tweaks-panel .panel-body { display: flex; flex-direction: column; gap: var(--gap, 9px); }
 
+/* ── appearance settings dropdown (BT-2487): the Tweaks panel as a top-bar gear
+   menu instead of a permanent sidebar pane ── */
+.settings-menu { position: relative; flex: none; display: flex; align-items: center; }
+.settings-gear {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; font-size: 15px; line-height: 1;
+  background: var(--panel-3); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 7px; cursor: pointer;
+}
+.settings-gear:hover { background: var(--hover); color: var(--ink); }
+.settings-gear[aria-expanded="true"] { background: var(--panel); color: var(--ink); }
+/* anchored under the gear, right-aligned; hidden until .open. The inner
+   .tweaks-panel keeps its .panel chrome but is sized by the dropdown here. */
+.settings-popover {
+  display: none; position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
+  width: 290px; max-height: 78vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: var(--shadow), 0 10px 28px rgba(40, 30, 10, .26);
+}
+.settings-popover.open { display: block; }
+.settings-popover .tweaks-panel { border: 0; box-shadow: none; background: transparent; }
+
 /* a labelled row: caption above its control */
 .twk-row { display: flex; flex-direction: column; gap: 5px; }
 .twk-row > .twk-cap {
@@ -726,6 +816,14 @@
   color: #fff; font-size: 13px; font-weight: 700;
   text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
 }
+/* Accent swatches disabled on dusk — dusk keeps its built-in accent. */
+.twk-swatches[data-accent-disabled="1"] .twk-swatch {
+  opacity: .35; cursor: not-allowed; pointer-events: none;
+}
+.twk-accent-note {
+  color: var(--faint); font-size: 10.5px; margin-top: 3px; display: none;
+}
+.twk-swatches[data-accent-disabled="1"] ~ .twk-accent-note { display: block; }
 
 /* dropdowns (UI font / code font) reuse the shared `.field` look */
 .twk-select {
@@ -770,10 +868,18 @@
 .omni-label { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .omni-empty { padding: 8px 10px; color: var(--faint); font-size: 12px; }
 
-/* ── senders / implementors popover (BT-2495), anchored to the editor panel ── */
-.nav-actions { display: flex; gap: .5rem; margin-top: .5rem; }
+/* ── senders / implementors popover (BT-2495), anchored to its trigger row ── */
+/* position: relative makes .nav-actions the containing block for the popover */
+.nav-actions { display: flex; gap: .5rem; margin-top: .5rem; position: relative; }
+/* one action row: nav buttons left, Compile / Save All pushed right (.spacer) */
+.editor-actions { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; }
+.editor-actions > .spacer { flex: 1; }
+.editor-actions .nav-actions { margin-top: 0; }
+/* pops up directly above the Senders / Implementors buttons (bottom-left of the
+   action row); explicit width is independent of the narrow .nav-actions box */
 .nav-popover {
-  position: absolute; right: 12px; bottom: 12px; z-index: 40; width: min(420px, 92%);
+  position: absolute; left: 0; bottom: calc(100% + 8px); z-index: 40;
+  width: min(420px, 80vw);
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   box-shadow: var(--shadow), 0 8px 22px rgba(40,30,10,.22);
   max-height: 320px; overflow-y: auto; padding: 8px;
