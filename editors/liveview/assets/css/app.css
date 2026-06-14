@@ -356,7 +356,10 @@
    last eval (`→ 7`, or `✓ evaluated` for Do it). It never wraps or grows, so it
    cannot squeeze the editor, and it fades out a few seconds after each eval
    (re-keyed by `eval_seq` so the animation restarts). The element stays in the
-   DOM at opacity 0 — the value remains assertable in tests. */
+   DOM at opacity 0 — the value remains assertable in tests.
+   `.eval-status-region` is the stable aria-live wrapper (always present so
+   screen readers announce the keyed child's changes); it adds no box of its own. */
+.eval-status-region { flex: none; }
 .eval-status {
   flex: none; margin-top: 6px; padding: 2px 2px 0 2px;
   font-family: var(--code-font, ui-monospace, monospace); font-size: 12px;

@@ -113,9 +113,16 @@ class ResultWidget extends WidgetType {
 }
 
 function buildDecorations(items) {
+  // Collapse items that share an exact position — possible once the user deletes
+  // the text between two results, mapping both anchors to the same offset. Two
+  // block widgets at the same position + side are ordering-unspecified in
+  // CodeMirror (stacked widgets, or an assertion in strict builds); keep the
+  // most-recent one. (Map insertion preserves last-wins.)
+  const byPos = new Map()
+  for (const it of items) byPos.set(it.pos, it)
   // Block widgets must be added in document order; items are appended in eval
   // order, which is not necessarily position order once the buffer is edited.
-  const ordered = [...items].sort((a, b) => a.pos - b.pos)
+  const ordered = [...byPos.values()].sort((a, b) => a.pos - b.pos)
   return Decoration.set(
     ordered.map((it) =>
       Decoration.widget({

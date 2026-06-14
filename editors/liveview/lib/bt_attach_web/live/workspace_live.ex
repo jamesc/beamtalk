@@ -1351,17 +1351,24 @@ defmodule BtAttachWeb.WorkspaceLive do
     anchor = ws_anchor(socket)
 
     # `push_event` is page-wide — every CmEditor hook that registered the
-    # handler receives it. Scope it to the Workspace editor by element id (must
-    # match the `#workspace-editor-overlay` host in the template) so a second
-    # inline editor (BT-2543) can't also insert this result.
+    # handler receives it. Scope it to the Workspace editor by element id (the
+    # client drops a mismatched target) so a second inline editor (BT-2543) can't
+    # also insert this result. The id is the shared `workspace_editor_id/0` so the
+    # target and the template host can't drift apart.
     socket
     |> eval_status("→ " <> rendered, output, expr)
     |> push_event("ws_insert_result", %{
       text: rendered,
       anchor: anchor,
-      target: "workspace-editor-overlay"
+      target: workspace_editor_id()
     })
   end
+
+  # DOM id of the Workspace CodeMirror editor host — the single source of truth
+  # shared by the template element and the `ws_insert_result` push target, so a
+  # rename can't silently break inline results (the client guard discards a push
+  # whose target doesn't match `this.el.id`).
+  defp workspace_editor_id, do: "workspace-editor-overlay"
 
   # The doc offset to anchor an inline result after: the end of the tracked
   # selection (the evaluated region) when evaluating a selection, else nil so the
@@ -3734,7 +3741,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                              submit a stale value). ⌘D/⌘P/⌘I ride the form's
                              KeyboardShortcuts hook (keydown bubbles out). --%>
                         <div
-                          id="workspace-editor-overlay"
+                          id={workspace_editor_id()}
                           class="cm-wrap ws-wrap"
                           phx-hook="CmEditor"
                           data-select-event="select_workspace"
@@ -3782,15 +3789,18 @@ defmodule BtAttachWeb.WorkspaceLive do
                          THIN, self-clearing status line — not the old growing
                          `.ws-result` bubble (which squeezed the editor). The full
                          result lands inline in the buffer (print_it) or the
-                         Inspector (inspect_it); this is the momentary echo. Keyed
-                         by `eval_seq` so its fade restarts on each eval. --%>
-                    <div
-                      :if={@result}
-                      id={"eval-status-#{@eval_seq}"}
-                      class="eval-status"
-                      aria-live="polite"
-                    >
-                      <span class="val">{@result}</span>
+                         Inspector (inspect_it); this is the momentary echo.
+
+                         The `aria-live` region is a STABLE outer wrapper: screen
+                         readers announce mutations WITHIN a persistent live region,
+                         not a freshly-inserted one. The inner div is keyed by
+                         `eval_seq` so it re-mounts each eval (restarting the fade);
+                         its reappearance inside the stable region is the announced
+                         change. --%>
+                    <div id="eval-status" class="eval-status-region" aria-live="polite">
+                      <div :if={@result} id={"eval-status-#{@eval_seq}"} class="eval-status">
+                        <span class="val">{@result}</span>
+                      </div>
                     </div>
                     <div :if={@error} class="ws-result err">
                       <span class="arrow">→</span>
