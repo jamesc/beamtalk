@@ -26,6 +26,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
 
   setup do
     Application.put_env(:bt_attach, :workspace_client, BtAttachWeb.StubWorkspaceClient)
+
     Application.put_env(:bt_attach, :oidc, %{
       issuer: "https://idp",
       client_id: "id",
@@ -34,13 +35,14 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       client_secret: "x",
       roles: %{"owner" => ["beamtalk-owners"], "observer" => ["beamtalk-observers"]}
     })
+
     Application.put_env(:bt_attach, :session_ttl_secs, 3600)
 
     on_exit(fn ->
-      BtAttachWeb.StubWorkspaceClient.stop_state(2_000)
       Application.delete_env(:bt_attach, :workspace_client)
       Application.delete_env(:bt_attach, :oidc)
       Application.delete_env(:bt_attach, :session_ttl_secs)
+      BtAttachWeb.StubWorkspaceClient.stop_state(2_000)
     end)
 
     {:ok, _} = BtAttachWeb.StubWorkspaceClient.start_state()
@@ -57,10 +59,15 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
 
   defp eventually(fun), do: eventually(fun, 20)
   defp eventually(fun, 0), do: fun.()
+
   defp eventually(fun, retries) do
     case fun.() do
-      true -> true
-      _ -> Process.sleep(50); eventually(fun, retries - 1)
+      true ->
+        true
+
+      _ ->
+        Process.sleep(50)
+        eventually(fun, retries - 1)
     end
   end
 

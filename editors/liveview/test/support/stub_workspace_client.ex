@@ -150,7 +150,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def browse_protocols(class, side) do
     selectors =
-      if side == "instance" and (class == "Counter" or MapSet.member?(get(:defined_classes), class)) do
+      if side == "instance" and
+           (class == "Counter" or MapSet.member?(get(:defined_classes), class)) do
         [%{"selector" => "value"}, %{"selector" => "increment"}]
       else
         []
@@ -167,11 +168,23 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         _ -> "stub => nil"
       end
 
-    {:value, %{"source" => source, "source_status" => "indexed", "origin" => "both", "disk_differs" => false}}
+    {:value,
+     %{
+       "source" => source,
+       "source_status" => "indexed",
+       "origin" => "both",
+       "disk_differs" => false
+     }}
   end
 
   def browse_class_definition(class) do
-    {:value, %{"class" => class, "definition" => "Object subclass: #{class}", "origin" => "both", "disk_differs" => false}}
+    {:value,
+     %{
+       "class" => class,
+       "definition" => "Object subclass: #{class}",
+       "origin" => "both",
+       "disk_differs" => false
+     }}
   end
 
   # ── Navigation ops ───────────────────────────────────────────────────────
@@ -194,7 +207,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def format_value(json), do: BtAttach.Workspace.format_value(json)
   def format_flush_summary(summary), do: BtAttach.Workspace.format_flush_summary(summary)
   def inspectable?(term), do: BtAttach.Workspace.inspectable?(term)
-  def node_name, do: :"stub_node@localhost"
+  def node_name, do: :stub_node@localhost
 
   # ── Call recording ───────────────────────────────────────────────────────
 
