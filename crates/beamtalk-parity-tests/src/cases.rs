@@ -145,8 +145,7 @@ pub struct Case {
 impl Case {
     /// Load and parse a case file from disk.
     pub fn from_path(path: &Path) -> Result<Self, String> {
-        let text =
-            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let text = crate::read_path(path)?;
         let steps = parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(Self {
             path: path.to_path_buf(),
