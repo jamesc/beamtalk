@@ -50,8 +50,7 @@ stays npm-free** — only the build needs node. `phoenix`, `phoenix_html`, and
 esbuild via `NODE_PATH`, version-locked to the hex packages.
 
 The editor highlights Beamtalk with a small regex tokenizer
-(`assets/js/hooks/bt_highlight.js`) that shares its rules with the legacy
-overlay highlighter (`highlight.js`) and paints CodeMirror decorations using the
+(`assets/js/hooks/bt_highlight.js`) that paints CodeMirror decorations using the
 themed `.tok-*` classes. (An earlier revision ran the VS Code TextMate grammar
 via oniguruma WASM; that added ~250 KB gzipped — more than CodeMirror itself —
 which was disproportionate for these small buffers. If structural features like
@@ -123,8 +122,8 @@ without a running workspace. To run them, start a workspace and export the node
 ## Browser e2e (Playwright)
 
 `Phoenix.LiveViewTest` renders the LiveView server-side and **never loads
-`app.js`**, so the cockpit's client-side JS hooks — `CodeEditor`,
-`KeyboardShortcuts`, `SelectionTracker` (BT-2485) and `TweaksPanel` (BT-2487) —
+`app.js`**, so the cockpit's client-side JS hooks — `CmEditor` (BT-2538/BT-2539),
+`KeyboardShortcuts` (BT-2485) and `TweaksPanel` (BT-2487) —
 are invisible to it. The browser e2e suite
 (`test/bt_attach_web/workspace_browser_test.exs`) closes that gap:
 [PhoenixTest](https://hexdocs.pm/phoenix_test) driving a **real Chromium** via

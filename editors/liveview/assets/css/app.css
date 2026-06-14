@@ -255,7 +255,7 @@
    and nav actions stay compact below it. */
 .editor-panel .panel-body { display: flex; flex-direction: column; }
 #method-editor-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-#method-editor-form .bt-editor-wrap { flex: 1; min-height: 6rem; }
+#method-editor-form .cm-wrap { flex: 1; min-height: 6rem; }
 
 /* ============================================================================
    Tabbed method editor — write-surface tab strip + breadcrumb (BT-2494)
@@ -311,7 +311,7 @@
    Ported from the spike (spikes/cockpit-ux-spike/app.jsx + styles.css). One
    panel switched by `dock_tab`; the three panes are all rendered (toggled with
    `hidden`) so the `#transcript` stream container stays in the DOM. The Workspace
-   pane wraps the BT-2485 CodeEditor overlay in the eval `<form>` with the
+   pane wraps the BT-2538 CmEditor (CodeMirror) in the eval `<form>` with the
    doIt/printIt/inspectIt action bar.
    ========================================================================== */
 .dock-tabs { display: flex; gap: 2px; align-items: center; }
@@ -567,31 +567,14 @@
 .bt-cockpit *::-webkit-scrollbar-track { background: transparent; }
 
 /* ============================================================================
-   Syntax-highlighting editor overlay (BT-2485, epic BT-2482 Phase 1)
+   Beamtalk syntax token colours (BT-2485, BT-2538)
    ----------------------------------------------------------------------------
-   The `CodeEditor` JS hook (assets/js/hooks/code_editor.js) paints a Beamtalk
-   highlight into a `<pre class="bt-editor-pre">` behind a transparent
-   `<textarea class="bt-editor-ta">`. The two layers MUST share identical font,
-   font-size, line-height, padding and tab-size so the highlighted glyphs sit
-   exactly under the typed (transparent) glyphs — keep these rules in sync.
-   The `.tok-*` colours below resolve the `--t-*` variables themed per surface.
+   The `.tok-*` classes are emitted by the CodeMirror highlighter
+   (`assets/js/hooks/bt_highlight.js`) as decoration marks; each colour resolves
+   a `--t-*` variable themed per surface, so the TweaksPanel re-skins the editor
+   without touching markup. (These also served the retired CodeEditor <pre>
+   overlay, removed when the method editor moved to CodeMirror in BT-2539.)
    ========================================================================== */
-.bt-editor-wrap {
-  position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--code-bg);
-}
-.bt-editor-pre, .bt-editor-ta {
-  margin: 0; padding: 12px 14px; font-family: var(--code-font, ui-monospace, monospace);
-  font-size: 12.5px; line-height: 1.6; tab-size: 2; -moz-tab-size: 2;
-  white-space: pre; overflow-wrap: normal; border: 0;
-}
-.bt-editor-pre {
-  position: absolute; inset: 0; pointer-events: none; color: var(--ink); overflow: auto;
-}
-.bt-editor-ta {
-  position: absolute; inset: 0; outline: none; resize: none; background: transparent;
-  color: transparent; caret-color: var(--accent); overflow: auto;
-}
-
 /* token colours — themed by the per-surface `--t-*` variables */
 .tok-comment { color: var(--t-comment); font-style: italic; }
 .tok-string  { color: var(--t-string); }
@@ -614,12 +597,12 @@
 .tok-punct   { color: var(--t-punct); }
 
 /* ============================================================================
-   CodeMirror 6 editor (BT-2538) — the CmEditor hook mounts CodeMirror into an
-   ignored host inside `.cm-wrap`. Match the old `.bt-editor` font/size/padding
-   so the surface looks unchanged; token colours reuse the `.tok-*` classes
-   above (the regex tokenizer in `bt_highlight.js` emits them), so per-theme `--t-*` variables
-   and the TweaksPanel keep working. The hidden `.cm-field` textarea is the
-   posted form field and is never shown.
+   CodeMirror 6 editor (BT-2538, BT-2539) — the CmEditor hook mounts CodeMirror
+   into an ignored host inside `.cm-wrap`, used by both the Workspace eval input
+   and the method-editor tabs. Token colours reuse the `.tok-*` classes above
+   (the regex tokenizer in `bt_highlight.js` emits them), so per-theme `--t-*`
+   variables and the TweaksPanel keep working. The hidden `.cm-field` textarea is
+   the posted form field and is never shown.
    ========================================================================== */
 .cm-wrap { position: relative; overflow: hidden; background: var(--code-bg); }
 .cm-wrap > .cm-host { position: absolute; inset: 0; }
