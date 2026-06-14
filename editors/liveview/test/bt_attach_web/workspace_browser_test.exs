@@ -66,8 +66,10 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # proof the real browser handshook the LiveSocket and the workspace attach
     # over distribution succeeded (not merely the disconnected HTTP render).
     |> assert_has(".att-label", text: "attached")
-    # The connected-only panes that host the JS hooks are present.
-    |> assert_has("#tweaks-panel")
+    # The connected-only panes that host the JS hooks are present. The Tweaks
+    # panel now lives behind the top-bar settings gear (still mounted in the DOM
+    # so its hook applies the saved theme on load).
+    |> assert_has(".settings-gear")
     |> assert_has("#eval-form")
     |> assert_has("#workspace-editor-overlay .cm-content")
   end
@@ -212,11 +214,14 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "the TweaksPanel hook reskins the IDE client-side and persists it (BT-2487)", %{conn: conn} do
     conn
     |> visit("/")
+    # The Tweaks panel is mounted on load (so the saved theme applies) but hidden
+    # behind the top-bar gear; open the settings dropdown to reach its controls.
     |> assert_has("#tweaks-panel")
     # The IDE boots on the default 'paper' theme (data-theme on <html>).
     |> evaluate("document.documentElement.getAttribute('data-theme')", fn theme ->
       assert theme == "paper"
     end)
+    |> click(".settings-gear")
     # Clicking the 'dusk' theme button is a PURE client-side hook action (no
     # server round-trip): it flips data-theme on <html>…
     |> click("[data-tweak='theme'][data-tweak-value='dusk']")
