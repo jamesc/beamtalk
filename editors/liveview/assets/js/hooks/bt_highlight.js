@@ -69,6 +69,12 @@ const RULES = [
 // matching at an explicit `lastIndex` avoids the per-character `src.slice(i)`
 // (O(n²)) a `^`-anchored `.match()` would force here. The leading `^` anchor is
 // dropped — `y` already pins the match to `lastIndex`.
+//
+// These compiled regexes live at module scope and `tokenize` mutates their
+// `lastIndex`, so a single `tokenize` call must run to completion before another
+// starts. JS's single-threaded execution guarantees that (no two generators
+// interleave mid-call), so this is safe — but it's why the regexes aren't shared
+// across concurrent tokenizations.
 const STICKY_RULES = RULES.map((rule) => ({
   cls: rule.cls,
   re: new RegExp(rule.re.source.replace(/^\^/, ""), "y"),
@@ -151,6 +157,10 @@ function* tokenize(src) {
       }
       break
     }
+    // Safety fallback, NOT dead code: in non-dotall mode `other: /^./` doesn't
+    // match line terminators, so a char no rule claims would loop forever without
+    // this advance. Newlines are normally consumed by the `ws` run; this only
+    // fires for exotic terminators that `.` excludes (e.g. U+2028, U+2029).
     if (!matched) i += 1
   }
 }
