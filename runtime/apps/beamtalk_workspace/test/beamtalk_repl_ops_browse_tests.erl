@@ -288,9 +288,10 @@ browse_tests(#{class_name := Class}) ->
             Row = find_class_row(Value, Class),
             SourceOrigin = maps:get(<<"source_origin">>, Row),
             ?assert(is_binary(SourceOrigin)),
-            ?assert(lists:member(SourceOrigin, [
-                <<"stdlib">>, <<"project">>, <<"dependency">>
-            ]) orelse binary:part(SourceOrigin, 0, 11) =:= <<"dependency:">>)
+            ?assert(
+                lists:member(SourceOrigin, [<<"stdlib">>, <<"project">>, <<"dependency">>]) orelse
+                binary:match(SourceOrigin, <<"dependency:">>) =/= nomatch
+            )
         end},
         {"browse-protocols groups selectors with line and source_status", fun() ->
             Value = decode_value(
