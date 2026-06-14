@@ -1709,29 +1709,35 @@ defmodule BtAttachWeb.WorkspaceLive do
         activate_tab(socket, id)
 
       %{} = existing ->
-        # Tab already open and clean: re-fetch the live image so the breadcrumb
-        # badges reflect an out-of-band patch (REPL `>>`, MCP `save_method`) that
-        # landed while the tab sat open, instead of the snapshot taken at first open.
-        # Safe because a clean tab has `source == base`, so re-seeding both to the
-        # current image cannot lose edits.
-        info = method_source_info(socket, class, side, selector)
+        # Tab already open and clean: re-fetch the live image so the breadcrumb badges
+        # reflect an out-of-band image patch (e.g. an image compile / MCP `save_method`)
+        # that landed while the tab sat open, instead of the snapshot taken at first
+        # open. On an empty-source fallback — a transient facade error or a
+        # since-deleted method — keep the existing buffer rather than blanking a tab the
+        # user is looking at (the precondition is a clean tab, so nothing typed is lost,
+        # but the visible source should not silently vanish).
+        case method_source_info(socket, class, side, selector) do
+          %{source: ""} ->
+            activate_tab(socket, id)
 
-        refreshed = %{
-          existing
-          | source: info.source,
-            base: info.source,
-            # Pick up *new* divergence (false → true) from an out-of-band patch, but
-            # never clear a divergence already set locally by an in-memory compile
-            # (`compile_clean/3`): clearing on flush is BT-2545's path, not this one.
-            # Keeps the false → true invariant the `nil ->` branch documents.
-            disk_differs: existing.disk_differs or info.disk_differs,
-            runtime_only: info.runtime_only
-        }
+          info ->
+            refreshed = %{
+              existing
+              | source: info.source,
+                base: info.source,
+                # Pick up *new* divergence (false → true) from an out-of-band patch,
+                # but never clear a divergence already set locally by an in-memory
+                # compile (`compile_clean/3`): clearing on flush is BT-2545's path.
+                # Keeps the false → true invariant the `nil ->` branch documents.
+                disk_differs: existing.disk_differs or info.disk_differs,
+                runtime_only: info.runtime_only
+            }
 
-        socket
-        |> update_active_tab_by_id(id, fn _ -> refreshed end)
-        |> assign(:active_tab, id)
-        |> sync_active(refreshed)
+            socket
+            |> update_active_tab_by_id(id, fn _ -> refreshed end)
+            |> assign(:active_tab, id)
+            |> sync_active(refreshed)
+        end
 
       nil ->
         info = method_source_info(socket, class, side, selector)

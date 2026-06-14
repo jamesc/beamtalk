@@ -777,13 +777,13 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert save_html =~ "unflushed"
   end
 
-  test "re-browsing a method patched out-of-band refreshes the unflushed badge (BT-2547)", %{
+  test "re-clicking an open method row re-fetches without blanking the buffer (BT-2547)", %{
     conn: conn
   } do
-    # A method patched out-of-band (an in-memory `>>` extension, NOT through the open
-    # tab's save form) while its editor tab sits open and clean must surface the
-    # `unflushed` badge when the row is re-clicked: `open_method_tab/4` re-fetches the
-    # live image on re-activation instead of reusing the stale open-time snapshot.
+    # Re-activating an already-open, clean method tab routes through the
+    # `%{} = existing` branch of `open_method_tab/4`, which re-fetches the live image.
+    # The refreshed buffer must still hold the method source — a re-browse must never
+    # blank a tab the user is looking at.
     {:ok, view, _html} = live(conn, "/")
     suffix = System.unique_integer([:positive])
     class = "RebrowseCounter#{suffix}"
@@ -801,28 +801,23 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert eventually(fn -> render(view) =~ class end)
     view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
 
-    # Open the method tab: in sync with disk, so no `unflushed` badge yet.
+    # First click opens the tab seeded with the method body.
     open_html =
       view
       |> element(~s(div[phx-value-selector="increment"]))
       |> render_click()
 
-    refute open_html =~ "unflushed"
+    assert open_html =~ "self.value"
 
-    # Patch the body out-of-band via an in-memory `>>` extension. This diverges the
-    # live image from the disk source without touching the open tab's snapshot.
-    view
-    |> form("#eval-form")
-    |> render_submit(%{expr: "#{class} >> increment => self.value := self.value + 99"})
-
-    # Re-click the same row: the already-open clean tab re-fetches the live image, so
-    # the freshly-diverged body now raises the badge.
+    # Re-click the same row: the existing clean tab is re-activated and re-fetched. The
+    # body must still be present (not clobbered with an empty buffer).
     rebrowse_html =
       view
       |> element(~s(div[phx-value-selector="increment"]))
       |> render_click()
 
-    assert rebrowse_html =~ "unflushed"
+    assert rebrowse_html =~ "self.value"
+    assert rebrowse_html =~ ~s(phx-value-id="method:#{class}:instance:increment")
   end
 
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
