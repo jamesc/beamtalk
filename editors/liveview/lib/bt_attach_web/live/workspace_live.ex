@@ -1821,12 +1821,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # `handle_repl_meta/3` routes.
   defp repl_meta_command(input) do
     if String.starts_with?(input, ":") do
-      case String.split(input, ~r/\s+/, parts: 2, trim: true) do
-        [cmd | rest] -> repl_meta_dispatch(cmd, meta_arg(rest))
-        # A bare ":" with nothing after it — treat as an unknown command rather
-        # than letting it reach `eval`.
-        [] -> {:unknown, ":"}
-      end
+      # `input` starts with ":", so splitting on whitespace always yields at least
+      # the command token (a bare ":" splits to `[":"]`, routed to the catch-all).
+      [cmd | rest] = String.split(input, ~r/\s+/, parts: 2, trim: true)
+      repl_meta_dispatch(cmd, meta_arg(rest))
     else
       nil
     end
@@ -1931,10 +1929,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp repl_help_text do
     """
     IDE REPL — evaluate any expression (Enter runs it, ↑/↓ recall history).
-    :help <Class>   open a class in the System Browser (left)
-    :bindings       → Bindings pane (right)
-    :changes        → Changes tab (this dock)
-    :test           test-runner pane coming soon (BT-2557)
+    :help / :h / :?        show this help
+    :help <Class>          open a class in the System Browser (left)
+    :bindings              → Bindings pane (right)
+    :changes               → Changes tab (this dock)
+    :test                  test-runner pane coming soon (BT-2557)
     Inspect results with the Inspect button; browse classes/methods on the left.\
     """
   end
@@ -1944,6 +1943,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # the System Browser on that class too — the help text stays in the scrollback
   # AND the browser navigates to the subject. Non-help evals pass through
   # untouched.
+  #
+  # Unlike `repl_focus_class/3`, this skips the `browser_class_names/1` validation
+  # and calls `open_class` directly: the `eval` already succeeded, which proves the
+  # class exists in the runtime, so a symbol-index lookup would be redundant (and
+  # would falsely reject a class defined moments earlier if the index is briefly
+  # stale). `load_protocols` handles an empty result gracefully regardless.
   defp repl_help_followup(socket, expr) do
     case Regex.run(~r/^\s*Beamtalk\s+help:\s+#?([A-Z]\w*)/, expr) do
       [_, class] -> open_class(socket, class)
