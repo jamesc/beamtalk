@@ -2339,6 +2339,21 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp runtime_only?(%{"origin" => "runtime"}), do: true
   defp runtime_only?(_), do: false
 
+  # Source origin badge helpers (BT-2552). The source_origin field is
+  # "stdlib", "project", or "dependency[:packagename]".
+  defp source_origin_class(%{"source_origin" => "stdlib"}), do: "stdlib"
+  defp source_origin_class(%{"source_origin" => <<"dependency:", _::binary>>}), do: "dependency"
+  defp source_origin_class(_), do: "project"
+
+  defp source_origin_label(%{"source_origin" => "stdlib"}), do: "stdlib"
+  defp source_origin_label(%{"source_origin" => <<"dependency:", pkg::binary>>}), do: pkg
+  defp source_origin_label(_), do: ""
+
+  defp source_origin_title(%{"source_origin" => "stdlib"}), do: "Standard library"
+  defp source_origin_title(%{"source_origin" => <<"dependency:", pkg::binary>>}),
+    do: "Dependency: #{pkg}"
+  defp source_origin_title(_), do: "Project"
+
   # ── tabbed method editor data model (BT-2494) ───────────────────────────────
   #
   # A tab is a plain map; the open-tab list lives in `:tabs` and the focused
@@ -3826,8 +3841,11 @@ defmodule BtAttachWeb.WorkspaceLive do
     >
       <span class="twig">{if class["superclass"], do: "→", else: "●"}</span>
       <span class="cls">{class["name"]}</span>
+      <span :if={class["source_origin"] && class["source_origin"] != "project"} class={"source-origin-tag #{source_origin_class(class)}"} title={source_origin_title(class)}>
+        {source_origin_label(class)}
+      </span>
       <span :if={runtime_only?(class)} class="runtime-tag" title="runtime-only (not on disk)">
-        runtime
+        ⚡
       </span>
       <span :if={@selected_class == class["name"] and @browser_side == "class"} class="pill">
         class
@@ -3910,7 +3928,10 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
               <span class="twig" style="color: var(--accent);">ƒ</span>
               <span class="mname mono">{m["selector"]}</span>
-              <span :if={runtime_only?(m)} class="runtime-tag">runtime</span>
+              <span :if={m["source_origin"] && m["source_origin"] != "project"} class={"source-origin-tag #{source_origin_class(m)}"} title={source_origin_title(m)}>
+                {source_origin_label(m)}
+              </span>
+              <span :if={runtime_only?(m)} class="runtime-tag" title="runtime-only">⚡</span>
             </div>
           </div>
         <% end %>
@@ -4477,7 +4498,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                     class="runtime-tag"
                     title="runtime-only (no source on disk)"
                   >
-                    runtime
+                    ⚡
                   </span>
                   <span :if={@role != :owner} class="meta-note read-only">read-only · Observer</span>
                   <span :if={@role == :owner and active_tab(assigns).dirty} class="meta-note edited">
