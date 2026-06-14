@@ -4,15 +4,11 @@
 defmodule BtAttachWeb.WorkspaceLiveReconcileTest do
   # Pure unit tests for the BT-2545 flush badge-clear reconcile.
   #
-  # A full compile → flush → badge-clear integration test would need a real
-  # workspace node that can flush a *method* to disk, which the `:workspace` e2e lane
-  # can't provide: the only way to get an in-project class into that workspace is the
-  # New File flow, and a New-File class's in-memory method patch is non-flushable
-  # (the loader can't resolve an in-project on-disk span for it), so a real flush
-  # leaves the patch pending and the badge legitimately never clears. We therefore
-  # test the reconcile functions directly with plain data — the same way
-  # `Workspace.format_flush_summary/1` is unit-tested without a node. No `:workspace`
-  # tag, so these run in the bare `mix test` lane.
+  # A full compile → flush → badge-clear integration test is covered by
+  # `workspace_flush_badge_test.exs` using a fully-stubbed workspace client
+  # (BT-2554). We test the reconcile functions directly with plain data — the
+  # same way `Workspace.format_flush_summary/1` is unit-tested without a node.
+  # No `:workspace` tag, so these run in the bare `mix test` lane.
   use ExUnit.Case, async: true
 
   alias BtAttachWeb.WorkspaceLive

@@ -244,10 +244,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # All RBAC-relevant workspace ops go through the curated facade (ADR 0091
   # Decision 3) — never a raw Workspace/:rpc call from an event handler. Pure
   # transport/display/lifecycle helpers (connect, render_term, session start)
-  # stay on Workspace: they are not browser-supplied ops. `ctx/1` carries the
+  # go through the injectable workspace client so the mount and session-start
+  # paths are testable without a live node (BT-2554). `ctx/1` carries the
   # request identity the facade audits / RBAC gates on (BT-2421).
   defp ctx(socket),
     do: %{user: socket.assigns[:current_user], role: socket.assigns[:role] || :owner}
+
+  defp ws_client, do: Application.get_env(:bt_attach, :workspace_client, Workspace)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -284,7 +287,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp attach(%{assigns: %{token: token}} = socket) do
     socket =
-      case Workspace.connect() do
+      case ws_client().connect() do
         :ok ->
           # Resume the tab's existing session if the registry still holds a live
           # one (reconnect within the grace window); otherwise start fresh.
@@ -351,7 +354,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp start_fresh(token, meta) do
     session_id = "phoenix-#{System.unique_integer([:positive])}"
 
-    case Workspace.start_session(session_id, meta) do
+    case ws_client().start_session(session_id, meta) do
       pid when is_pid(pid) ->
         # Register before binding so a crash mid-bind can't leak: the registry
         # owns the close, keyed by the tab token (a nil token simply skips
