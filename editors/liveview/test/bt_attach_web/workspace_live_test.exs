@@ -123,6 +123,19 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert text =~ "7"
   end
 
+  test "Print it echoes the selection anchor for inline placement (BT-2542)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    # Track a Workspace selection, then Print it: the inline-result push echoes
+    # the selection's end offset so the client anchors the widget after the
+    # evaluated region even if the cursor moves during the eval round-trip
+    # (wider over a remote distribution node). With no selection the anchor is
+    # nil and the client falls back to the live buffer end.
+    render_hook(view, "select_workspace", %{"text" => "3 + 4", "start" => 2, "end" => 7})
+    view |> form("#eval-form") |> render_submit(%{expr: "unused-buffer", action: "print_it"})
+    assert_push_event(view, "ws_insert_result", %{text: text, anchor: 7})
+    assert text =~ "7"
+  end
+
   test "Do it shows a terse status, no result value (BT-2542)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     # Do it evaluates for side effects only: a subtle `✓ evaluated` status, no

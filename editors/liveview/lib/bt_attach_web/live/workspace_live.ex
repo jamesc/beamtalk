@@ -1348,7 +1348,21 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     socket
     |> eval_status("→ " <> rendered, output, expr)
-    |> push_event("ws_insert_result", %{text: rendered})
+    |> push_event("ws_insert_result", %{text: rendered, anchor: ws_anchor(socket)})
+  end
+
+  # The doc offset to anchor an inline result after: the end of the tracked
+  # selection (the evaluated region) when evaluating a selection, else nil so the
+  # client falls back to the live buffer end. Echoed in the `ws_insert_result`
+  # push so a cursor move during the eval round-trip (wider over a remote
+  # distribution node) can't drop the widget on the wrong line.
+  defp ws_anchor(socket) do
+    if ws_selection?(socket.assigns) do
+      case socket.assigns.ws_selection.end do
+        offset when is_integer(offset) -> offset
+        _ -> nil
+      end
+    end
   end
 
   # Assign the transient eval-status line + bump its re-key sequence. Shared by

@@ -141,7 +141,13 @@ export const CmEditor = {
     if (!this.view || !payload || typeof payload.text !== "string") return
     const state = this.view.state
     const main = state.selection.main
-    const anchor = main.empty ? state.doc.length : main.to
+    // Prefer the server-echoed anchor (the evaluated selection's end at submit
+    // time) so a cursor move during the eval round-trip can't misplace the
+    // result; fall back to the live selection/buffer end. Clamp in case the doc
+    // shrank while waiting.
+    const fallback = main.empty ? state.doc.length : main.to
+    const raw = payload.anchor != null ? payload.anchor : fallback
+    const anchor = Math.min(Math.max(raw, 0), state.doc.length)
     const pos = state.doc.lineAt(anchor).to
     // Scroll to the widget position (not the cursor): this is a pure-effect
     // transaction with no selection move, so `scrollIntoView: true` would target

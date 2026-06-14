@@ -31,10 +31,6 @@ const SUMMARY_WIDTH = 60
 // on add/toggle O(cap) rather than O(session length).
 const MAX_RESULTS = 50
 
-// Monotonic id so a result keeps its identity (and collapsed state) across the
-// decoration rebuilds that follow every transaction.
-let nextId = 1
-
 // Effects the CmEditor hook (and the widgets) dispatch.
 //   addInlineResult    — {pos, text}: anchor a new result at a line boundary.
 //   toggleInlineResult — id: flip one result between collapsed and expanded.
@@ -131,15 +127,18 @@ function buildDecorations(items) {
 
 // Tracks the live set of inline results and provides their decorations. State is
 // kept as a plain `items` list so positions can be mapped through edits and the
-// collapsed flag toggled; decorations are rebuilt from it each transaction.
+// collapsed flag toggled; decorations are rebuilt from it on add/toggle. `nextId`
+// lives in the field value (not a module-level counter) so each editor instance
+// owns its own id sequence — a second inline editor (BT-2543) won't share it.
 export const inlineResultsField = StateField.define({
   create() {
-    return { items: [], deco: Decoration.none }
+    return { items: [], deco: Decoration.none, nextId: 1 }
   },
 
   update(value, tr) {
     let items = value.items
     let deco = value.deco
+    let nextId = value.nextId
     // Adding/toggling a result changes the widget set, so the decorations must
     // be rebuilt from `items`. A pure doc edit (every keystroke) only shifts
     // positions: map the existing decoration set through the changes instead —
@@ -173,7 +172,7 @@ export const inlineResultsField = StateField.define({
 
     if (rebuild) deco = buildDecorations(items)
     else if (!tr.docChanged) return value
-    return { items, deco }
+    return { items, deco, nextId }
   },
 
   provide: (field) => EditorView.decorations.from(field, (value) => value.deco),
