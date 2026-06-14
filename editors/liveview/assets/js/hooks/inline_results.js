@@ -33,10 +33,8 @@ let nextId = 1
 // Effects the CmEditor hook (and the widgets) dispatch.
 //   addInlineResult    — {pos, text}: anchor a new result at a line boundary.
 //   toggleInlineResult — id: flip one result between collapsed and expanded.
-//   clearInlineResults — (no payload): drop every inline result.
 export const addInlineResult = StateEffect.define()
 export const toggleInlineResult = StateEffect.define()
-export const clearInlineResults = StateEffect.define()
 
 function truncate(line) {
   return line.length > SUMMARY_WIDTH ? line.slice(0, SUMMARY_WIDTH - 1) + "…" : line
@@ -154,11 +152,6 @@ export const inlineResultsField = StateField.define({
           it.id === effect.value ? { ...it, collapsed: !it.collapsed } : it,
         )
         changed = true
-      } else if (effect.is(clearInlineResults)) {
-        if (items.length > 0) {
-          items = []
-          changed = true
-        }
       }
     }
 

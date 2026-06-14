@@ -143,9 +143,11 @@ export const CmEditor = {
     const main = state.selection.main
     const anchor = main.empty ? state.doc.length : main.to
     const pos = state.doc.lineAt(anchor).to
+    // Scroll to the widget position (not the cursor): this is a pure-effect
+    // transaction with no selection move, so `scrollIntoView: true` would target
+    // the unchanged cursor and leave a result below the fold unrevealed.
     this.view.dispatch({
-      effects: addInlineResult.of({ pos, text: payload.text }),
-      scrollIntoView: true,
+      effects: [addInlineResult.of({ pos, text: payload.text }), EditorView.scrollIntoView(pos)],
     })
   },
 
