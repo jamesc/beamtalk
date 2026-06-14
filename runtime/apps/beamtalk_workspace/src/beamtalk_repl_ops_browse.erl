@@ -436,7 +436,7 @@ source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
                             <<"project">>;
                         dependency ->
                             case package_of_module(ModName) of
-                                nil -> <<"dependency">>;
+                                nil -> <<"dependency:unknown">>;
                                 Pkg -> iolist_to_binary([<<"dependency:">>, Pkg])
                             end
                     end
