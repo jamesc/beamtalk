@@ -252,9 +252,16 @@
   background: var(--accent-soft); color: var(--accent-2); margin-left: auto;
 }
 .row .runtime-tag {
-  margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  margin-left: auto; font-size: 11px; font-weight: 700;
   color: var(--t-symbol);
 }
+.row .source-origin-tag {
+  font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  padding: 0 4px; border-radius: 3px; margin-left: 4px;
+}
+.row .source-origin-tag.stdlib { background: #e8d5f5; color: #7c3aed; }
+.row .source-origin-tag.dependency { background: #fef3c7; color: #b45309; }
+.row .source-origin-tag.project { display: none; }
 .sb-protocols { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 
 /* center column splits between editor and the workspace dock */
@@ -315,8 +322,8 @@
 .editor-meta .meta-note { flex: none; white-space: nowrap; color: var(--faint); }
 .editor-meta .meta-note.edited, .editor-meta .meta-note.read-only { color: var(--accent-2); }
 .editor-meta .runtime-tag {
-  flex: none; font-size: 9px; font-weight: 700; letter-spacing: .03em;
-  text-transform: uppercase; color: var(--t-symbol);
+  flex: none; font-size: 11px; font-weight: 700;
+  color: var(--t-symbol);
 }
 
 /* ============================================================================
