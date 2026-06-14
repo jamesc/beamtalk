@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn check_expr_contains_all_three_exit_codes() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.check_expr();
 
         // halt(0) for success
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn write_expr_contains_success_and_error_exit_codes() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.write_expr();
 
         assert!(
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn check_expr_propagates_read_reason_to_stderr() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.check_expr();
 
         // ReadReason must appear in io:put_chars to stderr
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn check_expr_propagates_fmt_reason_to_stderr() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.check_expr();
 
         assert!(
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn write_expr_propagates_write_reason_to_stderr() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.write_expr();
 
         assert!(
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn write_expr_propagates_fmt_reason_to_stderr() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.write_expr();
 
         assert!(
@@ -234,11 +234,11 @@ mod tests {
 
     #[test]
     fn file_path_is_properly_escaped_in_expr() {
-        let eval = ErlangEval::new("/tmp/my \"special\" dir/test.erl");
+        let eval = ErlangEval::new("my \"special\" dir/test.erl");
         let expr = eval.check_expr();
 
         assert!(
-            expr.contains(r#"/tmp/my \"special\" dir/test.erl"#),
+            expr.contains(r#"my \"special\" dir/test.erl"#),
             "file path with quotes must be escaped in the expression; got: {expr}"
         );
         // Must not contain the raw unescaped quotes
@@ -250,7 +250,7 @@ mod tests {
 
     #[test]
     fn build_delegates_to_correct_mode() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
 
         let check = eval.build(true);
         let write = eval.build(false);
@@ -261,33 +261,33 @@ mod tests {
 
     #[test]
     fn check_expr_uses_erlfmt_format_file() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.check_expr();
 
         assert!(
-            expr.contains("erlfmt:format_file(\"/tmp/test.erl\", [{print_width, 100}])"),
+            expr.contains("erlfmt:format_file(\"test_input.erl\", [{print_width, 100}])"),
             "must call erlfmt:format_file with correct path and options; got: {expr}"
         );
     }
 
     #[test]
     fn write_expr_uses_file_write_file() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.write_expr();
 
         assert!(
-            expr.contains("file:write_file(\"/tmp/test.erl\", Bin)"),
+            expr.contains("file:write_file(\"test_input.erl\", Bin)"),
             "write mode must call file:write_file; got: {expr}"
         );
     }
 
     #[test]
     fn check_expr_uses_file_read_file() {
-        let eval = ErlangEval::new("/tmp/test.erl");
+        let eval = ErlangEval::new("test_input.erl");
         let expr = eval.check_expr();
 
         assert!(
-            expr.contains("file:read_file(\"/tmp/test.erl\")"),
+            expr.contains("file:read_file(\"test_input.erl\")"),
             "check mode must call file:read_file; got: {expr}"
         );
     }
