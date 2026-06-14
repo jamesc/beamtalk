@@ -35,3 +35,10 @@ pub mod cases;
 pub mod drivers;
 pub mod normalize;
 pub mod pool;
+
+use std::path::Path;
+
+/// Read a file's contents, including the path in the error message on failure.
+pub(crate) fn read_path(path: &Path) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))
+}

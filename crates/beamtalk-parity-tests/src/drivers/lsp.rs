@@ -94,8 +94,7 @@ impl LspDriver {
 
     /// Open a file and capture the first `publishDiagnostics` for it.
     pub async fn diagnose(&mut self, path: &Path) -> Result<SurfaceOutput, String> {
-        let text =
-            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let text = crate::read_path(path)?;
         let uri = path_to_uri(path);
         let did_open = json!({
             "jsonrpc": "2.0",
@@ -110,30 +109,30 @@ impl LspDriver {
             }
         });
         self.send(&did_open).await?;
-        // Look for publishDiagnostics for this URI.
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
-        loop {
-            if tokio::time::Instant::now() >= deadline {
-                return Err("timed out waiting for publishDiagnostics".to_string());
-            }
-            let remaining = deadline - tokio::time::Instant::now();
-            let v = self.read_message(remaining).await?;
-            if v.get("method").and_then(Value::as_str) == Some("textDocument/publishDiagnostics")
-                && v.pointer("/params/uri").and_then(Value::as_str) == Some(uri.as_str())
-            {
+        self.poll_until(
+            Duration::from_secs(20),
+            "timed out waiting for publishDiagnostics",
+            |v| {
+                if v.get("method").and_then(Value::as_str)
+                    != Some("textDocument/publishDiagnostics")
+                    || v.pointer("/params/uri").and_then(Value::as_str) != Some(uri.as_str())
+                {
+                    return None;
+                }
                 let diags = v
                     .pointer("/params/diagnostics")
                     .and_then(Value::as_array)
                     .cloned()
                     .unwrap_or_default();
                 let raw = serde_json::to_string(&diags).unwrap_or_default();
-                return Ok(SurfaceOutput {
+                Some(Ok(SurfaceOutput {
                     diagnostic_count: Some(diags.len()),
                     raw,
                     ..SurfaceOutput::default()
-                });
-            }
-        }
+                }))
+            },
+        )
+        .await
     }
 
     /// Open a file via `textDocument/didOpen` without waiting for diagnostics.
@@ -143,8 +142,7 @@ impl LspDriver {
     /// before they can produce results, but unlike the diagnostic case they
     /// don't need the harness to wait for `publishDiagnostics`.
     pub async fn open_file(&mut self, path: &Path) -> Result<String, String> {
-        let text =
-            std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let text = crate::read_path(path)?;
         let uri = path_to_uri(path);
         let did_open = json!({
             "jsonrpc": "2.0",
@@ -331,23 +329,50 @@ impl LspDriver {
         Ok(out)
     }
 
-    /// Wait until a JSON-RPC response with the given id arrives, skipping
-    /// any notifications that come in first.
-    async fn await_response(&mut self, want_id: i64) -> Result<Value, String> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    /// Poll messages from the LSP server until `check` returns `Some(result)`
+    /// or the deadline expires.  Non-matching messages (e.g. server-initiated
+    /// notifications) are silently dropped.
+    async fn poll_until<T, F>(
+        &mut self,
+        timeout: Duration,
+        timeout_err: impl Into<String>,
+        mut check: F,
+    ) -> Result<T, String>
+    where
+        F: FnMut(Value) -> Option<Result<T, String>>,
+    {
+        let timeout_err = timeout_err.into();
+        let deadline = tokio::time::Instant::now() + timeout;
         loop {
             if tokio::time::Instant::now() >= deadline {
-                return Err(format!("timed out waiting for response id {want_id}"));
+                return Err(timeout_err);
             }
             let remaining = deadline - tokio::time::Instant::now();
             let v = self.read_message(remaining).await?;
-            if v.get("id") == Some(&Value::from(want_id)) {
-                if let Some(err) = v.get("error") {
-                    return Err(format!("lsp response error: {err}"));
-                }
-                return Ok(v);
+            if let Some(result) = check(v) {
+                return result;
             }
         }
+    }
+
+    /// Wait until a JSON-RPC response with the given id arrives, skipping
+    /// any notifications that come in first.
+    async fn await_response(&mut self, want_id: i64) -> Result<Value, String> {
+        self.poll_until(
+            Duration::from_secs(15),
+            format!("timed out waiting for response id {want_id}"),
+            |v| {
+                if v.get("id") != Some(&Value::from(want_id)) {
+                    return None;
+                }
+                if let Some(err) = v.get("error") {
+                    Some(Err(format!("lsp response error: {err}")))
+                } else {
+                    Some(Ok(v))
+                }
+            },
+        )
+        .await
     }
 
     /// Send `shutdown` + `exit` and reap the child.

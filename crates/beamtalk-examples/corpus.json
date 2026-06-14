@@ -26131,12 +26131,17 @@
         "assign",
         "assignment",
         "extends",
+        "field",
         "inherit",
         "inheritance",
+        "instance variable",
+        "member",
         "mutate",
         "mutation",
         "object",
+        "property",
         "set",
+        "setUp",
         "subclassing",
         "testFiveTimesRunsBlockFiveTimes",
         "testOneTimeRunsBlockOnce",
@@ -26144,7 +26149,7 @@
         "testZeroTimesIsNoOp",
         "times_repeat_simple_test"
       ],
-      "source": "// Regression tests for timesRepeat: simple path\n//\n// The simple path (no local mutations, no self-sends, no field writes)\n// previously generated `let _ = body_code in ...` without ever applying the\n// body closure, so the block body silently never executed\n//\n// The mutation path (local writes / self-sends) was unaffected\n\nTestCase subclass: TimesRepeatSimpleTest\n\n  testZeroTimesIsNoOp =>\n    c := Counter spawn\n    0 timesRepeat: [c increment]\n    self assert: c getValue equals: 0\n\n  testOneTimeRunsBlockOnce =>\n    c := Counter spawn\n    1 timesRepeat: [c increment]\n    self assert: c getValue equals: 1\n\n  testThreeTimesRunsBlockThreeTimes =>\n    c := Counter spawn\n    3 timesRepeat: [c increment]\n    self assert: c getValue equals: 3\n\n  testFiveTimesRunsBlockFiveTimes =>\n    c := Counter spawn\n    5 timesRepeat: [c increment]\n    self assert: c getValue equals: 5",
+      "source": "// Regression tests for timesRepeat: simple path\n//\n// The simple path (no local mutations, no self-sends, no field writes)\n// previously generated `let _ = body_code in ...` without ever applying the\n// body closure, so the block body silently never executed\n//\n// The mutation path (local writes / self-sends) was unaffected\n\nTestCase subclass: TimesRepeatSimpleTest\n  field: c = nil\n\n  setUp => self.c := Counter spawn\n\n  testZeroTimesIsNoOp =>\n    0 timesRepeat: [self.c increment]\n    self assert: self.c getValue equals: 0\n\n  testOneTimeRunsBlockOnce =>\n    1 timesRepeat: [self.c increment]\n    self assert: self.c getValue equals: 1\n\n  testThreeTimesRunsBlockThreeTimes =>\n    3 timesRepeat: [self.c increment]\n    self assert: self.c getValue equals: 3\n\n  testFiveTimesRunsBlockFiveTimes =>\n    5 timesRepeat: [self.c increment]\n    self assert: self.c getValue equals: 5",
       "explanation": "Regression tests for timesRepeat: simple path  The simple path (no local mutations, no self-sends, no field writes) previously generated `let _ = body_code in ...` without ever applying the body closure, so the block body silently never executed  The mutation path (local writes / self-sends) was unaffected"
     },
     {
