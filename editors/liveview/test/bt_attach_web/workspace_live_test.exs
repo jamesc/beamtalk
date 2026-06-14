@@ -429,21 +429,23 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ class
   end
 
-  # ── Phase 1 JS hook foundation (BT-2485) ────────────────────────────────────
+  # ── Phase 1 JS hook foundation (BT-2485, BT-2539) ───────────────────────────
 
   test "the editor hooks are present on the owner's connected render (BT-2485)", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/")
 
-    # CodeEditor overlay (highlight <pre> behind the transparent <textarea>),
-    # KeyboardShortcuts (⌘S → submit) and SelectionTracker (select_source). These
-    # now belong to the METHOD editor — the Workspace pane moved to CodeMirror
-    # (CmEditor, BT-2538), covered by its own test below.
-    assert html =~ ~s(phx-hook="CodeEditor")
+    # The method editor is CodeMirror (the CmEditor hook, BT-2539): ⌘S submits via
+    # KeyboardShortcuts and the selection rides select_source — the CodeEditor
+    # overlay + SelectionTracker hooks are retired. The Workspace pane is also
+    # CmEditor (BT-2538), covered by its own test below.
+    assert html =~ ~s(phx-hook="CmEditor")
     assert html =~ ~s(phx-hook="KeyboardShortcuts")
-    assert html =~ ~s(phx-hook="SelectionTracker")
     assert html =~ ~s(data-shortcuts)
     assert html =~ ~s(data-select-event="select_source")
-    assert html =~ "bt-editor-pre"
+    # The retired overlay machinery leaves no trace in the markup.
+    refute html =~ ~s(phx-hook="CodeEditor")
+    refute html =~ ~s(phx-hook="SelectionTracker")
+    refute html =~ "bt-editor-pre"
   end
 
   test "the Workspace editor renders the CmEditor hook over a hidden expr field (BT-2538)", %{
@@ -462,7 +464,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ ~s(name="expr")
   end
 
-  test "the SelectionTracker hook event is accepted and ignored when malformed (BT-2485)", %{
+  test "the select_source hook event is accepted and ignored when malformed (BT-2485)", %{
     conn: conn
   } do
     {:ok, view, _html} = live(conn, "/")
@@ -812,6 +814,49 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert save_html =~ "Saved increment on #{class}"
     # The post-compile divergence surfaces as the `unflushed` breadcrumb badge.
     assert save_html =~ "unflushed"
+  end
+
+  test "re-clicking an open method row re-fetches without blanking the buffer (BT-2547)", %{
+    conn: conn
+  } do
+    # Re-activating an already-open, clean method tab routes through the
+    # `%{} = existing` branch of `open_method_tab/4`, which re-fetches the live image.
+    # The refreshed buffer must still hold the method source — a re-browse must never
+    # blank a tab the user is looking at.
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "RebrowseCounter#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: value = 0
+
+      increment => self.value := self.value + 1
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+
+    {:ok, view, _html} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    # First click opens the tab seeded with the method body.
+    open_html =
+      view
+      |> element(~s(div[phx-value-selector="increment"]))
+      |> render_click()
+
+    assert open_html =~ "self.value"
+
+    # Re-click the same row: the existing clean tab is re-activated and re-fetched. The
+    # body must still be present (not clobbered with an empty buffer).
+    rebrowse_html =
+      view
+      |> element(~s(div[phx-value-selector="increment"]))
+      |> render_click()
+
+    assert rebrowse_html =~ "self.value"
+    assert rebrowse_html =~ ~s(phx-value-id="method:#{class}:instance:increment")
   end
 
   # ── Phase 3 Inspector live tracking (BT-2492, backend BT-2489) ──────────────
