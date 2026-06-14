@@ -654,20 +654,29 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # No session (attach failed) — surface it as a scrollback entry rather than
-  # crashing on the missing assign, mirroring the Workspace eval's no-session arm.
+  # No session — the first clause's `is_pid(pid)` guard only fails when
+  # bind_session never ran, so the REPL stream + assigns (`:repl_seq`,
+  # `:repl_terms`, `:repl_history`, `:repl_history_pos`) don't exist and the pane
+  # isn't rendered. A crafted `repl_eval` during the attach-failure window must
+  # NOT touch the REPL helpers (which read those assigns) — that would KeyError /
+  # crash the LiveView. Guard on the assigns' presence and no-op when absent,
+  # otherwise surface the "not attached" entry (the defensive path for any future
+  # state where the assigns exist but the session pid is gone).
   def handle_event("repl_eval", %{"expr" => expr}, socket) do
-    socket =
-      if String.trim(expr) == "" do
-        socket
-      else
-        socket
-        |> repl_append_error(expr, "not attached to workspace")
-        |> repl_record_history(expr)
-        |> repl_clear_input()
-      end
+    cond do
+      not Map.has_key?(socket.assigns, :repl_seq) ->
+        {:noreply, socket}
 
-    {:noreply, socket}
+      String.trim(expr) == "" ->
+        {:noreply, socket}
+
+      true ->
+        {:noreply,
+         socket
+         |> repl_append_error(expr, "not attached to workspace")
+         |> repl_record_history(expr)
+         |> repl_clear_input()}
+    end
   end
 
   def handle_event("repl_eval", _params, socket), do: {:noreply, socket}
@@ -1551,6 +1560,11 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # ── REPL helpers (BT-2543) ───────────────────────────────────────────────────
 
+  # Cap on the REPL scrollback depth: the client keeps the most recent N entries
+  # (via `stream_insert(:repl, …, limit: -N)`) and `repl_terms` is evicted in
+  # lockstep, so a long session can't grow the DOM or the assigns map unbounded.
+  @repl_scrollback_limit 200
+
   # Append a successful `› request` / `→ response` pair to the scrollback and
   # stash the live result term under the entry id so a later Inspect click can
   # re-open it. The response is the surface-shared `render_term` rendering — the
@@ -1573,13 +1587,12 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     socket
     |> assign(:repl_seq, seq)
-    |> update(:repl_terms, &Map.put(&1, id, term))
-    # NOTE: repl_terms is unbounded — one small reference per successful eval
-    # (the object lives in the workspace process, not here), so memory impact is
-    # low. Unlike repl_history (capped at @repl_history_limit), it has no cap; if
-    # a scrollback depth cap is added later (`stream_insert(:repl, …, limit: N)`),
-    # evict the matching key here in step.
-    |> stream_insert(:repl, entry)
+    # `repl_terms` is bounded in step with the scrollback (below): stash this
+    # term, then evict the one that just scrolled past the depth cap. Each entry
+    # is a small reference (the object lives in the workspace process), but a long
+    # session would still grow the map unboundedly without this.
+    |> update(:repl_terms, fn terms -> terms |> Map.put(id, term) |> repl_evict(seq) end)
+    |> stream_insert(:repl, entry, limit: -@repl_scrollback_limit)
     |> repl_scroll_to_bottom()
   end
 
@@ -1600,8 +1613,21 @@ defmodule BtAttachWeb.WorkspaceLive do
 
     socket
     |> assign(:repl_seq, seq)
-    |> stream_insert(:repl, entry)
+    # An error entry stashes no term, but still bump the cap so an OK term that
+    # scrolled past the depth limit (counting errors too) is evicted in step.
+    |> update(:repl_terms, &repl_evict(&1, seq))
+    |> stream_insert(:repl, entry, limit: -@repl_scrollback_limit)
     |> repl_scroll_to_bottom()
+  end
+
+  # Cap the scrollback depth (client DOM via `stream_insert(limit:)`) and the
+  # `repl_terms` map in lockstep. Entry ids are monotonic (`repl-entry-N`, N =
+  # seq), so the entry now `@repl_scrollback_limit` positions back is exactly the
+  # one the client dropped — evict its term (a no-op for an error entry, which
+  # was never stashed).
+  defp repl_evict(terms, seq) do
+    evicted = seq - @repl_scrollback_limit
+    if evicted > 0, do: Map.delete(terms, repl_entry_id(evicted)), else: terms
   end
 
   # Scroll the scrollback to the newest entry on each append (classic terminal
@@ -1616,8 +1642,9 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # DOM id of the REPL input editor host — the single source of truth shared by
   # the template element and the `repl_set_input` push target, so a rename can't
-  # silently break history recall / submit-clear (the hook ignores a push whose
-  # target doesn't match its own id).
+  # silently break history recall / submit-clear. (There is a single ReplInput
+  # instance on the page; `push_event/3` reaches every hook registered for the
+  # event, so this id is for template/push-target consistency, not filtering.)
   defp repl_input_id, do: "repl-input"
 
   # First-line (capped) preview shown in a collapsed long response's `<summary>`:
@@ -1637,7 +1664,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # handful of lines or a few hundred chars — the threshold that keeps a single
   # verbose result from pushing the rest of the scrollback off-screen.
   defp repl_long?(text) when is_binary(text) do
-    String.length(text) > 320 or length(String.split(text, "\n")) > 6
+    # `parts: 7` short-circuits the split after 6 newlines instead of
+    # materialising every line just to count past six.
+    String.length(text) > 320 or length(String.split(text, "\n", parts: 7)) > 6
   end
 
   # Record a submitted expression at the head of the recall ring and reset the
@@ -1660,6 +1689,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # past the newest restores the empty live input (pos = nil). An empty ring or a
   # ↓ while already at the live input is a no-op (no push, so the hook keeps the
   # in-progress text the user was typing).
+  #
+  # The first clause also covers the attach-failure window: when bind_session
+  # never ran, `:repl_history` is absent, so a crafted ↑/↓ must NOT fall through
+  # to `socket.assigns.repl_history` (a KeyError that would crash the LiveView) —
+  # `is_map_key/2` guards it to a no-op.
+  defp repl_recall(socket, _dir) when not is_map_key(socket.assigns, :repl_history),
+    do: socket
+
   defp repl_recall(%{assigns: %{repl_history: []}} = socket, _dir), do: socket
 
   defp repl_recall(socket, dir) do

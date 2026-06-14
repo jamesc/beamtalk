@@ -93,9 +93,11 @@ export const ReplInput = {
     this.handleEvent("repl_set_input", (payload) => this.setInput(payload))
     // After each appended entry the server asks the scrollback to scroll to the
     // newest result (classic terminal behaviour), so a submission's result is
-    // revealed even if the user had scrolled up to read older output.
+    // revealed even if the user had scrolled up to read older output. Scope the
+    // lookup to this hook's own pane (not a global id) so the relationship stays
+    // explicit and rename-safe.
     this.handleEvent("repl_scroll_bottom", () => {
-      const sb = document.getElementById("repl-scrollback")
+      const sb = this.el.closest(".repl-pane")?.querySelector(".repl-scrollback")
       if (sb) sb.scrollTop = sb.scrollHeight
     })
   },

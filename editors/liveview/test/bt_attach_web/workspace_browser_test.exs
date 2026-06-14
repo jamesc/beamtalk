@@ -550,13 +550,24 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # The input cleared on submit; ↑ on the now-empty first line recalls the prior
     # expression from the server-owned history ring back into the composer (the
     # ReplInput hook fires repl_history_prev only at the edge; the server pushes
-    # the recalled text via repl_set_input).
+    # the recalled text via repl_set_input). Recall is a server round-trip, so
+    # POLL for the recalled text rather than reading once — a bare read races the
+    # push back.
     |> press("#repl-input .cm-content", "ArrowUp")
     |> evaluate(
-      "document.querySelector('#repl-input .cm-content').textContent",
-      fn recalled ->
-        assert recalled =~ "6 * 7", "ArrowUp did not recall the prior expression"
-      end
+      """
+      new Promise((resolve, reject) => {
+        const start = Date.now();
+        const tick = () => {
+          const el = document.querySelector("#repl-input .cm-content");
+          if (el && el.textContent.includes("6 * 7")) return resolve(true);
+          if (Date.now() - start > 3000) return reject(new Error("ArrowUp did not recall the prior expression"));
+          requestAnimationFrame(tick);
+        };
+        tick();
+      })
+      """,
+      fn recalled -> assert recalled end
     )
   end
 
