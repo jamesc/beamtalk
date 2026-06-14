@@ -392,21 +392,23 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ class
   end
 
-  # ── Phase 1 JS hook foundation (BT-2485) ────────────────────────────────────
+  # ── Phase 1 JS hook foundation (BT-2485, BT-2539) ───────────────────────────
 
   test "the editor hooks are present on the owner's connected render (BT-2485)", %{conn: conn} do
     {:ok, _view, html} = live(conn, "/")
 
-    # CodeEditor overlay (highlight <pre> behind the transparent <textarea>),
-    # KeyboardShortcuts (⌘S → submit) and SelectionTracker (select_source). These
-    # now belong to the METHOD editor — the Workspace pane moved to CodeMirror
-    # (CmEditor, BT-2538), covered by its own test below.
-    assert html =~ ~s(phx-hook="CodeEditor")
+    # The method editor is CodeMirror (the CmEditor hook, BT-2539): ⌘S submits via
+    # KeyboardShortcuts and the selection rides select_source — the CodeEditor
+    # overlay + SelectionTracker hooks are retired. The Workspace pane is also
+    # CmEditor (BT-2538), covered by its own test below.
+    assert html =~ ~s(phx-hook="CmEditor")
     assert html =~ ~s(phx-hook="KeyboardShortcuts")
-    assert html =~ ~s(phx-hook="SelectionTracker")
     assert html =~ ~s(data-shortcuts)
     assert html =~ ~s(data-select-event="select_source")
-    assert html =~ "bt-editor-pre"
+    # The retired overlay machinery leaves no trace in the markup.
+    refute html =~ ~s(phx-hook="CodeEditor")
+    refute html =~ ~s(phx-hook="SelectionTracker")
+    refute html =~ "bt-editor-pre"
   end
 
   test "the Workspace editor renders the CmEditor hook over a hidden expr field (BT-2538)", %{
@@ -425,7 +427,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ ~s(name="expr")
   end
 
-  test "the SelectionTracker hook event is accepted and ignored when malformed (BT-2485)", %{
+  test "the select_source hook event is accepted and ignored when malformed (BT-2485)", %{
     conn: conn
   } do
     {:ok, view, _html} = live(conn, "/")

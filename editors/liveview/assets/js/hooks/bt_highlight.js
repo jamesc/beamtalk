@@ -2,12 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Beamtalk syntax highlighting for CodeMirror 6 (BT-2538). A CodeMirror
-// `ViewPlugin` that tokenizes the document with the SAME regex grammar as the
-// legacy <pre> overlay (`highlight.js`) — we import its `RULES`/`RESERVED`, so
-// there is one regex definition feeding both editors — and paints the tokens as
-// decorations using the existing `.tok-*` classes (assets/css/app.css). Those
+// `ViewPlugin` that tokenizes the document with a regex grammar and paints the
+// tokens as decorations using the `.tok-*` classes (assets/css/app.css). Those
 // classes resolve the per-theme `--t-*` variables, so the TweaksPanel keeps
 // working unchanged.
+//
+// The grammar (`RULES`/`RESERVED`) used to live in `highlight.js` alongside the
+// legacy <pre>-overlay highlighter; that overlay (CodeEditor) was retired in
+// BT-2539 when the method-editor tabs moved to CodeMirror, so the rules now live
+// here — their only remaining consumer.
+//
+// Beamtalk specifics vs classic Smalltalk:
+//   - comments are // line and /* block */ (NOT double-quoted)
+//   - strings are "double quoted" with {interpolation}
+//   - single quotes are reserved for #'quoted symbols'
+//   - method bodies use  selector => body
+//   - field access via self.field   - assignment :=   - early return ^
+//   - async send suffix !   - symbols #name   - maps and lists
 //
 // This deliberately replaces an earlier TextMate-grammar-via-WASM approach: for
 // the small snippets these editors hold, running oniguruma in WASM (~250 KB
@@ -22,12 +33,42 @@
 
 import { RangeSetBuilder } from "@codemirror/state"
 import { Decoration, ViewPlugin } from "@codemirror/view"
-import { RULES, RESERVED } from "./highlight"
 
-// Sticky (`y`) variants of the shared rules so the tokenizer scans in true O(n):
+// Reserved (pseudo-variable) identifiers — coloured `.tok-reserved`.
+const RESERVED = new Set(["self", "super", "nil", "true", "false", "thisContext"])
+
+// The ordered token grammar. Each rule's `^`-anchored regex is matched against
+// the remaining source; the first hit wins. `_string`/`field`/`ident` get
+// special post-classification in `tokenize` below.
+const RULES = [
+  { cls: "comment", re: /^\/\/[^\n]*/ }, // // line comment
+  { cls: "comment", re: /^\/\*[\s\S]*?\*\// }, // /* block comment */
+  { cls: "_string", re: /^"(?:\\.|[^"\\])*"/ }, // "double quoted string"
+  {
+    cls: "symbol",
+    re: /^#(?:'(?:''|[^'])*'|\{|\(|[A-Za-z_][\w]*[:]?|[-+*/~<>=&|@%,?!]+)/,
+  }, // #sym #{ #(
+  { cls: "field", re: /^\.[A-Za-z_]\w*/ }, // .field (after self/obj)
+  { cls: "number", re: /^\d+r[0-9A-Za-z]+/ }, // radix
+  { cls: "number", re: /^\d+(?:\.\d+)?(?:e-?\d+)?/ }, // int / float
+  { cls: "arrow", re: /^=>/ }, // method body arrow
+  { cls: "match", re: /^->/ }, // pattern / association arrow
+  { cls: "assign", re: /^:=/ }, // assignment
+  { cls: "return", re: /^\^/ }, // early return
+  { cls: "keyword", re: /^[A-Za-z_]\w*:/ }, // keyword message part  foo:
+  { cls: "ident", re: /^[A-Za-z_]\w*/ }, // identifier (resolved below)
+  { cls: "send", re: /^!/ }, // async send suffix
+  { cls: "cascade", re: /^;/ }, // cascade
+  { cls: "binary", re: /^(?:=:=|=\/=|\/=|==|\*\*|\+\+|<=|>=|[-+*/<>=~&|@%?])+/ },
+  { cls: "punct", re: /^[\[\]{}().|]/ },
+  { cls: "ws", re: /^\s+/ },
+  { cls: "other", re: /^./ },
+]
+
+// Sticky (`y`) variants of the rules so the tokenizer scans in true O(n):
 // matching at an explicit `lastIndex` avoids the per-character `src.slice(i)`
-// (O(n²)) that the highlight.js `^`-anchored `.match()` would force here. The
-// leading `^` anchor is dropped — `y` already pins the match to `lastIndex`.
+// (O(n²)) a `^`-anchored `.match()` would force here. The leading `^` anchor is
+// dropped — `y` already pins the match to `lastIndex`.
 const STICKY_RULES = RULES.map((rule) => ({
   cls: rule.cls,
   re: new RegExp(rule.re.source.replace(/^\^/, ""), "y"),
@@ -58,8 +99,7 @@ const MARKS = {}
 for (const cls of CLASSES) MARKS[cls] = Decoration.mark({ class: "tok-" + cls })
 
 // Split a "double-quoted string" token into `.tok-string` runs with `.tok-interp`
-// spans lifted out for `{interpolation}` — mirrors highlight.js's `hlString`,
-// but as non-overlapping ranges instead of nested HTML.
+// spans lifted out for `{interpolation}`, as non-overlapping ranges.
 function* stringRanges(start, text) {
   let i = 0
   let segStart = 0
@@ -81,9 +121,8 @@ function* stringRanges(start, text) {
   }
 }
 
-// Walk the source with the shared RULES, yielding {from, to, cls} ranges. Mirrors
-// the classification in highlight.js's `highlightBeamtalk` (identifiers resolve
-// to reserved/global/var; `.field` splits into a punct dot + field name).
+// Walk the source with the RULES, yielding {from, to, cls} ranges (identifiers
+// resolve to reserved/global/var; `.field` splits into a punct dot + field name).
 function* tokenize(src) {
   let i = 0
   const n = src.length
