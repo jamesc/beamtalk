@@ -42,6 +42,7 @@ import {
 } from "@codemirror/commands"
 import { indentUnit } from "@codemirror/language"
 import { beamtalkHighlighting } from "./bt_highlight"
+import { backendCompletion, completionQuery } from "./cm_autocomplete"
 
 export const ReplInput = {
   mounted() {
@@ -76,6 +77,11 @@ export const ReplInput = {
       beamtalkHighlighting(),
       EditorView.lineWrapping,
       EditorView.updateListener.of((u) => this.onUpdate(u)),
+      // Backend-driven autocomplete (BT-2544): same live-image completion source
+      // as the Workspace editor. Its completion keymap is high-precedence, so
+      // while the popup is open Enter accepts the candidate; when it is closed
+      // Enter falls through to `replKeymap` above and submits, as before.
+      backendCompletion(completionQuery(this.pushEvent.bind(this))),
     ]
     if (placeholderText) extensions.push(placeholderExt(placeholderText))
 
