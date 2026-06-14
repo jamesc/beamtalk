@@ -826,10 +826,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     #
     # The method must be *file-backed* for a flush to actually reconcile it — a
     # runtime-only (eval-defined) method has no on-disk body, so its patch is
-    # non-flushable and stays pending. We therefore create the class through the
-    # New File flow (`newClass:at:`), which assigns a `.bt` path that flush writes
-    # (and whose parent dir flush's `filelib:ensure_dir` creates), so the patch is
-    # genuinely flushable.
+    # non-flushable and stays pending. We create the class through the New File flow
+    # (`newClass:at:`), which assigns a `.bt` path, then flush *once* to materialise
+    # the file on disk: a method patch logged against a not-yet-flushed new class is
+    # itself non-flushable (the loader can't resolve a span until the file exists),
+    # so the divergent patch we want flushed must come *after* the file is on disk
+    # (see `beamtalk_workspace_flush:prepare_file/2`).
     {:ok, view, _html} = live(conn, "/")
     suffix = System.unique_integer([:positive])
     class = "Flushable#{suffix}"
@@ -845,9 +847,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     view |> form("#new-file-form") |> render_submit(%{"source" => class_src, "path" => path})
 
-    # Reload so the fresh browser tree picks up the newly-installed class (New File
-    # refreshes the Changes pane, not the class tree). The class lives on the shared
-    # workspace node, so it survives the new session.
+    # Materialise the new class on disk (its parent dir is created by flush's
+    # `filelib:ensure_dir`). Now a subsequent method patch is genuinely flushable.
+    new_class_flush = view |> element(~s(button[phx-click="flush"])) |> render_click()
+    assert new_class_flush =~ "Flushed"
+
+    # Reload so the fresh browser tree picks up the (now on-disk) class — New File and
+    # flush refresh the Changes pane, not the class tree. The class lives on the
+    # shared workspace node, so it survives the new session.
     {:ok, view, _html} = live(conn, "/")
     assert eventually(fn -> render(view) =~ class end)
     view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
@@ -869,6 +876,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # Flushing the ChangeLog writes the patch to disk and reconciles the open tab.
     flush_html = view |> element(~s(button[phx-click="flush"])) |> render_click()
 
+    # Assert the flush itself succeeded (the summary banner) before checking the
+    # badge — otherwise a silent flush failure that drops the tab through some other
+    # path could also satisfy the `refute` below. The flush is global over the
+    # shared node, so the summary may also report cross-test skips; we only assert
+    # the positive "Flushed" marker, not the absence of skips.
+    assert flush_html =~ "Flushed"
     refute flush_html =~ "unflushed"
   end
 
