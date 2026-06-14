@@ -583,7 +583,7 @@ stdlib_method_read_only_error(ClassNameBin, SelectorBin) ->
 %% the inserted `=>' arrow.
 -spec normalize_method_source(binary(), binary()) -> binary().
 normalize_method_source(SelectorBin, Source) ->
-    Body = skip_leading_doc_comments(Source),
+    Body = skip_leading_comments(Source),
     Head = first_token(SelectorBin),
     case has_method_header(Body, Head) of
         true ->
@@ -597,13 +597,13 @@ normalize_method_source(SelectorBin, Source) ->
 %% Skip leading whitespace and full-line `//'/`///' comments, returning the first
 %% suffix of `Source' that begins a real expression or method header. `Body' is
 %% always a suffix of `Source', so the consumed prefix can be recovered by length.
--spec skip_leading_doc_comments(binary()) -> binary().
-skip_leading_doc_comments(Source) ->
+-spec skip_leading_comments(binary()) -> binary().
+skip_leading_comments(Source) ->
     Trimmed = string:trim(Source, leading),
     case Trimmed of
         <<"//", _/binary>> ->
             case binary:split(Trimmed, <<"\n">>) of
-                [_Comment, Rest] -> skip_leading_doc_comments(Rest);
+                [_Comment, Rest] -> skip_leading_comments(Rest);
                 [_Comment] -> <<>>
             end;
         _ ->

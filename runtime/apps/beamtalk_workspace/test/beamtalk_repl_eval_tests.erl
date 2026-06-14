@@ -1531,7 +1531,19 @@ normalize_method_source_leading_whitespace_test() ->
     ).
 
 -doc """
-Regression (BT-2549 compile bug): a full definition fronted by `///' doc
+A bare body with leading whitespace keeps that whitespace *ahead* of the
+synthesised header (the prefix is preserved, the header inserted after it), so
+the result still parses. Documents the post-fix behaviour, which differs from the
+old `<<Selector/binary, " => ", Source/binary>>' prepend.
+""".
+normalize_method_source_bare_body_leading_whitespace_test() ->
+    ?assertEqual(
+        <<"   increment => self.value + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"   self.value + 1">>)
+    ).
+
+-doc """
+Regression (BT-2553 compile bug): a full definition fronted by `///' doc
 comments must be recognised as already-headed and left intact, not double-headed.
 The doc comments push the `selector => ' header down, so a whitespace-only skip
 would miss it and wrongly prepend a second header.
@@ -1887,6 +1899,9 @@ stdlib_gate_setup() ->
     ok.
 
 stdlib_gate_cleanup(_) ->
+    %% Intentional no-op: beamtalk_runtime / beamtalk_stdlib are left running for
+    %% the rest of the shared EUnit node (same convention as eval_teardown, which
+    %% only stops the compiler). Nothing here owns those apps exclusively.
     ok.
 
 compile_method_stdlib_refused() ->
