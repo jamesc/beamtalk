@@ -425,8 +425,8 @@ source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
         false ->
             case SourceFile of
                 null -> <<"project">>;
-                SourceFile ->
-                    case classify_source_origin(SourceFile) of
+                Bin when is_binary(Bin) ->
+                    case classify_source_origin(Bin) of
                         project -> <<"project">>;
                         dependency ->
                             case package_of_module(ModName) of

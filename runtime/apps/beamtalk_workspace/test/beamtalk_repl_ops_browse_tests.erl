@@ -290,7 +290,7 @@ browse_tests(#{class_name := Class}) ->
             ?assert(is_binary(SourceOrigin)),
             ?assert(lists:member(SourceOrigin, [
                 <<"stdlib">>, <<"project">>, <<"dependency">>
-            ]))
+            ]) orelse binary:part(SourceOrigin, 0, 11) =:= <<"dependency:">>)
         end},
         {"browse-protocols groups selectors with line and source_status", fun() ->
             Value = decode_value(
