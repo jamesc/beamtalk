@@ -1345,10 +1345,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # AND flash it in the status line.
   defp eval_success(socket, _print_it, term, output, expr) do
     rendered = Workspace.render_term(term)
+    # Capture the anchor from the ORIGINAL socket before the pipe: `eval_status`
+    # doesn't touch `ws_selection`, but binding it here makes that independence
+    # explicit and survives a future pipe stage that might clear the selection.
+    anchor = ws_anchor(socket)
 
     socket
     |> eval_status("→ " <> rendered, output, expr)
-    |> push_event("ws_insert_result", %{text: rendered, anchor: ws_anchor(socket)})
+    |> push_event("ws_insert_result", %{text: rendered, anchor: anchor})
   end
 
   # The doc offset to anchor an inline result after: the end of the tracked

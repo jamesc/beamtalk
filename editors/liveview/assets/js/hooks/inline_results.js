@@ -21,7 +21,7 @@
 import { StateField, StateEffect } from "@codemirror/state"
 import { Decoration, EditorView, WidgetType } from "@codemirror/view"
 
-// Past this many lines an inline result collapses by default.
+// Past this many lines an inline result collapses by default (≥ 5 lines collapse).
 const COLLAPSE_LINES = 4
 // One-line summary truncation width.
 const SUMMARY_WIDTH = 60
