@@ -1573,6 +1573,17 @@ normalize_method_source_line_comment_full_definition_test() ->
         beamtalk_repl_eval:normalize_method_source(<<"increment">>, Source)
     ).
 
+-doc """
+A comment-only source with no trailing newline must not glue the injected header
+onto the comment line (which would swallow it). A separator newline is inserted
+so the header starts fresh; the empty body is then reported by the compiler.
+""".
+normalize_method_source_comment_only_no_newline_test() ->
+    ?assertEqual(
+        <<"/// just a comment\nincrement => ">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"/// just a comment">>)
+    ).
+
 %%====================================================================
 %% Success-path tests (require the beamtalk_compiler + beamtalk_runtime apps)
 %%

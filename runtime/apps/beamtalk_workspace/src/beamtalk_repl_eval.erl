@@ -591,7 +591,29 @@ normalize_method_source(SelectorBin, Source) ->
         false ->
             PrefixLen = byte_size(Source) - byte_size(Body),
             <<Prefix:PrefixLen/binary, _/binary>> = Source,
-            <<Prefix/binary, SelectorBin/binary, " => ", Body/binary>>
+            %% A leading `//' comment with no trailing newline (a comment-only
+            %% source) would otherwise glue the injected `selector => ' onto the
+            %% comment line, swallowing the header. Insert a newline when the
+            %% prefix ends mid-comment so the header starts fresh and the compiler
+            %% can report the empty body clearly.
+            Sep = header_separator(Prefix),
+            <<Prefix/binary, Sep/binary, SelectorBin/binary, " => ", Body/binary>>
+    end.
+
+%% Separator between a consumed comment/whitespace prefix and the injected
+%% `selector => ' header. Empty when the prefix already ends at a line or
+%% statement boundary (newline / whitespace / no prefix); a newline only when the
+%% prefix ends in comment text (a `//' comment without a trailing newline).
+-spec header_separator(binary()) -> binary().
+header_separator(<<>>) ->
+    <<>>;
+header_separator(Prefix) ->
+    case binary:last(Prefix) of
+        $\n -> <<>>;
+        $\s -> <<>>;
+        $\t -> <<>>;
+        $\r -> <<>>;
+        _ -> <<"\n">>
     end.
 
 %% Skip leading whitespace and full-line `//'/`///' comments, returning the first
