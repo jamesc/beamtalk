@@ -101,13 +101,50 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "eval round-trip renders the workspace result term", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     view |> form("#eval-form") |> render_submit(%{expr: "3 + 4"})
-    # Scope the assertion to the result value element, NOT the whole page: the
-    # connected shell renders a session id (`phoenix-<integer>`) whose digits
-    # would let a bare `html =~ "7"` pass even when eval is completely broken and
-    # the result pane shows an error. The value span is the real signal — it must
-    # carry the computed `7` and there must be no error pane (BT-2496).
-    assert view |> element(".ws-result:not(.err) .val") |> render() =~ "7"
+    # Scope the assertion to the transient eval-status value element (BT-2542),
+    # NOT the whole page: the connected shell renders a session id
+    # (`phoenix-<integer>`) whose digits would let a bare `html =~ "7"` pass even
+    # when eval is completely broken and an error pane shows. The status span is
+    # the real signal — it must carry the computed `7` and there must be no error
+    # pane (BT-2496). The full result also lands inline in the buffer via the
+    # `ws_insert_result` push (asserted separately below).
+    assert view |> element(".eval-status .val") |> render() =~ "7"
     refute render(view) =~ "Empty expression"
+  end
+
+  test "Print it pushes the result for inline insertion into the buffer (BT-2542)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    # Print it (the default action) inserts its result inline in the Workspace
+    # editor. The insert is a client-side CodeMirror edit driven by a server
+    # push, so a server-side render can't observe the buffer — assert the push
+    # instead (the browser e2e covers the actual inline DOM + collapse).
+    view |> form("#eval-form") |> render_submit(%{expr: "3 + 4", action: "print_it"})
+    assert_push_event(view, "ws_insert_result", %{text: text})
+    assert text =~ "7"
+  end
+
+  test "Print it echoes the selection anchor for inline placement (BT-2542)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    # Track a Workspace selection, then Print it: the inline-result push echoes
+    # the selection's end offset so the client anchors the widget after the
+    # evaluated region even if the cursor moves during the eval round-trip
+    # (wider over a remote distribution node). With no selection the anchor is
+    # nil and the client falls back to the live buffer end.
+    render_hook(view, "select_workspace", %{"text" => "3 + 4", "start" => 2, "end" => 7})
+    view |> form("#eval-form") |> render_submit(%{expr: "unused-buffer", action: "print_it"})
+    assert_push_event(view, "ws_insert_result", %{text: text, anchor: 7})
+    assert text =~ "7"
+  end
+
+  test "Do it shows a terse status, no result value (BT-2542)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    # Do it evaluates for side effects only: a subtle `✓ evaluated` status, no
+    # result term (ambient output streams to the Transcript instead) and no
+    # inline buffer insert.
+    view |> form("#eval-form") |> render_submit(%{expr: "3 + 4", action: "do_it"})
+    status = view |> element(".eval-status .val") |> render()
+    assert status =~ "✓ evaluated"
+    refute status =~ "7"
   end
 
   test "eval state persists across evals within a session", %{conn: conn} do
@@ -116,9 +153,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     # Bind a variable, then read it back in a later eval on the same session.
     view |> form("#eval-form") |> render_submit(%{expr: "x := 21 * 2"})
     view |> form("#eval-form") |> render_submit(%{expr: "x"})
-    # Result-scoped (see "eval round-trip" above) so a session-id digit can't
+    # Status-scoped (see "eval round-trip" above) so a session-id digit can't
     # spuriously satisfy the assertion when eval is broken.
-    assert view |> element(".ws-result:not(.err) .val") |> render() =~ "42"
+    assert view |> element(".eval-status .val") |> render() =~ "42"
   end
 
   test "Transcript output streams live into the LiveView", %{conn: conn} do

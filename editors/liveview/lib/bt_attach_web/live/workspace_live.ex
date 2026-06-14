@@ -372,6 +372,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:session_id, session_id)
       |> assign(:session_pid, pid)
       |> assign(:result, nil)
+      # `eval_seq` re-keys the transient `.eval-status` line (BT-2542) so its
+      # fade animation restarts on every eval — the status self-clears visually
+      # while staying in the DOM (the value is still assertable in tests).
+      |> assign(:eval_seq, 0)
       |> assign(:output, nil)
       |> assign(:error, nil)
       |> assign(:expr, "3 + 4")
@@ -1305,25 +1309,27 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Render an eval success according to the chosen action, reusing the existing
-  # `render_term` formatting and (for inspectIt) the same `inspect_term/4`
-  # read-surface path bindings drill through:
+  # Render an eval success according to the chosen action (BT-2542 Workspace
+  # rebuild). The growing below-editor `.ws-result` success bubble is gone; the
+  # Workspace is now editor-primary, so feedback is split:
   #
-  #   * print_it   — show the result term (classic eval; the default).
-  #   * do_it      — evaluate for side effects; show a terse confirmation only.
-  #   * inspect_it — show the term AND open it in the Inspector (when inspectable).
+  #   * print_it   — the classic Workspace "Print it": the result is inserted
+  #     INLINE into the CodeMirror buffer after the evaluated region (pushed to
+  #     the `CmEditor` hook as `ws_insert_result`, rendered as a collapsible
+  #     block widget — NOT doc text, so "evaluate buffer" never re-runs it). A
+  #     terse `→ result` also flashes in the transient status line.
+  #   * do_it      — evaluate for side effects; a subtle, self-clearing
+  #     `✓ evaluated` status only (no buffer insert; ambient output → Transcript).
+  #   * inspect_it — show the term in the status AND open it in the Inspector.
+  #
+  # All three carry the result/confirmation in `result` (rendered as the thin
+  # `.eval-status` line) and bump `eval_seq` to restart its fade.
   defp eval_success(socket, "do_it", _term, output, expr) do
-    assign(socket, result: "✓ evaluated", output: present(output), error: nil, expr: expr)
+    eval_status(socket, "✓ evaluated", output, expr)
   end
 
   defp eval_success(socket, "inspect_it", term, output, expr) do
-    socket =
-      assign(socket,
-        result: Workspace.render_term(term),
-        output: present(output),
-        error: nil,
-        expr: expr
-      )
+    socket = eval_status(socket, "→ " <> Workspace.render_term(term), output, expr)
 
     # In `"float"` mode (BT-2493) Inspect-it opens a floating window on the
     # `→ result` term rather than driving the docked pane; docked mode keeps the
@@ -1335,13 +1341,58 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # print_it (and the historical default).
+  # print_it (and the historical default): insert the result inline in the buffer
+  # AND flash it in the status line.
   defp eval_success(socket, _print_it, term, output, expr) do
+    rendered = Workspace.render_term(term)
+    # Capture the anchor from the ORIGINAL socket before the pipe: `eval_status`
+    # doesn't touch `ws_selection`, but binding it here makes that independence
+    # explicit and survives a future pipe stage that might clear the selection.
+    anchor = ws_anchor(socket)
+
+    # `push_event` is page-wide — every CmEditor hook that registered the
+    # handler receives it. Scope it to the Workspace editor by element id (the
+    # client drops a mismatched target) so a second inline editor (BT-2543) can't
+    # also insert this result. The id is the shared `workspace_editor_id/0` so the
+    # target and the template host can't drift apart.
+    socket
+    |> eval_status("→ " <> rendered, output, expr)
+    |> push_event("ws_insert_result", %{
+      text: rendered,
+      anchor: anchor,
+      target: workspace_editor_id()
+    })
+  end
+
+  # DOM id of the Workspace CodeMirror editor host — the single source of truth
+  # shared by the template element and the `ws_insert_result` push target, so a
+  # rename can't silently break inline results (the client guard discards a push
+  # whose target doesn't match `this.el.id`).
+  defp workspace_editor_id, do: "workspace-editor-overlay"
+
+  # The doc offset to anchor an inline result after: the end of the tracked
+  # selection (the evaluated region) when evaluating a selection, else nil so the
+  # client falls back to the live buffer end. Echoed in the `ws_insert_result`
+  # push so a cursor move during the eval round-trip (wider over a remote
+  # distribution node) can't drop the widget on the wrong line.
+  defp ws_anchor(socket) do
+    if ws_selection?(socket.assigns) do
+      case socket.assigns.ws_selection[:end] do
+        offset when is_integer(offset) -> offset
+        _ -> nil
+      end
+    end
+  end
+
+  # Assign the transient eval-status line + bump its re-key sequence. Shared by
+  # every success branch so the status fade restarts consistently per eval.
+  defp eval_status(socket, status, output, expr) do
     assign(socket,
-      result: Workspace.render_term(term),
+      result: status,
       output: present(output),
       error: nil,
-      expr: expr
+      expr: expr,
+      eval_seq: socket.assigns.eval_seq + 1
     )
   end
 
@@ -3690,10 +3741,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                              submit a stale value). ⌘D/⌘P/⌘I ride the form's
                              KeyboardShortcuts hook (keydown bubbles out). --%>
                         <div
-                          id="workspace-editor-overlay"
+                          id={workspace_editor_id()}
                           class="cm-wrap ws-wrap"
                           phx-hook="CmEditor"
                           data-select-event="select_workspace"
+                          data-inline-results="true"
                         >
                           <textarea
                             id="workspace-editor-source"
@@ -3733,9 +3785,22 @@ defmodule BtAttachWeb.WorkspaceLive do
                          its "Not authorized" message must still show (the form
                          itself is owner-gated away). --%>
                     <div :if={@output} class="io-block">{@output}</div>
-                    <div :if={@result} class="ws-result">
-                      <span class="arrow">→</span>
-                      <span class="val">{@result}</span>
+                    <%!-- Print it / Do it / Inspect it confirmation (BT-2542): a
+                         THIN, self-clearing status line — not the old growing
+                         `.ws-result` bubble (which squeezed the editor). The full
+                         result lands inline in the buffer (print_it) or the
+                         Inspector (inspect_it); this is the momentary echo.
+
+                         The `aria-live` region is a STABLE outer wrapper: screen
+                         readers announce mutations WITHIN a persistent live region,
+                         not a freshly-inserted one. The inner div is keyed by
+                         `eval_seq` so it re-mounts each eval (restarting the fade);
+                         its reappearance inside the stable region is the announced
+                         change. --%>
+                    <div id="eval-status" class="eval-status-region" aria-live="polite">
+                      <div :if={@result} id={"eval-status-#{@eval_seq}"} class="eval-status">
+                        <span class="val">{@result}</span>
+                      </div>
                     </div>
                     <div :if={@error} class="ws-result err">
                       <span class="arrow">→</span>
