@@ -352,6 +352,60 @@
 .ws-result.err { border-color: color-mix(in oklab, var(--err) 35%, var(--line)); }
 .ws-result.err .arrow, .ws-result.err .val { color: var(--err); }
 
+/* REPL tab (BT-2543): a classic TUI request→response scrollback ABOVE a thin
+   bottom-pinned composer. The pane is a flex column — the scrollback flexes and
+   scrolls (flex:1, overflow:auto) while the input stays pinned (flex:none), so a
+   long response never pushes the input off-screen. */
+.repl-pane { padding: 0; }
+.repl-scrollback {
+  flex: 1; min-height: 0; overflow: auto; padding: 10px 12px;
+  font-family: var(--code-font, ui-monospace, monospace); font-size: 12.5px;
+  background: var(--code-bg);
+}
+/* The empty-state hint (shown until the first entry; `:if`-gated server-side). */
+.repl-empty { flex: none; margin: 10px 12px; }
+
+.repl-entry { margin: 0 0 10px 0; }
+.repl-entry:last-child { margin-bottom: 0; }
+.repl-req { display: flex; gap: 8px; align-items: flex-start; color: var(--ink); }
+.repl-mark { color: var(--muted); font-weight: 700; flex: none; }
+.repl-expr { white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; }
+.repl-res {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 2px; padding-left: 0;
+}
+.repl-arrow { color: var(--accent); font-weight: 700; flex: none; }
+.repl-val { color: var(--accent-2); white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; flex: 1; }
+.repl-entry.err .repl-arrow, .repl-entry.err .repl-val { color: var(--err); }
+
+/* Long responses collapse within their entry (capped open height, scroll past
+   it) so one verbose result can't flood the scrollback. */
+.repl-collapse { flex: 1; min-width: 0; }
+.repl-summary { cursor: pointer; color: var(--accent-2); list-style: revert; }
+.repl-collapse[open] .repl-summary { color: var(--muted); margin-bottom: 4px; }
+.repl-collapse .repl-val { display: block; max-height: 16em; overflow: auto; }
+
+/* Inspect affordance: results stay live objects even in the terminal idiom. */
+.repl-inspect {
+  flex: none; align-self: flex-start; margin-left: auto; padding: 1px 7px;
+  font-size: 11px; color: var(--muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 5px; cursor: pointer;
+}
+.repl-inspect:hover { color: var(--ink); border-color: var(--accent); }
+
+/* Bottom-pinned composer: a thin, growing CodeMirror input (the ReplInput hook).
+   Mirrors `.cm-wrap`/`.ws-wrap` chrome but caps its growth so the scrollback
+   keeps the bulk of the pane. */
+.repl-input-form { flex: none; padding: 8px 12px; border-top: 1px solid var(--line); }
+/* Unlike the Workspace editor (which fills a fixed pane via an absolute host),
+   the REPL composer grows with its content between a one-line floor and a small
+   cap, scrolling internally past the cap — a chat-composer feel. */
+.repl-wrap {
+  min-height: 2.2em; border: 1px solid var(--line); border-radius: 7px;
+}
+.repl-wrap .cm-host { position: relative; inset: auto; }
+.repl-wrap .cm-editor { height: auto; }
+.repl-wrap .cm-scroller { max-height: 9em; }
+
 /* Transient eval-status line (BT-2542): a thin, one-line confirmation of the
    last eval (`→ 7`, or `✓ evaluated` for Do it). It never wraps or grows, so it
    cannot squeeze the editor, and it fades out a few seconds after each eval

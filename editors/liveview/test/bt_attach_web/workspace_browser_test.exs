@@ -513,6 +513,53 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     )
   end
 
+  test "the REPL tab evaluates from the bottom input into the scrollback (BT-2543)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Switch to the REPL dock tab; its CodeMirror composer (the ReplInput hook)
+    # mounts at the bottom of the pane.
+    |> click("button[phx-value-tab='repl']")
+    |> assert_has("#repl-input .cm-content")
+    |> set_cm_source("#repl-input", "3 + 4")
+    # Enter SUBMITS in the REPL (terminal convention) — the confirmed BT-2543
+    # divergence from the Workspace, where Enter is a newline. A server-side render
+    # can't observe this: it's the ReplInput hook's keymap + a requestSubmit.
+    |> press("#repl-input .cm-content", "Enter")
+    # The request→response pair lands in the scrollback above the input...
+    |> assert_has(".repl-scrollback .repl-entry .repl-expr", text: "3 + 4")
+    |> assert_has(".repl-scrollback .repl-entry .repl-val", text: "7")
+    # ...and the input is cleared after submit (REPL style).
+    |> evaluate(
+      "document.querySelector('#repl-input .cm-content').textContent",
+      fn after_submit ->
+        refute after_submit =~ "3 + 4", "the REPL input was not cleared after submit"
+      end
+    )
+  end
+
+  test "↑ recalls a prior REPL expression into the input (BT-2543)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    |> click("button[phx-value-tab='repl']")
+    |> assert_has("#repl-input .cm-content")
+    |> set_cm_source("#repl-input", "6 * 7")
+    |> press("#repl-input .cm-content", "Enter")
+    |> assert_has(".repl-scrollback .repl-entry .repl-val", text: "42")
+    # The input cleared on submit; ↑ on the now-empty first line recalls the prior
+    # expression from the server-owned history ring back into the composer (the
+    # ReplInput hook fires repl_history_prev only at the edge; the server pushes
+    # the recalled text via repl_set_input).
+    |> press("#repl-input .cm-content", "ArrowUp")
+    |> evaluate(
+      "document.querySelector('#repl-input .cm-content').textContent",
+      fn recalled ->
+        assert recalled =~ "6 * 7", "ArrowUp did not recall the prior expression"
+      end
+    )
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   # Type `query` into the omni search input and fire the `keyup` event the server
