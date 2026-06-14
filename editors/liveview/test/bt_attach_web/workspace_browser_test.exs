@@ -216,12 +216,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> visit("/")
     # The Tweaks panel is mounted on load (so the saved theme applies) but hidden
     # behind the top-bar gear; open the settings dropdown to reach its controls.
+    |> click(".settings-gear")
     |> assert_has("#tweaks-panel")
     # The IDE boots on the default 'paper' theme (data-theme on <html>).
     |> evaluate("document.documentElement.getAttribute('data-theme')", fn theme ->
       assert theme == "paper"
     end)
-    |> click(".settings-gear")
     # Clicking the 'dusk' theme button is a PURE client-side hook action (no
     # server round-trip): it flips data-theme on <html>…
     |> click("[data-tweak='theme'][data-tweak-value='dusk']")
@@ -238,6 +238,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "density toggle produces a measurable layout delta (BT-2551)", %{conn: conn} do
     conn
     |> visit("/")
+    |> click(".settings-gear")
     |> assert_has("#tweaks-panel")
     # Default density is 'cozy' — the app shell padding uses --pad (7px) and
     # --gap (9px). Read the computed panel-body padding as a measurable proxy.
@@ -261,6 +262,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   test "accent swatches are disabled on dusk theme (BT-2551)", %{conn: conn} do
     conn
     |> visit("/")
+    |> click(".settings-gear")
     |> assert_has("#tweaks-panel")
     # On paper (default), accent swatches are enabled.
     |> evaluate(
