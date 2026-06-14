@@ -217,7 +217,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # The Tweaks panel is mounted on load (so the saved theme applies) but hidden
     # behind the top-bar gear; open the settings dropdown to reach its controls.
     |> click(".settings-gear")
-    |> assert_has("#tweaks-panel")
+    |> assert_has(".settings-popover.open")
     # The IDE boots on the default 'paper' theme (data-theme on <html>).
     |> evaluate("document.documentElement.getAttribute('data-theme')", fn theme ->
       assert theme == "paper"
@@ -239,7 +239,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> click(".settings-gear")
-    |> assert_has("#tweaks-panel")
+    |> assert_has(".settings-popover.open")
     # Default density is 'cozy' — the app shell padding uses --pad (7px) and
     # --gap (9px). Read the computed panel-body padding as a measurable proxy.
     |> evaluate(
@@ -263,7 +263,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> click(".settings-gear")
-    |> assert_has("#tweaks-panel")
+    |> assert_has(".settings-popover.open")
     # On paper (default), accent swatches are enabled.
     |> evaluate(
       "document.querySelector('.twk-swatches').dataset.accentDisabled",

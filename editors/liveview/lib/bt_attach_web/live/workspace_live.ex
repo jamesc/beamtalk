@@ -1789,14 +1789,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # protocols. Used when a method is opened from *outside* the browser (a
   # Senders/Implementors jump to another class) so the pane tracks the focused
   # tab, per the "browser highlights whatever the focused tab shows" design.
-  defp navigate_browser(socket, class, side)
-       when is_binary(class) and is_binary(side) do
+   defp navigate_browser(socket, class, side)
+        when is_binary(class) and is_binary(side) do
     socket
     |> assign(selected_class: class, browser_side: side, selected_protocol: nil)
     |> load_protocols(class, side)
   end
-
-  defp navigate_browser(socket, _class, _side), do: socket
 
   # Open (or re-focus) an *editable* method tab for class/side/selector — the
   # shared open path for an omni-search selector result and a senders/implementors
@@ -3289,7 +3287,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     syntax: "warm",
     density: "cozy",
     uiFont: "Hanken Grotesk",
-    codeFont: "IBM Plex Mono"
+    codeFont: "Cascadia Code"
   }
 
   # The curated accent swatches (paper/squeak only — dusk keeps its built-in
@@ -3732,7 +3730,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                primary workspace pane. The panel stays mounted (so the TweaksPanel
                hook applies the saved theme on load); the gear only toggles the
                dropdown. Click-away / Escape close it. --%>
-          <div :if={@connected} class="settings-menu" phx-click-away="close_settings">
+           <div :if={@connected} class="settings-menu" phx-click-away={if @show_settings, do: "close_settings"}>
             <button
               type="button"
               class="settings-gear"
@@ -3743,6 +3741,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
               ⚙
             </button>
+            <%!-- Escape listener: phx-window-keydown works even on display:none elements --%>
             <div
               :if={@show_settings}
               phx-window-keydown="close_settings"
