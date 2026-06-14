@@ -865,14 +865,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   end
 
   # The BT-2545 *flush clears the unflushed badge* behaviour is covered by the pure
-  # reconcile unit tests in `workspace_live_reconcile_test.exs`. A full
-  # compile → flush → badge-clear integration test is not viable on this `:workspace`
-  # lane: clearing the badge requires the method's patch to be genuinely *flushable*
-  # to disk, but the only way to get an in-project class into the e2e workspace is the
-  # New File flow, whose in-memory method patches are non-flushable (the loader can't
-  # resolve an in-project on-disk span for a New-File class), so a real flush leaves
-  # them pending and the badge legitimately never clears. The `compile → unflushed
-  # shown` half is covered by "compiling a browsed method shows the unflushed badge".
+  # reconcile unit tests in `workspace_live_reconcile_test.exs` and the full
+  # integration test in `workspace_flush_badge_test.exs` (BT-2554) which uses a
+  # fully-stubbed workspace client. The `compile → unflushed shown` half is
+  # covered by "compiling a browsed method shows the unflushed badge".
 
   test "re-clicking an open method row re-fetches without blanking the buffer (BT-2547)", %{
     conn: conn
