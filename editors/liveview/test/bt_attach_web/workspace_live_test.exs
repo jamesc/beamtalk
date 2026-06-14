@@ -430,20 +430,68 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "the select_source hook event is accepted and ignored when malformed (BT-2485)", %{
     conn: conn
   } do
-    {:ok, view, _html} = live(conn, "/")
+    {:ok, view, html} = live(conn, "/")
 
-    # A well-formed selection payload must not crash the LiveView (the assign is
-    # internal, so we just prove the handler accepts it and re-renders).
+    # A well-formed selection payload stamped with the *active* tab id is stored
+    # (BT-2549: the stamp is what the guard matches against).
+    tab_id = active_tab_id(html)
+
     assert render_hook(view, "select_source", %{
              "text" => "self.value",
              "start" => 0,
-             "end" => 10
+             "end" => 10,
+             "tab_id" => tab_id
            })
+
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
 
     # A malformed payload (no text key, or non-binary) is ignored, not a crash —
     # the LiveView keeps rendering, proving the defensive clause holds.
     assert render_hook(view, "select_source", %{"garbage" => true})
     assert render_hook(view, "select_source", %{"text" => 123})
+  end
+
+  test "select_source ignores a stale stamp from a departing tab (BT-2549)", %{conn: conn} do
+    {:ok, view, html} = live(conn, "/")
+    active = active_tab_id(html)
+
+    # Seed a real selection for the active tab so we can prove the stale event
+    # doesn't clobber *or* overwrite it.
+    render_hook(view, "select_source", %{
+      "text" => "self.value",
+      "start" => 0,
+      "end" => 10,
+      "tab_id" => active
+    })
+
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
+
+    # The race: a `select_source` the *departing* CmEditor dispatched just before
+    # its `destroyed()` ran lands carrying the previous tab's id. Its stamp no
+    # longer matches `active_tab`, so the handler drops it — `:edit_selection`
+    # keeps the live tab's coordinates rather than stale ones from the closed tab.
+    render_hook(view, "select_source", %{
+      "text" => "stale.from.closed.tab",
+      "start" => 99,
+      "end" => 123,
+      "tab_id" => active <> ":stale"
+    })
+
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
+
+    # A payload with no tab-id stamp at all is likewise ignored (defensive: a
+    # client that never stamps can't poison the assign).
+    render_hook(view, "select_source", %{"text" => "no.stamp", "start" => 1, "end" => 2})
+    assert edit_selection(view) == %{text: "self.value", start: 0, end: 10}
+  end
+
+  # The method editor stamps its CmEditor element with the active tab id so each
+  # selection push can be matched against the live tab (BT-2549).
+  test "the method editor stamps its CmEditor with the active tab id (BT-2549)", %{conn: conn} do
+    {:ok, _view, html} = live(conn, "/")
+
+    assert html =~ ~s(data-select-event="select_source")
+    assert html =~ ~s(data-tab-id="#{active_tab_id(html)}")
   end
 
   # ── Phase 2 tabbed method editor (BT-2494) ──────────────────────────────────
@@ -1460,6 +1508,19 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       [_, n] -> String.to_integer(n)
       _ -> 0
     end
+  end
+
+  # The active method-editor tab id, read from the CmEditor element's stamp
+  # (`data-tab-id`) — the same value a real selection push carries (BT-2549).
+  defp active_tab_id(html) do
+    [_, id] = Regex.run(~r/data-tab-id="([^"]+)"/, html)
+    id
+  end
+
+  # The internal `:edit_selection` assign — no rendered consumer yet (BT-2549),
+  # so peek at the LiveView's socket to assert the selection-guard behaviour.
+  defp edit_selection(view) do
+    :sys.get_state(view.pid).socket.assigns.edit_selection
   end
 
   # ~6s total — generous for cross-node async transcript delivery under CI load.

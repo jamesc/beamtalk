@@ -65,6 +65,14 @@ export const CmEditor = {
     }
 
     this.selectEvent = this.el.dataset.selectEvent || null
+    // Tab-id stamp (BT-2549): the method editor re-keys this element per active
+    // tab, so `data-tab-id` captures the tab THIS editor instance edits. We send
+    // it with every selection push; the server ignores any push whose stamp ≠ the
+    // active tab, so a `select_source` the departing editor dispatched just before
+    // `destroyed()` can't re-populate `:edit_selection` with stale coordinates
+    // after a tab switch. Absent (Workspace editor) → null, which that handler
+    // doesn't read.
+    this.tabId = this.el.dataset.tabId || null
     this.lastSelection = null
     this.hadSelection = false
     const readOnly = this.field.readOnly || this.el.dataset.readonly === "true"
@@ -130,6 +138,11 @@ export const CmEditor = {
     const key = range.from + ":" + range.to + ":" + text
     if (key === this.lastSelection) return
     this.lastSelection = key
-    this.pushEvent(this.selectEvent, { text, start: range.from, end: range.to })
+    this.pushEvent(this.selectEvent, {
+      text,
+      start: range.from,
+      end: range.to,
+      tab_id: this.tabId,
+    })
   },
 }
