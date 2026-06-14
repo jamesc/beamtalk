@@ -96,9 +96,39 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has("#workspace-editor-overlay .cm-content")
     |> set_source("3 + 4")
     # The primary action button submits the eval form (action=print_it) over the
-    # live socket; the workspace evaluates and the result term renders.
+    # live socket; the workspace evaluates and the result flashes in the transient
+    # status line (BT-2542) — the durable copy lands inline in the buffer (asserted
+    # in the inline-result test below).
     |> click("button[value='print_it']")
-    |> assert_has(".ws-result .val", text: "7")
+    |> assert_has(".eval-status .val", text: "7")
+  end
+
+  test "Print it inserts a result inline in the Workspace buffer (BT-2542)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    |> set_source("3 + 4")
+    # The classic Smalltalk "Print it inserts the result": the server pushes the
+    # rendered term and the CmEditor inline-results extension drops a `→ 7` block
+    # widget into the editor (NOT the old below-editor bubble). It is a widget,
+    # not doc text, so re-evaluating the buffer never re-runs it.
+    |> click("button[value='print_it']")
+    |> assert_has("#workspace-editor-overlay .cm-inline-result", text: "7")
+  end
+
+  test "a long Print it result collapses inline and expands on click (BT-2542)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # `Beamtalk help: Integer` returns a long, multi-line class summary — the
+    # canonical "long result" the issue calls out (it used to blow out the pane).
+    # Inline it collapses to a one-line summary by default.
+    |> set_source("Beamtalk help: Integer")
+    |> click("button[value='print_it']")
+    |> assert_has("#workspace-editor-overlay .cm-inline-result.is-collapsed")
+    # Clicking the collapsed strip expands the full body inline.
+    |> click("#workspace-editor-overlay .cm-inline-result.is-collapsed")
+    |> assert_has("#workspace-editor-overlay .cm-inline-result .cm-inline-result-body")
   end
 
   test "the KeyboardShortcuts hook submits the eval on ⌘/Ctrl+P (BT-2485)", %{conn: conn} do
@@ -110,7 +140,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # sets the hidden action field and request-submits the eval form — no button
     # click. Linux/CI uses Ctrl as the mod key.
     |> press("#workspace-editor-overlay .cm-content", "Control+p")
-    |> assert_has(".ws-result .val", text: "15")
+    |> assert_has(".eval-status .val", text: "15")
   end
 
   test "the bindings pane reflects a live eval (BT-2408)", %{conn: conn} do

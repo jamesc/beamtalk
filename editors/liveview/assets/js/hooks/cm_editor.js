@@ -48,6 +48,7 @@ import {
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands"
 import { indentUnit } from "@codemirror/language"
 import { beamtalkHighlighting } from "./bt_highlight"
+import { inlineResultsField, addInlineResult } from "./inline_results"
 
 export const CmEditor = {
   mounted() {
@@ -67,6 +68,10 @@ export const CmEditor = {
     this.selectEvent = this.el.dataset.selectEvent || null
     this.lastSelection = null
     this.hadSelection = false
+    // Opt-in to inline eval results (BT-2542). Only the Workspace editor sets
+    // data-inline-results; a future REPL input (BT-2543) is a CmEditor too but
+    // shows results in its own scrollback, so it leaves this off.
+    this.inlineResults = this.el.dataset.inlineResults === "true"
     const readOnly = this.field.readOnly || this.el.dataset.readonly === "true"
     const placeholderText = this.el.dataset.placeholder || ""
 
@@ -88,6 +93,7 @@ export const CmEditor = {
       EditorView.updateListener.of((u) => this.onUpdate(u)),
     ]
     if (placeholderText) extensions.push(placeholderExt(placeholderText))
+    if (this.inlineResults) extensions.push(inlineResultsField)
 
     this.view = new EditorView({
       state: EditorState.create({ doc: this.field.value, extensions }),
@@ -97,6 +103,13 @@ export const CmEditor = {
     // (which dispatches a doc-replace transaction to set editor contents
     // deterministically — there is no <textarea> value to fill any more).
     this.el.cmView = this.view
+
+    // Print it inserts the result inline (BT-2542): the server pushes the
+    // rendered result here after eval; we drop it as a collapsible block widget
+    // after the evaluated region. Only registered for the Workspace editor.
+    if (this.inlineResults) {
+      this.handleEvent("ws_insert_result", (payload) => this.insertInlineResult(payload))
+    }
   },
 
   destroyed() {
@@ -116,6 +129,24 @@ export const CmEditor = {
   syncField(update) {
     this.field.value = update.state.doc.toString()
     this.field.dispatchEvent(new Event("input", { bubbles: true }))
+  },
+
+  // Anchor a `→ result` block widget after the evaluated region: the end of the
+  // selection if one is active (we evaluated the selection), else the end of the
+  // buffer (we evaluated the whole buffer). Anchoring at the END of that line's
+  // doc position lets the block widget render on the line(s) below it. No doc
+  // edit happens, so the eval path (which reads the mirrored textarea text) never
+  // sees the result and "evaluate buffer" stays pure code.
+  insertInlineResult(payload) {
+    if (!this.view || !payload || typeof payload.text !== "string") return
+    const state = this.view.state
+    const main = state.selection.main
+    const anchor = main.empty ? state.doc.length : main.to
+    const pos = state.doc.lineAt(anchor).to
+    this.view.dispatch({
+      effects: addInlineResult.of({ pos, text: payload.text }),
+      scrollIntoView: true,
+    })
   },
 
   reportSelection(update) {

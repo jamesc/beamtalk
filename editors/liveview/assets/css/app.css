@@ -333,6 +333,11 @@
 }
 .dock-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 .dock-pane[hidden] { display: none; }
+/* BT-2542: the Workspace is editor-primary — the CodeMirror buffer fills the
+   pane and grows; the action bar is pinned at the bottom (flex:none); the input
+   is always reachable. The old below-editor `.ws-result` success bubble is gone
+   (results now land inline in the buffer); `.ws-result` survives only for the
+   capped error strip, so a long error can't squeeze the editor either. */
 .ws-pane { padding: 10px 12px; }
 .ws-pane > form { flex: 1; min-height: 0; }
 .ws-wrap { flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: 7px; }
@@ -340,12 +345,51 @@
   margin-top: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px;
   background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
   font-size: 12.5px; display: flex; align-items: flex-start; gap: 8px; flex: none;
-  white-space: pre-wrap; overflow-wrap: break-word;
+  white-space: pre-wrap; overflow-wrap: break-word; max-height: 30vh; overflow: auto;
 }
 .ws-result .arrow { color: var(--accent); font-weight: 700; flex: none; }
 .ws-result .val { color: var(--ink); min-width: 0; }
 .ws-result.err { border-color: color-mix(in oklab, var(--err) 35%, var(--line)); }
 .ws-result.err .arrow, .ws-result.err .val { color: var(--err); }
+
+/* Transient eval-status line (BT-2542): a thin, one-line confirmation of the
+   last eval (`→ 7`, or `✓ evaluated` for Do it). It never wraps or grows, so it
+   cannot squeeze the editor, and it fades out a few seconds after each eval
+   (re-keyed by `eval_seq` so the animation restarts). The element stays in the
+   DOM at opacity 0 — the value remains assertable in tests. */
+.eval-status {
+  flex: none; margin-top: 6px; padding: 2px 2px 0 2px;
+  font-family: var(--code-font, ui-monospace, monospace); font-size: 12px;
+  color: var(--accent-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  animation: eval-status-fade 6s ease forwards;
+}
+.eval-status .val { color: var(--accent-2); }
+@keyframes eval-status-fade {
+  0%, 55% { opacity: 1; }
+  100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .eval-status { animation: none; opacity: 0.85; }
+}
+
+/* Inline Print-it results (BT-2542): CodeMirror block widgets dropped after the
+   evaluated expression — the classic Smalltalk "Print it inserts the result".
+   A long result collapses to a one-line summary; click to expand. */
+.cm-inline-result {
+  font-family: var(--code-font, ui-monospace, monospace); font-size: 12.5px;
+  color: var(--accent-2); background: var(--code-bg);
+  border-left: 2px solid var(--accent); border-radius: 0 5px 5px 0;
+  margin: 2px 0 4px 0; padding: 3px 8px; white-space: pre-wrap; overflow-wrap: break-word;
+}
+.cm-inline-result.is-collapsed { cursor: pointer; white-space: nowrap; }
+.cm-inline-result.is-collapsed:hover { background: var(--hover); }
+.cm-inline-result-summary { color: var(--muted); }
+.cm-inline-result-toggle {
+  margin-left: 6px; padding: 0 4px; border: 0; background: transparent;
+  color: var(--faint); cursor: pointer; font: inherit; line-height: inherit;
+}
+.cm-inline-result-toggle:hover { color: var(--ink); }
+
 .actionbar {
   flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0 0 0;
 }
