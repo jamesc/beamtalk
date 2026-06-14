@@ -1560,7 +1560,13 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(:repl_seq, seq)
     |> update(:repl_terms, &Map.put(&1, id, term))
+    # NOTE: repl_terms is unbounded — one small reference per successful eval
+    # (the object lives in the workspace process, not here), so memory impact is
+    # low. Unlike repl_history (capped at @repl_history_limit), it has no cap; if
+    # a scrollback depth cap is added later (`stream_insert(:repl, …, limit: N)`),
+    # evict the matching key here in step.
     |> stream_insert(:repl, entry)
+    |> repl_scroll_to_bottom()
   end
 
   # Append an error entry: the `→ response` carries the rendered error and there
@@ -1581,6 +1587,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(:repl_seq, seq)
     |> stream_insert(:repl, entry)
+    |> repl_scroll_to_bottom()
+  end
+
+  # Scroll the scrollback to the newest entry on each append (classic terminal
+  # behaviour): a new submission should reveal its result even if the user had
+  # scrolled up to read older output. The scroll is a pure client effect, so it
+  # rides a push to the ReplInput hook rather than a re-render.
+  defp repl_scroll_to_bottom(socket) do
+    push_event(socket, "repl_scroll_bottom", %{})
   end
 
   defp repl_entry_id(seq), do: "repl-entry-#{seq}"
@@ -1612,10 +1627,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Record a submitted expression at the head of the recall ring and reset the
-  # ↑/↓ cursor to the live input. The exact previous entry is dropped first so
-  # repeatedly re-running the same expression doesn't bloat the ring (consecutive
-  # duplicates collapse, shell-style); the ring is capped so a long session can't
-  # grow the assigns unbounded.
+  # ↑/↓ cursor to the live input. Every prior occurrence of the expression is
+  # dropped first so re-running the same expression doesn't bloat the ring (all
+  # earlier copies collapse onto the new head, shell `HISTCONTROL=erasedups`
+  # style — not just consecutive runs); the ring is capped so a long session
+  # can't grow the assigns unbounded.
   @repl_history_limit 100
   defp repl_record_history(socket, expr) do
     history =

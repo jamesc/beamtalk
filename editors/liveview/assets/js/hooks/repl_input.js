@@ -91,6 +91,13 @@ export const ReplInput = {
     // Server→input pushes: history recall and the post-submit clear both arrive as
     // `repl_set_input`, replacing the doc with the server-supplied text.
     this.handleEvent("repl_set_input", (payload) => this.setInput(payload))
+    // After each appended entry the server asks the scrollback to scroll to the
+    // newest result (classic terminal behaviour), so a submission's result is
+    // revealed even if the user had scrolled up to read older output.
+    this.handleEvent("repl_scroll_bottom", () => {
+      const sb = document.getElementById("repl-scrollback")
+      if (sb) sb.scrollTop = sb.scrollHeight
+    })
   },
 
   destroyed() {
