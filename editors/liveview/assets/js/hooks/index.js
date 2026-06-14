@@ -9,6 +9,9 @@
 //                       text, selection, history and highlighting for both the
 //                       workspace eval input and the method-editor tabs. Replaced
 //                       the CodeEditor overlay + SelectionTracker, now retired.
+//   ReplInput         — the REPL tab's bottom-pinned composer (BT-2543): a
+//                       CodeMirror input where Enter submits and ↑/↓ recall
+//                       history at the edges (a CmEditor sibling, terminal idiom).
 //   KeyboardShortcuts — Cmd/Ctrl chords → LiveView events (⌘S/⌘D/⌘P/⌘I)
 //   TweaksPanel       — appearance panel (theme/accent/syntax/density/fonts);
 //                       flips :root CSS vars + persists to localStorage (BT-2487)
@@ -24,6 +27,7 @@
 // The Workspace dock and method editor (later Phase 1 issues) build on these.
 
 import { CmEditor } from "./cm_editor"
+import { ReplInput } from "./repl_input"
 import { KeyboardShortcuts } from "./keyboard_shortcuts"
 import { TweaksPanel } from "./tweaks_panel"
 import { FieldFlash } from "./field_flash"
@@ -32,6 +36,7 @@ import { WindowDrag } from "./window_drag"
 
 export const Hooks = {
   CmEditor,
+  ReplInput,
   KeyboardShortcuts,
   TweaksPanel,
   FieldFlash,
