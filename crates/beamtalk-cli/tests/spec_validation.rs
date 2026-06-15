@@ -9,24 +9,13 @@
 //! Tests are `#[ignore]` because they require the beamtalk binary, `erlc`, and `escript`.
 //! Run with: `cargo test --test spec_validation -- --ignored`
 
+mod cli_common;
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
-fn beamtalk_binary() -> PathBuf {
-    project_root().join("target/debug/beamtalk")
-}
-
 fn validate_specs_script() -> PathBuf {
-    project_root().join("scripts/validate_specs.escript")
+    cli_common::project_root().join("scripts/validate_specs.escript")
 }
 
 /// Compile a `.bt` file and return the path to the build directory containing `.core` files.
@@ -34,7 +23,7 @@ fn compile_bt_to_core(bt_source: &str, work_dir: &Path) -> PathBuf {
     let bt_path = work_dir.join("test_input.bt");
     std::fs::write(&bt_path, bt_source).expect("write .bt file");
 
-    let output = Command::new(beamtalk_binary())
+    let output = Command::new(cli_common::beamtalk_binary())
         .args(["build", bt_path.to_str().unwrap()])
         .output()
         .expect("run beamtalk build");

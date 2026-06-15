@@ -9,21 +9,9 @@
 //! Tests are `#[ignore]` because they require the beamtalk binary.
 //! Run with: `cargo test --test gen_native -- --ignored`
 
-use std::path::PathBuf;
+mod cli_common;
+
 use std::process::Command;
-
-fn project_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .to_path_buf()
-}
-
-fn beamtalk_binary() -> PathBuf {
-    project_root().join("target/debug/beamtalk")
-}
 
 #[test]
 #[ignore = "requires beamtalk binary"]
@@ -39,7 +27,7 @@ fn gen_native_generates_valid_erlang_stub() {
     std::fs::write(tmp.path().join("TestActor.bt"), bt_source).expect("write .bt");
 
     // Run gen-native
-    let output = Command::new(beamtalk_binary())
+    let output = Command::new(cli_common::beamtalk_binary())
         .args(["gen-native", "TestActor"])
         .current_dir(tmp.path())
         .output()
@@ -104,7 +92,7 @@ fn gen_native_errors_on_missing_native_declaration() {
     let bt_source = "Actor subclass: PlainActor\n  getValue -> Integer => 42\n";
     std::fs::write(tmp.path().join("PlainActor.bt"), bt_source).expect("write .bt");
 
-    let output = Command::new(beamtalk_binary())
+    let output = Command::new(cli_common::beamtalk_binary())
         .args(["gen-native", "PlainActor"])
         .current_dir(tmp.path())
         .output()
@@ -127,7 +115,7 @@ fn gen_native_errors_on_missing_native_declaration() {
 fn gen_native_errors_on_missing_file() {
     let tmp = tempfile::tempdir().expect("create tempdir");
 
-    let output = Command::new(beamtalk_binary())
+    let output = Command::new(cli_common::beamtalk_binary())
         .args(["gen-native", "NonExistent"])
         .current_dir(tmp.path())
         .output()
@@ -160,7 +148,7 @@ fn gen_native_refuses_to_overwrite_existing_file() {
         .expect("write existing .erl");
 
     // Run gen-native without --force — should fail
-    let output = Command::new(beamtalk_binary())
+    let output = Command::new(cli_common::beamtalk_binary())
         .args(["gen-native", "TestActor"])
         .current_dir(tmp.path())
         .output()
@@ -200,7 +188,7 @@ fn gen_native_force_overwrites_existing_file() {
         .expect("write existing .erl");
 
     // Run gen-native with --force — should succeed
-    let output = Command::new(beamtalk_binary())
+    let output = Command::new(cli_common::beamtalk_binary())
         .args(["gen-native", "--force", "TestActor"])
         .current_dir(tmp.path())
         .output()
@@ -233,7 +221,7 @@ fn gen_native_output_passes_erlc_syntax_check() {
     std::fs::write(tmp.path().join("TestActor.bt"), bt_source).expect("write .bt");
 
     // Generate the stub
-    let output = Command::new(beamtalk_binary())
+    let output = Command::new(cli_common::beamtalk_binary())
         .args(["gen-native", "TestActor"])
         .current_dir(tmp.path())
         .output()
