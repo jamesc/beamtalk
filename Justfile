@@ -452,8 +452,12 @@ fmt-check-elixir:
     @echo "✅ Elixir formatting check passed"
 
 # Check all code formatting
+# Elixir formatting is enforced by the dedicated `liveview` CI job (which runs
+# `mix deps.get` first, required by `import_deps: [:phoenix]`). The cross-platform
+# `check` job has no Elixir deps fetched, so `fmt-check-elixir` is excluded here
+# and run via `just lint-elixir` / `just fmt-check-elixir` locally instead.
 [unix]
-fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk fmt-check-elixir
+fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk
 
 # Windows: skip Erlang, JS, and Elixir format checks (platform-agnostic, covered by Linux CI)
 [windows]

@@ -297,23 +297,16 @@
 .dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; transition: height 200ms ease, opacity 150ms ease; overflow: hidden; }
 .dock .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .dock.collapsed { height: 0; opacity: 0; pointer-events: none; }
-.dock .dock-collapse-toggle {
-  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  border: 1px solid var(--line); background: var(--panel-2); cursor: pointer;
-  color: var(--faint); font-size: 10px; padding: 2px 8px; border-radius: 4px;
-  z-index: 10; opacity: 0; transition: opacity 150ms ease;
-}
-.dock:hover .dock-collapse-toggle { opacity: 1; }
-.dock .dock-collapse-toggle:hover { color: var(--ink); background: var(--hover); }
-/* collapsed state: show a thin restore bar at the bottom */
+/* collapsed state: show a thin restore bar at the bottom. The element is only
+   rendered (via :if={!@show_dock}) when the dock is collapsed, so DOM presence
+   is the guard — no hidden default/visible-variant toggle is needed. */
 .dock-bar {
-  flex: none; height: 28px; display: none; align-items: center; justify-content: center;
+  flex: none; height: 28px; display: flex; align-items: center; justify-content: center;
   background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
   box-shadow: var(--shadow); cursor: pointer; color: var(--faint); font-size: 11px;
   font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
 }
 .dock-bar:hover { color: var(--ink); background: var(--hover); }
-.dock-bar.visible { display: flex; }
 
 /* The editor body and its method form fill the panel so a browsed method gets the
    whole reclaimed height (the read-only Method Source panel is gone — browsing a
