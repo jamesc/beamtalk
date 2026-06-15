@@ -1919,7 +1919,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> open_class(class)
       |> repl_append_info(expr, "Opened #{class} in the System Browser ◂")
     else
-      repl_append_error(
+      # "No class named X" is feedback about a meta-command, not a code-evaluation
+      # failure, so it uses the muted `:info` styling (like an unknown `:cmd`) rather
+      # than the red error arrow reserved for eval errors.
+      repl_append_info(
         socket,
         expr,
         "No class named #{class}. Browse classes in the System Browser, or search with the omni bar (top)."
@@ -1946,9 +1949,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     IDE REPL — evaluate any expression (Enter runs it, ↑/↓ recall history).
     :help / :h / :?        show this help
     :help <Class>          open a class in the System Browser (left)
-    :bindings              → Bindings pane (right)
-    :changes               → Changes tab (this dock)
+    :bindings / :b         → Bindings pane (right)
+    :changes / :dirty      → Changes tab (this dock)
+    :flush                 → Flush control (Changes tab)
+    :sync / :s             tracks the live image (loads beamtalk.toml on connect)
+    :clear                 evaluates `Session current clear`
+    :show-codegen / :sc    CLI-only — run from `beamtalk repl`
     :test                  test-runner pane coming soon (BT-2557)
+    :exit / :quit / :q     close the browser tab to disconnect
     Inspect results with the Inspect button; browse classes/methods on the left.\
     """
   end
