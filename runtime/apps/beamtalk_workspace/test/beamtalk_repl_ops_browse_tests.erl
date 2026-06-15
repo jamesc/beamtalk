@@ -160,6 +160,17 @@ browse_setup() ->
             'increment' => <<"increment =>\n  self.value := self.value + self.step">>,
             'value' => <<"value =>\n  ^ self.value">>
         },
+        %% BT-2558: a signature for both methods and a `///` doc-comment on
+        %% `increment` only — so browse-method-source can carry the rendered
+        %% signature + doc, and `value` exercises the no-doc (null) path.
+        method_signatures => #{
+            'increment' => <<"increment -> Counter">>,
+            'value' => <<"value -> Integer">>
+        },
+        method_docs => #{
+            'increment' =>
+                <<"Increment the counter by its step.\n\n## Examples\n```beamtalk\nc increment\n```">>
+        },
         class_methods => #{
             'startingAt:' => #{block => fun(_, _, _) -> erlang:error(must_not_run) end, arity => 1}
         }
@@ -388,6 +399,43 @@ browse_tests(#{class_name := Class}) ->
             ?assert(is_binary(Src)),
             ?assertNotEqual(nomatch, binary:match(Src, <<"self.value">>))
         end},
+        {"browse-method-source carries the doc-comment and signature (BT-2558)", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-method-source">>,
+                    #{
+                        <<"class">> => Class,
+                        <<"side">> => <<"instance">>,
+                        <<"selector">> => <<"increment">>
+                    },
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(<<"increment -> Counter">>, maps:get(<<"signature">>, Value)),
+            Doc = maps:get(<<"doc">>, Value),
+            ?assert(is_binary(Doc)),
+            ?assertNotEqual(nomatch, binary:match(Doc, <<"Increment the counter">>)),
+            ?assertNotEqual(nomatch, binary:match(Doc, <<"## Examples">>))
+        end},
+        {"browse-method-source doc is null when the method has no doc-comment (BT-2558)", fun() ->
+            %% `value` carries a signature but no `///` doc — doc is null, the
+            %% signature still rides along.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-method-source">>,
+                    #{
+                        <<"class">> => Class,
+                        <<"side">> => <<"instance">>,
+                        <<"selector">> => <<"value">>
+                    },
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(null, maps:get(<<"doc">>, Value)),
+            ?assertEqual(<<"value -> Integer">>, maps:get(<<"signature">>, Value))
+        end},
         {"browse-method-source disk_differs is null with no static source", fun() ->
             %% No workspace_meta class source is stored in this isolated node, so
             %% there is nothing to diff against → null (ADR 0096).
@@ -424,6 +472,9 @@ browse_tests(#{class_name := Class}) ->
                 )
             ),
             ?assertEqual(null, maps:get(<<"source">>, Value)),
+            %% No CompiledMethod → no doc/signature either (BT-2558).
+            ?assertEqual(null, maps:get(<<"doc">>, Value)),
+            ?assertEqual(null, maps:get(<<"signature">>, Value)),
             ?assertEqual(<<"unindexed_runtime_fun">>, maps:get(<<"source_status">>, Value))
         end},
         {"browse-class-definition returns header, state slots and comment", fun() ->
