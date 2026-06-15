@@ -19,6 +19,7 @@ Extracted from beamtalk_repl_eval (BT-863).
     handle_load_source/3,
     load_class_module/3,
     reload_method_definition/4,
+    install_method/8,
     activate_module/2,
     activate_module/3,
     register_classes/2,
@@ -611,11 +612,20 @@ recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
         end,
     %% Include module index for correct cross-directory class references.
     ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
-    Options =
+    Options2 =
         case map_size(ModuleIndex) of
             0 -> Options1;
             _ -> Options1#{class_module_index => ModuleIndex}
         end,
+    %% BT-2553 follow-up: preserve the class's package-qualified module name and
+    %% on-disk source path across the patch so a project class stays
+    %% `bt@pkg@mod' (flushable, revertable) instead of degrading to a stem-named,
+    %% source-less `bt@mod'.
+    #{class_name := ClassNameBin} = MethodInfo,
+    {ModuleNameOverride, SourcePath} = patch_module_target(ClassNameBin),
+    Options3 = beamtalk_repl_compiler:apply_module_name_override(Options2, ModuleNameOverride),
+    Options = beamtalk_repl_compiler:apply_source_path(Options3, SourcePath),
+    LoadPath = source_path_or_empty(SourcePath),
     case beamtalk_repl_compiler:compile_for_method_reload(SourceBin, Options) of
         {ok, Binary, ModName, Classes, RecompileWarnings} ->
             AllWarnings = Warnings ++ RecompileWarnings,
@@ -625,6 +635,7 @@ recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
                 Classes,
                 MethodInfo,
                 CombinedSource,
+                LoadPath,
                 AllWarnings,
                 State
             );
@@ -632,9 +643,156 @@ recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
             {error, Reason, <<>>, Warnings, State}
     end.
 
+-doc """
+Install a single method into a class via the structured backend compile
+(the rock-solid live-image write-surface idiom — IDE save / `compile:source:` /
+MCP `save_method`).
+
+`MethodSource` is the BARE method body (comments and all). It is parsed
+standalone by the backend — no `Class >>` text wrap, no `normalize_method_source`
+header-sniffing — so the stored source round-trips byte-for-byte. The class's
+package-qualified module name and on-disk source path are preserved, so the
+patched class stays flushable + revertable.
+""".
+-spec install_method(
+    binary(),
+    binary(),
+    binary(),
+    durable | ephemeral,
+    binary(),
+    human | agent,
+    [binary()],
+    beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+install_method(
+    ClassNameBin, SelectorBin, MethodSource, Intent, Author, AuthorKind, Warnings, State
+) ->
+    case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
+        undefined ->
+            ErrorMsg =
+                <<"Class source not available for ", ClassNameBin/binary,
+                    " (source not recorded or workspace metadata unavailable)">>,
+            {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
+        ClassSource ->
+            install_method_with_source(
+                ClassNameBin,
+                SelectorBin,
+                MethodSource,
+                ClassSource,
+                Intent,
+                Author,
+                AuthorKind,
+                Warnings,
+                State
+            )
+    end.
+
+-spec install_method_with_source(
+    binary(),
+    binary(),
+    binary(),
+    string(),
+    durable | ephemeral,
+    binary(),
+    human | agent,
+    [binary()],
+    beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+install_method_with_source(
+    ClassNameBin,
+    _SelectorBin,
+    MethodSource,
+    ClassSource,
+    Intent,
+    Author,
+    AuthorKind,
+    Warnings,
+    State
+) ->
+    ClassSourceBin = unicode:characters_to_binary(ClassSource),
+    MethodSourceBin = unicode:characters_to_binary(MethodSource),
+    {ModuleNameOverride, SourcePath} = patch_module_target(ClassNameBin),
+    SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
+    ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
+    Options = #{
+        class_name => ClassNameBin,
+        is_class_method => false,
+        workspace_mode => true,
+        module_name => ModuleNameOverride,
+        source_path => source_path_binary(SourcePath),
+        class_superclass_index => SuperclassIndex,
+        class_module_index => ModuleIndex
+    },
+    case beamtalk_repl_compiler:compile_method_reload(ClassSourceBin, MethodSourceBin, Options) of
+        {ok, Result} ->
+            #{
+                binary := Binary,
+                module_name := ModName,
+                classes := Classes,
+                selector := Selector,
+                is_class_method := IsClassMethod,
+                method_source := CanonicalSource,
+                merged_class_source := MergedClassSource,
+                warnings := RecompileWarnings
+            } = Result,
+            MethodInfo = #{
+                class_name => ClassNameBin,
+                selector => Selector,
+                is_class_method => IsClassMethod,
+                method_source => CanonicalSource,
+                intent => Intent,
+                author => Author,
+                author_kind => AuthorKind
+            },
+            AllWarnings = Warnings ++ RecompileWarnings,
+            load_recompiled_method(
+                Binary,
+                ModName,
+                Classes,
+                MethodInfo,
+                unicode:characters_to_list(MergedClassSource),
+                source_path_or_empty(SourcePath),
+                AllWarnings,
+                State
+            );
+        {error, Reason} ->
+            {error, Reason, <<>>, Warnings, State}
+    end.
+
+%% Resolve a class's package-qualified module name + on-disk source path for a
+%% patch, by reusing the class's CURRENT loaded module (which already carries the
+%% correct package-qualified name for both project and dependency classes) and
+%% its `beamtalk_source' attribute. Returns `{undefined, undefined}' for
+%% dynamic/source-less classes so they keep the default stem naming.
+-spec patch_module_target(binary()) -> {binary() | undefined, string() | undefined}.
+patch_module_target(ClassNameBin) ->
+    case class_module(ClassNameBin) of
+        {ok, Module} ->
+            case beamtalk_reflection:source_file_from_module(Module) of
+                Path when is_binary(Path) ->
+                    {atom_to_binary(Module, utf8), binary_to_list(Path)};
+                _ ->
+                    {undefined, undefined}
+            end;
+        error ->
+            {undefined, undefined}
+    end.
+
+-spec source_path_binary(string() | undefined) -> binary() | undefined.
+source_path_binary(undefined) -> undefined;
+source_path_binary(Path) -> list_to_binary(Path).
+
+-spec source_path_or_empty(string() | undefined) -> string().
+source_path_or_empty(undefined) -> "";
+source_path_or_empty(Path) -> Path.
+
 %% Load a recompiled method-patched class binary into BEAM.
 -spec load_recompiled_method(
-    binary(), atom(), list(), map(), string(), [binary()], beamtalk_repl_state:state()
+    binary(), atom(), list(), map(), string(), string(), [binary()], beamtalk_repl_state:state()
 ) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
@@ -644,11 +802,15 @@ load_recompiled_method(
     Classes,
     MethodInfo,
     CombinedSource,
+    SourcePath,
     AllWarnings,
     State
 ) ->
     #{class_name := ClassNameBin, selector := SelectorBin} = MethodInfo,
-    case code:load_binary(ModName, "", Binary) of
+    %% Pass the class's on-disk source path (when known) so `code:which/1`
+    %% reports a real path — keeping a patched project class classified as a
+    %% project class, not "stdlib"/"dynamic" (BT-2553 follow-up).
+    case code:load_binary(ModName, SourcePath, Binary) of
         {module, ModName} ->
             %% (2) Install in memory. The memory install is the visible effect;
             %% the ChangeEntry below is step (3) — emitted only after install
@@ -1223,8 +1385,12 @@ no_source_reason(ClassNameBin) ->
     case class_module(ClassNameBin) of
         {ok, Module} ->
             case code:which(Module) of
-                Path when is_list(Path) -> <<"stdlib">>;
-                _NonPath -> <<"dynamic">>
+                %% A non-EMPTY path means a real `.beam' on disk → a stdlib /
+                %% precompiled class. `code:which/1' returns `[]' (an empty list,
+                %% so `is_list/1' is still true) for a module loaded from binary
+                %% with no file — that is a live-only / dynamic class, NOT stdlib.
+                Path when is_list(Path), Path =/= [] -> <<"stdlib">>;
+                _NonPathOrEmpty -> <<"dynamic">>
             end;
         error ->
             <<"dynamic">>

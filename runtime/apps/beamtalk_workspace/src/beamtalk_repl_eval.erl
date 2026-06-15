@@ -59,8 +59,7 @@ module loading to beamtalk_repl_loader (BT-863).
     handle_class_definition/7,
     handle_method_definition/4,
     handle_protocol_definition/3,
-    wrap_load_err/3,
-    normalize_method_source/2
+    wrap_load_err/3
 ]).
 -endif.
 
@@ -477,43 +476,20 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
 ) ->
     {ok, binary()} | {error, term()}.
 do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind) ->
-    SourceStr = unicode:characters_to_list(normalize_method_source(SelectorBin, Source)),
-    Expression =
-        unicode:characters_to_list(<<ClassNameBin/binary, " >> ">>) ++ SourceStr,
-    %% Compile the synthesized standalone definition to recover the canonical
-    %% MethodInfo (selector, is_class_method, method_source) the install path
-    %% expects, then tag it with the caller's intent and audit metadata so the
-    %% ChangeLog entry is durable / ephemeral and attributed correctly.
+    %% Structured single-method install. `Source' is the BARE method body — the
+    %% backend parses it standalone (no `Class >>' text wrap, no
+    %% `normalize_method_source' header-sniffing), so comments and formatting
+    %% round-trip exactly and the patched class keeps its package-qualified module
+    %% name + on-disk source attribution (flushable + revertable). A `Source' that
+    %% is not a single method definition comes back as a structured compile error.
     State = beamtalk_repl_state:new(undefined, 0),
-    Counter = beamtalk_repl_state:get_eval_counter(State),
-    % elp:fixme W0023 intentional atom creation
-    ModuleName = list_to_atom("beamtalk_compile_method_" ++ integer_to_list(Counter)),
-    case beamtalk_repl_compiler:compile_expression(Expression, ModuleName, #{}) of
-        {ok, method_definition, MethodInfo0, Warnings} ->
-            MethodInfo = MethodInfo0#{
-                intent => Intent,
-                author => Author,
-                author_kind => AuthorKind,
-                %% `unicode:characters_to_binary/1', not `list_to_binary/1': the
-                %% expression may carry non-Latin1 characters (em dash, arrows,
-                %% smart quotes in doc comments) that crash `list_to_binary' with
-                %% `badarg'.
-                expression => unicode:characters_to_binary(Expression)
-            },
-            case
-                beamtalk_repl_loader:reload_method_definition(
-                    MethodInfo, Warnings, Expression, State
-                )
-            of
-                {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
-                {error, Reason, _Output, _W, _S} -> {error, Reason}
-            end;
-        {ok, _OtherKind, _Info, _Warnings} ->
-            %% A class/protocol definition, or a plain expression — not a method
-            %% patch. compile:source: only accepts a single method body.
-            {error, {not_a_method_definition, SelectorBin}};
-        {error, Reason} ->
-            {error, Reason}
+    case
+        beamtalk_repl_loader:install_method(
+            ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind, [], State
+        )
+    of
+        {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
+        {error, Reason, _Output, _W, _S} -> {error, Reason}
     end.
 
 %% `{ok, Module}' when `ClassNameBin' names a loaded built-in (stdlib) class,
@@ -567,128 +543,6 @@ stdlib_method_read_only_error(ClassNameBin, SelectorBin) ->
         Err1,
         <<"Built-in (stdlib) classes ship with the standard library; edit them in the Beamtalk source tree and rebuild, not from the workspace.">>
     ).
-
-%% A `compile:source:' body may be a full method definition or a bare body. When
-%% it is a bare body, prepend the canonical `selector => ' header so the
-%% synthesized `>>' expression parses as a method definition. We only treat the
-%% source as already-headed when it begins with the selector token *and* that
-%% token is followed by a header form — an argument list / argument name and/or
-%% whitespace up to the `=>' arrow. A bare expression such as `incremented + 1'
-%% for selector `increment' shares no such header and is correctly prefixed.
-%%
-%% Leading doc comments (`///') and line comments (`//') precede the header in
-%% stored method source, so we look past them before testing for a header. The
-%% `>>' form attaches them to the synthesized method, so a documented full
-%% definition is left intact; a documented bare body keeps its comments ahead of
-%% the inserted `=>' arrow.
--spec normalize_method_source(binary(), binary()) -> binary().
-normalize_method_source(SelectorBin, Source) ->
-    Body = skip_leading_comments(Source),
-    Head = first_token(SelectorBin),
-    case has_method_header(Body, Head) of
-        true ->
-            Source;
-        false ->
-            PrefixLen = byte_size(Source) - byte_size(Body),
-            <<Prefix:PrefixLen/binary, _/binary>> = Source,
-            %% A leading `//' comment with no trailing newline (a comment-only
-            %% source) would otherwise glue the injected `selector => ' onto the
-            %% comment line, swallowing the header. Insert a newline when the
-            %% prefix ends mid-comment so the header starts fresh and the compiler
-            %% can report the empty body clearly.
-            Sep = header_separator(Prefix),
-            <<Prefix/binary, Sep/binary, SelectorBin/binary, " => ", Body/binary>>
-    end.
-
-%% Separator between a consumed comment/whitespace prefix and the injected
-%% `selector => ' header. Empty when the prefix already ends at a line or
-%% statement boundary (newline / whitespace / no prefix); a newline only when the
-%% prefix ends in comment text (a `//' comment without a trailing newline).
--spec header_separator(binary()) -> binary().
-header_separator(<<>>) ->
-    <<>>;
-header_separator(Prefix) ->
-    case binary:last(Prefix) of
-        $\n -> <<>>;
-        $\s -> <<>>;
-        $\t -> <<>>;
-        $\r -> <<>>;
-        _ -> <<"\n">>
-    end.
-
-%% Skip leading whitespace and full-line `//'/`///' comments, returning the first
-%% suffix of `Source' that begins a real expression or method header. `Body' is
-%% always a suffix of `Source', so the consumed prefix can be recovered by length.
--spec skip_leading_comments(binary()) -> binary().
-skip_leading_comments(Source) ->
-    Trimmed = string:trim(Source, leading),
-    case Trimmed of
-        <<"//", _/binary>> ->
-            case binary:split(Trimmed, <<"\n">>) of
-                [_Comment, Rest] -> skip_leading_comments(Rest);
-                [_Comment] -> <<>>
-            end;
-        _ ->
-            Trimmed
-    end.
-
-%% True iff `Trimmed' starts with the selector token `Head' followed by a valid
-%% method header: the token, then anything (args / arg names / whitespace), then
-%% the `=>' arrow, before any other top-level statement boundary. We require both
-%% the leading token *and* an arrow so a bare body that merely happens to begin
-%% with the selector name (e.g. `increment + 1') is not mistaken for a header.
--spec has_method_header(binary(), binary()) -> boolean().
-has_method_header(Trimmed, Head) ->
-    HeadSize = byte_size(Head),
-    case Trimmed of
-        <<Head:HeadSize/binary, Rest/binary>> ->
-            %% The char right after the token must be a header delimiter, not a
-            %% continuation of a longer identifier (so `increments' is not read
-            %% as the `increment' header) — `:' for keyword selectors, or
-            %% whitespace, or an operator/`=>' for unary/binary selectors.
-            header_after_token(Rest);
-        _ ->
-            false
-    end.
-
--spec header_after_token(binary()) -> boolean().
-header_after_token(<<>>) ->
-    false;
-%% Identifier continuation: not a header boundary (e.g. `increments').
-header_after_token(<<C, _/binary>>) when
-    (C >= $a andalso C =< $z);
-    (C >= $A andalso C =< $Z);
-    (C >= $0 andalso C =< $9);
-    C =:= $_
-->
-    false;
-header_after_token(Rest) ->
-    %% A keyword/unary/binary header reaches the `=>' arrow before the next
-    %% top-level statement separator (`.' or newline).
-    binary_has_arrow_before_break(Rest).
-
-%% True iff `Bin' contains a `=>' arrow before the first top-level statement
-%% break (newline or `.'), i.e. the leading token really opens a method header.
--spec binary_has_arrow_before_break(binary()) -> boolean().
-binary_has_arrow_before_break(<<"=>", _/binary>>) ->
-    true;
-binary_has_arrow_before_break(<<$\n, _/binary>>) ->
-    false;
-binary_has_arrow_before_break(<<$., _/binary>>) ->
-    false;
-binary_has_arrow_before_break(<<_, Rest/binary>>) ->
-    binary_has_arrow_before_break(Rest);
-binary_has_arrow_before_break(<<>>) ->
-    false.
-
-%% First whitespace/`:'-delimited token of a (possibly keyword) selector binary,
-%% e.g. `at:put:' -> `at', `increment' -> `increment', `+' -> `+'.
--spec first_token(binary()) -> binary().
-first_token(SelectorBin) ->
-    case binary:split(SelectorBin, [<<":">>, <<" ">>]) of
-        [Head | _] when byte_size(Head) > 0 -> Head;
-        _ -> SelectorBin
-    end.
 
 %%% Internal functions
 

@@ -906,3 +906,171 @@ fn standalone_method_leading_comment_attached() {
     );
     assert!(module.file_leading_comments.is_empty());
 }
+
+// ========================================================================
+// Structured single-method compile: parse_method (bare body, NO `Class >>`)
+//
+// The live-image "compile one method" idiom (IDE save / compile:source: /
+// REPL `>>`) must parse the method source DIRECTLY — no synthetic `Class >>`
+// wrap, no header-sniffing. These tests pin that the bare-method parser keeps
+// the source intact (comments and all) and round-trips idempotently, which is
+// what makes a save not erode the stored source.
+// ========================================================================
+
+use crate::source_analysis::parse_method;
+use crate::unparse::unparse_method;
+
+fn parse_method_ok(source: &str) -> crate::ast::MethodDefinition {
+    let tokens = lex_with_eof(source);
+    let (method, diagnostics) = parse_method(tokens);
+    let errors: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+    method.expect("expected a single method definition")
+}
+
+#[test]
+fn parse_method_bare_unary() {
+    let m = parse_method_ok("increment => self.value := self.value + 1");
+    assert_eq!(m.selector.name().as_str(), "increment");
+    assert!(m.parameters.is_empty());
+}
+
+#[test]
+fn parse_method_bare_keyword() {
+    let m = parse_method_ok("setValue: v => self.value := v");
+    assert_eq!(m.selector.name().as_str(), "setValue:");
+    assert_eq!(m.parameters.len(), 1);
+}
+
+#[test]
+fn parse_method_bare_keyword_with_types() {
+    let m = parse_method_ok("createExecution: execution :: Object -> Object =>\n  execution");
+    assert_eq!(m.selector.name().as_str(), "createExecution:");
+    assert_eq!(m.parameters.len(), 1);
+    assert!(m.return_type.is_some());
+}
+
+#[test]
+fn parse_method_bare_binary() {
+    let m = parse_method_ok("+ other => self x + (other x)");
+    assert_eq!(m.selector.name().as_str(), "+");
+    assert_eq!(m.parameters.len(), 1);
+}
+
+#[test]
+fn parse_method_bare_return_type() {
+    let m = parse_method_ok("ensureDirectories -> Nil =>\n  self doStuff");
+    assert_eq!(m.selector.name().as_str(), "ensureDirectories");
+    assert!(m.return_type.is_some());
+}
+
+#[test]
+fn parse_method_preserves_doc_comment() {
+    let m = parse_method_ok("/// Increase the counter by one.\nincrement => self.value + 1");
+    assert!(
+        m.doc_comment
+            .as_deref()
+            .is_some_and(|d| d.contains("Increase the counter by one.")),
+        "doc_comment: {:?}",
+        m.doc_comment
+    );
+}
+
+#[test]
+fn parse_method_preserves_leading_section_banner() {
+    // The exact shape that the `Class >> ` wrap used to corrupt: a `// --- … ---`
+    // section banner above a `///` doc block above the header. Parsed bare, the
+    // banner attaches cleanly to the selector — nothing is on a `>>` line.
+    let src = "// --- Execution CRUD ---\n\
+               \n\
+               /// Store a new workflow execution.\n\
+               createExecution: execution :: Object -> Object =>\n\
+               \x20\x20execution";
+    let m = parse_method_ok(src);
+    let leading_text: String = m
+        .comments
+        .leading
+        .iter()
+        .map(|c| c.content.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        leading_text.contains("--- Execution CRUD ---"),
+        "section banner lost; leading = {leading_text:?}"
+    );
+    assert!(
+        m.doc_comment
+            .as_deref()
+            .is_some_and(|d| d.contains("Store a new workflow execution.")),
+        "doc_comment: {:?}",
+        m.doc_comment
+    );
+}
+
+#[test]
+fn parse_method_unparse_keeps_banner_and_doc() {
+    // unparse_method is what gets STORED as the live method `__source__`. It must
+    // re-emit the banner and the doc comment, so a save preserves them.
+    let src = "// --- Execution CRUD ---\n\
+               \n\
+               /// Store a new workflow execution.\n\
+               /// Raises if the workflowId already exists.\n\
+               createExecution: execution :: Object -> Object =>\n\
+               \x20\x20execution";
+    let m = parse_method_ok(src);
+    let out = unparse_method(&m);
+    assert!(
+        out.contains("--- Execution CRUD ---"),
+        "unparse dropped the section banner:\n{out}"
+    );
+    assert!(
+        out.contains("/// Store a new workflow execution."),
+        "unparse dropped the first doc line:\n{out}"
+    );
+    assert!(
+        out.contains("/// Raises if the workflowId already exists."),
+        "unparse dropped a doc line:\n{out}"
+    );
+}
+
+#[test]
+fn parse_method_roundtrip_is_idempotent() {
+    // parse -> unparse -> parse -> unparse must be stable: this is the property
+    // that a method surviving N saves keeps its source intact (no per-save
+    // erosion of the leading comment block).
+    let src = "// --- Execution CRUD ---\n\
+               \n\
+               /// Store a new workflow execution.\n\
+               createExecution: execution :: Object -> Object =>\n\
+               \x20\x20execution";
+    let once = unparse_method(&parse_method_ok(src));
+    let twice = unparse_method(&parse_method_ok(&once));
+    let thrice = unparse_method(&parse_method_ok(&twice));
+    assert_eq!(once, twice, "method source not idempotent after 2nd save");
+    assert_eq!(twice, thrice, "method source not idempotent after 3rd save");
+}
+
+#[test]
+fn parse_method_rejects_non_method() {
+    // A bare expression is not a method definition.
+    let tokens = lex_with_eof("1 + 1");
+    let (method, _diags) = parse_method(tokens);
+    assert!(
+        method.is_none(),
+        "a bare expression must not parse as a method"
+    );
+}
+
+#[test]
+fn parse_method_rejects_trailing_tokens() {
+    // Two methods in one source must be rejected (single-method contract).
+    let tokens = lex_with_eof("inc => self.v + 1\ndec => self.v - 1");
+    let (_method, diagnostics) = parse_method(tokens);
+    assert!(
+        diagnostics.iter().any(|d| d.severity == Severity::Error),
+        "trailing second method should be an error"
+    );
+}

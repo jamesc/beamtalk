@@ -760,6 +760,221 @@ write_bt(Proj, Name, Source) ->
     ok = file:write_file(Path, Source),
     Path.
 
+%% Write a .bt file under <Proj>/<SubDir>/ so it gets a package-qualified module
+%% name (`bt@loaderpkg@<mod>' for src/, `bt@loaderpkg@test@<mod>' for test/).
+write_bt_under(Proj, SubDir, Name, Source) ->
+    Dir = filename:join(Proj, SubDir),
+    ok = filelib:ensure_dir(filename:join(Dir, "anchor")),
+    Path = filename:join(Dir, Name),
+    ok = file:write_file(Path, Source),
+    Path.
+
+%% The BEAM module a class is currently registered to (what a patch must keep).
+current_module_of(ClassName) ->
+    Pid = beamtalk_class_registry:whereis_class(ClassName),
+    ?assert(is_pid(Pid)),
+    beamtalk_object_class:module_name(Pid).
+
+%% The live `__source__' of a method, as the IDE reads it back after a save
+%% (same channel `browse_method_source' uses: a `{method, Selector}' class call).
+stored_method_source(ClassName, Selector) ->
+    Pid = beamtalk_class_registry:whereis_class(ClassName),
+    ?assert(is_pid(Pid)),
+    #{'__source__' := Src} = gen_server:call(Pid, {method, Selector}, 5000),
+    Src.
+
+t_install_method_keeps_package_and_source(_Proj) ->
+    Proj = live_project_dir(),
+    %% BT-2553 follow-up (bug 2): patching a method must NOT drop the class's
+    %% package-qualified module name or its on-disk source attribution — that
+    %% degradation is what broke flush/revert (a project class became a
+    %% stem-named, source-less `bt@<mod>').
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "InstallPkg.bt",
+        <<"Actor subclass: InstallPkg\n  state: v = 1\n\n  value -> Integer =>\n    self.v\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% Fresh load → package-qualified module WITH a beamtalk_source attribute.
+    Mod0 = current_module_of('InstallPkg'),
+    ?assertEqual('bt@loaderpkg@install_pkg', Mod0),
+    ?assert(is_binary(beamtalk_reflection:source_file_from_module(Mod0))),
+    %% Patch a new method via the structured install path.
+    Result = beamtalk_repl_loader:install_method(
+        <<"InstallPkg">>,
+        <<"doubled">>,
+        <<"doubled -> Integer =>\n  self.v * 2">>,
+        durable,
+        <<"test">>,
+        human,
+        [],
+        State1
+    ),
+    ?assertMatch({ok, _, _, _, _}, Result),
+    %% Module name AND source attribution are PRESERVED across the patch.
+    Mod1 = current_module_of('InstallPkg'),
+    ?assertEqual('bt@loaderpkg@install_pkg', Mod1),
+    ?assert(is_binary(beamtalk_reflection:source_file_from_module(Mod1))).
+
+t_install_method_preserves_comments(_Proj) ->
+    Proj = live_project_dir(),
+    %% Bug 1: a method's leading `// --- … ---' section banner + multi-line `///'
+    %% doc block must survive the save AND repeated saves (idempotent — the bug
+    %% eroded one comment line per save).
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "InstallDoc.bt",
+        <<"Actor subclass: InstallDoc\n  state: v = 1\n\n  value -> Integer =>\n    self.v\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    MethodSrc =
+        <<
+            "// --- Section ---\n\n/// First doc line.\n/// Second doc line.\n"
+            "bumped -> Integer =>\n  self.v + 1"
+        >>,
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"InstallDoc">>, <<"bumped">>, MethodSrc, durable, <<"test">>, human, [], State1
+        )
+    ),
+    Src1 = stored_method_source('InstallDoc', bumped),
+    ?assert(binary:match(Src1, <<"// --- Section ---">>) =/= nomatch),
+    ?assert(binary:match(Src1, <<"/// First doc line.">>) =/= nomatch),
+    ?assert(binary:match(Src1, <<"/// Second doc line.">>) =/= nomatch),
+    %% Save again (feeding back the stored source). Source stays byte-stable —
+    %% no per-save erosion of the leading comment block.
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"InstallDoc">>, <<"bumped">>, Src1, durable, <<"test">>, human, [], State1
+        )
+    ),
+    Src2 = stored_method_source('InstallDoc', bumped),
+    ?assertEqual(Src1, Src2).
+
+t_install_method_accumulation_preserves_siblings(_Proj) ->
+    Proj = live_project_dir(),
+    %% Round-trip fidelity across saves: the stored class source accumulates via
+    %% unparse, so patching one method must NOT erode OTHER methods (or their
+    %% comments) or the class's state. Save methodOne, then methodTwo, then read
+    %% BOTH back from the image.
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "InstallAccum.bt",
+        <<
+            "Actor subclass: InstallAccum\n"
+            "  state: v :: Integer = 1\n\n"
+            "  /// Doc for one.\n"
+            "  methodOne -> Integer =>\n    self.v + 1\n\n"
+            "  /// Doc for two.\n"
+            "  methodTwo -> Integer =>\n    self.v + 2\n"
+        >>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% Patch methodOne (with a leading banner), then patch methodTwo.
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"InstallAccum">>,
+            <<"methodOne">>,
+            <<"// --- one ---\n/// Doc for one (edited).\nmethodOne -> Integer =>\n  self.v + 10">>,
+            durable,
+            <<"test">>,
+            human,
+            [],
+            State1
+        )
+    ),
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"InstallAccum">>,
+            <<"methodTwo">>,
+            <<"methodTwo -> Integer =>\n  self.v + 20">>,
+            durable,
+            <<"test">>,
+            human,
+            [],
+            State1
+        )
+    ),
+    %% After patching methodTwo, methodOne (and its edited doc/banner) must still
+    %% be intact — accumulation did not drop or erode the sibling method.
+    One = stored_method_source('InstallAccum', methodOne),
+    ?assert(binary:match(One, <<"// --- one ---">>) =/= nomatch),
+    ?assert(binary:match(One, <<"Doc for one (edited).">>) =/= nomatch),
+    ?assert(binary:match(One, <<"self.v + 10">>) =/= nomatch),
+    Two = stored_method_source('InstallAccum', methodTwo),
+    ?assert(binary:match(Two, <<"self.v + 20">>) =/= nomatch),
+    %% The class state survived the accumulation (still has the `v` ivar).
+    Pid = beamtalk_class_registry:whereis_class('InstallAccum'),
+    ?assert(lists:member(v, beamtalk_runtime_api:instance_variables(Pid))).
+
+t_revert_recovers_prev_from_disk(_Proj) ->
+    Proj = live_project_dir(),
+    %% A ChangeEntry with a known on-disk source_file but NO recorded prev_source
+    %% (e.g. recorded before source attribution was preserved). find_revert_target
+    %% must reconstruct the pre-patch body from disk rather than failing.
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "RevertDisk.bt",
+        <<"Actor subclass: RevertDisk\n  state: v = 1\n\n  bump -> Integer =>\n    self.v + 1\n">>
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(#{
+        class => <<"RevertDisk">>,
+        selector => <<"bump">>,
+        kind => instance,
+        source => <<"bump -> Integer => self.v + 99">>,
+        intent => durable,
+        flushable => true,
+        author => <<"test">>,
+        author_kind => human,
+        source_file => list_to_binary(Path),
+        span => #{start => 0, 'end' => 1}
+    }),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"RevertDisk">>, bump),
+    ?assertMatch({ok, _Body, _Entry}, Result),
+    {ok, Body, _} = Result,
+    %% The recovered body is the CURRENT on-disk method (the pre-patch state),
+    %% not the patched `self.v + 99'.
+    ?assert(binary:match(Body, <<"self.v + 1">>) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Body, <<"99">>)).
+
+t_install_method_test_dir_keeps_package(_Proj) ->
+    Proj = live_project_dir(),
+    %% A class under test/ gets `bt@loaderpkg@test@<mod>' — a patch must keep it.
+    Path = write_bt_under(
+        Proj,
+        "test",
+        "InstallSpec.bt",
+        <<"Actor subclass: InstallSpec\n  state: v = 1\n\n  value -> Integer =>\n    self.v\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    ?assertEqual('bt@loaderpkg@test@install_spec', current_module_of('InstallSpec')),
+    ?assertMatch(
+        {ok, _, _, _, _},
+        beamtalk_repl_loader:install_method(
+            <<"InstallSpec">>,
+            <<"doubled">>,
+            <<"doubled -> Integer =>\n  self.v * 2">>,
+            durable,
+            <<"test">>,
+            human,
+            [],
+            State1
+        )
+    ),
+    ?assertEqual('bt@loaderpkg@test@install_spec', current_module_of('InstallSpec')).
+
 loader_integration_test_() ->
     {setup, fun loader_setup/0, fun loader_teardown/1, fun(Proj) ->
         [
@@ -784,6 +999,21 @@ loader_integration_test_() ->
             end},
             {"reload_method_definition compile error", fun() ->
                 t_reload_method_definition_compile_error(Proj)
+            end},
+            {"install_method keeps package module + source attr (bug 2)", fun() ->
+                t_install_method_keeps_package_and_source(Proj)
+            end},
+            {"install_method preserves leading comments, idempotently (bug 1)", fun() ->
+                t_install_method_preserves_comments(Proj)
+            end},
+            {"install_method on test/ class keeps package", fun() ->
+                t_install_method_test_dir_keeps_package(Proj)
+            end},
+            {"install_method accumulation preserves sibling methods + state", fun() ->
+                t_install_method_accumulation_preserves_siblings(Proj)
+            end},
+            {"revert recovers prior body from disk when prev_source absent", fun() ->
+                t_revert_recovers_prev_from_disk(Proj)
             end},
             {"new_class/2 success", fun() -> t_new_class_success(Proj) end},
             {"new_class/2 target exists", fun() -> t_new_class_target_exists(Proj) end},
