@@ -37,45 +37,6 @@ MISE_DATA_DIR="${MISE_DATA_DIR:-/usr/local/share/mise}"
 export MISE_DATA_DIR
 MISE_SHIMS="${MISE_DATA_DIR}/shims"
 
-# Repo root (the directory containing .tool-versions). Resolution order:
-#   1. CLAUDE_PROJECT_DIR if the harness exports it (the checkout the hook runs in)
-#   2. the script's own parent dir — only when run from a file on disk
-#   3. the current working directory — the `curl … | bash` case, where the
-#      script arrives on stdin and BASH_SOURCE is unset (so guard it under set -u)
-# Then, if .tool-versions isn't at the guessed root, walk up from the cwd to
-# find it, so running from a subdirectory of the checkout still works.
-if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
-  REPO_ROOT="${CLAUDE_PROJECT_DIR}"
-elif [ -n "${BASH_SOURCE[0]:-}" ]; then
-  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-else
-  REPO_ROOT="$(pwd)"
-fi
-if [ ! -f "${REPO_ROOT}/.tool-versions" ]; then
-  _dir="$(pwd)"
-  while [ "${_dir}" != "/" ]; do
-    if [ -f "${_dir}/.tool-versions" ]; then
-      REPO_ROOT="${_dir}"
-      break
-    fi
-    _dir="$(dirname "${_dir}")"
-  done
-fi
-TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
-
-# The repo ships a committed mise.toml. mise refuses to read ANY config in a
-# directory whose config is untrusted — including .tool-versions — so a fresh
-# cloud container (no trust record in mise's state dir) makes `mise install`
-# bail out entirely, silently skipping the BEAM toolchain. mise's trust store
-# lives in ~/.local/state/mise and is only intermittently captured by the cloud
-# snapshot, which is exactly the "elixir isn't always installed" flakiness.
-# Trust the checkout via env var so it holds regardless of snapshot state; this
-# is persisted to /etc/profile.d below so every future shell trusts it too.
-case ":${MISE_TRUSTED_CONFIG_PATHS:-}:" in
-  *":${REPO_ROOT}:"*) ;;
-  *) export MISE_TRUSTED_CONFIG_PATHS="${REPO_ROOT}${MISE_TRUSTED_CONFIG_PATHS:+:${MISE_TRUSTED_CONFIG_PATHS}}" ;;
-esac
-
 # --- Helpers ---
 
 if [ -t 1 ]; then
@@ -94,6 +55,49 @@ warn()  { echo -e "  ${YELLOW}!${NC} $1"; }
 fail()  { echo -e "  ${RED}✗${NC} $1"; }
 
 have() { command -v "$1" &>/dev/null; }
+
+# Repo root (the directory containing .tool-versions). Resolution order:
+#   1. CLAUDE_PROJECT_DIR if the harness exports it (the checkout the hook runs in)
+#   2. the script's own parent dir — only when run from a file on disk
+#   3. the current working directory — the `curl … | bash` case, where the
+#      script arrives on stdin and BASH_SOURCE is unset (so guard it under set -u)
+# Then, if .tool-versions isn't at the guessed root, walk up from the cwd to
+# find it, so running from a subdirectory of the checkout still works.
+if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+  REPO_ROOT="${CLAUDE_PROJECT_DIR}"
+elif [ -n "${BASH_SOURCE[0]:-}" ]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+else
+  REPO_ROOT="$(pwd)"
+fi
+if [ ! -f "${REPO_ROOT}/.tool-versions" ]; then
+  _guess="${REPO_ROOT}"
+  _dir="$(pwd)"
+  while [ "${_dir}" != "/" ]; do
+    if [ -f "${_dir}/.tool-versions" ]; then
+      REPO_ROOT="${_dir}"
+      break
+    fi
+    _dir="$(dirname "${_dir}")"
+  done
+  # Surface the silent reroute — otherwise a wrong .tool-versions (e.g. a parent
+  # repo's) is impossible to trace back from the resolved toolchain pins.
+  [ "${REPO_ROOT}" = "${_guess}" ] || warn "REPO_ROOT adjusted to ${REPO_ROOT} (walked up from $(pwd))"
+fi
+TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
+
+# The repo ships a committed mise.toml. mise refuses to read ANY config in a
+# directory whose config is untrusted — including .tool-versions — so a fresh
+# cloud container (no trust record in mise's state dir) makes `mise install`
+# bail out entirely, silently skipping the BEAM toolchain. mise's trust store
+# lives in ~/.local/state/mise and is only intermittently captured by the cloud
+# snapshot, which is exactly the "elixir isn't always installed" flakiness.
+# Trust the checkout via env var so it holds regardless of snapshot state; this
+# is persisted to /etc/profile.d below so every future shell trusts it too.
+case ":${MISE_TRUSTED_CONFIG_PATHS:-}:" in
+  *":${REPO_ROOT}:"*) ;;
+  *) export MISE_TRUSTED_CONFIG_PATHS="${REPO_ROOT}${MISE_TRUSTED_CONFIG_PATHS:+:${MISE_TRUSTED_CONFIG_PATHS}}" ;;
+esac
 
 # Compute SUDO prefix — defer failure until a command actually needs it.
 # This allows the script to succeed when all tools are pre-installed even if
