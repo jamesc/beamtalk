@@ -45,6 +45,18 @@ defmodule BtAttach.DocFormatTest do
       assert out =~ ~s(<pre class="doc-code"><code>c increment</code></pre>)
     end
 
+    test "bare CR and CRLF line endings are normalised" do
+      # Classic-Mac (\r) and Windows (\r\n) newlines split into clean blocks —
+      # no trailing carriage returns left to misparse a heading or blank line.
+      out = html("## Heading\r\rBody text.")
+      assert out =~ ~s(<h4 class="doc-h">Heading</h4>)
+      assert out =~ ~s(<p class="doc-p">Body text.</p>)
+
+      out_crlf = html("## Heading\r\n\r\nBody text.")
+      assert out_crlf =~ ~s(<h4 class="doc-h">Heading</h4>)
+      assert out_crlf =~ ~s(<p class="doc-p">Body text.</p>)
+    end
+
     test "unordered list items group into a single doc-list" do
       out = html("- first\n- second")
       assert out =~ ~s(<ul class="doc-list">)

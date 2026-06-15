@@ -2850,8 +2850,17 @@ defmodule BtAttachWeb.WorkspaceLive do
     id = "def:" <> class
 
     case find_tab(socket, id) do
-      %{} ->
-        activate_tab(socket, id)
+      %{} = existing ->
+        # Parity with the method-tab re-activation path: refresh the read-only
+        # doc block from the live image so an out-of-band class comment change
+        # (MCP `save_class`, a `>>` patch) shows on re-focus instead of the
+        # snapshot taken at first open. Only `doc:` is touched — the editable
+        # definition buffer and its dirty flag are left untouched.
+        refreshed = %{existing | doc: class_comment(socket, class)}
+
+        socket
+        |> update_active_tab_by_id(id, fn _ -> refreshed end)
+        |> activate_tab(id)
 
       nil ->
         tab = %{
@@ -4987,7 +4996,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                     class="doc-block"
                     aria-label="Documentation"
                   >
-                    <div :if={doc_tab.signature} class="doc-sig mono">{doc_tab.signature}</div>
+                    <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
                     <div :if={doc_tab.doc} class="doc-body">
                       {BtAttach.DocFormat.to_html(doc_tab.doc)}
                     </div>

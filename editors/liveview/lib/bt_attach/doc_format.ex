@@ -181,7 +181,11 @@ defmodule BtAttach.DocFormat do
 
   # ── Line classifiers ─────────────────────────────────────────────────────────
 
-  defp normalize_newlines(text), do: String.replace(text, "\r\n", "\n")
+  defp normalize_newlines(text) do
+    text
+    |> String.replace("\r\n", "\n")
+    |> String.replace("\r", "\n")
+  end
 
   defp blank?(line), do: String.trim(line) == ""
 
