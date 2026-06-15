@@ -633,6 +633,35 @@ just test-parity
 - A bug fix corrected a divergence between surfaces — add a regression case
 - A surface gets a new tool/command that maps to an existing REPL op
 
+### 10. LiveView IDE (Cockpit) Tests
+
+The Phoenix LiveView IDE under `editors/liveview` is tested in four layers,
+gated by tags in `test/test_helper.exs`:
+
+| Layer | Tag | Needs | Example |
+|-------|-----|-------|---------|
+| Pure / unit | *(none — bare `mix test`)* | nothing | `test/bt_attach/doc_format_test.exs` |
+| LiveView integration | *(none)* | the `StubWorkspaceClient` stub | `test/bt_attach_web/workspace_doc_block_test.exs` |
+| Workspace integration | `:workspace` | a live workspace node + `BT_WORKSPACE_COOKIE` | `test/bt_attach_web/workspace_live_test.exs` |
+| Browser e2e | `:playwright` | a workspace node **and** Playwright/Chromium (`PHX_PLAYWRIGHT=1`) | `test/bt_attach_web/workspace_browser_test.exs` |
+
+The bare `mix test` lane (the `liveview` CI job) runs the first two layers
+against the stub, so the full LiveView render path is covered without a node;
+the `:workspace` / `:playwright` lanes run in the `e2e` CI job.
+
+**Known coverage note — doc-comment rendering (BT-2558):** the System Browser
+doc block is covered at two seams — `beamtalk_repl_ops_browse_tests` asserts
+`browse-method-source` carries `doc`/`signature` (from a `beamtalk_object_class`
+fixture that populates `__doc__` directly), and `workspace_doc_block_test.exs`
+asserts the LiveView renders that payload as escaped HTML (against a stub). The
+compiler seam — that a `///` comment in `.bt` source actually flows through to
+`__doc__` / `get_doc` at runtime — is exercised by the `help:` tests
+(`beamtalk_repl_docs` / `beamtalk_interface_test.bt`), **not** through the
+browser. There is intentionally no browser e2e walking source → codegen →
+render (an earlier attempt was fragile against the mount-time class tree); if
+doc-comment rendering regresses, check those three suites in that order.
+
+
 ---
 
 ## CI Pipeline

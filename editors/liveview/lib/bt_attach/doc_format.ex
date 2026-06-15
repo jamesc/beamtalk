@@ -171,12 +171,15 @@ defmodule BtAttach.DocFormat do
   defp code_span(_), do: :no
 
   # Bold before italic so `**x**` is not mis-split by the single-`*` rule. Runs on
-  # already-escaped text, so the captured groups carry no raw HTML.
+  # already-escaped text, so the captured groups carry no raw HTML. No dotall flag
+  # is needed: `inline/1` only ever sees single-line text (paragraphs are joined
+  # with spaces, list items and headings are one line), so the spans never cross a
+  # newline.
   defp emphasis(escaped) do
     escaped
-    |> String.replace(~r/\*\*(.+?)\*\*/s, "<strong>\\1</strong>")
-    |> String.replace(~r/(?<![\*\w])\*(?!\s)([^*]+?)\*(?![\*\w])/s, "<em>\\1</em>")
-    |> String.replace(~r/(?<![_\w])_(?!\s)([^_]+?)_(?![_\w])/s, "<em>\\1</em>")
+    |> String.replace(~r/\*\*(.+?)\*\*/, "<strong>\\1</strong>")
+    |> String.replace(~r/(?<![\*\w])\*(?!\s)([^*]+?)\*(?![\*\w])/, "<em>\\1</em>")
+    |> String.replace(~r/(?<![_\w])_(?!\s)([^_]+?)_(?![_\w])/, "<em>\\1</em>")
   end
 
   # ── Line classifiers ─────────────────────────────────────────────────────────
