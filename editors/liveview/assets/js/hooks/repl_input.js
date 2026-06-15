@@ -43,6 +43,7 @@ import {
 import { indentUnit } from "@codemirror/language"
 import { beamtalkHighlighting } from "./bt_highlight"
 import { backendCompletion, completionQuery } from "./cm_autocomplete"
+import { backendHover, hoverQuery } from "./cm_hover"
 
 export const ReplInput = {
   mounted() {
@@ -82,6 +83,9 @@ export const ReplInput = {
       // while the popup is open Enter accepts the candidate; when it is closed
       // Enter falls through to `replKeymap` above and submits, as before.
       backendCompletion(completionQuery(this.pushEvent.bind(this))),
+      // Live-image hover (BT-2555): same hover source as the Workspace editor —
+      // signature + doc-comment tooltips from the live session.
+      backendHover(hoverQuery(this.pushEvent.bind(this))),
     ]
     if (placeholderText) extensions.push(placeholderExt(placeholderText))
 

@@ -30,7 +30,7 @@ jobs:
       issues: write         # upsert the sticky summary comment
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -126,7 +126,7 @@ jobs:
 
       - name: Post review summary
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

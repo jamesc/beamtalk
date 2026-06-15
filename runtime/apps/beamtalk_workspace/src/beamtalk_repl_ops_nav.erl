@@ -194,7 +194,8 @@ site_to_row(Site) ->
         <<"class_side">> => ClassSide,
         <<"method">> => atom_to_binary(Method, utf8),
         <<"line">> => Line,
-        <<"source_file">> => source_file_of(Owner)
+        <<"source_file">> => source_file_of(Owner),
+        <<"source_origin">> => source_origin_of(Owner)
     }.
 
 -spec implementor_to_row(atom(), boolean(), atom()) -> map().
@@ -208,7 +209,8 @@ implementor_to_row(Cls, ClassSide, Selector) ->
         <<"class_side">> => ClassSide,
         <<"method">> => atom_to_binary(Selector, utf8),
         <<"line">> => method_line_of(Cls, ClassSide, Selector),
-        <<"source_file">> => source_file_of(Cls)
+        <<"source_file">> => source_file_of(Cls),
+        <<"source_origin">> => source_origin_of(Cls)
     }.
 
 -spec source_file_of(atom()) -> binary() | null.
@@ -222,6 +224,21 @@ source_file_of(ClassName) ->
                 nil -> null;
                 Path when is_binary(Path) -> Path
             end
+    end.
+
+-spec source_origin_of(atom()) -> binary().
+source_origin_of(ClassName) ->
+    case beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined ->
+            <<"project">>;
+        ClassPid ->
+            ModName = beamtalk_object_class:module_name(ClassPid),
+            SourceFile =
+                case beamtalk_reflection:source_file_from_module(ModName) of
+                    nil -> null;
+                    Path when is_binary(Path) -> Path
+                end,
+            beamtalk_repl_ops_browse:source_origin_of(ModName, SourceFile)
     end.
 
 -spec method_line_of(atom(), boolean(), atom()) -> pos_integer() | null.

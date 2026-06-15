@@ -63,6 +63,10 @@ defmodule BtAttach.Facade do
     processes_system: :execute,
     sessions: :read,
     complete: :read,
+    # BT-2555: live-image hover docs for the cockpit editors. Like `complete`,
+    # it triggers no user code (pure reflection over the live class registry +
+    # stored doc-comments), so it is `:read` — the Observer role may hover.
+    hover: :read,
     changes: :read,
     # ADR 0096 (BT-2488): the System Browser browse facade — four read-only
     # ops backing the four-pane navigator. They trigger no user code (pure
@@ -229,6 +233,18 @@ defmodule BtAttach.Facade do
   defp invoke(:complete, %{session_pid: pid, code: code}, _ctx) do
     if is_pid(pid) and is_binary(code),
       do: client().complete(pid, code),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2555: live-image hover for the CodeMirror editors. `code` is the editor
+  # line up to the hovered token; the client resolves it to class/method docs
+  # against the live image via the `hover` op and returns `{:ok, String.t()}`
+  # (the markdown, "" when nothing resolves). Capability `:read` (no user code),
+  # so the Observer role hovers too. A bad shape is `:invalid_params` with no
+  # dist call, matching `:complete`.
+  defp invoke(:hover, %{session_pid: pid, code: code}, _ctx) do
+    if is_pid(pid) and is_binary(code),
+      do: client().hover(pid, code),
       else: {:error, :invalid_params}
   end
 

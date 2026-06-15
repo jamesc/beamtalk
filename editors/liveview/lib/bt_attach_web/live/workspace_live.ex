@@ -244,10 +244,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # All RBAC-relevant workspace ops go through the curated facade (ADR 0091
   # Decision 3) — never a raw Workspace/:rpc call from an event handler. Pure
   # transport/display/lifecycle helpers (connect, render_term, session start)
-  # stay on Workspace: they are not browser-supplied ops. `ctx/1` carries the
+  # go through the injectable workspace client so the mount and session-start
+  # paths are testable without a live node (BT-2554). `ctx/1` carries the
   # request identity the facade audits / RBAC gates on (BT-2421).
   defp ctx(socket),
     do: %{user: socket.assigns[:current_user], role: socket.assigns[:role] || :owner}
+
+  defp ws_client, do: Application.get_env(:bt_attach, :workspace_client, Workspace)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -284,7 +287,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp attach(%{assigns: %{token: token}} = socket) do
     socket =
-      case Workspace.connect() do
+      case ws_client().connect() do
         :ok ->
           # Resume the tab's existing session if the registry still holds a live
           # one (reconnect within the grace window); otherwise start fresh.
@@ -351,7 +354,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp start_fresh(token, meta) do
     session_id = "phoenix-#{System.unique_integer([:positive])}"
 
-    case Workspace.start_session(session_id, meta) do
+    case ws_client().start_session(session_id, meta) do
       pid when is_pid(pid) ->
         # Register before binding so a crash mid-bind can't leak: the registry
         # owns the close, keyed by the tab token (a nil token simply skips
@@ -515,6 +518,12 @@ defmodule BtAttachWeb.WorkspaceLive do
       #   * `:window_z` — the running max z-index; a click bumps the focused window
       #     to `window_z + 1` so z-order follows focus (the spike's stacking).
       |> assign(:inspector_mode, "docked")
+      # Panel visibility toggles (BT-2559): dismissable side panels + collapsible
+      # dock. Each panel can be hidden via a close button; toggle buttons in the
+      # top bar re-show them. The dock can be collapsed/expanded.
+      |> assign(:show_browser, true)
+      |> assign(:show_inspector, true)
+      |> assign(:show_dock, true)
       |> assign(:windows, [])
       |> assign(:next_window_id, 1)
       |> assign(:window_z, 10)
@@ -632,6 +641,30 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:reply, %{"completions" => []}, socket}
   end
 
+  # Live-image hover (BT-2555): the CodeMirror editors' `hoverTooltip` source
+  # round-trips the editor line up to the hovered token; we answer with
+  # signature + doc-comment markdown from the live session via the `hover` op
+  # (a class name → its docs; a `Receiver selector` pair → that method's docs).
+  # `:read` capability — hover runs no user code — so the Observer role hovers
+  # too. We `{:reply, …}` on the same event so CodeMirror resolves its async
+  # tooltip source; an unreachable workspace, a denied op, a missing session, or
+  # nothing-to-show all degrade to an empty string (no tooltip is shown).
+  @impl true
+  def handle_event("hover", %{"code" => code}, %{assigns: %{session_pid: pid}} = socket)
+      when is_pid(pid) and is_binary(code) do
+    hover =
+      case Facade.dispatch(:hover, %{session_pid: pid, code: code}, ctx(socket)) do
+        {:ok, docs} when is_binary(docs) -> docs
+        _ -> ""
+      end
+
+    {:reply, %{"hover" => hover}, socket}
+  end
+
+  def handle_event("hover", _params, socket) do
+    {:reply, %{"hover" => ""}, socket}
+  end
+
   # Switch the Workspace dock's active tab (Workspace / REPL / Transcript /
   # Changes, BT-2490, REPL added BT-2543). Pure view state — no workspace
   # round-trip; an unknown tab is ignored rather than rendered, so a crafted
@@ -660,27 +693,41 @@ defmodule BtAttachWeb.WorkspaceLive do
   @impl true
   def handle_event("repl_eval", %{"expr" => expr}, %{assigns: %{session_pid: pid}} = socket)
       when is_pid(pid) do
-    if String.trim(expr) == "" do
-      # Empty submit (bare Enter) is a no-op — never append a blank entry or
-      # disturb the history cursor.
-      {:noreply, socket}
-    else
-      socket =
-        case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
-          {:ok, term, _output, _warnings} ->
-            repl_append_ok(socket, expr, term)
+    trimmed = String.trim(expr)
 
-          {:error, reason, _output, _warnings} ->
-            repl_append_error(socket, expr, Workspace.render_error(reason))
+    cond do
+      trimmed == "" ->
+        # Empty submit (bare Enter) is a no-op — never append a blank entry or
+        # disturb the history cursor.
+        {:noreply, socket}
 
-          # Facade short-circuit (RBAC denial / off-vocabulary op) — a 2-tuple the
-          # eval contract never produces; render it as the entry's response rather
-          # than crashing the LiveView.
-          {:error, reason} ->
-            repl_append_error(socket, expr, facade_error(reason))
-        end
+      meta = repl_meta_command(trimmed) ->
+        # A `:`-prefixed meta-command (BT-2543 follow-up). The IDE handles these
+        # itself — driving the matching pane or pointing at it — and NEVER sends
+        # them to `eval`, which would choke trying to compile `:h` as Beamtalk.
+        {:noreply,
+         socket
+         |> handle_repl_meta(meta, expr)
+         |> repl_record_history(expr)
+         |> repl_clear_input()}
 
-      {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
+      true ->
+        socket =
+          case Facade.dispatch(:eval, %{session_pid: pid, code: expr}, ctx(socket)) do
+            {:ok, term, _output, _warnings} ->
+              socket |> repl_append_ok(expr, term) |> repl_help_followup(expr)
+
+            {:error, reason, _output, _warnings} ->
+              repl_append_error(socket, expr, Workspace.render_error(reason))
+
+            # Facade short-circuit (RBAC denial / off-vocabulary op) — a 2-tuple the
+            # eval contract never produces; render it as the entry's response rather
+            # than crashing the LiveView.
+            {:error, reason} ->
+              repl_append_error(socket, expr, facade_error(reason))
+          end
+
+        {:noreply, socket |> repl_record_history(expr) |> repl_clear_input()}
     end
   end
 
@@ -855,6 +902,27 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("close_settings", _params, socket) do
     {:noreply, assign(socket, show_settings: false)}
+  end
+
+  # Panel visibility toggles (BT-2559): close/toggle side panels and dock.
+  def handle_event("toggle_browser", _params, socket) do
+    {:noreply, assign(socket, show_browser: !socket.assigns.show_browser)}
+  end
+
+  def handle_event("toggle_inspector", _params, socket) do
+    {:noreply, assign(socket, show_inspector: !socket.assigns.show_inspector)}
+  end
+
+  def handle_event("toggle_dock", _params, socket) do
+    {:noreply, assign(socket, show_dock: !socket.assigns.show_dock)}
+  end
+
+  def handle_event("close_browser", _params, socket) do
+    {:noreply, assign(socket, show_browser: false)}
+  end
+
+  def handle_event("close_inspector", _params, socket) do
+    {:noreply, assign(socket, show_inspector: false)}
   end
 
   # Drill into an object-valued field of a *floating window* (BT-2493): the field
@@ -1787,6 +1855,202 @@ defmodule BtAttachWeb.WorkspaceLive do
     push_event(socket, "repl_set_input", %{text: ""})
   end
 
+  # ── REPL meta-commands (BT-2543 follow-up) ──────────────────────────────────
+  #
+  # The CLI REPL parses `:`-prefixed meta-commands client-side (see
+  # crates/beamtalk-cli/src/commands/repl/mod.rs); the LiveView REPL historically
+  # forwarded them straight to `eval`, which choked trying to compile `:h` as a
+  # Beamtalk expression. In a graphical IDE most of those commands map onto a pane
+  # that already exists (the System Browser, the Bindings pane, the Changes tab),
+  # so rather than re-implement the CLI's command DSL we recognise the leading
+  # colon and either DRIVE the matching pane (`:help X` focuses the System
+  # Browser) or POINT the user at it. Input without a leading colon is real code
+  # and falls through to `eval` untouched.
+  #
+  # Returns `nil` for non-meta input (the overwhelmingly common path) so the
+  # caller's `cond` falls through to eval; otherwise a parsed `{kind, …}` tuple
+  # `handle_repl_meta/3` routes.
+  defp repl_meta_command(input) do
+    if String.starts_with?(input, ":") do
+      # `input` starts with ":", so splitting on whitespace always yields at least
+      # the command token (a bare ":" splits to `[":"]`, routed to the catch-all).
+      [cmd | rest] = String.split(input, ~r/\s+/, parts: 2, trim: true)
+      repl_meta_dispatch(cmd, meta_arg(rest))
+    else
+      nil
+    end
+  end
+
+  # First whitespace-delimited token of a meta-command's argument, with a leading
+  # `#` stripped so `:help #Counter` and `:help Counter` agree. `nil` when the
+  # command had no argument.
+  defp meta_arg([]), do: nil
+
+  defp meta_arg([arg]) do
+    # `arg` is the non-empty second part of the outer `parts: 2, trim: true` split,
+    # so this inner split always yields at least the first token.
+    [token | _] = String.split(arg, ~r/\s+/, parts: 2, trim: true)
+
+    case String.trim_leading(token, "#") do
+      "" -> nil
+      stripped -> stripped
+    end
+  end
+
+  defp repl_meta_dispatch(cmd, arg) when cmd in [":help", ":h", ":?"], do: {:help, arg}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":bindings", ":b"],
+    do:
+      {:point,
+       "Bindings are listed live in the Bindings pane on the right — click one to inspect it."}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":changes", ":dirty"],
+    do: {:point, "Pending changes are shown in the Changes tab of this dock."}
+
+  defp repl_meta_dispatch(":flush", _),
+    do: {:point, "Use the Flush control in the Changes tab to write pending changes to disk."}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":sync", ":s"],
+    do:
+      {:point,
+       "The IDE tracks the live image as you work, so there is no manual sync step — project files from `beamtalk.toml` load when you connect."}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":test", ":t"],
+    do:
+      {:point,
+       "A test-runner pane is coming to the IDE (BT-2557). For now, run tests from the CLI with `beamtalk test`."}
+
+  defp repl_meta_dispatch(":clear", _),
+    do:
+      {:point,
+       "Session bindings clear with the workspace. To clear them now, evaluate: Session current clear"}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":show-codegen", ":sc"],
+    do:
+      {:point,
+       "Generated-code inspection (:show-codegen) is CLI-only for now — run it from `beamtalk repl`."}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":exit", ":quit", ":q"],
+    do:
+      {:point,
+       "Close the browser tab to disconnect — there is no REPL process to exit in the IDE."}
+
+  defp repl_meta_dispatch(cmd, _), do: {:unknown, cmd}
+
+  # Route a parsed meta-command. `:help X` drives the System Browser; everything
+  # else appends an informational scrollback entry (a third `kind`, `:info`, the
+  # template styles muted rather than as an error).
+  defp handle_repl_meta(socket, {:help, nil}, expr),
+    do: repl_append_info(socket, expr, repl_help_text())
+
+  defp handle_repl_meta(socket, {:help, class}, expr),
+    do: repl_focus_class(socket, expr, class)
+
+  defp handle_repl_meta(socket, {:point, message}, expr),
+    do: repl_append_info(socket, expr, message)
+
+  defp handle_repl_meta(socket, {:unknown, cmd}, expr) do
+    repl_append_info(
+      socket,
+      expr,
+      "Unknown command #{cmd}. This is the IDE REPL — type :help for what's available, " <>
+        ":help <Class> to open a class in the System Browser, or just evaluate an expression."
+    )
+  end
+
+  # Focus the System Browser on `class` (the GUI equivalent of the CLI's
+  # `:help Class` → `Beamtalk help: Class`). We validate against the live symbol
+  # index first so an unknown name gives a clean message instead of pointing the
+  # browser at a class that doesn't exist.
+  defp repl_focus_class(socket, expr, class) do
+    if class in browser_class_names(socket) do
+      socket
+      |> open_class(class)
+      |> repl_append_info(expr, "Opened #{class} in the System Browser ◂")
+    else
+      # "No class named X" is feedback about a meta-command, not a code-evaluation
+      # failure, so it uses the muted `:info` styling (like an unknown `:cmd`) rather
+      # than the red error arrow reserved for eval errors.
+      repl_append_info(
+        socket,
+        expr,
+        "No class named #{class}. Browse classes in the System Browser, or search with the omni bar (top)."
+      )
+    end
+  end
+
+  # The class names known to the live image, from the same symbol index the omni
+  # search uses, as a MapSet so the `class in browser_class_names(socket)`
+  # membership check in `repl_focus_class/3` is O(1). An empty index (dispatch
+  # failure / RBAC denial) just means every `:help X` reports "no such class"
+  # rather than crashing.
+  defp browser_class_names(socket) do
+    socket
+    |> symbol_rows()
+    |> Enum.filter(&(&1.kind == "class"))
+    |> MapSet.new(& &1.class)
+  end
+
+  # `:help` with no argument: a short tour of where the CLI REPL's commands live
+  # in the IDE, so a muscle-memory `:h` lands somewhere useful instead of erroring.
+  defp repl_help_text do
+    """
+    IDE REPL — evaluate any expression (Enter runs it, ↑/↓ recall history).
+    :help / :h / :?        show this help
+    :help <Class>          open a class in the System Browser (left)
+    :bindings / :b         → Bindings pane (right)
+    :changes / :dirty      → Changes tab (this dock)
+    :flush                 → Flush control (Changes tab)
+    :sync / :s             tracks the live image (loads beamtalk.toml on connect)
+    :clear                 evaluates `Session current clear`
+    :show-codegen / :sc    CLI-only — run from `beamtalk repl`
+    :test / :t             test-runner pane coming soon (BT-2557)
+    :exit / :quit / :q     close the browser tab to disconnect
+    Inspect results with the Inspect button; browse classes/methods on the left.\
+    """
+  end
+
+  # After a successful eval, if the expression was a `Beamtalk help: Class` send
+  # (the CLI's `:help` desugaring, and a natural thing to type directly), focus
+  # the System Browser on that class too — the help text stays in the scrollback
+  # AND the browser navigates to the subject. Non-help evals pass through
+  # untouched.
+  #
+  # Unlike `repl_focus_class/3`, this skips the `browser_class_names/1` validation
+  # and calls `open_class` directly: the `eval` already succeeded, which proves the
+  # class exists in the runtime, so a symbol-index lookup would be redundant (and
+  # would falsely reject a class defined moments earlier if the index is briefly
+  # stale). `load_protocols` handles an empty result gracefully regardless.
+  defp repl_help_followup(socket, expr) do
+    case Regex.run(~r/^\s*Beamtalk\s+help:\s+#?([A-Z]\w*)/, expr) do
+      [_, class] -> open_class(socket, class)
+      _ -> socket
+    end
+  end
+
+  # Append an informational meta-command response (`kind: :info`): no live term,
+  # so no Inspect affordance and nothing stashed. Mirrors `repl_append_error/3`'s
+  # bookkeeping (seq bump + term-map eviction in lockstep with the scrollback cap).
+  defp repl_append_info(socket, request, message) do
+    seq = socket.assigns.repl_seq + 1
+    id = repl_entry_id(seq)
+
+    entry = %{
+      id: id,
+      request: request,
+      kind: :info,
+      response: message,
+      inspectable: false,
+      long: repl_long?(message)
+    }
+
+    socket
+    |> assign(:repl_seq, seq)
+    |> update(:repl_terms, &repl_evict(&1, seq))
+    |> stream_insert(:repl, entry, limit: -@repl_scrollback_limit)
+    |> repl_scroll_to_bottom()
+  end
+
   # ── method editor helpers (Wave 3) ──────────────────────────────────────────
 
   # Compile (⌘S) the active tab's source. A class-definition tab evals its whole
@@ -2244,7 +2508,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                 # compile (`compile_clean/3`): clearing on flush is BT-2545's path.
                 # Keeps the false → true invariant the `nil ->` branch documents.
                 disk_differs: existing.disk_differs or info.disk_differs,
-                runtime_only: info.runtime_only
+                runtime_only: info.runtime_only,
+                # Re-read the doc block from the live image too (BT-2558), so an
+                # out-of-band edit to the method's `///` doc / signature is
+                # reflected when the clean tab is re-activated.
+                doc: info.doc,
+                signature: info.signature
             }
 
             socket
@@ -2272,7 +2541,11 @@ defmodule BtAttachWeb.WorkspaceLive do
           # both flags are re-derived from the live image when a clean tab is
           # re-activated (see the `%{} = existing` branch above).
           disk_differs: info.disk_differs,
-          runtime_only: info.runtime_only
+          runtime_only: info.runtime_only,
+          # The method's `///` doc-comment + signature for the read-only doc
+          # block (BT-2558); nil when the method carries no doc / signature.
+          doc: info.doc,
+          signature: info.signature
         }
 
         socket
@@ -2297,7 +2570,12 @@ defmodule BtAttachWeb.WorkspaceLive do
         %{
           source: if(is_binary(result["source"]), do: result["source"], else: ""),
           disk_differs: result["disk_differs"] == true,
-          runtime_only: runtime_only?(result)
+          runtime_only: runtime_only?(result),
+          # BT-2558: the method's `///` doc-comment and signature, carried so the
+          # editor can show a read-only doc block alongside the editable body.
+          # `nil` when the method has no doc / no resolvable signature.
+          doc: doc_text(result["doc"]),
+          signature: doc_text(result["signature"])
         }
 
       # Facade returned a value but not the expected map (sourceless / malformed
@@ -2317,8 +2595,33 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Defaults for a method with no resolvable image source: an empty editable buffer
-  # and no divergence badges.
-  defp empty_source_info, do: %{source: "", disk_differs: false, runtime_only: false}
+  # and no divergence badges (and no doc block — BT-2558).
+  defp empty_source_info,
+    do: %{source: "", disk_differs: false, runtime_only: false, doc: nil, signature: nil}
+
+  # Normalise a browse-payload doc/signature field to a non-empty binary or nil.
+  # The op already returns `null` (decoded to nil) for absent fields; this also
+  # drops a stray empty string so the editor never shows a blank doc block.
+  defp doc_text(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      _ -> value
+    end
+  end
+
+  defp doc_text(_), do: nil
+
+  # The class' comment text (`browse-class-definition` → `comment`) for the
+  # class-definition tab's read-only doc block (BT-2558). `nil` when the class
+  # carries no comment or the browse fails — the editor then shows no doc block.
+  # This is the same comment `Beamtalk help:` renders, so the browser and the
+  # `help:` send agree on the docs for a class.
+  defp class_comment(socket, class) do
+    case Facade.dispatch(:browse_class_definition, %{class: class}, ctx(socket)) do
+      {:value, %{"comment" => comment}} -> doc_text(comment)
+      _ -> nil
+    end
+  end
 
   # Query senders/implementors of the active method's selector (`nav-query`) and
   # open the result popover. A tab with no selector (a class-definition tab) is a
@@ -2434,6 +2737,23 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp runtime_only?(%{"origin" => "runtime"}), do: true
   defp runtime_only?(_), do: false
 
+  # Source origin badge helpers (BT-2552). The source_origin field is
+  # "stdlib", "project", or "dependency[:packagename]".
+  defp source_origin_class(%{"source_origin" => "stdlib"}), do: "stdlib"
+  defp source_origin_class(%{"source_origin" => <<"dependency:", _::binary>>}), do: "dependency"
+  defp source_origin_class(_), do: "project"
+
+  defp source_origin_label(%{"source_origin" => "stdlib"}), do: "stdlib"
+  defp source_origin_label(%{"source_origin" => <<"dependency:", pkg::binary>>}), do: pkg
+  defp source_origin_label(_), do: ""
+
+  defp source_origin_title(%{"source_origin" => "stdlib"}), do: "Standard library"
+
+  defp source_origin_title(%{"source_origin" => <<"dependency:", pkg::binary>>}),
+    do: "Dependency: #{pkg}"
+
+  defp source_origin_title(_), do: "Project"
+
   # ── tabbed method editor data model (BT-2494) ───────────────────────────────
   #
   # A tab is a plain map; the open-tab list lives in `:tabs` and the focused
@@ -2451,7 +2771,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     base: last-compiled source (dirty = source != base),
   #     dirty: boolean,
   #     disk_differs: boolean,   # methods only — unflushed live `>>` patch; snapshot at open, set true on compile
-  #     runtime_only: boolean    # methods only — sourceless runtime method at open
+  #     runtime_only: boolean,   # methods only — sourceless runtime method at open
+  #     doc: binary | nil,       # BT-2558 read-only doc block: method `///` doc / class comment
+  #     signature: binary | nil  # BT-2558 method signature (nil for a class-definition tab)
   #   }
   #
   # The cockpit opens with one starter method tab so the editor is never empty
@@ -2469,7 +2791,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       base: "",
       dirty: false,
       disk_differs: false,
-      runtime_only: false
+      runtime_only: false,
+      doc: nil,
+      signature: nil
     }
 
     socket
@@ -2542,14 +2866,25 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Open (or re-focus) a class-definition tab for the active tab's class. A def
-  # tab evals its definition source on compile (saving compiles the class).
+  # tab evals its definition source on compile (saving compiles the class). On
+  # first open it also reads the class' comment (BT-2558) so the editor can show
+  # it as a read-only documentation block above the editable definition body.
   defp open_definition(socket) do
     class = active_tab(socket.assigns).class
     id = "def:" <> class
 
     case find_tab(socket, id) do
-      %{} ->
-        activate_tab(socket, id)
+      %{} = existing ->
+        # Parity with the method-tab re-activation path: refresh the read-only
+        # doc block from the live image so an out-of-band class comment change
+        # (MCP `save_class`, a `>>` patch) shows on re-focus instead of the
+        # snapshot taken at first open. Only `doc:` is touched — the editable
+        # definition buffer and its dirty flag are left untouched.
+        refreshed = %{existing | doc: class_comment(socket, class)}
+
+        socket
+        |> update_active_tab_by_id(id, fn _ -> refreshed end)
+        |> activate_tab(id)
 
       nil ->
         tab = %{
@@ -2562,7 +2897,11 @@ defmodule BtAttachWeb.WorkspaceLive do
           base: "",
           dirty: false,
           disk_differs: false,
-          runtime_only: false
+          runtime_only: false,
+          # The class comment as the doc block; no per-method signature on a
+          # class-definition tab.
+          doc: class_comment(socket, class),
+          signature: nil
         }
 
         socket
@@ -3852,6 +4191,15 @@ defmodule BtAttachWeb.WorkspaceLive do
             {label}
           </button>
         </div>
+        <button
+          type="button"
+          class="panel-close"
+          phx-click="close_browser"
+          aria-label="Close System Browser panel"
+          title="Close panel"
+        >
+          ×
+        </button>
       </div>
       <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
         <div :if={@browser_error} class="io-block err">{@browser_error}</div>
@@ -3921,8 +4269,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     >
       <span class="twig">{if class["superclass"], do: "→", else: "●"}</span>
       <span class="cls">{class["name"]}</span>
+      <span
+        :if={class["source_origin"] && class["source_origin"] != "project"}
+        class={"source-origin-tag #{source_origin_class(class)}"}
+        title={source_origin_title(class)}
+      >
+        {source_origin_label(class)}
+      </span>
       <span :if={runtime_only?(class)} class="runtime-tag" title="runtime-only (not on disk)">
-        runtime
+        ⚡
       </span>
       <span :if={@selected_class == class["name"] and @browser_side == "class"} class="pill">
         class
@@ -4005,7 +4360,14 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
               <span class="twig" style="color: var(--accent);">ƒ</span>
               <span class="mname mono">{m["selector"]}</span>
-              <span :if={runtime_only?(m)} class="runtime-tag">runtime</span>
+              <span
+                :if={m["source_origin"] && m["source_origin"] != "project"}
+                class={"source-origin-tag #{source_origin_class(m)}"}
+                title={source_origin_title(m)}
+              >
+                {source_origin_label(m)}
+              </span>
+              <span :if={runtime_only?(m)} class="runtime-tag" title="runtime-only">⚡</span>
             </div>
           </div>
         <% end %>
@@ -4119,6 +4481,35 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
           </div>
           <span class="spacer"></span>
+          <%!-- Panel toggle buttons (BT-2559): show/hide side panels and dock. --%>
+          <div :if={@connected} class="panel-toggles">
+            <button
+              type="button"
+              class={["panel-toggle", @show_browser && "on"]}
+              phx-click="toggle_browser"
+              title="Toggle System Browser"
+            >
+              Browser
+            </button>
+            <%!-- `show_inspector` gates the whole right column (Bindings + Inspector),
+                 so the label names both rather than just "Inspector" (BT-2559 review). --%>
+            <button
+              type="button"
+              class={["panel-toggle", @show_inspector && "on"]}
+              phx-click="toggle_inspector"
+              title="Toggle the Bindings + Inspector column"
+            >
+              Inspector &amp; Bindings
+            </button>
+            <button
+              type="button"
+              class={["panel-toggle", @show_dock && "on"]}
+              phx-click="toggle_dock"
+              title="Toggle Workspace Dock"
+            >
+              Dock
+            </button>
+          </div>
           <%!-- Dock/Float toggle (BT-2493, the spike's mode switch): in Float mode
                a binding click / Inspect-it opens a floating, draggable inspector
                window instead of the docked pane. Docked is the default. Shown only
@@ -4184,14 +4575,18 @@ defmodule BtAttachWeb.WorkspaceLive do
         </div>
 
         <%= if @connected do %>
-          <%!-- ── three-column cockpit grid ──────────────────────────────── --%>
-          <div class="cockpit">
+          <%!-- ── three-column cockpit grid (BT-2559: collapsible panels) --%>
+          <div class={[
+            "cockpit",
+            !@show_browser && "browser-hidden",
+            !@show_inspector && "inspector-hidden"
+          ]}>
             <%!-- LEFT — System Browser (BT-2491, 286px).
                  A class tree (Hierarchy / Category views, instance/class side
                  toggle) over a protocol-grouped method list, driven by the
                  BT-2488 browse ops (ADR 0096). The Tweaks panel that used to sit
                  below it now lives in the top-bar settings dropdown. --%>
-            <div class="col">
+            <div class="col" inert={!@show_browser}>
               <div class="browser-split">
                 <.system_browser_classes
                   browser_view={@browser_view}
@@ -4221,7 +4616,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                    `hidden`, not removed) so the `#transcript` stream container is
                    always in the DOM for `stream_insert` regardless of the active
                    tab. --%>
-              <div class="dock" style="order:2;">
+              <div class={["dock", !@show_dock && "collapsed"]} style="order:2;" inert={!@show_dock}>
                 <div id="workspace-dock" class="panel">
                   <div class="panel-head">
                     <span class="dock-tabs" role="tablist">
@@ -4248,6 +4643,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <span :if={@dock_tab == "workspace"} class="count">
                       {if ws_selection?(assigns), do: "evaluates selection", else: "evaluates buffer"}
                     </span>
+                    <button
+                      type="button"
+                      class="panel-close"
+                      phx-click="toggle_dock"
+                      aria-label="Collapse workspace dock"
+                      title="Collapse dock"
+                    >
+                      ▾
+                    </button>
                   </div>
 
                   <%!-- WORKSPACE tab: highlighted editor + doIt/printIt/inspectIt --%>
@@ -4372,7 +4776,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <div
                         :for={{dom_id, entry} <- @streams.repl}
                         id={dom_id}
-                        class={["repl-entry", entry.kind == :error && "err"]}
+                        class={[
+                          "repl-entry",
+                          entry.kind == :error && "err",
+                          entry.kind == :info && "meta"
+                        ]}
                       >
                         <div class="repl-req">
                           <span class="repl-mark">›</span>
@@ -4497,6 +4905,20 @@ defmodule BtAttachWeb.WorkspaceLive do
                   </div>
                 </div>
               </div>
+              <%!-- Dock restore bar: shown when dock is collapsed. A real <button>
+                   (not a <div>) so it is keyboard-reachable and announced as
+                   interactive; `.dock-bar` styling is class-driven either way. --%>
+              <button
+                :if={!@show_dock}
+                type="button"
+                class="dock-bar"
+                phx-click="toggle_dock"
+                aria-label="Expand workspace dock"
+                title="Expand dock"
+                style="order:3;"
+              >
+                Workspace ▴
+              </button>
 
               <%!-- TABBED METHOD EDITOR (BT-2494): the spike's write-surface.
                    A tab strip (methods + class definitions) over a breadcrumb
@@ -4573,7 +4995,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                     class="runtime-tag"
                     title="runtime-only (no source on disk)"
                   >
-                    runtime
+                    ⚡
                   </span>
                   <span :if={@role != :owner} class="meta-note read-only">read-only · Observer</span>
                   <span :if={@role == :owner and active_tab(assigns).dirty} class="meta-note edited">
@@ -4585,6 +5007,24 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
 
                 <div class="panel-body">
+                  <%!-- Read-only documentation block (BT-2558): the active
+                       method's signature + rendered `///` doc-comment, or — on a
+                       class-definition tab — the class comment. Distinct from the
+                       editable source body below, and shown to every role (it
+                       rides the `:read`-capability browse ops). The doc text is
+                       rendered to safe HTML by `BtAttach.DocFormat` (author text
+                       is escaped first), so `{...}` interpolation is safe. --%>
+                  <% doc_tab = active_tab(assigns) %>
+                  <section
+                    :if={doc_tab.doc || doc_tab.signature}
+                    class="doc-block"
+                    aria-label="Documentation"
+                  >
+                    <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
+                    <div :if={doc_tab.doc} class="doc-body">
+                      {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                    </div>
+                  </section>
                   <%= if @role == :owner do %>
                     <%!-- ⌘S submits this editor form via the KeyboardShortcuts
                          hook (BT-2485): the chord request-submits the form so
@@ -4748,7 +5188,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
 
             <%!-- RIGHT — Bindings + Inspector (348px), with ChangeLog + Transcript --%>
-            <div class="col">
+            <div class="col" inert={!@show_inspector}>
               <div class="right-split">
                 <div id="bindings-panel" class="panel bindings-panel">
                   <div class="panel-head">
@@ -4812,6 +5252,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <span class="iwf-dot"></span>{(@inspect_frozen && "frozen") || "live"}
                     </button>
                     <span :if={@inspect_target} class="count">following references</span>
+                    <button
+                      type="button"
+                      class="panel-close"
+                      phx-click="close_inspector"
+                      aria-label="Close the Inspector and Bindings column"
+                      title="Close the Inspector + Bindings column"
+                    >
+                      ×
+                    </button>
                   </div>
                   <%= if @inspect_target do %>
                     <%!-- Spike Inspector head (inspector.jsx `InspectorContent`): a

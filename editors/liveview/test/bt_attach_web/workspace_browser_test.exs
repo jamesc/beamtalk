@@ -108,6 +108,21 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has(".cm-tooltip-autocomplete", text: "Integer")
   end
 
+  test "the CmEditor shows live-image hover docs over a class name (BT-2555)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # A bare class name on its own line. `Integer` is a stdlib class always
+    # present in the live image, so hover resolves without a freshly-defined
+    # class. The hovered token round-trips to the live session over the
+    # term-seam (`hover` event → `Workspace.hover/2`), which formats the class's
+    # signature + doc-comment from the RUNNING image (not on-disk source) via
+    # the same `beamtalk_repl_docs` engine the REPL `:help` uses.
+    |> set_source("Integer")
+    |> hover_token("#workspace-editor-overlay .cm-content .tok-global")
+    |> assert_has(".cm-hover-doc", text: "Integer")
+  end
+
   test "an eval round-trips through the real browser via the Print it button", %{conn: conn} do
     conn
     |> visit("/")
@@ -709,6 +724,30 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
         assert flashed, "FieldFlash hook never applied .vflash to #{selector}"
       end
     )
+  end
+
+  # Dispatch a real `mousemove` at the centre of `selector` so CodeMirror's
+  # hoverTooltip plugin (BT-2555) fires its query. CM triggers on a settle — the
+  # pointer stops over a token for the hover delay — so we move the synthetic
+  # pointer onto the token once and then leave it; `assert_has` polls for the
+  # resulting `.cm-hover-doc` tooltip while the async server round-trip lands.
+  #
+  # The event MUST be dispatched on the token element itself, not the `.cm-editor`
+  # root: CM's hover plugin ignores any mousemove whose `target` is not inside
+  # `view.contentDOM` (`.cm-content`). The token span is inside `.cm-content`, and
+  # `bubbles: true` still carries the event up to the plugin's listener on the
+  # editor root.
+  defp hover_token(conn, selector) do
+    evaluate(conn, """
+    (() => {
+      const sel = #{Jason.encode!(selector)};
+      const el = document.querySelector(sel);
+      if (!el) throw new Error("hover target not found: " + sel);
+      const r = el.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      el.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: x, clientY: y}));
+    })()
+    """)
   end
 
   # Set the Workspace editor's contents to exactly `source`.

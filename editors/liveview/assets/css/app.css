@@ -181,8 +181,25 @@
 .cockpit {
   flex: 1; min-height: 0; display: grid; gap: var(--gap);
   grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) var(--inspector-w, 348px);
+  transition: grid-template-columns 200ms ease;
 }
-.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
+.cockpit.browser-hidden {
+  grid-template-columns: 0px minmax(0, 1fr) var(--inspector-w, 348px);
+}
+.cockpit.inspector-hidden {
+  grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) 0px;
+}
+.cockpit.browser-hidden.inspector-hidden {
+  grid-template-columns: 0px minmax(0, 1fr) 0px;
+}
+.col { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); overflow: hidden; }
+/* A hidden side panel collapses via the parent `.cockpit.browser-hidden` /
+   `.inspector-hidden` grid-track → 0px (animated), with `.col`'s `overflow: hidden`
+   + `min-width: 0` clipping the content. The element stays a grid item so the other
+   columns keep their tracks — `display: none` here would evict it from grid
+   auto-placement and shift the editor into the 0px track (BT-2559 review). The
+   template marks the collapsed column `inert` so its clipped (but still
+   laid-out) controls drop out of tab order and the AT tree. */
 
 /* panel chrome */
 .panel {
@@ -199,6 +216,22 @@
 }
 .panel-head .count { color: var(--faint); font-weight: 500; letter-spacing: 0; text-transform: none; white-space: nowrap; flex: none; }
 .panel-head .spacer { flex: 1; }
+.panel-head .panel-close {
+  border: 0; background: transparent; cursor: pointer; color: var(--faint);
+  font-size: 14px; padding: 0 4px; line-height: 1; border-radius: 4px;
+  flex: none;
+}
+.panel-head .panel-close:hover { color: var(--ink); background: var(--hover); }
+
+/* top-bar panel toggle buttons */
+.topbar .panel-toggles { display: flex; gap: 4px; }
+.topbar .panel-toggle {
+  border: 1px solid var(--line); background: var(--panel-2); cursor: pointer;
+  color: var(--muted); font-size: 11px; font-weight: 600; padding: 4px 10px;
+  border-radius: 6px; white-space: nowrap;
+}
+.topbar .panel-toggle:hover { background: var(--hover); color: var(--ink); }
+.topbar .panel-toggle.on { background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent); }
 .panel-body { flex: 1; min-height: 0; overflow: auto; padding: var(--panel-pad); }
 
 /* placeholder copy for not-yet-built Phase 1 panes */
@@ -252,16 +285,34 @@
   background: var(--accent-soft); color: var(--accent-2); margin-left: auto;
 }
 .row .runtime-tag {
-  margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  margin-left: auto; font-size: 11px; font-weight: 700;
   color: var(--t-symbol);
 }
+.row .source-origin-tag {
+  font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  padding: 0 4px; border-radius: 3px; margin-left: 4px;
+}
+.row .source-origin-tag.stdlib { background: #e8d5f5; color: #7c3aed; }
+.row .source-origin-tag.dependency { background: #fef3c7; color: #b45309; }
+.row .source-origin-tag.project { display: none; }
 .sb-protocols { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 
 /* center column splits between editor and the workspace dock */
 /* position: relative anchors the BT-2495 Senders/Implementors popover. */
 .editor-panel { flex: 1; min-height: 0; position: relative; }
-.dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; }
+.dock { flex: none; height: var(--dock-h, 230px); display: flex; flex-direction: column; transition: height 200ms ease, opacity 150ms ease; overflow: hidden; }
 .dock .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.dock.collapsed { height: 0; opacity: 0; pointer-events: none; }
+/* collapsed state: show a thin restore bar at the bottom. The element is only
+   rendered (via :if={!@show_dock}) when the dock is collapsed, so DOM presence
+   is the guard — no hidden default/visible-variant toggle is needed. */
+.dock-bar {
+  flex: none; height: 28px; display: flex; align-items: center; justify-content: center;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+  box-shadow: var(--shadow); cursor: pointer; color: var(--faint); font-size: 11px;
+  font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
+}
+.dock-bar:hover { color: var(--ink); background: var(--hover); }
 
 /* The editor body and its method form fill the panel so a browsed method gets the
    whole reclaimed height (the read-only Method Source panel is gone — browsing a
@@ -315,8 +366,50 @@
 .editor-meta .meta-note { flex: none; white-space: nowrap; color: var(--faint); }
 .editor-meta .meta-note.edited, .editor-meta .meta-note.read-only { color: var(--accent-2); }
 .editor-meta .runtime-tag {
-  flex: none; font-size: 9px; font-weight: 700; letter-spacing: .03em;
-  text-transform: uppercase; color: var(--t-symbol);
+  flex: none; font-size: 11px; font-weight: 700;
+  color: var(--t-symbol);
+}
+
+/* ============================================================================
+   Read-only documentation block (BT-2558)
+   ----------------------------------------------------------------------------
+   The System Browser is the IDE's help destination: above the editable method /
+   class-definition body, `.doc-block` renders the method signature + its `///`
+   doc-comment (or, on a class-definition tab, the class comment) as formatted
+   docs. `flex: none` so it sits above the growing CodeMirror editor; the body
+   scrolls if a long doc would otherwise crowd the editor out. The HTML is
+   produced by `BtAttach.DocFormat` (a small, escaped Markdown subset).
+   ========================================================================== */
+.doc-block {
+  flex: none; max-height: 40%; overflow: auto;
+  margin-bottom: 8px; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; line-height: 1.5; color: var(--muted);
+}
+.doc-block .doc-sig {
+  color: var(--accent-2); font-family: var(--code-font, monospace);
+  font-size: 12px; font-weight: 600; margin-bottom: 6px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  white-space: pre-wrap; word-break: break-word;
+}
+.doc-block .doc-body .doc-h {
+  color: var(--ink); font-size: 12px; font-weight: 700;
+  margin: 8px 0 4px; line-height: 1.3;
+}
+.doc-block .doc-body .doc-h:first-child { margin-top: 0; }
+.doc-block .doc-body .doc-p { margin: 4px 0; }
+.doc-block .doc-body .doc-list { margin: 4px 0; padding-left: 18px; }
+.doc-block .doc-body .doc-list li { margin: 2px 0; }
+.doc-block .doc-body code {
+  font-family: var(--code-font, monospace); font-size: 11.5px;
+  background: var(--code-bg); padding: 1px 4px; border-radius: 3px;
+}
+.doc-block .doc-body .doc-code {
+  margin: 6px 0; padding: 8px 10px; overflow-x: auto;
+  background: var(--code-bg); border-radius: 4px;
+}
+.doc-block .doc-body .doc-code code {
+  background: none; padding: 0; font-size: 11.5px; white-space: pre;
 }
 
 /* ============================================================================
@@ -390,6 +483,8 @@
 .repl-arrow { color: var(--accent); font-weight: 700; flex: none; }
 .repl-val { color: var(--accent-2); white-space: pre-wrap; overflow-wrap: break-word; min-width: 0; flex: 1; }
 .repl-entry.err .repl-arrow, .repl-entry.err .repl-val { color: var(--err); }
+/* Meta-command responses (`:help`, pane pointers): muted, not a result. */
+.repl-entry.meta .repl-arrow, .repl-entry.meta .repl-val { color: var(--muted); }
 
 /* Long responses collapse within their entry (capped open height, scroll past
    it) so one verbose result can't flood the scrollback. */
@@ -460,6 +555,19 @@
   color: var(--faint); cursor: pointer; font: inherit; line-height: inherit;
 }
 .cm-inline-result-toggle:hover { color: var(--ink); }
+
+/* Live-image hover tooltips (BT-2555): signature + doc-comment docs sourced
+   from the running session. The docs are the same plain text `:help` shows in
+   the REPL, rendered verbatim in a <pre>; cap the size and let it scroll so a
+   class with a long method listing can't fill the viewport. */
+.cm-tooltip .cm-hover-doc {
+  max-width: 42rem; max-height: 22rem; overflow: auto;
+}
+.cm-tooltip .cm-hover-doc pre {
+  margin: 0; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: break-word;
+  font-family: var(--code-font, ui-monospace, monospace); font-size: 12px;
+  color: var(--ink); background: var(--code-bg);
+}
 
 .actionbar {
   flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0 0 0;

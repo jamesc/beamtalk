@@ -120,6 +120,7 @@ _rel/
 .lint-erlang-stamp
 .lint-js-stamp
 .lint-beamtalk-stamp
+.lint-elixir-stamp
 
 # Session and temporary files
 *.tmp

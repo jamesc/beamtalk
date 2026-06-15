@@ -36,8 +36,9 @@ only at the WebSocket edge. Validation failures return
 
 All four ops are **pure reflection**: class metadata (`get_doc`, `is_sealed`,
 `is_abstract`, `is_internal`, `instance_variables`, `field_defaults`), xref rows
-(`beamtalk_xref:defined_selectors/2`, `method_info/3`), and stored source text
-(`{method, Sel}` / `{class_method, Sel}` → `__source__`). None sends a
+(`beamtalk_xref:defined_selectors/2`, `method_info/3`), and stored method text
+(`{method, Sel}` / `{class_method, Sel}` → `__source__` / `__doc__` /
+`__signature__`). None sends a
 user-defined method to a value (no `printOn:` / `displayString` / `printString`),
 so the browse data source is safe to grant the **Observer** role (ADR 0091
 Decision 4). This is asserted, not assumed (see the tests).
@@ -63,7 +64,7 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4, handle_term/4, describe_ops/0]).
+-export([handle/4, handle_term/4, describe_ops/0, source_origin_of/2]).
 
 -doc """
 Handle a browse op for the WebSocket transport — encodes the term result to
@@ -152,7 +153,8 @@ class_row(Pid) ->
             <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(Pid) end),
             <<"internal">> => safe_bool(fun() -> beamtalk_runtime_api:is_internal(Pid) end),
             <<"source_file">> => SourceFile,
-            <<"origin">> => origin_of(SourceFile)
+            <<"origin">> => origin_of(SourceFile),
+            <<"source_origin">> => source_origin_of(ModName, SourceFile)
         }}
     catch
         exit:{noproc, _} ->
@@ -180,7 +182,11 @@ class_row(Pid) ->
 browse_protocols(ClassName, ClassSide) ->
     Selectors = beamtalk_xref:defined_selectors(ClassName, ClassSide),
     SourceFile = source_file_for_class(ClassName),
-    SelectorRows = [selector_row(ClassName, ClassSide, Sel, SourceFile) || Sel <- Selectors],
+    ModName = mod_name_for_class(ClassName),
+    SelectorRows = [
+        selector_row(ClassName, ClassSide, Sel, SourceFile, ModName)
+     || Sel <- Selectors
+    ],
     Grouped = group_by_protocol(SelectorRows),
     {value, #{
         <<"class">> => atom_to_binary(ClassName, utf8),
@@ -188,8 +194,8 @@ browse_protocols(ClassName, ClassSide) ->
         <<"protocols">> => Grouped
     }}.
 
--spec selector_row(atom(), boolean(), atom(), binary() | null) -> map().
-selector_row(ClassName, ClassSide, Selector, SourceFile) ->
+-spec selector_row(atom(), boolean(), atom(), binary() | null, atom()) -> map().
+selector_row(ClassName, ClassSide, Selector, SourceFile, ModName) ->
     Info = beamtalk_xref:method_info(ClassName, ClassSide, Selector),
     {Line, SourceStatus, Provenance} = info_fields(Info),
     #{
@@ -197,6 +203,7 @@ selector_row(ClassName, ClassSide, Selector, SourceFile) ->
         <<"line">> => Line,
         <<"source_status">> => atom_to_binary(SourceStatus, utf8),
         <<"origin">> => origin_for_provenance(Provenance, SourceFile),
+        <<"source_origin">> => source_origin_of(ModName, SourceFile),
         %% carried internally for grouping; stripped before emit
         '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus)
     }.
@@ -260,35 +267,65 @@ browse_method_source(ClassName, ClassSide, Selector) ->
             {Line, SourceStatus, Provenance} = info_fields(
                 beamtalk_xref:method_info(ClassName, ClassSide, Selector)
             ),
-            Source = method_source_text(ClassPid, ClassSide, Selector, SourceStatus),
+            {Source, Doc, Signature} =
+                method_text_fields(ClassPid, ClassSide, Selector, SourceStatus),
             SourceFile = source_file_for_class(ClassName),
+            ModName = beamtalk_runtime_api:module_name(ClassPid),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
                 <<"side">> => side_to_binary(ClassSide),
                 <<"selector">> => atom_to_binary(Selector, utf8),
                 <<"source">> => Source,
+                %% BT-2558: the method's `///` doc-comment and rendered
+                %% signature, carried alongside the editable source so the
+                %% System Browser can present a read-only documentation block.
+                %% Pulled from the same CompiledMethod map (`__doc__` /
+                %% `__signature__`) that `Beamtalk help: aClass selector:`
+                %% reads (`beamtalk_repl_docs:method_doc_info/2`), so the
+                %% browser and the `help:` send agree on the docs for a method.
+                <<"doc">> => Doc,
+                <<"signature">> => Signature,
                 <<"line">> => Line,
                 <<"source_status">> => atom_to_binary(SourceStatus, utf8),
                 <<"origin">> => origin_for_provenance(Provenance, SourceFile),
+                <<"source_origin">> => source_origin_of(ModName, SourceFile),
                 <<"disk_differs">> => disk_differs(ClassName, Source)
             }}
     end.
 
-%% Sourceless runtime methods (unindexed_runtime_fun): source is null, the
-%% source_status says why — the browser shows "no source (runtime method)"
-%% rather than an empty pane (ADR 0096).
--spec method_source_text(pid(), boolean(), atom(), beamtalk_xref:source_status()) ->
-    binary() | null.
-method_source_text(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
-    null;
-method_source_text(ClassPid, ClassSide, Selector, _SourceStatus) ->
+%% The method's editable source, `///` doc-comment, and signature — all read
+%% from the one live CompiledMethod map so they stay mutually consistent.
+%% Sourceless runtime methods (unindexed_runtime_fun) have no CompiledMethod to
+%% read: source/doc/signature are all null, and the source_status says why — the
+%% browser shows "no source (runtime method)" rather than an empty pane (ADR
+%% 0096).
+-spec method_text_fields(pid(), boolean(), atom(), beamtalk_xref:source_status()) ->
+    {binary() | null, binary() | null, binary() | null}.
+method_text_fields(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
+    {null, null, null};
+method_text_fields(ClassPid, ClassSide, Selector, _SourceStatus) ->
     Call =
         case ClassSide of
             true -> {class_method, Selector};
             false -> {method, Selector}
         end,
     case safe_class_call(ClassPid, Call) of
-        #{'__source__' := Src} when is_binary(Src), byte_size(Src) > 0 -> Src;
+        MethodObj when is_map(MethodObj) ->
+            {
+                method_field(MethodObj, '__source__'),
+                method_field(MethodObj, '__doc__'),
+                method_field(MethodObj, '__signature__')
+            };
+        _ ->
+            {null, null, null}
+    end.
+
+%% A CompiledMethod text field (`__source__` / `__doc__` / `__signature__`):
+%% the stored binary when present and non-empty, `null` otherwise.
+-spec method_field(map(), atom()) -> binary() | null.
+method_field(MethodObj, Key) ->
+    case maps:get(Key, MethodObj, null) of
+        Bin when is_binary(Bin), byte_size(Bin) > 0 -> Bin;
         _ -> null
     end.
 
@@ -320,6 +357,7 @@ browse_class_definition(ClassName) ->
                 <<"state">> => State,
                 <<"comment">> => class_doc(ClassPid),
                 <<"origin">> => origin_of(SourceFile),
+                <<"source_origin">> => source_origin_of(ModName, SourceFile),
                 %% The definition pane renders a *synthesized* class skeleton
                 %% (header + state slots), not the verbatim on-disk class source
                 %% — so a substring diff against the disk store would be unsound
@@ -408,6 +446,62 @@ default_suffix(Default) -> [<<" = ">>, Default].
 -spec origin_of(binary() | null) -> binary().
 origin_of(null) -> <<"runtime">>;
 origin_of(SourceFile) when is_binary(SourceFile) -> <<"both">>.
+
+%% Class source origin: whether a class comes from the project, a dependency,
+%% or the stdlib. Used for IDE badges (BT-2552). For dependencies, the package
+%% name is included (e.g. <<"dependency:cowboy">>).
+-spec source_origin_of(atom(), binary() | null) -> binary().
+source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
+    case beamtalk_class_registry:is_stdlib_module(ModName) of
+        true ->
+            <<"stdlib">>;
+        false ->
+            case SourceFile of
+                null ->
+                    <<"project">>;
+                Bin when is_binary(Bin) ->
+                    case classify_source_origin(Bin) of
+                        project ->
+                            <<"project">>;
+                        dependency ->
+                            case package_of_module(ModName) of
+                                nil -> <<"dependency:unknown">>;
+                                Pkg -> iolist_to_binary([<<"dependency:">>, Pkg])
+                            end
+                    end
+            end
+    end.
+
+%% Extract the package name from a module atom (bt@{pkg}@{class} → {pkg}).
+-spec package_of_module(atom()) -> binary() | nil.
+package_of_module(ModName) when is_atom(ModName) ->
+    ModStr = atom_to_list(ModName),
+    case string:split(ModStr, "@", all) of
+        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
+            list_to_binary(Pkg);
+        _ ->
+            nil
+    end.
+
+%% Determine if a source file belongs to the project or a dependency.
+%% Falls back to `project` when metadata is unavailable (startup, no workspace)
+%% — a wrong "project" badge is less confusing than a wrong "dependency" badge.
+-spec classify_source_origin(binary()) -> project | dependency.
+classify_source_origin(SourceFile) ->
+    SourceStr = binary_to_list(SourceFile),
+    AbsPath = filename:absname(SourceStr),
+    case beamtalk_workspace_meta:get_metadata() of
+        {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
+            ProjectRoot = filename:absname(binary_to_list(ProjectPath)),
+            RootParts = filename:split(ProjectRoot),
+            PathParts = filename:split(AbsPath),
+            case lists:prefix(RootParts, PathParts) of
+                true -> project;
+                false -> dependency
+            end;
+        _ ->
+            project
+    end.
 
 %% Per-selector origin from xref provenance: a runtime-installed selector
 %% (put_method, class_builder) is runtime-only; a class_body / extension selector
@@ -550,6 +644,13 @@ source_file_for_class(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined -> null;
         Pid -> source_file_of(beamtalk_runtime_api:module_name(Pid))
+    end.
+
+-spec mod_name_for_class(atom()) -> atom().
+mod_name_for_class(ClassName) ->
+    case beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined -> undefined;
+        Pid -> beamtalk_runtime_api:module_name(Pid)
     end.
 
 -spec source_file_of(atom()) -> binary() | null.

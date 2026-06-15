@@ -360,7 +360,7 @@ T-shirt sizing for estimates: `S`, `M`, `L`, `XL`
 
 **Epics** group 5+ related issues for large initiatives. Use `Epic:` title prefix, `Epic` label, and size XL or L. Link child issues with "blocks" relationships. Include overview, goals, status summary, and child issue list in description.
 
-Query Linear for epic status: `streamlinear-cli search "Epic:" --state "In Progress"`
+Query Linear for epic status with the Linear MCP tools (e.g. `list_issues` filtered to the `Epic` label and `In Progress` state).
 
 ### Writing Agent-Ready Issues
 

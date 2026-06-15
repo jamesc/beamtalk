@@ -300,7 +300,8 @@ nil
 | Variable | Purpose | How to Set |
 |----------|---------|------------|
 | `GH_TOKEN` | GitHub authentication for devcontainers | `gh auth login`, then `$env:GH_TOKEN = (gh auth token)` |
-| `LINEAR_API_TOKEN` | Linear issue tracking | Get from [Linear API settings](https://linear.app/settings/api) |
+
+Linear issue tracking is handled by the Linear MCP server (`.vscode/mcp.json`), which authenticates via OAuth — no API token is required.
 
 ### Quick Start: Basic Development
 

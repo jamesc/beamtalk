@@ -51,7 +51,7 @@ leak compiler/runtime internals.
 | sessions | `{sessions, [SessionMeta]}` | `sessions` |
 | health | `{health, WorkspaceId, Nonce}` | `health` |
 | completions | `{completions, [binary()]}` | `complete`, `erlang-complete` |
-| docs | `{docs, binary()}` | `erlang-help` |
+| docs | `{docs, binary()}` | `erlang-help`, `hover` |
 | codegen | `{codegen, CoreErlang, Warnings}` | `show-codegen` |
 | methods | `{methods, Methods, StateVars}` | `methods` |
 | class_list | `{class_list, [ClassInfo]}` | `list-classes` |
@@ -152,6 +152,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     beamtalk_repl_ops_session:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"complete">>;
+    Op =:= <<"hover">>;
     Op =:= <<"describe">>;
     Op =:= <<"methods">>;
     Op =:= <<"list-classes">>;

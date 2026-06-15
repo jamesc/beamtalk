@@ -13,6 +13,29 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tempfile::TempDir;
 
+/// Resolve the workspace root (repo root) from `CARGO_MANIFEST_DIR`.
+///
+/// `CARGO_MANIFEST_DIR` points at `crates/beamtalk-cli`, so two `parent()`
+/// calls reach the repo root.
+#[allow(dead_code)]
+pub fn project_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+/// Path to the debug `beamtalk` binary.
+///
+/// Used by ignored integration tests that spawn the binary via
+/// `std::process::Command` rather than `assert_cmd`.
+#[allow(dead_code)]
+pub fn beamtalk_binary() -> PathBuf {
+    project_root().join("target/debug/beamtalk")
+}
+
 /// Path to the `beamtalk` binary built by `cargo`.
 ///
 /// `assert_cmd::Command::cargo_bin` works because `beamtalk-cli` declares
