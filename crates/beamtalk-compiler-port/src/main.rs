@@ -813,11 +813,18 @@ fn handle_compile_expression(request: &Map) -> Term {
         let method_def = &module.method_definitions[0];
         let class_name = method_def.class_name.name.to_string();
         let selector = method_def.method.selector.name().to_string();
+        // `method_source` must be the METHOD's source (`sel => body`), not the
+        // full `Class >> sel => body` input — it is recorded verbatim in the
+        // ChangeLog and written back on flush. Echoing the input would splice a
+        // stray `Class >>` extension into the class body on flush (BT-2553
+        // follow-up). `unparse_method` re-emits the parsed method, comments and
+        // all, so the recorded source round-trips cleanly.
+        let method_source = beamtalk_core::unparse::unparse_method(&method_def.method);
         return method_definition_ok_response(
             &class_name,
             &selector,
             method_def.is_class_method,
-            &source,
+            &method_source,
             &warnings,
         );
     }

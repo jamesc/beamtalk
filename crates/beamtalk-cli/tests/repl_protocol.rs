@@ -442,6 +442,20 @@ impl ProcessManager {
             Stdio::null()
         };
 
+        // Run the e2e workspace with a dedicated, empty project directory rather
+        // than the repo root. The read-only fixtures live in the repo (loaded by
+        // repo-relative `@load`, with cwd still the repo root), so they fall
+        // OUTSIDE the project tree and are therefore non-flushable — a
+        // `Workspace flush` in one btscript can no longer write a patched method
+        // back into a shared fixture and corrupt it for later btscripts
+        // (BT-2553 follow-up: method patches are now correctly flushable, which
+        // exposed this). `TMPDIR` is pointed at the same dir so the flush
+        // round-trip test's own temp files (created via `File tempDirectory`)
+        // stay INSIDE the project and remain flushable.
+        let e2e_project_dir =
+            std::env::temp_dir().join(format!("bt_e2e_project_{}", std::process::id()));
+        std::fs::create_dir_all(&e2e_project_dir).expect("create e2e project dir");
+
         let mut beam_child = Command::new("erl")
             .arg("-noshell")
             .arg("-sname")
@@ -452,6 +466,8 @@ impl ProcessManager {
             .current_dir(workspace_root())
             .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
             .env("BEAMTALK_NO_FILE_LOG", "1")
+            .env("BEAMTALK_WORKSPACE_PROJECT_PATH", &e2e_project_dir)
+            .env("TMPDIR", &e2e_project_dir)
             .stdout(Stdio::piped())
             .stderr(stderr_cfg)
             .spawn()

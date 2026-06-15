@@ -1642,6 +1642,37 @@ compile_method_not_a_method() ->
     ),
     ?assertMatch({error, _}, Result).
 
+%%% normalize_method_source/2 — `compile:source:`/MCP pass the method BODY only;
+%%% the IDE passes a full definition. The helper synthesises the `selector => '
+%%% header for a bare body and leaves a full (possibly comment-led) definition
+%%% untouched, so the structured install path always gets a complete method.
+
+normalize_method_source_full_definition_unchanged_test() ->
+    %% A full `selector => body' definition is returned verbatim.
+    Src = <<"increment => self.value + 1">>,
+    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
+
+normalize_method_source_bare_body_gets_header_test() ->
+    %% A bare body (no header) gets the canonical `selector => ' prepended.
+    ?assertEqual(
+        <<"increment => self.value + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"self.value + 1">>)
+    ).
+
+normalize_method_source_bare_body_resembling_selector_test() ->
+    %% A bare body that merely starts with the selector name (but is not a header)
+    %% is still prefixed — `incremented' is not the `increment' header.
+    ?assertEqual(
+        <<"increment => incremented + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"incremented + 1">>)
+    ).
+
+normalize_method_source_commented_full_definition_unchanged_test() ->
+    %% A full definition behind `//`/`///` comments is left intact (the header is
+    %% found past the comments), so saved comments round-trip.
+    Src = <<"// --- Section ---\n/// Doc.\nincrement => self.value + 1">>,
+    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
+
 do_show_codegen_with_binding() ->
     %% A non-internal binding key is forwarded as a known var to the codegen
     %% compiler (exercises the KnownVars comprehension in do_show_codegen).
