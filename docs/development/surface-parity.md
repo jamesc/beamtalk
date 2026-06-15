@@ -62,8 +62,10 @@ and routed to the matching IDE surface instead of being sent to `eval` (which
 would reject `:h` as a parse error). `:help <Class>` — and a `Beamtalk help:
 <Class>` message-send — focus the **System Browser** on that class; `:bindings`,
 `:changes`/`:dirty`, `:flush` point at the Bindings pane / Changes tab; `:test`
-notes the forthcoming test-runner pane (BT-2557); unknown `:cmd`s get a friendly
-note. This is `surface-specific` UX routing — it adds no op vocabulary and
+notes the forthcoming test-runner pane (BT-2557); `:sync`/`:s`, `:clear`,
+`:show-codegen`/`:sc`, and `:exit` get a `:point` note explaining the IDE
+equivalent (or that the op is CLI-only); unknown `:cmd`s get a friendly note.
+This is `surface-specific` UX routing — it adds no op vocabulary and
 changes no op output (the underlying capability is still the same `eval` /
 `browse_*` ops these panes already use).
 

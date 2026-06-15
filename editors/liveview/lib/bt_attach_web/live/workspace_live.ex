@@ -1861,8 +1861,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp repl_meta_dispatch(":flush", _),
     do: {:point, "Use the Flush control in the Changes tab to write pending changes to disk."}
 
-  defp repl_meta_dispatch(":sync", _),
-    do: {:point, "The IDE tracks the live image as you work — there is no manual sync step."}
+  defp repl_meta_dispatch(cmd, _) when cmd in [":sync", ":s"],
+    do:
+      {:point,
+       "The IDE tracks the live image as you work, so there is no manual sync step — project files from `beamtalk.toml` load when you connect."}
 
   defp repl_meta_dispatch(cmd, _) when cmd in [":test", ":t"],
     do:
@@ -1872,7 +1874,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp repl_meta_dispatch(":clear", _),
     do:
       {:point,
-       "Session bindings clear with the workspace; there is no separate clear control yet."}
+       "Session bindings clear with the workspace. To clear them now, evaluate: Session current clear"}
+
+  defp repl_meta_dispatch(cmd, _) when cmd in [":show-codegen", ":sc"],
+    do:
+      {:point,
+       "Generated-code inspection (:show-codegen) is CLI-only for now — run it from `beamtalk repl`."}
 
   defp repl_meta_dispatch(cmd, _) when cmd in [":exit", ":quit", ":q"],
     do:
@@ -1921,13 +1928,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # The class names known to the live image, from the same symbol index the omni
-  # search uses. An empty index (dispatch failure / RBAC denial) just means every
-  # `:help X` reports "no such class" rather than crashing.
+  # search uses, as a MapSet so the `class in browser_class_names(socket)`
+  # membership check in `repl_focus_class/3` is O(1). An empty index (dispatch
+  # failure / RBAC denial) just means every `:help X` reports "no such class"
+  # rather than crashing.
   defp browser_class_names(socket) do
     socket
     |> symbol_rows()
     |> Enum.filter(&(&1.kind == "class"))
-    |> Enum.map(& &1.class)
+    |> MapSet.new(& &1.class)
   end
 
   # `:help` with no argument: a short tour of where the CLI REPL's commands live

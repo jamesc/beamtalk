@@ -1758,6 +1758,18 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       assert html =~ "Not authorized"
       assert Process.alive?(view.pid)
     end
+
+    test "an Observer can run :help <Class> — meta routing performs no privileged op",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+      # `:help` is a client-side meta-command: it routes through `handle_repl_meta`
+      # (driving the System Browser via the `:read` `:symbols` op), never the `:eval`
+      # op. So an Observer who cannot eval can still navigate with it — no 403, no
+      # crash — regardless of whether the class is in the symbol index.
+      html = render_hook(view, "repl_eval", %{"expr" => ":help Object"})
+      refute html =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
   end
 
   # Set the per-tab resume token on the conn so the connected mount reads it back
