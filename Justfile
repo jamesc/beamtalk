@@ -479,7 +479,7 @@ fmt-rust:
 [working-directory: 'editors/liveview']
 fmt-elixir:
     @echo "✨ Formatting Elixir code..."
-    mix deps.get
+    mix deps.get --quiet
     mix format
     @echo "✅ Elixir formatting complete"
 
