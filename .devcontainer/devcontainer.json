@@ -69,7 +69,6 @@
     "--label=git.worktree=${localWorkspaceFolderBasename}"
   ],
   "remoteEnv": {
-    "LINEAR_API_TOKEN": "${localEnv:LINEAR_API_TOKEN}",
     "GH_TOKEN": "${localEnv:GH_TOKEN}",
     "GITHUB_TOKEN": "${localEnv:GH_TOKEN}",
     "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",

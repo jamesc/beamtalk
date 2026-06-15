@@ -112,7 +112,8 @@ if (( _HAS_AUTH_PROXY || _IN_CLOUD_SANDBOX )); then
   if (( _HAS_AUTH_PROXY )); then
     # Node.js built-in fetch (undici) doesn't respect HTTP_PROXY/HTTPS_PROXY by
     # default. --use-env-proxy (Node 22.21+) enables proxy-aware fetch, which
-    # fixes tools like streamlinear-cli that use bare fetch() for API calls.
+    # fixes Node-based tools (e.g. MCP servers run via npx) that use bare
+    # fetch() for API calls.
     # Guard: only set when Node supports the flag, and skip if already present.
     if command -v node >/dev/null 2>&1; then
       _NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo "")"

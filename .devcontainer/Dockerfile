@@ -5,7 +5,6 @@
 # - Erlang/OTP for BEAM bytecode
 # - Node.js for build tooling
 # - GitHub CLI (gh)
-# - streamlinear CLI for Linear issue management
 # - Debugging and networking utilities
 #
 # GitHub Copilot CLI and workspace setup are handled by devcontainer.json features.
@@ -66,17 +65,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash \
     && cargo binstall -y cargo-watch cargo-nextest cargo-insta cargo-llvm-cov cargo-fuzz just
 
-# Install streamlinear CLI for Linear issue management (used by Copilot skill)
-# npm install -g from a GitHub URL leaves dangling symlinks to a cleaned-up temp dir,
-# and npm link fails because the prepare script calls simple-git-hooks.
-# Clone to /opt, install mcp deps, and manually symlink the binaries.
-RUN git clone --depth 1 https://github.com/obra/streamlinear.git /opt/streamlinear \
-    && cd /opt/streamlinear/mcp && npm install --ignore-scripts \
-    && NPM_PREFIX="$(npm prefix -g)" \
-    && ln -sf /opt/streamlinear "${NPM_PREFIX}/lib/node_modules/streamlinear" \
-    && ln -sf /opt/streamlinear/mcp/dist/index.js "${NPM_PREFIX}/bin/streamlinear" \
-    && ln -sf /opt/streamlinear/mcp/dist/cli.js "${NPM_PREFIX}/bin/streamlinear-cli" \
-    && chmod +x /opt/streamlinear/mcp/dist/index.js /opt/streamlinear/mcp/dist/cli.js
+# Linear issue tracking is handled by the Linear MCP server (.vscode/mcp.json),
+# launched on demand via npx — no CLI is baked into the image.
 
 # Install Sourcegraph Amp CLI (as vscode user so it lands in the right home dir)
 USER vscode
@@ -98,7 +88,7 @@ USER root
 # Verify installations
 RUN rustc --version && cargo --version && erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell \
     && ELIXIR_ERL_OPTIONS="+fnu" elixir --version && ELIXIR_ERL_OPTIONS="+fnu" mix --version \
-    && node --version && npm --version && gh --version && (streamlinear-cli --version 2>/dev/null || true) && amp --version \
+    && node --version && npm --version && gh --version && amp --version \
     && rebar3 --version
 
 # Pre-create cargo registry directory with correct ownership

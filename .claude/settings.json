@@ -97,7 +97,6 @@
       "Bash(gh pr:*)",
       "Bash(gh issue:*)",
       "Bash(gh api:*)",
-      "Bash(streamlinear-cli:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",

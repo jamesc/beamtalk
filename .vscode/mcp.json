@@ -2,10 +2,7 @@
   "servers": {
     "linear": {
       "command": "npx",
-      "args": ["-y", "github:obra/streamlinear"],
-      "env": {
-        "LINEAR_API_TOKEN": "${env:LINEAR_API_TOKEN}"
-      }
+      "args": ["-y", "mcp-remote", "https://mcp.linear.app/sse"]
     }
   }
 }
