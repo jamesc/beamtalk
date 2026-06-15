@@ -121,13 +121,13 @@ p path
 
 // --- ACTOR: inspect captures a live snapshot; refresh re-snapshots ---
 c := Counter spawn
-// => _
+// => Actor(Counter, _)
 
 c increment
-// => _
+// => 1
 
 c increment
-// => _
+// => 2
 
 // `c inspect` runs inside the actor and seeds the cursor from its in-hand state
 // (no self-`sys:get_state` deadlock) — the snapshot shows value 2.
@@ -142,7 +142,7 @@ ci printString includesSubstring: "value: 2"
 
 // The snapshot is frozen at inspect-time: mutating the actor does not change it.
 c increment
-// => _
+// => 3
 
 ci printString includesSubstring: "value: 2"
 // => true
