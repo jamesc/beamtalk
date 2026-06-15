@@ -704,7 +704,7 @@ install_method(
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
 install_method_with_source(
     ClassNameBin,
-    _SelectorBin,
+    SelectorBin,
     MethodSource,
     ClassSource,
     Intent,
@@ -728,6 +728,14 @@ install_method_with_source(
         class_module_index => ModuleIndex
     },
     case beamtalk_repl_compiler:compile_method_reload(ClassSourceBin, MethodSourceBin, Options) of
+        {ok, #{selector := Selector}} when Selector =/= SelectorBin ->
+            %% The body declares a different selector than the caller asked to
+            %% patch (e.g. `compile: #foo source: "bar => ..."'). Reject loudly
+            %% rather than silently install under the body's selector.
+            ErrorMsg =
+                <<"Method selector mismatch: asked to compile '", SelectorBin/binary,
+                    "' but the source defines '", Selector/binary, "'">>,
+            {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
         {ok, Result} ->
             #{
                 binary := Binary,

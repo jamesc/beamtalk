@@ -222,9 +222,11 @@ pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
 /// method side (instance vs class) are supplied out-of-band by the caller, so
 /// the source round-trips byte-for-byte.
 ///
-/// Returns `None` (with diagnostics) when the source is not exactly one method
-/// definition: a missing `=>`, or trailing tokens after the method body, are
-/// reported as errors rather than silently accepted.
+/// Returns `None` when the source is not a method definition at all (e.g. a
+/// missing `=>`). Trailing tokens after a valid method body return `Some`
+/// (the parsed method) together with an error diagnostic — so callers must
+/// treat any error-severity diagnostic as a failure, not rely solely on the
+/// `Option`.
 #[must_use]
 pub fn parse_method(tokens: Vec<Token>) -> (Option<crate::ast::MethodDefinition>, Vec<Diagnostic>) {
     let mut parser = Parser::new(tokens);

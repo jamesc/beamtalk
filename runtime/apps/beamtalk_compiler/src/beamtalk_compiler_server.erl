@@ -144,7 +144,7 @@ workspace_mode => boolean(), module_name => binary(), source_path => binary(),
 class_superclass_index => map(), class_module_index => map()}`.
 
 Returns `{ok, #{core_erlang, module_name, classes, selector, is_class_method,
-method_source, warnings}}' or `{error, Diagnostics}'.
+method_source, merged_class_source, warnings}}' or `{error, Diagnostics}'.
 """.
 -spec compile_method(binary(), binary(), map()) -> {ok, map()} | {error, [map()]}.
 compile_method(ClassSource, MethodSource, Options) ->
