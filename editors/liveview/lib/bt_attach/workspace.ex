@@ -358,6 +358,43 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  @doc """
+  Return live-image hover documentation for `code` — the editor line up to the
+  hovered token — in `session_pid`'s live context (BT-2555). This is the
+  CodeMirror editors' hover data source.
+
+  Reuses the `hover` op, which resolves the hovered token against the **live
+  class registry** (a class name → its docs, a `Receiver selector` pair → that
+  method's docs) and formats it via `beamtalk_repl_docs` — the same live doc
+  engine the CLI REPL `:help` uses. Because it reads the running image rather
+  than on-disk source, hover covers REPL-defined and live-patched classes the
+  static LSP hover (`hover_provider.rs`) cannot see. Hover runs **no user code**
+  (pure reflection), consistent with the facade's `:read` capability.
+
+  `session_pid` is passed as the op's session so an instance receiver that is a
+  bound variable classifies (BT-1045), mirroring `complete/2`.
+
+  Returns the formatted markdown as `{:ok, String.t()}` (`""` when nothing
+  resolves — the client then shows no tooltip), or `{:error, reason}` on a
+  dispatch failure — JSON never crosses the Attach path here either.
+  """
+  @spec hover(pid(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def hover(session_pid, code) when is_pid(session_pid) and is_binary(code) do
+    case dispatch_hover(session_pid, code) do
+      {:docs, docs} when is_binary(docs) ->
+        {:ok, docs}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
   # Build the browse request as a plain map, decode it to a `protocol_msg()` on
   # the workspace node, then dispatch through the term-returning op layer. The
   # browse ops ignore the session pid (they are workspace-global reflection), so
@@ -423,6 +460,24 @@ defmodule BtAttach.Workspace do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
         rpc(:beamtalk_repl_ops, :dispatch, ["complete", params, msg, session_pid])
+
+      other ->
+        other
+    end
+  end
+
+  # Build the `hover` request as a flat map (`code` top-level, mirroring
+  # `dispatch_complete`), decode it on the workspace node, and dispatch through
+  # the term-returning op layer so the `{docs, _}` term arrives live (no JSON
+  # edge). `session_pid` is passed as `dispatch/4`'s SessionPid so the op
+  # resolves the session's bindings for receiver classification (BT-1045).
+  defp dispatch_hover(session_pid, code) do
+    request = %{"op" => "hover", "code" => code}
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        rpc(:beamtalk_repl_ops, :dispatch, ["hover", params, msg, session_pid])
 
       other ->
         other

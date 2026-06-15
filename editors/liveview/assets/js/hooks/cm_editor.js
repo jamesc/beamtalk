@@ -50,6 +50,7 @@ import { indentUnit } from "@codemirror/language"
 import { beamtalkHighlighting } from "./bt_highlight"
 import { inlineResultsField, addInlineResult } from "./inline_results"
 import { backendCompletion, completionQuery } from "./cm_autocomplete"
+import { backendHover, hoverQuery } from "./cm_hover"
 
 export const CmEditor = {
   mounted() {
@@ -114,6 +115,11 @@ export const CmEditor = {
     if (autocomplete && !readOnly) {
       extensions.push(backendCompletion(completionQuery(this.pushEvent.bind(this))))
     }
+    // Live-image hover (BT-2555): signature + doc-comment tooltips sourced from
+    // the live session via the `hover` event. Always enabled — even on a
+    // read-only editor — because hover runs no user code (`:read` capability),
+    // so an Observer hovers too, and the method-editor tabs get it for free.
+    extensions.push(backendHover(hoverQuery(this.pushEvent.bind(this))))
 
     this.view = new EditorView({
       state: EditorState.create({ doc: this.field.value, extensions }),

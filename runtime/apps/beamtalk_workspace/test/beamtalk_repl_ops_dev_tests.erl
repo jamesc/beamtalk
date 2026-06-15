@@ -397,6 +397,22 @@ handle_complete_legacy_empty_prefix_test() ->
     ?assertEqual([], maps:get(<<"completions">>, Decoded)).
 
 %%====================================================================
+%% handle/4 -- hover (BT-2555)
+%%====================================================================
+
+handle_hover_empty_code_test() ->
+    %% Empty code short-circuits before any binding/registry lookup, so this
+    %% needs no runtime: hover returns empty docs ("nothing to show"), which the
+    %% client renders as no tooltip.
+    Msg = make_msg(<<"hover">>, undefined, undefined, true),
+    Result = beamtalk_repl_ops_dev:handle(
+        <<"hover">>, #{<<"code">> => <<>>}, Msg, self()
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"docs">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(<<>>, maps:get(<<"docs">>, Decoded)).
+
+%%====================================================================
 %% handle/4 -- methods with unknown class
 %%====================================================================
 

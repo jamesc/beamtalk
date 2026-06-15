@@ -641,6 +641,30 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:reply, %{"completions" => []}, socket}
   end
 
+  # Live-image hover (BT-2555): the CodeMirror editors' `hoverTooltip` source
+  # round-trips the editor line up to the hovered token; we answer with
+  # signature + doc-comment markdown from the live session via the `hover` op
+  # (a class name → its docs; a `Receiver selector` pair → that method's docs).
+  # `:read` capability — hover runs no user code — so the Observer role hovers
+  # too. We `{:reply, …}` on the same event so CodeMirror resolves its async
+  # tooltip source; an unreachable workspace, a denied op, a missing session, or
+  # nothing-to-show all degrade to an empty string (no tooltip is shown).
+  @impl true
+  def handle_event("hover", %{"code" => code}, %{assigns: %{session_pid: pid}} = socket)
+      when is_pid(pid) and is_binary(code) do
+    hover =
+      case Facade.dispatch(:hover, %{session_pid: pid, code: code}, ctx(socket)) do
+        {:ok, docs} when is_binary(docs) -> docs
+        _ -> ""
+      end
+
+    {:reply, %{"hover" => hover}, socket}
+  end
+
+  def handle_event("hover", _params, socket) do
+    {:reply, %{"hover" => ""}, socket}
+  end
+
   # Switch the Workspace dock's active tab (Workspace / REPL / Transcript /
   # Changes, BT-2490, REPL added BT-2543). Pure view state — no workspace
   # round-trip; an unknown tab is ignored rather than rendered, so a crafted
