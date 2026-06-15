@@ -4109,7 +4109,13 @@ defmodule BtAttachWeb.WorkspaceLive do
             {label}
           </button>
         </div>
-        <button type="button" class="panel-close" phx-click="close_browser" title="Close panel">
+        <button
+          type="button"
+          class="panel-close"
+          phx-click="close_browser"
+          aria-label="Close System Browser panel"
+          title="Close panel"
+        >
           ×
         </button>
       </div>
@@ -4403,13 +4409,15 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
               Browser
             </button>
+            <%!-- `show_inspector` gates the whole right column (Bindings + Inspector),
+                 so the label names both rather than just "Inspector" (BT-2559 review). --%>
             <button
               type="button"
               class={["panel-toggle", @show_inspector && "on"]}
               phx-click="toggle_inspector"
-              title="Toggle Inspector"
+              title="Toggle the Bindings + Inspector column"
             >
-              Inspector
+              Inspector &amp; Bindings
             </button>
             <button
               type="button"
@@ -4557,6 +4565,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                       type="button"
                       class="panel-close"
                       phx-click="toggle_dock"
+                      aria-label="Collapse workspace dock"
                       title="Collapse dock"
                     >
                       ▾
@@ -5143,6 +5152,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                       type="button"
                       class="panel-close"
                       phx-click="close_inspector"
+                      aria-label="Close Inspector panel"
                       title="Close panel"
                     >
                       ×
