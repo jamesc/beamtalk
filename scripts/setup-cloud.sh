@@ -43,6 +43,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
 
+# The repo ships a committed mise.toml. mise refuses to read ANY config in a
+# directory whose config is untrusted — including .tool-versions — so a fresh
+# cloud container (no trust record in mise's state dir) makes `mise install`
+# bail out entirely, silently skipping the BEAM toolchain. mise's trust store
+# lives in ~/.local/state/mise and is only intermittently captured by the cloud
+# snapshot, which is exactly the "elixir isn't always installed" flakiness.
+# Trust the checkout via env var so it holds regardless of snapshot state; this
+# is persisted to /etc/profile.d below so every future shell trusts it too.
+case ":${MISE_TRUSTED_CONFIG_PATHS:-}:" in
+  *":${REPO_ROOT}:"*) ;;
+  *) export MISE_TRUSTED_CONFIG_PATHS="${REPO_ROOT}${MISE_TRUSTED_CONFIG_PATHS:+:${MISE_TRUSTED_CONFIG_PATHS}}" ;;
+esac
+
 # --- Helpers ---
 
 if [ -t 1 ]; then
@@ -126,6 +139,11 @@ else
     ok "mise installed"
   fi
 
+  # Record trust in mise's state dir too (belt-and-suspenders alongside
+  # MISE_TRUSTED_CONFIG_PATHS) so a bare `mise` invocation by the user — in a
+  # shell that didn't source the env var — still resolves the pinned toolchain.
+  "${MISE_BIN}" trust "${REPO_ROOT}" >/dev/null 2>&1 || true
+
   # 2. Erlang + Elixir from .tool-versions. A GITHUB_TOKEN (if a valid one is in
   #    the env) lifts the unauthenticated GitHub API rate limit mise hits while
   #    resolving release lists; it degrades gracefully without one.
@@ -175,6 +193,12 @@ export MISE_DATA_DIR="${MISE_DATA_DIR}"
 case ":\${PATH}:" in
   *":${MISE_SHIMS}:"*) ;;
   *) export PATH="${MISE_SHIMS}:\${PATH}" ;;
+esac
+# Trust the repo's mise.toml without depending on mise's snapshot-fragile trust
+# store, so .tool-versions always resolves the pinned BEAM toolchain.
+case ":\${MISE_TRUSTED_CONFIG_PATHS:-}:" in
+  *":${REPO_ROOT}:"*) ;;
+  *) export MISE_TRUSTED_CONFIG_PATHS="${REPO_ROOT}\${MISE_TRUSTED_CONFIG_PATHS:+:\${MISE_TRUSTED_CONFIG_PATHS}}" ;;
 esac
 export ELIXIR_ERL_OPTIONS="\${ELIXIR_ERL_OPTIONS:-+fnu}"
 PROFILE
