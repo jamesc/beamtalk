@@ -4815,12 +4815,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
               </div>
               <%!-- Dock restore bar: shown when dock is collapsed --%>
-              <div
-                :if={!@show_dock}
-                class="dock-bar"
-                phx-click="toggle_dock"
-                title="Expand dock"
-              >
+              <div :if={!@show_dock} class="dock-bar" phx-click="toggle_dock" title="Expand dock">
                 Workspace ▴
               </div>
 
