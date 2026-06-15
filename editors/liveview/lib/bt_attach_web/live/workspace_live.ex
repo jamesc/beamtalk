@@ -1842,7 +1842,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           "" -> nil
           stripped -> stripped
         end
-      [] -> nil
+
+      [] ->
+        nil
     end
   end
 
