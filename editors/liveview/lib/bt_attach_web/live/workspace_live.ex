@@ -1836,15 +1836,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp meta_arg([]), do: nil
 
   defp meta_arg([arg]) do
-    case String.split(arg, ~r/\s+/, parts: 2, trim: true) do
-      [token | _] ->
-        case String.trim_leading(token, "#") do
-          "" -> nil
-          stripped -> stripped
-        end
+    # `arg` is the non-empty second part of the outer `parts: 2, trim: true` split,
+    # so this inner split always yields at least the first token.
+    [token | _] = String.split(arg, ~r/\s+/, parts: 2, trim: true)
 
-      [] ->
-        nil
+    case String.trim_leading(token, "#") do
+      "" -> nil
+      stripped -> stripped
     end
   end
 
@@ -1955,7 +1953,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     :sync / :s             tracks the live image (loads beamtalk.toml on connect)
     :clear                 evaluates `Session current clear`
     :show-codegen / :sc    CLI-only — run from `beamtalk repl`
-    :test                  test-runner pane coming soon (BT-2557)
+    :test / :t             test-runner pane coming soon (BT-2557)
     :exit / :quit / :q     close the browser tab to disconnect
     Inspect results with the Inspect button; browse classes/methods on the left.\
     """

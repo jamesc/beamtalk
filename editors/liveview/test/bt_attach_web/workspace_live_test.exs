@@ -1768,6 +1768,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       # crash — regardless of whether the class is in the symbol index.
       html = render_hook(view, "repl_eval", %{"expr" => ":help Object"})
       refute html =~ "Not authorized"
+      # Routes to an `:info` meta entry (either "Opened Object" or, if the symbol
+      # index lacks it, "No class named Object") — never an `:eval` RBAC error.
+      assert has_element?(view, ".repl-entry.meta")
+      refute has_element?(view, ".repl-entry.err")
       assert Process.alive?(view.pid)
     end
   end
