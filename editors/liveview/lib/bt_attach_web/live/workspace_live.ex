@@ -1837,7 +1837,11 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp meta_arg([arg]) do
     case String.split(arg, ~r/\s+/, parts: 2, trim: true) do
-      [token | _] -> String.trim_leading(token, "#")
+      [token | _] ->
+        case String.trim_leading(token, "#") do
+          "" -> nil
+          stripped -> stripped
+        end
       [] -> nil
     end
   end
