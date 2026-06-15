@@ -4096,9 +4096,6 @@ defmodule BtAttachWeb.WorkspaceLive do
     <div id="system-browser" class="panel" style="flex:1;">
       <div class="panel-head">
         System Browser <span class="spacer"></span>
-        <button type="button" class="panel-close" phx-click="close_browser" title="Close panel">
-          ×
-        </button>
         <div class="seg" role="tablist" aria-label="Class tree view">
           <button
             :for={{view, label} <- [{"hierarchy", "Hier"}, {"category", "Cats"}]}
@@ -4112,6 +4109,9 @@ defmodule BtAttachWeb.WorkspaceLive do
             {label}
           </button>
         </div>
+        <button type="button" class="panel-close" phx-click="close_browser" title="Close panel">
+          ×
+        </button>
       </div>
       <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
         <div :if={@browser_error} class="io-block err">{@browser_error}</div>
@@ -4815,7 +4815,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
               </div>
               <%!-- Dock restore bar: shown when dock is collapsed --%>
-              <div :if={!@show_dock} class="dock-bar" phx-click="toggle_dock" title="Expand dock">
+              <div
+                :if={!@show_dock}
+                class="dock-bar"
+                phx-click="toggle_dock"
+                title="Expand dock"
+                style="order:3;"
+              >
                 Workspace ▴
               </div>
 

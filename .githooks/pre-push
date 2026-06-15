@@ -86,7 +86,7 @@ else
   echo "$BT_FP" > "$BT_STAMP"
 fi
 
-ELIXIR_FP="$(fingerprint 'editors/liveview/**/*.ex' 'editors/liveview/**/*.exs')"
+ELIXIR_FP="$(fingerprint 'editors/liveview/*.ex' 'editors/liveview/*.exs')"
 if stamp_matches "$ELIXIR_STAMP" "$ELIXIR_FP"; then
   echo "⏭️  lint-elixir: no Elixir changes since last lint, skipping"
 else
