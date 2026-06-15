@@ -108,7 +108,7 @@ TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
 if [ ! -f "${TOOL_VERSIONS}" ]; then
   _PINS_REF="${BEAMTALK_PINS_REF:-main}"
   _PINS_DIR="$(mktemp -d)"
-  if curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+  if curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
        "https://raw.githubusercontent.com/jamesc/beamtalk/${_PINS_REF}/.tool-versions" \
        -o "${_PINS_DIR}/.tool-versions" 2>/dev/null && [ -s "${_PINS_DIR}/.tool-versions" ]; then
     # rust-toolchain.toml is optional — only the rustc pin assertion reads it.
@@ -192,7 +192,7 @@ else
     ok "mise already installed ($("${MISE_BIN}" --version 2>/dev/null | head -1))"
   else
     info "Installing mise ${MISE_VERSION}..."
-    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 https://mise.run \
+    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 https://mise.run \
       | MISE_VERSION="${MISE_VERSION}" MISE_INSTALL_PATH=/usr/local/bin/mise sh
     MISE_BIN=/usr/local/bin/mise
     ok "mise installed"
@@ -234,7 +234,7 @@ else
     info "Installing rebar3 ${REBAR3_PIN} (escript)..."
     require_sudo
     _REBAR3_TMP="$(mktemp)"
-    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
       "https://github.com/erlang/rebar3/releases/download/${REBAR3_PIN}/rebar3" -o "${_REBAR3_TMP}"
     $SUDO install -m 755 "${_REBAR3_TMP}" /usr/local/bin/rebar3
     rm -f "${_REBAR3_TMP}"
@@ -321,7 +321,8 @@ else
   info "Installing Node.js LTS..."
   require_sudo
   _NODE_TMP="$(mktemp)"
-  curl -fsSL https://deb.nodesource.com/setup_lts.x -o "${_NODE_TMP}"
+  curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+    https://deb.nodesource.com/setup_lts.x -o "${_NODE_TMP}"
   $SUDO bash "${_NODE_TMP}"
   rm -f "${_NODE_TMP}"
   $SUDO apt-get install -y -qq nodejs
@@ -335,7 +336,8 @@ if have gh; then
 else
   info "Installing GitHub CLI..."
   require_sudo
-  curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+    https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     | $SUDO dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
   $SUDO chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
@@ -351,7 +353,9 @@ if have rustc; then
   ok "Rust already installed ($(rustc --version))"
 else
   info "Installing Rust..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+  curl --proto '=https' --tlsv1.2 -sSf \
+    --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+    https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
   # shellcheck disable=SC1091
   source "${CARGO_HOME:-$HOME/.cargo}/env"
   ok "Rust $(rustc --version) installed"
@@ -367,17 +371,33 @@ else
   # cargo-binstall for fast binary installs
   if ! have cargo-binstall; then
     curl -L --proto '=https' --tlsv1.2 -sSf \
+      --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
       https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
     ok "cargo-binstall installed"
   else
     ok "cargo-binstall already installed"
   fi
 
-  CARGO_TOOLS="cargo-watch cargo-nextest cargo-insta cargo-llvm-cov cargo-fuzz just"
+  # cargo-nextest refuses ANY source build without --locked (its locked-tripwire
+  # crate compile_error!s). cargo-binstall's compile fallback omits --locked, so a
+  # transient prebuilt-fetch failure turns into a hard build error (exit 70).
+  # Install nextest from its official prebuilt CDN — no GitHub release API, no
+  # compile — and keep it out of the binstall batch entirely.
+  if have cargo-nextest; then
+    ok "cargo-nextest already installed"
+  else
+    info "Installing cargo-nextest (prebuilt from get.nexte.st)..."
+    _CARGO_BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
+    mkdir -p "${_CARGO_BIN}"
+    curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+      https://get.nexte.st/latest/linux | tar -xz -C "${_CARGO_BIN}" cargo-nextest
+    ok "cargo-nextest installed"
+  fi
+
+  CARGO_TOOLS="cargo-watch cargo-insta cargo-llvm-cov cargo-fuzz just"
   MISSING_TOOLS=""
   for tool in $CARGO_TOOLS; do
-    bin_name="${tool#cargo-}"
-    # just and cargo-watch have matching binary names; nextest is 'cargo nextest' etc.
+    # just and cargo-watch have matching binary names; the rest match the crate.
     case "$tool" in
       just)        bin_name="just" ;;
       cargo-watch) bin_name="cargo-watch" ;;
@@ -391,9 +411,19 @@ else
   done
 
   if [ -n "$MISSING_TOOLS" ]; then
+    # Prefer binstall's prebuilt binaries; never let it fall back to an unlocked
+    # source compile (slow, and breaks crates that demand --locked). If no
+    # prebuilt is available, do a controlled source build with --locked.
     # shellcheck disable=SC2086
-    cargo binstall -y $MISSING_TOOLS
-    ok "Cargo tools installed"
+    if cargo binstall -y --disable-strategies compile $MISSING_TOOLS; then
+      ok "Cargo tools installed (binstall)"
+    else
+      warn "binstall could not fetch prebuilt binaries — building from source (--locked)"
+      for tool in $MISSING_TOOLS; do
+        cargo install --locked "$tool"
+      done
+      ok "Cargo tools installed (source)"
+    fi
   fi
 fi
 
@@ -433,7 +463,8 @@ else
   # init.sh clones the skills repo into .claude/skills-repo and links
   # skills/agents into .claude/commands/ and .claude/agents/.
   # It's idempotent — pulls latest if already cloned.
-  curl -fsSL https://raw.githubusercontent.com/jamesc/skills/main/scripts/init.sh | bash
+  curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
+    https://raw.githubusercontent.com/jamesc/skills/main/scripts/init.sh | bash
   ok "Skills and agents linked"
 fi
 
