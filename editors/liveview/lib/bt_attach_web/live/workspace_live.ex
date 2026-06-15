@@ -4534,11 +4534,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                    `hidden`, not removed) so the `#transcript` stream container is
                    always in the DOM for `stream_insert` regardless of the active
                    tab. --%>
-              <div
-                class={["dock", !@show_dock && "collapsed"]}
-                style="order:2;"
-                inert={!@show_dock}
-              >
+              <div class={["dock", !@show_dock && "collapsed"]} style="order:2;" inert={!@show_dock}>
                 <div id="workspace-dock" class="panel">
                   <div class="panel-head">
                     <span class="dock-tabs" role="tablist">
