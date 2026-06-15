@@ -37,10 +37,30 @@ MISE_DATA_DIR="${MISE_DATA_DIR:-/usr/local/share/mise}"
 export MISE_DATA_DIR
 MISE_SHIMS="${MISE_DATA_DIR}/shims"
 
-# Repo root (the directory containing .tool-versions). The hook invokes this
-# script from the checkout; fall back to the script's own location.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+# Repo root (the directory containing .tool-versions). Resolution order:
+#   1. CLAUDE_PROJECT_DIR if the harness exports it (the checkout the hook runs in)
+#   2. the script's own parent dir — only when run from a file on disk
+#   3. the current working directory — the `curl … | bash` case, where the
+#      script arrives on stdin and BASH_SOURCE is unset (so guard it under set -u)
+# Then, if .tool-versions isn't at the guessed root, walk up from the cwd to
+# find it, so running from a subdirectory of the checkout still works.
+if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+  REPO_ROOT="${CLAUDE_PROJECT_DIR}"
+elif [ -n "${BASH_SOURCE[0]:-}" ]; then
+  REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+else
+  REPO_ROOT="$(pwd)"
+fi
+if [ ! -f "${REPO_ROOT}/.tool-versions" ]; then
+  _dir="$(pwd)"
+  while [ "${_dir}" != "/" ]; do
+    if [ -f "${_dir}/.tool-versions" ]; then
+      REPO_ROOT="${_dir}"
+      break
+    fi
+    _dir="$(dirname "${_dir}")"
+  done
+fi
 TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
 
 # The repo ships a committed mise.toml. mise refuses to read ANY config in a
