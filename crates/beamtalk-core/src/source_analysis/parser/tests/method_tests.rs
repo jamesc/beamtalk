@@ -1068,7 +1068,10 @@ fn parse_method_rejects_non_method() {
 fn parse_method_rejects_trailing_tokens() {
     // Two methods in one source must be rejected (single-method contract).
     let tokens = lex_with_eof("inc => self.v + 1\ndec => self.v - 1");
-    let (_method, diagnostics) = parse_method(tokens);
+    let (method, diagnostics) = parse_method(tokens);
+    // Pins the documented contract: trailing tokens yield None, not Some, so the
+    // Option alone is a reliable success signal.
+    assert!(method.is_none(), "trailing second method must yield None");
     assert!(
         diagnostics.iter().any(|d| d.severity == Severity::Error),
         "trailing second method should be an error"
