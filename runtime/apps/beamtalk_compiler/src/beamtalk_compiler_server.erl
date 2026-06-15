@@ -26,6 +26,7 @@ to avoid temp files on disk (BT-48).
     compile_expression/3, compile_expression/4,
     compile_expression_trace/3, compile_expression_trace/4,
     compile/2,
+    compile_method/3,
     diagnostics/1,
     version/0,
     compile_core_erlang/1,
@@ -130,6 +131,24 @@ or `{error, Diagnostics}'.
     {ok, map()} | {ok, protocol_definition, map()} | {error, [map()]}.
 compile(Source, Options) ->
     gen_server:call(?MODULE, {compile, Source, Options}, 30000).
+
+-doc """
+Structured single-method compile (the live-image write-surface idiom).
+
+`ClassSource` is the current full class definition; `MethodSource` is the BARE
+method body (comments and all — no `Class >>` prefix). The method is parsed
+standalone and merged into the class, so the stored source round-trips exactly.
+
+Options: `#{is_class_method => boolean(), stdlib_mode => boolean(),
+workspace_mode => boolean(), module_name => binary(), source_path => binary(),
+class_superclass_index => map(), class_module_index => map()}`.
+
+Returns `{ok, #{core_erlang, module_name, classes, selector, is_class_method,
+method_source, merged_class_source, warnings}}' or `{error, Diagnostics}'.
+""".
+-spec compile_method(binary(), binary(), map()) -> {ok, map()} | {error, [map()]}.
+compile_method(ClassSource, MethodSource, Options) ->
+    gen_server:call(?MODULE, {compile_method, ClassSource, MethodSource, Options}, 30000).
 
 -doc "Get diagnostics for source code (no code generation).".
 -spec diagnostics(binary()) ->
@@ -472,6 +491,10 @@ handle_call({compile, Source, Options}, _From, State) ->
     Options1 = Options#{class_hierarchy => State#state.classes},
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
+handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
+    Options1 = Options#{class_hierarchy => State#state.classes},
+    Result = do_compile_method(State#state.port, ClassSource, MethodSource, Options1),
+    {reply, Result, State};
 handle_call({resolve_completion_type, Expression}, _From, State) ->
     %% BT-1068: Forward class hierarchy so user-defined classes are visible.
     Result = beamtalk_compiler_port:resolve_completion_type(
@@ -743,6 +766,73 @@ do_compile(Port, Source, Options) ->
             {error, [#{message => <<"Compiler port response is malformed">>}]}
     end.
 
+%% Send a structured single-method compile request via the port. Mirrors
+%% do_compile/3 but carries class_source + method_source + the method side, and
+%% the response also yields the recovered selector + canonical method source.
+do_compile_method(Port, ClassSource, MethodSource, Options) ->
+    StdlibMode = maps:get(stdlib_mode, Options, false),
+    WorkspaceMode = maps:get(workspace_mode, Options, true),
+    IsClassMethod = maps:get(is_class_method, Options, false),
+    ClassName = maps:get(class_name, Options, undefined),
+    ModuleName = maps:get(module_name, Options, undefined),
+    SourcePath = maps:get(source_path, Options, undefined),
+    ClassSuperclassIndex = maps:get(class_superclass_index, Options, #{}),
+    ClassModuleIndex = maps:get(class_module_index, Options, #{}),
+    Request0a = #{
+        command => compile_method,
+        class_source => ClassSource,
+        method_source => MethodSource,
+        is_class_method => IsClassMethod,
+        stdlib_mode => StdlibMode,
+        workspace_mode => WorkspaceMode
+    },
+    Request0 =
+        case ClassName of
+            undefined -> Request0a;
+            _ -> Request0a#{class_name => ClassName}
+        end,
+    Request1 =
+        case ModuleName of
+            undefined -> Request0;
+            _ -> Request0#{module_name => ModuleName}
+        end,
+    Request2 =
+        case SourcePath of
+            undefined -> Request1;
+            _ -> Request1#{source_path => SourcePath}
+        end,
+    Request3 =
+        case map_size(ClassSuperclassIndex) of
+            0 -> Request2;
+            _ -> Request2#{class_superclass_index => ClassSuperclassIndex}
+        end,
+    Request4 =
+        case map_size(ClassModuleIndex) of
+            0 -> Request3;
+            _ -> Request3#{class_module_index => ClassModuleIndex}
+        end,
+    Classes = maps:get(class_hierarchy, Options, #{}),
+    RequestFinal =
+        case map_size(Classes) of
+            0 -> Request4;
+            _ -> Request4#{class_hierarchy => Classes}
+        end,
+    case send_port_request(Port, RequestFinal, 30000) of
+        {ok, Response} ->
+            handle_compile_method_response(Response);
+        {exit_status, Status} ->
+            ?LOG_ERROR("Compiler port exited during compile_method", #{
+                domain => [beamtalk, runtime], status => Status
+            }),
+            {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
+        timeout ->
+            {error, [#{message => <<"Compiler port timed out">>}]};
+        port_not_available ->
+            {error, [#{message => <<"Compiler port is not available">>}]};
+        decode_error ->
+            {error, [#{message => <<"Compiler port response is malformed">>}]}
+    end.
+
 %% Send a diagnostics request via the port.
 do_diagnostics(Port, Source) ->
     Request = #{command => diagnostics, source => Source},
@@ -813,6 +903,43 @@ handle_compile_response(#{status := error, diagnostics := Diagnostics}) ->
 handle_compile_response(Other) ->
     ?LOG_ERROR("Unexpected compile response", #{domain => [beamtalk, runtime], response => Other}),
     {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+%% Decode the `compile_method` response: the compiled class module plus the
+%% recovered method metadata (canonical source, selector, side).
+handle_compile_method_response(#{
+    status := ok,
+    kind := method_definition,
+    core_erlang := CoreErlang,
+    module_name := ModuleName,
+    classes := Classes,
+    selector := Selector,
+    is_class_method := IsClassMethod,
+    method_source := MethodSource,
+    merged_class_source := MergedClassSource,
+    warnings := Warnings
+}) ->
+    {ok, #{
+        core_erlang => CoreErlang,
+        module_name => ModuleName,
+        classes => Classes,
+        selector => Selector,
+        is_class_method => decode_bool(IsClassMethod),
+        method_source => MethodSource,
+        merged_class_source => MergedClassSource,
+        warnings => Warnings
+    }};
+handle_compile_method_response(#{status := error, diagnostics := Diagnostics}) ->
+    {error, Diagnostics};
+handle_compile_method_response(Other) ->
+    ?LOG_ERROR("Unexpected compile response", #{domain => [beamtalk, runtime], response => Other}),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+%% Normalise the port's `is_class_method` (an atom `true'/`false', or a binary
+%% defensively) into an Erlang boolean.
+decode_bool(true) -> true;
+decode_bool(false) -> false;
+decode_bool(<<"true">>) -> true;
+decode_bool(_) -> false.
 
 %% Handle response from diagnostics command.
 handle_diagnostics_response(#{status := ok, diagnostics := Diagnostics}) ->

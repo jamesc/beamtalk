@@ -389,14 +389,51 @@ find_revert_target(Class, Selector) when is_binary(Class) ->
     case lists:reverse(lists:keysort(#entry.seq, Candidates)) of
         [] ->
             {error, no_entry};
-        [#entry{prev_source_ref = undefined} | _] ->
-            {error, no_prev_source};
+        [#entry{prev_source_ref = undefined} = Entry | _] ->
+            %% No recorded prior body. Fall back to the method's CURRENT on-disk
+            %% body when the entry knows its source file — an unflushed patch's
+            %% disk body IS its pre-patch body, so revert can still reconstruct it
+            %% rather than failing outright (resilience for entries recorded
+            %% before source attribution was preserved).
+            recover_prev_from_disk(Entry);
         [Entry | _] ->
             case read_prev_source_body(Entry) of
                 {ok, Body} -> {ok, Body, Entry};
-                {error, _} -> {error, no_prev_source}
+                {error, _} -> recover_prev_from_disk(Entry)
             end
     end.
+
+%% Reconstruct a method's pre-patch body from its on-disk source file when no
+%% `prev_source' was recorded. Returns `{ok, Body, Entry}' on success, else
+%% `{error, no_prev_source}'. A brand-new method (absent on disk) has no prior
+%% body to recover, so `resolve_method_span' reports `selector_not_found' and we
+%% surface the original error.
+%%
+%% Invariant + limit: this returns the method's CURRENT on-disk body, which is
+%% the true pre-patch body only while the entry is unflushed AND the file has
+%% not been edited externally (VSCode/git) since the patch. The normal-flow
+%% entries that *do* record `prev_source' (BT-2553 follow-up) don't reach here;
+%% this is a best-effort fallback for entries that predate source attribution,
+%% so reverting to the live disk body is the most faithful reconstruction
+%% available — a later flush still runs its own byte-span/prev_source conflict
+%% check before writing.
+-spec recover_prev_from_disk(entry()) -> {ok, binary(), entry()} | {error, no_prev_source}.
+recover_prev_from_disk(
+    #entry{source_file = File, class = Class, selector = Selector, kind = Kind} = Entry
+) when
+    is_binary(File), is_binary(Selector)
+->
+    case file:read_file(File) of
+        {ok, DiskSource} ->
+            case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Kind) of
+                {ok, _Span, PrevBody} -> {ok, PrevBody, Entry};
+                _ -> {error, no_prev_source}
+            end;
+        {error, _} ->
+            {error, no_prev_source}
+    end;
+recover_prev_from_disk(_Entry) ->
+    {error, no_prev_source}.
 
 %% Normalise the selector argument: callers may pass an atom or a binary.
 -spec revert_selector_binary(atom() | binary()) -> binary().

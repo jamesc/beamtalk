@@ -272,6 +272,9 @@ struct ProcessManager {
     cover_enabled: bool,
     /// The OS-assigned port on which the REPL TCP server is listening.
     port: u16,
+    /// Dedicated, empty project dir for the workspace (so repo fixtures stay
+    /// out-of-project / non-flushable). Removed on `stop`.
+    project_dir: PathBuf,
 }
 
 /// Build the `-eval` command for the BEAM node.
@@ -442,6 +445,20 @@ impl ProcessManager {
             Stdio::null()
         };
 
+        // Run the e2e workspace with a dedicated, empty project directory rather
+        // than the repo root. The read-only fixtures live in the repo (loaded by
+        // repo-relative `@load`, with cwd still the repo root), so they fall
+        // OUTSIDE the project tree and are therefore non-flushable — a
+        // `Workspace flush` in one btscript can no longer write a patched method
+        // back into a shared fixture and corrupt it for later btscripts
+        // (BT-2553 follow-up: method patches are now correctly flushable, which
+        // exposed this). `TMPDIR` is pointed at the same dir so the flush
+        // round-trip test's own temp files (created via `File tempDirectory`)
+        // stay INSIDE the project and remain flushable.
+        let e2e_project_dir =
+            std::env::temp_dir().join(format!("bt_e2e_project_{}", std::process::id()));
+        std::fs::create_dir_all(&e2e_project_dir).expect("create e2e project dir");
+
         let mut beam_child = Command::new("erl")
             .arg("-noshell")
             .arg("-sname")
@@ -452,6 +469,8 @@ impl ProcessManager {
             .current_dir(workspace_root())
             .env("BEAMTALK_WORKSPACE", E2E_SESSION_NAME)
             .env("BEAMTALK_NO_FILE_LOG", "1")
+            .env("BEAMTALK_WORKSPACE_PROJECT_PATH", &e2e_project_dir)
+            .env("TMPDIR", &e2e_project_dir)
             .stdout(Stdio::piped())
             .stderr(stderr_cfg)
             .spawn()
@@ -465,6 +484,7 @@ impl ProcessManager {
             beam_process: Some(beam_child),
             cover_enabled,
             port,
+            project_dir: e2e_project_dir,
         }
     }
 
@@ -525,6 +545,8 @@ impl ProcessManager {
                 let _ = child.wait();
             }
         }
+        // Remove the dedicated project dir now the workspace has stopped.
+        let _ = fs::remove_dir_all(&self.project_dir);
     }
 
     #[cfg(not(unix))]
@@ -536,6 +558,8 @@ impl ProcessManager {
             let _ = child.kill();
             let _ = child.wait();
         }
+        // Remove the dedicated project dir now the workspace has stopped.
+        let _ = fs::remove_dir_all(&self.project_dir);
     }
 }
 

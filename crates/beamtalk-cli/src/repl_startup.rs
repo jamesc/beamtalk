@@ -256,9 +256,10 @@ pub fn startup_prelude(port: u16, bind_addr: Option<Ipv4Addr>, log_level: &str) 
          application:set_env(beamtalk_runtime, log_level, {log_level}), \
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          {{ok, Cwd}} = file:get_cwd(), \
+         ProjectPath = case os:getenv(\"BEAMTALK_WORKSPACE_PROJECT_PATH\") of false -> list_to_binary(Cwd); Pp -> list_to_binary(Pp) end, \
          {{ok, _}} = beamtalk_workspace_sup:start_link(#{{ \
              workspace_id => list_to_binary(\"foreground_\" ++ integer_to_list(erlang:unique_integer([positive]))), \
-             project_path => list_to_binary(Cwd), \
+             project_path => ProjectPath, \
              tcp_port => {port}, \
              bind_addr => {bind_addr_erl}, \
              auto_cleanup => false, \

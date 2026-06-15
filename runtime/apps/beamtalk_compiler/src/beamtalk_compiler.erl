@@ -25,6 +25,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     compile_expression/3, compile_expression/4,
     compile_expression_trace/3, compile_expression_trace/4,
     compile/2,
+    compile_method/3,
     diagnostics/1,
     version/0,
     compile_core_erlang/1,
@@ -108,6 +109,18 @@ or `{error, Diagnostics}'.
     {ok, map()} | {ok, protocol_definition, map()} | {error, [map()]}.
 compile(Source, Options) ->
     beamtalk_compiler_server:compile(Source, Options).
+
+-doc """
+Structured single-method compile (the live-image write-surface idiom).
+
+Parses `MethodSource' as a BARE method body (no `Class >>' wrap, no
+header-sniffing), merges it into `ClassSource''s class, and compiles. The
+returned `method_source' round-trips byte-for-byte. See
+`beamtalk_compiler_server:compile_method/3' for the options/result shape.
+""".
+-spec compile_method(binary(), binary(), map()) -> {ok, map()} | {error, [map()]}.
+compile_method(ClassSource, MethodSource, Options) ->
+    beamtalk_compiler_server:compile_method(ClassSource, MethodSource, Options).
 
 -doc """
 Get diagnostics for source code (no code generation).

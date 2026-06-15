@@ -1466,124 +1466,6 @@ handle_protocol_definition_no_register_class_test() ->
     code:purge(ModuleName),
     code:delete(ModuleName).
 
-%%% normalize_method_source/2 tests (ADR 0082 Phase 1, BT-2283)
-%%%
-%%% `compile:source:' accepts either a full method definition (left intact) or a
-%%% bare body (canonical `selector => ' header prepended). The header detection
-%%% must not be fooled by a bare body that merely starts with the selector name.
-
--doc "A full unary definition is left untouched (already has a header).".
-normalize_method_source_full_unary_test() ->
-    ?assertEqual(
-        <<"increment => self.value := self.value + 1">>,
-        beamtalk_repl_eval:normalize_method_source(
-            <<"increment">>, <<"increment => self.value := self.value + 1">>
-        )
-    ).
-
--doc "A bare unary body gets the canonical `selector => ' header prepended.".
-normalize_method_source_bare_unary_test() ->
-    ?assertEqual(
-        <<"increment => self.value + 1">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"self.value + 1">>)
-    ).
-
--doc """
-Regression (CodeRabbit): a bare body that begins with the selector token but is
-not a header (`increment + 1') must still be prefixed, not mistaken for a
-definition. A raw prefix check would wrongly leave it unheaded.
-""".
-normalize_method_source_bare_body_starting_with_selector_test() ->
-    ?assertEqual(
-        <<"increment => increment + 1">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"increment + 1">>)
-    ).
-
--doc "A longer identifier sharing the selector prefix is not a header.".
-normalize_method_source_identifier_prefix_not_header_test() ->
-    ?assertEqual(
-        <<"increment => incremented value">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"incremented value">>)
-    ).
-
--doc "A full keyword definition (`at: k put: v => body') is left untouched.".
-normalize_method_source_full_keyword_test() ->
-    Source = <<"at: k put: v => self.store at: k put: v">>,
-    ?assertEqual(
-        Source,
-        beamtalk_repl_eval:normalize_method_source(<<"at:put:">>, Source)
-    ).
-
--doc "A full binary definition (`+ other => body') is left untouched.".
-normalize_method_source_full_binary_test() ->
-    Source = <<"+ other => self.value + other">>,
-    ?assertEqual(
-        Source,
-        beamtalk_repl_eval:normalize_method_source(<<"+">>, Source)
-    ).
-
--doc "Leading whitespace before a full definition is tolerated.".
-normalize_method_source_leading_whitespace_test() ->
-    Source = <<"   increment => self.value + 1">>,
-    ?assertEqual(
-        Source,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Source)
-    ).
-
--doc """
-A bare body with leading whitespace keeps that whitespace *ahead* of the
-synthesised header (the prefix is preserved, the header inserted after it), so
-the result still parses. Documents the post-fix behaviour, which differs from the
-old `<<Selector/binary, " => ", Source/binary>>' prepend.
-""".
-normalize_method_source_bare_body_leading_whitespace_test() ->
-    ?assertEqual(
-        <<"   increment => self.value + 1">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"   self.value + 1">>)
-    ).
-
--doc """
-Regression (BT-2553 compile bug): a full definition fronted by `///' doc
-comments must be recognised as already-headed and left intact, not double-headed.
-The doc comments push the `selector => ' header down, so a whitespace-only skip
-would miss it and wrongly prepend a second header.
-""".
-normalize_method_source_doc_comment_full_definition_test() ->
-    Source =
-        <<"/// Decrease the counter by one.\n///\ndecrement => self.value := self.value - 1">>,
-    ?assertEqual(
-        Source,
-        beamtalk_repl_eval:normalize_method_source(<<"decrement">>, Source)
-    ).
-
--doc "A bare body fronted by doc comments keeps the comments ahead of the header.".
-normalize_method_source_doc_comment_bare_body_test() ->
-    ?assertEqual(
-        <<"/// doc\nincrement => self.value + 1">>,
-        beamtalk_repl_eval:normalize_method_source(
-            <<"increment">>, <<"/// doc\nself.value + 1">>
-        )
-    ).
-
--doc "A plain `//' line comment before a full definition is also skipped.".
-normalize_method_source_line_comment_full_definition_test() ->
-    Source = <<"// note\nincrement => self.value + 1">>,
-    ?assertEqual(
-        Source,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Source)
-    ).
-
--doc """
-A comment-only source with no trailing newline must not glue the injected header
-onto the comment line (which would swallow it). A separator newline is inserted
-so the header starts fresh; the empty body is then reported by the compiler.
-""".
-normalize_method_source_comment_only_no_newline_test() ->
-    ?assertEqual(
-        <<"/// just a comment\nincrement => ">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"/// just a comment">>)
-    ).
-
 %%====================================================================
 %% Success-path tests (require the beamtalk_compiler + beamtalk_runtime apps)
 %%
@@ -1632,8 +1514,6 @@ eval_success_test_() ->
         {"compile_method on unrecorded class returns error", fun compile_method_unrecorded/0},
         {"compile_method invalid body returns error", fun compile_method_invalid_body/0},
         {"compile_method non-method expression rejected", fun compile_method_not_a_method/0},
-        {"doc-commented method body parses (regression)",
-            fun compile_method_doc_commented_parses/0},
         {"do_show_codegen with binding known var", fun do_show_codegen_with_binding/0},
         {"reload_class_file/1 missing file", fun reload_class_file_arity1/0},
         {"handle_load/3 missing file delegates", fun handle_load3_missing/0},
@@ -1762,44 +1642,36 @@ compile_method_not_a_method() ->
     ),
     ?assertMatch({error, _}, Result).
 
-compile_method_doc_commented_parses() ->
-    %% Regression (compile bug): a method body with leading `///' doc comments
-    %% must reach the compiler as a single method_definition. Before the
-    %% normalize_method_source fix the doc comments hid the `decrement => ' header,
-    %% so a second header was prepended and the synthesized
-    %% `Object >> decrement => /// ... decrement => ...' expression failed to
-    %% parse with "Unexpected token: expected expression, found =>".
-    %%
-    %% We assert via the wrapped expression the way compile_method builds it: the
-    %% real compiler classifies it as a method_definition (parses cleanly) rather
-    %% than returning a parse error.
-    %% Exercise the exact shape stored for the example Counter methods: leading
-    %% `///' doc comments followed by a `-> ReturnType' header (BT-2547 / counter.bt).
-    Sources = [
-        {<<"decrement">>, <<"/// Decrease the counter by one.\n///\ndecrement => self.value - 1">>},
-        {<<"increment">>,
-            <<"/// Increase the counter by one.\n///\n/// ## Examples\n",
-                "increment -> Integer => self.value := self.value + 1">>}
-    ],
-    lists:foreach(
-        fun({Selector, Source}) ->
-            Wrapped =
-                unicode:characters_to_list(<<"Object >> ">>) ++
-                    unicode:characters_to_list(
-                        beamtalk_repl_eval:normalize_method_source(Selector, Source)
-                    ),
-            Result = beamtalk_repl_compiler:compile_expression(
-                Wrapped, 'beamtalk_compile_method_doc_test', #{}
-            ),
-            ?assertMatch({ok, method_definition, _MethodInfo, _Warnings}, Result),
-            %% The doc comment must round-trip into the recovered method_source so
-            %% saved methods keep their documentation (it is not stripped).
-            {ok, method_definition, MethodInfo, _} = Result,
-            MethodSource = maps:get(method_source, MethodInfo),
-            ?assert(binary:match(MethodSource, <<"///">>) =/= nomatch)
-        end,
-        Sources
+%%% normalize_method_source/2 — `compile:source:`/MCP pass the method BODY only;
+%%% the IDE passes a full definition. The helper synthesises the `selector => '
+%%% header for a bare body and leaves a full (possibly comment-led) definition
+%%% untouched, so the structured install path always gets a complete method.
+
+normalize_method_source_full_definition_unchanged_test() ->
+    %% A full `selector => body' definition is returned verbatim.
+    Src = <<"increment => self.value + 1">>,
+    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
+
+normalize_method_source_bare_body_gets_header_test() ->
+    %% A bare body (no header) gets the canonical `selector => ' prepended.
+    ?assertEqual(
+        <<"increment => self.value + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"self.value + 1">>)
     ).
+
+normalize_method_source_bare_body_resembling_selector_test() ->
+    %% A bare body that merely starts with the selector name (but is not a header)
+    %% is still prefixed — `incremented' is not the `increment' header.
+    ?assertEqual(
+        <<"increment => incremented + 1">>,
+        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"incremented + 1">>)
+    ).
+
+normalize_method_source_commented_full_definition_unchanged_test() ->
+    %% A full definition behind `//`/`///` comments is left intact (the header is
+    %% found past the comments), so saved comments round-trip.
+    Src = <<"// --- Section ---\n/// Doc.\nincrement => self.value + 1">>,
+    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
 
 do_show_codegen_with_binding() ->
     %% A non-internal binding key is forwarded as a known var to the codegen

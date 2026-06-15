@@ -211,6 +211,44 @@ pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
     (module, parser.diagnostics)
 }
 
+/// Parses a single standalone method *body* — `selector params => body`, with
+/// optional leading `//`/`///` comments — WITHOUT a `Class >>` prefix.
+///
+/// This is the first-class entry for the live-image "compile one method" idiom
+/// (the workspace write-surface / IDE save). Because the method source is parsed
+/// directly, its leading comments attach unambiguously to the selector token —
+/// there is no `>>` for a same-line comment to mis-attach to, and no textual
+/// class wrapper or header-sniffing heuristic is involved. The owning class and
+/// method side (instance vs class) are supplied out-of-band by the caller, so
+/// the source round-trips byte-for-byte.
+///
+/// Returns `Some(method)` only when the source is *exactly* one method
+/// definition. It returns `None` (always with an error diagnostic) when the
+/// source is not a method definition at all (e.g. a missing `=>`) OR when a
+/// valid method body is followed by trailing tokens (a second method / stray
+/// expression) — so the `Option` alone is a reliable success signal and callers
+/// cannot accidentally compile a fragment.
+#[must_use]
+pub fn parse_method(tokens: Vec<Token>) -> (Option<crate::ast::MethodDefinition>, Vec<Diagnostic>) {
+    let mut parser = Parser::new(tokens);
+    let method = parser.parse_method_definition();
+
+    // A well-formed method body consumes everything up to EOF. Anything left
+    // over means the caller handed us more than one method — reject it loudly
+    // and drop the partial parse so `None` consistently means "not exactly one
+    // method".
+    if method.is_some() && !parser.is_at_end() {
+        let span = parser.current_token().span();
+        parser.diagnostics.push(Diagnostic::error(
+            "expected a single method definition, found trailing tokens after the method body",
+            span,
+        ));
+        return (None, parser.diagnostics);
+    }
+
+    (method, parser.diagnostics)
+}
+
 /// Checks whether the given source text appears syntactically complete for REPL
 /// evaluation.
 ///

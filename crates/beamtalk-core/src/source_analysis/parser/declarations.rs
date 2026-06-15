@@ -1038,7 +1038,7 @@ impl Parser {
     /// - `at: index put: value => body`
     /// - `sealed methodName => body`
     /// - `internal methodName => body` (ADR 0071)
-    fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
+    pub(super) fn parse_method_definition(&mut self) -> Option<MethodDefinition> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
         let comments = self.collect_comment_attachment();

@@ -477,43 +477,24 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
 ) ->
     {ok, binary()} | {error, term()}.
 do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind) ->
-    SourceStr = unicode:characters_to_list(normalize_method_source(SelectorBin, Source)),
-    Expression =
-        unicode:characters_to_list(<<ClassNameBin/binary, " >> ">>) ++ SourceStr,
-    %% Compile the synthesized standalone definition to recover the canonical
-    %% MethodInfo (selector, is_class_method, method_source) the install path
-    %% expects, then tag it with the caller's intent and audit metadata so the
-    %% ChangeLog entry is durable / ephemeral and attributed correctly.
+    %% `compile:source:` / MCP `save_method` pass the method BODY only (no
+    %% `selector => ' header); the IDE save passes a full method definition.
+    %% `normalize_method_source/2' synthesises the header for the bare-body case
+    %% and leaves a full (possibly comment-led) definition untouched, so the
+    %% structured install path always receives a complete method definition. This
+    %% is header *synthesis*, not the old `Class >>` text-wrap — the backend then
+    %% parses the result standalone, so comments/formatting still round-trip
+    %% exactly and the patched class keeps its package-qualified module name +
+    %% on-disk source attribution (flushable + revertable).
+    MethodSource = normalize_method_source(SelectorBin, Source),
     State = beamtalk_repl_state:new(undefined, 0),
-    Counter = beamtalk_repl_state:get_eval_counter(State),
-    % elp:fixme W0023 intentional atom creation
-    ModuleName = list_to_atom("beamtalk_compile_method_" ++ integer_to_list(Counter)),
-    case beamtalk_repl_compiler:compile_expression(Expression, ModuleName, #{}) of
-        {ok, method_definition, MethodInfo0, Warnings} ->
-            MethodInfo = MethodInfo0#{
-                intent => Intent,
-                author => Author,
-                author_kind => AuthorKind,
-                %% `unicode:characters_to_binary/1', not `list_to_binary/1': the
-                %% expression may carry non-Latin1 characters (em dash, arrows,
-                %% smart quotes in doc comments) that crash `list_to_binary' with
-                %% `badarg'.
-                expression => unicode:characters_to_binary(Expression)
-            },
-            case
-                beamtalk_repl_loader:reload_method_definition(
-                    MethodInfo, Warnings, Expression, State
-                )
-            of
-                {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
-                {error, Reason, _Output, _W, _S} -> {error, Reason}
-            end;
-        {ok, _OtherKind, _Info, _Warnings} ->
-            %% A class/protocol definition, or a plain expression — not a method
-            %% patch. compile:source: only accepts a single method body.
-            {error, {not_a_method_definition, SelectorBin}};
-        {error, Reason} ->
-            {error, Reason}
+    case
+        beamtalk_repl_loader:install_method(
+            ClassNameBin, SelectorBin, MethodSource, Intent, Author, AuthorKind, [], State
+        )
+    of
+        {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
+        {error, Reason, _Output, _W, _S} -> {error, Reason}
     end.
 
 %% `{ok, Module}' when `ClassNameBin' names a loaded built-in (stdlib) class,
@@ -568,19 +549,20 @@ stdlib_method_read_only_error(ClassNameBin, SelectorBin) ->
         <<"Built-in (stdlib) classes ship with the standard library; edit them in the Beamtalk source tree and rebuild, not from the workspace.">>
     ).
 
-%% A `compile:source:' body may be a full method definition or a bare body. When
-%% it is a bare body, prepend the canonical `selector => ' header so the
-%% synthesized `>>' expression parses as a method definition. We only treat the
-%% source as already-headed when it begins with the selector token *and* that
-%% token is followed by a header form — an argument list / argument name and/or
-%% whitespace up to the `=>' arrow. A bare expression such as `incremented + 1'
-%% for selector `increment' shares no such header and is correctly prefixed.
+%% A `compile:source:' / MCP `save_method' body may be a full method definition
+%% or just the body (the selector is supplied separately). When it is a bare
+%% body, prepend the canonical `selector => ' header so the structured install
+%% path receives a complete method definition. We only treat the source as
+%% already-headed when it begins with the selector token *and* that token is
+%% followed by a header form — args / arg names / whitespace up to the `=>'
+%% arrow. A bare expression such as `incremented + 1' for selector `increment'
+%% shares no such header and is correctly prefixed.
 %%
 %% Leading doc comments (`///') and line comments (`//') precede the header in
-%% stored method source, so we look past them before testing for a header. The
-%% `>>' form attaches them to the synthesized method, so a documented full
-%% definition is left intact; a documented bare body keeps its comments ahead of
-%% the inserted `=>' arrow.
+%% stored method source, so we look past them before testing for a header; a
+%% documented full definition is left intact. NOTE: this is header *synthesis*,
+%% not the removed `Class >>` text-wrap — its output is parsed standalone by the
+%% backend, so comments round-trip exactly.
 -spec normalize_method_source(binary(), binary()) -> binary().
 normalize_method_source(SelectorBin, Source) ->
     Body = skip_leading_comments(Source),
@@ -594,8 +576,7 @@ normalize_method_source(SelectorBin, Source) ->
             %% A leading `//' comment with no trailing newline (a comment-only
             %% source) would otherwise glue the injected `selector => ' onto the
             %% comment line, swallowing the header. Insert a newline when the
-            %% prefix ends mid-comment so the header starts fresh and the compiler
-            %% can report the empty body clearly.
+            %% prefix ends mid-comment so the header starts fresh.
             Sep = header_separator(Prefix),
             <<Prefix/binary, Sep/binary, SelectorBin/binary, " => ", Body/binary>>
     end.

@@ -58,7 +58,7 @@ pub use lexer::{Lexer, lex, lex_with_eof};
 pub use method_span::{MethodSide, SpanResolveError, resolve_method_span};
 pub use parser::{
     Diagnostic, DiagnosticCategory, DiagnosticNote, Severity, is_input_complete,
-    needs_blank_line_to_complete, parse,
+    needs_blank_line_to_complete, parse, parse_method,
 };
 pub use span::Span;
 pub use summary::{DiagnosticSummary, SeverityCounts, category_name};

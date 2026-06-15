@@ -497,6 +497,47 @@ fn compile_ok_response(
     ]))
 }
 
+/// Build a response map for a successful `compile_method` (structured
+/// single-method compile). Carries the compiled class module AND the method
+/// metadata the workspace `ChangeLog` needs (canonical source, selector, side).
+#[allow(clippy::too_many_arguments)]
+fn compile_method_ok_response(
+    core_erlang: &str,
+    module_name: &str,
+    classes: &[(String, String)],
+    selector: &str,
+    is_class_method: bool,
+    method_source: &str,
+    merged_class_source: &str,
+    warnings: &[String],
+) -> Term {
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("kind"), atom("method_definition")),
+        (atom("core_erlang"), binary(core_erlang)),
+        (atom("module_name"), binary(module_name)),
+        (
+            atom("classes"),
+            Term::from(List::from(build_class_terms(classes))),
+        ),
+        (atom("selector"), binary(selector)),
+        (
+            atom("is_class_method"),
+            if is_class_method {
+                atom("true")
+            } else {
+                atom("false")
+            },
+        ),
+        (atom("method_source"), binary(method_source)),
+        (atom("merged_class_source"), binary(merged_class_source)),
+        (
+            atom("warnings"),
+            Term::from(List::from(build_warning_terms(warnings))),
+        ),
+    ]))
+}
+
 /// Build a response map for a successful `diagnostics` query.
 fn diagnostics_ok_response(diagnostics: &[DiagInfo]) -> Term {
     let diag_terms: Vec<Term> = diagnostics
@@ -772,11 +813,18 @@ fn handle_compile_expression(request: &Map) -> Term {
         let method_def = &module.method_definitions[0];
         let class_name = method_def.class_name.name.to_string();
         let selector = method_def.method.selector.name().to_string();
+        // `method_source` must be the METHOD's source (`sel => body`), not the
+        // full `Class >> sel => body` input — it is recorded verbatim in the
+        // ChangeLog and written back on flush. Echoing the input would splice a
+        // stray `Class >>` extension into the class body on flush (BT-2553
+        // follow-up). `unparse_method` re-emits the parsed method, comments and
+        // all, so the recorded source round-trips cleanly.
+        let method_source = beamtalk_core::unparse::unparse_method(&method_def.method);
         return method_definition_ok_response(
             &class_name,
             &selector,
             method_def.is_class_method,
-            &source,
+            &method_source,
             &warnings,
         );
     }
@@ -1211,6 +1259,165 @@ fn handle_compile(request: &Map) -> Term {
     ) {
         Ok(code) => compile_ok_response(&code, &module_name, &classes, &warning_msgs),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
+    }
+}
+
+/// Handle a `compile_method` request — the structured single-method compile that
+/// backs the live-image write-surface (IDE save / `compile:source:` / REPL `>>`).
+///
+/// Inputs:
+///   - `class_source`: the current full class definition,
+///   - `method_source`: the BARE method body (comments and all) — NO `Class >>`
+///     prefix and NO header-sniffing,
+///   - `is_class_method`: instance-side vs class-side,
+///   - plus the usual `module_name` override, `source_path`, and class indexes.
+///
+/// The method is parsed standalone (so its source round-trips byte-for-byte),
+/// merged into the parsed class via the SAME `merge_method` path the file/`>>`
+/// compile uses, and codegen'd. The response carries the compiled module AND the
+/// canonical method source (`unparse_method`) for the `ChangeLog`. This is the
+/// rock-solid replacement for the textual `Class >> <source>` wrap.
+#[allow(clippy::too_many_lines)]
+fn handle_compile_method(request: &Map) -> Term {
+    let Some(class_source) = map_get(request, "class_source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'class_source' field".to_string()]);
+    };
+    let Some(method_source) = map_get(request, "method_source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'method_source' field".to_string()]);
+    };
+    let is_class_method = map_get(request, "is_class_method")
+        .and_then(term_to_bool)
+        .unwrap_or(false);
+    let stdlib_mode = map_get(request, "stdlib_mode")
+        .and_then(term_to_bool)
+        .unwrap_or(false);
+    let workspace_mode = map_get(request, "workspace_mode")
+        .and_then(term_to_bool)
+        .unwrap_or(true);
+    let pre_class_hierarchy = extract_class_hierarchy(request);
+
+    // 1. Parse the bare method body directly — no `Class >>`, no normalize.
+    let method_tokens = beamtalk_core::source_analysis::lex_with_eof(&method_source);
+    let (parsed_method, method_diags) = beamtalk_core::source_analysis::parse_method(method_tokens);
+    let method_errors = filter_error_diagnostics(&method_diags);
+    if !method_errors.is_empty() {
+        return diagnostic_error_response(&method_errors, &method_source);
+    }
+    let Some(method) = parsed_method else {
+        return error_response(&["method_source is not a single method definition".to_string()]);
+    };
+
+    // Canonical stored form + selector come straight from the parsed AST, so the
+    // source the workspace records is exactly what `unparse_method` re-emits.
+    let canonical_method_source = beamtalk_core::unparse::unparse_method(&method);
+    let selector = method.selector.name().to_string();
+
+    // 2. Parse the existing class.
+    let class_tokens = beamtalk_core::source_analysis::lex_with_eof(&class_source);
+    let (mut module, class_parse_diags) = beamtalk_core::source_analysis::parse(class_tokens);
+
+    if module.classes.is_empty() {
+        return error_response(&["class_source contains no class definition".to_string()]);
+    }
+    // Pick the class to patch: the caller's `class_name` when given (a
+    // class_source may legitimately define more than one class — REPL inline
+    // multi-class, dependency files), else the sole/first class.
+    let target_name = map_get(request, "class_name").and_then(term_to_string);
+    let target_idx = target_name
+        .as_deref()
+        .and_then(|n| module.classes.iter().position(|c| c.name.name == n))
+        .unwrap_or(0);
+    let class_name = module.classes[target_idx].name.name.to_string();
+
+    // 3. Merge the method into the target class (replace-or-add) via the shared path.
+    {
+        let class = &mut module.classes[target_idx];
+        let methods = if is_class_method {
+            &mut class.class_methods
+        } else {
+            &mut class.methods
+        };
+        merge_method(methods, method);
+    }
+
+    // The merged MODULE, unparsed, is the new canonical class source the
+    // workspace stores for the next patch. Unparsing the whole module (not just
+    // the target class) preserves any sibling classes in a multi-class source —
+    // matching the textual accumulation path it replaces — so the stored source
+    // stays a clean inline definition with no `Class >>` extension accumulation.
+    let merged_class_source = beamtalk_core::unparse::unparse_module(&module);
+
+    // 4. Full semantic analysis on the MERGED module — catches method errors in
+    //    class context (undefined fields, type errors). Method-edit failures are
+    //    reported against the method source the user is editing.
+    let mut all_diagnostics =
+        beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
+            &module,
+            class_parse_diags,
+            &[],
+            pre_class_hierarchy.clone(),
+        );
+    let options = beamtalk_core::CompilerOptions {
+        stdlib_mode,
+        allow_primitives: false,
+        workspace_mode,
+        suppress_warnings: false,
+        ..Default::default()
+    };
+    all_diagnostics.extend(
+        beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
+            &module, &options,
+        ),
+    );
+    let error_diags = filter_error_diagnostics(&all_diagnostics);
+    let (_, warnings) = partition_diagnostics(&all_diagnostics);
+    if !error_diags.is_empty() {
+        return diagnostic_error_response(&error_diags, &method_source);
+    }
+
+    // 5. Package-qualified module name (via override) + codegen — identical to
+    //    the file/extension compile path, so the installed module matches.
+    let module_name_override = map_get(request, "module_name").and_then(term_to_string);
+    let module_name =
+        derive_class_module_name(&class_name, module_name_override.as_deref(), stdlib_mode);
+    let source_path = map_get(request, "source_path").and_then(term_to_string);
+    let class_module_index = match extract_optional_string_map(request, "class_module_index") {
+        Ok(map) => map,
+        Err(resp) => return resp,
+    };
+    let class_superclass_index =
+        match extract_optional_string_map(request, "class_superclass_index") {
+            Ok(map) => map,
+            Err(resp) => return resp,
+        };
+    let classes: Vec<(String, String)> = module
+        .classes
+        .iter()
+        .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
+        .collect();
+    let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
+
+    match beamtalk_core::erlang::generate_module(
+        &module,
+        beamtalk_core::erlang::CodegenOptions::new(&module_name)
+            .with_workspace_mode(workspace_mode)
+            .with_source(&class_source)
+            .with_class_module_index(class_module_index)
+            .with_class_superclass_index(class_superclass_index)
+            .with_class_hierarchy(pre_class_hierarchy)
+            .with_source_path_opt(source_path.as_deref()),
+    ) {
+        Ok(code) => compile_method_ok_response(
+            &code,
+            &module_name,
+            &classes,
+            &selector,
+            is_class_method,
+            &canonical_method_source,
+            &merged_class_source,
+            &warning_msgs,
+        ),
+        Err(e) => error_response(&[format_codegen_error(&e, &class_source)]),
     }
 }
 
@@ -1683,6 +1890,7 @@ fn handle_request(request_term: &Term) -> Term {
         "compile_expression" => handle_compile_expression(map),
         "compile_expression_trace" => handle_compile_expression_trace(map),
         "compile" => handle_compile(map),
+        "compile_method" => handle_compile_method(map),
         "diagnostics" => handle_diagnostics(map),
         "version" => handle_version(),
         "resolve_completion_type" => handle_resolve_completion_type(map),
@@ -2498,6 +2706,121 @@ mod property_tests {
             }
         }
         None
+    }
+
+    /// Extract a string-valued (binary) field from a response Term.
+    fn response_field_str(term: &Term, key: &str) -> Option<String> {
+        if let Term::Map(map) = term {
+            map_get(map, key).and_then(term_to_string)
+        } else {
+            None
+        }
+    }
+
+    const COMPILE_METHOD_CLASS: &str = "Actor subclass: EventStore\n  state: events = #{}\n\n  initialize -> Nil =>\n    self.events := #{}";
+
+    #[test]
+    fn compile_method_preserves_source_and_compiles() {
+        // The bug shape: a `// --- … ---` banner over a `///` doc block over the
+        // header. The structured command must keep ALL of it in the returned
+        // canonical source AND emit Core Erlang for the merged class.
+        let method_source = "// --- Execution CRUD ---\n\n/// Store a new workflow execution.\n/// Raises if the workflowId already exists.\ncreateExecution: execution :: Object -> Object =>\n  execution";
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (atom("method_source"), binary(method_source)),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        assert_eq!(
+            response_field_str(&response, "selector").as_deref(),
+            Some("createExecution:")
+        );
+        let ms = response_field_str(&response, "method_source").expect("method_source");
+        assert!(ms.contains("--- Execution CRUD ---"), "banner lost: {ms}");
+        assert!(
+            ms.contains("/// Store a new workflow execution."),
+            "first doc line lost: {ms}"
+        );
+        assert!(
+            ms.contains("/// Raises if the workflowId already exists."),
+            "doc line lost: {ms}"
+        );
+        assert!(
+            response_field_str(&response, "core_erlang").is_some_and(|c| !c.is_empty()),
+            "no core erlang emitted"
+        );
+        // The merged class source (stored for the next patch) is a clean inline
+        // class that now contains the new method — no `>>` accumulation.
+        let merged = response_field_str(&response, "merged_class_source").expect("merged");
+        assert!(
+            merged.contains("createExecution:"),
+            "merged class missing the new method:\n{merged}"
+        );
+        assert!(
+            merged.contains("Actor subclass: EventStore"),
+            "merged class lost its header:\n{merged}"
+        );
+        assert!(
+            !merged.contains(">>"),
+            "merged class should be inline, not `>>` extensions:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn compile_method_honors_module_name_override() {
+        // Package-qualified override must flow into the compiled module name
+        // (this is what keeps EventStore as bt@exdura@event_store on a patch).
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (atom("method_source"), binary("touch => self.events")),
+            (atom("is_class_method"), atom("false")),
+            (atom("module_name"), binary("bt@exdura@event_store")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(response_status(&response).as_deref(), Some("ok"));
+        assert_eq!(
+            response_field_str(&response, "module_name").as_deref(),
+            Some("bt@exdura@event_store")
+        );
+    }
+
+    #[test]
+    fn compile_method_rejects_multi_class_source_cleanly() {
+        // One-class-per-file (ADR 0040) is enforced by semantic analysis, so a
+        // multi-class `class_source` can never load/compile through any path.
+        // compile_method must surface that as a clean error (not silently drop a
+        // sibling class from the merged source) — the caller then leaves the
+        // stored source untouched, so there is no corruption.
+        let two = "Actor subclass: Alpha\n  state: a = 1\n\n  va => self.a\n\n\
+                   Actor subclass: Beta\n  state: b = 2\n\n  vb => self.b";
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(two)),
+            (atom("class_name"), binary("Alpha")),
+            (atom("method_source"), binary("bumped => self.a + 1")),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(response_status(&response).as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn compile_method_rejects_non_method_source() {
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (atom("method_source"), binary("1 + 1")),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(response_status(&response).as_deref(), Some("error"));
     }
 
     /// Near-valid Beamtalk source fragments (reuses patterns from parser property tests).
