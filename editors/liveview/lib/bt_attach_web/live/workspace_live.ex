@@ -2484,7 +2484,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                 # compile (`compile_clean/3`): clearing on flush is BT-2545's path.
                 # Keeps the false → true invariant the `nil ->` branch documents.
                 disk_differs: existing.disk_differs or info.disk_differs,
-                runtime_only: info.runtime_only
+                runtime_only: info.runtime_only,
+                # Re-read the doc block from the live image too (BT-2558), so an
+                # out-of-band edit to the method's `///` doc / signature is
+                # reflected when the clean tab is re-activated.
+                doc: info.doc,
+                signature: info.signature
             }
 
             socket
@@ -2512,7 +2517,11 @@ defmodule BtAttachWeb.WorkspaceLive do
           # both flags are re-derived from the live image when a clean tab is
           # re-activated (see the `%{} = existing` branch above).
           disk_differs: info.disk_differs,
-          runtime_only: info.runtime_only
+          runtime_only: info.runtime_only,
+          # The method's `///` doc-comment + signature for the read-only doc
+          # block (BT-2558); nil when the method carries no doc / signature.
+          doc: info.doc,
+          signature: info.signature
         }
 
         socket
@@ -2537,7 +2546,12 @@ defmodule BtAttachWeb.WorkspaceLive do
         %{
           source: if(is_binary(result["source"]), do: result["source"], else: ""),
           disk_differs: result["disk_differs"] == true,
-          runtime_only: runtime_only?(result)
+          runtime_only: runtime_only?(result),
+          # BT-2558: the method's `///` doc-comment and signature, carried so the
+          # editor can show a read-only doc block alongside the editable body.
+          # `nil` when the method has no doc / no resolvable signature.
+          doc: doc_text(result["doc"]),
+          signature: doc_text(result["signature"])
         }
 
       # Facade returned a value but not the expected map (sourceless / malformed
@@ -2557,8 +2571,33 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Defaults for a method with no resolvable image source: an empty editable buffer
-  # and no divergence badges.
-  defp empty_source_info, do: %{source: "", disk_differs: false, runtime_only: false}
+  # and no divergence badges (and no doc block — BT-2558).
+  defp empty_source_info,
+    do: %{source: "", disk_differs: false, runtime_only: false, doc: nil, signature: nil}
+
+  # Normalise a browse-payload doc/signature field to a non-empty binary or nil.
+  # The op already returns `null` (decoded to nil) for absent fields; this also
+  # drops a stray empty string so the editor never shows a blank doc block.
+  defp doc_text(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      _ -> value
+    end
+  end
+
+  defp doc_text(_), do: nil
+
+  # The class' comment text (`browse-class-definition` → `comment`) for the
+  # class-definition tab's read-only doc block (BT-2558). `nil` when the class
+  # carries no comment or the browse fails — the editor then shows no doc block.
+  # This is the same comment `Beamtalk help:` renders, so the browser and the
+  # `help:` send agree on the docs for a class.
+  defp class_comment(socket, class) do
+    case Facade.dispatch(:browse_class_definition, %{class: class}, ctx(socket)) do
+      {:value, %{"comment" => comment}} -> doc_text(comment)
+      _ -> nil
+    end
+  end
 
   # Query senders/implementors of the active method's selector (`nav-query`) and
   # open the result popover. A tab with no selector (a class-definition tab) is a
@@ -2708,7 +2747,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     base: last-compiled source (dirty = source != base),
   #     dirty: boolean,
   #     disk_differs: boolean,   # methods only — unflushed live `>>` patch; snapshot at open, set true on compile
-  #     runtime_only: boolean    # methods only — sourceless runtime method at open
+  #     runtime_only: boolean,   # methods only — sourceless runtime method at open
+  #     doc: binary | nil,       # BT-2558 read-only doc block: method `///` doc / class comment
+  #     signature: binary | nil  # BT-2558 method signature (nil for a class-definition tab)
   #   }
   #
   # The cockpit opens with one starter method tab so the editor is never empty
@@ -2726,7 +2767,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       base: "",
       dirty: false,
       disk_differs: false,
-      runtime_only: false
+      runtime_only: false,
+      doc: nil,
+      signature: nil
     }
 
     socket
@@ -2799,14 +2842,25 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Open (or re-focus) a class-definition tab for the active tab's class. A def
-  # tab evals its definition source on compile (saving compiles the class).
+  # tab evals its definition source on compile (saving compiles the class). On
+  # first open it also reads the class' comment (BT-2558) so the editor can show
+  # it as a read-only documentation block above the editable definition body.
   defp open_definition(socket) do
     class = active_tab(socket.assigns).class
     id = "def:" <> class
 
     case find_tab(socket, id) do
-      %{} ->
-        activate_tab(socket, id)
+      %{} = existing ->
+        # Parity with the method-tab re-activation path: refresh the read-only
+        # doc block from the live image so an out-of-band class comment change
+        # (MCP `save_class`, a `>>` patch) shows on re-focus instead of the
+        # snapshot taken at first open. Only `doc:` is touched — the editable
+        # definition buffer and its dirty flag are left untouched.
+        refreshed = %{existing | doc: class_comment(socket, class)}
+
+        socket
+        |> update_active_tab_by_id(id, fn _ -> refreshed end)
+        |> activate_tab(id)
 
       nil ->
         tab = %{
@@ -2819,7 +2873,11 @@ defmodule BtAttachWeb.WorkspaceLive do
           base: "",
           dirty: false,
           disk_differs: false,
-          runtime_only: false
+          runtime_only: false,
+          # The class comment as the doc block; no per-method signature on a
+          # class-definition tab.
+          doc: class_comment(socket, class),
+          signature: nil
         }
 
         socket
@@ -4925,6 +4983,24 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
 
                 <div class="panel-body">
+                  <%!-- Read-only documentation block (BT-2558): the active
+                       method's signature + rendered `///` doc-comment, or — on a
+                       class-definition tab — the class comment. Distinct from the
+                       editable source body below, and shown to every role (it
+                       rides the `:read`-capability browse ops). The doc text is
+                       rendered to safe HTML by `BtAttach.DocFormat` (author text
+                       is escaped first), so `{...}` interpolation is safe. --%>
+                  <% doc_tab = active_tab(assigns) %>
+                  <section
+                    :if={doc_tab.doc || doc_tab.signature}
+                    class="doc-block"
+                    aria-label="Documentation"
+                  >
+                    <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
+                    <div :if={doc_tab.doc} class="doc-body">
+                      {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                    </div>
+                  </section>
                   <%= if @role == :owner do %>
                     <%!-- ⌘S submits this editor form via the KeyboardShortcuts
                          hook (BT-2485): the chord request-submits the form so
