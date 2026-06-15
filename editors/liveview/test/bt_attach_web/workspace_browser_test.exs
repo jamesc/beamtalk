@@ -731,6 +731,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   # pointer stops over a token for the hover delay — so we move the synthetic
   # pointer onto the token once and then leave it; `assert_has` polls for the
   # resulting `.cm-hover-doc` tooltip while the async server round-trip lands.
+  #
+  # The event MUST be dispatched on the token element itself, not the `.cm-editor`
+  # root: CM's hover plugin ignores any mousemove whose `target` is not inside
+  # `view.contentDOM` (`.cm-content`). The token span is inside `.cm-content`, and
+  # `bubbles: true` still carries the event up to the plugin's listener on the
+  # editor root.
   defp hover_token(conn, selector) do
     evaluate(conn, """
     (() => {
@@ -739,8 +745,7 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
       if (!el) throw new Error("hover target not found: " + sel);
       const r = el.getBoundingClientRect();
       const x = r.left + r.width / 2, y = r.top + r.height / 2;
-      const editor = el.closest(".cm-editor");
-      editor.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: x, clientY: y}));
+      el.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: x, clientY: y}));
     })()
     """)
   end

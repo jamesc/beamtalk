@@ -61,8 +61,11 @@ export function backendHover(requestHover) {
   })
 }
 
-// The identifier token covering `pos`, as {from, to}. Returns an empty range
-// (from === to) when `pos` is not inside an identifier.
+// The identifier token at `pos`, as {from, to}. Grows left then right over
+// identifier characters, so a pointer resting just after a token (e.g. on the
+// space following it) still resolves that token — benign, and matches the
+// completion plugin's `matchBefore` behaviour. Returns an empty range
+// (from === to) only when there is no identifier on either side of `pos`.
 function wordAt(state, pos) {
   const line = state.doc.lineAt(pos)
   const s = line.text
@@ -79,6 +82,12 @@ function wordAt(state, pos) {
 // same event (a `{:reply, …}` from `handle_event`), resolving the callback. A
 // reply that carries no session / an unreachable workspace / nothing to show
 // resolves to "" (the handler still replies ""), so no tooltip opens.
+//
+// If the LiveView socket drops mid-flight the callback never fires and this
+// Promise stays pending — benign (no tooltip ever appears, CM drops it when the
+// editor is destroyed) and the same accepted gap as `completionQuery`. The
+// correct fix when it matters is a shared per-hook cancel signal, not a local
+// try/catch — left uncancelled deliberately.
 export function hoverQuery(pushEvent) {
   return (linePrefix) =>
     new Promise((resolve) => {

@@ -471,6 +471,11 @@ defmodule BtAttach.Workspace do
   # the term-returning op layer so the `{docs, _}` term arrives live (no JSON
   # edge). `session_pid` is passed as `dispatch/4`'s SessionPid so the op
   # resolves the session's bindings for receiver classification (BT-1045).
+  #
+  # Unlike `dispatch_complete`, no `cursor` is sent: completion uses `cursor`'s
+  # presence to switch between bare-prefix and context-aware modes (BT-783),
+  # whereas hover always resolves the hovered token against its line context, so
+  # the distinction does not apply here.
   defp dispatch_hover(session_pid, code) do
     request = %{"op" => "hover", "code" => code}
 
