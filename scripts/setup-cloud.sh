@@ -389,7 +389,6 @@ ERRORS=0
 PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
 PIN_ELIXIR="$(awk '/^elixir[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
 PIN_REBAR="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
-PIN_NODE="$(awk '/^nodejs[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
 PIN_RUST="$(awk -F'"' '/^[[:space:]]*channel[[:space:]]*=/{print $2}' "${REPO_ROOT}/rust-toolchain.toml" 2>/dev/null)"
 # Elixir's pin carries an -otp-NN suffix that `elixir --version` never prints,
 # so compare against just the numeric Elixir version (e.g. 1.20.1-otp-28 -> 1.20.1).
@@ -448,13 +447,6 @@ else
 fi
 check_version "rebar3" "${PIN_REBAR}" "${REBAR_VER}"
 
-if have node; then
-  NODE_VER="$(node --version 2>/dev/null | sed 's/^v//')"
-else
-  NODE_VER=""
-fi
-check_version "node" "${PIN_NODE}" "${NODE_VER}"
-
 if have rustc; then
   RUST_VER="$(rustc --version 2>/dev/null | awk '{print $2}')"
 else
@@ -462,9 +454,12 @@ else
 fi
 check_version "rustc" "${PIN_RUST}" "${RUST_VER}"
 
-# Remaining tools have no pin — presence is enough. (mix tracks elixir, npm
-# tracks node; cargo tracks rustc.)
-for cmd in cargo mix npm gh just; do
+# Remaining tools are presence-only. node is installed via NodeSource LTS (not
+# mise-pinned in the cloud path, and skipped when already present), so the
+# .tool-versions nodejs pin isn't a guarantee here — asserting it would fail
+# spuriously on any LTS patch drift. mix tracks elixir, npm tracks node, cargo
+# tracks rustc.
+for cmd in cargo mix node npm gh just; do
   check_present "$cmd"
 done
 
