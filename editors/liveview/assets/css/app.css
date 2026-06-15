@@ -556,6 +556,19 @@
 }
 .cm-inline-result-toggle:hover { color: var(--ink); }
 
+/* Live-image hover tooltips (BT-2555): signature + doc-comment docs sourced
+   from the running session. The docs are the same plain text `:help` shows in
+   the REPL, rendered verbatim in a <pre>; cap the size and let it scroll so a
+   class with a long method listing can't fill the viewport. */
+.cm-tooltip .cm-hover-doc {
+  max-width: 42rem; max-height: 22rem; overflow: auto;
+}
+.cm-tooltip .cm-hover-doc pre {
+  margin: 0; padding: 6px 9px; white-space: pre-wrap; overflow-wrap: break-word;
+  font-family: var(--code-font, ui-monospace, monospace); font-size: 12px;
+  color: var(--ink); background: var(--code-bg);
+}
+
 .actionbar {
   flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0 0 0;
 }

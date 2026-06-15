@@ -58,6 +58,10 @@ defmodule BtAttach.FacadeTest do
     # BT-2544: backend-driven autocomplete for the CodeMirror editors.
     def complete(pid, code),
       do: record({:complete, pid, code}) && {:ok, ["size", "sizeWith:"]}
+
+    # BT-2555: live-image hover docs for the CodeMirror editors.
+    def hover(pid, code),
+      do: record({:hover, pid, code}) && {:ok, "== Integer < Number =="}
   end
 
   setup do
@@ -78,7 +82,7 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:flush) == :execute
       assert Facade.capability(:reload) == :execute
 
-      for read <- ~w(info inspect bindings actors processes sessions complete
+      for read <- ~w(info inspect bindings actors processes sessions complete hover
                      subscribe_transcript subscribe_bindings subscribe_actors
                      subscribe_classes
                      subscribe_object unsubscribe_object pid_stats
@@ -280,6 +284,32 @@ defmodule BtAttach.FacadeTest do
 
       assert Facade.dispatch(:complete, %{session_pid: self(), code: "s"}, observer) ==
                {:ok, ["size", "sizeWith:"]}
+    end
+  end
+
+  describe "live-image hover (BT-2555)" do
+    test "hover routes to the client and passes the session pid + line through" do
+      assert Facade.dispatch(:hover, %{session_pid: self(), code: "Integer"}) ==
+               {:ok, "== Integer < Number =="}
+
+      assert {:hover, self(), "Integer"} in RecordingClient.calls()
+    end
+
+    test "a bad shape is invalid params, with no dist call" do
+      assert Facade.dispatch(:hover, %{session_pid: :nope, code: "x"}) ==
+               {:error, :invalid_params}
+
+      assert Facade.dispatch(:hover, %{session_pid: self(), code: 42}) ==
+               {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may hover (read capability)" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:hover, %{session_pid: self(), code: "Integer"}, observer) ==
+               {:ok, "== Integer < Number =="}
     end
   end
 

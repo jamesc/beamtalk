@@ -109,6 +109,33 @@ handle_term(<<"complete">>, Params, Msg, SessionPid) ->
                 get_completions(Code)
         end,
     {completions, Completions};
+handle_term(<<"hover">>, Params, Msg, SessionPid) ->
+    %% BT-2555: live-image hover for the cockpit CodeMirror editors. `code` is
+    %% the editor line up to (and including) the hovered token. We resolve the
+    %% token against the LIVE class registry — a bare class name → its docs, a
+    %% `Receiver selector` pair → that method's docs — and format signature +
+    %% doc-comment markdown via beamtalk_repl_docs, the SAME live doc engine the
+    %% REPL `:help` uses (no forked hover engine; the static LSP path in
+    %% hover_provider.rs reads on-disk ASTs and so cannot see REPL-defined or
+    %% live-patched classes — this can). Pure reflection, runs no user code, so
+    %% it is a `:read` op (the Observer may hover).
+    Code = maps:get(<<"code">>, Params, <<>>),
+    case Code of
+        <<>> ->
+            {docs, <<>>};
+        _ ->
+            %% Resolve bindings the same way `complete` does so an instance
+            %% receiver that is a bound variable classifies (BT-1045). Hover is
+            %% answered on a side WebSocket session with no user bindings, so we
+            %% resolve the caller's main session via the protocol-decoded id.
+            BindingPid = beamtalk_session_table:resolve_pid(
+                beamtalk_repl_protocol:get_session(Msg), SessionPid
+            ),
+            SessionBindings = get_session_bindings(BindingPid),
+            WorkspaceBindings = get_workspace_bindings(),
+            Bindings = maps:merge(WorkspaceBindings, SessionBindings),
+            {docs, hover_docs(Code, Bindings)}
+    end;
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
@@ -772,6 +799,86 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
              || S <- MethodSelectors,
                 binary:match(atom_to_binary(S, utf8), Prefix) =:= {0, byte_size(Prefix)}
             ])
+    end.
+
+-doc """
+Resolve hover documentation for the hovered token (BT-2555).
+
+`Code` is the editor line up to and including the hovered token; we reuse
+`parse_receiver_and_prefix/1` (the completion parser) so the trailing token is
+the hovered word and the token before it (if any) is its receiver:
+
+  * bare class name (`Counter`)            → that class's live docs
+  * `Receiver selector` (`42 factorial`)   → that method's live docs
+  * multi-token receiver expression        → class-name hover only (full
+                                             receiver inference is future work)
+
+Returns the formatted markdown binary, or `<<>>` when nothing resolves (the
+client shows no tooltip): a missing class/selector is a `{error, _}` return that
+degrades to `<<>>`, since hover is advisory. This does not *catch* exceptions —
+an unexpected throw in `beamtalk_repl_docs` propagates and surfaces to the
+`rpc`-attached client as `{badrpc, _}`, which the Elixir layer maps to an empty
+hover, so the system still degrades cleanly.
+""".
+-spec hover_docs(binary(), map()) -> binary().
+hover_docs(Code, Bindings) ->
+    case parse_receiver_and_prefix(Code) of
+        {expression, _ReceiverExpr, Word} ->
+            %% Multi-token receiver: only offer hover when the hovered token is
+            %% itself a class name. Selector hover on an inferred expression
+            %% receiver is deferred (full receiver inference).
+            hover_class(Word, Bindings);
+        {_Receiver, <<>>} ->
+            %% Empty trailing token (line ends in whitespace). Defensive: the JS
+            %% `wordAt` always ends `code` at the last char of an identifier, so
+            %% this is unreachable from the client path — nothing to hover.
+            <<>>;
+        {undefined, Word} ->
+            hover_class(Word, Bindings);
+        {Receiver, Word} ->
+            hover_method(Receiver, Word, Bindings)
+    end.
+
+-doc "Hover docs for a bare token that is a class name; `<<>>` otherwise.".
+-spec hover_class(binary(), map()) -> binary().
+hover_class(<<>>, _Bindings) ->
+    <<>>;
+hover_class(Word, Bindings) ->
+    case classify_receiver(Word, Bindings) of
+        {class, ClassName} ->
+            hover_format(fun() -> beamtalk_repl_docs:format_class_docs(ClassName) end);
+        %% A bare lowercase token (a binding/instance) is intentionally NOT
+        %% hovered in v1: hover targets class names + explicit receiver→selector.
+        _ ->
+            <<>>
+    end.
+
+-doc """
+Hover docs for a `Receiver selector` pair, picking the instance-side or
+class-side doc lookup from how the receiver classifies (mirroring how
+`complete` offers class-side vs instance-side selectors for a receiver).
+""".
+-spec hover_method(binary(), binary(), map()) -> binary().
+hover_method(Receiver, Selector, Bindings) ->
+    case classify_receiver(Receiver, Bindings) of
+        {class, ClassName} ->
+            hover_format(fun() ->
+                beamtalk_repl_docs:format_method_doc_class_side(ClassName, Selector)
+            end);
+        {instance, ClassName} ->
+            hover_format(fun() ->
+                beamtalk_repl_docs:format_method_doc(ClassName, Selector)
+            end);
+        undefined ->
+            <<>>
+    end.
+
+-doc "Run a `{ok, Bin} | {error, _}` doc lookup, mapping anything but ok to `<<>>`.".
+-spec hover_format(fun(() -> {ok, binary()} | {error, term()})) -> binary().
+hover_format(Lookup) ->
+    case Lookup() of
+        {ok, Docs} when is_binary(Docs) -> Docs;
+        _ -> <<>>
     end.
 
 -doc """
@@ -1675,6 +1782,8 @@ base_ops() ->
         <<"eval">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"trace">>]},
         <<"stdin">> => #{<<"params">> => [<<"value">>]},
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
+        %% BT-2555: live-image hover docs for the cockpit editors.
+        <<"hover">> => #{<<"params">> => [<<"code">>]},
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
