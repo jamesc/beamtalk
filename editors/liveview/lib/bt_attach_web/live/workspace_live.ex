@@ -4504,7 +4504,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                  toggle) over a protocol-grouped method list, driven by the
                  BT-2488 browse ops (ADR 0096). The Tweaks panel that used to sit
                  below it now lives in the top-bar settings dropdown. --%>
-            <div class={["col", !@show_browser && "hidden"]}>
+            <div class="col" inert={!@show_browser}>
               <div class="browser-split">
                 <.system_browser_classes
                   browser_view={@browser_view}
@@ -4534,7 +4534,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                    `hidden`, not removed) so the `#transcript` stream container is
                    always in the DOM for `stream_insert` regardless of the active
                    tab. --%>
-              <div class={["dock", !@show_dock && "collapsed"]} style="order:2;">
+              <div
+                class={["dock", !@show_dock && "collapsed"]}
+                style="order:2;"
+                inert={!@show_dock}
+              >
                 <div id="workspace-dock" class="panel">
                   <div class="panel-head">
                     <span class="dock-tabs" role="tablist">
@@ -5088,7 +5092,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
 
             <%!-- RIGHT — Bindings + Inspector (348px), with ChangeLog + Transcript --%>
-            <div class={["col", !@show_inspector && "hidden"]}>
+            <div class="col" inert={!@show_inspector}>
               <div class="right-split">
                 <div id="bindings-panel" class="panel bindings-panel">
                   <div class="panel-head">

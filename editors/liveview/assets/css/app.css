@@ -197,7 +197,9 @@
    `.inspector-hidden` grid-track → 0px (animated), with `.col`'s `overflow: hidden`
    + `min-width: 0` clipping the content. The element stays a grid item so the other
    columns keep their tracks — `display: none` here would evict it from grid
-   auto-placement and shift the editor into the 0px track (BT-2559 review). */
+   auto-placement and shift the editor into the 0px track (BT-2559 review). The
+   template marks the collapsed column `inert` so its clipped (but still
+   laid-out) controls drop out of tab order and the AT tree. */
 
 /* panel chrome */
 .panel {
