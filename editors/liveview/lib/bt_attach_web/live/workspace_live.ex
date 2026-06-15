@@ -5152,8 +5152,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                       type="button"
                       class="panel-close"
                       phx-click="close_inspector"
-                      aria-label="Close Inspector panel"
-                      title="Close panel"
+                      aria-label="Close the Inspector and Bindings column"
+                      title="Close the Inspector + Bindings column"
                     >
                       ×
                     </button>
