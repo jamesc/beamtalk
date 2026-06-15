@@ -635,7 +635,7 @@ just test-parity
 
 ### 10. LiveView IDE (Cockpit) Tests
 
-The Phoenix LiveView IDE under `editors/liveview` is tested in three layers,
+The Phoenix LiveView IDE under `editors/liveview` is tested in four layers,
 gated by tags in `test/test_helper.exs`:
 
 | Layer | Tag | Needs | Example |
