@@ -1646,6 +1646,77 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "n"
   end
 
+  # ── REPL meta-commands (BT-2543 follow-up) ──────────────────────────────────
+  #
+  # `:`-prefixed commands are an IDE concern, never sent to `eval` (which would
+  # choke compiling `:h` as Beamtalk). They drive a pane (`:help X` focuses the
+  # System Browser) or point at one (`:bindings` → Bindings pane); unknown colon
+  # input gets a friendly note rather than a parse error.
+
+  test ":help with no argument prints an info entry, not an eval error", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    html = view |> form("#repl-form") |> render_submit(%{expr: ":help"})
+    # Routed by the IDE: a muted `:info` entry, NOT an `err` entry, and never
+    # round-tripped through eval (which would reject `:help` as a parse error).
+    assert has_element?(view, ".repl-entry.meta")
+    refute has_element?(view, ".repl-entry.err")
+    assert html =~ "IDE REPL"
+  end
+
+  test ":help <Class> focuses the System Browser on that class", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    class = "ReplHelp#{System.unique_integer([:positive])}"
+    # Define the class in the image so it is in the live symbol index.
+    view
+    |> form("#repl-form")
+    |> render_submit(%{expr: "Object subclass: #{class}\n  greet => 1"})
+
+    html = view |> form("#repl-form") |> render_submit(%{expr: ":help #{class}"})
+    # Confirmation in the scrollback …
+    assert html =~ "Opened #{class} in the System Browser"
+    refute has_element?(view, ".repl-entry.err")
+    # … and the System Browser is now pointed at the class: its protocol pane
+    # heads on the class (`selected_class` set + protocols loaded).
+    assert view |> element(".panel-head", class) |> render() =~ "methods"
+  end
+
+  test ":help <Unknown> reports no such class instead of opening the browser", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    html = view |> form("#repl-form") |> render_submit(%{expr: ":help NoSuchClassHere"})
+    assert html =~ "No class named NoSuchClassHere"
+  end
+
+  test ":bindings points at the Bindings pane rather than evaluating", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    html = view |> form("#repl-form") |> render_submit(%{expr: ":bindings"})
+    assert has_element?(view, ".repl-entry.meta")
+    refute has_element?(view, ".repl-entry.err")
+    assert html =~ "Bindings pane"
+  end
+
+  test "an unrecognised :command gets a friendly note, never a parse error", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    html = view |> form("#repl-form") |> render_submit(%{expr: ":wat"})
+    assert has_element?(view, ".repl-entry.meta")
+    refute has_element?(view, ".repl-entry.err")
+    assert html =~ "Unknown command :wat"
+  end
+
+  test "`Beamtalk help: Class` evaluates AND focuses the System Browser", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    class = "ReplHelpSend#{System.unique_integer([:positive])}"
+
+    view
+    |> form("#repl-form")
+    |> render_submit(%{expr: "Object subclass: #{class}\n  greet => 1"})
+
+    # A real `help:` send: its help text still lands as a normal `→ result`
+    # entry, and the browser additionally navigates to the subject class.
+    view |> form("#repl-form") |> render_submit(%{expr: "Beamtalk help: #{class}"})
+    refute has_element?(view, ".repl-entry.err")
+    assert view |> element(".panel-head", class) |> render() =~ "methods"
+  end
+
   describe "REPL tab — read-only Observer (BT-2421)" do
     setup %{conn: conn} do
       Application.put_env(:bt_attach, :oidc, %{
@@ -1685,6 +1756,22 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       # the facade/RBAC and surfaced as an error entry, not crash the LiveView.
       html = render_hook(view, "repl_eval", %{"expr" => "3 + 4"})
       assert html =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
+
+    test "an Observer can run :help <Class> — meta routing performs no privileged op",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+      # `:help` is a client-side meta-command: it routes through `handle_repl_meta`
+      # (driving the System Browser via the `:read` `:symbols` op), never the `:eval`
+      # op. So an Observer who cannot eval can still navigate with it — no 403, no
+      # crash — regardless of whether the class is in the symbol index.
+      html = render_hook(view, "repl_eval", %{"expr" => ":help Object"})
+      refute html =~ "Not authorized"
+      # Routes to an `:info` meta entry (either "Opened Object" or, if the symbol
+      # index lacks it, "No class named Object") — never an `:eval` RBAC error.
+      assert has_element?(view, ".repl-entry.meta")
+      refute has_element?(view, ".repl-entry.err")
       assert Process.alive?(view.pid)
     end
   end
