@@ -203,6 +203,27 @@ esac
 export ELIXIR_ERL_OPTIONS="\${ELIXIR_ERL_OPTIONS:-+fnu}"
 PROFILE
   ok "Toolchain PATH persisted to /etc/profile.d/beamtalk-mise.sh"
+
+  # 6. Decommission the stale esl-erlang baked into the cloud base image. It
+  #    ships an old OTP (27.x) from the Erlang Solutions apt repo and installs
+  #    /usr/bin/erl, which shadows the mise-pinned OTP for any shell that hasn't
+  #    sourced the profile.d shims — and silently passed the old presence-only
+  #    verify. We install the BEAM toolchain exclusively via mise now, so purge
+  #    the package and its apt source to stop it from ever coming back.
+  if [ "${SKIP_ERLANG:-}" != "1" ] && dpkg -s esl-erlang &>/dev/null; then
+    info "Removing stale esl-erlang (apt OTP) — toolchain is mise-managed now..."
+    require_sudo
+    $SUDO apt-get purge -y -qq esl-erlang >/dev/null 2>&1 || true
+    $SUDO apt-get autoremove -y -qq >/dev/null 2>&1 || true
+    $SUDO rm -f /etc/apt/sources.list.d/erlang-solutions.list \
+                /etc/apt/keyrings/erlang-solutions.gpg 2>/dev/null || true
+    hash -r 2>/dev/null || true
+    if dpkg -s esl-erlang &>/dev/null; then
+      warn "esl-erlang still present after purge"
+    else
+      ok "esl-erlang removed"
+    fi
+  fi
 fi
 
 # --- System packages ---
