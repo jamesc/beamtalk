@@ -43,6 +43,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
 
+# The repo ships a committed mise.toml. mise refuses to read ANY config in a
+# directory whose config is untrusted — including .tool-versions — so a fresh
+# cloud container (no trust record in mise's state dir) makes `mise install`
+# bail out entirely, silently skipping the BEAM toolchain. mise's trust store
+# lives in ~/.local/state/mise and is only intermittently captured by the cloud
+# snapshot, which is exactly the "elixir isn't always installed" flakiness.
+# Trust the checkout via env var so it holds regardless of snapshot state; this
+# is persisted to /etc/profile.d below so every future shell trusts it too.
+case ":${MISE_TRUSTED_CONFIG_PATHS:-}:" in
+  *":${REPO_ROOT}:"*) ;;
+  *) export MISE_TRUSTED_CONFIG_PATHS="${REPO_ROOT}${MISE_TRUSTED_CONFIG_PATHS:+:${MISE_TRUSTED_CONFIG_PATHS}}" ;;
+esac
+
 # --- Helpers ---
 
 if [ -t 1 ]; then
@@ -126,6 +139,11 @@ else
     ok "mise installed"
   fi
 
+  # Record trust in mise's state dir too (belt-and-suspenders alongside
+  # MISE_TRUSTED_CONFIG_PATHS) so a bare `mise` invocation by the user — in a
+  # shell that didn't source the env var — still resolves the pinned toolchain.
+  "${MISE_BIN}" trust "${REPO_ROOT}" >/dev/null 2>&1 || true
+
   # 2. Erlang + Elixir from .tool-versions. A GITHUB_TOKEN (if a valid one is in
   #    the env) lifts the unauthenticated GitHub API rate limit mise hits while
   #    resolving release lists; it degrades gracefully without one.
@@ -176,9 +194,36 @@ case ":\${PATH}:" in
   *":${MISE_SHIMS}:"*) ;;
   *) export PATH="${MISE_SHIMS}:\${PATH}" ;;
 esac
+# Trust the repo's mise.toml without depending on mise's snapshot-fragile trust
+# store, so .tool-versions always resolves the pinned BEAM toolchain.
+case ":\${MISE_TRUSTED_CONFIG_PATHS:-}:" in
+  *":${REPO_ROOT}:"*) ;;
+  *) export MISE_TRUSTED_CONFIG_PATHS="${REPO_ROOT}\${MISE_TRUSTED_CONFIG_PATHS:+:\${MISE_TRUSTED_CONFIG_PATHS}}" ;;
+esac
 export ELIXIR_ERL_OPTIONS="\${ELIXIR_ERL_OPTIONS:-+fnu}"
 PROFILE
   ok "Toolchain PATH persisted to /etc/profile.d/beamtalk-mise.sh"
+
+  # 6. Decommission the stale esl-erlang baked into the cloud base image. It
+  #    ships an old OTP (27.x) from the Erlang Solutions apt repo and installs
+  #    /usr/bin/erl, which shadows the mise-pinned OTP for any shell that hasn't
+  #    sourced the profile.d shims — and silently passed the old presence-only
+  #    verify. We install the BEAM toolchain exclusively via mise now, so purge
+  #    the package and its apt source to stop it from ever coming back.
+  if [ "${SKIP_ERLANG:-}" != "1" ] && dpkg -s esl-erlang &>/dev/null; then
+    info "Removing stale esl-erlang (apt OTP) — toolchain is mise-managed now..."
+    require_sudo
+    $SUDO apt-get purge -y -qq esl-erlang >/dev/null 2>&1 || true
+    $SUDO apt-get autoremove -y -qq >/dev/null 2>&1 || true
+    $SUDO rm -f /etc/apt/sources.list.d/erlang-solutions.list \
+                /etc/apt/keyrings/erlang-solutions.gpg 2>/dev/null || true
+    hash -r 2>/dev/null || true
+    if dpkg -s esl-erlang &>/dev/null; then
+      warn "esl-erlang still present after purge"
+    else
+      ok "esl-erlang removed"
+    fi
+  fi
 fi
 
 # --- System packages ---
@@ -187,7 +232,7 @@ info "Installing system packages..."
 case "$OS_ID" in
   ubuntu|debian)
     PKGS=""
-    for pkg in git gettext-base curl wget jq htop strace socat netcat-openbsd lsof unzip; do
+    for pkg in git gettext-base curl wget jq htop strace socat netcat-openbsd lsof unzip shellcheck; do
       if ! dpkg -s "$pkg" &>/dev/null; then
         PKGS="$PKGS $pkg"
       fi
@@ -293,32 +338,9 @@ else
   fi
 fi
 
-# --- streamlinear CLI ---
-
-if have streamlinear-cli; then
-  ok "streamlinear-cli already installed"
-else
-  info "Installing streamlinear CLI..."
-  # npm install -g from a GitHub URL leaves dangling symlinks because npm clones
-  # into a temp dir that gets cleaned up. npm link fails because the prepare
-  # script calls simple-git-hooks. Instead, clone to a permanent location,
-  # install mcp deps, and manually symlink the binaries.
-  STREAMLINEAR_DIR="/opt/streamlinear"
-  require_sudo
-  if [[ ! -d "${STREAMLINEAR_DIR}" ]]; then
-    $SUDO git clone --depth 1 https://github.com/obra/streamlinear.git "${STREAMLINEAR_DIR}"
-  fi
-  if (cd "${STREAMLINEAR_DIR}/mcp" && $SUDO npm install --ignore-scripts 2>/dev/null); then
-    NPM_PREFIX="$(npm prefix -g)"
-    $SUDO ln -sf "${STREAMLINEAR_DIR}" "${NPM_PREFIX}/lib/node_modules/streamlinear"
-    $SUDO ln -sf "${STREAMLINEAR_DIR}/mcp/dist/index.js" "${NPM_PREFIX}/bin/streamlinear"
-    $SUDO ln -sf "${STREAMLINEAR_DIR}/mcp/dist/cli.js" "${NPM_PREFIX}/bin/streamlinear-cli"
-    $SUDO chmod +x "${STREAMLINEAR_DIR}/mcp/dist/index.js" "${STREAMLINEAR_DIR}/mcp/dist/cli.js"
-    ok "streamlinear-cli installed"
-  else
-    warn "streamlinear-cli installation failed — Linear skills won't be available"
-  fi
-fi
+# Linear integration is handled by the connected Linear MCP server (no local
+# CLI needed). The old streamlinear-cli install — a git clone + npm install on
+# every cold start — was removed once the skills moved to the MCP tools.
 
 # Install Hex + register the system rebar3 with Mix so `mix deps.get` works with
 # no further setup. `mix local.hex` fetches from builds.hex.pm, which some MITM
@@ -362,18 +384,88 @@ echo ""
 info "Verifying installations..."
 ERRORS=0
 
-for cmd in rustc cargo erl elixir mix node npm gh just rebar3; do
-  if have "$cmd"; then
-    ok "$cmd"
+# Read the pins so the assertions stay in lockstep with .tool-versions /
+# rust-toolchain.toml — the single sources of truth.
+PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
+PIN_ELIXIR="$(awk '/^elixir[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
+PIN_REBAR="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
+PIN_RUST="$(awk -F'"' '/^[[:space:]]*channel[[:space:]]*=/{print $2}' "${REPO_ROOT}/rust-toolchain.toml" 2>/dev/null)"
+# Elixir's pin carries an -otp-NN suffix that `elixir --version` never prints,
+# so compare against just the numeric Elixir version (e.g. 1.20.1-otp-28 -> 1.20.1).
+PIN_ELIXIR_NUM="${PIN_ELIXIR%%-otp-*}"
+
+# check_present NAME            — assert a command exists (no pin).
+check_present() {
+  if have "$1"; then
+    ok "$1"
   else
-    fail "$cmd NOT FOUND"
+    fail "$1 NOT FOUND"
     ERRORS=$((ERRORS + 1))
   fi
+}
+
+# check_version NAME EXPECTED ACTUAL — assert ACTUAL matches the EXPECTED pin.
+# An empty EXPECTED means there is no pin to check, so fall back to presence.
+check_version() {
+  local name="$1" expected="$2" actual="$3"
+  if [ -z "$actual" ]; then
+    fail "${name} NOT FOUND"
+    ERRORS=$((ERRORS + 1))
+  elif [ -z "$expected" ]; then
+    warn "${name} ${actual} (no pin to verify)"
+  elif [ "$actual" = "$expected" ]; then
+    ok "${name} ${actual} (matches pin)"
+  else
+    fail "${name} ${actual} != pinned ${expected}"
+    ERRORS=$((ERRORS + 1))
+  fi
+}
+
+# Pinned BEAM + Rust toolchain — assert the running binary equals the pin, not
+# just that *some* build is on PATH (an apt esl-erlang would otherwise mask a
+# mise toolchain that never installed).
+if have erl; then
+  ERL_VER="$(erl -noshell -eval \
+    '{ok,V}=file:read_file(filename:join([code:root_dir(),"releases",erlang:system_info(otp_release),"OTP_VERSION"])),io:format("~s",[string:trim(V)]),halt().' \
+    2>/dev/null)"
+else
+  ERL_VER=""
+fi
+check_version "erlang" "${PIN_ERLANG}" "${ERL_VER}"
+
+if have elixir; then
+  ELIXIR_VER="$(elixir --version 2>/dev/null | grep -o 'Elixir [0-9][0-9.]*' | awk '{print $2}')"
+else
+  ELIXIR_VER=""
+fi
+check_version "elixir" "${PIN_ELIXIR_NUM}" "${ELIXIR_VER}"
+
+if have rebar3; then
+  REBAR_VER="$(rebar3 --version 2>/dev/null | awk '/^rebar[[:space:]]/{print $2}')"
+else
+  REBAR_VER=""
+fi
+check_version "rebar3" "${PIN_REBAR}" "${REBAR_VER}"
+
+if have rustc; then
+  RUST_VER="$(rustc --version 2>/dev/null | awk '{print $2}')"
+else
+  RUST_VER=""
+fi
+check_version "rustc" "${PIN_RUST}" "${RUST_VER}"
+
+# Remaining tools are presence-only. node is installed via NodeSource LTS (not
+# mise-pinned in the cloud path, and skipped when already present), so the
+# .tool-versions nodejs pin isn't a guarantee here — asserting it would fail
+# spuriously on any LTS patch drift. mix tracks elixir, npm tracks node, cargo
+# tracks rustc.
+for cmd in cargo mix node npm gh just; do
+  check_present "$cmd"
 done
 
 echo ""
 if [ "$ERRORS" -gt 0 ]; then
-  fail "${ERRORS} tool(s) failed to install"
+  fail "${ERRORS} tool(s) missing or not matching pins"
   exit 1
 else
   info "All dependencies installed successfully!"

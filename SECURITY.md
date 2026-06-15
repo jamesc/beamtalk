@@ -42,7 +42,7 @@ When using Beamtalk, follow these security guidelines:
 ### Development Environment
 - Never commit `.env` files or API tokens to git
 - Use environment variables for sensitive configuration
-- Keep your `GH_TOKEN` and `LINEAR_API_TOKEN` secure
+- Keep your `GH_TOKEN` secure
 
 ### Code Contributions
 - Validate all user input at system boundaries
