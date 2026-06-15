@@ -392,8 +392,11 @@ bench:
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Lint Elixir: format check
+lint-elixir: fmt-check-elixir
+
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-beamtalk lint-workaround-comments
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments
 
 # Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
 # reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders
@@ -441,11 +444,26 @@ fmt-check-rust:
     @echo "📋 Checking Rust formatting..."
     cargo fmt --all -- --check
 
+# Check Elixir code formatting (LiveView IDE)
+# `mix format` needs fetched deps (import_deps: [:phoenix] + HTML formatter
+# plugin), so fetch them first — mirrors `fmt-elixir` and `fmt-check-js`'s
+# `npm ci`, keeping `just lint-elixir` / the pre-push hook fresh-checkout-safe.
+[working-directory: 'editors/liveview']
+fmt-check-elixir:
+    @echo "📋 Checking Elixir formatting..."
+    mix deps.get --quiet
+    mix format --check-formatted
+    @echo "✅ Elixir formatting check passed"
+
 # Check all code formatting
+# Elixir formatting is enforced by the dedicated `liveview` CI job (which runs
+# `mix deps.get` first, required by `import_deps: [:phoenix]`). The cross-platform
+# `check` job has no Elixir deps fetched, so `fmt-check-elixir` is excluded here
+# and run via `just lint-elixir` / `just fmt-check-elixir` locally instead.
 [unix]
 fmt-check: fmt-check-rust fmt-check-erlang fmt-check-js fmt-check-beamtalk
 
-# Windows: skip Erlang and JS format checks (platform-agnostic, covered by Linux CI)
+# Windows: skip Erlang, JS, and Elixir format checks (platform-agnostic, covered by Linux CI)
 [windows]
 fmt-check: fmt-check-rust fmt-check-beamtalk
 
@@ -454,8 +472,19 @@ fmt-rust:
     @echo "✨ Formatting Rust code..."
     cargo fmt --all
 
-# Format all code (Rust + Erlang + JS + Beamtalk stdlib/test sources)
-fmt: fmt-rust fmt-erlang fmt-js fmt-beamtalk
+# Format Elixir code (LiveView IDE)
+# `.formatter.exs` declares `import_deps: [:phoenix]` and the LiveView HTML
+# formatter plugin, both of which need fetched deps — so a fresh checkout must
+# `mix deps.get` before `mix format` can run.
+[working-directory: 'editors/liveview']
+fmt-elixir:
+    @echo "✨ Formatting Elixir code..."
+    mix deps.get --quiet
+    mix format
+    @echo "✅ Elixir formatting complete"
+
+# Format all code (Rust + Erlang + JS + Elixir + Beamtalk stdlib/test sources)
+fmt: fmt-rust fmt-erlang fmt-js fmt-elixir fmt-beamtalk
 
 # Check JS/TS formatting (Biome)
 [working-directory: 'editors/vscode']
