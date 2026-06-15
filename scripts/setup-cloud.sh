@@ -474,6 +474,14 @@ echo ""
 info "Verifying installations..."
 ERRORS=0
 
+# The verify block is purely diagnostic: every capture is meant to degrade to an
+# empty string (→ "NOT FOUND") and be tallied in ERRORS, with a single exit at
+# the end. errexit/pipefail defeat that — a `$(awk … missing-file)` (exit 2) or a
+# version pipeline whose grep finds nothing (exit 1) would abort the whole script
+# with NO output before any check prints. Disable them for this section so verify
+# always runs to completion and reports what actually failed.
+set +e +o pipefail
+
 # Read the pins so the assertions stay in lockstep with .tool-versions /
 # rust-toolchain.toml — the single sources of truth.
 PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
