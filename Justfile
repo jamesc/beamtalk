@@ -445,9 +445,13 @@ fmt-check-rust:
     cargo fmt --all -- --check
 
 # Check Elixir code formatting (LiveView IDE)
+# `mix format` needs fetched deps (import_deps: [:phoenix] + HTML formatter
+# plugin), so fetch them first — mirrors `fmt-elixir` and `fmt-check-js`'s
+# `npm ci`, keeping `just lint-elixir` / the pre-push hook fresh-checkout-safe.
 [working-directory: 'editors/liveview']
 fmt-check-elixir:
     @echo "📋 Checking Elixir formatting..."
+    mix deps.get --quiet
     mix format --check-formatted
     @echo "✅ Elixir formatting check passed"
 
