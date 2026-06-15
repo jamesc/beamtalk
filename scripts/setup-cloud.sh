@@ -61,8 +61,11 @@ have() { command -v "$1" &>/dev/null; }
 #   2. the script's own parent dir — only when run from a file on disk
 #   3. the current working directory — the `curl … | bash` case, where the
 #      script arrives on stdin and BASH_SOURCE is unset (so guard it under set -u)
-# Then, if .tool-versions isn't at the guessed root, walk up from the cwd to
-# find it, so running from a subdirectory of the checkout still works.
+# Then, if .tool-versions isn't at the guessed root, locate the checkout: walk
+# up from the cwd (running from a subdirectory of the checkout), then look one
+# level down. The cloud builds the environment from a parent dir (cwd=/home/user)
+# with the checkout in a child (/home/user/beamtalk), so .tool-versions sits
+# *below* the cwd, not at or above it.
 if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
   REPO_ROOT="${CLAUDE_PROJECT_DIR}"
 elif [ -n "${BASH_SOURCE[0]:-}" ]; then
@@ -72,6 +75,7 @@ else
 fi
 if [ ! -f "${REPO_ROOT}/.tool-versions" ]; then
   _guess="${REPO_ROOT}"
+  # (a) Walk up from the cwd.
   _dir="$(pwd)"
   while [ "${_dir}" != "/" ]; do
     if [ -f "${_dir}/.tool-versions" ]; then
@@ -80,11 +84,42 @@ if [ ! -f "${REPO_ROOT}/.tool-versions" ]; then
     fi
     _dir="$(dirname "${_dir}")"
   done
-  # Surface the silent reroute — otherwise a wrong .tool-versions (e.g. a parent
-  # repo's) is impossible to trace back from the resolved toolchain pins.
-  [ "${REPO_ROOT}" = "${_guess}" ] || warn "REPO_ROOT adjusted to ${REPO_ROOT} (walked up from $(pwd))"
+  # (b) Not at/above the cwd — look one level down into the cwd's and $HOME's
+  #     children (the cloud's checkout-in-a-subdir layout). The [ -f ] guard
+  #     handles the no-match case where the glob stays literal.
+  if [ ! -f "${REPO_ROOT}/.tool-versions" ]; then
+    for _cand in "$(pwd)"/*/.tool-versions "${HOME:-/root}"/*/.tool-versions; do
+      [ -f "${_cand}" ] || continue
+      REPO_ROOT="$(cd "$(dirname "${_cand}")" && pwd)"
+      break
+    done
+  fi
+  # Surface the reroute — otherwise a wrong .tool-versions (e.g. a parent repo's)
+  # is impossible to trace back from the resolved toolchain pins.
+  [ "${REPO_ROOT}" = "${_guess}" ] || warn "REPO_ROOT resolved to ${REPO_ROOT} (searched from $(pwd))"
 fi
 TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
+
+# Last resort: no checkout on disk anywhere we looked (e.g. the cloud builds the
+# environment snapshot before the repo is cloned). Fetch the canonical pins from
+# the default branch so mise can still resolve the BEAM toolchain — the same
+# GitHub-asset path the rest of this script already relies on. The live session
+# later runs against the real checkout, which the SessionStart hook trusts.
+if [ ! -f "${TOOL_VERSIONS}" ]; then
+  _PINS_REF="${BEAMTALK_PINS_REF:-main}"
+  _PINS_DIR="$(mktemp -d)"
+  if curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 \
+       "https://raw.githubusercontent.com/jamesc/beamtalk/${_PINS_REF}/.tool-versions" \
+       -o "${_PINS_DIR}/.tool-versions" 2>/dev/null && [ -s "${_PINS_DIR}/.tool-versions" ]; then
+    # rust-toolchain.toml is optional — only the rustc pin assertion reads it.
+    curl -fsSL --retry 3 \
+      "https://raw.githubusercontent.com/jamesc/beamtalk/${_PINS_REF}/rust-toolchain.toml" \
+      -o "${_PINS_DIR}/rust-toolchain.toml" 2>/dev/null || true
+    REPO_ROOT="${_PINS_DIR}"
+    TOOL_VERSIONS="${REPO_ROOT}/.tool-versions"
+    warn "No checkout found — using BEAM pins from origin/${_PINS_REF}"
+  fi
+fi
 
 # The repo ships a committed mise.toml. mise refuses to read ANY config in a
 # directory whose config is untrusted — including .tool-versions — so a fresh
