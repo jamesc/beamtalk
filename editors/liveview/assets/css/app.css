@@ -371,6 +371,48 @@
 }
 
 /* ============================================================================
+   Read-only documentation block (BT-2558)
+   ----------------------------------------------------------------------------
+   The System Browser is the IDE's help destination: above the editable method /
+   class-definition body, `.doc-block` renders the method signature + its `///`
+   doc-comment (or, on a class-definition tab, the class comment) as formatted
+   docs. `flex: none` so it sits above the growing CodeMirror editor; the body
+   scrolls if a long doc would otherwise crowd the editor out. The HTML is
+   produced by `BtAttach.DocFormat` (a small, escaped Markdown subset).
+   ========================================================================== */
+.doc-block {
+  flex: none; max-height: 40%; overflow: auto;
+  margin-bottom: 8px; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; line-height: 1.5; color: var(--muted);
+}
+.doc-block .doc-sig {
+  color: var(--accent-2); font-family: var(--code-font, monospace);
+  font-size: 12px; font-weight: 600; margin-bottom: 6px;
+  padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  white-space: pre-wrap; word-break: break-word;
+}
+.doc-block .doc-body .doc-h {
+  color: var(--ink); font-size: 12px; font-weight: 700;
+  margin: 8px 0 4px; line-height: 1.3;
+}
+.doc-block .doc-body .doc-h:first-child { margin-top: 0; }
+.doc-block .doc-body .doc-p { margin: 4px 0; }
+.doc-block .doc-body .doc-list { margin: 4px 0; padding-left: 18px; }
+.doc-block .doc-body .doc-list li { margin: 2px 0; }
+.doc-block .doc-body code {
+  font-family: var(--code-font, monospace); font-size: 11.5px;
+  background: var(--code-bg); padding: 1px 4px; border-radius: 3px;
+}
+.doc-block .doc-body .doc-code {
+  margin: 6px 0; padding: 8px 10px; overflow-x: auto;
+  background: var(--code-bg); border-radius: 4px;
+}
+.doc-block .doc-body .doc-code code {
+  background: none; padding: 0; font-size: 11.5px; white-space: pre;
+}
+
+/* ============================================================================
    Workspace dock — tabbed Workspace / Transcript / Changes (BT-2490)
    ----------------------------------------------------------------------------
    Ported from the spike (spikes/cockpit-ux-spike/app.jsx + styles.css). One

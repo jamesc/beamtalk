@@ -478,6 +478,51 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has(".nav-popover .nav-pop-head", text: "Implementors")
   end
 
+  test "the System Browser renders method doc-comments and the class comment as docs (BT-2558)",
+       %{conn: conn} do
+    # A class with a class-level `///` comment and a method-level `///` doc — the
+    # text the browser must surface as formatted documentation (not a raw blob),
+    # consistent with `Beamtalk help:` which reads the same get_doc / __doc__.
+    class_src = """
+    /// DocBrowserCounter — a documented counter.
+    ///
+    /// ## Overview
+    /// Tracks a single integer value.
+    Actor subclass: DocBrowserCounter
+      state: value = 0
+
+      /// Increment the counter by one.
+      ///
+      /// ## Examples
+      /// ```beamtalk
+      /// c increment
+      /// ```
+      increment => self.value := self.value + 1
+    """
+
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    |> eval_do(class_src)
+    # Re-visit so the System Browser tree (a mount-time snapshot) picks up the
+    # freshly-defined class on the shared workspace node.
+    |> visit("/")
+    |> assert_has(".row[phx-value-class='DocBrowserCounter']", timeout: 10_000)
+    # Select the class, then open its `increment` method — open_method_tab browses
+    # the live method, whose payload now carries the signature + `///` doc.
+    |> click(".row[phx-value-class='DocBrowserCounter']")
+    |> click(".method-row[phx-value-selector='increment']")
+    # The read-only doc block renders the method's doc as formatted HTML — prose,
+    # a heading, and a fenced code block — distinct from the editable body.
+    |> assert_has("#method-editor .doc-block", timeout: 10_000)
+    |> assert_has("#method-editor .doc-block .doc-body", text: "Increment the counter by one.")
+    |> assert_has("#method-editor .doc-block .doc-h", text: "Examples")
+    # Opening the class definition surfaces the class comment as the doc block.
+    |> click("button[phx-click='open_definition']")
+    |> assert_has("#method-editor .doc-block .doc-body", text: "Tracks a single integer value.")
+    |> assert_has("#method-editor .doc-block .doc-h", text: "Overview")
+  end
+
   # ── Phase 3 floating inspector windows / overlay mode (BT-2493) ─────────────
   #
   # The Float toggle, opening / drilling / closing a floating window, and

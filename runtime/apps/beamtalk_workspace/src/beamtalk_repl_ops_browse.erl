@@ -36,8 +36,9 @@ only at the WebSocket edge. Validation failures return
 
 All four ops are **pure reflection**: class metadata (`get_doc`, `is_sealed`,
 `is_abstract`, `is_internal`, `instance_variables`, `field_defaults`), xref rows
-(`beamtalk_xref:defined_selectors/2`, `method_info/3`), and stored source text
-(`{method, Sel}` / `{class_method, Sel}` → `__source__`). None sends a
+(`beamtalk_xref:defined_selectors/2`, `method_info/3`), and stored method text
+(`{method, Sel}` / `{class_method, Sel}` → `__source__` / `__doc__` /
+`__signature__`). None sends a
 user-defined method to a value (no `printOn:` / `displayString` / `printString`),
 so the browse data source is safe to grant the **Observer** role (ADR 0091
 Decision 4). This is asserted, not assumed (see the tests).
@@ -266,7 +267,8 @@ browse_method_source(ClassName, ClassSide, Selector) ->
             {Line, SourceStatus, Provenance} = info_fields(
                 beamtalk_xref:method_info(ClassName, ClassSide, Selector)
             ),
-            Source = method_source_text(ClassPid, ClassSide, Selector, SourceStatus),
+            {Source, Doc, Signature} =
+                method_text_fields(ClassPid, ClassSide, Selector, SourceStatus),
             SourceFile = source_file_for_class(ClassName),
             ModName = beamtalk_runtime_api:module_name(ClassPid),
             {value, #{
@@ -274,6 +276,15 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 <<"side">> => side_to_binary(ClassSide),
                 <<"selector">> => atom_to_binary(Selector, utf8),
                 <<"source">> => Source,
+                %% BT-2558: the method's `///` doc-comment and rendered
+                %% signature, carried alongside the editable source so the
+                %% System Browser can present a read-only documentation block.
+                %% Pulled from the same CompiledMethod map (`__doc__` /
+                %% `__signature__`) that `Beamtalk help: aClass selector:`
+                %% reads (`beamtalk_repl_docs:method_doc_info/2`), so the
+                %% browser and the `help:` send agree on the docs for a method.
+                <<"doc">> => Doc,
+                <<"signature">> => Signature,
                 <<"line">> => Line,
                 <<"source_status">> => atom_to_binary(SourceStatus, utf8),
                 <<"origin">> => origin_for_provenance(Provenance, SourceFile),
@@ -282,21 +293,39 @@ browse_method_source(ClassName, ClassSide, Selector) ->
             }}
     end.
 
-%% Sourceless runtime methods (unindexed_runtime_fun): source is null, the
-%% source_status says why — the browser shows "no source (runtime method)"
-%% rather than an empty pane (ADR 0096).
--spec method_source_text(pid(), boolean(), atom(), beamtalk_xref:source_status()) ->
-    binary() | null.
-method_source_text(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
-    null;
-method_source_text(ClassPid, ClassSide, Selector, _SourceStatus) ->
+%% The method's editable source, `///` doc-comment, and signature — all read
+%% from the one live CompiledMethod map so they stay mutually consistent.
+%% Sourceless runtime methods (unindexed_runtime_fun) have no CompiledMethod to
+%% read: source/doc/signature are all null, and the source_status says why — the
+%% browser shows "no source (runtime method)" rather than an empty pane (ADR
+%% 0096).
+-spec method_text_fields(pid(), boolean(), atom(), beamtalk_xref:source_status()) ->
+    {binary() | null, binary() | null, binary() | null}.
+method_text_fields(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
+    {null, null, null};
+method_text_fields(ClassPid, ClassSide, Selector, _SourceStatus) ->
     Call =
         case ClassSide of
             true -> {class_method, Selector};
             false -> {method, Selector}
         end,
     case safe_class_call(ClassPid, Call) of
-        #{'__source__' := Src} when is_binary(Src), byte_size(Src) > 0 -> Src;
+        MethodObj when is_map(MethodObj) ->
+            {
+                method_field(MethodObj, '__source__'),
+                method_field(MethodObj, '__doc__'),
+                method_field(MethodObj, '__signature__')
+            };
+        _ ->
+            {null, null, null}
+    end.
+
+%% A CompiledMethod text field (`__source__` / `__doc__` / `__signature__`):
+%% the stored binary when present and non-empty, `null` otherwise.
+-spec method_field(map(), atom()) -> binary() | null.
+method_field(MethodObj, Key) ->
+    case maps:get(Key, MethodObj, null) of
+        Bin when is_binary(Bin), byte_size(Bin) > 0 -> Bin;
         _ -> null
     end.
 
