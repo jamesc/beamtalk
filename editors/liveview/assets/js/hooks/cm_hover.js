@@ -27,6 +27,9 @@ const TOKEN = /[A-Za-z0-9_]/
 // Promise<string> — the hover markdown for the line up to the hovered token
 // (an empty string when there is nothing to show).
 export function backendHover(requestHover) {
+  // CM's source signature is (view, pos, side); we ignore `side` because
+  // `wordAt` expands symmetrically from `pos` and so already covers both edges
+  // of the token regardless of which side the pointer favours.
   return hoverTooltip(async (view, pos) => {
     // Grow left/right from the pointer position over identifier characters to
     // find the hovered token's range. Not over an identifier ⇒ no hover.

@@ -814,8 +814,11 @@ the hovered word and the token before it (if any) is its receiver:
                                              receiver inference is future work)
 
 Returns the formatted markdown binary, or `<<>>` when nothing resolves (the
-client shows no tooltip). Never raises — a missing class/selector degrades to
-`<<>>` rather than an error, since hover is advisory.
+client shows no tooltip): a missing class/selector is a `{error, _}` return that
+degrades to `<<>>`, since hover is advisory. This does not *catch* exceptions —
+an unexpected throw in `beamtalk_repl_docs` propagates and surfaces to the
+`rpc`-attached client as `{badrpc, _}`, which the Elixir layer maps to an empty
+hover, so the system still degrades cleanly.
 """.
 -spec hover_docs(binary(), map()) -> binary().
 hover_docs(Code, Bindings) ->
@@ -826,6 +829,9 @@ hover_docs(Code, Bindings) ->
             %% receiver is deferred (full receiver inference).
             hover_class(Word, Bindings);
         {_Receiver, <<>>} ->
+            %% Empty trailing token (line ends in whitespace). Defensive: the JS
+            %% `wordAt` always ends `code` at the last char of an identifier, so
+            %% this is unreachable from the client path — nothing to hover.
             <<>>;
         {undefined, Word} ->
             hover_class(Word, Bindings);
