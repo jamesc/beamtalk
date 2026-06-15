@@ -442,7 +442,7 @@ fi
 check_version "elixir" "${PIN_ELIXIR_NUM}" "${ELIXIR_VER}"
 
 if have rebar3; then
-  REBAR_VER="$(rebar3 --version 2>/dev/null | awk '/^rebar /{print $2}')"
+  REBAR_VER="$(rebar3 --version 2>/dev/null | awk '/^rebar[[:space:]]/{print $2}')"
 else
   REBAR_VER=""
 fi

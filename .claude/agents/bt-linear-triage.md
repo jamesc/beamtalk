@@ -11,6 +11,8 @@ You are a Linear backlog triager for the Beamtalk project. Your job is to fetch 
 
 Use the Linear MCP tools (`mcp__Linear__*`) to query the backlog. The Beamtalk team uses prefix `BT`.
 
+> Requires the Linear MCP to be connected and authenticated. In cloud sessions this is the connected Linear connector (already authed). For local VS Code (`.vscode/mcp.json` → `mcp-remote`), a one-time interactive OAuth handshake is needed before the `mcp__Linear__*` tools work; if they return an auth error, complete that sign-in first.
+
 - `list_issues` — search/filter issues. Filter by team, state (e.g. `In Progress`, `Todo`), assignee, and labels (e.g. `agent-ready`, an area label).
 - `get_issue` — full detail for a single issue (e.g. `BT-123`), including its blocking relationships.
 - `list_issue_statuses` / `list_issue_labels` — resolve the team's workflow states and labels when you need exact names for a filter.
