@@ -338,32 +338,9 @@ else
   fi
 fi
 
-# --- streamlinear CLI ---
-
-if have streamlinear-cli; then
-  ok "streamlinear-cli already installed"
-else
-  info "Installing streamlinear CLI..."
-  # npm install -g from a GitHub URL leaves dangling symlinks because npm clones
-  # into a temp dir that gets cleaned up. npm link fails because the prepare
-  # script calls simple-git-hooks. Instead, clone to a permanent location,
-  # install mcp deps, and manually symlink the binaries.
-  STREAMLINEAR_DIR="/opt/streamlinear"
-  require_sudo
-  if [[ ! -d "${STREAMLINEAR_DIR}" ]]; then
-    $SUDO git clone --depth 1 https://github.com/obra/streamlinear.git "${STREAMLINEAR_DIR}"
-  fi
-  if (cd "${STREAMLINEAR_DIR}/mcp" && $SUDO npm install --ignore-scripts 2>/dev/null); then
-    NPM_PREFIX="$(npm prefix -g)"
-    $SUDO ln -sf "${STREAMLINEAR_DIR}" "${NPM_PREFIX}/lib/node_modules/streamlinear"
-    $SUDO ln -sf "${STREAMLINEAR_DIR}/mcp/dist/index.js" "${NPM_PREFIX}/bin/streamlinear"
-    $SUDO ln -sf "${STREAMLINEAR_DIR}/mcp/dist/cli.js" "${NPM_PREFIX}/bin/streamlinear-cli"
-    $SUDO chmod +x "${STREAMLINEAR_DIR}/mcp/dist/index.js" "${STREAMLINEAR_DIR}/mcp/dist/cli.js"
-    ok "streamlinear-cli installed"
-  else
-    warn "streamlinear-cli installation failed — Linear skills won't be available"
-  fi
-fi
+# Linear integration is handled by the connected Linear MCP server (no local
+# CLI needed). The old streamlinear-cli install — a git clone + npm install on
+# every cold start — was removed once the skills moved to the MCP tools.
 
 # Install Hex + register the system rebar3 with Mix so `mix deps.get` works with
 # no further setup. `mix local.hex` fetches from builds.hex.pm, which some MITM
