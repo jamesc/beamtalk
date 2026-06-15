@@ -272,6 +272,9 @@ struct ProcessManager {
     cover_enabled: bool,
     /// The OS-assigned port on which the REPL TCP server is listening.
     port: u16,
+    /// Dedicated, empty project dir for the workspace (so repo fixtures stay
+    /// out-of-project / non-flushable). Removed on `stop`.
+    project_dir: PathBuf,
 }
 
 /// Build the `-eval` command for the BEAM node.
@@ -481,6 +484,7 @@ impl ProcessManager {
             beam_process: Some(beam_child),
             cover_enabled,
             port,
+            project_dir: e2e_project_dir,
         }
     }
 
@@ -541,6 +545,8 @@ impl ProcessManager {
                 let _ = child.wait();
             }
         }
+        // Remove the dedicated project dir now the workspace has stopped.
+        let _ = fs::remove_dir_all(&self.project_dir);
     }
 
     #[cfg(not(unix))]
@@ -552,6 +558,8 @@ impl ProcessManager {
             let _ = child.kill();
             let _ = child.wait();
         }
+        // Remove the dedicated project dir now the workspace has stopped.
+        let _ = fs::remove_dir_all(&self.project_dir);
     }
 }
 

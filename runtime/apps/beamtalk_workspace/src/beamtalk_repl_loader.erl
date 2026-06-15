@@ -720,6 +720,11 @@ install_method_with_source(
     ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
     Options = #{
         class_name => ClassNameBin,
+        %% Instance-side only: this chokepoint (`compile:source:` / MCP
+        %% `save_method` / IDE save) installs instance methods. Class-side
+        %% `Class class >> sel` patches reach the workspace through the REPL
+        %% `>>` path (`reload_method_definition`), which carries the side in its
+        %% `MethodInfo`. Enabling class-side here is tracked in BT-2563.
         is_class_method => false,
         workspace_mode => true,
         module_name => ModuleNameOverride,

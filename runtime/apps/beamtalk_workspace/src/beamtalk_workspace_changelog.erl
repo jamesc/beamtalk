@@ -408,6 +408,15 @@ find_revert_target(Class, Selector) when is_binary(Class) ->
 %% `{error, no_prev_source}'. A brand-new method (absent on disk) has no prior
 %% body to recover, so `resolve_method_span' reports `selector_not_found' and we
 %% surface the original error.
+%%
+%% Invariant + limit: this returns the method's CURRENT on-disk body, which is
+%% the true pre-patch body only while the entry is unflushed AND the file has
+%% not been edited externally (VSCode/git) since the patch. The normal-flow
+%% entries that *do* record `prev_source' (BT-2553 follow-up) don't reach here;
+%% this is a best-effort fallback for entries that predate source attribution,
+%% so reverting to the live disk body is the most faithful reconstruction
+%% available — a later flush still runs its own byte-span/prev_source conflict
+%% check before writing.
 -spec recover_prev_from_disk(entry()) -> {ok, binary(), entry()} | {error, no_prev_source}.
 recover_prev_from_disk(
     #entry{source_file = File, class = Class, selector = Selector, kind = Kind} = Entry

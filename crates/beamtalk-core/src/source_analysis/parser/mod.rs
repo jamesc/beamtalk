@@ -222,25 +222,28 @@ pub fn parse(tokens: Vec<Token>) -> (Module, Vec<Diagnostic>) {
 /// method side (instance vs class) are supplied out-of-band by the caller, so
 /// the source round-trips byte-for-byte.
 ///
-/// Returns `None` when the source is not a method definition at all (e.g. a
-/// missing `=>`). Trailing tokens after a valid method body return `Some`
-/// (the parsed method) together with an error diagnostic — so callers must
-/// treat any error-severity diagnostic as a failure, not rely solely on the
-/// `Option`.
+/// Returns `Some(method)` only when the source is *exactly* one method
+/// definition. It returns `None` (always with an error diagnostic) when the
+/// source is not a method definition at all (e.g. a missing `=>`) OR when a
+/// valid method body is followed by trailing tokens (a second method / stray
+/// expression) — so the `Option` alone is a reliable success signal and callers
+/// cannot accidentally compile a fragment.
 #[must_use]
 pub fn parse_method(tokens: Vec<Token>) -> (Option<crate::ast::MethodDefinition>, Vec<Diagnostic>) {
     let mut parser = Parser::new(tokens);
     let method = parser.parse_method_definition();
 
     // A well-formed method body consumes everything up to EOF. Anything left
-    // over (a second method, a stray expression) means the caller handed us
-    // more than one method — reject it loudly rather than compile a fragment.
+    // over means the caller handed us more than one method — reject it loudly
+    // and drop the partial parse so `None` consistently means "not exactly one
+    // method".
     if method.is_some() && !parser.is_at_end() {
         let span = parser.current_token().span();
         parser.diagnostics.push(Diagnostic::error(
             "expected a single method definition, found trailing tokens after the method body",
             span,
         ));
+        return (None, parser.diagnostics);
     }
 
     (method, parser.diagnostics)
