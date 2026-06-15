@@ -232,7 +232,7 @@ info "Installing system packages..."
 case "$OS_ID" in
   ubuntu|debian)
     PKGS=""
-    for pkg in git gettext-base curl wget jq htop strace socat netcat-openbsd lsof unzip; do
+    for pkg in git gettext-base curl wget jq htop strace socat netcat-openbsd lsof unzip shellcheck; do
       if ! dpkg -s "$pkg" &>/dev/null; then
         PKGS="$PKGS $pkg"
       fi
