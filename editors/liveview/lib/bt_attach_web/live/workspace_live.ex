@@ -4823,16 +4823,20 @@ defmodule BtAttachWeb.WorkspaceLive do
                   </div>
                 </div>
               </div>
-              <%!-- Dock restore bar: shown when dock is collapsed --%>
-              <div
+              <%!-- Dock restore bar: shown when dock is collapsed. A real <button>
+                   (not a <div>) so it is keyboard-reachable and announced as
+                   interactive; `.dock-bar` styling is class-driven either way. --%>
+              <button
                 :if={!@show_dock}
+                type="button"
                 class="dock-bar"
                 phx-click="toggle_dock"
+                aria-label="Expand workspace dock"
                 title="Expand dock"
                 style="order:3;"
               >
                 Workspace ▴
-              </div>
+              </button>
 
               <%!-- TABBED METHOD EDITOR (BT-2494): the spike's write-surface.
                    A tab strip (methods + class definitions) over a breadcrumb

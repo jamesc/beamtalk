@@ -469,9 +469,13 @@ fmt-rust:
     cargo fmt --all
 
 # Format Elixir code (LiveView IDE)
+# `.formatter.exs` declares `import_deps: [:phoenix]` and the LiveView HTML
+# formatter plugin, both of which need fetched deps — so a fresh checkout must
+# `mix deps.get` before `mix format` can run.
 [working-directory: 'editors/liveview']
 fmt-elixir:
     @echo "✨ Formatting Elixir code..."
+    mix deps.get
     mix format
     @echo "✅ Elixir formatting complete"
 
