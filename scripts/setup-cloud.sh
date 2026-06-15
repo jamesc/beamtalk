@@ -386,18 +386,93 @@ echo ""
 info "Verifying installations..."
 ERRORS=0
 
-for cmd in rustc cargo erl elixir mix node npm gh just rebar3; do
-  if have "$cmd"; then
-    ok "$cmd"
+# Read the pins so the assertions stay in lockstep with .tool-versions /
+# rust-toolchain.toml — the single sources of truth.
+PIN_ERLANG="$(awk '/^erlang[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
+PIN_ELIXIR="$(awk '/^elixir[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
+PIN_REBAR="$(awk '/^rebar[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
+PIN_NODE="$(awk '/^nodejs[[:space:]]/{print $2}' "${TOOL_VERSIONS}" 2>/dev/null)"
+PIN_RUST="$(awk -F'"' '/^[[:space:]]*channel[[:space:]]*=/{print $2}' "${REPO_ROOT}/rust-toolchain.toml" 2>/dev/null)"
+# Elixir's pin carries an -otp-NN suffix that `elixir --version` never prints,
+# so compare against just the numeric Elixir version (e.g. 1.20.1-otp-28 -> 1.20.1).
+PIN_ELIXIR_NUM="${PIN_ELIXIR%%-otp-*}"
+
+# check_present NAME            — assert a command exists (no pin).
+check_present() {
+  if have "$1"; then
+    ok "$1"
   else
-    fail "$cmd NOT FOUND"
+    fail "$1 NOT FOUND"
     ERRORS=$((ERRORS + 1))
   fi
+}
+
+# check_version NAME EXPECTED ACTUAL — assert ACTUAL matches the EXPECTED pin.
+# An empty EXPECTED means there is no pin to check, so fall back to presence.
+check_version() {
+  local name="$1" expected="$2" actual="$3"
+  if [ -z "$actual" ]; then
+    fail "${name} NOT FOUND"
+    ERRORS=$((ERRORS + 1))
+  elif [ -z "$expected" ]; then
+    warn "${name} ${actual} (no pin to verify)"
+  elif [ "$actual" = "$expected" ]; then
+    ok "${name} ${actual} (matches pin)"
+  else
+    fail "${name} ${actual} != pinned ${expected}"
+    ERRORS=$((ERRORS + 1))
+  fi
+}
+
+# Pinned BEAM + Rust toolchain — assert the running binary equals the pin, not
+# just that *some* build is on PATH (an apt esl-erlang would otherwise mask a
+# mise toolchain that never installed).
+if have erl; then
+  ERL_VER="$(erl -noshell -eval \
+    '{ok,V}=file:read_file(filename:join([code:root_dir(),"releases",erlang:system_info(otp_release),"OTP_VERSION"])),io:format("~s",[string:trim(V)]),halt().' \
+    2>/dev/null)"
+else
+  ERL_VER=""
+fi
+check_version "erlang" "${PIN_ERLANG}" "${ERL_VER}"
+
+if have elixir; then
+  ELIXIR_VER="$(elixir --version 2>/dev/null | grep -o 'Elixir [0-9][0-9.]*' | awk '{print $2}')"
+else
+  ELIXIR_VER=""
+fi
+check_version "elixir" "${PIN_ELIXIR_NUM}" "${ELIXIR_VER}"
+
+if have rebar3; then
+  REBAR_VER="$(rebar3 --version 2>/dev/null | awk '/^rebar /{print $2}')"
+else
+  REBAR_VER=""
+fi
+check_version "rebar3" "${PIN_REBAR}" "${REBAR_VER}"
+
+if have node; then
+  NODE_VER="$(node --version 2>/dev/null | sed 's/^v//')"
+else
+  NODE_VER=""
+fi
+check_version "node" "${PIN_NODE}" "${NODE_VER}"
+
+if have rustc; then
+  RUST_VER="$(rustc --version 2>/dev/null | awk '{print $2}')"
+else
+  RUST_VER=""
+fi
+check_version "rustc" "${PIN_RUST}" "${RUST_VER}"
+
+# Remaining tools have no pin — presence is enough. (mix tracks elixir, npm
+# tracks node; cargo tracks rustc.)
+for cmd in cargo mix npm gh just; do
+  check_present "$cmd"
 done
 
 echo ""
 if [ "$ERRORS" -gt 0 ]; then
-  fail "${ERRORS} tool(s) failed to install"
+  fail "${ERRORS} tool(s) missing or not matching pins"
   exit 1
 else
   info "All dependencies installed successfully!"
