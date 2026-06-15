@@ -161,16 +161,26 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   def browse_method_source(_class, _side, selector) do
-    source =
+    {source, doc, signature} =
       case selector do
-        "increment" -> "increment => self.value := self.value + 1"
-        "value" -> "value => self.value"
-        _ -> "stub => nil"
+        "increment" ->
+          {"increment => self.value := self.value + 1",
+           "Increment the counter by one.\n\n## Examples\n```beamtalk\nc increment\n```",
+           "increment -> Counter"}
+
+        "value" ->
+          # A method with a signature but no `///` doc — exercises the no-doc path.
+          {"value => self.value", nil, "value -> Integer"}
+
+        _ ->
+          {"stub => nil", nil, nil}
       end
 
     {:value,
      %{
        "source" => source,
+       "doc" => doc,
+       "signature" => signature,
        "source_status" => "indexed",
        "origin" => "both",
        "disk_differs" => false
@@ -182,6 +192,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
      %{
        "class" => class,
        "definition" => "Object subclass: #{class}",
+       "comment" => "The #{class} class.\n\n## Overview\nA stubbed class comment.",
        "origin" => "both",
        "disk_differs" => false
      }}

@@ -377,7 +377,7 @@ jobs:
         run: scripts/ci/determine-version.sh "${{ github.event_name }}" "${{ github.event.release.tag_name }}" "${{ inputs.tag }}"
 
       - name: Dispatch UAT gate
-        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0 # v3
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697 # v4.0.1
         with:
           # UAT_DISPATCH_TOKEN: a PAT / fine-grained token with
           # `contents: write` (i.e. repository_dispatch) scope on
