@@ -781,6 +781,169 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
     );
 }
 
+// ── BT-2561: in_direct_params_loop path for search ops ────────────────
+// Each test nests a search op with a local-var mutation inside a to:do:
+// loop that has its own local-var mutation. The outer loop's threaded-locals
+// are purely local (count + seen/inner), so it chooses use_direct_params=true
+// and sets in_direct_params_loop=true before compiling the body. The inner
+// search op then hits the in_direct_params_loop=true branch inside
+// generate_list_bool_predicate_with_mutations / generate_list_detect_with_mutations /
+// generate_list_detect_if_none_with_mutations.
+
+#[test]
+fn test_any_satisfy_nested_in_direct_params_loop() {
+    // BT-2561: anySatisfy: with a local mutation nested inside a direct-params
+    // to:do: loop. The outer loop uses use_direct_params=true (local-only mutations
+    // on `count` and `seen`), which sets in_direct_params_loop=true before
+    // compiling the body. The inner anySatisfy: picks up in_direct_params_loop=true
+    // and skips the StateAcc repack in generate_list_bool_predicate_with_mutations.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items anySatisfy: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    // Outer loop is a letrec (counted loop with local mutations).
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    // Inner anySatisfy: must use foldl (mutation threading for `seen`).
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "anySatisfy: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    // Pure lists:any must NOT appear (mutation path was taken).
+    assert!(
+        !code.contains("'lists':'any'"),
+        "Mutation-threaded anySatisfy: must NOT use lists:any. Got:\n{code}"
+    );
+    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_all_satisfy_nested_in_direct_params_loop() {
+    // BT-2561: allSatisfy: with a local mutation nested inside a direct-params
+    // to:do: loop. Exercises generate_list_bool_predicate_with_mutations(is_all=true)
+    // with in_direct_params_loop=true.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items allSatisfy: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "allSatisfy: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'lists':'all'"),
+        "Mutation-threaded allSatisfy: must NOT use lists:all. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_nested_in_direct_params_loop() {
+    // BT-2561: detect: with a local mutation nested inside a direct-params
+    // to:do: loop. Exercises generate_list_detect_with_mutations with
+    // in_direct_params_loop=true (skips the StateAcc repack in the non-direct path).
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items detect: [:item | seen := seen + 1. item > 0]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "detect: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FoundFlag"),
+        "detect: should use FoundFlag accumulator. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'beamtalk_list':'detect'"),
+        "Mutation-threaded detect: must NOT use beamtalk_list:detect. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_detect_if_none_nested_in_direct_params_loop() {
+    // BT-2561: detect:ifNone: with a local mutation nested inside a direct-params
+    // to:do: loop. Exercises generate_list_detect_if_none_with_mutations with
+    // in_direct_params_loop=true.
+    let src = concat!(
+        "Actor subclass: Ctr\n",
+        "  state: x = 0\n\n",
+        "  run: items =>\n",
+        "    count := 0\n",
+        "    seen := 0\n",
+        "    1 to: 3 do: [:i |\n",
+        "      count := count + 1\n",
+        "      items detect: [:item | seen := seen + 1. item > 0] ifNone: [42]\n",
+        "    ]\n",
+        "    count\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("letrec"),
+        "Outer to:do: should generate a letrec. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'lists':'foldl'"),
+        "detect:ifNone: with local mutation should use lists:foldl. Got:\n{code}"
+    );
+    assert!(
+        code.contains("FoundFlag"),
+        "detect:ifNone: should use FoundFlag accumulator. Got:\n{code}"
+    );
+    assert!(
+        code.contains("ExitSA"),
+        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
+    );
+}
+
 // ── BT-1486: count: ───────────────────────────────────────────────────
 
 #[test]

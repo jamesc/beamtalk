@@ -1,0 +1,51 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot tests for list search operations: anySatisfy:, allSatisfy:,
+// detect:, and detect:ifNone:. Exercises both the simple (no outer-scope
+// mutations) and mutation-threaded codegen paths in search_ops.rs.
+// BT-2561.
+
+numbers := [1, 2, 3, 4, 5]
+
+// anySatisfy: — true if any element satisfies predicate (no mutations)
+hasEven := numbers anySatisfy: [:n | n % 2 = 0]
+
+// allSatisfy: — true if all elements satisfy predicate (no mutations)
+allPositive := numbers allSatisfy: [:n | n > 0]
+
+// detect: — first element satisfying predicate (no mutations)
+firstEven := numbers detect: [:n | n % 2 = 0]
+
+// detect:ifNone: — first match or fallback value (no mutations)
+firstBig := numbers detect: [:n | n > 10] ifNone: [-1]
+
+// anySatisfy: with outer-scope mutation (triggers generate_list_bool_predicate_with_mutations, is_all=false)
+anySeen := 0
+hasLarge := numbers anySatisfy: [:n |
+    anySeen := anySeen + 1
+    n > 3
+]
+
+// allSatisfy: with outer-scope mutation (triggers generate_list_bool_predicate_with_mutations, is_all=true)
+allSeen := 0
+allSmall := numbers allSatisfy: [:n |
+    allSeen := allSeen + 1
+    n < 10
+]
+
+// detect: with outer-scope mutation (triggers generate_list_detect_with_mutations)
+detectSeen := 0
+found := numbers detect: [:n |
+    detectSeen := detectSeen + 1
+    n > 3
+]
+
+// detect:ifNone: with outer-scope mutation (triggers generate_list_detect_if_none_with_mutations)
+detectNoneSeen := 0
+foundOrDefault := numbers
+    detect: [:n |
+        detectNoneSeen := detectNoneSeen + 1
+        n > 10
+    ]
+    ifNone: [-1]
