@@ -88,7 +88,8 @@ export function backendLint(requestDiagnostics) {
 // returns that code point's start. ASCII (the common case) advances one byte /
 // one code unit per step, so this degrades to the identity mapping; multibyte
 // identifiers and string literals stay aligned. The `next > byteOffset` test
-// returns the *containing* code point for both boundary offsets (the Rust
+// returns the start of the code point whose UTF-8 span includes or begins at
+// `byteOffset` — correct for both an exact boundary offset (the Rust
 // `diagnostics` path always emits these) and the degenerate case of an offset
 // that lands mid–code-point, rather than overshooting to the next character.
 function byteToPos(doc, byteOffset) {

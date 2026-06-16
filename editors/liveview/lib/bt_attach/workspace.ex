@@ -543,6 +543,19 @@ defmodule BtAttach.Workspace do
     }
   end
 
+  # Defensive fallback: the test runner always returns well-shaped entry maps
+  # today, but a non-map entry from some unexpected failure path must degrade to
+  # a rendered "fail" row rather than raising a FunctionClauseError that would
+  # crash the LiveView socket with no user-visible diagnosis.
+  defp normalize_test_entry(other) do
+    %{
+      "name" => inspect(other),
+      "class" => "",
+      "status" => "fail",
+      "detail" => "Unexpected entry shape from test runner"
+    }
+  end
+
   defp test_entry_detail(entry) do
     cond do
       Map.has_key?(entry, :error) -> stringify_detail(Map.get(entry, :error))

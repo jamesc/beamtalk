@@ -2468,7 +2468,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp test_status_label("pass"), do: "✓ pass"
   defp test_status_label("fail"), do: "✗ fail"
   defp test_status_label("skip"), do: "○ skip"
-  defp test_status_label(other), do: other
+  # An unanticipated status from the runner still gets a visible "?" label rather
+  # than rendering the raw atom text unadorned.
+  defp test_status_label(other), do: "? " <> other
+
+  # CSS class suffix for a per-case status. Only the three known statuses carry a
+  # styled rule (`.st-pass` / `.st-fail` / `.st-skip`); an unknown status falls
+  # back to the neutral skip style so a row is never left unstyled with a raw
+  # `st-<atom>` class that has no matching rule.
+  defp test_status_class(status) when status in ~w(pass fail skip), do: "st-" <> status
+  defp test_status_class(_other), do: "st-skip"
 
   # ── System Browser data source (BT-2491, browse ops ADR 0096) ───────────────
   #
@@ -5096,9 +5105,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <tbody>
                         <tr
                           :for={t <- @test_results["tests"]}
-                          class={["test-row", "st-" <> t["status"]]}
+                          class={["test-row", test_status_class(t["status"])]}
                         >
-                          <td class={["test-status", "st-" <> t["status"]]}>
+                          <td class={["test-status", test_status_class(t["status"])]}>
                             {test_status_label(t["status"])}
                           </td>
                           <td class="k">{t["class"]}</td>

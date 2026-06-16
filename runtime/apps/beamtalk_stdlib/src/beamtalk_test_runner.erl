@@ -159,17 +159,18 @@ discover_tests() ->
                     selectors => [atom_to_binary(S, utf8) || S <- TestMethods]
                 }}
             catch
-                Class:Reason ->
+                Class:Reason:Stack ->
                     %% The documented case is a class unloaded between
                     %% enumeration and inspection (discovery degrades cleanly by
-                    %% skipping it). Log any other failure so an unexpected skip
-                    %% is diagnosable rather than silent.
+                    %% skipping it). Log any other failure — with the stacktrace —
+                    %% so an unexpected skip is diagnosable rather than silent.
                     ?LOG_WARNING(
                         #{
                             event => discover_tests_class_skipped,
                             class => ClassName,
                             error_class => Class,
-                            reason => Reason
+                            reason => Reason,
+                            stacktrace => Stack
                         },
                         #{domain => [beamtalk, stdlib]}
                     ),
