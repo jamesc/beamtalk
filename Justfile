@@ -254,9 +254,31 @@ dist-liveview:
     echo "   Run: dist-liveview/bin/server <workspace-id>   (resolves node+cookie like 'just web')"
     echo "   Or:  PHX_SERVER=true SECRET_KEY_BASE=... dist-liveview/bin/bt_attach start"
 
+# Ensure the loopback hex-bridge proxy is up before any rebar3/mix dep fetch.
+# Cloud containers only (gated on CLAUDE_CODE_REMOTE): a session can outlive the
+# SessionStart launch, and a dead bridge makes `rebar3 compile` fail to fetch
+# Hex packages. No-op on local/dev machines. See scripts/hex-bridge-proxy.py.
+[unix]
+_ensure-hex-bridge:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]] || exit 0
+    port="${HEX_BRIDGE_PORT:-18081}"
+    script="scripts/hex-bridge-proxy.py"
+    [[ -f "${script}" ]] || exit 0
+    (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && exit 0
+    echo "↻ hex-bridge proxy down — starting on :${port}"
+    setsid python3 "${script}" >/dev/null 2>&1 </dev/null &
+    disown 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && exit 0
+      sleep 0.1
+    done
+    echo "⚠ hex-bridge proxy did not come up on :${port}" >&2
+
 # Build Erlang runtime
 [working-directory: 'runtime']
-build-erlang:
+build-erlang: _ensure-hex-bridge
     @echo "🔨 Building Erlang runtime..."
     @rebar3 compile
     @echo "✅ Erlang build complete"

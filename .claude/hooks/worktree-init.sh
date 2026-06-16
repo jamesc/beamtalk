@@ -180,7 +180,18 @@ ${_NODE_OPTS_BLOCK}"
   # precompiled Elixir from tripping on a non-UTF-8 container locale.
   _EXPORT_BLOCK="export HEX_CDN=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
 export HEX_MIRROR=\"http://127.0.0.1:${HEX_BRIDGE_PORT}\"
-export ELIXIR_ERL_OPTIONS=\"\${ELIXIR_ERL_OPTIONS:-+fnu}\""
+export ELIXIR_ERL_OPTIONS=\"\${ELIXIR_ERL_OPTIONS:-+fnu}\"
+# Self-heal the loopback hex bridge: a cloud session can outlive the
+# SessionStart launch (idle reaping, multi-day sessions), and a dead bridge
+# makes every rebar3/mix dependency fetch fail. Revive it here, from a file
+# every shell sources, so a new shell repairs the env without re-running the
+# hook. Bash-only (uses /dev/tcp); the port probe is a sub-ms loopback connect.
+if [ -n \"\${BASH_VERSION:-}\" ] && command -v python3 >/dev/null 2>&1 && [ -f \"${HEX_BRIDGE_SCRIPT}\" ]; then
+  if ! (exec 3<>/dev/tcp/127.0.0.1/${HEX_BRIDGE_PORT}) 2>/dev/null; then
+    setsid python3 \"${HEX_BRIDGE_SCRIPT}\" >/dev/null 2>&1 </dev/null &
+    disown 2>/dev/null || true
+  fi
+fi"
   if [[ -n "${_EXTRA_EXPORT_LINES}" ]]; then
     _EXPORT_BLOCK="${_EXPORT_BLOCK}
 ${_EXTRA_EXPORT_LINES}"
@@ -188,10 +199,12 @@ ${_EXTRA_EXPORT_LINES}"
 
   # Sentinel inside the block lets us cheaply detect mode mismatches without
   # diffing the whole content. "wrapper-path" appears only in auth-proxy mode.
+  # The vN suffix is a content version: bump it when the block body changes so
+  # already-provisioned containers replace their stale block on the next hook.
   if (( _HAS_AUTH_PROXY )); then
-    _MODE_SENTINEL="wrapper-path"
+    _MODE_SENTINEL="wrapper-path v2"
   else
-    _MODE_SENTINEL="cdn-only"
+    _MODE_SENTINEL="cdn-only v2"
   fi
   _FULL_BLOCK="${_MARKER} (${_MODE_SENTINEL})
 ${_EXPORT_BLOCK}
