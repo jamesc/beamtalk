@@ -267,6 +267,7 @@ _ensure-hex-bridge:
     script="scripts/hex-bridge-proxy.py"
     [[ -f "${script}" ]] || exit 0
     (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && exit 0
+    command -v python3 >/dev/null 2>&1 || { echo "⚠ python3 not found — hex-bridge proxy cannot start" >&2; exit 0; }
     echo "↻ hex-bridge proxy down — starting on :${port}"
     setsid python3 "${script}" >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null || true
