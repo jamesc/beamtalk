@@ -1835,8 +1835,12 @@ base_ops() ->
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         %% BT-2555: live-image hover docs for the cockpit editors.
         <<"hover">> => #{<<"params">> => [<<"code">>]},
+        %% BT-2556: parse-only diagnostics for the cockpit editors.
+        <<"diagnostics">> => #{<<"params">> => [<<"code">>]},
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
+        %% BT-2557: discover TestCase subclasses for the cockpit test-runner pane.
+        <<"list-tests">> => #{<<"params">> => []},
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
         <<"load-project">> => #{
             <<"params">> => [],
