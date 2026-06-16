@@ -276,6 +276,11 @@ _ensure-hex-bridge:
     done
     echo "⚠ hex-bridge proxy did not come up on :${port}" >&2
 
+# Windows has no cloud-sandbox hex bridge; the dependency must still resolve so
+# `build-erlang` parses. No-op.
+[windows]
+_ensure-hex-bridge:
+
 # Build Erlang runtime
 [working-directory: 'runtime']
 build-erlang: _ensure-hex-bridge
