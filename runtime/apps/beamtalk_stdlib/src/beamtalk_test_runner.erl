@@ -159,7 +159,7 @@ discover_tests() ->
                     selectors => [atom_to_binary(S, utf8) || S <- TestMethods]
                 }}
             catch
-                _Class:_Reason -> false
+                _:_ -> false
             end
         end,
         Classes
