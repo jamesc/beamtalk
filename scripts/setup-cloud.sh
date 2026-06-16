@@ -323,7 +323,7 @@ PROFILE
     [[ -e "${_dest}" && ! -L "${_dest}" ]] && continue
     $SUDO ln -sf "${_shim}" "${_dest}" && _linked+=("${_name}")
   done
-  ok "Linked BEAM tools into /usr/local/bin (${#_linked[@]}): ${_linked[*]}"
+  ok "Linked BEAM tools into /usr/local/bin (${#_linked[@]}): ${_linked[*]:-(none)}"
 
   # 6. Decommission the stale esl-erlang baked into the cloud base image. It
   #    ships an old OTP (27.x) from the Erlang Solutions apt repo and installs

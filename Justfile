@@ -270,10 +270,12 @@ _ensure-hex-bridge:
     echo "↻ hex-bridge proxy down — starting on :${port}"
     setsid python3 "${script}" >/dev/null 2>&1 </dev/null &
     disown 2>/dev/null || true
-    for _ in $(seq 1 20); do
+    for _ in {1..20}; do
       (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && exit 0
       sleep 0.1
     done
+    # Deliberately fall through to exit 0: let `rebar3 compile` fail with its own
+    # connection error (more actionable) rather than aborting the build here.
     echo "⚠ hex-bridge proxy did not come up on :${port}" >&2
 
 # Windows has no cloud-sandbox hex bridge; the dependency must still resolve so

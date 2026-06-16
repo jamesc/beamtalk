@@ -186,6 +186,8 @@ export ELIXIR_ERL_OPTIONS=\"\${ELIXIR_ERL_OPTIONS:-+fnu}\"
 # makes every rebar3/mix dependency fetch fail. Revive it here, from a file
 # every shell sources, so a new shell repairs the env without re-running the
 # hook. Bash-only (uses /dev/tcp); the port probe is a sub-ms loopback connect.
+# This launch is fire-and-forget (no readiness wait) — the just _ensure-hex-bridge
+# recipe is the one that polls for readiness on the build critical path.
 if [ -n \"\${BASH_VERSION:-}\" ] && command -v python3 >/dev/null 2>&1 && [ -f \"${HEX_BRIDGE_SCRIPT}\" ]; then
   if ! (exec 3<>/dev/tcp/127.0.0.1/${HEX_BRIDGE_PORT}) 2>/dev/null; then
     setsid python3 \"${HEX_BRIDGE_SCRIPT}\" >/dev/null 2>&1 </dev/null &
