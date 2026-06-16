@@ -557,7 +557,11 @@ defmodule BtAttach.Workspace do
   # Decode + dispatch a session-less term op (workspace-global: discovery,
   # test runs). `self()` is passed as `dispatch/4`'s SessionPid only to satisfy
   # its arity — these ops do not read session bindings — mirroring
-  # `dispatch_browse/2`. Returns the op-result term verbatim (no JSON edge).
+  # `dispatch_browse/2`. Unlike `dispatch_browse/2`, which normalises everything
+  # to `{:value, _} | {:error, _}`, this returns the op-result term VERBATIM (no
+  # JSON edge): **callers own the op-specific term-shape match** (`list_tests/0`
+  # matches `{:value, _}`, `run_tests/1` matches `{:test_results, _}`). A new
+  # caller must match its op's own result tag, not assume browse-style normalising.
   defp dispatch_simple(op, params) when is_binary(op) and is_map(params) do
     request = Map.put(params, "op", op)
 

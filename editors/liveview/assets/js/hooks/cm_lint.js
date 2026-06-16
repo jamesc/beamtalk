@@ -53,11 +53,20 @@ export function backendLint(requestDiagnostics) {
         let from = clamp(byteToPos(doc, d.from), 0, len)
         let to = clamp(byteToPos(doc, d.to), 0, len)
         if (to < from) [from, to] = [to, from]
-        // A zero-width range renders nothing; widen by one column where the doc
-        // allows so the marker is always visible.
+        // A zero-width range renders nothing; widen by one whole code point
+        // where the doc allows so the marker is always visible. Stepping a full
+        // code point (not one UTF-16 code unit) keeps the range off the middle
+        // of a surrogate pair when the boundary lands on a supplementary-plane
+        // character (emoji, etc.).
         if (from === to) {
-          if (to < len) to += 1
-          else if (from > 0) from -= 1
+          if (to < len) {
+            to += doc.codePointAt(to) > 0xffff ? 2 : 1
+          } else if (from > 0) {
+            // Widen backwards: a low surrogate just before `from` means the
+            // preceding character is an astral pair, so step back two units.
+            const lo = doc.charCodeAt(from - 1)
+            from -= lo >= 0xdc00 && lo <= 0xdfff ? 2 : 1
+          }
         }
         return {
           from,
