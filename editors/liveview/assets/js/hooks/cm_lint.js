@@ -73,17 +73,22 @@ export function backendLint(requestDiagnostics) {
 
 // Convert a UTF-8 byte offset into a CodeMirror position (a UTF-16 code-unit
 // index into `doc`). Walks code points from the start, accumulating each one's
-// UTF-8 byte length until the target offset is reached. ASCII (the common case)
-// advances one byte / one code unit per step, so this degrades to the identity
-// mapping; multibyte identifiers and string literals stay aligned.
+// UTF-8 byte length until the byte that *contains* `byteOffset` is reached, then
+// returns that code point's start. ASCII (the common case) advances one byte /
+// one code unit per step, so this degrades to the identity mapping; multibyte
+// identifiers and string literals stay aligned. The `next > byteOffset` test
+// returns the *containing* code point for both boundary offsets (the Rust
+// `diagnostics` path always emits these) and the degenerate case of an offset
+// that lands mid–code-point, rather than overshooting to the next character.
 function byteToPos(doc, byteOffset) {
   if (byteOffset <= 0) return 0
   let bytes = 0
   let i = 0
   while (i < doc.length) {
-    if (bytes >= byteOffset) return i
     const cp = doc.codePointAt(i)
-    bytes += utf8Len(cp)
+    const next = bytes + utf8Len(cp)
+    if (next > byteOffset) return i
+    bytes = next
     i += cp > 0xffff ? 2 : 1
   }
   return doc.length
