@@ -395,8 +395,16 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:error, nil)
       |> assign(:expr, "3 + 4")
       # Workspace dock active tab (BT-2490): Workspace | REPL | Transcript |
-      # Changes (REPL added in BT-2543).
+      # Changes | Tests (REPL added in BT-2543, Tests in BT-2557).
       |> assign(:dock_tab, "workspace")
+      # Test-runner pane (BT-2557): `:test_classes` is the discovered catalogue
+      # (`[%{"class","selectors"}]`), loaded lazily the first time the Tests tab
+      # is opened (nil = not loaded yet); `:test_results` is the last run's
+      # normalised result map (nil = nothing run yet); `:tests_error` carries a
+      # discovery/run failure string for the pane.
+      |> assign(:test_classes, nil)
+      |> assign(:test_results, nil)
+      |> assign(:tests_error, nil)
       # REPL tab (BT-2543): a classic TUI request→response scrollback with the
       # input pinned at the bottom. `:repl` is the scrollback stream (so long
       # history never bloats the assigns/diff); `:repl_seq` mints stable entry
@@ -698,16 +706,56 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Switch the Workspace dock's active tab (Workspace / REPL / Transcript /
-  # Changes, BT-2490, REPL added BT-2543). Pure view state — no workspace
-  # round-trip; an unknown tab is ignored rather than rendered, so a crafted
-  # value can't blank the dock.
+  # Changes / Tests, BT-2490, REPL added BT-2543, Tests BT-2557). Pure view state
+  # — no workspace round-trip — EXCEPT the Tests tab lazily loads its test
+  # catalogue the first time it is opened (discovery is a cheap `:read` op, but
+  # there is no point running it for users who never open the tab). An unknown
+  # tab is ignored rather than rendered, so a crafted value can't blank the dock.
   @impl true
+  def handle_event("dock_tab", %{"tab" => "tests"}, socket) do
+    {:noreply, socket |> assign(dock_tab: "tests") |> ensure_test_classes()}
+  end
+
   def handle_event("dock_tab", %{"tab" => tab}, socket)
       when tab in ~w(workspace repl transcript changes) do
     {:noreply, assign(socket, dock_tab: tab)}
   end
 
   def handle_event("dock_tab", _params, socket), do: {:noreply, socket}
+
+  # ── Test-runner pane (BT-2557) ───────────────────────────────────────────────
+  #
+  # The GUI equivalent of a Smalltalk Test Runner: a dock tab that lists the live
+  # image's `TestCase` subclasses, runs all or a selected class through the
+  # attached session (never a shelled-out `beamtalk test`), and shows per-case
+  # pass/fail with failure detail — with an affordance to open a failing method
+  # in the method editor. Discovery is a `:read` op (the Observer may browse the
+  # catalogue); running tests is `:execute` (Owner-only, it evaluates code), so
+  # the run controls are owner-gated in the template, mirroring the eval form.
+
+  # Re-discover the test catalogue (the "refresh" affordance + lazy first load).
+  @impl true
+  def handle_event("tests_refresh", _params, socket) do
+    {:noreply, assign_test_classes(socket)}
+  end
+
+  # Run every loaded TestCase subclass (`test-all`).
+  def handle_event("run_tests", _params, socket) do
+    {:noreply, run_tests(socket, nil)}
+  end
+
+  # Run a single selected test class (`test`, `class` = the row's class).
+  def handle_event("run_test_class", %{"class" => class}, socket) when is_binary(class) do
+    {:noreply, run_tests(socket, class)}
+  end
+
+  # Open a (failing) test method in the method editor. Test selectors are
+  # instance-side, so the side is always "instance"; reuses the System Browser's
+  # method-tab opener (BT-2491) so the test runner and browser share one editor.
+  def handle_event("open_test_method", %{"class" => class, "selector" => selector}, socket)
+      when is_binary(class) and is_binary(selector) do
+    {:noreply, open_method_tab(socket, class, "instance", selector)}
+  end
 
   # ── REPL tab (BT-2543) ───────────────────────────────────────────────────────
   #
@@ -1948,9 +1996,7 @@ defmodule BtAttachWeb.WorkspaceLive do
        "The IDE tracks the live image as you work, so there is no manual sync step — project files from `beamtalk.toml` load when you connect."}
 
   defp repl_meta_dispatch(cmd, _) when cmd in [":test", ":t"],
-    do:
-      {:point,
-       "A test-runner pane is coming to the IDE (BT-2557). For now, run tests from the CLI with `beamtalk test`."}
+    do: {:tab, "tests", "Opened the Tests pane in this dock — Run all, or run a single class. ◂"}
 
   defp repl_meta_dispatch(":clear", _),
     do:
@@ -1980,6 +2026,16 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp handle_repl_meta(socket, {:point, message}, expr),
     do: repl_append_info(socket, expr, message)
+
+  # Route a meta-command to a dock tab (BT-2557: `:test` → Tests pane). Switches
+  # the dock to `tab`, lazily loads the Tests catalogue when that is the target,
+  # and appends a confirming info entry — the GUI equivalent of the CLI command.
+  defp handle_repl_meta(socket, {:tab, tab, message}, expr) do
+    socket
+    |> assign(dock_tab: tab)
+    |> then(fn s -> if tab == "tests", do: ensure_test_classes(s), else: s end)
+    |> repl_append_info(expr, message)
+  end
 
   defp handle_repl_meta(socket, {:unknown, cmd}, expr) do
     repl_append_info(
@@ -2036,7 +2092,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     :sync / :s             tracks the live image (loads beamtalk.toml on connect)
     :clear                 evaluates `Session current clear`
     :show-codegen / :sc    CLI-only — run from `beamtalk repl`
-    :test / :t             test-runner pane coming soon (BT-2557)
+    :test / :t             → Tests pane (this dock) — run all or a class
     :exit / :quit / :q     close the browser tab to disconnect
     Inspect results with the Inspect button; browse classes/methods on the left.\
     """
@@ -2358,6 +2414,49 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, changes: [], changes_error: Workspace.render_error(reason))
     end
   end
+
+  # ── Test-runner pane data source (BT-2557) ──────────────────────────────────
+
+  # Load the test catalogue once (lazy first open of the Tests tab). Re-opening
+  # the tab keeps the already-loaded list — use `tests_refresh` to re-discover.
+  defp ensure_test_classes(socket) do
+    if is_nil(socket.assigns.test_classes),
+      do: assign_test_classes(socket),
+      else: socket
+  end
+
+  # Discover the live image's TestCase subclasses + selectors (`list_tests`,
+  # `:read`). A dispatch failure / RBAC denial renders a `tests_error` rather
+  # than crashing the pane, mirroring `assign_changes/1`.
+  defp assign_test_classes(socket) do
+    case Facade.dispatch(:list_tests, %{}, ctx(socket)) do
+      {:ok, classes} when is_list(classes) ->
+        assign(socket, test_classes: classes, tests_error: nil)
+
+      {:error, reason} ->
+        assign(socket, test_classes: [], tests_error: facade_error(reason))
+    end
+  end
+
+  # Run all tests (`class` = nil) or a single class (`run_tests`, `:execute`).
+  # The result map drives the per-case render; an error (including an RBAC
+  # denial for a non-Owner) surfaces as `tests_error` and leaves the prior
+  # results in place.
+  defp run_tests(socket, class) do
+    case Facade.dispatch(:run_tests, %{class: class}, ctx(socket)) do
+      {:ok, result} when is_map(result) ->
+        assign(socket, test_results: result, tests_error: nil)
+
+      {:error, reason} ->
+        assign(socket, tests_error: facade_error(reason))
+    end
+  end
+
+  # Short status glyph for a per-case result row.
+  defp test_status_label("pass"), do: "✓ pass"
+  defp test_status_label("fail"), do: "✗ fail"
+  defp test_status_label("skip"), do: "○ skip"
+  defp test_status_label(other), do: other
 
   # ── System Browser data source (BT-2491, browse ops ADR 0096) ───────────────
   #
@@ -4658,7 +4757,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                             {"workspace", "Workspace"},
                             {"repl", "REPL"},
                             {"transcript", "Transcript"},
-                            {"changes", "Changes"}
+                            {"changes", "Changes"},
+                            {"tests", "Tests"}
                           ]
                         }
                         type="button"
@@ -4933,6 +5033,118 @@ defmodule BtAttachWeb.WorkspaceLive do
                           </tr>
                         </tbody>
                       </table>
+                    <% end %>
+                  </div>
+                  <%!-- TESTS tab (BT-2557): the cockpit Test Runner. Discovery
+                       (`list_tests`, :read) lists the live image's TestCase
+                       subclasses; running (`run_tests`, :execute) is owner-gated
+                       like the eval form. The last run's per-case results render
+                       above the catalogue; a failing case opens in the method
+                       editor. --%>
+                  <div class="dock-pane panel-body test-pane" hidden={@dock_tab != "tests"}>
+                    <div class="test-toolbar">
+                      <button
+                        :if={@role == :owner}
+                        type="button"
+                        class="btn"
+                        phx-click="run_tests"
+                        phx-disable-with="Running…"
+                      >
+                        Run all
+                      </button>
+                      <button type="button" class="btn ghost" phx-click="tests_refresh">
+                        Refresh
+                      </button>
+                      <span
+                        :if={@test_results}
+                        class={["test-summary", @test_results["failed"] > 0 && "fail"]}
+                      >
+                        {@test_results["passed"]}/{@test_results["total"]} passed<span :if={
+                          @test_results["failed"] > 0
+                        }>, {@test_results["failed"]} failed</span>
+                        <span :if={@test_results["skipped"] > 0}>
+                          , {@test_results["skipped"]} skipped
+                        </span>
+                      </span>
+                    </div>
+                    <div :if={@tests_error} class="io-block err">{@tests_error}</div>
+
+                    <table
+                      :if={@test_results && @test_results["tests"] != []}
+                      class="bt-table test-results"
+                    >
+                      <thead>
+                        <tr>
+                          <th>Status</th>
+                          <th>Class</th>
+                          <th>Test</th>
+                          <th>Detail</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          :for={t <- @test_results["tests"]}
+                          class={["test-row", "st-" <> t["status"]]}
+                        >
+                          <td class={["test-status", "st-" <> t["status"]]}>
+                            {test_status_label(t["status"])}
+                          </td>
+                          <td class="k">{t["class"]}</td>
+                          <td>
+                            <%!-- Open a failing/any case in the method editor
+                                 (owner-only — the editor is a write surface). --%>
+                            <button
+                              :if={t["class"] != "" and @role == :owner}
+                              type="button"
+                              class="btn-link"
+                              phx-click="open_test_method"
+                              phx-value-class={t["class"]}
+                              phx-value-selector={t["name"]}
+                            >
+                              {t["name"]}
+                            </button>
+                            <span :if={t["class"] == "" or @role != :owner}>{t["name"]}</span>
+                          </td>
+                          <td class="test-detail">{t["detail"]}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <%= cond do %>
+                      <% is_nil(@test_classes) -> %>
+                        <p class="muted-note">Loading tests…</p>
+                      <% @test_classes == [] -> %>
+                        <p class="muted-note">
+                          No TestCase subclasses loaded. Define one
+                          (<code>TestCase subclass: …</code>) or sync your project.
+                        </p>
+                      <% true -> %>
+                        <table class="bt-table test-catalogue">
+                          <thead>
+                            <tr>
+                              <th>Class</th>
+                              <th>Tests</th>
+                              <th :if={@role == :owner}></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr :for={tc <- @test_classes}>
+                              <td class="k">{tc["class"]}</td>
+                              <td>{length(tc["selectors"])}</td>
+                              <td :if={@role == :owner}>
+                                <button
+                                  type="button"
+                                  class="btn-link"
+                                  phx-click="run_test_class"
+                                  phx-value-class={tc["class"]}
+                                  phx-disable-with="Running…"
+                                >
+                                  run
+                                </button>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
                     <% end %>
                   </div>
                 </div>

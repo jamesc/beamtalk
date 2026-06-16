@@ -1697,6 +1697,15 @@ handle_test_file_returns_response_test() ->
     ?assert(is_map(Decoded)),
     ?assert(maps:is_key(<<"status">>, Decoded)).
 
+handle_list_tests_returns_classes_term_test() ->
+    %% BT-2557: list-tests discovers TestCase subclasses via the live registry.
+    %% The bare EUnit image loads no TestCase subclasses, so discovery returns an
+    %% empty `classes` list — exercising the op routing + the `{value, _}` term
+    %% shape without depending on any fixture class being present.
+    Msg = make_msg(<<"list-tests">>, <<"lt-1">>, undefined, false),
+    {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"list-tests">>, #{}, Msg, self()),
+    ?assert(is_list(maps:get(<<"classes">>, Value))).
+
 validate_list_classes_filter_user_test() ->
     %% list-classes with the "user" filter takes the not-stdlib branch and must
     %% include the (non-stdlib) WidgetDev fixture-free path: here we only assert

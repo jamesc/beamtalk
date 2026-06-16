@@ -456,6 +456,22 @@ handle_term(<<"test">>, Params, _Msg, _SessionPid) ->
     end;
 handle_term(<<"test-all">>, _Params, _Msg, _SessionPid) ->
     run_test_op(undefined);
+handle_term(<<"list-tests">>, _Params, _Msg, _SessionPid) ->
+    %% BT-2557: discover loaded TestCase subclasses + their selectors for the
+    %% cockpit's test-runner pane. Pure reflection over the class registry — runs
+    %% NO test code — so it is a `:read` op (the Observer may list tests). The
+    %% discovery maps are projected to the binary-keyed wire shape so the result
+    %% travels as a `{value, _}` term (consumed live over distribution, or encoded
+    %% as JSON identity at the WebSocket edge).
+    Discovered = beamtalk_test_runner:discover_tests(),
+    Classes = [
+        #{
+            <<"class">> => maps:get(class, T),
+            <<"selectors">> => maps:get(selectors, T)
+        }
+     || T <- Discovered
+    ],
+    {value, #{<<"classes">> => Classes}};
 handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
     Ops = describe_ops(),
     BeamtalkVsnBin =

@@ -141,6 +141,30 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> refute_has(".cm-lintRange-error")
   end
 
+  test "the Tests pane discovers + runs a TestCase in a real browser (BT-2557)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Define a TestCase subclass in the live image via the Workspace editor + Do
+    # it (side-effect-only install). One passing, one failing test.
+    |> set_source(
+      "TestCase subclass: CockpitBrowserDemoTest\n" <>
+        "  testPasses =>\n    self assert: 1 equals: 1\n" <>
+        "  testFails =>\n    self assert: 1 equals: 2"
+    )
+    |> click("button[value='do_it']")
+    # Open the Tests dock tab and refresh discovery so the catalogue reflects the
+    # just-installed class (discovery is the live `list-tests` op).
+    |> click("button[phx-value-tab='tests']")
+    |> click("button[phx-click='tests_refresh']")
+    |> assert_has(".test-catalogue", text: "CockpitBrowserDemoTest")
+    # Run all: per-case results render, with the failing case + a failing summary,
+    # driven through the live session (no shelled-out CLI).
+    |> click("button[phx-click='run_tests']")
+    |> assert_has(".test-results", text: "testFails")
+    |> assert_has(".test-summary.fail")
+  end
+
   test "an eval round-trips through the real browser via the Print it button", %{conn: conn} do
     conn
     |> visit("/")

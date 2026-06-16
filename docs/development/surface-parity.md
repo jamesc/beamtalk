@@ -135,8 +135,9 @@ changes no op output (the underlying capability is still the same `eval` /
 
 | REPL op | CLI subcommand | REPL meta-command | MCP tool | LSP capability | Notes |
 |---------|---------------|-------------------|----------|----------------|-------|
-| `test` | `test` | `:test` / `:t` | `test` | -- | Run BUnit tests (single class or file) |
-| `test-all` | -- | `via Workspace test` | -- | -- | Run all loaded tests; MCP `test` covers the all-tests case via empty params |
+| `test` | `test` | `:test` / `:t` | `test` | -- | Run BUnit tests (single class or file). The LiveView IDE (Attach topology, BT-2557) is a further consumer: its **Tests** dock pane runs a selected class through the term-returning seam (`beamtalk_repl_ops:dispatch/4` → `BtAttach.Workspace.run_tests/1` → facade `:run_tests`, capability `:execute` — tests evaluate code, so Owner-only, the same gate as `eval`) and renders per-case pass/fail with failure detail. The REPL `:test` / `:t` meta-command now routes to this pane instead of pointing at the CLI. |
+| `test-all` | -- | `via Workspace test` | -- | -- | Run all loaded tests; MCP `test` covers the all-tests case via empty params. The LiveView IDE Tests pane's "Run all" button (BT-2557) drives this op (facade `:run_tests` with no class). |
+| `list-tests` | -- | *(implicit: the Tests pane lists them)* | -- | -- | Discover loaded `TestCase` subclasses + their selectors for the LiveView IDE Tests pane (Attach topology, BT-2557). Pure reflection over the live class registry (`beamtalk_test_runner:discover_tests/0`) — runs **no** test code — so it is `:read` (the Observer may browse the catalogue, but cannot run, which is `:execute`). Routed through the term seam (`beamtalk_repl_ops:dispatch/4` → `BtAttach.Workspace.list_tests/0` → facade `:list_tests`) and returned as a `{value, _}` term. |
 
 ## Dev / Introspection Operations
 

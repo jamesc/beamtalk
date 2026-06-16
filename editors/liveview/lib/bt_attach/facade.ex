@@ -104,6 +104,13 @@ defmodule BtAttach.Facade do
     subscribe_object: :read,
     unsubscribe_object: :read,
     pid_stats: :read,
+    # BT-2557: the cockpit test-runner pane. `list_tests` discovers loaded
+    # TestCase subclasses + their selectors — pure reflection over the class
+    # registry, runs no test code — so it is `:read` (the Observer may list).
+    # `run_tests` compiles + EVALUATES the tests (mutating the image, just like
+    # `eval`), so it is `:execute` — Owner-only, the same gate the eval form uses.
+    list_tests: :read,
+    run_tests: :execute,
     kill: :admin,
     rotate_cookie: :admin
   }
@@ -266,6 +273,20 @@ defmodule BtAttach.Facade do
       do: client().diagnostics(code),
       else: {:error, :invalid_params}
   end
+
+  # BT-2557: the cockpit test-runner pane. `list_tests` discovers test classes
+  # (no args, pure reflection). `run_tests` runs all tests (`class` is nil) or a
+  # single class (`class` is a binary). A non-binary, non-nil class is a bad
+  # shape → `:invalid_params` with no dist call, matching the browse ops.
+  defp invoke(:list_tests, _params, _ctx), do: client().list_tests()
+
+  defp invoke(:run_tests, %{class: class}, _ctx) do
+    if is_nil(class) or is_binary(class),
+      do: client().run_tests(class),
+      else: {:error, :invalid_params}
+  end
+
+  defp invoke(:run_tests, _params, _ctx), do: client().run_tests(nil)
 
   defp invoke(:flush, _params, _ctx), do: client().flush()
 

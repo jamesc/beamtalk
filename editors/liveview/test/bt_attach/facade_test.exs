@@ -68,6 +68,25 @@ defmodule BtAttach.FacadeTest do
       do:
         record({:diagnostics, code}) &&
           {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+    # BT-2557: test-runner pane — discovery + run.
+    def list_tests,
+      do: record({:list_tests}) && {:ok, [%{"class" => "FooTest", "selectors" => ["testOne"]}]}
+
+    def run_tests(class),
+      do:
+        record({:run_tests, class}) &&
+          {:ok,
+           %{
+             "total" => 1,
+             "passed" => 1,
+             "failed" => 0,
+             "skipped" => 0,
+             "duration" => 0.1,
+             "tests" => [
+               %{"name" => "testOne", "class" => "FooTest", "status" => "pass", "detail" => ""}
+             ]
+           }}
   end
 
   setup do
@@ -87,6 +106,8 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:revert) == :execute
       assert Facade.capability(:flush) == :execute
       assert Facade.capability(:reload) == :execute
+      # BT-2557: running tests evaluates code → :execute; discovery is :read.
+      assert Facade.capability(:run_tests) == :execute
 
       for read <- ~w(info inspect bindings actors processes sessions complete hover
                      diagnostics
@@ -94,7 +115,7 @@ defmodule BtAttach.FacadeTest do
                      subscribe_classes
                      subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
-                     browse_class_definition
+                     browse_class_definition list_tests
                      senders implementors symbols)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
       end
@@ -341,6 +362,43 @@ defmodule BtAttach.FacadeTest do
 
       assert Facade.dispatch(:diagnostics, %{code: "x"}, observer) ==
                {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+    end
+  end
+
+  describe "test-runner pane (BT-2557)" do
+    test "list_tests routes to the client (discovery, no args)" do
+      assert Facade.dispatch(:list_tests, %{}) ==
+               {:ok, [%{"class" => "FooTest", "selectors" => ["testOne"]}]}
+
+      assert {:list_tests} in RecordingClient.calls()
+    end
+
+    test "the observer role may list tests (read capability)" do
+      observer = %{role: :observer}
+
+      assert {:ok, [_ | _]} = Facade.dispatch(:list_tests, %{}, observer)
+    end
+
+    test "run_tests with a class runs that class" do
+      assert {:ok, %{"passed" => 1}} = Facade.dispatch(:run_tests, %{class: "FooTest"})
+      assert {:run_tests, "FooTest"} in RecordingClient.calls()
+    end
+
+    test "run_tests with a nil class runs all" do
+      assert {:ok, %{"total" => 1}} = Facade.dispatch(:run_tests, %{class: nil})
+      assert {:run_tests, nil} in RecordingClient.calls()
+    end
+
+    test "a bad class shape is invalid params, with no dist call" do
+      assert Facade.dispatch(:run_tests, %{class: 42}) == {:error, :invalid_params}
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may NOT run tests (execute capability)" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:run_tests, %{class: nil}, observer) == {:error, :unauthorized}
+      assert RecordingClient.calls() == []
     end
   end
 

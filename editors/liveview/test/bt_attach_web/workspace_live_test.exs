@@ -96,6 +96,71 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       refute html =~ ~s(id="new-file-form")
       refute html =~ ~s(phx-submit="new_file")
     end
+
+    test "the Tests pane is read-only for an Observer: catalogue listed, Run hidden, run refused (BT-2557)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(observer_conn(conn), "/")
+
+      # Discovery (`list_tests`) is :read — opening the Tests tab lists the
+      # catalogue without an authorization refusal.
+      listed = render_hook(view, "dock_tab", %{"tab" => "tests"})
+      refute listed =~ "Not authorized"
+
+      # Running (`run_tests`) is :execute — the Run controls are owner-gated away,
+      # and a crafted run event is refused by RBAC (BT-2421), not crashed.
+      refute listed =~ ~s(phx-click="run_tests")
+      refused = render_hook(view, "run_tests", %{})
+      assert refused =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
+  end
+
+  describe "Test-runner pane (BT-2557)" do
+    test "discovers a defined TestCase, runs it, and shows per-case pass/fail", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+
+      # Define a TestCase subclass in the live image with one passing + one
+      # failing test, through the same eval path the Workspace uses.
+      view
+      |> form("#eval-form")
+      |> render_submit(%{
+        expr:
+          "TestCase subclass: CockpitRunnerDemoTest\n" <>
+            "  testPasses =>\n    self assert: 1 equals: 1\n" <>
+            "  testFails =>\n    self assert: 1 equals: 2"
+      })
+
+      # Opening the Tests tab discovers the live catalogue — the new class appears.
+      listed = render_hook(view, "dock_tab", %{"tab" => "tests"})
+      assert listed =~ "CockpitRunnerDemoTest"
+
+      # Run all: the result summary + per-case rows render, with the failing case
+      # and its detail surfaced (run-all → test-all op, live session, no CLI).
+      ran = render_hook(view, "run_tests", %{})
+      assert ran =~ "testPasses"
+      assert ran =~ "testFails"
+      assert ran =~ "failed"
+      assert Process.alive?(view.pid)
+    end
+
+    test "run-selection runs a single class", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/")
+
+      view
+      |> form("#eval-form")
+      |> render_submit(%{
+        expr:
+          "TestCase subclass: CockpitRunnerSelectTest\n" <>
+            "  testOk =>\n    self assert: true"
+      })
+
+      render_hook(view, "dock_tab", %{"tab" => "tests"})
+      # Run just this class (the row's "run" button → run_test_class).
+      ran = render_hook(view, "run_test_class", %{"class" => "CockpitRunnerSelectTest"})
+      assert ran =~ "testOk"
+      assert ran =~ "passed"
+      assert Process.alive?(view.pid)
+    end
   end
 
   test "eval round-trip renders the workspace result term", %{conn: conn} do

@@ -30,6 +30,7 @@ TestResult is a tagged map:
     run_class/1,
     run_class_by_name/1,
     run_method/2,
+    discover_tests/0,
     %% TestResult instance primitives
     result_passed/1,
     result_failed/1,
@@ -132,6 +133,37 @@ run_all_impl(MaxJobs) ->
             %% Replace summed per-class durations with actual wall-clock time
             Aggregated#{duration => WallDuration}
     end.
+
+-doc """
+Discover all loaded TestCase subclasses and their test selectors (BT-2557).
+
+Pure reflection over the class registry — runs **no** test code, mutates
+nothing — so it is safe to call from a `:read` op (the cockpit's test-runner
+pane lists tests before running them). Returns one map per test class,
+`#{class => binary(), selectors => [binary()]}`, sorted by class name with the
+selectors sorted within each class.
+
+A class that disappears between enumeration and inspection (unloaded
+concurrently) is skipped rather than raising — it cannot be a live test target
+if it is gone — so discovery degrades cleanly for the caller.
+""".
+-spec discover_tests() -> [#{class := binary(), selectors := [binary()]}].
+discover_tests() ->
+    Classes = lists:sort(beamtalk_test_case:find_test_classes()),
+    lists:filtermap(
+        fun(ClassName) ->
+            try
+                {TestMethods, _FlatMethods, _Module} = discover_methods_via_registry(ClassName),
+                {true, #{
+                    class => atom_to_binary(ClassName, utf8),
+                    selectors => [atom_to_binary(S, utf8) || S <- TestMethods]
+                }}
+            catch
+                _Class:_Reason -> false
+            end
+        end,
+        Classes
+    ).
 
 -doc """
 Run all TestCase subclasses whose source file matches FilePath.
