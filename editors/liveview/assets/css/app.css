@@ -775,6 +775,19 @@
 .bt-table .k { font-weight: 600; color: var(--accent-2); font-family: var(--code-font, ui-monospace, monospace); }
 .bt-table .v { width: 100%; color: var(--ink); }
 
+/* test-runner pane (BT-2557) */
+.test-pane { padding: var(--panel-pad); gap: 10px; }
+.test-toolbar { display: flex; align-items: center; gap: 8px; flex: none; }
+.test-summary { font-size: 12px; font-weight: 600; color: var(--ok); margin-left: auto; }
+.test-summary.fail { color: var(--err); }
+.test-results { margin-bottom: 4px; }
+.test-status { white-space: nowrap; font-weight: 600; font-family: var(--code-font, ui-monospace, monospace); }
+.test-status.st-pass { color: var(--ok); }
+.test-status.st-fail { color: var(--err); }
+.test-status.st-skip { color: var(--muted); }
+.test-detail { color: var(--err); font-family: var(--code-font, ui-monospace, monospace); font-size: 11.5px; }
+.test-row.st-pass .test-detail { color: var(--muted); }
+
 /* transcript */
 .transcript {
   padding: 10px 14px; font-family: var(--code-font, ui-monospace, monospace);

@@ -123,6 +123,48 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has(".cm-hover-doc", text: "Integer")
   end
 
+  test "the CmEditor shows live parse-only diagnostics + clears them on a fix (BT-2556)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Invalid syntax (`:=` as a right-hand side) — the buffer round-trips to the
+    # live compiler over the term-seam (`diagnostics` event →
+    # `Workspace.diagnostics/1`), whose SIDE-EFFECT-FREE parse-only path returns
+    # an error span. `@codemirror/lint` paints it as a `.cm-lintRange-error`
+    # squiggle. The lint source debounces, so `assert_has` polls past the delay.
+    |> set_source("x := :=")
+    |> assert_has(".cm-lintRange-error")
+    # Fixing the error clears the squiggle: a valid buffer parses clean, so the
+    # next debounced lint returns no diagnostics and CodeMirror drops the mark.
+    |> set_source("x := 42")
+    |> refute_has(".cm-lintRange-error")
+  end
+
+  test "the Tests pane discovers + runs a TestCase in a real browser (BT-2557)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Define a TestCase subclass in the live image via the Workspace editor + Do
+    # it (side-effect-only install). One passing, one failing test.
+    |> set_source(
+      "TestCase subclass: CockpitBrowserDemoTest\n" <>
+        "  testPasses =>\n    self assert: 1 equals: 1\n" <>
+        "  testFails =>\n    self assert: 1 equals: 2"
+    )
+    |> click("button[value='do_it']")
+    # Open the Tests dock tab and refresh discovery so the catalogue reflects the
+    # just-installed class (discovery is the live `list-tests` op).
+    |> click("button[phx-value-tab='tests']")
+    |> click("button[phx-click='tests_refresh']")
+    |> assert_has(".test-catalogue", text: "CockpitBrowserDemoTest")
+    # Run all: per-case results render, with the failing case + a failing summary,
+    # driven through the live session (no shelled-out CLI).
+    |> click("button[phx-click='run_tests']")
+    |> assert_has(".test-results", text: "testFails")
+    |> assert_has(".test-summary.fail")
+  end
+
   test "an eval round-trips through the real browser via the Print it button", %{conn: conn} do
     conn
     |> visit("/")

@@ -39,6 +39,7 @@ Legacy format (backward compatible):
     encode_test_results/2,
     encode_trace_result/5,
     encode_completions/2,
+    encode_diagnostics/2,
     encode_codegen/3,
     encode_methods/3,
     encode_class_list/2,
@@ -621,6 +622,34 @@ encode_completions(Completions, Msg) ->
                 })
             )
     end.
+
+-doc """
+Encode a diagnostics response (BT-2556).
+
+Carries the parse-only diagnostics for an editor buffer: a list of maps, each
+with `message`, `severity`, `start`, and `end` (byte offsets into the buffer).
+There is no legacy form — `diagnostics` is a new-protocol-only op consumed by
+the cockpit CodeMirror editors. The cockpit consumes the `{diagnostics, _}`
+TERM directly over distribution (`dispatch/4`); this JSON encoder exists only
+for the browser WebSocket transport edge, mirroring `encode_completions/2`.
+""".
+-spec encode_diagnostics([map()], protocol_msg()) -> binary().
+encode_diagnostics(Diagnostics, Msg) ->
+    %% Diagnostic maps carry atom keys (message/severity/start/end); project to
+    %% the binary-keyed wire shape so the JSON encoder emits stable string keys.
+    Wire = [
+        #{
+            <<"message">> => maps:get(message, D, <<>>),
+            <<"severity">> => maps:get(severity, D, <<"error">>),
+            <<"start">> => maps:get(start, D, 0),
+            <<"end">> => maps:get('end', D, 0)
+        }
+     || D <- Diagnostics
+    ],
+    Base = base_response(Msg),
+    iolist_to_binary(
+        json:encode(Base#{<<"diagnostics">> => Wire, <<"status">> => [<<"done">>]})
+    ).
 
 -doc """
 Encode a show-codegen response (BT-2402).

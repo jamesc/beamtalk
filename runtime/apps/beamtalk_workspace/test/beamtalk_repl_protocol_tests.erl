@@ -842,3 +842,30 @@ encode_test_results_skip_without_reason_test() ->
     ?assertEqual(<<"skip">>, maps:get(<<"status">>, Entry)),
     %% No reason field when not provided
     ?assertEqual(error, maps:find(<<"reason">>, Entry)).
+
+%%====================================================================
+%% encode_diagnostics/2 (BT-2556)
+%%====================================================================
+
+encode_diagnostics_projects_atom_keyed_maps_test() ->
+    %% Backend diagnostics carry atom keys with byte-offset spans; the encoder
+    %% must project them onto the binary-keyed wire shape with a `done` status.
+    Msg = make_msg(<<"diagnostics">>, <<"dg-100">>, undefined, false),
+    Diagnostics = [
+        #{message => <<"unexpected token">>, severity => <<"error">>, start => 4, 'end' => 6}
+    ],
+    Result = beamtalk_repl_protocol:encode_diagnostics(Diagnostics, Msg),
+    Decoded = json:decode(Result),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    [Entry] = maps:get(<<"diagnostics">>, Decoded),
+    ?assertEqual(<<"unexpected token">>, maps:get(<<"message">>, Entry)),
+    ?assertEqual(<<"error">>, maps:get(<<"severity">>, Entry)),
+    ?assertEqual(4, maps:get(<<"start">>, Entry)),
+    ?assertEqual(6, maps:get(<<"end">>, Entry)).
+
+encode_diagnostics_empty_list_test() ->
+    Msg = make_msg(<<"diagnostics">>, <<"dg-101">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_diagnostics([], Msg),
+    Decoded = json:decode(Result),
+    ?assertEqual([], maps:get(<<"diagnostics">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).

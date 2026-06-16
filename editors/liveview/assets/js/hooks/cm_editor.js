@@ -51,6 +51,7 @@ import { beamtalkHighlighting } from "./bt_highlight"
 import { inlineResultsField, addInlineResult } from "./inline_results"
 import { backendCompletion, completionQuery } from "./cm_autocomplete"
 import { backendHover, hoverQuery } from "./cm_hover"
+import { backendLint, lintQuery } from "./cm_lint"
 
 export const CmEditor = {
   mounted() {
@@ -120,6 +121,14 @@ export const CmEditor = {
     // read-only editor — because hover runs no user code (`:read` capability),
     // so an Observer hovers too, and the method-editor tabs get it for free.
     extensions.push(backendHover(hoverQuery(this.pushEvent.bind(this))))
+    // Live parse-only diagnostics (BT-2556): error/warning squiggles sourced
+    // from the live compiler via the `diagnostics` event. Only for editable
+    // editors — a read-only buffer has nothing to fix, so squiggles would just
+    // be noise. The source debounces (idle delay) so typing never floods the
+    // workspace; the op runs no user code (`:read`, parse-only).
+    if (!readOnly) {
+      extensions.push(backendLint(lintQuery(this.pushEvent.bind(this))))
+    }
 
     this.view = new EditorView({
       state: EditorState.create({ doc: this.field.value, extensions }),

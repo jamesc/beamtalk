@@ -67,6 +67,11 @@ defmodule BtAttach.Facade do
     # it triggers no user code (pure reflection over the live class registry +
     # stored doc-comments), so it is `:read` — the Observer role may hover.
     hover: :read,
+    # BT-2556: parse-only live diagnostics for the cockpit editors. The buffer is
+    # parsed + semantically checked for DIAGNOSIS ONLY (no codegen, no install, no
+    # eval, no ChangeLog) — pure analysis, no user code — so it is `:read` and the
+    # Observer role may see diagnostics.
+    diagnostics: :read,
     changes: :read,
     # ADR 0096 (BT-2488): the System Browser browse facade — four read-only
     # ops backing the four-pane navigator. They trigger no user code (pure
@@ -99,6 +104,13 @@ defmodule BtAttach.Facade do
     subscribe_object: :read,
     unsubscribe_object: :read,
     pid_stats: :read,
+    # BT-2557: the cockpit test-runner pane. `list_tests` discovers loaded
+    # TestCase subclasses + their selectors — pure reflection over the class
+    # registry, runs no test code — so it is `:read` (the Observer may list).
+    # `run_tests` compiles + EVALUATES the tests (mutating the image, just like
+    # `eval`), so it is `:execute` — Owner-only, the same gate the eval form uses.
+    list_tests: :read,
+    run_tests: :execute,
     kill: :admin,
     rotate_cookie: :admin
   }
@@ -247,6 +259,34 @@ defmodule BtAttach.Facade do
       do: client().hover(pid, code),
       else: {:error, :invalid_params}
   end
+
+  # BT-2556: parse-only diagnostics for the CodeMirror editors. `code` is the
+  # full editor buffer; the client runs the compiler's side-effect-free
+  # `diagnostics` path and returns `{:ok, [diagnostic]}` (each a map with
+  # `from`/`to`/`severity`/`message`). Unlike `:complete`/`:hover` there is no
+  # session/receiver context — diagnostics analyse the buffer in isolation — so
+  # only `code` is required. Capability `:read` (no user code), so the Observer
+  # role sees diagnostics too. A non-binary `code` is `:invalid_params` with no
+  # dist call, matching `:complete`/`:hover`.
+  defp invoke(:diagnostics, %{code: code}, _ctx) do
+    if is_binary(code),
+      do: client().diagnostics(code),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2557: the cockpit test-runner pane. `list_tests` discovers test classes
+  # (no args, pure reflection). `run_tests` runs all tests (`class` is nil) or a
+  # single class (`class` is a binary). A non-binary, non-nil class is a bad
+  # shape → `:invalid_params` with no dist call, matching the browse ops.
+  defp invoke(:list_tests, _params, _ctx), do: client().list_tests()
+
+  defp invoke(:run_tests, %{class: class}, _ctx) do
+    if is_nil(class) or is_binary(class),
+      do: client().run_tests(class),
+      else: {:error, :invalid_params}
+  end
+
+  defp invoke(:run_tests, _params, _ctx), do: client().run_tests(nil)
 
   defp invoke(:flush, _params, _ctx), do: client().flush()
 

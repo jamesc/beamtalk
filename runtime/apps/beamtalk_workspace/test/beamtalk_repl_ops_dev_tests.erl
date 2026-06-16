@@ -278,6 +278,41 @@ handle_show_codegen_missing_code_error_test() ->
     ?assert(maps:is_key(<<"error">>, Decoded)).
 
 %%====================================================================
+%% handle_term/4 + handle/4 -- diagnostics (BT-2556)
+%%
+%% Only the empty-buffer + encoding paths are exercised here: they short-circuit
+%% before the Rust compiler port (which a bare EUnit run does not start), so the
+%% routing, the `{diagnostics, _}` term shape, and the JSON encoding are all
+%% covered without a running workspace. The real parse path is covered by the
+%% facade test (mock) and the browser e2e (live workspace).
+%%====================================================================
+
+diagnostics_empty_code_returns_empty_term_test() ->
+    Msg = make_msg(<<"diagnostics">>, <<"dg-1">>, undefined, false),
+    ?assertEqual(
+        {diagnostics, []},
+        beamtalk_repl_ops_dev:handle_term(
+            <<"diagnostics">>, #{<<"code">> => <<>>}, Msg, self()
+        )
+    ).
+
+diagnostics_missing_code_returns_empty_term_test() ->
+    %% No `code` key at all defaults to an empty buffer -> no diagnostics, no port.
+    Msg = make_msg(<<"diagnostics">>, <<"dg-2">>, undefined, false),
+    ?assertEqual(
+        {diagnostics, []},
+        beamtalk_repl_ops_dev:handle_term(<<"diagnostics">>, #{}, Msg, self())
+    ).
+
+diagnostics_empty_code_encodes_done_status_test() ->
+    %% handle/4 runs the term through encode_diagnostics -> WebSocket JSON shape.
+    Msg = make_msg(<<"diagnostics">>, <<"dg-3">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"diagnostics">>, #{<<"code">> => <<>>}, Msg, self()),
+    Decoded = json:decode(Result),
+    ?assertEqual([], maps:get(<<"diagnostics">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+%%====================================================================
 %% handle/4 -- show-codegen class+selector (BT-1236)
 %%====================================================================
 
@@ -1661,6 +1696,15 @@ handle_test_file_returns_response_test() ->
     Decoded = json:decode(Result),
     ?assert(is_map(Decoded)),
     ?assert(maps:is_key(<<"status">>, Decoded)).
+
+handle_list_tests_returns_classes_term_test() ->
+    %% BT-2557: list-tests discovers TestCase subclasses via the live registry.
+    %% The bare EUnit image loads no TestCase subclasses, so discovery returns an
+    %% empty `classes` list — exercising the op routing + the `{value, _}` term
+    %% shape without depending on any fixture class being present.
+    Msg = make_msg(<<"list-tests">>, <<"lt-1">>, undefined, false),
+    {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"list-tests">>, #{}, Msg, self()),
+    ?assert(is_list(maps:get(<<"classes">>, Value))).
 
 validate_list_classes_filter_user_test() ->
     %% list-classes with the "user" filter takes the not-stdlib branch and must

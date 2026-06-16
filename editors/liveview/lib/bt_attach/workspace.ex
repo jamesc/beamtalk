@@ -395,6 +395,210 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  @doc """
+  Return parse-only diagnostics for `code` — the full editor buffer — via the
+  `diagnostics` op (BT-2556). This is the CodeMirror editors' `@codemirror/lint`
+  data source.
+
+  Reuses the compiler's **side-effect-free** `diagnostics` path (the Rust port's
+  `diagnostics` command behind `beamtalk_compiler:diagnostics/1`): the buffer is
+  parsed and semantically checked for DIAGNOSIS ONLY — it generates no code,
+  installs no module, mutates no image state, appends nothing to the ChangeLog,
+  and runs no user code. That makes it safe to fire on every keystroke and
+  consistent with the facade's `:read` capability (the Observer sees diagnostics).
+
+  Unlike `complete/2` and `hover/2`, no `session_pid` is involved: diagnostics
+  analyse the buffer in isolation (no receiver / binding resolution), so the op
+  is workspace-global and `self()` is passed only to satisfy `dispatch/4`'s arity
+  (mirroring the browse ops).
+
+  Each diagnostic is normalised to a binary-keyed map
+  `%{"from" => byte_offset, "to" => byte_offset, "severity" => bin, "message" => bin}`
+  — `start`/`end` are renamed to `from`/`to` so the client maps straight onto a
+  CodeMirror `Diagnostic`. Returns `{:ok, [map()]}` (possibly empty), or
+  `{:error, reason}` on a dispatch failure — JSON never crosses the Attach path.
+  """
+  @spec diagnostics(String.t()) :: {:ok, [map()]} | {:error, term()}
+  def diagnostics(code) when is_binary(code) do
+    case dispatch_diagnostics(code) do
+      {:diagnostics, list} when is_list(list) ->
+        {:ok, Enum.map(list, &normalize_diagnostic/1)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # Project one backend diagnostic term (atom-keyed `%{message, severity, start,
+  # end}`, byte offsets) onto the binary-keyed wire shape the client consumes,
+  # renaming `start`/`end` to `from`/`to` (CodeMirror's `Diagnostic` field names).
+  defp normalize_diagnostic(diag) when is_map(diag) do
+    %{
+      "from" => Map.get(diag, :start, 0),
+      "to" => Map.get(diag, :end, 0),
+      "severity" => to_string(Map.get(diag, :severity, "error")),
+      "message" => to_string(Map.get(diag, :message, ""))
+    }
+  end
+
+  # Defensive fallback (symmetry with `normalize_test_entry/1`): a non-map
+  # diagnostic from an unexpected compiler-port path degrades to an empty,
+  # zero-span diagnostic rather than raising a FunctionClauseError that would
+  # bypass the `diagnostics` handler's catch-all and crash the LiveView socket.
+  defp normalize_diagnostic(_other) do
+    %{"from" => 0, "to" => 0, "severity" => "error", "message" => ""}
+  end
+
+  @doc """
+  Discover loaded `TestCase` subclasses + their test selectors via the
+  `list-tests` op (BT-2557) — the cockpit test-runner pane's catalogue.
+
+  Pure reflection over the live class registry (`beamtalk_test_runner:discover_tests/0`):
+  runs **no** test code and mutates nothing, consistent with the facade's
+  `:read` capability (the Observer may list tests). The op ignores the session
+  (workspace-global discovery), so `self()` is passed only for `dispatch/4`'s
+  arity, mirroring the browse ops.
+
+  Returns `{:ok, [%{"class" => binary, "selectors" => [binary]}]}` (sorted by
+  class), or `{:error, reason}` on a dispatch failure.
+  """
+  @spec list_tests() :: {:ok, [map()]} | {:error, term()}
+  def list_tests do
+    case dispatch_simple("list-tests", %{}) do
+      {:value, %{"classes" => classes}} when is_list(classes) ->
+        {:ok, classes}
+
+      {:value, other} ->
+        {:error, {:unexpected_reply, other}}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  Run tests via the `test` / `test-all` ops (BT-2557) — the cockpit test-runner
+  pane's execution path.
+
+  `class` is `nil` to run every loaded `TestCase` subclass (`test-all`), or a
+  binary class name to run a single class (`test`). Tests compile + **evaluate**
+  user code (mutating the image), so the facade gates this op as `:execute`
+  (Owner-only) — the same gate the eval form uses. Runs through the attached
+  session/facade, never a shelled-out `beamtalk test`.
+
+  Returns `{:ok, result}` where `result` is a normalised, string-keyed map
+  `%{"total","passed","failed","skipped","duration","tests" => [entry]}` and each
+  entry is `%{"name","class","status","detail"}` (`detail` is the assertion
+  message for a failure, the reason for a skip, or `""`). Returns `{:error,
+  reason}` on a dispatch failure or a structured test-run error.
+  """
+  @spec run_tests(String.t() | nil) :: {:ok, map()} | {:error, term()}
+  def run_tests(class) when is_binary(class) or is_nil(class) do
+    {op, params} =
+      case class do
+        nil -> {"test-all", %{}}
+        name -> {"test", %{"class" => name}}
+      end
+
+    case dispatch_simple(op, params) do
+      {:test_results, result} when is_map(result) ->
+        {:ok, normalize_test_result(result)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # Project a backend `TestResult` term (atom-keyed, live `tests` list) onto a
+  # string-keyed wire map the LiveView can render directly.
+  defp normalize_test_result(result) when is_map(result) do
+    %{
+      "total" => Map.get(result, :total, 0),
+      "passed" => Map.get(result, :passed, 0),
+      "failed" => Map.get(result, :failed, 0),
+      "skipped" => Map.get(result, :skipped, 0),
+      "duration" => Map.get(result, :duration, 0.0),
+      "tests" => Enum.map(Map.get(result, :tests, []), &normalize_test_entry/1)
+    }
+  end
+
+  # One per-case entry: `name`/`status`/`class` arrive as atoms over distribution;
+  # `detail` carries the failure message (`:error`) or skip reason (`:reason`).
+  defp normalize_test_entry(entry) when is_map(entry) do
+    %{
+      "name" => to_string(Map.get(entry, :name, "")),
+      "class" => to_string(Map.get(entry, :class, "")),
+      "status" => to_string(Map.get(entry, :status, "")),
+      "detail" => test_entry_detail(entry)
+    }
+  end
+
+  # Defensive fallback: the test runner always returns well-shaped entry maps
+  # today, but a non-map entry from some unexpected failure path must degrade to
+  # a rendered "fail" row rather than raising a FunctionClauseError that would
+  # crash the LiveView socket with no user-visible diagnosis.
+  defp normalize_test_entry(other) do
+    %{
+      "name" => inspect(other),
+      "class" => "",
+      "status" => "fail",
+      "detail" => "Unexpected entry shape from test runner"
+    }
+  end
+
+  defp test_entry_detail(entry) do
+    cond do
+      Map.has_key?(entry, :error) -> stringify_detail(Map.get(entry, :error))
+      Map.has_key?(entry, :reason) -> stringify_detail(Map.get(entry, :reason))
+      true -> ""
+    end
+  end
+
+  defp stringify_detail(detail) when is_binary(detail), do: detail
+  defp stringify_detail(detail), do: inspect(detail)
+
+  # Decode + dispatch a session-less term op (workspace-global: discovery,
+  # test runs). `self()` is passed as `dispatch/4`'s SessionPid only to satisfy
+  # its arity — these ops do not read session bindings — mirroring
+  # `dispatch_browse/2`. Unlike `dispatch_browse/2`, which normalises everything
+  # to `{:value, _} | {:error, _}`, this returns the op-result term VERBATIM (no
+  # JSON edge): **callers own the op-specific term-shape match** (`list_tests/0`
+  # matches `{:value, _}`, `run_tests/1` matches `{:test_results, _}`). A new
+  # caller must match its op's own result tag, not assume browse-style normalising.
+  defp dispatch_simple(op, params) when is_binary(op) and is_map(params) do
+    request = Map.put(params, "op", op)
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        decoded_params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        rpc(:beamtalk_repl_ops, :dispatch, [op, decoded_params, msg, self()])
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
   # Build the browse request as a plain map, decode it to a `protocol_msg()` on
   # the workspace node, then dispatch through the term-returning op layer. The
   # browse ops ignore the session pid (they are workspace-global reflection), so
@@ -483,6 +687,24 @@ defmodule BtAttach.Workspace do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
         rpc(:beamtalk_repl_ops, :dispatch, ["hover", params, msg, session_pid])
+
+      other ->
+        other
+    end
+  end
+
+  # Build the `diagnostics` request as a flat map (`code` top-level), decode it on
+  # the workspace node, and dispatch through the term-returning op layer so the
+  # `{diagnostics, _}` term arrives live (no JSON edge). No session pid is needed
+  # — diagnostics are workspace-global parse-only analysis — so `self()` is passed
+  # only to satisfy `dispatch/4`'s arity, mirroring `dispatch_browse/2`.
+  defp dispatch_diagnostics(code) do
+    request = %{"op" => "diagnostics", "code" => code}
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        rpc(:beamtalk_repl_ops, :dispatch, ["diagnostics", params, msg, self()])
 
       other ->
         other
