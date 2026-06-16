@@ -207,6 +207,31 @@ else
   #    the env) lifts the unauthenticated GitHub API rate limit mise hits while
   #    resolving release lists; it degrades gracefully without one.
   export GITHUB_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+
+  # mise's precompiled OTP links against system libssl + libncurses at RUNTIME.
+  # The devcontainer never needed these installed explicitly because its
+  # rust:1-trixie base already ships them — but a bare cloud base image (ubuntu
+  # noble) may not, so the downloaded `erl` extracts fine (no mise warning) yet
+  # fails to start with a shared-library loader error, which then cascades into
+  # "elixir/rebar3 NOT FOUND" at verify. Install the deps up front. Harmless if
+  # already present; non-fatal so a flaky apt mirror doesn't abort setup.
+  if [ "${SKIP_ERLANG:-}" != "1" ] && command -v apt-get >/dev/null 2>&1; then
+    _OTP_DEPS=""
+    for pkg in libssl-dev libncurses-dev; do
+      dpkg -s "$pkg" >/dev/null 2>&1 || _OTP_DEPS="${_OTP_DEPS} $pkg"
+    done
+    if [ -n "${_OTP_DEPS}" ]; then
+      info "Installing Erlang runtime deps (${_OTP_DEPS# })..."
+      require_sudo
+      # shellcheck disable=SC2086
+      if $SUDO apt-get update -qq && $SUDO apt-get install -y -qq --no-install-recommends ${_OTP_DEPS}; then
+        ok "Erlang runtime deps installed"
+      else
+        warn "Could not install Erlang runtime deps (${_OTP_DEPS# }) — erl may fail to start"
+      fi
+    fi
+  fi
+
   MISE_TOOLS=""
   [ "${SKIP_ERLANG:-}" = "1" ] || MISE_TOOLS="${MISE_TOOLS} erlang"
   [ "${SKIP_ELIXIR:-}" = "1" ] || MISE_TOOLS="${MISE_TOOLS} elixir"
@@ -220,6 +245,20 @@ else
   #    OTP — both for the rest of this script and (persisted below) every shell.
   case ":${PATH}:" in *":${MISE_SHIMS}:"*) ;; *) export PATH="${MISE_SHIMS}:${PATH}" ;; esac
   hash -r 2>/dev/null || true
+
+  # 3b. Functional smoke test: a precompiled OTP can download cleanly yet fail to
+  #     *run* if a runtime lib is still missing. Surface the real loader error
+  #     here (the `if` condition exempts this from set -e) instead of letting it
+  #     resurface as a cryptic "elixir NOT FOUND" 200 lines later at verify.
+  if [ "${SKIP_ERLANG:-}" != "1" ]; then
+    if _erl_smoke="$(erl -noshell -eval 'halt(0).' 2>&1)"; then
+      ok "erl runs"
+    else
+      fail "erl installed but cannot start — toolchain will not work:"
+      printf '%s\n' "${_erl_smoke}" | sed 's/^/      /'
+      warn "Usually a missing runtime library (libssl/libncurses/libtinfo); install the lib it names and re-run."
+    fi
+  fi
 
   # 4. rebar3 — install the pinned escript directly. mise's rebar backend lists
   #    releases through the GitHub *API* (rate-limited to 60/h without a token);
@@ -545,12 +584,23 @@ else
 fi
 check_version "rebar3" "${PIN_REBAR}" "${REBAR_VER}"
 
+# rustc: rust-toolchain.toml pins the toolchain rustup auto-installs per-project,
+# so the *ambient* rustc (often the base image's, e.g. 1.94.1 vs a 1.94.0 pin)
+# legitimately differs and the repo still builds with the pinned one. Treat a
+# mismatch as a note, not a hard failure — only genuine absence is an error.
 if have rustc; then
   RUST_VER="$(rustc --version 2>/dev/null | awk '{print $2}')"
 else
   RUST_VER=""
 fi
-check_version "rustc" "${PIN_RUST}" "${RUST_VER}"
+if [ -z "${RUST_VER}" ]; then
+  fail "rustc NOT FOUND"
+  ERRORS=$((ERRORS + 1))
+elif [ -n "${PIN_RUST}" ] && [ "${RUST_VER}" != "${PIN_RUST}" ]; then
+  warn "rustc ${RUST_VER} (ambient; rust-toolchain.toml pins ${PIN_RUST} per-project via rustup)"
+else
+  ok "rustc ${RUST_VER}"
+fi
 
 # Remaining tools are presence-only. node is installed via NodeSource LTS (not
 # mise-pinned in the cloud path, and skipped when already present), so the
