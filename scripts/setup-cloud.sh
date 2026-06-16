@@ -241,6 +241,24 @@ else
     || warn "mise install reported issues (continuing — erlang/elixir may still be present)"
   (cd "${REPO_ROOT}" && "${MISE_BIN}" reshim >/dev/null 2>&1) || true
 
+  # 2b. Pin the BEAM tools as mise GLOBAL defaults too — not just the project
+  #     .tool-versions. A mise shim resolves its version by walking up from the
+  #     *current working directory* for a .tool-versions / mise config. With only
+  #     the project pin, any process that shells out to `erl` from a directory
+  #     OUTSIDE the repo finds no pin, no global default, and the shim aborts with
+  #     "No version is set for shim: erl". The Beamtalk compiler does exactly this:
+  #     it spawns its BEAM type-spec-extraction worker from $TMPDIR, so a
+  #     project-only pin made every FFI spec come back empty and broke the stdlib
+  #     build with a spurious "Dynamic in typed class (untyped FFI)" error. The
+  #     global default carries the *same* pinned versions, so this resolves the
+  #     out-of-tree cwd case without bypassing version management. Derived from
+  #     .tool-versions to stay in sync; non-fatal (rebar's release-list lookup may
+  #     warn behind a rate-limited/offline GitHub API, which is irrelevant here).
+  for _tool in ${MISE_TOOLS}; do
+    _ver="$(awk -v t="${_tool}" '$1==t {print $2; exit}' "${REPO_ROOT}/.tool-versions")"
+    [ -n "${_ver}" ] && ("${MISE_BIN}" use -g "${_tool}@${_ver}" >/dev/null 2>&1 || true)
+  done
+
   # 3. Put the mise shims first on PATH so erl/elixir/mix resolve to the pinned
   #    OTP — both for the rest of this script and (persisted below) every shell.
   case ":${PATH}:" in *":${MISE_SHIMS}:"*) ;; *) export PATH="${MISE_SHIMS}:${PATH}" ;; esac
