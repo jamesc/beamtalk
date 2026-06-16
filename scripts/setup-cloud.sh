@@ -252,8 +252,10 @@ else
   #     build with a spurious "Dynamic in typed class (untyped FFI)" error. The
   #     global default carries the *same* pinned versions, so this resolves the
   #     out-of-tree cwd case without bypassing version management. Derived from
-  #     .tool-versions to stay in sync; non-fatal (rebar's release-list lookup may
-  #     warn behind a rate-limited/offline GitHub API, which is irrelevant here).
+  #     .tool-versions to stay in sync. Non-fatal (|| true): only erlang/elixir are
+  #     set here, but `mise use -g` re-evaluates the merged project config — which
+  #     also pins rebar — so it can emit a rebar release-list warning behind a
+  #     rate-limited/offline GitHub API. That warning is harmless here.
   for _tool in ${MISE_TOOLS}; do
     _ver="$(awk -v t="${_tool}" '$1==t {print $2; exit}' "${REPO_ROOT}/.tool-versions")"
     [ -n "${_ver}" ] && ("${MISE_BIN}" use -g "${_tool}@${_ver}" >/dev/null 2>&1 || true)
