@@ -44,6 +44,7 @@ import { indentUnit } from "@codemirror/language"
 import { beamtalkHighlighting } from "./bt_highlight"
 import { backendCompletion, completionQuery } from "./cm_autocomplete"
 import { backendHover, hoverQuery } from "./cm_hover"
+import { backendLint, lintQuery } from "./cm_lint"
 
 export const ReplInput = {
   mounted() {
@@ -86,6 +87,9 @@ export const ReplInput = {
       // Live-image hover (BT-2555): same hover source as the Workspace editor —
       // signature + doc-comment tooltips from the live session.
       backendHover(hoverQuery(this.pushEvent.bind(this))),
+      // Live parse-only diagnostics (BT-2556): same lint source as the Workspace
+      // editor — error/warning squiggles from the live compiler, debounced.
+      backendLint(lintQuery(this.pushEvent.bind(this))),
     ]
     if (placeholderText) extensions.push(placeholderExt(placeholderText))
 

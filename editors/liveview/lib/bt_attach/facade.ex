@@ -67,6 +67,11 @@ defmodule BtAttach.Facade do
     # it triggers no user code (pure reflection over the live class registry +
     # stored doc-comments), so it is `:read` — the Observer role may hover.
     hover: :read,
+    # BT-2556: parse-only live diagnostics for the cockpit editors. The buffer is
+    # parsed + semantically checked for DIAGNOSIS ONLY (no codegen, no install, no
+    # eval, no ChangeLog) — pure analysis, no user code — so it is `:read` and the
+    # Observer role may see diagnostics.
+    diagnostics: :read,
     changes: :read,
     # ADR 0096 (BT-2488): the System Browser browse facade — four read-only
     # ops backing the four-pane navigator. They trigger no user code (pure
@@ -245,6 +250,20 @@ defmodule BtAttach.Facade do
   defp invoke(:hover, %{session_pid: pid, code: code}, _ctx) do
     if is_pid(pid) and is_binary(code),
       do: client().hover(pid, code),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2556: parse-only diagnostics for the CodeMirror editors. `code` is the
+  # full editor buffer; the client runs the compiler's side-effect-free
+  # `diagnostics` path and returns `{:ok, [diagnostic]}` (each a map with
+  # `from`/`to`/`severity`/`message`). Unlike `:complete`/`:hover` there is no
+  # session/receiver context — diagnostics analyse the buffer in isolation — so
+  # only `code` is required. Capability `:read` (no user code), so the Observer
+  # role sees diagnostics too. A non-binary `code` is `:invalid_params` with no
+  # dist call, matching `:complete`/`:hover`.
+  defp invoke(:diagnostics, %{code: code}, _ctx) do
+    if is_binary(code),
+      do: client().diagnostics(code),
       else: {:error, :invalid_params}
   end
 

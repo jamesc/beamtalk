@@ -136,6 +136,18 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
             Bindings = maps:merge(WorkspaceBindings, SessionBindings),
             {docs, hover_docs(Code, Bindings)}
     end;
+handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
+    %% BT-2556: parse-only diagnostics for the cockpit CodeMirror editors. `code`
+    %% is the FULL editor buffer (not a line prefix). We run the compiler's
+    %% side-effect-free `diagnostics/1` path — parse + semantic check via the
+    %% Rust port's `diagnostics` command — which compiles for DIAGNOSIS ONLY: it
+    %% emits no module, installs nothing, never touches the image or the
+    %% ChangeLog, and runs no user code. That makes it safe to fire on every
+    %% keystroke and a `:read` op (the Observer may see diagnostics). Each entry
+    %% carries byte-offset `start`/`end` spans + a `severity` + a `message`; the
+    %% client maps spans to editor positions and severities to squiggles.
+    Code = maps:get(<<"code">>, Params, <<>>),
+    {diagnostics, diagnostics_for(Code)};
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
@@ -799,6 +811,29 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
              || S <- MethodSelectors,
                 binary:match(atom_to_binary(S, utf8), Prefix) =:= {0, byte_size(Prefix)}
             ])
+    end.
+
+-doc """
+Compute parse-only diagnostics for an editor buffer (BT-2556).
+
+`Code` is the full buffer source. Delegates to `beamtalk_compiler:diagnostics/1`
+— the side-effect-free parse + semantic-check path (the Rust port's
+`diagnostics` command): it never generates code, installs a module, mutates the
+image, or appends to the ChangeLog. Each diagnostic is a map with `message`,
+`severity`, and byte-offset `start`/`end` keys.
+
+An empty buffer short-circuits to `[]` (nothing to diagnose). A compiler-port
+failure (`{error, _}` — port down / timed out) also degrades to `[]`: diagnostics
+are advisory and fire on every keystroke, so a transient port hiccup must not
+surface an error to the editor.
+""".
+-spec diagnostics_for(binary()) -> [map()].
+diagnostics_for(<<>>) ->
+    [];
+diagnostics_for(Code) when is_binary(Code) ->
+    case beamtalk_compiler:diagnostics(Code) of
+        {ok, Diagnostics} when is_list(Diagnostics) -> Diagnostics;
+        {error, _Reason} -> []
     end.
 
 -doc """

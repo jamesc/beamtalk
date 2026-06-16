@@ -395,6 +395,58 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  @doc """
+  Return parse-only diagnostics for `code` — the full editor buffer — via the
+  `diagnostics` op (BT-2556). This is the CodeMirror editors' `@codemirror/lint`
+  data source.
+
+  Reuses the compiler's **side-effect-free** `diagnostics` path (the Rust port's
+  `diagnostics` command behind `beamtalk_compiler:diagnostics/1`): the buffer is
+  parsed and semantically checked for DIAGNOSIS ONLY — it generates no code,
+  installs no module, mutates no image state, appends nothing to the ChangeLog,
+  and runs no user code. That makes it safe to fire on every keystroke and
+  consistent with the facade's `:read` capability (the Observer sees diagnostics).
+
+  Unlike `complete/2` and `hover/2`, no `session_pid` is involved: diagnostics
+  analyse the buffer in isolation (no receiver / binding resolution), so the op
+  is workspace-global and `self()` is passed only to satisfy `dispatch/4`'s arity
+  (mirroring the browse ops).
+
+  Each diagnostic is normalised to a binary-keyed map
+  `%{"from" => byte_offset, "to" => byte_offset, "severity" => bin, "message" => bin}`
+  — `start`/`end` are renamed to `from`/`to` so the client maps straight onto a
+  CodeMirror `Diagnostic`. Returns `{:ok, [map()]}` (possibly empty), or
+  `{:error, reason}` on a dispatch failure — JSON never crosses the Attach path.
+  """
+  @spec diagnostics(String.t()) :: {:ok, [map()]} | {:error, term()}
+  def diagnostics(code) when is_binary(code) do
+    case dispatch_diagnostics(code) do
+      {:diagnostics, list} when is_list(list) ->
+        {:ok, Enum.map(list, &normalize_diagnostic/1)}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # Project one backend diagnostic term (atom-keyed `%{message, severity, start,
+  # end}`, byte offsets) onto the binary-keyed wire shape the client consumes,
+  # renaming `start`/`end` to `from`/`to` (CodeMirror's `Diagnostic` field names).
+  defp normalize_diagnostic(diag) when is_map(diag) do
+    %{
+      "from" => Map.get(diag, :start, 0),
+      "to" => Map.get(diag, :end, 0),
+      "severity" => to_string(Map.get(diag, :severity, "error")),
+      "message" => to_string(Map.get(diag, :message, ""))
+    }
+  end
+
   # Build the browse request as a plain map, decode it to a `protocol_msg()` on
   # the workspace node, then dispatch through the term-returning op layer. The
   # browse ops ignore the session pid (they are workspace-global reflection), so
@@ -483,6 +535,24 @@ defmodule BtAttach.Workspace do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
         rpc(:beamtalk_repl_ops, :dispatch, ["hover", params, msg, session_pid])
+
+      other ->
+        other
+    end
+  end
+
+  # Build the `diagnostics` request as a flat map (`code` top-level), decode it on
+  # the workspace node, and dispatch through the term-returning op layer so the
+  # `{diagnostics, _}` term arrives live (no JSON edge). No session pid is needed
+  # — diagnostics are workspace-global parse-only analysis — so `self()` is passed
+  # only to satisfy `dispatch/4`'s arity, mirroring `dispatch_browse/2`.
+  defp dispatch_diagnostics(code) do
+    request = %{"op" => "diagnostics", "code" => code}
+
+    case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
+      {:ok, msg} ->
+        params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
+        rpc(:beamtalk_repl_ops, :dispatch, ["diagnostics", params, msg, self()])
 
       other ->
         other

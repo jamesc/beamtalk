@@ -123,6 +123,24 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has(".cm-hover-doc", text: "Integer")
   end
 
+  test "the CmEditor shows live parse-only diagnostics + clears them on a fix (BT-2556)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Invalid syntax (`:=` as a right-hand side) — the buffer round-trips to the
+    # live compiler over the term-seam (`diagnostics` event →
+    # `Workspace.diagnostics/1`), whose SIDE-EFFECT-FREE parse-only path returns
+    # an error span. `@codemirror/lint` paints it as a `.cm-lintRange-error`
+    # squiggle. The lint source debounces, so `assert_has` polls past the delay.
+    |> set_source("x := :=")
+    |> assert_has(".cm-lintRange-error")
+    # Fixing the error clears the squiggle: a valid buffer parses clean, so the
+    # next debounced lint returns no diagnostics and CodeMirror drops the mark.
+    |> set_source("x := 42")
+    |> refute_has(".cm-lintRange-error")
+  end
+
   test "an eval round-trips through the real browser via the Print it button", %{conn: conn} do
     conn
     |> visit("/")

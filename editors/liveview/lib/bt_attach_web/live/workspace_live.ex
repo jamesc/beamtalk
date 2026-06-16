@@ -665,6 +665,38 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:reply, %{"hover" => ""}, socket}
   end
 
+  # Live parse-only diagnostics (BT-2556): the CodeMirror editors'
+  # `@codemirror/lint` source round-trips the FULL buffer; we answer with
+  # error/warning ranges from the compiler's side-effect-free `diagnostics` path
+  # (parse + semantic check, NO codegen / install / eval / ChangeLog), so it is
+  # safe to fire as the buffer changes and is a `:read` op — the Observer role
+  # sees diagnostics too. We `{:reply, …}` on the same event so CodeMirror
+  # resolves its async lint source; an unreachable workspace, a denied op, or a
+  # bad shape all degrade to an empty list (no squiggles shown). Diagnostics do
+  # not need a session pid — they analyse the buffer in isolation — so unlike
+  # `complete`/`hover` there is no `session_pid` guard.
+  #
+  # Debounce lives on the CLIENT: the `@codemirror/lint` `linter(…, {delay})`
+  # only invokes this source after the editor has been idle, so rapid keystrokes
+  # never flood the workspace (the same pattern the LSP uses to debounce
+  # `didChange`). A server-side *drop* debounce would break the request/reply
+  # contract — a coalesced request's reply would never arrive — so the throttle
+  # is deliberately upstream of the round-trip, not in this handler.
+  @impl true
+  def handle_event("diagnostics", %{"code" => code}, socket) when is_binary(code) do
+    diagnostics =
+      case Facade.dispatch(:diagnostics, %{code: code}, ctx(socket)) do
+        {:ok, list} when is_list(list) -> list
+        _ -> []
+      end
+
+    {:reply, %{"diagnostics" => diagnostics}, socket}
+  end
+
+  def handle_event("diagnostics", _params, socket) do
+    {:reply, %{"diagnostics" => []}, socket}
+  end
+
   # Switch the Workspace dock's active tab (Workspace / REPL / Transcript /
   # Changes, BT-2490, REPL added BT-2543). Pure view state — no workspace
   # round-trip; an unknown tab is ignored rather than rendered, so a crafted

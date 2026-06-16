@@ -51,6 +51,7 @@ leak compiler/runtime internals.
 | sessions | `{sessions, [SessionMeta]}` | `sessions` |
 | health | `{health, WorkspaceId, Nonce}` | `health` |
 | completions | `{completions, [binary()]}` | `complete`, `erlang-complete` |
+| diagnostics | `{diagnostics, [map()]}` | `diagnostics` |
 | docs | `{docs, binary()}` | `erlang-help`, `hover` |
 | codegen | `{codegen, CoreErlang, Warnings}` | `show-codegen` |
 | methods | `{methods, Methods, StateVars}` | `methods` |
@@ -107,6 +108,7 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
     | {sessions, [map()]}
     | {health, WorkspaceId :: binary(), Nonce :: binary()}
     | {completions, [binary()]}
+    | {diagnostics, [map()]}
     | {docs, binary()}
     | {codegen, CoreErlang :: binary(), Warnings :: [binary()]}
     | {methods, Methods :: [map()], StateVars :: [binary()]}
@@ -153,6 +155,7 @@ dispatch(Op, Params, Msg, SessionPid) when
 dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"complete">>;
     Op =:= <<"hover">>;
+    Op =:= <<"diagnostics">>;
     Op =:= <<"describe">>;
     Op =:= <<"methods">>;
     Op =:= <<"list-classes">>;
@@ -238,6 +241,8 @@ encode({health, WorkspaceId, Nonce}, Msg) ->
     beamtalk_repl_protocol:encode_health(WorkspaceId, Nonce, Msg);
 encode({completions, Completions}, Msg) ->
     beamtalk_repl_protocol:encode_completions(Completions, Msg);
+encode({diagnostics, Diagnostics}, Msg) ->
+    beamtalk_repl_protocol:encode_diagnostics(Diagnostics, Msg);
 encode({docs, DocText}, Msg) ->
     beamtalk_repl_protocol:encode_docs(DocText, Msg);
 encode({codegen, CoreErlang, Warnings}, Msg) ->

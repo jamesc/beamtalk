@@ -62,6 +62,12 @@ defmodule BtAttach.FacadeTest do
     # BT-2555: live-image hover docs for the CodeMirror editors.
     def hover(pid, code),
       do: record({:hover, pid, code}) && {:ok, "== Integer < Number =="}
+
+    # BT-2556: parse-only diagnostics for the CodeMirror editors.
+    def diagnostics(code),
+      do:
+        record({:diagnostics, code}) &&
+          {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
   end
 
   setup do
@@ -83,6 +89,7 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:reload) == :execute
 
       for read <- ~w(info inspect bindings actors processes sessions complete hover
+                     diagnostics
                      subscribe_transcript subscribe_bindings subscribe_actors
                      subscribe_classes
                      subscribe_object unsubscribe_object pid_stats
@@ -310,6 +317,30 @@ defmodule BtAttach.FacadeTest do
 
       assert Facade.dispatch(:hover, %{session_pid: self(), code: "Integer"}, observer) ==
                {:ok, "== Integer < Number =="}
+    end
+  end
+
+  describe "parse-only diagnostics (BT-2556)" do
+    test "diagnostics routes to the client and passes the buffer through" do
+      assert Facade.dispatch(:diagnostics, %{code: "1 +"}) ==
+               {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+      assert {:diagnostics, "1 +"} in RecordingClient.calls()
+    end
+
+    test "a bad shape is invalid params, with no dist call" do
+      # Non-binary code → no diagnostics round-trip. Diagnostics need no session,
+      # so the only shape check is on `code`.
+      assert Facade.dispatch(:diagnostics, %{code: 42}) == {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may see diagnostics (read capability)" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:diagnostics, %{code: "x"}, observer) ==
+               {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
     end
   end
 
