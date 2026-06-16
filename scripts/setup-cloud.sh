@@ -302,6 +302,29 @@ export ELIXIR_ERL_OPTIONS="\${ELIXIR_ERL_OPTIONS:-+fnu}"
 PROFILE
   ok "Toolchain PATH persisted to /etc/profile.d/beamtalk-mise.sh"
 
+  # 5b. Symlink the pinned BEAM tools into /usr/local/bin. The /etc/profile.d
+  #     export above only reaches LOGIN shells. The agent harness runs build
+  #     commands in NON-login, NON-interactive shells whose PATH it controls
+  #     directly — it sources neither /etc/profile.d nor ~/.bashrc, so a
+  #     profile-only install left escript/erl/elixir off PATH and broke
+  #     `just build` mid-session (rebar3 only worked because it is installed
+  #     into /usr/local/bin as a real binary). /usr/local/bin IS on that bare
+  #     PATH, so linking the shims there is what actually makes the toolchain
+  #     resolve for harness builds. The shims still defer to the .tool-versions
+  #     pin at run time, so this does not bypass version management.
+  _linked=()
+  for _shim in "${MISE_SHIMS}"/*; do
+    [[ -f "${_shim}" && -x "${_shim}" ]] || continue
+    _name="$(basename "${_shim}")"
+    case "${_name}" in *.ps1) continue ;; esac
+    _dest="/usr/local/bin/${_name}"
+    # Never clobber a real binary already in /usr/local/bin (e.g. rebar3); only
+    # create/refresh symlinks that we own.
+    [[ -e "${_dest}" && ! -L "${_dest}" ]] && continue
+    $SUDO ln -sf "${_shim}" "${_dest}" && _linked+=("${_name}")
+  done
+  ok "Linked BEAM tools into /usr/local/bin (${#_linked[@]}): ${_linked[*]:-(none)}"
+
   # 6. Decommission the stale esl-erlang baked into the cloud base image. It
   #    ships an old OTP (27.x) from the Erlang Solutions apt repo and installs
   #    /usr/bin/erl, which shadows the mise-pinned OTP for any shell that hasn't
