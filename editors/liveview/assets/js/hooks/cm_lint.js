@@ -64,8 +64,10 @@ export function backendLint(requestDiagnostics) {
           } else if (from > 0) {
             // Widen backwards: a low surrogate just before `from` means the
             // preceding character is an astral pair, so step back two units.
+            // `Math.max(0, …)` guards the degenerate case of an orphan low
+            // surrogate at index 0 (a 1-char doc), which would otherwise yield -1.
             const lo = doc.charCodeAt(from - 1)
-            from -= lo >= 0xdc00 && lo <= 0xdfff ? 2 : 1
+            from = Math.max(0, from - (lo >= 0xdc00 && lo <= 0xdfff ? 2 : 1))
           }
         }
         return {

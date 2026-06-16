@@ -757,6 +757,13 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, open_method_tab(socket, class, "instance", selector)}
   end
 
+  # Fallback clauses for the guarded test handlers: a crafted WebSocket message
+  # with a missing / non-binary `class`/`selector` must be ignored, not crash the
+  # socket on a FunctionClauseError before RBAC is reached (matching `save_method`,
+  # `revert`, `browser_select_class`, etc.).
+  def handle_event("run_test_class", _params, socket), do: {:noreply, socket}
+  def handle_event("open_test_method", _params, socket), do: {:noreply, socket}
+
   # ── REPL tab (BT-2543) ───────────────────────────────────────────────────────
   #
   # The REPL is the *conversational, line-at-a-time* idiom (distinct from the
@@ -2434,7 +2441,10 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, test_classes: classes, tests_error: nil)
 
       {:error, reason} ->
-        assign(socket, test_classes: [], tests_error: facade_error(reason))
+        # Leave the catalogue as the nil sentinel (not []) so the pane shows only
+        # the error — not the misleading "No TestCase subclasses" empty-state —
+        # and so re-opening the tab retries discovery (a transient failure heals).
+        assign(socket, test_classes: nil, tests_error: facade_error(reason))
     end
   end
 
@@ -2448,7 +2458,9 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, test_results: result, tests_error: nil)
 
       {:error, reason} ->
-        assign(socket, tests_error: facade_error(reason))
+        # Clear any prior run's results so a stale pass/fail summary can't sit
+        # next to the new error and confuse what just failed.
+        assign(socket, test_results: nil, tests_error: facade_error(reason))
     end
   end
 
