@@ -447,6 +447,14 @@ defmodule BtAttach.Workspace do
     }
   end
 
+  # Defensive fallback (symmetry with `normalize_test_entry/1`): a non-map
+  # diagnostic from an unexpected compiler-port path degrades to an empty,
+  # zero-span diagnostic rather than raising a FunctionClauseError that would
+  # bypass the `diagnostics` handler's catch-all and crash the LiveView socket.
+  defp normalize_diagnostic(_other) do
+    %{"from" => 0, "to" => 0, "severity" => "error", "message" => ""}
+  end
+
   @doc """
   Discover loaded `TestCase` subclasses + their test selectors via the
   `list-tests` op (BT-2557) — the cockpit test-runner pane's catalogue.
