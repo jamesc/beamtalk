@@ -57,15 +57,15 @@ handle_term(<<"clone">>, _Params, _Msg, _SessionPid) ->
         {ok, _NewPid} ->
             {ok, NewSessionId, <<>>, []};
         {error, Reason} ->
-            Err0 = beamtalk_error:new(session_error, 'REPL'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary([
-                    <<"Failed to create session: ">>,
-                    io_lib:format("~p", [Reason])
-                ])
-            ),
-            {error, Err1}
+            {error,
+                beamtalk_repl_errors:make(
+                    session_error,
+                    'REPL',
+                    iolist_to_binary([
+                        <<"Failed to create session: ">>,
+                        io_lib:format("~p", [Reason])
+                    ])
+                )}
     end;
 handle_term(<<"close">>, _Params, _Msg, _SessionPid) ->
     {status, ok};
@@ -91,10 +91,11 @@ handle_term(<<"shutdown">>, Params, _Msg, _SessionPid) ->
             {status, ok};
         false ->
             ?LOG_WARNING("Shutdown rejected: invalid cookie", #{domain => [beamtalk, runtime]}),
-            Err0 = beamtalk_error:new(auth_error, 'REPL'),
-            Err1 = beamtalk_error:with_message(Err0, <<"Invalid cookie">>),
-            Err2 = beamtalk_error:with_hint(
-                Err1, <<"Provide the correct node cookie for shutdown.">>
-            ),
-            {error, Err2}
+            {error,
+                beamtalk_repl_errors:make(
+                    auth_error,
+                    'REPL',
+                    <<"Invalid cookie">>,
+                    <<"Provide the correct node cookie for shutdown.">>
+                )}
     end.

@@ -101,3 +101,24 @@ TestCase subclass: IntervalTest
     self assert: (1 to: 10 by: -1) size equals: 0
 
   testZeroStepRaisesError => self should: [1 to: 10 by: 0] raise: #user_error
+
+  testAsListForward => self assert: (1 to: 5) asList equals: #(1, 2, 3, 4, 5)
+
+  testAsListForwardByStep =>
+    self assert: (1 to: 10 by: 3) asList equals: #(1, 4, 7, 10)
+
+  testAsListEmptyInterval => self assert: (1 to: 0) asList equals: #()
+
+  testAsListNegativeStep =>
+    self assert: (5 to: 1 by: -1) asList equals: #(5, 4, 3, 2, 1)
+
+  testAsListNegativeStepBy2 =>
+    self assert: (10 to: 2 by: -2) asList equals: #(10, 8, 6, 4, 2)
+
+  testAsListWrongDirectionPos =>
+    // step > 0 but from > to — empty list (beamtalk_interval:from/3 line 31)
+    self assert: (5 to: 3 by: 1) asList equals: #()
+
+  testAsListWrongDirectionNeg =>
+    // step < 0 but from < to — empty list (beamtalk_interval:from/3 line 31)
+    self assert: (1 to: 5 by: -1) asList equals: #()

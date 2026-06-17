@@ -965,8 +965,10 @@ safe_class_call(Pid, Call) ->
 
 -spec arg_error(binary(), binary()) -> {error, #beamtalk_error{}}.
 arg_error(Op, Reason) ->
-    Err = beamtalk_error:new(argument_error, 'REPL'),
-    {error, beamtalk_error:with_message(Err, iolist_to_binary([Op, <<": ">>, Reason]))}.
+    {error,
+        beamtalk_repl_errors:make(
+            argument_error, 'REPL', iolist_to_binary([Op, <<": ">>, Reason])
+        )}.
 
 -spec not_found_error(binary(), atom()) -> {error, #beamtalk_error{}}.
 not_found_error(Op, ClassName) ->

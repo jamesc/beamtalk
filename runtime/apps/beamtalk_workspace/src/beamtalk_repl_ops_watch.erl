@@ -112,13 +112,10 @@ format_mfa(_) ->
 -spec invalid_pid_error(atom(), string()) -> beamtalk_error:error().
 invalid_pid_error(Reason, PidStr) ->
     PidBin = list_to_binary(PidStr),
-    Err0 = beamtalk_error:new(Reason, 'Actor'),
-    Err1 = beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])
-    ),
-    beamtalk_error:with_hint(
-        Err1,
+    beamtalk_repl_errors:make(
+        Reason,
+        'Actor',
+        iolist_to_binary([<<"Invalid actor PID: ">>, PidBin]),
         <<"Use :actors to list valid actor PIDs.">>
     ).
 

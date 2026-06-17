@@ -16,6 +16,8 @@ Used by protocol handlers and op modules.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -export([
+    make/3,
+    make/4,
     ensure_structured_error/1,
     ensure_structured_error/2,
     format_name/1,
@@ -23,6 +25,26 @@ Used by protocol handlers and op modules.
 ]).
 
 %%% Public API
+
+-doc """
+Build a structured #beamtalk_error{} from a kind, source class, and message.
+
+Collapses the repeated `new` -> `with_message` chain used across the REPL
+op modules.
+""".
+-spec make(atom(), atom(), term()) -> #beamtalk_error{}.
+make(Kind, Source, Message) ->
+    beamtalk_error:with_message(beamtalk_error:new(Kind, Source), Message).
+
+-doc """
+Build a structured #beamtalk_error{} from a kind, source class, message, and hint.
+
+Collapses the repeated `new` -> `with_message` -> `with_hint` chain used across
+the REPL op modules. A hint of `undefined` is dropped by `beamtalk_error:with_hint/2`.
+""".
+-spec make(atom(), atom(), term(), term()) -> #beamtalk_error{}.
+make(Kind, Source, Message, Hint) ->
+    beamtalk_error:with_hint(make(Kind, Source, Message), Hint).
 
 -doc """
 Safely convert a binary to an existing atom, returning error instead of creating new atoms.
@@ -61,93 +83,63 @@ ensure_structured_error({eval_error, _Class, Reason}) ->
     ensure_structured_error(Reason);
 ensure_structured_error({compile_error, [#{message := Msg} = Diag | _]}) ->
     %% BT-1235: structured diagnostic list — extract message and hint from first diagnostic
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    Err1 = beamtalk_error:with_message(Err0, Msg),
     % elp:fixme W0032 maps:find with complex branch logic
     case maps:find(hint, Diag) of
-        {ok, Hint} when is_binary(Hint) -> beamtalk_error:with_hint(Err1, Hint);
-        _ -> Err1
+        {ok, Hint} when is_binary(Hint) -> make(compile_error, 'Compiler', Msg, Hint);
+        _ -> make(compile_error, 'Compiler', Msg)
     end;
 ensure_structured_error({compile_error, Msg}) when is_binary(Msg) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(Err0, Msg);
+    make(compile_error, 'Compiler', Msg);
 ensure_structured_error({compile_error, Msg}) when is_list(Msg) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
     MsgBin =
         try
             list_to_binary(Msg)
         catch
             error:badarg -> iolist_to_binary(io_lib:format("~p", [Msg]))
         end,
-    beamtalk_error:with_message(Err0, MsgBin);
+    make(compile_error, 'Compiler', MsgBin);
 ensure_structured_error({compile_error, Reason}) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Compile error: ">>, format_name(Reason)])
-    );
+    make(compile_error, 'Compiler', iolist_to_binary([<<"Compile error: ">>, format_name(Reason)]));
 ensure_structured_error({undefined_variable, Name}) ->
-    Err0 = beamtalk_error:new(undefined_variable, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
+    make(
+        undefined_variable,
+        'REPL',
         iolist_to_binary([<<"Undefined variable: ">>, format_name(Name)])
     );
 ensure_structured_error({file_not_found, Path}) ->
-    Err0 = beamtalk_error:new(file_not_found, 'File'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"File not found: ">>, format_name(Path)])
-    );
+    make(file_not_found, 'File', iolist_to_binary([<<"File not found: ">>, format_name(Path)]));
 ensure_structured_error({read_error, Reason}) ->
-    Err0 = beamtalk_error:new(io_error, 'File'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)])
-    );
+    make(io_error, 'File', iolist_to_binary([<<"Failed to read file: ">>, format_name(Reason)]));
 ensure_structured_error({load_error, Reason}) ->
-    Err0 = beamtalk_error:new(io_error, 'File'),
-    beamtalk_error:with_message(
-        Err0,
+    make(
+        io_error,
+        'File',
         iolist_to_binary([<<"Failed to load bytecode: ">>, format_name(Reason)])
     );
 ensure_structured_error({registration_error, {ModuleName, Reason}}) ->
-    Err0 = beamtalk_error:new(registration_error, 'Runtime'),
-    beamtalk_error:with_message(
-        Err0,
+    make(
+        registration_error,
+        'Runtime',
         iolist_to_binary(
             io_lib:format("Class registration failed for ~s: ~p", [ModuleName, Reason])
         )
     );
 ensure_structured_error({registration_error, Reason}) ->
-    Err0 = beamtalk_error:new(registration_error, 'Runtime'),
-    beamtalk_error:with_message(
-        Err0,
+    make(
+        registration_error,
+        'Runtime',
         iolist_to_binary([<<"Class registration failed: ">>, format_name(Reason)])
     );
 ensure_structured_error({parse_error, Details}) ->
-    Err0 = beamtalk_error:new(compile_error, 'Compiler'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Parse error: ">>, format_name(Details)])
-    );
+    make(compile_error, 'Compiler', iolist_to_binary([<<"Parse error: ">>, format_name(Details)]));
 ensure_structured_error({invalid_request, Reason}) ->
-    Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)])
-    );
+    make(internal_error, 'REPL', iolist_to_binary([<<"Invalid request: ">>, format_name(Reason)]));
 ensure_structured_error(empty_expression) ->
-    Err0 = beamtalk_error:new(empty_expression, 'REPL'),
-    beamtalk_error:with_message(Err0, <<"Empty expression">>);
+    make(empty_expression, 'REPL', <<"Empty expression">>);
 ensure_structured_error(timeout) ->
-    Err0 = beamtalk_error:new(timeout, 'REPL'),
-    beamtalk_error:with_message(Err0, <<"Request timed out">>);
+    make(timeout, 'REPL', <<"Request timed out">>);
 ensure_structured_error(Reason) ->
-    Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary(io_lib:format("~p", [Reason]))
-    ).
+    make(internal_error, 'REPL', iolist_to_binary(io_lib:format("~p", [Reason]))).
 
 -doc """
 Ensure an error reason is structured, with exception class context.
@@ -178,9 +170,9 @@ ensure_structured_error({invalid_request, _} = Reason, _Class) ->
 ensure_structured_error({registration_error, _} = Reason, _Class) ->
     ensure_structured_error(Reason);
 ensure_structured_error(Reason, Class) ->
-    Err0 = beamtalk_error:new(internal_error, 'REPL'),
-    beamtalk_error:with_message(
-        Err0,
+    make(
+        internal_error,
+        'REPL',
         iolist_to_binary([
             atom_to_binary(Class, utf8),
             <<": ">>,
