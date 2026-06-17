@@ -779,6 +779,21 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "value"
     assert html =~ ">all<"
     assert html =~ ~s(phx-click="browser_select_protocol")
+
+    # The method pane leads with a "class definition" entry so the class shape is
+    # browsable, not only its methods — clicking it opens the def tab (BT-2491).
+    assert html =~ "class definition"
+    assert html =~ ~s(phx-click="browser_open_definition")
+
+    opened =
+      view
+      |> element(~s(div[phx-click="browser_open_definition"][phx-value-class="#{class}"]))
+      |> render_click()
+
+    # A class-definition tab is now open and focused for the selected class — the
+    # breadcrumb reads "<Class> › class definition" (parity with the "+ def" path).
+    assert opened =~ "class definition"
+    assert opened =~ class
   end
 
   test "the instance/class side toggle re-populates the method list (BT-2491)", %{conn: conn} do
