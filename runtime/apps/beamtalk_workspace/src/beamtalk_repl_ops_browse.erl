@@ -257,7 +257,7 @@ take_protocol(Row) ->
 %% object's stored method source (`{method, Sel}` / `{class_method, Sel}` →
 %% `__source__`) — the patch-aware per-method text (BT-2196). source_status from
 %% xref. `disk_differs` compares the image body against a live re-read of the
-%% on-disk class source (BT-2567; `current_disk_source/1`).
+%% on-disk class source (BT-2567; `current_disk_source/2`).
 -spec browse_method_source(atom(), boolean(), atom()) -> beamtalk_repl_ops:op_result().
 browse_method_source(ClassName, ClassSide, Selector) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
@@ -289,7 +289,7 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 <<"source_status">> => atom_to_binary(SourceStatus, utf8),
                 <<"origin">> => origin_for_provenance(Provenance, SourceFile),
                 <<"source_origin">> => source_origin_of(ModName, SourceFile),
-                <<"disk_differs">> => disk_differs(ClassName, Source)
+                <<"disk_differs">> => disk_differs(SourceFile, ClassName, Source)
             }}
     end.
 
@@ -524,19 +524,20 @@ origin_for_provenance(_Provenance, _SourceFile) -> <<"both">>.
 %% `class_definition_disk_differs/1`.
 %%
 %% BT-2567: the comparison source is a *live re-read* of the on-disk class
-%% file (`current_disk_source/1`), not the load-time snapshot held in
+%% file (`current_disk_source/2`), not the load-time snapshot held in
 %% `beamtalk_workspace_meta`. The snapshot goes stale under out-of-band writes
 %% (an external editor, or another session flushing the file) and is mutated by
 %% in-memory `>>` patches (`load_recompiled_method/7` appends the patched body
 %% to it), both of which let `disk_differs` under-report divergence. Reading the
 %% file each browse keeps the signal pinned to the actual disk state; the
 %% snapshot remains the fallback when no source file is on record or the read
-%% fails.
--spec disk_differs(atom(), binary() | null) -> boolean() | null.
-disk_differs(_ClassName, null) ->
+%% fails. `SourceFile` is threaded in from the caller (already resolved there)
+%% so the divergence diff does not re-derive it with another class-process call.
+-spec disk_differs(binary() | null, atom(), binary() | null) -> boolean() | null.
+disk_differs(_SourceFile, _ClassName, null) ->
     null;
-disk_differs(ClassName, ImageText) when is_binary(ImageText) ->
-    case current_disk_source(ClassName) of
+disk_differs(SourceFile, ClassName, ImageText) when is_binary(ImageText) ->
+    case current_disk_source(SourceFile, ClassName) of
         undefined ->
             null;
         DiskSource when is_binary(DiskSource) ->
@@ -551,17 +552,33 @@ disk_differs(ClassName, ImageText) when is_binary(ImageText) ->
 %% load-time snapshot when the class has no source file on record or the file
 %% cannot be read (deleted/moved/permissions) — degrading to the pre-BT-2567
 %% behaviour rather than dropping the signal entirely.
--spec current_disk_source(atom()) -> binary() | undefined.
-current_disk_source(ClassName) ->
-    case source_file_for_class(ClassName) of
-        null ->
-            disk_source(ClassName);
-        Path when is_binary(Path) ->
-            case file:read_file(Path) of
-                {ok, Bin} -> Bin;
-                {error, _Reason} -> disk_source(ClassName)
-            end
+-spec current_disk_source(binary() | null, atom()) -> binary() | undefined.
+current_disk_source(null, ClassName) ->
+    disk_source(ClassName);
+current_disk_source(Path, ClassName) when is_binary(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            Bin;
+        {error, Reason} ->
+            disk_read_fallback(Reason, Path, ClassName)
     end.
+
+%% A vanished/moved file (`enoent`/`enotdir`) is the expected race when a tab
+%% outlives its on-disk class — fall back to the snapshot quietly. Any other
+%% error (`eacces`, I/O) is worth surfacing: behaviour is unchanged (still the
+%% snapshot fallback), but a log line makes a permission/FS problem diagnosable.
+-spec disk_read_fallback(file:posix() | badarg | terminated | system_limit, binary(), atom()) ->
+    binary() | undefined.
+disk_read_fallback(Reason, _Path, ClassName) when Reason =:= enoent; Reason =:= enotdir ->
+    disk_source(ClassName);
+disk_read_fallback(Reason, Path, ClassName) ->
+    ?LOG_WARNING(
+        "browse-method-source: disk_differs falling back to snapshot for ~p; "
+        "could not read ~ts: ~p",
+        [ClassName, Path, Reason],
+        #{domain => [beamtalk, runtime]}
+    ),
+    disk_source(ClassName).
 
 -spec disk_source(atom()) -> binary() | undefined.
 disk_source(ClassName) ->
