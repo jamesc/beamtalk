@@ -2789,6 +2789,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     so the on-disk body stays pinned across the round-trip.
   #
   # A fresh snapshot (image back in sync with disk) always wins over the carried one.
+  #
+  # The carried `existing.disk_source` is only as fresh as tab-open time: if the file
+  # is rewritten out-of-band (another session flushes, an external editor) *while the
+  # image is diverged*, the carried body goes stale, and a later compile of the *old*
+  # on-disk body would clear `unflushed` against disk that has since moved on. This is
+  # a narrow false-negative (concurrent out-of-band writes during divergence); the
+  # backend's `disk_differs` is itself a load-time snapshot, not a live re-read, so
+  # the editor already trusts a tab-open view of disk. The conservative pre-BT-2565
+  # path avoided this only by re-flagging *every* re-activated diverged tab — the
+  # false-positive BT-2565 fixes. The common-case win is worth the narrow tradeoff.
   @doc false
   def reactivation_disk_source(_existing, %{runtime_only: true}), do: nil
 
