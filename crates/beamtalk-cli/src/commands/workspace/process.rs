@@ -390,6 +390,7 @@ pub fn start_detached_node(
 
     // Wait for WebSocket health endpoint to be fully ready before returning.
     wait_for_tcp_ready(
+        workspace_id,
         node_info.connect_host(),
         actual_port,
         pid,
@@ -430,6 +431,7 @@ pub fn start_detached_node(
 /// `log_path` is `Some(path)` only when the startup log file was successfully
 /// opened; it is included in timeout error messages to guide diagnosis.
 fn wait_for_tcp_ready(
+    workspace_id: &str,
     host: &str,
     port: u16,
     pid: u32,
@@ -487,40 +489,61 @@ fn wait_for_tcp_ready(
     // initial probes catch quick readiness; slower later probes avoid
     // busy-spinning while cowboy finishes route registration.
     let request = serde_json::json!({"op": "health"});
+    // Remember the most recent WS-level failure so the final timeout error can name
+    // the actual cause (auth/session error, handshake rejection, read timeout)
+    // instead of the opaque "health check failed". Without this the recurring
+    // "port accepting TCP but WS health failed" flake is undiagnosable (BT-2532):
+    // ProtocolClient::connect's error was previously discarded.
+    let mut last_ws_err: Option<String> = None;
     for attempt in 0..WS_HEALTH_RETRIES {
-        if let Ok(mut client) = ProtocolClient::connect(
+        match ProtocolClient::connect(
             host,
             port,
             cookie,
             Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)),
         ) {
-            if client.send_raw(&request).is_ok() {
-                return Ok(());
-            }
+            Ok(mut client) => match client.send_raw(&request) {
+                Ok(_) => return Ok(()),
+                Err(e) => last_ws_err = Some(format!("health request failed: {e}")),
+            },
+            Err(e) => last_ws_err = Some(format!("WebSocket connect/auth failed: {e}")),
         }
         // Check after the first attempt so we don't mask a quick crash with a
         // misleading "port accepting" error variant.
         if attempt > 0 && !is_process_alive(pid) {
             return Err(miette!(
                 "BEAM node (PID {pid}) crashed while WebSocket health checks were \
-                 in progress on port {port}.{log_suffix}"
+                 in progress on port {port}.{log_suffix}{}",
+                ws_err_detail(last_ws_err.as_deref())
             ));
         }
         std::thread::sleep(Duration::from_millis(ws_health_delay_ms(attempt)));
     }
 
     Err(if is_process_alive(pid) {
+        // The node is alive but never served a healthy `/ws`. Inline the last
+        // WS error and any startup.log crash output so the failure is actionable
+        // from the CI log alone (server-side details still land in workspace.log).
+        let ws_detail = ws_err_detail(last_ws_err.as_deref());
+        let log_detail = read_startup_log_detail(workspace_id);
         miette!(
             "BEAM node started (PID {pid}) and port {port} is accepting TCP connections, \
              but the WebSocket health check failed. The workspace may be in a degraded \
-             state — try again.{log_suffix}"
+             state — try again.{log_suffix}{ws_detail}{log_detail}"
         )
     } else {
         miette!(
             "BEAM node (PID {pid}) crashed after WebSocket port {port} started accepting. \
-             Ensure Erlang/OTP is installed correctly.{log_suffix}"
+             Ensure Erlang/OTP is installed correctly.{log_suffix}{}",
+            ws_err_detail(last_ws_err.as_deref())
         )
     })
+}
+
+/// Format the last WebSocket health-probe error for inclusion in a timeout
+/// message. Returns an empty string when no WS error was recorded.
+fn ws_err_detail(last_ws_err: Option<&str>) -> String {
+    last_ws_err.map_or_else(String::new, |e| format!(" Last WebSocket error: {e}."))
 }
 
 /// Compute the delay for a Phase 2 WS health retry with exponential backoff.
