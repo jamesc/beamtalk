@@ -691,15 +691,14 @@ fn compile_method_diagnostic_response(
     merged_class_source: &str,
     patched_method_span: Option<beamtalk_core::source_analysis::Span>,
 ) -> Term {
-    let method_start_line =
-        patched_method_span.map(|s| byte_offset_to_line(merged_class_source, s.start()));
     let diag_terms: Vec<Term> = diagnostics
         .iter()
         .map(|d| {
             let abs_line = byte_offset_to_line(merged_class_source, d.span.start());
-            let line = match (patched_method_span, method_start_line) {
-                (Some(ms), Some(start_line)) if ms.contains(d.span) => {
-                    abs_line.saturating_sub(start_line).saturating_add(1)
+            let line = match patched_method_span {
+                Some(ms) if ms.contains(d.span) => {
+                    let method_start_line = byte_offset_to_line(merged_class_source, ms.start());
+                    abs_line.saturating_sub(method_start_line).saturating_add(1)
                 }
                 _ => abs_line,
             };
@@ -1369,8 +1368,11 @@ fn handle_compile_method(request: &Map) -> Term {
     let canonical_method_source = beamtalk_core::unparse::unparse_method(&method);
     let selector = method.selector.name().to_string();
 
-    // 2. Parse the existing class. Parse diagnostics are recomputed post-merge on
-    //    the re-parsed merged source (below), so they are not needed here.
+    // 2. Parse the existing class. Initial parse diagnostics are intentionally
+    //    discarded: in the workspace flow `class_source` is always the
+    //    `merged_class_source` produced by a previous successful `compile_method`,
+    //    so it is syntactically clean. Diagnostics are computed post-merge on the
+    //    re-parsed merged source (below), where spans share one coordinate system.
     let class_tokens = beamtalk_core::source_analysis::lex_with_eof(&class_source);
     let (mut module, _class_parse_diags) = beamtalk_core::source_analysis::parse(class_tokens);
 
