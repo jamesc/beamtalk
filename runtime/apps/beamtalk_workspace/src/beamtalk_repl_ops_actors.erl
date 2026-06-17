@@ -22,13 +22,10 @@ wrapper that encodes the term result via `beamtalk_repl_ops:encode/2`.
 -spec invalid_pid_error(atom(), string()) -> beamtalk_error:error().
 invalid_pid_error(Reason, PidStr) ->
     PidBin = list_to_binary(PidStr),
-    Err0 = beamtalk_error:new(Reason, 'Actor'),
-    Err1 = beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Invalid actor PID: ">>, PidBin])
-    ),
-    beamtalk_error:with_hint(
-        Err1,
+    beamtalk_repl_errors:make(
+        Reason,
+        'Actor',
+        iolist_to_binary([<<"Invalid actor PID: ">>, PidBin]),
         <<"Use :actors to list valid actor PIDs.">>
     ).
 
@@ -85,20 +82,20 @@ handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
                         end
                     catch
                         _:_ ->
-                            Err3 = beamtalk_error:new(inspect_failed, 'Actor'),
-                            Err4 = beamtalk_error:with_message(
-                                Err3,
-                                iolist_to_binary([<<"Failed to inspect actor: ">>, PidBin])
-                            ),
-                            {error, Err4}
+                            {error,
+                                beamtalk_repl_errors:make(
+                                    inspect_failed,
+                                    'Actor',
+                                    iolist_to_binary([<<"Failed to inspect actor: ">>, PidBin])
+                                )}
                     end;
                 false ->
-                    Err3 = beamtalk_error:new(actor_not_alive, 'Actor'),
-                    Err4 = beamtalk_error:with_message(
-                        Err3,
-                        iolist_to_binary([<<"Actor is not alive: ">>, PidBin])
-                    ),
-                    {error, Err4}
+                    {error,
+                        beamtalk_repl_errors:make(
+                            actor_not_alive,
+                            'Actor',
+                            iolist_to_binary([<<"Actor is not alive: ">>, PidBin])
+                        )}
             end
     end;
 handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->

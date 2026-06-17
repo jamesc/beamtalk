@@ -80,14 +80,11 @@ sync_project(Path, Options) ->
     ManifestPath = filename:join(AbsPath, "beamtalk.toml"),
     case filelib:is_file(ManifestPath) of
         false ->
-            Err0 = beamtalk_error:new(file_not_found, 'WorkspaceInterface'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary(["No beamtalk.toml found in: ", AbsPath])
-            ),
             {error,
-                beamtalk_error:with_hint(
-                    Err1,
+                beamtalk_repl_errors:make(
+                    file_not_found,
+                    'WorkspaceInterface',
+                    iolist_to_binary(["No beamtalk.toml found in: ", AbsPath]),
                     <<"Provide a directory path containing beamtalk.toml">>
                 )};
         true ->
@@ -316,10 +313,13 @@ handle_term(<<"load-source">>, Params, _Msg, SessionPid) ->
     Source = maps:get(<<"source">>, Params, <<>>),
     case Source of
         <<>> ->
-            Err = beamtalk_error:new(empty_expression, 'REPL'),
-            Err1 = beamtalk_error:with_message(Err, <<"Empty source">>),
-            Err2 = beamtalk_error:with_hint(Err1, <<"Enter Beamtalk source code to compile.">>),
-            {error, Err2};
+            {error,
+                beamtalk_repl_errors:make(
+                    empty_expression,
+                    'REPL',
+                    <<"Empty source">>,
+                    <<"Enter Beamtalk source code to compile.">>
+                )};
         _ ->
             case beamtalk_repl_shell:load_source(SessionPid, Source) of
                 {ok, Classes} ->
@@ -335,12 +335,12 @@ handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
     ClassNameBin = maps:get(<<"module">>, Params, <<>>),
     case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
         {error, badarg} ->
-            Err0 = beamtalk_error:new(class_not_found, 'REPL'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary([<<"Class not found: '">>, ClassNameBin, <<"'">>])
-            ),
-            {error, Err1};
+            {error,
+                beamtalk_repl_errors:make(
+                    class_not_found,
+                    'REPL',
+                    iolist_to_binary([<<"Class not found: '">>, ClassNameBin, <<"'">>])
+                )};
         {ok, ClassName} ->
             case beamtalk_runtime_api:remove_class_from_system(ClassName) of
                 {ok, ModuleName} ->

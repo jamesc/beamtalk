@@ -200,10 +200,13 @@ handle_term(<<"erlang-help">>, Params, _Msg, _SessionPid) ->
     FunctionBin = nonempty_or_undefined(maps:get(<<"function">>, Params, undefined)),
     case ModuleBin of
         <<>> ->
-            Err = beamtalk_error:new(invalid_argument, 'REPL'),
-            Err1 = beamtalk_error:with_message(Err, <<"Module name required">>),
-            Err2 = beamtalk_error:with_hint(Err1, <<"Usage: :help Erlang <module>">>),
-            {error, Err2};
+            {error,
+                beamtalk_repl_errors:make(
+                    invalid_argument,
+                    'REPL',
+                    <<"Module name required">>,
+                    <<"Usage: :help Erlang <module>">>
+                )};
         _ ->
             %% Use binary_to_existing_atom to prevent atom table exhaustion
             %% from repeated queries with typos (atoms are never GC'd).
@@ -265,15 +268,13 @@ handle_term(<<"show-codegen">>, Params, _Msg, SessionPid) ->
     %% so behaviour is consistent regardless of which entry point is used.
     case {SelectorBin, ClassBin} of
         {SB, undefined} when SB =/= undefined ->
-            Err = beamtalk_error:new(invalid_argument, 'REPL'),
-            Err1 = beamtalk_error:with_message(
-                Err, <<"'selector' requires 'class' to be specified">>
-            ),
-            Err2 = beamtalk_error:with_hint(
-                Err1,
-                <<"Provide 'class' along with 'selector' to inspect a specific method.">>
-            ),
-            {error, Err2};
+            {error,
+                beamtalk_repl_errors:make(
+                    invalid_argument,
+                    'REPL',
+                    <<"'selector' requires 'class' to be specified">>,
+                    <<"Provide 'class' along with 'selector' to inspect a specific method.">>
+                )};
         _ ->
             case {ClassBin, CodeBin} of
                 {CB, _} when CB =/= undefined ->
@@ -282,12 +283,13 @@ handle_term(<<"show-codegen">>, Params, _Msg, SessionPid) ->
                     Code = binary_to_list(CB),
                     case Code of
                         [] ->
-                            Err = beamtalk_error:new(empty_expression, 'REPL'),
-                            Err1 = beamtalk_error:with_message(Err, <<"Empty expression">>),
-                            Err2 = beamtalk_error:with_hint(
-                                Err1, <<"Enter an expression to compile.">>
-                            ),
-                            {error, Err2};
+                            {error,
+                                beamtalk_repl_errors:make(
+                                    empty_expression,
+                                    'REPL',
+                                    <<"Empty expression">>,
+                                    <<"Enter an expression to compile.">>
+                                )};
                         _ ->
                             case beamtalk_repl_shell:show_codegen(SessionPid, Code) of
                                 {ok, CoreErlang, Warnings} ->
@@ -300,13 +302,13 @@ handle_term(<<"show-codegen">>, Params, _Msg, SessionPid) ->
                             end
                     end;
                 {undefined, undefined} ->
-                    Err = beamtalk_error:new(empty_expression, 'REPL'),
-                    Err1 = beamtalk_error:with_message(Err, <<"Missing required parameter">>),
-                    Err2 = beamtalk_error:with_hint(
-                        Err1,
-                        <<"Provide 'code' to compile an expression, or 'class' to inspect a loaded class.">>
-                    ),
-                    {error, Err2}
+                    {error,
+                        beamtalk_repl_errors:make(
+                            empty_expression,
+                            'REPL',
+                            <<"Missing required parameter">>,
+                            <<"Provide 'code' to compile an expression, or 'class' to inspect a loaded class.">>
+                        )}
             end
     end;
 handle_term(<<"methods">>, Params, _Msg, _SessionPid) ->
@@ -438,17 +440,15 @@ handle_term(<<"test">>, Params, _Msg, _SessionPid) ->
     FilePath = maps:get(<<"file">>, Params, undefined),
     case {ClassName, FilePath} of
         {CN, FP} when CN =/= undefined, FP =/= undefined ->
-            Err0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
-            Err1 = beamtalk_error:with_message(
-                Err0, <<"'class' and 'file' are mutually exclusive">>
-            ),
-            {error, Err1};
+            {error,
+                beamtalk_repl_errors:make(
+                    invalid_argument, 'TestRunner', <<"'class' and 'file' are mutually exclusive">>
+                )};
         {undefined, FP} when FP =/= undefined, not is_binary(FP) ->
-            Err0 = beamtalk_error:new(invalid_argument, 'TestRunner'),
-            Err1 = beamtalk_error:with_message(
-                Err0, <<"'file' must be a binary path">>
-            ),
-            {error, Err1};
+            {error,
+                beamtalk_repl_errors:make(
+                    invalid_argument, 'TestRunner', <<"'file' must be a binary path">>
+                )};
         {undefined, FP} when FP =/= undefined ->
             run_test_op_file(FP);
         _ ->
@@ -527,16 +527,16 @@ show_codegen_class_method(ClassBin, SelectorBin) ->
                         exit:{noproc, _} ->
                             {error, make_class_not_found_error(ClassBin)};
                         exit:{timeout, _} ->
-                            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
-                            Err1 = beamtalk_error:with_message(
-                                Err0,
-                                iolist_to_binary([
-                                    <<"Class '">>,
-                                    ClassBin,
-                                    <<"' is not responding (may be under heavy load)">>
-                                ])
-                            ),
-                            {error, Err1}
+                            {error,
+                                beamtalk_repl_errors:make(
+                                    runtime_error,
+                                    ClassAtom,
+                                    iolist_to_binary([
+                                        <<"Class '">>,
+                                        ClassBin,
+                                        <<"' is not responding (may be under heavy load)">>
+                                    ])
+                                )}
                     end
             end
     end.
@@ -571,16 +571,16 @@ compile_class_source(ClassBin, ClassAtom, ClassPid) ->
         end,
     case SourceResult of
         {error, no_source} ->
-            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary([
-                    <<"No source for ">>,
-                    ClassBin,
-                    <<". Class may have been defined inline.">>
-                ])
-            ),
-            {error, Err1};
+            {error,
+                beamtalk_repl_errors:make(
+                    runtime_error,
+                    ClassAtom,
+                    iolist_to_binary([
+                        <<"No source for ">>,
+                        ClassBin,
+                        <<". Class may have been defined inline.">>
+                    ])
+                )};
         {ok, SourceBin} ->
             case beamtalk_repl_compiler:compile_file_for_codegen(SourceBin, CompilePath) of
                 {ok, CoreErlang, Warnings} ->
@@ -589,14 +589,14 @@ compile_class_source(ClassBin, ClassAtom, ClassPid) ->
                     {error, beamtalk_repl_errors:ensure_structured_error(ErrorReason)}
             end;
         {error, Reason} ->
-            Err0 = beamtalk_error:new(runtime_error, ClassAtom),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary(
-                    io_lib:format("Cannot read source file ~s: ~p", [SourcePath, Reason])
-                )
-            ),
-            {error, Err1}
+            {error,
+                beamtalk_repl_errors:make(
+                    runtime_error,
+                    ClassAtom,
+                    iolist_to_binary(
+                        io_lib:format("Cannot read source file ~s: ~p", [SourcePath, Reason])
+                    )
+                )}
     end.
 
 -doc """
@@ -623,20 +623,17 @@ validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin) ->
         true ->
             ok;
         false ->
-            Err0 = beamtalk_error:new(not_found, ClassAtom),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary([
-                    <<"Selector '">>, SelectorBin, <<"' not found on ">>, ClassBin
-                ])
-            ),
-            Err2 = beamtalk_error:with_hint(
-                Err1,
-                iolist_to_binary([
-                    <<"Use :help ">>, ClassBin, <<" to see available selectors.">>
-                ])
-            ),
-            {error, Err2}
+            {error,
+                beamtalk_repl_errors:make(
+                    not_found,
+                    ClassAtom,
+                    iolist_to_binary([
+                        <<"Selector '">>, SelectorBin, <<"' not found on ">>, ClassBin
+                    ]),
+                    iolist_to_binary([
+                        <<"Use :help ">>, ClassBin, <<" to see available selectors.">>
+                    ])
+                )}
     end.
 
 -doc """
@@ -666,11 +663,12 @@ run_test_op(undefined) ->
             {error, Err};
         _Class:Reason ->
             ?LOG_ERROR("test-all op failed: ~p", [Reason], #{domain => [beamtalk, runtime]}),
-            Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
-            Err1 = beamtalk_error:with_message(
-                Err0, iolist_to_binary(io_lib:format("Test run failed: ~p", [Reason]))
-            ),
-            {error, Err1}
+            {error,
+                beamtalk_repl_errors:make(
+                    runtime_error,
+                    'TestRunner',
+                    iolist_to_binary(io_lib:format("Test run failed: ~p", [Reason]))
+                )}
     end;
 run_test_op(ClassName) when is_binary(ClassName) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassName) of
@@ -687,14 +685,14 @@ run_test_op(ClassName) when is_binary(ClassName) ->
                     ?LOG_ERROR("test op failed for ~s: ~p", [ClassName, Reason], #{
                         domain => [beamtalk, runtime]
                     }),
-                    Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
-                    Err1 = beamtalk_error:with_message(
-                        Err0,
-                        iolist_to_binary(
-                            io_lib:format("Test run failed for ~s: ~p", [ClassName, Reason])
-                        )
-                    ),
-                    {error, Err1}
+                    {error,
+                        beamtalk_repl_errors:make(
+                            runtime_error,
+                            'TestRunner',
+                            iolist_to_binary(
+                                io_lib:format("Test run failed for ~s: ~p", [ClassName, Reason])
+                            )
+                        )}
             end
     end.
 
@@ -716,14 +714,14 @@ run_test_op_file(FilePath) ->
             ?LOG_ERROR("test file op failed for ~s: ~p", [FilePath, Reason], #{
                 domain => [beamtalk, runtime]
             }),
-            Err0 = beamtalk_error:new(runtime_error, 'TestRunner'),
-            Err1 = beamtalk_error:with_message(
-                Err0,
-                iolist_to_binary(
-                    io_lib:format("Test run failed for file ~s: ~p", [FilePath, Reason])
-                )
-            ),
-            {error, Err1}
+            {error,
+                beamtalk_repl_errors:make(
+                    runtime_error,
+                    'TestRunner',
+                    iolist_to_binary(
+                        io_lib:format("Test run failed for file ~s: ~p", [FilePath, Reason])
+                    )
+                )}
     end.
 
 %%% Internal helpers
@@ -1988,13 +1986,10 @@ camel_to_snake([H | T], _PrevWasLower, Acc) ->
 -spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
 make_class_not_found_error(ClassName) ->
     NameBin = beamtalk_repl_protocol:to_binary(ClassName),
-    Err0 = beamtalk_error:new(class_not_found, 'REPL'),
-    Err1 = beamtalk_error:with_message(
-        Err0,
-        iolist_to_binary([<<"Unknown class: ">>, NameBin])
-    ),
-    beamtalk_error:with_hint(
-        Err1,
+    beamtalk_repl_errors:make(
+        class_not_found,
+        'REPL',
+        iolist_to_binary([<<"Unknown class: ">>, NameBin]),
         <<"Use Workspace classes to see loaded classes.">>
     ).
 
@@ -2094,9 +2089,7 @@ should_include_class(Name, _Super, _ModName, {superclass, FilterAtom}) ->
 -doc "Build a \"not found\" error term for Erlang help lookups (BT-2402).".
 -spec erlang_not_found_error(binary(), binary()) -> {error, #beamtalk_error{}}.
 erlang_not_found_error(What, Hint) ->
-    Err = beamtalk_error:new(does_not_understand, 'Erlang'),
-    Err1 = beamtalk_error:with_message(
-        Err, iolist_to_binary([What, <<" not found">>])
-    ),
-    Err2 = beamtalk_error:with_hint(Err1, Hint),
-    {error, Err2}.
+    {error,
+        beamtalk_repl_errors:make(
+            does_not_understand, 'Erlang', iolist_to_binary([What, <<" not found">>]), Hint
+        )}.

@@ -89,9 +89,10 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
             Pairs = beamtalk_xref:implementors_of(Selector),
             {value, implementors_value(Pairs, Selector)};
         {error, Reason} ->
-            Err = beamtalk_error:new(argument_error, 'REPL'),
-            Msg1 = iolist_to_binary([<<"nav-query: ">>, Reason]),
-            {error, beamtalk_error:with_message(Err, Msg1)}
+            {error,
+                beamtalk_repl_errors:make(
+                    argument_error, 'REPL', iolist_to_binary([<<"nav-query: ">>, Reason])
+                )}
     end.
 
 -doc "Advertise the `nav-query` op in `describe`.".

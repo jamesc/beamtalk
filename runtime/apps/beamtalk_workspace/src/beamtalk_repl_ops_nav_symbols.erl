@@ -114,11 +114,10 @@ handle_term(<<"nav-symbols">>, Params, _Msg, _SessionPid) ->
             ),
             {value, #{<<"classes">> => Sorted}};
         {error, Reason} ->
-            Err0 = beamtalk_error:new(argument_error, 'REPL'),
-            Err1 = beamtalk_error:with_message(
-                Err0, iolist_to_binary([<<"nav-symbols: ">>, Reason])
-            ),
-            {error, Err1}
+            {error,
+                beamtalk_repl_errors:make(
+                    argument_error, 'REPL', iolist_to_binary([<<"nav-symbols: ">>, Reason])
+                )}
     end.
 
 -doc "Advertise the `nav-symbols` op in `describe`.".
