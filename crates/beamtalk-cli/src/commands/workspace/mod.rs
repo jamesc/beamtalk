@@ -260,6 +260,27 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_cookie_is_args_file_safe() {
+        // A cookie passed via `-args_file` as `-setcookie <cookie>` must not be
+        // mistaken for a VM flag. Erlang treats any token starting with `-` or
+        // `+` as a flag, and `+`/`/` anywhere break parsing — so the node would
+        // boot with the wrong cookie and every WebSocket auth would fail with
+        // "Invalid cookie" (BT-2532). Run enough iterations to exercise the
+        // ~1.5% leading-`-` reroll path.
+        for _ in 0..5_000 {
+            let cookie = generate_cookie();
+            assert!(
+                !cookie.starts_with('-') && !cookie.starts_with('+'),
+                "cookie must not start with a flag prefix: {cookie:?}"
+            );
+            assert!(
+                !cookie.contains('+') && !cookie.contains('/'),
+                "cookie must not contain '+' or '/': {cookie:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_workspace_dir_contains_id() {
         let dir = workspace_dir("test-ws-123").unwrap();
         assert!(dir.ends_with("workspaces/test-ws-123"));

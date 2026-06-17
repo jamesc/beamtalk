@@ -428,8 +428,10 @@ pub fn start_detached_node(
 /// Phase 2 checks after every attempt; the delay between attempts grows via
 /// `ws_health_delay_ms` (exponential backoff, see BT-1598).
 ///
-/// `log_path` is `Some(path)` only when the startup log file was successfully
-/// opened; it is included in timeout error messages to guide diagnosis.
+/// `workspace_id` is used to read `startup.log` for inlining into timeout
+/// errors. `log_path` is `Some(path)` only when the startup log file was
+/// successfully opened; it is included in timeout error messages to guide
+/// diagnosis.
 fn wait_for_tcp_ready(
     workspace_id: &str,
     host: &str,
@@ -524,8 +526,10 @@ fn wait_for_tcp_ready(
         // The node is alive but never served a healthy `/ws`. Inline the last
         // WS error and any startup.log crash output so the failure is actionable
         // from the CI log alone (server-side details still land in workspace.log).
+        // Use read_startup_log_content (not _detail) so we don't append a
+        // misleading "Check Erlang/OTP is installed" hint — the node clearly started.
         let ws_detail = ws_err_detail(last_ws_err.as_deref());
-        let log_detail = read_startup_log_detail(workspace_id);
+        let log_detail = read_startup_log_content(workspace_id).unwrap_or_default();
         miette!(
             "BEAM node started (PID {pid}) and port {port} is accepting TCP connections, \
              but the WebSocket health check failed. The workspace may be in a degraded \
@@ -565,37 +569,47 @@ fn ws_health_delay_ms(attempt: usize) -> u64 {
 /// keeping terminal output manageable.
 const STARTUP_LOG_MAX_BYTES: usize = 4096;
 
-/// Read crash diagnostics from `startup.log` written by the eval try/catch.
+/// Read `startup.log` content (written by the eval try/catch) if present.
 ///
-/// Returns a formatted detail string suitable for appending to an error message.
-/// If the log contains content, it's shown inline (truncated to `STARTUP_LOG_MAX_BYTES`);
-/// otherwise a generic hint is returned.
-fn read_startup_log_detail(workspace_id: &str) -> String {
+/// Returns `Some(formatted)` with the log shown inline (truncated to
+/// `STARTUP_LOG_MAX_BYTES`) when the file exists and is non-empty, or `None`
+/// when there is nothing to show. Callers that know the node is alive use this
+/// directly so they do not append a misleading "Erlang/OTP" hint.
+fn read_startup_log_content(workspace_id: &str) -> Option<String> {
     workspace_dir(workspace_id)
         .ok()
         .map(|d| d.join("startup.log"))
         .and_then(|p| std::fs::read(&p).ok())
         .filter(|bytes| !bytes.is_empty())
-        .map_or_else(
-            || "\nCheck Erlang/OTP is installed.".to_string(),
-            |log| {
-                if log.len() <= STARTUP_LOG_MAX_BYTES {
-                    format!("\nStartup log:\n{}", String::from_utf8_lossy(&log))
-                } else {
-                    // Truncate to the last STARTUP_LOG_MAX_BYTES, keeping the most
-                    // recent (and usually most relevant) output.  Operating on raw
-                    // bytes avoids panicking on multibyte UTF-8 boundaries;
-                    // from_utf8_lossy replaces any split characters with U+FFFD.
-                    let tail = &log[log.len() - STARTUP_LOG_MAX_BYTES..];
-                    // Find the first newline to avoid cutting mid-line.
-                    let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
-                    format!(
-                        "\nStartup log (last {STARTUP_LOG_MAX_BYTES} bytes, truncated):\n{}",
-                        String::from_utf8_lossy(&tail[start..])
-                    )
-                }
-            },
-        )
+        .map(|log| {
+            if log.len() <= STARTUP_LOG_MAX_BYTES {
+                format!("\nStartup log:\n{}", String::from_utf8_lossy(&log))
+            } else {
+                // Truncate to the last STARTUP_LOG_MAX_BYTES, keeping the most
+                // recent (and usually most relevant) output.  Operating on raw
+                // bytes avoids panicking on multibyte UTF-8 boundaries;
+                // from_utf8_lossy replaces any split characters with U+FFFD.
+                let tail = &log[log.len() - STARTUP_LOG_MAX_BYTES..];
+                // Find the first newline to avoid cutting mid-line.
+                let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+                format!(
+                    "\nStartup log (last {STARTUP_LOG_MAX_BYTES} bytes, truncated):\n{}",
+                    String::from_utf8_lossy(&tail[start..])
+                )
+            }
+        })
+}
+
+/// Read crash diagnostics from `startup.log` for paths where the node is *not*
+/// known to be alive.
+///
+/// Shows the log inline if present, otherwise falls back to a generic
+/// "Check Erlang/OTP is installed" hint — appropriate only when the node may
+/// have failed to boot. On "node alive but unhealthy" paths use
+/// [`read_startup_log_content`] instead, where that hint would be misleading.
+fn read_startup_log_detail(workspace_id: &str) -> String {
+    read_startup_log_content(workspace_id)
+        .unwrap_or_else(|| "\nCheck Erlang/OTP is installed.".to_string())
 }
 
 /// Build the Erlang `-eval` string for workspace node startup.
