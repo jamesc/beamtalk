@@ -212,5 +212,52 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       assert reflush_html =~ "Saved increment on Counter"
       refute reflush_html =~ "unflushed"
     end
+
+    test "re-activating a compiled tab after navigating away shows the compiled body (BT-2566)",
+         %{conn: conn} do
+      # BT-2566: in production `browse_method_source` returns the current *image*
+      # body, so after a `>>` compile the editor re-seeds the compiled body on
+      # re-activation. The stub now tracks the compiled source per method, so this
+      # asserts the source-content path the BT-2565 badge test left unchecked.
+      #
+      # Navigating to a *different* tab and back re-keys the CodeMirror host on
+      # `@active_tab`, so the re-activated `increment` editor remounts and renders
+      # the freshly re-seeded buffer (a same-tab re-click is `phx-update="ignore"`).
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      new_body = "increment => self.value := self.value + 2"
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      # 1. Compile a different body — the image now diverges from the on-disk stub.
+      save_html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "increment",
+          "source" => new_body,
+          "tab" => "method:Counter:instance:increment"
+        })
+
+      assert save_html =~ "unflushed"
+
+      # 2. Navigate away to a different method tab (`value`), re-keying the editor.
+      view |> element(~s(div[phx-value-selector="value"])) |> render_click()
+
+      # 3. Re-activate `increment`: its editor remounts and the buffer is re-seeded
+      #    from the live image — the compiled body, not the original on-disk stub.
+      reactivate_html =
+        view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      # Match the escape-safe tail of the compiled body: the rendered buffer HTML-
+      # escapes `=>`, but `:= self.value + 2` survives verbatim and is unique to the
+      # compiled body. The editor's `data-placeholder` carries the "+ 1" disk body
+      # unconditionally, so we assert the compiled body is present (the "+ 2" tail)
+      # rather than refuting the disk body. Pre-fix, the re-activated buffer reverts
+      # to the on-disk stub ("+ 1") and this tail is absent.
+      assert reactivate_html =~ ":= self.value + 2"
+    end
   end
 end
