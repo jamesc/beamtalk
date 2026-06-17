@@ -158,5 +158,59 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       assert save_html =~ "Saved increment on Counter"
       refute save_html =~ "unflushed"
     end
+
+    test "re-activating a compiled tab then re-saving the disk body clears unflushed (BT-2565)",
+         %{conn: conn} do
+      # Regression for BT-2565: re-activating a clean tab re-derives `disk_source`.
+      # `disk_body_snapshot/1` yields nil while the image diverges from disk, so the
+      # on-disk body captured at open used to be lost on re-activation — a later
+      # re-compile of the *exact* on-disk body then fell back to the conservative
+      # `unflushed` flag instead of recognising the image was back in sync.
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      disk_body = "increment => self.value := self.value + 1"
+      new_body = "increment => self.value := self.value + 2"
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      open_html = view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+      refute open_html =~ "unflushed"
+
+      # 1. Compile a *different* body — a real divergence, so `unflushed` shows and the
+      #    stub now reports the method diverges from disk on a re-browse.
+      save_html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "increment",
+          "source" => new_body,
+          "tab" => "method:Counter:instance:increment"
+        })
+
+      assert save_html =~ "unflushed"
+
+      # 2. Re-activate the (now clean) tab: routes through the `%{} = existing` branch,
+      #    which re-derives `disk_source`. The image diverges from disk, so a fresh
+      #    snapshot is unavailable — the captured on-disk body must survive (BT-2565).
+      reactivate_html =
+        view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      assert reactivate_html =~ "unflushed"
+
+      # 3. Re-compile the *exact on-disk body*. With the snapshot preserved this is a
+      #    no-op against disk → `unflushed` clears; losing it keeps the stale badge.
+      reflush_html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "increment",
+          "source" => disk_body,
+          "tab" => "method:Counter:instance:increment"
+        })
+
+      assert reflush_html =~ "Saved increment on Counter"
+      refute reflush_html =~ "unflushed"
+    end
   end
 end
