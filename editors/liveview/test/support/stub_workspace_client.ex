@@ -18,6 +18,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     @moduledoc false
     defstruct defined_classes: MapSet.new(),
               changes: %{},
+              # BT-2566: the compiled body per `{class, selector}`, recorded on
+              # `save_method/3`. In production `browse_method_source` returns the
+              # current *image* body, which after a `>>` compile is the compiled
+              # body — so the stub serves this over the hardcoded on-disk body.
+              compiled_sources: %{},
               calls: []
   end
 
@@ -89,11 +94,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   # ── Write-surface: save / flush / changes ─────────────────────────────────
 
-  def save_method(class, selector, _source) do
+  def save_method(class, selector, source) do
     record({:save, class, selector})
 
     update(:changes, fn changes ->
       Map.put(changes, {class, selector}, "src/#{Macro.underscore(class)}.bt")
+    end)
+
+    # BT-2566: remember the compiled body so a later `browse_method_source/3`
+    # returns the image body (as production does) rather than the on-disk stub.
+    update(:compiled_sources, fn sources ->
+      Map.put(sources, {class, selector}, source)
     end)
 
     {:ok, class}
@@ -161,7 +172,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   def browse_method_source(class, _side, selector) do
-    {source, doc, signature} =
+    {disk_source, doc, signature} =
       case selector do
         "increment" ->
           {"increment => self.value := self.value + 1",
@@ -176,9 +187,14 @@ defmodule BtAttachWeb.StubWorkspaceClient do
           {"stub => nil", nil, nil}
       end
 
+    # BT-2566: in production `browse_method_source` returns the current *image*
+    # body, which after a `save_method` `>>` compile is the compiled body. Serve
+    # the tracked compiled source when one exists, falling back to the on-disk stub.
+    source = Map.get(get(:compiled_sources), {class, selector}, disk_source)
+
     # A saved-but-unflushed method has an image body that diverges from disk, so a
-    # re-browse reports `disk_differs: true` (BT-2565). `source` stays the on-disk
-    # body — the backend's `disk_differs` is a load-time snapshot, not a live diff.
+    # re-browse reports `disk_differs: true` (BT-2565). The backend's `disk_differs`
+    # is a load-time snapshot, not a live diff.
     disk_differs = Map.has_key?(get(:changes), {class, selector})
 
     {:value,
