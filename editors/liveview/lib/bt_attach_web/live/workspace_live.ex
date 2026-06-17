@@ -2661,10 +2661,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                 # Keeps the false → true invariant the `nil ->` branch documents.
                 disk_differs: existing.disk_differs or info.disk_differs,
                 runtime_only: info.runtime_only,
-                # Re-derive the on-disk body reference from the live image too, so
-                # a method that gained / lost an on-disk source out-of-band diffs a
-                # later compile against the current disk body (BT-2550).
-                disk_source: disk_body_snapshot(info),
+                # Carry the on-disk body forward across the re-activation. A fresh
+                # snapshot wins when the image is back in sync with disk; a method
+                # whose image diverged but is *still* disk-backed keeps the prior
+                # snapshot instead of regressing to nil (BT-2565); a now runtime-only
+                # method drops to nil (BT-2550).
+                disk_source: reactivation_disk_source(existing, info),
                 # Re-read the doc block from the live image too (BT-2558), so an
                 # out-of-band edit to the method's `///` doc / signature is
                 # reflected when the clean tab is re-activated.
@@ -2770,6 +2772,28 @@ defmodule BtAttachWeb.WorkspaceLive do
     do: src
 
   defp disk_body_snapshot(_), do: nil
+
+  # The on-disk body to carry forward when a *clean* tab is re-activated (BT-2565).
+  # `disk_body_snapshot/1` only yields a body while the image matches disk
+  # (`disk_differs: false`), so a tab whose image diverged from disk via an
+  # in-memory compile — `compile_clean/3` set `disk_differs: true` while preserving
+  # the body captured at open — would otherwise re-derive `nil` on re-activation,
+  # regressing a later exact-on-disk-body re-compile back to the conservative
+  # `unflushed` flag. We split the two ways `disk_body_snapshot/1` returns nil:
+  #
+  #   * now runtime-only (no on-disk body at all) → drop to nil, matching the
+  #     conservative fallback for a method that genuinely lost its disk source.
+  #     This guards against a naive `existing.disk_source || …` retaining a stale
+  #     snapshot for a method that legitimately transitioned to runtime-only.
+  #   * still disk-backed but image-diverged → keep the prior `existing.disk_source`
+  #     so the on-disk body stays pinned across the round-trip.
+  #
+  # A fresh snapshot (image back in sync with disk) always wins over the carried one.
+  @doc false
+  def reactivation_disk_source(_existing, %{runtime_only: true}), do: nil
+
+  def reactivation_disk_source(existing, info),
+    do: disk_body_snapshot(info) || existing.disk_source
 
   # Normalise a browse-payload doc/signature field to a non-empty binary or nil.
   # The op already returns `null` (decoded to nil) for absent fields; this also

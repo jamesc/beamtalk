@@ -98,4 +98,52 @@ defmodule BtAttachWeb.WorkspaceLiveReconcileTest do
                [def_tab]
     end
   end
+
+  describe "reactivation_disk_source/2 (BT-2565)" do
+    # `info` as `method_source_info/4` shapes it for the re-activation branch.
+    defp source_info(opts) do
+      %{
+        runtime_only: Keyword.get(opts, :runtime_only, false),
+        disk_differs: Keyword.get(opts, :disk_differs, false),
+        source: Keyword.get(opts, :source, "")
+      }
+    end
+
+    test "keeps the prior snapshot when the image diverged but stays disk-backed" do
+      # The bug: a tab compiled to a new body (disk_differs flipped true, disk_source
+      # preserved) is navigated away from and re-activated. The backend now reports
+      # `disk_differs: true`, so a fresh snapshot is unavailable — the carried body
+      # must survive instead of regressing to nil.
+      existing = %{disk_source: "increment => self.value := self.value + 1"}
+      info = source_info(disk_differs: true, source: "increment => self.value := self.value + 2")
+
+      assert WorkspaceLive.reactivation_disk_source(existing, info) ==
+               "increment => self.value := self.value + 1"
+    end
+
+    test "takes a fresh snapshot when the image is back in sync with disk" do
+      # Image matches disk again (disk_differs false): the live body *is* the on-disk
+      # body, so re-snapshot it — it supersedes any carried value.
+      existing = %{disk_source: "stale body"}
+      info = source_info(disk_differs: false, source: "fresh on-disk body")
+
+      assert WorkspaceLive.reactivation_disk_source(existing, info) == "fresh on-disk body"
+    end
+
+    test "drops to nil when the method is now runtime-only" do
+      # A method that legitimately lost its on-disk body must not retain a stale
+      # snapshot — fall back to nil so `compiled_disk_differs/2` stays conservative.
+      existing = %{disk_source: "was on disk"}
+      info = source_info(runtime_only: true, source: "runtime body")
+
+      assert WorkspaceLive.reactivation_disk_source(existing, info) == nil
+    end
+
+    test "drops to nil when image-diverged with no prior snapshot to carry" do
+      existing = %{disk_source: nil}
+      info = source_info(disk_differs: true, source: "diverged body")
+
+      assert WorkspaceLive.reactivation_disk_source(existing, info) == nil
+    end
+  end
 end
