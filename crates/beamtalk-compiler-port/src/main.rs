@@ -284,7 +284,16 @@ fn parse_class_hierarchy_from_term(
         .collect()
 }
 
-/// Merge a method into a method list, replacing any existing method with the same selector and kind.
+/// Merge a method into a method list, replacing any existing method with the
+/// same selector and kind, else appending it.
+///
+/// The instance/class **side** is encoded entirely by *which* list the caller
+/// passes (`class.methods` vs `class.class_methods`) — `handle_compile_method`
+/// selects it from the `is_class_method` flag. `MethodKind` does *not* encode the
+/// side (it only distinguishes `Primary` from future AOP advice kinds), so a
+/// standalone-parsed body lands in the right side purely by list choice, and the
+/// `kind` match is a within-list replace-or-add discriminator — not a side check.
+/// (BT-2563 #3: there is therefore no class-side "kind trap" / duplicate-push.)
 fn merge_method(
     methods: &mut Vec<beamtalk_core::ast::MethodDefinition>,
     method: beamtalk_core::ast::MethodDefinition,
@@ -646,6 +655,53 @@ fn diagnostic_error_response(
         .iter()
         .map(|d| {
             let line = byte_offset_to_line(source, d.span.start());
+            let line_term = Term::from(eetf::FixInteger::from(
+                i32::try_from(line).unwrap_or(i32::MAX),
+            ));
+            let mut map: std::collections::HashMap<Term, Term> = std::collections::HashMap::from([
+                (atom("message"), binary(d.message.as_ref())),
+                (atom("line"), line_term),
+            ]);
+            if let Some(ref hint) = d.hint {
+                map.insert(atom("hint"), binary(hint.as_ref()));
+            }
+            Term::from(Map::from(map))
+        })
+        .collect();
+    Term::from(Map::from([
+        (atom("status"), atom("error")),
+        (atom("diagnostics"), Term::from(List::from(diag_terms))),
+    ]))
+}
+
+/// Build a `compile_method` diagnostic response with method-relative line numbers
+/// for errors inside the patched method body.
+///
+/// Diagnostics are computed on the re-parsed merged module, so every span indexes
+/// into `merged_class_source` — one coordinate system, no fragile byte-length
+/// routing. The Erlang layer renders these as `"Line N: <message>"`
+/// (`beamtalk_repl_compiler:format_diagnostic_text/1`), so for the common case — a
+/// method-body error (type error, undefined var) — `N` is reported relative to the
+/// patched method, matching the snippet the user is editing rather than the line in
+/// the whole class. A diagnostic whose span lands outside the patched method (a
+/// rarer class-context error) keeps its merged-source line, which is accurate and
+/// in-range (BT-2563 #2).
+fn compile_method_diagnostic_response(
+    diagnostics: &[&beamtalk_core::source_analysis::Diagnostic],
+    merged_class_source: &str,
+    patched_method_span: Option<beamtalk_core::source_analysis::Span>,
+) -> Term {
+    let diag_terms: Vec<Term> = diagnostics
+        .iter()
+        .map(|d| {
+            let abs_line = byte_offset_to_line(merged_class_source, d.span.start());
+            let line = match patched_method_span {
+                Some(ms) if ms.contains(d.span) => {
+                    let method_start_line = byte_offset_to_line(merged_class_source, ms.start());
+                    abs_line.saturating_sub(method_start_line).saturating_add(1)
+                }
+                _ => abs_line,
+            };
             let line_term = Term::from(eetf::FixInteger::from(
                 i32::try_from(line).unwrap_or(i32::MAX),
             ));
@@ -1312,9 +1368,13 @@ fn handle_compile_method(request: &Map) -> Term {
     let canonical_method_source = beamtalk_core::unparse::unparse_method(&method);
     let selector = method.selector.name().to_string();
 
-    // 2. Parse the existing class.
+    // 2. Parse the existing class. Initial parse diagnostics are intentionally
+    //    discarded: in the workspace flow `class_source` is always the
+    //    `merged_class_source` produced by a previous successful `compile_method`,
+    //    so it is syntactically clean. Diagnostics are computed post-merge on the
+    //    re-parsed merged source (below), where spans share one coordinate system.
     let class_tokens = beamtalk_core::source_analysis::lex_with_eof(&class_source);
-    let (mut module, class_parse_diags) = beamtalk_core::source_analysis::parse(class_tokens);
+    let (mut module, _class_parse_diags) = beamtalk_core::source_analysis::parse(class_tokens);
 
     if module.classes.is_empty() {
         return error_response(&["class_source contains no class definition".to_string()]);
@@ -1330,6 +1390,7 @@ fn handle_compile_method(request: &Map) -> Term {
     let class_name = module.classes[target_idx].name.name.to_string();
 
     // 3. Merge the method into the target class (replace-or-add) via the shared path.
+    let patched_kind = method.kind;
     {
         let class = &mut module.classes[target_idx];
         let methods = if is_class_method {
@@ -1347,13 +1408,65 @@ fn handle_compile_method(request: &Map) -> Term {
     // stays a clean inline definition with no `Class >>` extension accumulation.
     let merged_class_source = beamtalk_core::unparse::unparse_module(&module);
 
+    // Re-parse the merged source so EVERY span — for diagnostics AND codegen —
+    // shares one coordinate system rooted at `merged_class_source`. The patched
+    // method was parsed standalone (its span indexes into the bare `method_source`)
+    // while the surviving methods index into `class_source`; the AST merge left
+    // those two span bases mixed in `module`. Re-parsing the unparsed merge rebases
+    // them all, so `span_to_line` annotates the freshly-patched method with the
+    // right BEAM line (BT-2563 #1) and semantic diagnostics resolve against a
+    // single coherent source (BT-2563 #2) — no fragile per-diagnostic source
+    // routing. `unparse_module` round-trips a valid module, so the re-parse is
+    // clean; a non-empty diag list here means an unparser regression.
+    let merged_tokens = beamtalk_core::source_analysis::lex_with_eof(&merged_class_source);
+    let (merged_module, merged_parse_diags) = beamtalk_core::source_analysis::parse(merged_tokens);
+    // `unparse_module` round-trips a valid module, so a non-empty diag list here is
+    // an unparser regression, not user error. Fail loudly in debug (CI/tests); in
+    // release, surface an internal error rather than leaking parse diagnostics —
+    // rendered against an internal canonical string — to a user who wrote valid
+    // code (`debug_assert!` is elided in release).
+    debug_assert!(
+        merged_parse_diags.is_empty(),
+        "unparse_module produced source that failed to re-parse: {merged_parse_diags:?}"
+    );
+    if !merged_parse_diags.is_empty() {
+        return error_response(&[format!(
+            "internal error: re-parsing the merged class source produced {} diagnostic(s); \
+             this indicates an unparser regression, not a problem with your code",
+            merged_parse_diags.len()
+        )]);
+    }
+
+    // Locate the freshly-patched method in the re-parsed module so method-body
+    // diagnostics can be reported relative to the method snippet the user edits
+    // (BT-2563 #2). Its span now indexes into `merged_class_source`, the same
+    // coordinate system as every diagnostic span.
+    let patched_method_span = merged_module
+        .classes
+        .iter()
+        .find(|c| c.name.name == class_name)
+        .and_then(|c| {
+            let methods = if is_class_method {
+                &c.class_methods
+            } else {
+                &c.methods
+            };
+            methods
+                .iter()
+                .find(|m| m.selector.name() == selector && m.kind == patched_kind)
+        })
+        .map(|m| m.span);
+
     // 4. Full semantic analysis on the MERGED module — catches method errors in
-    //    class context (undefined fields, type errors). Method-edit failures are
-    //    reported against the method source the user is editing.
+    //    class context (undefined fields, type errors). Every diagnostic span
+    //    indexes into `merged_class_source`; method-body errors are then reported
+    //    relative to the patched method (so the method editor shows a snippet-local
+    //    line) while rarer class-context errors keep their merged-source line — all
+    //    accurate and in-range (BT-2563 #2).
     let mut all_diagnostics =
         beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars_and_classes(
-            &module,
-            class_parse_diags,
+            &merged_module,
+            merged_parse_diags,
             &[],
             pre_class_hierarchy.clone(),
         );
@@ -1366,13 +1479,18 @@ fn handle_compile_method(request: &Map) -> Term {
     };
     all_diagnostics.extend(
         beamtalk_core::semantic_analysis::primitive_validator::validate_primitives(
-            &module, &options,
+            &merged_module,
+            &options,
         ),
     );
     let error_diags = filter_error_diagnostics(&all_diagnostics);
     let (_, warnings) = partition_diagnostics(&all_diagnostics);
     if !error_diags.is_empty() {
-        return diagnostic_error_response(&error_diags, &method_source);
+        return compile_method_diagnostic_response(
+            &error_diags,
+            &merged_class_source,
+            patched_method_span,
+        );
     }
 
     // 5. Package-qualified module name (via override) + codegen — identical to
@@ -1390,7 +1508,7 @@ fn handle_compile_method(request: &Map) -> Term {
             Ok(map) => map,
             Err(resp) => return resp,
         };
-    let classes: Vec<(String, String)> = module
+    let classes: Vec<(String, String)> = merged_module
         .classes
         .iter()
         .map(|c| (c.name.name.to_string(), c.superclass_name().to_string()))
@@ -1398,10 +1516,10 @@ fn handle_compile_method(request: &Map) -> Term {
     let warning_msgs: Vec<String> = warnings.iter().map(|w| w.message.clone()).collect();
 
     match beamtalk_core::erlang::generate_module(
-        &module,
+        &merged_module,
         beamtalk_core::erlang::CodegenOptions::new(&module_name)
             .with_workspace_mode(workspace_mode)
-            .with_source(&class_source)
+            .with_source(&merged_class_source)
             .with_class_module_index(class_module_index)
             .with_class_superclass_index(class_superclass_index)
             .with_class_hierarchy(pre_class_hierarchy)
@@ -1417,7 +1535,9 @@ fn handle_compile_method(request: &Map) -> Term {
             &merged_class_source,
             &warning_msgs,
         ),
-        Err(e) => error_response(&[format_codegen_error(&e, &class_source)]),
+        // Codegen spans are now relative to the re-parsed merged module, so the
+        // error location resolves against the merged source.
+        Err(e) => error_response(&[format_codegen_error(&e, &merged_class_source)]),
     }
 }
 
@@ -2809,6 +2929,184 @@ mod property_tests {
         ]));
         let response = handle_request(&request);
         assert_eq!(response_status(&response).as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn compile_method_replaces_class_side_method_without_duplicating() {
+        // BT-2563 #3: the instance/class side is chosen by which method list the
+        // backend merges into (driven by `is_class_method`), NOT by `MethodKind`.
+        // A class-side patch must REPLACE the existing class method, never push a
+        // duplicate alongside it — there is no "kind trap".
+        let class_source = "Actor subclass: Counter\n  state: count = 0\n\n  class create -> Nil =>\n    Counter new\n\n  increment => count := count + 1";
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(class_source)),
+            (atom("method_source"), binary("create -> Nil =>\n  42")),
+            (atom("is_class_method"), atom("true")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        assert_eq!(
+            response_field_str(&response, "selector").as_deref(),
+            Some("create")
+        );
+        let merged = response_field_str(&response, "merged_class_source").expect("merged");
+        // Exactly one class-side `create` — replaced in place, not duplicated.
+        assert_eq!(
+            merged.matches("class create").count(),
+            1,
+            "class-side method duplicated instead of replaced:\n{merged}"
+        );
+        assert!(
+            merged.contains("42"),
+            "class-side method body not updated:\n{merged}"
+        );
+        // The instance method is untouched.
+        assert!(
+            merged.contains("increment"),
+            "instance method dropped:\n{merged}"
+        );
+    }
+
+    #[test]
+    fn compile_method_annotates_patched_method_at_its_merged_line() {
+        // BT-2563 #1: the patched method is parsed standalone, so its raw span
+        // indexes into the bare snippet (line 1). Codegen must annotate the
+        // method's message sends with the line they occupy in the MERGED class
+        // source (the send carries the BEAM stacktrace line), not line 1.
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (
+                atom("method_source"),
+                binary("touch => self.events isEmpty"),
+            ),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "resp: {response:?}"
+        );
+        let merged = response_field_str(&response, "merged_class_source").expect("merged");
+        let touch_line = merged
+            .lines()
+            .position(|l| l.contains("touch"))
+            .map(|i| i + 1)
+            .expect("touch present in merged source");
+        assert!(
+            touch_line > 1,
+            "expected the patched method below line 1 in the merged source:\n{merged}"
+        );
+        let core = response_field_str(&response, "core_erlang").expect("core erlang");
+        // Bare line annotation (no source_path in this request): `-| [<line>]`.
+        assert!(
+            core.contains(&format!(" -| [{touch_line}]")),
+            "patched method not annotated at its merged line {touch_line}:\n{core}"
+        );
+    }
+
+    #[test]
+    fn compile_method_class_context_diagnostic_resolves_against_merged_source() {
+        // BT-2563 #2: a post-merge semantic diagnostic whose span lands in the
+        // CLASS (not the patched method body) must resolve against the merged
+        // class source, not the short `method_source`. The one-class-per-file
+        // error points at the second class declaration, several lines into the
+        // merged source; the buggy path rendered it against the 1-line method
+        // body and clamped it to line 1.
+        let two = "Actor subclass: Alpha\n  state: a = 1\n\n  va => self.a\n\n\
+                   Actor subclass: Beta\n  state: b = 2\n\n  vb => self.b";
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(two)),
+            (atom("class_name"), binary("Alpha")),
+            (atom("method_source"), binary("bumped => self.a + 1")),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(response_status(&response).as_deref(), Some("error"));
+        let list = response_diagnostics(&response).expect("diagnostics");
+        let line = list.elements.iter().find_map(|d| {
+            if let Term::Map(m) = d {
+                if let Some(Term::FixInteger(i)) = map_get(m, "line") {
+                    return Some(i.value);
+                }
+            }
+            None
+        });
+        // The second class declaration sits several lines into the merged source
+        // (`Beta` is below all of `Alpha` plus the patched method), so a correctly
+        // resolved span lands well past the 1-line method body. The buggy path
+        // clamped this class-context span into the method body (line 1); requiring
+        // it to be clearly past the method body — without hardcoding the exact line,
+        // which depends on the unparser's blank-line output — guards the regression.
+        assert!(
+            line.is_some_and(|l| l >= 5),
+            "class-context diagnostic clamped into the method body instead of \
+             resolving against the merged source: {response:?}"
+        );
+    }
+
+    #[test]
+    fn compile_method_body_diagnostic_is_method_relative() {
+        // BT-2563 #2: a semantic error INSIDE the patched method body must report a
+        // line relative to the method snippet the user is editing — not its absolute
+        // line in the merged class. `probe` is appended below the multi-line
+        // `initialize` method, so its absolute merged line is well past 2; the
+        // undefined-variable error on the method's second line must still report
+        // line 2 (`beamtalk_repl_compiler:format_diagnostic_text/1` renders it as
+        // "Line 2: ...", matching the method editor's view).
+        let request = Term::from(Map::from([
+            (atom("command"), atom("compile_method")),
+            (atom("class_source"), binary(COMPILE_METHOD_CLASS)),
+            (
+                atom("method_source"),
+                binary("probe =>\n    undefinedLocal\n    self.events"),
+            ),
+            (atom("is_class_method"), atom("false")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("error"),
+            "resp: {response:?}"
+        );
+        let list = response_diagnostics(&response).expect("diagnostics");
+        let (msg, line) = list
+            .elements
+            .iter()
+            .find_map(|d| {
+                if let Term::Map(m) = d {
+                    let msg = match map_get(m, "message") {
+                        Some(Term::Binary(b)) => String::from_utf8_lossy(&b.bytes).into_owned(),
+                        _ => return None,
+                    };
+                    let line = match map_get(m, "line") {
+                        Some(Term::FixInteger(i)) => i.value,
+                        _ => return None,
+                    };
+                    Some((msg, line))
+                } else {
+                    None
+                }
+            })
+            .expect("a structured diagnostic with message + line");
+        assert!(
+            msg.contains("undefinedLocal"),
+            "expected the undefined-variable diagnostic, got: {msg}"
+        );
+        // Method-relative: the error is on the method's second line. The absolute
+        // line in the merged class is larger (the method is appended below
+        // `initialize`); reporting 2 proves the span was rebased into method space.
+        assert_eq!(
+            line, 2,
+            "method-body diagnostic not reported method-relative: {response:?}"
+        );
     }
 
     #[test]
