@@ -262,20 +262,23 @@ mod tests {
     #[test]
     fn test_generate_cookie_is_args_file_safe() {
         // A cookie passed via `-args_file` as `-setcookie <cookie>` must not be
-        // mistaken for a VM flag. Erlang treats any token starting with `-` or
-        // `+` as a flag, and `+`/`/` anywhere break parsing — so the node would
-        // boot with the wrong cookie and every WebSocket auth would fail with
-        // "Invalid cookie" (BT-2532). Run enough iterations to exercise the
-        // ~1.5% leading-`-` reroll path.
+        // mistaken for a VM flag, or the node boots with the wrong cookie and
+        // every WebSocket auth fails with "Invalid cookie" (BT-2532). Run enough
+        // iterations to exercise the ~1.5% leading-`-` reroll path.
         for _ in 0..5_000 {
             let cookie = generate_cookie();
+            // The live guard: URL-safe base64 can begin with `-`, which the
+            // args-file reader treats as a flag prefix. The reroll must prevent it.
             assert!(
-                !cookie.starts_with('-') && !cookie.starts_with('+'),
-                "cookie must not start with a flag prefix: {cookie:?}"
+                !cookie.starts_with('-'),
+                "cookie must not start with '-' (args_file flag prefix): {cookie:?}"
             );
+            // Tripwire: `+`/`/` are impossible under URL-safe base64 today, but
+            // would reintroduce the original parsing bug if the encoding were ever
+            // swapped back to standard base64. Fail loudly if that regresses.
             assert!(
                 !cookie.contains('+') && !cookie.contains('/'),
-                "cookie must not contain '+' or '/': {cookie:?}"
+                "cookie encoding must stay args_file-safe (no '+' or '/'): {cookie:?}"
             );
         }
     }

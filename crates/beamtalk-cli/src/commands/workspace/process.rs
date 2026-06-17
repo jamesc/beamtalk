@@ -515,8 +515,9 @@ fn wait_for_tcp_ready(
         if attempt > 0 && !is_process_alive(pid) {
             return Err(miette!(
                 "BEAM node (PID {pid}) crashed while WebSocket health checks were \
-                 in progress on port {port}.{log_suffix}{}",
-                ws_err_detail(last_ws_err.as_deref())
+                 in progress on port {port}.{log_suffix}{}{}",
+                ws_err_detail(last_ws_err.as_deref()),
+                read_startup_log_content(workspace_id).unwrap_or_default()
             ));
         }
         std::thread::sleep(Duration::from_millis(ws_health_delay_ms(attempt)));
@@ -538,8 +539,9 @@ fn wait_for_tcp_ready(
     } else {
         miette!(
             "BEAM node (PID {pid}) crashed after WebSocket port {port} started accepting. \
-             Ensure Erlang/OTP is installed correctly.{log_suffix}{}",
-            ws_err_detail(last_ws_err.as_deref())
+             Ensure Erlang/OTP is installed correctly.{log_suffix}{}{}",
+            ws_err_detail(last_ws_err.as_deref()),
+            read_startup_log_content(workspace_id).unwrap_or_default()
         )
     })
 }
