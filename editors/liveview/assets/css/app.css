@@ -296,7 +296,6 @@
 .row .source-origin-tag.dependency { background: #fef3c7; color: #b45309; }
 .row .source-origin-tag.project { display: none; }
 .sb-classdef { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
-.sb-classdef .mname { font-family: var(--code-font, monospace); }
 .sb-protocols { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 
 /* center column splits between editor and the workspace dock */
