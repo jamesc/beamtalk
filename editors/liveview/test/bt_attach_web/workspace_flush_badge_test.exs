@@ -127,5 +127,36 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       assert flush_html =~ "Flushed"
       refute flush_html =~ "unflushed"
     end
+
+    test "re-saving the identical on-disk body does not show unflushed (BT-2550)", %{conn: conn} do
+      # `save_method` logs a ChangeLog entry for every `>>`, but a byte-for-byte
+      # re-save of the on-disk body is not a real divergence — `compile_clean/3`
+      # diffs the compiled source against the disk body captured at open and must
+      # leave `disk_differs` false, so the `unflushed` badge stays away (BT-2550).
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # The stub's `increment` is a disk-backed method (origin "both",
+      # disk_differs false): the body the editor seeds is exactly the on-disk body.
+      disk_body = "increment => self.value := self.value + 1"
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      open_html = view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+      assert open_html =~ "in image"
+      refute open_html =~ "unflushed"
+
+      # Save the *same* body back — a no-op edit re-compiled.
+      save_html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "increment",
+          "source" => disk_body,
+          "tab" => "method:Counter:instance:increment"
+        })
+
+      assert save_html =~ "Saved increment on Counter"
+      refute save_html =~ "unflushed"
+    end
   end
 end

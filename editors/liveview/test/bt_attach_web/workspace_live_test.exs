@@ -886,12 +886,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     refute html =~ ~s(id="browse-method-source")
   end
 
-  test "compiling a browsed method shows the unflushed badge (BT-2539)", %{conn: conn} do
+  test "compiling a runtime-only browsed method shows runtime, not unflushed (BT-2539 / BT-2550)",
+       %{conn: conn} do
     # An in-memory `>>` compile (⌘S) live-patches the method without flushing to
-    # disk, so the image now diverges from the on-disk body. The `disk_differs`
-    # snapshot is captured at browse time, so `compile_clean/3` must flip it for a
-    # `:method` tab — otherwise the `unflushed` breadcrumb badge never appears for
-    # a method that was in-sync when opened.
+    # disk. This class is eval-defined, so it is *runtime-only* (no on-disk body):
+    # there is no disk counterpart for the image to "differ" from, so BT-2550
+    # suppresses the misleading `unflushed` badge and the breadcrumb carries the ⚡
+    # runtime badge instead. (The `unflushed`-on-compile path for a *disk-backed*
+    # method is covered by `workspace_flush_badge_test.exs`.)
     {:ok, view, _html} = live(conn, "/")
     suffix = System.unique_integer([:positive])
     class = "FlushCounter#{suffix}"
@@ -925,8 +927,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       })
 
     assert save_html =~ "Saved increment on #{class}"
-    # The post-compile divergence surfaces as the `unflushed` breadcrumb badge.
-    assert save_html =~ "unflushed"
+    # Runtime-only: the breadcrumb shows the ⚡ runtime badge, never `unflushed`.
+    assert save_html =~ "runtime-only (no source on disk)"
+    refute save_html =~ "unflushed"
   end
 
   # The BT-2545 *flush clears the unflushed badge* behaviour is covered by the pure

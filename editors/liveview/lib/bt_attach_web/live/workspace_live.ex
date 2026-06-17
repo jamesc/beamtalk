@@ -2661,6 +2661,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                 # Keeps the false → true invariant the `nil ->` branch documents.
                 disk_differs: existing.disk_differs or info.disk_differs,
                 runtime_only: info.runtime_only,
+                # Re-derive the on-disk body reference from the live image too, so
+                # a method that gained / lost an on-disk source out-of-band diffs a
+                # later compile against the current disk body (BT-2550).
+                disk_source: disk_body_snapshot(info),
                 # Re-read the doc block from the live image too (BT-2558), so an
                 # out-of-band edit to the method's `///` doc / signature is
                 # reflected when the clean tab is re-activated.
@@ -2694,6 +2698,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           # re-activated (see the `%{} = existing` branch above).
           disk_differs: info.disk_differs,
           runtime_only: info.runtime_only,
+          # The on-disk body captured while the image matched disk, so a later
+          # compile diffs against it instead of flagging every re-save (BT-2550).
+          disk_source: disk_body_snapshot(info),
           # The method's `///` doc-comment + signature for the read-only doc
           # block (BT-2558); nil when the method carries no doc / signature.
           doc: info.doc,
@@ -2750,6 +2757,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   # and no divergence badges (and no doc block — BT-2558).
   defp empty_source_info,
     do: %{source: "", disk_differs: false, runtime_only: false, doc: nil, signature: nil}
+
+  # The on-disk method body to diff a later compile against (BT-2550 item 2). We
+  # can only know it when the image matched disk at open: `disk_differs: false` and
+  # not runtime-only means the backend confirmed the image body appears verbatim in
+  # the on-disk class source, so the image `source` *is* the on-disk body. A
+  # runtime-only or already-diverged method has no body we can pin to disk → `nil`,
+  # and `compile_clean/3` falls back to its conservative flag.
+  defp disk_body_snapshot(%{runtime_only: true}), do: nil
+
+  defp disk_body_snapshot(%{disk_differs: false, source: src}) when is_binary(src) and src != "",
+    do: src
+
+  defp disk_body_snapshot(_), do: nil
 
   # Normalise a browse-payload doc/signature field to a non-empty binary or nil.
   # The op already returns `null` (decoded to nil) for absent fields; this also
@@ -2922,8 +2942,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     source: live edit buffer,
   #     base: last-compiled source (dirty = source != base),
   #     dirty: boolean,
-  #     disk_differs: boolean,   # methods only — unflushed live `>>` patch; snapshot at open, set true on compile
+  #     disk_differs: boolean,   # methods only — unflushed live `>>` patch; snapshot at open, set on compile
   #     runtime_only: boolean,   # methods only — sourceless runtime method at open
+  #     disk_source: binary | nil, # methods only — on-disk body captured at open (BT-2550); nil when unknown
   #     doc: binary | nil,       # BT-2558 read-only doc block: method `///` doc / class comment
   #     signature: binary | nil  # BT-2558 method signature (nil for a class-definition tab)
   #   }
@@ -2944,6 +2965,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       dirty: false,
       disk_differs: false,
       runtime_only: false,
+      disk_source: nil,
       doc: nil,
       signature: nil
     }
@@ -3050,6 +3072,8 @@ defmodule BtAttachWeb.WorkspaceLive do
           dirty: false,
           disk_differs: false,
           runtime_only: false,
+          # A :def tab has no single on-disk method body to diff against.
+          disk_source: nil,
           # The class comment as the doc block; no per-method signature on a
           # class-definition tab.
           doc: class_comment(socket, class),
@@ -3080,12 +3104,20 @@ defmodule BtAttachWeb.WorkspaceLive do
   # then there's nothing to reconcile.
   #
   # A `:method` save is an in-memory live `>>` patch (logged to the ChangeLog) that
-  # is *not* flushed to disk, so a successful compile diverges the live body from
-  # its on-disk counterpart: flip `disk_differs` on so the `unflushed` breadcrumb
+  # is *not* flushed to disk, so a successful compile *may* diverge the live body
+  # from its on-disk counterpart: set `disk_differs` so the `unflushed` breadcrumb
   # badge appears. (Clearing it again on flush needs a `flush_completed`
   # subscription — tracked as BT-2545.) A `:def` tab evaluates a whole class
   # definition with no single on-disk method body to diverge, so leave its
   # snapshot untouched.
+  #
+  # We only badge a *real* divergence (BT-2550): `save_method` logs a ChangeLog
+  # entry for every `>>`, so flipping `disk_differs` unconditionally false-flags a
+  # byte-for-byte re-save of the on-disk body (e.g. ⌘S with no edit). When we know
+  # the on-disk body (`disk_source`, captured at open while the image matched
+  # disk), compare the compiled source against it; only differ when they actually
+  # differ. With no known disk body (`nil` — a runtime-only or already-diverged
+  # method) we conservatively flag, matching the prior behaviour.
   defp compile_clean(socket, nil, _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
@@ -3095,10 +3127,21 @@ defmodule BtAttachWeb.WorkspaceLive do
         | source: source,
           base: source,
           dirty: false,
-          disk_differs: if(tab.kind == :method, do: true, else: tab.disk_differs)
+          disk_differs: compiled_disk_differs(tab, source)
       }
     end)
   end
+
+  # Whether a just-compiled `:method` body diverges from its on-disk counterpart.
+  # `disk_source` is the on-disk body captured at open (see `disk_body_snapshot/1`)
+  # — a precise body-to-body comparison, so an identical re-save reads as "in
+  # sync". `nil` (no known disk body) falls back to a conservative `true`. A `:def`
+  # tab has no single method body to diverge, so its snapshot is left untouched.
+  defp compiled_disk_differs(%{kind: :method, disk_source: disk}, source) when is_binary(disk),
+    do: source != disk
+
+  defp compiled_disk_differs(%{kind: :method}, _source), do: true
+  defp compiled_disk_differs(%{disk_differs: existing}, _source), do: existing
 
   defp update_active_tab(socket, fun),
     do: update_active_tab_by_id(socket, socket.assigns.active_tab, fun)
@@ -5247,9 +5290,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <%!-- image-divergence badges carried from the browse snapshot
                        (the indicators the old read-only Method Source pane showed):
                        an unflushed live `>>` patch, or a sourceless runtime
-                       method. --%>
+                       method. A runtime-only method (no on-disk body) is
+                       suppressed from the `unflushed` badge (BT-2550): there is
+                       no disk counterpart for the image to "differ" from, so the
+                       'image differs from disk' tooltip would be misleading — the
+                       ⚡ runtime badge below is the honest signal there. --%>
                   <span
-                    :if={active_tab(assigns).disk_differs}
+                    :if={active_tab(assigns).disk_differs and not active_tab(assigns).runtime_only}
                     class="runtime-tag"
                     title="unflushed live patch (image differs from disk)"
                   >
