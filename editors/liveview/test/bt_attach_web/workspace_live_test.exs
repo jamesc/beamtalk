@@ -935,8 +935,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # The BT-2545 *flush clears the unflushed badge* behaviour is covered by the pure
   # reconcile unit tests in `workspace_live_reconcile_test.exs` and the full
   # integration test in `workspace_flush_badge_test.exs` (BT-2554) which uses a
-  # fully-stubbed workspace client. The `compile → unflushed shown` half is
-  # covered by "compiling a browsed method shows the unflushed badge".
+  # fully-stubbed workspace client. The `compile → unflushed shown` half (a
+  # disk-backed method compiled to a *different* body) lives there too — the live
+  # test above is runtime-only, so BT-2550 suppresses its `unflushed` badge.
 
   test "re-clicking an open method row re-fetches without blanking the buffer (BT-2547)", %{
     conn: conn
