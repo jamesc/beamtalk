@@ -390,6 +390,7 @@ pub fn start_detached_node(
 
     // Wait for WebSocket health endpoint to be fully ready before returning.
     wait_for_tcp_ready(
+        workspace_id,
         node_info.connect_host(),
         actual_port,
         pid,
@@ -427,9 +428,12 @@ pub fn start_detached_node(
 /// Phase 2 checks after every attempt; the delay between attempts grows via
 /// `ws_health_delay_ms` (exponential backoff, see BT-1598).
 ///
-/// `log_path` is `Some(path)` only when the startup log file was successfully
-/// opened; it is included in timeout error messages to guide diagnosis.
+/// `workspace_id` is used to read `startup.log` for inlining into timeout
+/// errors. `log_path` is `Some(path)` only when the startup log file was
+/// successfully opened; it is included in timeout error messages to guide
+/// diagnosis.
 fn wait_for_tcp_ready(
+    workspace_id: &str,
     host: &str,
     port: u16,
     pid: u32,
@@ -487,40 +491,65 @@ fn wait_for_tcp_ready(
     // initial probes catch quick readiness; slower later probes avoid
     // busy-spinning while cowboy finishes route registration.
     let request = serde_json::json!({"op": "health"});
+    // Remember the most recent WS-level failure so the final timeout error can name
+    // the actual cause (auth/session error, handshake rejection, read timeout)
+    // instead of the opaque "health check failed". Without this the recurring
+    // "port accepting TCP but WS health failed" flake is undiagnosable (BT-2532):
+    // ProtocolClient::connect's error was previously discarded.
+    let mut last_ws_err: Option<String> = None;
     for attempt in 0..WS_HEALTH_RETRIES {
-        if let Ok(mut client) = ProtocolClient::connect(
+        match ProtocolClient::connect(
             host,
             port,
             cookie,
             Some(Duration::from_millis(READINESS_READ_TIMEOUT_MS)),
         ) {
-            if client.send_raw(&request).is_ok() {
-                return Ok(());
-            }
+            Ok(mut client) => match client.send_raw(&request) {
+                Ok(_) => return Ok(()),
+                Err(e) => last_ws_err = Some(format!("health request failed: {e}")),
+            },
+            Err(e) => last_ws_err = Some(format!("WebSocket connect/auth failed: {e}")),
         }
         // Check after the first attempt so we don't mask a quick crash with a
         // misleading "port accepting" error variant.
         if attempt > 0 && !is_process_alive(pid) {
             return Err(miette!(
                 "BEAM node (PID {pid}) crashed while WebSocket health checks were \
-                 in progress on port {port}.{log_suffix}"
+                 in progress on port {port}.{log_suffix}{}{}",
+                ws_err_detail(last_ws_err.as_deref()),
+                read_startup_log_content(workspace_id).unwrap_or_default()
             ));
         }
         std::thread::sleep(Duration::from_millis(ws_health_delay_ms(attempt)));
     }
 
     Err(if is_process_alive(pid) {
+        // The node is alive but never served a healthy `/ws`. Inline the last
+        // WS error and any startup.log crash output so the failure is actionable
+        // from the CI log alone (server-side details still land in workspace.log).
+        // Use read_startup_log_content (not _detail) so we don't append a
+        // misleading "Check Erlang/OTP is installed" hint — the node clearly started.
+        let ws_detail = ws_err_detail(last_ws_err.as_deref());
+        let log_detail = read_startup_log_content(workspace_id).unwrap_or_default();
         miette!(
             "BEAM node started (PID {pid}) and port {port} is accepting TCP connections, \
              but the WebSocket health check failed. The workspace may be in a degraded \
-             state — try again.{log_suffix}"
+             state — try again.{log_suffix}{ws_detail}{log_detail}"
         )
     } else {
         miette!(
             "BEAM node (PID {pid}) crashed after WebSocket port {port} started accepting. \
-             Ensure Erlang/OTP is installed correctly.{log_suffix}"
+             Ensure Erlang/OTP is installed correctly.{log_suffix}{}{}",
+            ws_err_detail(last_ws_err.as_deref()),
+            read_startup_log_content(workspace_id).unwrap_or_default()
         )
     })
+}
+
+/// Format the last WebSocket health-probe error for inclusion in a timeout
+/// message. Returns an empty string when no WS error was recorded.
+fn ws_err_detail(last_ws_err: Option<&str>) -> String {
+    last_ws_err.map_or_else(String::new, |e| format!(" Last WebSocket error: {e}."))
 }
 
 /// Compute the delay for a Phase 2 WS health retry with exponential backoff.
@@ -542,37 +571,47 @@ fn ws_health_delay_ms(attempt: usize) -> u64 {
 /// keeping terminal output manageable.
 const STARTUP_LOG_MAX_BYTES: usize = 4096;
 
-/// Read crash diagnostics from `startup.log` written by the eval try/catch.
+/// Read `startup.log` content (written by the eval try/catch) if present.
 ///
-/// Returns a formatted detail string suitable for appending to an error message.
-/// If the log contains content, it's shown inline (truncated to `STARTUP_LOG_MAX_BYTES`);
-/// otherwise a generic hint is returned.
-fn read_startup_log_detail(workspace_id: &str) -> String {
+/// Returns `Some(formatted)` with the log shown inline (truncated to
+/// `STARTUP_LOG_MAX_BYTES`) when the file exists and is non-empty, or `None`
+/// when there is nothing to show. Callers that know the node is alive use this
+/// directly so they do not append a misleading "Erlang/OTP" hint.
+fn read_startup_log_content(workspace_id: &str) -> Option<String> {
     workspace_dir(workspace_id)
         .ok()
         .map(|d| d.join("startup.log"))
         .and_then(|p| std::fs::read(&p).ok())
         .filter(|bytes| !bytes.is_empty())
-        .map_or_else(
-            || "\nCheck Erlang/OTP is installed.".to_string(),
-            |log| {
-                if log.len() <= STARTUP_LOG_MAX_BYTES {
-                    format!("\nStartup log:\n{}", String::from_utf8_lossy(&log))
-                } else {
-                    // Truncate to the last STARTUP_LOG_MAX_BYTES, keeping the most
-                    // recent (and usually most relevant) output.  Operating on raw
-                    // bytes avoids panicking on multibyte UTF-8 boundaries;
-                    // from_utf8_lossy replaces any split characters with U+FFFD.
-                    let tail = &log[log.len() - STARTUP_LOG_MAX_BYTES..];
-                    // Find the first newline to avoid cutting mid-line.
-                    let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
-                    format!(
-                        "\nStartup log (last {STARTUP_LOG_MAX_BYTES} bytes, truncated):\n{}",
-                        String::from_utf8_lossy(&tail[start..])
-                    )
-                }
-            },
-        )
+        .map(|log| {
+            if log.len() <= STARTUP_LOG_MAX_BYTES {
+                format!("\nStartup log:\n{}", String::from_utf8_lossy(&log))
+            } else {
+                // Truncate to the last STARTUP_LOG_MAX_BYTES, keeping the most
+                // recent (and usually most relevant) output.  Operating on raw
+                // bytes avoids panicking on multibyte UTF-8 boundaries;
+                // from_utf8_lossy replaces any split characters with U+FFFD.
+                let tail = &log[log.len() - STARTUP_LOG_MAX_BYTES..];
+                // Find the first newline to avoid cutting mid-line.
+                let start = tail.iter().position(|&b| b == b'\n').map_or(0, |i| i + 1);
+                format!(
+                    "\nStartup log (last {STARTUP_LOG_MAX_BYTES} bytes, truncated):\n{}",
+                    String::from_utf8_lossy(&tail[start..])
+                )
+            }
+        })
+}
+
+/// Read crash diagnostics from `startup.log` for paths where the node is *not*
+/// known to be alive.
+///
+/// Shows the log inline if present, otherwise falls back to a generic
+/// "Check Erlang/OTP is installed" hint — appropriate only when the node may
+/// have failed to boot. On "node alive but unhealthy" paths use
+/// [`read_startup_log_content`] instead, where that hint would be misleading.
+fn read_startup_log_detail(workspace_id: &str) -> String {
+    read_startup_log_content(workspace_id)
+        .unwrap_or_else(|| "\nCheck Erlang/OTP is installed.".to_string())
 }
 
 /// Build the Erlang `-eval` string for workspace node startup.

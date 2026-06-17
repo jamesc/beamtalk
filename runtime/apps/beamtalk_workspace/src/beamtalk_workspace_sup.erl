@@ -26,10 +26,10 @@ beamtalk_workspace_sup
   ├─ beamtalk_actor_registry       % Workspace-wide actor registry
   ├─ beamtalk_workspace_bootstrap % Class var bootstrap (ADR 0019)
   │     (also initialises sealed Object singletons: BeamtalkInterface, WorkspaceInterface)
-  ├─ beamtalk_repl_server         % TCP server (session-per-connection)
-  ├─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
   ├─ beamtalk_actor_sup           % Supervises user actors
-  └─ beamtalk_session_sup         % Supervises session shell processes
+  ├─ beamtalk_session_sup         % Supervises session shell processes (before repl_server)
+  ├─ beamtalk_repl_server         % TCP server (session-per-connection)
+  └─ beamtalk_idle_monitor        % Tracks activity, self-terminates if idle
 ```
 """.
 
@@ -197,6 +197,27 @@ repl_child_specs(false, _TcpPort, _WorkspaceId, _BindAddr, _AutoCleanup, _MaxIdl
     [];
 repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSeconds) ->
     [
+        %% Session supervisor (one child per REPL connection).
+        %%
+        %% MUST start before beamtalk_repl_server: the REPL server's init/1 binds
+        %% the cowboy `/ws` listener AND writes the port file (the CLI's readiness
+        %% signal) before returning. If session_sup started after repl_server, the
+        %% CLI could discover the port and open a `/ws` connection during the window
+        %% where session_sup does not yet exist, so beamtalk_ws_handler's
+        %% create_session -> supervisor:start_child(beamtalk_session_sup, _) exits
+        %% with `noproc`, the handler crashes, and the connection is dropped. The CLI
+        %% sees "port accepting TCP but WebSocket health check failed" and retries on
+        %% a fresh node (flaky workspace-startup CI failures, BT-2532). Ordering
+        %% session_sup first gates the port file behind a ready session tier.
+        #{
+            id => beamtalk_session_sup,
+            start => {beamtalk_session_sup, start_link, []},
+            restart => permanent,
+            shutdown => infinity,
+            type => supervisor,
+            modules => [beamtalk_session_sup]
+        },
+
         %% REPL WebSocket server (session-per-connection architecture)
         #{
             id => beamtalk_repl_server,
@@ -228,16 +249,6 @@ repl_child_specs(true, TcpPort, WorkspaceId, BindAddr, AutoCleanup, MaxIdleSecon
             shutdown => 5000,
             type => worker,
             modules => [beamtalk_idle_monitor]
-        },
-
-        %% Session supervisor (one child per REPL connection)
-        #{
-            id => beamtalk_session_sup,
-            start => {beamtalk_session_sup, start_link, []},
-            restart => permanent,
-            shutdown => infinity,
-            type => supervisor,
-            modules => [beamtalk_session_sup]
         }
     ].
 

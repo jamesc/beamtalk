@@ -217,6 +217,20 @@ bootstrap_after_singletons_before_repl_test() ->
     ?assert(BootstrapIdx > ActorRegistryIdx),
     ?assert(BootstrapIdx < ReplServerIdx).
 
+session_sup_before_repl_server_test() ->
+    %% The session supervisor MUST start before the REPL server. repl_server's
+    %% init/1 binds the cowboy `/ws` listener and writes the port file (the CLI's
+    %% readiness signal) before returning; if session_sup is not yet up when a
+    %% client connects, beamtalk_ws_handler:create_session exits with `noproc` and
+    %% the connection is dropped, surfacing as the flaky "port accepting TCP but
+    %% WebSocket health check failed" CI failure (BT-2532).
+    {ok, {_SupFlags, ChildSpecs}} = beamtalk_workspace_sup:init(test_config()),
+
+    Ids = [maps:get(id, S) || S <- ChildSpecs],
+    SessionSupIdx = index_of(beamtalk_session_sup, Ids),
+    ReplServerIdx = index_of(beamtalk_repl_server, Ids),
+    ?assert(SessionSupIdx < ReplServerIdx).
+
 %%% Helpers
 
 index_of(Elem, List) ->

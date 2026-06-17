@@ -185,16 +185,26 @@ pub(super) fn write_secure_file(path: &Path, content: &[u8]) -> Result<()> {
 
 /// Generate a unique Erlang cookie for a workspace.
 ///
-/// Uses URL-safe base64 (RFC 4648 §5) to avoid `+` and `/` characters,
-/// which Erlang's `-args_file` parser misinterprets as ERTS VM flags when
-/// they appear at the start of a token (e.g. `-setcookie +abc` treats `+abc`
-/// as an ERTS flag rather than the cookie value).
+/// Uses URL-safe base64 (RFC 4648 §5) to avoid `+` and `/` characters, then
+/// rerolls any value that starts with `-`. All three of `+`, `/`, and a leading
+/// `-` are misinterpreted by Erlang's `-args_file` reader: a token that begins
+/// with `+` or `-` is parsed as a VM flag rather than the value of `-setcookie`,
+/// so the node boots without the intended cookie and every WebSocket auth then
+/// fails with "Invalid cookie" (an intermittent workspace-startup CI flake,
+/// BT-2532). URL-safe base64 rules out `+`/`/` anywhere; the reroll rules out a
+/// leading `-` (the only place `-` is a flag prefix — `-` and `_` elsewhere in
+/// the token are harmless). 24 bytes encode to 32 chars with no `=` padding.
 pub fn generate_cookie() -> String {
     use rand::Rng;
     let mut rng = rand::rng();
-    let mut bytes = vec![0u8; 24];
-    rng.fill_bytes(&mut bytes);
-    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE, &bytes)
+    loop {
+        let mut bytes = vec![0u8; 24];
+        rng.fill_bytes(&mut bytes);
+        let cookie = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE, &bytes);
+        if !cookie.starts_with('-') {
+            return cookie;
+        }
+    }
 }
 
 /// Save workspace cookie with secure permissions (owner read/write only).

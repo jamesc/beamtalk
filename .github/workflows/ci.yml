@@ -351,7 +351,12 @@ jobs:
         if: failure()
         run: |
           epmd -names || true
-          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log 2>/dev/null | head -5); do
+          # startup.log holds VM boot / -eval crash output; workspace.log holds the
+          # OTP logger stream where beamtalk_ws_handler writes session/auth failures
+          # (e.g. "Session creation failed"). The "port accepting TCP but WS health
+          # check failed" flake (BT-2532) leaves startup.log empty — the real cause
+          # is in workspace.log — so dump both.
+          for f in $(ls -t "$HOME"/.beamtalk/workspaces/*/startup.log "$HOME"/.beamtalk/workspaces/*/workspace.log 2>/dev/null | head -10); do
             echo "=== $f ==="
             cat "$f"
           done
