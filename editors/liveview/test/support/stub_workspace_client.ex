@@ -160,7 +160,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     {:value, %{"protocols" => [%{"name" => "all", "selectors" => selectors}]}}
   end
 
-  def browse_method_source(_class, _side, selector) do
+  def browse_method_source(class, _side, selector) do
     {source, doc, signature} =
       case selector do
         "increment" ->
@@ -176,6 +176,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
           {"stub => nil", nil, nil}
       end
 
+    # A saved-but-unflushed method has an image body that diverges from disk, so a
+    # re-browse reports `disk_differs: true` (BT-2565). `source` stays the on-disk
+    # body — the backend's `disk_differs` is a load-time snapshot, not a live diff.
+    disk_differs = Map.has_key?(get(:changes), {class, selector})
+
     {:value,
      %{
        "source" => source,
@@ -183,7 +188,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        "signature" => signature,
        "source_status" => "indexed",
        "origin" => "both",
-       "disk_differs" => false
+       "disk_differs" => disk_differs
      }}
   end
 

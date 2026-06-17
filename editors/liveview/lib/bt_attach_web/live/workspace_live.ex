@@ -1166,6 +1166,16 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, open_definition(socket)}
   end
 
+  # Open the *selected* class's definition tab from the System Browser's "class
+  # definition" entry (BT-2491). The class rides the click; a malformed payload
+  # is ignored rather than crashing the LiveView.
+  def handle_event("browser_open_definition", %{"class" => class}, socket)
+      when is_binary(class) and class != "" do
+    {:noreply, open_definition(socket, class)}
+  end
+
+  def handle_event("browser_open_definition", _params, socket), do: {:noreply, socket}
+
   # Track edits to the active tab so its dirty dot reflects unsaved changes
   # (BT-2494). The save_method form's `phx-change` reports the live source on
   # each keystroke; we stash it on the active tab and recompute its dirty flag
@@ -2661,10 +2671,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                 # Keeps the false → true invariant the `nil ->` branch documents.
                 disk_differs: existing.disk_differs or info.disk_differs,
                 runtime_only: info.runtime_only,
-                # Re-derive the on-disk body reference from the live image too, so
-                # a method that gained / lost an on-disk source out-of-band diffs a
-                # later compile against the current disk body (BT-2550).
-                disk_source: disk_body_snapshot(info),
+                # Carry the on-disk body forward across the re-activation. A fresh
+                # snapshot wins when the image is back in sync with disk; a method
+                # whose image diverged but is *still* disk-backed keeps the prior
+                # snapshot instead of regressing to nil (BT-2565); a now runtime-only
+                # method drops to nil (BT-2550).
+                disk_source: reactivation_disk_source(existing, info),
                 # Re-read the doc block from the live image too (BT-2558), so an
                 # out-of-band edit to the method's `///` doc / signature is
                 # reflected when the clean tab is re-activated.
@@ -2770,6 +2782,38 @@ defmodule BtAttachWeb.WorkspaceLive do
     do: src
 
   defp disk_body_snapshot(_), do: nil
+
+  # The on-disk body to carry forward when a *clean* tab is re-activated (BT-2565).
+  # `disk_body_snapshot/1` only yields a body while the image matches disk
+  # (`disk_differs: false`), so a tab whose image diverged from disk via an
+  # in-memory compile — `compile_clean/3` set `disk_differs: true` while preserving
+  # the body captured at open — would otherwise re-derive `nil` on re-activation,
+  # regressing a later exact-on-disk-body re-compile back to the conservative
+  # `unflushed` flag. We split the two ways `disk_body_snapshot/1` returns nil:
+  #
+  #   * now runtime-only (no on-disk body at all) → drop to nil, matching the
+  #     conservative fallback for a method that genuinely lost its disk source.
+  #     This guards against a naive `existing.disk_source || …` retaining a stale
+  #     snapshot for a method that legitimately transitioned to runtime-only.
+  #   * still disk-backed but image-diverged → keep the prior `existing.disk_source`
+  #     so the on-disk body stays pinned across the round-trip.
+  #
+  # A fresh snapshot (image back in sync with disk) always wins over the carried one.
+  #
+  # The carried `existing.disk_source` is only as fresh as tab-open time: if the file
+  # is rewritten out-of-band (another session flushes, an external editor) *while the
+  # image is diverged*, the carried body goes stale, and a later compile of the *old*
+  # on-disk body would clear `unflushed` against disk that has since moved on. This is
+  # a narrow false-negative (concurrent out-of-band writes during divergence); the
+  # backend's `disk_differs` is itself a load-time snapshot, not a live re-read, so
+  # the editor already trusts a tab-open view of disk. The conservative pre-BT-2565
+  # path avoided this only by re-flagging *every* re-activated diverged tab — the
+  # false-positive BT-2565 fixes. The common-case win is worth the narrow tradeoff.
+  @doc false
+  def reactivation_disk_source(_existing, %{runtime_only: true}), do: nil
+
+  def reactivation_disk_source(existing, info),
+    do: disk_body_snapshot(info) || existing.disk_source
 
   # Normalise a browse-payload doc/signature field to a non-empty binary or nil.
   # The op already returns `null` (decoded to nil) for absent fields; this also
@@ -3044,7 +3088,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # first open it also reads the class' comment (BT-2558) so the editor can show
   # it as a read-only documentation block above the editable definition body.
   defp open_definition(socket) do
-    class = active_tab(socket.assigns).class
+    open_definition(socket, active_tab(socket.assigns).class)
+  end
+
+  # Open (or re-focus) a class-definition tab for a named class — the System
+  # Browser's "class definition" entry opens the *selected* class's definition,
+  # which need not be the active tab's class.
+  defp open_definition(socket, class) do
     id = "def:" <> class
 
     case find_tab(socket, id) do
@@ -3165,6 +3215,16 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       _ ->
         nil
+    end
+  end
+
+  # The class whose definition tab is focused, so the System Browser's "class
+  # definition" entry can track the editor (mirrors `selected_method_ref/1` for
+  # method tabs). nil when the active tab is a method or there is no def tab.
+  defp selected_def_ref(assigns) do
+    case active_tab(assigns) do
+      %{kind: :def, class: class} -> class
+      _ -> nil
     end
   end
 
@@ -4493,6 +4553,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # for a class-definition tab — drives the "sel" highlight so the browser tracks
   # whatever the editor is showing.
   attr :active_method, :map, default: nil
+  # The class whose *definition* tab is focused (or nil) — highlights the "class
+  # definition" entry when the editor is showing this class's definition.
+  attr :active_def, :string, default: nil
 
   defp system_browser_methods(assigns) do
     assigns =
@@ -4515,6 +4578,19 @@ defmodule BtAttachWeb.WorkspaceLive do
         <%= if @selected_class == nil do %>
           <div class="empty">Select a class to browse its methods.</div>
         <% else %>
+          <%!-- class definition entry: opens (or focuses) the class-definition
+               tab so the class shape is browsable, not just its methods. Saving
+               that tab compiles the class (ADR 0082). --%>
+          <div class="tree sb-classdef">
+            <div
+              class={["row", @active_def == @selected_class && "sel"]}
+              phx-click="browser_open_definition"
+              phx-value-class={@selected_class}
+            >
+              <span class="twig" style="color: var(--accent);">▸</span>
+              <span class="mname mono">class definition</span>
+            </div>
+          </div>
           <%!-- protocol filter row: ∗ "all" + one row per protocol --%>
           <div class="tree sb-protocols">
             <div
@@ -4553,7 +4629,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               phx-value-side={@browser_side}
               phx-value-selector={m["selector"]}
             >
-              <span class="twig" style="color: var(--accent);">ƒ</span>
+              <span class="twig" style="color: var(--accent);">m</span>
               <span class="mname mono">{m["selector"]}</span>
               <span
                 :if={m["source_origin"] && m["source_origin"] != "project"}
@@ -4796,6 +4872,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   selected_class={@selected_class}
                   browser_side={@browser_side}
                   active_method={selected_method_ref(assigns)}
+                  active_def={selected_def_ref(assigns)}
                 />
               </div>
             </div>
