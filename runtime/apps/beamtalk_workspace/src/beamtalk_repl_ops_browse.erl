@@ -256,8 +256,8 @@ take_protocol(Row) ->
 %% Fetches one method's source, image-accurate. Source comes from the live class
 %% object's stored method source (`{method, Sel}` / `{class_method, Sel}` →
 %% `__source__`) — the patch-aware per-method text (BT-2196). source_status from
-%% xref. `disk_differs` compares the image body against the static/disk class
-%% source recorded at load time (`beamtalk_workspace_meta:get_class_source/1`).
+%% xref. `disk_differs` compares the image body against a live re-read of the
+%% on-disk class source (BT-2567; `current_disk_source/1`).
 -spec browse_method_source(atom(), boolean(), atom()) -> beamtalk_repl_ops:op_result().
 browse_method_source(ClassName, ClassSide, Selector) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
@@ -513,26 +513,54 @@ origin_for_provenance(_Provenance, null) -> <<"runtime">>;
 origin_for_provenance(_Provenance, _SourceFile) -> <<"both">>.
 
 %% disk_differs (browse-method-source, op 3): true when the live per-method
-%% source is absent from the static/disk class source recorded at load time —
-%% the signature of an unflushed live `>>` patch (ADR 0082). null when there is
-%% no static source to compare (file-less class, or a sourceless runtime method
-%% whose source is itself null). Heuristic: the disk store is whole-class source
-%% text and contains method bodies, so a patched body that no longer matches the
-%% disk text reads as `differs`; a whitespace-only reformat could read as a
-%% false positive, which is acceptable for a "you may be viewing unflushed
-%% state" cue. The class-definition pane (op 4) does NOT use this — see
+%% source is absent from the *current* on-disk class source — the signature of
+%% an unflushed live `>>` patch (ADR 0082). null when there is no static source
+%% to compare (file-less class, or a sourceless runtime method whose source is
+%% itself null). Heuristic: the disk store is whole-class source text and
+%% contains method bodies, so a patched body that no longer matches the disk
+%% text reads as `differs`; a whitespace-only reformat could read as a false
+%% positive, which is acceptable for a "you may be viewing unflushed state" cue.
+%% The class-definition pane (op 4) does NOT use this — see
 %% `class_definition_disk_differs/1`.
+%%
+%% BT-2567: the comparison source is a *live re-read* of the on-disk class
+%% file (`current_disk_source/1`), not the load-time snapshot held in
+%% `beamtalk_workspace_meta`. The snapshot goes stale under out-of-band writes
+%% (an external editor, or another session flushing the file) and is mutated by
+%% in-memory `>>` patches (`load_recompiled_method/7` appends the patched body
+%% to it), both of which let `disk_differs` under-report divergence. Reading the
+%% file each browse keeps the signal pinned to the actual disk state; the
+%% snapshot remains the fallback when no source file is on record or the read
+%% fails.
 -spec disk_differs(atom(), binary() | null) -> boolean() | null.
 disk_differs(_ClassName, null) ->
     null;
 disk_differs(ClassName, ImageText) when is_binary(ImageText) ->
-    case disk_source(ClassName) of
+    case current_disk_source(ClassName) of
         undefined ->
             null;
         DiskSource when is_binary(DiskSource) ->
             %% The image text is a fragment of the whole-class disk source; it
             %% "differs" when the disk source does not contain it verbatim.
             binary:match(DiskSource, ImageText) =:= nomatch
+    end.
+
+%% The class' current on-disk source for the divergence diff (BT-2567). Prefer a
+%% live re-read of the recorded source file so the comparison reflects the file
+%% as it is *now*, not as it was at load time. Falls back to the in-memory
+%% load-time snapshot when the class has no source file on record or the file
+%% cannot be read (deleted/moved/permissions) — degrading to the pre-BT-2567
+%% behaviour rather than dropping the signal entirely.
+-spec current_disk_source(atom()) -> binary() | undefined.
+current_disk_source(ClassName) ->
+    case source_file_for_class(ClassName) of
+        null ->
+            disk_source(ClassName);
+        Path when is_binary(Path) ->
+            case file:read_file(Path) of
+                {ok, Bin} -> Bin;
+                {error, _Reason} -> disk_source(ClassName)
+            end
     end.
 
 -spec disk_source(atom()) -> binary() | undefined.

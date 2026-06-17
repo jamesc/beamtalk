@@ -857,6 +857,56 @@ t_install_method_preserves_comments(_Proj) ->
     Src2 = stored_method_source('InstallDoc', bumped),
     ?assertEqual(Src1, Src2).
 
+%% BT-2567: `browse-method-source`'s `disk_differs` re-reads the on-disk class
+%% file *live* each browse, so an out-of-band rewrite (an external editor, or
+%% another session flushing) is detected even though the image body is
+%% unchanged. A pre-BT-2567 diff against the load-time `workspace_meta` snapshot
+%% would stay `false` here — the snapshot still matches the image body.
+t_disk_differs_reflects_live_disk(_Proj) ->
+    Proj = live_project_dir(),
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "DiskDiff.bt",
+        <<"Actor subclass: DiskDiff\n  state: v = 1\n\n  value -> Integer => self.v\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% A fresh file load gives the module a `beamtalk_source` attribute, which is
+    %% how `disk_differs` finds the file to re-read.
+    ?assert(is_binary(beamtalk_reflection:source_file_from_module(current_module_of('DiskDiff')))),
+    %% (1) Image == disk: the live method body appears verbatim on disk → not
+    %% diverged. Capture the image body the diff compares against.
+    Value0 = browse_method_value('DiskDiff'),
+    ImageSource = maps:get(<<"source">>, Value0),
+    ?assert(is_binary(ImageSource)),
+    ?assertEqual(false, maps:get(<<"disk_differs">>, Value0)),
+    {ok, OnDisk0} = file:read_file(Path),
+    ?assertNotEqual(nomatch, binary:match(OnDisk0, ImageSource)),
+    %% (2) Rewrite the file out-of-band (no reload): the image body is now absent
+    %% from disk. A live re-read must report divergence; the load-time snapshot
+    %% (unchanged) would not.
+    NewFile = <<"Actor subclass: DiskDiff\n  state: v = 1\n\n  value -> Integer => self.w\n">>,
+    ?assertEqual(nomatch, binary:match(NewFile, ImageSource)),
+    ok = file:write_file(Path, NewFile),
+    Value1 = browse_method_value('DiskDiff'),
+    ?assertEqual(true, maps:get(<<"disk_differs">>, Value1)).
+
+%% browse-method-source for the instance `value' selector, term form (the same
+%% path the System Browser drives). `Msg' is unused by this op.
+browse_method_value(Class) ->
+    {value, V} = beamtalk_repl_ops_browse:handle_term(
+        <<"browse-method-source">>,
+        #{
+            <<"class">> => atom_to_binary(Class, utf8),
+            <<"side">> => <<"instance">>,
+            <<"selector">> => <<"value">>
+        },
+        {protocol_msg, <<"browse">>, <<"t1">>, <<"s1">>, #{}, false},
+        self()
+    ),
+    V.
+
 t_install_method_accumulation_preserves_siblings(_Proj) ->
     Proj = live_project_dir(),
     %% Round-trip fidelity across saves: the stored class source accumulates via
@@ -1005,6 +1055,9 @@ loader_integration_test_() ->
             end},
             {"install_method preserves leading comments, idempotently (bug 1)", fun() ->
                 t_install_method_preserves_comments(Proj)
+            end},
+            {"disk_differs re-reads the on-disk file live (BT-2567)", fun() ->
+                t_disk_differs_reflects_live_disk(Proj)
             end},
             {"install_method on test/ class keeps package", fun() ->
                 t_install_method_test_dir_keeps_package(Proj)

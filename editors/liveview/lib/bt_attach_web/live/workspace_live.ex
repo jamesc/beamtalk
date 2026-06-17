@@ -2803,12 +2803,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The carried `existing.disk_source` is only as fresh as tab-open time: if the file
   # is rewritten out-of-band (another session flushes, an external editor) *while the
   # image is diverged*, the carried body goes stale, and a later compile of the *old*
-  # on-disk body would clear `unflushed` against disk that has since moved on. This is
-  # a narrow false-negative (concurrent out-of-band writes during divergence); the
-  # backend's `disk_differs` is itself a load-time snapshot, not a live re-read, so
-  # the editor already trusts a tab-open view of disk. The conservative pre-BT-2565
-  # path avoided this only by re-flagging *every* re-activated diverged tab — the
-  # false-positive BT-2565 fixes. The common-case win is worth the narrow tradeoff.
+  # on-disk body would clear `unflushed` against disk that has since moved on — a
+  # narrow false-negative (concurrent out-of-band writes during divergence, BT-2567).
+  # As of BT-2567 the backend's `disk_differs` is a *live* re-read of the on-disk
+  # file (not a load-time snapshot), so this self-corrects on the next re-activation:
+  # `info.disk_differs` comes back `true` and the `existing.disk_differs or
+  # info.disk_differs` merge re-raises the badge. The residual window is only the
+  # transient between an out-of-band write and the next re-activation — and only when
+  # the user re-compiles the *old* on-disk body in that gap. The conservative
+  # pre-BT-2565 path avoided even that by re-flagging *every* re-activated diverged
+  # tab — the false-positive BT-2565 fixes. The common-case win is worth the residual.
   @doc false
   def reactivation_disk_source(_existing, %{runtime_only: true}), do: nil
 
