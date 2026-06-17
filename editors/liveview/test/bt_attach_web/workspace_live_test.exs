@@ -790,10 +790,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       |> element(~s(div[phx-click="browser_open_definition"][phx-value-class="#{class}"]))
       |> render_click()
 
-    # A class-definition tab is now open and focused for the selected class — the
-    # breadcrumb reads "<Class> › class definition" (parity with the "+ def" path).
-    assert opened =~ "class definition"
-    assert opened =~ class
+    # A class-definition tab is now open and focused for the selected class — its
+    # tab label reads "<Class> ▸ def" (the def-tab marker, which only exists once
+    # a def tab is open), parity with the "+ def" path.
+    assert opened =~ "#{class} ▸ def"
   end
 
   test "the instance/class side toggle re-populates the method list (BT-2491)", %{conn: conn} do

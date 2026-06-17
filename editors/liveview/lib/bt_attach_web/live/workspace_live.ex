@@ -1170,7 +1170,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # definition" entry (BT-2491). The class rides the click; a malformed payload
   # is ignored rather than crashing the LiveView.
   def handle_event("browser_open_definition", %{"class" => class}, socket)
-      when is_binary(class) do
+      when is_binary(class) and class != "" do
     {:noreply, open_definition(socket, class)}
   end
 
