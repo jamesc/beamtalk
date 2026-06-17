@@ -32,8 +32,7 @@ TestCase subclass: FileDirectoryTest
 
   testIsDirectoryAbsolutePath =>
     // Absolute paths now work (ADR 0063)
-    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
-    self assert: (File isDirectory: "/tmp")
+    self assert: (File isDirectory: File tempDirectory)
 
   testIsFileOnFile =>
     self assert: (File writeAll: "target/bt-test-tmp/fdt/isfile_check.txt" contents: "data") isOk
@@ -45,9 +44,8 @@ TestCase subclass: FileDirectoryTest
     self deny: (File isFile: "target/bt-test-tmp/fdt/no_such_file.txt")
 
   testIsFileAbsolutePath =>
-    // Absolute paths now work (ADR 0063) — /tmp is a directory, not a file
-    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
-    self deny: (File isFile: "/tmp")
+    // Absolute paths now work (ADR 0063) — tempDirectory is a directory, not a file
+    self deny: (File isFile: File tempDirectory)
 
   testMkdir =>
     self assert: (File mkdir: "target/bt-test-tmp/fdt/mkdir_test") isOk
@@ -119,8 +117,7 @@ TestCase subclass: FileDirectoryTest
 
   testListDirectoryAbsolutePath =>
     // Absolute paths now accepted (ADR 0063)
-    System osFamily == "unix" ifFalse: [^self skip: "Unix only"]
-    self assert: (File listDirectory: "/tmp") isOk
+    self assert: (File listDirectory: File tempDirectory) isOk
 
   testListDirectoryTypeErrorRaisesError =>
     @expect type
