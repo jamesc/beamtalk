@@ -139,7 +139,7 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
 handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% BT-2556: parse-only diagnostics for the cockpit CodeMirror editors. `code`
     %% is the FULL editor buffer (not a line prefix). We run the compiler's
-    %% side-effect-free `diagnostics/1` path — parse + semantic check via the
+    %% side-effect-free `diagnostics/2` path — parse + semantic check via the
     %% Rust port's `diagnostics` command — which compiles for DIAGNOSIS ONLY: it
     %% emits no module, installs nothing, never touches the image or the
     %% ChangeLog, and runs no user code. That makes it safe to fire on every
