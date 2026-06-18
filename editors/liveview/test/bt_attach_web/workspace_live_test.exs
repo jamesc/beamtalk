@@ -477,7 +477,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       |> form("#new-class-form")
       |> render_submit(%{"source" => "1 + 1"})
 
-    assert html =~ "Couldn't find a class name"
+    # Match a non-apostrophe substring of "Couldn't find a class name …": the
+    # rendered HTML escapes the apostrophe (`Couldn&#39;t`), so asserting the
+    # literal contraction would spuriously fail.
+    assert html =~ "find a class name"
   end
 
   test "New Class creates a class end-to-end via newClass:at: (BT-2293)", %{conn: conn} do
