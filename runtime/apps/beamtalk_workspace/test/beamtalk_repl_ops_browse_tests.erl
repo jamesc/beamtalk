@@ -117,6 +117,22 @@ native_clause_selector_skips_generic_clauses_test() ->
     ?assertEqual(
         {ok, <<"readLine">>},
         beamtalk_repl_ops_browse:clause_selector(<<"handle_call({readLine, []}, From, S) ->">>)
+    ),
+    %% An indented clause head still matches (anchored to optional leading
+    %% whitespace).
+    ?assertEqual(
+        {ok, <<"readLine">>},
+        beamtalk_repl_ops_browse:clause_selector(<<"    handle_call({readLine, []}, F, S) ->">>)
+    ),
+    %% A `handle_call` mention mid-line is NOT a clause head: a comment or an
+    %% assignment must not produce a spurious clause row.
+    ?assertEqual(
+        none,
+        beamtalk_repl_ops_browse:clause_selector(<<"%% see handle_call({readLine, []}, ...)">>)
+    ),
+    ?assertEqual(
+        none,
+        beamtalk_repl_ops_browse:clause_selector(<<"    R = handle_call({readLine, []}, F, S),">>)
     ).
 
 %% native_delegate is keyed off the facade's `dispatch_<selector>` exports — the

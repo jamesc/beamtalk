@@ -10,8 +10,8 @@ Op handlers for the System Browser browse facade (ADR 0096, BT-2488).
 
 The LiveView IDE's System Browser (ADR 0017 Phase 3, epic BT-2482) renders the
 four-pane Smalltalk navigator — *classes → protocols → selectors → method
-source* plus a class-definition pane. These four read-only term-ops populate
-those panes against a live workspace, sourced **static-first / live-augmented**
+source* plus a class-definition pane. These read-only term-ops populate those
+panes against a live workspace, sourced **static-first / live-augmented**
 (ADR 0024) with image/disk divergence carried as explicit per-row metadata
 (never silently merged):
 
@@ -21,6 +21,7 @@ those panes against a live workspace, sourced **static-first / live-augmented**
 | `browse-protocols` | protocol + selector tree | `{value, ProtocolTree}` |
 | `browse-method-source` | method source pane | `{value, MethodSource}` |
 | `browse-class-definition` | class-definition pane | `{value, ClassDefinition}` |
+| `browse-native-source` | read-only native pane | `{value, NativeSource}` |
 
 ## Term contract (BT-2399)
 
@@ -34,11 +35,13 @@ only at the WebSocket edge. Validation failures return
 
 ## Read-only / no-user-code guarantee (ADR 0091 Observer gate)
 
-All four ops are **pure reflection**: class metadata (`get_doc`, `is_sealed`,
+All these ops are **pure reflection**: class metadata (`get_doc`, `is_sealed`,
 `is_abstract`, `is_internal`, `instance_variables`, `field_defaults`), xref rows
-(`beamtalk_xref:defined_selectors/2`, `method_info/3`), and stored method text
+(`beamtalk_xref:defined_selectors/2`, `method_info/3`), stored method text
 (`{method, Sel}` / `{class_method, Sel}` → `__source__` / `__doc__` /
-`__signature__`). None sends a
+`__signature__`), and — for `browse-native-source` — the facade's
+`__beamtalk_meta/0` plus the backing module's on-disk `.erl` (read only).
+None sends a
 user-defined method to a value (no `printOn:` / `displayString` / `printString`),
 so the browse data source is safe to grant the **Observer** role (ADR 0091
 Decision 4). This is asserted, not assumed (see the tests).
@@ -81,7 +84,7 @@ handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for the four browse ops (ADR 0096). Returns
+Term-returning handler for the browse ops (ADR 0096). Returns
 `{value, JsonValue}` on success or `{error, #beamtalk_error{}}` on a validation
 failure (unknown class, bad side, missing selector).
 """.
@@ -583,7 +586,11 @@ handle_call_clause_lines(Content) when is_binary(Content) ->
 %% single capture group avoids `re`'s truncation of trailing unmatched groups.
 -spec clause_selector(binary()) -> {ok, binary()} | none.
 clause_selector(Line) ->
-    Pattern = <<"handle_call\\(\\{\\s*'?([a-z][A-Za-z0-9_:]*)'?\\s*,">>,
+    %% Anchored to line start (after optional indentation): a `handle_call`
+    %% mention mid-line — inside a comment (`%% see handle_call({foo, …`) or an
+    %% assignment (`R = handle_call({…`) — is not a clause head and must not
+    %% produce a spurious clause row.
+    Pattern = <<"^\\s*handle_call\\(\\{\\s*'?([a-z][A-Za-z0-9_:]*)'?\\s*,">>,
     case re:run(Line, Pattern, [{capture, all_but_first, binary}]) of
         {match, [Sel]} when byte_size(Sel) > 0 -> {ok, Sel};
         _ -> none
