@@ -214,10 +214,57 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        "class" => class,
        "definition" => "Object subclass: #{class}",
        "comment" => "The #{class} class.\n\n## Overview\nA stubbed class comment.",
+       # BT-2578: `Subprocess` / `Headless` stand in for native: classes (ADR
+       # 0056) so the System Browser's "Erlang backend" badge + native pane can be
+       # exercised (`Subprocess` has shipped source, `Headless` does not); every
+       # other stubbed class is ordinary (native: false).
+       "native" => class in ["Subprocess", "Headless"],
+       "backing_module" => native_backing(class),
        "origin" => "both",
        "disk_differs" => false
      }}
   end
+
+  defp native_backing("Subprocess"), do: "beamtalk_subprocess"
+  defp native_backing("Headless"), do: "beamtalk_headless"
+  defp native_backing(_), do: nil
+
+  # BT-2578: the backing Erlang source of a native: class. `Subprocess` returns a
+  # readable stdlib module + a `handle_call` clause map; `Headless` exercises the
+  # "source not available" empty state (a `.beam`-only build, `content: nil`).
+  def browse_native_source(class, selector \\ nil)
+
+  def browse_native_source("Subprocess", selector) do
+    {:value,
+     %{
+       "class" => "Subprocess",
+       "backing_module" => "beamtalk_subprocess",
+       "source_file" => "apps/beamtalk_stdlib/src/beamtalk_subprocess.erl",
+       "source_origin" => "stdlib",
+       "editable" => false,
+       "content" => "handle_call({readLine, []}, From, State) ->\n    {noreply, State}.\n",
+       "clauses" => [%{"selector" => "readLine", "line" => 1}],
+       "selected_clause" =>
+         if(selector == "readLine", do: %{"selector" => "readLine", "line" => 1}, else: nil)
+     }}
+  end
+
+  def browse_native_source("Headless", _selector) do
+    {:value,
+     %{
+       "class" => "Headless",
+       "backing_module" => "beamtalk_headless",
+       "source_file" => nil,
+       "source_origin" => "stdlib",
+       "editable" => false,
+       "content" => nil,
+       "clauses" => [],
+       "selected_clause" => nil
+     }}
+  end
+
+  def browse_native_source(class, _selector),
+    do: {:error, "class `#{class}` is not native-backed"}
 
   # ── Navigation ops ───────────────────────────────────────────────────────
 

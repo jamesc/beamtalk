@@ -116,7 +116,7 @@ defmodule BtAttach.FacadeTest do
                      subscribe_classes
                      subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
-                     browse_class_definition list_tests
+                     browse_class_definition browse_native_source list_tests
                      senders implementors symbols)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
       end

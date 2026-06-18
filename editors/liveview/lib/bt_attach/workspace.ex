@@ -266,6 +266,26 @@ defmodule BtAttach.Workspace do
   def browse_class_definition(class) when is_binary(class),
     do: dispatch_browse("browse-class-definition", %{"class" => class})
 
+  @doc """
+  Return the backing Erlang source of a `native:` class for the System Browser's
+  read-only native pane (BT-2578, `browse-native-source`). The result carries
+  `backing_module`, `source_file` (`null` when the `.erl` is not shipped),
+  `source_origin`, `editable` (`project` ⇒ `true`), `content` (`null` =
+  "source not available"), and a best-effort `handle_call` clause line-map
+  (`clauses`). When `selector` is given, `selected_clause` points at the matching
+  clause (or `null` — the delegate's work may live in `handle_info`). A non-native
+  class comes back as a structured `#beamtalk_error{}` (`{:error, reason}`).
+  """
+  @spec browse_native_source(String.t(), String.t() | nil) ::
+          {:value, term()} | {:error, term()}
+  def browse_native_source(class, selector \\ nil)
+
+  def browse_native_source(class, nil) when is_binary(class),
+    do: dispatch_browse("browse-native-source", %{"class" => class})
+
+  def browse_native_source(class, selector) when is_binary(class) and is_binary(selector),
+    do: dispatch_browse("browse-native-source", %{"class" => class, "selector" => selector})
+
   # ── navigation-surface: senders/implementors + omni-search index ────────────
   #
   # BT-2495 (Cockpit Phase 3): two navigation aids ride the SAME term-returning
