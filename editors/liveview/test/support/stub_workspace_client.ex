@@ -204,7 +204,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        "signature" => signature,
        "source_status" => "indexed",
        "origin" => "both",
-       "disk_differs" => disk_differs
+       "disk_differs" => disk_differs,
+       # BT-2578: methods on the stubbed native: class are `self delegate` facades,
+       # so they carry the native_delegate flag the "→ Erlang implementation" jump
+       # keys off; ordinary classes' methods do not.
+       "native_delegate" => class == "Subprocess"
      }}
   end
 

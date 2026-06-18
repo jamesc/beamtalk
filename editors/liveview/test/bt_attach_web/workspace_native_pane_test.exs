@@ -114,6 +114,58 @@ defmodule BtAttachWeb.WorkspaceNativePaneTest do
       refute html =~ "View Erlang source"
     end
 
+    test "a self delegate method jumps to its highlighted handle_call clause", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Open a `self delegate` method on the native: class — the stub marks
+      # Subprocess methods as native delegates.
+      html =
+        render_click(view, "browser_select_method", %{
+          "class" => "Subprocess",
+          "side" => "instance",
+          "selector" => "readLine"
+        })
+
+      # The method tab offers the jump to its Erlang implementation.
+      assert html =~ "Native delegate"
+      assert html =~ "→ Erlang implementation"
+
+      # Jumping opens the class-definition tab's native pane with readLine's
+      # handle_call clause resolved and highlighted.
+      html =
+        render_click(view, "browser_jump_native", %{
+          "class" => "Subprocess",
+          "selector" => "readLine"
+        })
+
+      assert html =~ "Erlang backend"
+      assert html =~ ~s(class="native-pre")
+      assert html =~ "native-clause-active"
+      assert html =~ ~s(aria-current="true")
+    end
+
+    test "a delegate with no matching clause explains where it completes", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # writeLine has no clause in the stub's clause map → the pane says so rather
+      # than highlighting nothing.
+      render_click(view, "browser_select_method", %{
+        "class" => "Subprocess",
+        "side" => "instance",
+        "selector" => "writeLine:"
+      })
+
+      html =
+        render_click(view, "browser_jump_native", %{
+          "class" => "Subprocess",
+          "selector" => "writeLine:"
+        })
+
+      assert html =~ "No direct"
+      assert html =~ "handle_info"
+      refute html =~ "native-clause-active"
+    end
+
     test "an observer sees the read-only native pane", %{conn: conn} do
       {:ok, view, _html} = live(observer_conn(conn), "/")
 
