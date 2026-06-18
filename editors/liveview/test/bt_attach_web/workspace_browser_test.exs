@@ -717,7 +717,138 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     )
   end
 
+  # ── Phase 3 resizeable cockpit splitters (BT-2576) ──────────────────────────
+  #
+  # The `SplitDrag` hook (`split_drag.js`) drags a divider to resize the stacked
+  # panels (class tree vs. method list, Bindings vs. Inspector) or a side column's
+  # width, moving the element via a CSS var for a no-latency drag and persisting
+  # the final size to `localStorage` — like the Tweaks panel's theme/density, NOT
+  # the server. The drag motion, the localStorage write, and the restore-on-mount
+  # are all client JS that `Phoenix.LiveViewTest` never runs (it never loads
+  # `app.js`), so they MUST run in a real browser (the e2e lane).
+
+  test "dragging the browser split gutter resizes the class tree and persists (BT-2576)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#browser-split-gutter")
+    # Snapshot the class-tree pane's height, then drag the divider DOWN — the top
+    # pane (class tree) should grow ("more class, less method").
+    |> evaluate(
+      "(() => { window.__h0 = document.getElementById('system-browser').offsetHeight; return true; })()"
+    )
+    |> drag_split("browser-split-gutter", 0, 120)
+    # The drag really moved layout, not just a var: the class-tree pane is taller.
+    |> assert_eventually(
+      "document.getElementById('system-browser').offsetHeight > window.__h0 + 20",
+      "dragging the browser gutter down did not enlarge the class tree"
+    )
+    # The hook drove the size through the `--browser-split` var on the container…
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.browser-split')).getPropertyValue('--browser-split')",
+      fn v ->
+        assert v =~ ~r/\d+px/,
+               "the --browser-split var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    # …and persisted the final size to localStorage (no server round-trip).
+    |> evaluate("window.localStorage.getItem('bt.split.browser')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the browser split size was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  test "dragging the left column gutter widens the System Browser column and persists (BT-2576)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#col-gutter-left")
+    # Snapshot the left column's width, then drag its seam gutter to the RIGHT —
+    # the System Browser column should widen (driving the `--browser-w` grid track).
+    |> evaluate(
+      "(() => { window.__w0 = document.querySelector('.cockpit > .col').offsetWidth; return true; })()"
+    )
+    |> drag_split("col-gutter-left", 90, 0)
+    |> assert_eventually(
+      "document.querySelector('.cockpit > .col').offsetWidth > window.__w0 + 20",
+      "dragging the left column gutter right did not widen the System Browser column"
+    )
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.cockpit')).getPropertyValue('--browser-w')",
+      fn v ->
+        assert v =~ ~r/\d+px/, "the --browser-w var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    |> evaluate("window.localStorage.getItem('bt.split.browser-w')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the column width was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  test "a saved split size is restored on the next load (BT-2576)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#browser-split-gutter")
+    # Drag to set a non-default size, persisted to localStorage.
+    |> drag_split("browser-split-gutter", 0, 100)
+    |> evaluate("window.localStorage.getItem('bt.split.browser')", fn saved ->
+      assert is_binary(saved) and saved =~ "px", "the drag did not persist a size"
+    end)
+    # Reload the page: JS globals reset but localStorage survives, so the hook's
+    # `restore()` on mount must re-apply the saved `--browser-split` size — proving
+    # the split survives a reload / LiveView reconnect with no server state.
+    |> visit("/")
+    |> assert_has("#browser-split-gutter")
+    |> assert_eventually(
+      "getComputedStyle(document.querySelector('.browser-split')).getPropertyValue('--browser-split').trim() === window.localStorage.getItem('bt.split.browser')",
+      "the saved browser split size was not restored on reload"
+    )
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  # Drive the SplitDrag hook through a full mousedown→mousemove→mouseup drag of the
+  # gutter `gutter_id`, moving the pointer by (`dx`, `dy`) from the gutter's centre.
+  # The hook binds mousedown on the gutter and mousemove/mouseup on `document`, so
+  # we dispatch the down on the gutter and the move/up on the document — exactly
+  # the event path a real pointer drag takes.
+  defp drag_split(conn, gutter_id, dx, dy) do
+    evaluate(conn, """
+    (() => {
+      const g = document.getElementById(#{Jason.encode!(gutter_id)});
+      if (!g) throw new Error("gutter not found: " + #{Jason.encode!(gutter_id)});
+      const r = g.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      g.dispatchEvent(new MouseEvent("mousedown", {bubbles: true, button: 0, clientX: x, clientY: y}));
+      document.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: x + #{dx}, clientY: y + #{dy}}));
+      document.dispatchEvent(new MouseEvent("mouseup", {bubbles: true, button: 0}));
+    })()
+    """)
+  end
+
+  # Poll the browser until the JS boolean expression `expr` is truthy, failing
+  # with `msg` if it never becomes true within the window. Layout/var changes
+  # settle a frame or two after the drag (and a restore lands after the connected
+  # mount), so a single read can race; this polls past that, like the FieldFlash /
+  # ArrowUp-recall waiters above. The Promise rejection surfaces as a test failure.
+  defp assert_eventually(conn, expr, msg) do
+    evaluate(conn, """
+    new Promise((resolve, reject) => {
+      const start = Date.now();
+      const tick = () => {
+        let ok = false;
+        try { ok = (#{expr}); } catch (_e) {}
+        if (ok) return resolve(true);
+        if (Date.now() - start > 3000) return reject(new Error(#{Jason.encode!(msg)}));
+        requestAnimationFrame(tick);
+      };
+      tick();
+    })
+    """)
+  end
 
   # Type `query` into the omni search input and fire the `keyup` event the server
   # listens for (phx-keyup="omni_search"), so the results popover re-renders.
