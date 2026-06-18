@@ -539,7 +539,17 @@ backing_source(Backing) ->
         undefined ->
             {null, null};
         Path ->
-            PathBin = unicode:characters_to_binary(Path),
+            %% `unicode:characters_to_binary/1` returns an `{error, _, _}` /
+            %% `{incomplete, _, _}` tuple (not a binary) for a malformed path, which
+            %% must not leak into the result map as `source_file`. Fall back to a
+            %% raw Latin-1 binary so the field is always a binary (CodeRabbit / Claude
+            %% review). Build-machine paths are virtually always UTF-8, so the
+            %% fallback is for the pathological case only.
+            PathBin =
+                case unicode:characters_to_binary(Path) of
+                    B when is_binary(B) -> B;
+                    _ -> list_to_binary(Path)
+                end,
             case file:read_file(Path) of
                 {ok, Bin} -> {PathBin, Bin};
                 {error, _} -> {PathBin, null}
@@ -565,6 +575,8 @@ backing_source_file(Backing) ->
 %% lowercase atom like `readLine`) becomes `#{selector, line}`. Generic clauses
 %% — `handle_call({Selector, Args, _}, …)`, the catch-all `handle_call(Msg, …)`
 %% — bind variables (uppercase / `_`), match no selector, and are skipped.
+%% Matches single-line clause heads; a head split across lines is mapped on its
+%% opening line (the comma-terminated first element satisfies the per-line regex).
 -spec handle_call_clause_lines(binary() | null) -> [map()].
 handle_call_clause_lines(null) ->
     [];
@@ -832,8 +844,16 @@ disk_read_fallback(Reason, Path, ClassName) ->
 disk_source(ClassName) ->
     NameBin = atom_to_binary(ClassName, utf8),
     case beamtalk_workspace_meta:get_class_source(NameBin) of
-        undefined -> undefined;
-        Src when is_list(Src) -> unicode:characters_to_binary(Src)
+        undefined ->
+            undefined;
+        Src when is_list(Src) ->
+            %% Guard the error/incomplete tuple the same way `backing_source/1`
+            %% does, so a malformed stored source never leaks a non-binary into
+            %% the disk_differs comparison (Claude review).
+            case unicode:characters_to_binary(Src) of
+                B when is_binary(B) -> B;
+                _ -> list_to_binary(Src)
+            end
     end.
 
 %%% ====================================================================

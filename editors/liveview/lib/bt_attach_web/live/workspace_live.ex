@@ -491,6 +491,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       # BT-2578: the read-only native backing-source pane. `nil` = collapsed;
       # otherwise a map carrying the fetched Erlang source for one class
       # (lazily loaded on the def tab's "View Erlang source" toggle).
+      # Single-slot: only one class's native pane is expanded at a time — opening
+      # a second replaces this value, and `native_shown?/2` scopes display to the
+      # active tab's class (per-tab pane state is intentionally not kept).
       |> assign(:native_view, nil)
       # New Class form (BT-2293): the System Browser's owner-only create-a-class
       # affordance, collapsed by default (it lives in the browser head's ＋ button)

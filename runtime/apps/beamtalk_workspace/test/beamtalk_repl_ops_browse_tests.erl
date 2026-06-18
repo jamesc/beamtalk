@@ -51,12 +51,13 @@ decode_value(Response) ->
 %% describe_ops/0
 %%====================================================================
 
-describe_ops_has_four_browse_keys_test() ->
+describe_ops_has_browse_keys_test() ->
     Ops = beamtalk_repl_ops_browse:describe_ops(),
     ?assert(maps:is_key(<<"browse-classes">>, Ops)),
     ?assert(maps:is_key(<<"browse-protocols">>, Ops)),
     ?assert(maps:is_key(<<"browse-method-source">>, Ops)),
-    ?assert(maps:is_key(<<"browse-class-definition">>, Ops)).
+    ?assert(maps:is_key(<<"browse-class-definition">>, Ops)),
+    ?assert(maps:is_key(<<"browse-native-source">>, Ops)).
 
 describe_ops_protocols_requires_class_and_side_test() ->
     #{<<"browse-protocols">> := Info} = beamtalk_repl_ops_browse:describe_ops(),
