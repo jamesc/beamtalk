@@ -38,6 +38,7 @@ changelog_test_() ->
         fun change_entries_builds_tagged_maps/1,
         fun change_log_wraps_all_entries/1,
         fun change_entries_marks_active_flag/1,
+        fun change_entries_marks_shadowed/1,
         fun dirty_methods_groups_active_by_class/1,
         fun dirty_methods_uses_new_class_placeholder/1,
         fun append_returns_error_on_unwritable_dir/1,
@@ -217,7 +218,9 @@ change_entries_builds_tagged_maps(_Ctx) ->
         ?_assertEqual(<<"/proj/src/counter.bt">>, maps:get(sourceFile, Entry)),
         ?_assertEqual(false, maps:get(orphan, Entry)),
         ?_assertEqual(false, maps:get(priorEpoch, Entry)),
-        ?_assertEqual(true, maps:get(active, Entry))
+        ?_assertEqual(true, maps:get(active, Entry)),
+        %% A lone entry has no newer sibling, so it is never shadowed.
+        ?_assertEqual(false, maps:get(shadowed, Entry))
     ].
 
 change_log_wraps_all_entries(_Ctx) ->
@@ -252,6 +255,36 @@ change_entries_marks_active_flag(_Ctx) ->
         ?_assertEqual('new-class', maps:get(kind, Entry)),
         ?_assertEqual(agent, maps:get(authorKind, Entry)),
         ?_assertEqual(true, maps:get(active, Entry))
+    ].
+
+%% A method patched twice — or patched then reverted, since a revert is itself a
+%% patch (ADR 0082 "Undo") — yields multiple active entries for the same
+%% (class, selector). Only the most recent survives the pending view; the older
+%% one is tagged `shadowed` so `ChangeLog>>activeEntries` collapses to one row
+%% per method (BT-2574). A different selector is never shadowed.
+change_entries_marks_shadowed(_Ctx) ->
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
+    {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
+    [E0, E1, E2] = beamtalk_workspace_changelog:change_entries(),
+    [
+        %% Oldest Counter>>inc: active but shadowed by the newer inc entry.
+        ?_assertEqual(0, maps:get(seq, E0)),
+        ?_assertEqual(true, maps:get(active, E0)),
+        ?_assertEqual(true, maps:get(shadowed, E0)),
+        %% Newest Counter>>inc: the survivor.
+        ?_assertEqual(1, maps:get(seq, E1)),
+        ?_assertEqual(true, maps:get(active, E1)),
+        ?_assertEqual(false, maps:get(shadowed, E1)),
+        %% A different selector is never shadowed.
+        ?_assertEqual(2, maps:get(seq, E2)),
+        ?_assertEqual(dec, maps:get(selector, E2)),
+        ?_assertEqual(false, maps:get(shadowed, E2)),
+        %% dirtyMethods is unchanged: the Set already collapses inc to one entry.
+        ?_assertEqual(
+            [dec, inc],
+            maps:get(elements, maps:get('Counter', beamtalk_workspace_changelog:dirtyMethods()))
+        )
     ].
 
 dirty_methods_groups_active_by_class(_Ctx) ->

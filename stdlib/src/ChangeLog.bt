@@ -29,12 +29,17 @@
 sealed typed Value subclass: ChangeLog
   field: entries :: List(ChangeEntry) = #()
 
-  /// Return the active entries: current epoch and not orphaned.
+  /// Return the active entries: current epoch, not orphaned, and not shadowed
+  /// by a newer entry for the same method.
   ///
-  /// This is the live, re-appliable dirty set that the default collection
-  /// views operate on. `select:` (which can reach orphans) uses the full set
-  /// instead.
-  activeEntries -> List(ChangeEntry) => self.entries select: [:e | e isActive]
+  /// This is the live, re-appliable dirty set that the default collection views
+  /// operate on. Repeated patches/reverts of one method (a revert is itself a
+  /// patch, ADR 0082 "Undo") collapse to the latest entry — the one
+  /// `Workspace flush` would apply — so the view shows one row per dirty method
+  /// rather than one per log append. `select:` (which can reach orphaned and
+  /// shadowed entries) uses the full set instead.
+  activeEntries -> List(ChangeEntry) =>
+    self.entries select: [:e | e isActive and: [e isShadowed not]]
 
   /// Return all entries, including prior-epoch and orphan entries.
   ///

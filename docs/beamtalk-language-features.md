@@ -2840,13 +2840,13 @@ current project's source tree. `Workspace flush` writes only entries where
 | `size` | `Integer` | Active (live, re-appliable) entries |
 | `isEmpty` / `notEmpty` | `Boolean` | "Is anything dirty?" is `Workspace changes notEmpty` |
 | `do: block` | `Nil` | Iterate active entries |
-| `select: block` | `List` | Filter **all** entries (reaches orphans and prior-epoch entries too) |
+| `select: block` | `List` | Filter **all** entries (reaches orphans, prior-epoch, and shadowed entries too) |
 | `dirtyMethods` | `Dictionary` | `#{Class => Set(selectors)}` for the active set |
 | `revert: anEntry` | class | Re-install `prev_source` for that entry (itself a durable patch) |
 | `clear` | `ChangeLog` | Discard every pending entry without writing to disk (memory keeps the patches until restart) |
 | `flushKinds: kinds` | `FlushResult` | Flush only entries matching a Set of `#instance` / `#class` / `#'new-class'` / `#human` / `#agent` symbols (both dimensions AND together) |
-| `allEntries` | `List(ChangeEntry)` | Every logged entry, including prior-epoch and orphan entries |
-| `activeEntries` | `List(ChangeEntry)` | Current-epoch entries that have not been orphaned (the default view) |
+| `allEntries` | `List(ChangeEntry)` | Every logged entry, including prior-epoch, orphan, and shadowed entries |
+| `activeEntries` | `List(ChangeEntry)` | The default view: current-epoch, non-orphaned entries, collapsed to the latest entry per `(class, selector)` — one row per dirty method |
 
 Each `ChangeEntry` carries the patch's body, prior body, byte span, class,
 selector, intent (`durable` / `ephemeral`), flushable flag, `authorKind`
@@ -2854,6 +2854,12 @@ selector, intent (`durable` / `ephemeral`), flushable flag, `authorKind`
 `.bt` files under `<workspace>/changes/sources/`; metadata lives in
 `<workspace>/changes/changes.jsonl`. `cat`, `less`, `diff`, and `bt fmt` all
 work on the source files directly.
+
+Repeated patches to one method — or a patch followed by a `revert:`, which is
+itself a patch (ADR 0082 "Undo") — append multiple entries for the same
+`(class, selector)`. The default view keeps only the latest (the one
+`Workspace flush` would apply) and marks the rest *shadowed*; `e isShadowed`
+identifies them, and `select:` still reaches them for audit.
 
 The ChangeLog persists across workspace restart. On restart, the workspace
 assigns a fresh `epoch` and excludes prior-epoch entries from the active view

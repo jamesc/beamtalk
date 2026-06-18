@@ -1142,10 +1142,7 @@ defmodule BtAttach.Workspace do
   def change_history do
     case rpc(:beamtalk_workspace_changelog, :change_entries, []) do
       entries when is_list(entries) ->
-        entries
-        |> Enum.filter(&active_entry?/1)
-        |> Enum.map(&entry_to_row/1)
-        |> Enum.reverse()
+        pending_rows(entries)
 
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
@@ -1155,10 +1152,28 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # The change-entry value map carries an `active` boolean (current epoch, not
-  # orphaned, not flushed) — the same predicate `Workspace changes` filters on.
-  defp active_entry?(%{active: active}), do: active == true
-  defp active_entry?(_), do: false
+  @doc false
+  # Pure: reduce the raw change-entry value maps to the pending view and render
+  # display rows newest-first. The pending view is active AND not shadowed, so
+  # repeated patches/reverts of one method collapse to the latest entry — one
+  # row per dirty method, matching `ChangeLog activeEntries` on every other
+  # surface (BT-2574). Unit-tested directly (no RPC).
+  def pending_rows(entries) when is_list(entries) do
+    entries
+    |> Enum.filter(&pending_entry?/1)
+    |> Enum.map(&entry_to_row/1)
+    |> Enum.reverse()
+  end
+
+  # A change entry belongs in the pending view when it is active (current epoch,
+  # not orphaned, not flushed) AND not shadowed by a newer entry for the same
+  # `(class, selector)`. The `shadowed` flag collapses repeated patches/reverts
+  # of one method to its latest entry (a revert is itself a patch, ADR 0082
+  # "Undo"), so the pane shows one row per dirty method — matching `Workspace
+  # changes` on every other surface (`ChangeLog activeEntries`). Older builds of
+  # the workspace may not emit `shadowed`; absence defaults to not-shadowed.
+  defp pending_entry?(%{active: true} = entry), do: Map.get(entry, :shadowed, false) != true
+  defp pending_entry?(_), do: false
 
   @doc """
   Render a `FlushResult` summary map (ADR 0082 `Workspace flush`) to a one-line
