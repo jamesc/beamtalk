@@ -50,6 +50,13 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
     })
   end
 
+  defp observer_conn(conn) do
+    Plug.Test.init_test_session(conn, %{
+      "bt_user" => %{"sub" => "bob", "groups" => ["beamtalk-observers"]},
+      "bt_logged_in_at" => System.system_time(:second)
+    })
+  end
+
   describe "method doc block (BT-2558)" do
     test "selecting a method shows its signature and rendered doc-comment", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
@@ -96,6 +103,49 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
       assert html =~ "value -&gt; Integer"
       # No `///` doc → no rendered doc body.
       refute html =~ ~s(class="doc-body")
+    end
+
+    test "the expanded state is sticky across tab switches", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      # Expand the doc'd method's block.
+      html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
+      assert html =~ ~s(class="doc-body")
+
+      # Switching to a method with no doc collapses to a plain signature (nothing
+      # to expand) but must not reset the preference…
+      html = view |> element(~s(div[phx-value-selector="value"])) |> render_click()
+      refute html =~ ~s(class="doc-body")
+
+      # …so returning to the doc'd method shows the body again *without* re-toggling.
+      html = view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+      assert html =~ ~s(class="doc-body")
+      assert html =~ "Increment the counter by one."
+    end
+  end
+
+  describe "doc block visibility by role (BT-2558)" do
+    test "an observer sees the read-only doc block", %{conn: conn} do
+      {:ok, view, _html} = live(observer_conn(conn), "/")
+
+      # The doc block rides the `:read`-capability browse ops, so it renders for
+      # an observer even though the editable source form below does not.
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      html =
+        view
+        |> element(~s(div[phx-value-selector="increment"]))
+        |> render_click()
+
+      assert html =~ ~s(class="doc-block")
+      assert html =~ "increment -&gt; Counter"
+      # The toggle is present and expands the body for an observer too.
+      html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
+      assert html =~ ~s(class="doc-body")
+      assert html =~ "Increment the counter by one."
     end
   end
 
