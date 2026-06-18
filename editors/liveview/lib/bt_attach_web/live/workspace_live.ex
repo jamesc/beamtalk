@@ -3404,7 +3404,17 @@ defmodule BtAttachWeb.WorkspaceLive do
         # in-progress edit survives a tab switch. The skeleton `definition` the
         # browse also returns is intentionally discarded here.
         {_definition, comment, native_module} = class_definition_info(socket, class)
-        refreshed = %{existing | doc: comment, native_module: native_module}
+        # Keep the prior backing module if the re-fetch fails transiently
+        # (workspace unreachable → `{"", nil, nil}`): a `nil` here would hide the
+        # "Erlang backend" badge + pane toggle on an already-open tab while
+        # `@native_view` still holds the fetched source. A successful re-fetch
+        # always wins (the class of a `def:` tab does not change between
+        # activations, so a non-nil result is the same module).
+        refreshed = %{
+          existing
+          | doc: comment,
+            native_module: native_module || existing.native_module
+        }
 
         socket
         |> update_active_tab_by_id(id, fn _ -> refreshed end)
