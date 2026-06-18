@@ -977,6 +977,9 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
       const start = Date.now();
       const tick = () => {
         let ok = false;
+        // A throw here means the DOM isn't ready yet (e.g. a queried node is
+        // still null mid-render) — treat it as "not true yet" and keep polling;
+        // a genuinely wrong `expr` still surfaces as the timeout below.
         try { ok = (#{expr}); } catch (_e) {}
         if (ok) return resolve(true);
         if (Date.now() - start > 3000) return reject(new Error(#{Jason.encode!(msg)}));

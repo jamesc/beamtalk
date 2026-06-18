@@ -64,9 +64,13 @@ export const SplitDrag = {
   },
 
   destroyed() {
+    // A reconnect (network blip / deploy) can destroy the hook mid-drag. Run
+    // end() first so it tears the drag down — removes the document listeners and
+    // the body `*-resizing` classes (whose `transition: none` would otherwise
+    // permanently suppress the BT-2559 collapse animation until a full reload).
+    // It is a guarded no-op when no drag is in flight.
+    this.end()
     this.el.removeEventListener("mousedown", this.onDown)
-    document.removeEventListener("mousemove", this.onMove)
-    document.removeEventListener("mouseup", this.onUp)
   },
 
   // Apply the persisted size (a CSS length string, e.g. "240px") to the target's
