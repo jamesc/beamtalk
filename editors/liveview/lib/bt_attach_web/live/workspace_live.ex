@@ -536,6 +536,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:show_browser, true)
       |> assign(:show_inspector, true)
       |> assign(:show_dock, true)
+      # Method-editor doc block (BT-2558) starts collapsed: the signature is
+      # always shown as a one-line summary, but the rendered `///` doc body —
+      # which is *also* present verbatim in the editable source below — is hidden
+      # until the user expands it, so it no longer crowds the editor by default.
+      # Server-held (not a native <details>) so the open state survives the
+      # frequent phx-change re-renders morphdom would otherwise reset.
+      |> assign(:doc_expanded, false)
       |> assign(:windows, [])
       |> assign(:next_window_id, 1)
       |> assign(:window_z, 10)
@@ -1006,6 +1013,14 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("toggle_dock", _params, socket) do
     {:noreply, assign(socket, show_dock: !socket.assigns.show_dock)}
+  end
+
+  # Expand/collapse the method-editor doc block (BT-2558). The signature stays
+  # visible either way; this only reveals/hides the rendered `///` doc body so it
+  # doesn't permanently occupy the top of the editor. Sticky across tab switches —
+  # one preference, not per-method — so a user who wants docs open keeps them open.
+  def handle_event("toggle_doc", _params, socket) do
+    {:noreply, assign(socket, doc_expanded: !socket.assigns.doc_expanded)}
   end
 
   def handle_event("close_browser", _params, socket) do
@@ -2892,6 +2907,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp doc_text(_), do: nil
+
+  # Summary label for the collapsible doc block (BT-2558) when there is no method
+  # signature to show — i.e. a class-definition tab, whose doc *is* the class
+  # comment. The breadcrumb already names the class, so a short generic label reads
+  # cleanly as the collapse toggle.
+  defp doc_summary_label(%{kind: :def}), do: "Class comment"
+  defp doc_summary_label(_), do: "Documentation"
 
   # The class' comment text (`browse-class-definition` → `comment`) for the
   # class-definition tab's read-only doc block (BT-2558). `nil` when the class
@@ -5520,13 +5542,38 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <% doc_tab = active_tab(assigns) %>
                   <section
                     :if={doc_tab.doc || doc_tab.signature}
-                    class="doc-block"
+                    class={"doc-block" <> if(doc_tab.doc && @doc_expanded, do: " open", else: "")}
                     aria-label="Documentation"
                   >
-                    <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
-                    <div :if={doc_tab.doc} class="doc-body">
-                      {BtAttach.DocFormat.to_html(doc_tab.doc)}
-                    </div>
+                    <%!-- When the tab carries a `///` doc / class comment the
+                         signature line doubles as the collapse toggle (the body is
+                         also present verbatim in the editable source below, so it
+                         stays hidden until asked for). A method with only a
+                         signature has nothing to expand, so it renders as a plain,
+                         non-interactive line. --%>
+                    <%= if doc_tab.doc do %>
+                      <button
+                        type="button"
+                        class="doc-sig doc-toggle"
+                        phx-click="toggle_doc"
+                        aria-expanded={to_string(@doc_expanded)}
+                        title={
+                          if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"
+                        }
+                      >
+                        <span class="doc-caret" aria-hidden="true">
+                          {if @doc_expanded, do: "▾", else: "▸"}
+                        </span>
+                        <span class="doc-sig-text">
+                          {doc_tab.signature || doc_summary_label(doc_tab)}
+                        </span>
+                      </button>
+                      <div :if={@doc_expanded} class="doc-body">
+                        {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                      </div>
+                    <% else %>
+                      <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
+                    <% end %>
                   </section>
                   <%= if @role == :owner do %>
                     <%!-- ⌘S submits this editor form via the KeyboardShortcuts

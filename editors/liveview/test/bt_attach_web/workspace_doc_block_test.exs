@@ -65,9 +65,18 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
 
       # The doc block is present, distinct from the editable source.
       assert html =~ ~s(class="doc-block")
-      # Signature (HEEx-escaped `->`).
+      # Signature (HEEx-escaped `->`) — always visible as the collapse toggle.
       assert html =~ "increment -&gt; Counter"
-      # The doc body, rendered from Markdown: prose, a heading, and fenced code.
+      # Collapsed by default (BT-2558): the rendered body (which is also present
+      # verbatim in the editable source) is hidden until expanded, so the docs
+      # aren't shown twice and don't crowd the editor.
+      refute html =~ ~s(class="doc-body")
+
+      # Expanding the block reveals the rendered Markdown: prose, a heading, fenced
+      # code. The signature line doubles as the toggle (phx-click="toggle_doc").
+      html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
+
+      assert html =~ ~s(class="doc-body")
       assert html =~ "Increment the counter by one."
       assert html =~ ~s(<h4 class="doc-h">Examples</h4>)
       assert html =~ "<code>c increment</code>"
@@ -102,6 +111,12 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
         |> render_click()
 
       assert html =~ ~s(class="doc-block")
+      # A class-definition tab has no signature, so the toggle reads "Class comment".
+      assert html =~ "Class comment"
+
+      # Expand to reveal the rendered class comment (collapsed by default, BT-2558).
+      html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
+
       assert html =~ "The Counter class."
       assert html =~ ~s(<h4 class="doc-h">Overview</h4>)
     end
