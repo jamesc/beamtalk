@@ -1224,8 +1224,30 @@ defmodule BtAttachWeb.WorkspaceLive do
   # each keystroke; we stash it on the active tab and recompute its dirty flag
   # (source != the last-compiled base). Client-supplied, so a non-binary / absent
   # source is ignored rather than crashing.
-  def handle_event("edit_source", %{"source" => source}, socket) when is_binary(source) do
-    {:noreply, track_edit(socket, source)}
+  #
+  # On a *new-method* tab the form also carries the visible `selector` input. That
+  # input is controlled (`value={@edit_selector}`) and NOT `phx-update="ignore"`,
+  # so without capturing it here the server re-render (fired by typing in the
+  # CodeMirror source) would patch it back to `""` and wipe the author's typed
+  # selector — the next ⌘S would then fail the empty-selector guard. Mirror the
+  # payload's selector into `@edit_selector` so it survives the edit-source churn.
+  def handle_event("edit_source", %{"source" => source} = params, socket)
+      when is_binary(source) do
+    socket = track_edit(socket, source)
+
+    socket =
+      case active_tab(socket.assigns) do
+        %{new: true} ->
+          case Map.get(params, "selector") do
+            sel when is_binary(sel) -> assign(socket, edit_selector: sel)
+            _ -> socket
+          end
+
+        _ ->
+          socket
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("edit_source", _params, socket), do: {:noreply, socket}
@@ -3401,7 +3423,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # edit assigns so the now-hidden selector reflects the saved name.
   defp promote_new_method_tab(socket, tab_id, class, selector) do
     case find_tab(socket, tab_id) do
-      %{new: true, side: side} = tab ->
+      %{new: true, side: side, source: source} = tab ->
         new_id = "method:" <> class <> ":" <> side <> ":" <> selector
         tabs = socket.assigns.tabs
 
@@ -3415,8 +3437,24 @@ defmodule BtAttachWeb.WorkspaceLive do
           existing ->
             # A canonical method tab for this selector is already open: drop the
             # redundant scratch tab and focus the existing one, rather than leaving
-            # a stale "Class ▸ new" tab alongside it.
-            focus_tab_keep_banner(socket, Enum.reject(tabs, &(&1.id == tab_id)), existing)
+            # a stale "Class ▸ new" tab alongside it. Re-base that tab on the body
+            # just compiled (same post-compile treatment `compile_clean/3` gives the
+            # in-place path) so the editor shows the saved source, not its browse
+            # snapshot.
+            rebased = %{
+              existing
+              | source: source,
+                base: source,
+                dirty: false,
+                disk_differs: compiled_disk_differs(existing, source)
+            }
+
+            replaced =
+              tabs
+              |> Enum.reject(&(&1.id == tab_id))
+              |> Enum.map(fn t -> if t.id == new_id, do: rebased, else: t end)
+
+            focus_tab_keep_banner(socket, replaced, rebased)
         end
 
       _ ->
@@ -5715,10 +5753,24 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <span :if={@role != :owner} class="meta-note read-only">
                       read-only · Observer
                     </span>
-                    <span :if={@role == :owner and active_tab(assigns).dirty} class="meta-note edited">
+                    <span :if={@role == :owner and active_tab(assigns).new} class="meta-note edited">
+                      new method — ⌘S to compile
+                    </span>
+                    <span
+                      :if={
+                        @role == :owner and not active_tab(assigns).new and active_tab(assigns).dirty
+                      }
+                      class="meta-note edited"
+                    >
                       edited — ⌘S to compile
                     </span>
-                    <span :if={@role == :owner and not active_tab(assigns).dirty} class="meta-note">
+                    <span
+                      :if={
+                        @role == :owner and not active_tab(assigns).new and
+                          not active_tab(assigns).dirty
+                      }
+                      class="meta-note"
+                    >
                       in image
                     </span>
                   </div>

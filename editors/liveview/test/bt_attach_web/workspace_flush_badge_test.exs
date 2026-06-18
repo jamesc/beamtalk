@@ -327,6 +327,28 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       assert html =~ "Enter a selector"
     end
 
+    test "a new-method tab keeps the typed selector across source edits", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # Typing in the CodeMirror source fires the form's phx-change="edit_source"
+      # carrying the selector input's current value. Without capturing it the
+      # server re-render would patch the (controlled, non-ignored) selector field
+      # back to "" — so a later ⌘S would fail the empty-selector guard. Drive that
+      # event and confirm the typed selector survives.
+      html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_change(%{"source" => ~s|greet => "hi"|, "selector" => "greet"})
+
+      assert html =~ ~s(name="selector" value="greet")
+    end
+
     test "saving a new method whose selector is already open folds into that tab", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 

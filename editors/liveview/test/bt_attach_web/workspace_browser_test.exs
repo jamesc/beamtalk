@@ -291,19 +291,20 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define Counter *with* `increment` so the ⌘S save re-compiles an existing
-    # method against a real class. Re-visit to refresh the System Browser tree
-    # (browse-classes is a mount snapshot), then open the existing `increment`
-    # method tab from the browser — its selector rides the form as a hidden field,
-    # so ⌘S needs only the edited body (the starter tab no longer opens on mount).
+    # Define a class with a uniquely-named method, then open that method tab via
+    # the omni search — its nav-symbols index updates live on the eval, so no
+    # browser remount (and its browse-classes-snapshot race) is needed. The opened
+    # method tab carries its selector as a hidden form field, so ⌘S re-compiles a
+    # real `KsCounter >> ksBump` with only the edited body. (The starter tab no
+    # longer opens on mount, so authoring goes through an opened method.)
     |> eval_do(
-      "Actor subclass: Counter\n  state: value = 0\n\n  increment => self.value := self.value + 1\n\n  value => self.value"
+      "Actor subclass: KsCounter\n  state: value = 0\n\n  ksBump => self.value := self.value + 1"
     )
-    |> visit("/")
-    |> assert_has("#workspace-editor-overlay .cm-content")
-    |> click(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
-    |> click(~s(div[phx-value-selector="increment"]))
-    |> set_method_source("increment => self.value := self.value + 1")
+    |> omni_type("ksBump")
+    |> assert_has(".omni-results .omni-row", text: "ksBump")
+    |> omni_key("Enter")
+    |> assert_has("#method-editor .tabstrip", text: "ksBump")
+    |> set_method_source("ksBump => self.value := self.value + 1")
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
     # data-shortcuts "mod+s" → submit): the keydown bubbles out of CodeMirror to
     # the form's KeyboardShortcuts hook, which request-submits the form so
@@ -531,36 +532,21 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define Counter *with* `increment` (the selector we trace) so it exists to
-    # open + re-save. Define it here rather than leaning on another test having
-    # done so (the suite shares one workspace and runs in seed-randomised order, so
-    # that ordering is not guaranteed: BT-2528). A second class (NavCounter) gives
-    # `increment` a real implementor to trace.
+    # Define two classes that both implement a uniquely-named selector, so it has
+    # real implementors to trace. Open its method tab via the omni search (live
+    # nav-symbols index — no browser remount race); the Implementors query runs on
+    # the active tab's selector, so the method need only exist (no ⌘S save here).
     |> eval_do(
-      "Actor subclass: Counter\n  state: value = 0\n\n  increment => self.value := self.value + 1\n\n  value => self.value"
+      "Actor subclass: NavTraceA\n  state: value = 0\n\n  navTrace => self.value := self.value + 1"
     )
     |> eval_do(
-      "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
+      "Actor subclass: NavTraceB\n  state: value = 0\n\n  navTrace => self.value := self.value + 2"
     )
-    # Re-visit to refresh the System Browser tree (browse-classes is a mount
-    # snapshot), then open the existing `increment` method tab from the browser
-    # (its selector rides the form as a hidden field) and re-save it with ⌘S.
-    |> visit("/")
-    |> assert_has("#workspace-editor-overlay .cm-content")
-    |> click(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
-    |> click(~s(div[phx-value-selector="increment"]))
-    |> set_method_source("increment => self.value := self.value + 1")
-    |> press("[id^='method-editor-overlay-'] .cm-content", "Control+s")
-    # The Ctrl+S save is a server round-trip: WorkspaceLive compiles `Counter >>
-    # increment` (a real backend op via Facade.dispatch(:save, …)) before it
-    # assigns `save_result` and the success banner renders. Under parallel CI
-    # load that compile + re-render regularly outlasts the 2s default assertion
-    # poll, so the banner lands late and the assertion misses `#method-editor`
-    # (BT-2529). Wait on the banner explicitly with a generous window instead of
-    # racing the default — the assertion still returns the instant the text
-    # appears, so passing runs are not slowed.
-    |> assert_has("#method-editor", text: "Saved increment on Counter", timeout: 10_000)
-    # Implementors of `increment`: the popover opens over the nav-query result. We
+    |> omni_type("navTrace")
+    |> assert_has(".omni-results .omni-row", text: "navTrace")
+    |> omni_key("Enter")
+    |> assert_has("#method-editor .tabstrip", text: "navTrace")
+    # Implementors of `navTrace`: the popover opens over the nav-query result. We
     # assert it renders (header + either site rows or the empty state) rather than
     # coupling to exact image contents.
     |> click("button[phx-click='implementors']")
