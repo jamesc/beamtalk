@@ -488,6 +488,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:selected_protocol, nil)
       |> assign(:browser_protocols, [])
       |> assign(:browser_error, nil)
+      # New Class form (BT-2293): the System Browser's owner-only create-a-class
+      # affordance, collapsed by default (it lives in the browser head's ＋ button)
+      # so it never crowds the class tree until wanted.
+      |> assign(:new_class_open, false)
       # Navigation aids (BT-2495, epic BT-2482 Phase 3): the top-bar omni search
       # and the method-editor Senders/Implementors popovers. Both ride thin
       # `:read` facade ops over the navigation channel (ADR 0096), so they work
@@ -1194,19 +1198,46 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, flush_changes(socket)}
   end
 
-  # Create a brand-new class from the New File form's source + path ("New File",
-  # ADR 0082 Phase 5 `Workspace newClass:at:`, BT-2293). A successful create logs
-  # a durable `new-class` ChangeLog entry (written to disk later on flush) and
-  # appears in the Changes pane.
-  def handle_event("new_file", %{"source" => source, "path" => path}, socket)
-      when is_binary(source) and is_binary(path) do
-    {:noreply, new_file(socket, source, path)}
+  # Toggle the System Browser's "New Class" form open/closed (BT-2293). Collapsed
+  # by default so it doesn't occupy the class tree's space until the owner wants
+  # to create a class; the ＋ button in the browser head flips it. Opening the
+  # form clears any stale validation/create status from a prior attempt so the
+  # user gets a clean slate.
+  def handle_event("toggle_new_class", _params, socket) do
+    opening? = !socket.assigns.new_class_open
+
+    # Clear the whole shared status area on open (all four assigns, matching
+    # `status_error/2`) so no stale save *or* flush banner lingers behind the
+    # freshly-opened form.
+    socket =
+      if opening?,
+        do:
+          assign(socket,
+            save_error: nil,
+            save_result: nil,
+            flush_error: nil,
+            flush_result: nil
+          ),
+        else: socket
+
+    {:noreply, assign(socket, new_class_open: opening?)}
   end
 
-  # Malformed payload (missing keys / non-binary values): surface a validation
+  # Create a brand-new class from the New Class form's source ("New Class",
+  # ADR 0082 Phase 5 `Workspace newClass:at:`, BT-2293). The target `.bt` path is
+  # *derived from the declared class name* (`Greeter` → `src/Greeter.bt`) rather
+  # than typed — the user thinks in classes, not files. A successful create logs
+  # a durable `new-class` ChangeLog entry (written to disk later on flush) and
+  # appears in the Changes pane.
+  def handle_event("new_class", %{"source" => source}, socket)
+      when is_binary(source) do
+    {:noreply, new_class(socket, source)}
+  end
+
+  # Malformed payload (missing key / non-binary value): surface a validation
   # error rather than letting a crafted event crash the LiveView.
-  def handle_event("new_file", _params, socket) do
-    {:noreply, status_error(socket, "Invalid new-file form payload.")}
+  def handle_event("new_class", _params, socket) do
+    {:noreply, status_error(socket, "Invalid new-class form payload.")}
   end
 
   # Revert one pending in-memory method patch (ADR 0082 Phase 5 `Workspace
@@ -1219,7 +1250,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Malformed payload (missing keys / non-binary values): surface a validation
-  # error rather than silently no-op'ing, consistent with `new_file`/`save_method`.
+  # error rather than silently no-op'ing, consistent with `new_class`/`save_method`.
   def handle_event("revert", _params, socket) do
     {:noreply, status_error(socket, "Invalid revert request.")}
   end
@@ -2264,39 +2295,70 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Create a new class from the New File form (BT-2293). Empty source/path is a
-  # local validation error (no round-trip); a real create threads source + path
-  # straight to the workspace newClass chokepoint and refreshes the Changes pane
-  # so the durable `new-class` entry is visible (ChangeLog coherence).
-  defp new_file(socket, source, path) do
-    # Trim both up front so the emptiness guards and the dispatched payload see
-    # the same normalised values (whitespace around a class definition or path
-    # is never significant).
+  # Create a new class from the New Class form (BT-2293). Empty source is a local
+  # validation error (no round-trip); a real create derives the target `.bt` path
+  # from the declared class name (so the user never types a file path), threads
+  # source + derived path straight to the workspace newClass chokepoint, refreshes
+  # the Changes pane so the durable `new-class` entry is visible (ChangeLog
+  # coherence), and collapses the form.
+  defp new_class(socket, source) do
+    # Trim up front so the emptiness guard and the dispatched payload see the same
+    # normalised value (whitespace around a class definition is never significant).
     source = String.trim(source)
-    path = String.trim(path)
 
     cond do
       source == "" ->
-        status_error(socket, "Enter a class definition to create a file.")
-
-      path == "" ->
-        status_error(socket, "Enter a target path to create a file.")
+        status_error(socket, "Enter a class definition to create a class.")
 
       true ->
-        case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
-          {:ok, created_path} ->
-            socket
-            |> assign(
-              save_result: "Created new class — #{created_path}",
-              save_error: nil,
-              flush_result: nil,
-              flush_error: nil
-            )
-            |> assign_changes()
+        case derive_class_path(source) do
+          {:ok, path} ->
+            dispatch_new_class(socket, source, path)
 
-          {:error, reason} ->
-            status_error(socket, facade_error(reason))
+          :error ->
+            status_error(
+              socket,
+              "Couldn't find a class name — start with e.g. `Object subclass: Greeter`."
+            )
         end
+    end
+  end
+
+  defp dispatch_new_class(socket, source, path) do
+    case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
+      {:ok, created_path} ->
+        socket
+        |> assign(
+          save_result: "Created new class — #{created_path}",
+          save_error: nil,
+          flush_result: nil,
+          flush_error: nil,
+          new_class_open: false
+        )
+        |> assign_changes()
+
+      {:error, reason} ->
+        status_error(socket, facade_error(reason))
+    end
+  end
+
+  # Derive the in-project `.bt` path for a new class from its definition's
+  # declared name (BT-2293): `Object subclass: Greeter` → `src/Greeter.bt`. The
+  # runtime's `newClass:at:` validation accepts an exact (`Greeter.bt`, the stdlib
+  # convention) basename match, so the PascalCase name maps cleanly. Returns
+  # `:error` when no `… subclass: Name` header is present so the caller can surface
+  # a friendly "looks like a class definition?" message instead of a path error.
+  #
+  # The `src/` prefix is assumed — it's the canonical package source dir the
+  # runtime resolves (`resolve_package_module` tries `src/` then `test/`). A
+  # project with a different layout would get a `target_outside_project` error at
+  # creation time (not silently on flush). If per-project source dirs ever land,
+  # this is the spot to read the configured dir instead of hardcoding `src/`.
+  @new_class_name_re ~r/\bsubclass:\s*([A-Z][A-Za-z0-9_]*)/
+  defp derive_class_path(source) do
+    case Regex.run(@new_class_name_re, source) do
+      [_, name] -> {:ok, "src/" <> name <> ".bt"}
+      _ -> :error
     end
   end
 
@@ -2322,7 +2384,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Set the active error line, clearing the other three status assigns so only
-  # the most recent New File / revert outcome shows in the shared status area
+  # the most recent New Class / revert outcome shows in the shared status area
   # (BT-2293). Keeps the validation/error branches from leaving a stale flush
   # banner visible — the success branches already clear all four inline.
   defp status_error(socket, message) do
@@ -4431,6 +4493,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :browser_classes, :list, required: true
   attr :selected_class, :string, default: nil
   attr :browser_error, :string, default: nil
+  # Owner-only "New Class" affordance (BT-2293): `role` gates the ＋ button (only
+  # the owner can `newClass:at:`); `new_class_open` is the collapsed/expanded
+  # state of the inline create form. Both default so read-only callers can omit.
+  attr :role, :atom, default: :observer
+  attr :new_class_open, :boolean, default: false
 
   defp system_browser_classes(assigns) do
     ~H"""
@@ -4450,6 +4517,20 @@ defmodule BtAttachWeb.WorkspaceLive do
             {label}
           </button>
         </div>
+        <%!-- New Class (BT-2293): owner-only ＋ toggle. Reveals the inline create
+             form below; the new class then appears right in the tree under it. --%>
+        <button
+          :if={@role == :owner}
+          type="button"
+          class={["panel-icon", @new_class_open && "on"]}
+          phx-click="toggle_new_class"
+          aria-expanded={to_string(@new_class_open)}
+          aria-controls={if @new_class_open, do: "new-class-form"}
+          aria-label="New class"
+          title="New class"
+        >
+          ＋
+        </button>
         <button
           type="button"
           class="panel-close"
@@ -4460,6 +4541,33 @@ defmodule BtAttachWeb.WorkspaceLive do
           ×
         </button>
       </div>
+      <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): create a brand-new class from a
+           source definition (`Workspace newClass:at:`). The target `.bt` path is
+           derived from the declared class name server-side, so the owner thinks in
+           classes, not files. Collapsed by default; the new-class entry appears in
+           the Changes pane and is written to disk on the next flush. --%>
+      <form
+        :if={@role == :owner and @new_class_open}
+        id="new-class-form"
+        phx-submit="new_class"
+        class="new-class-form"
+      >
+        <label class="new-class-label" for="new-class-source">
+          New Class
+          <span class="muted-note">— saved under <code>src/</code> as <code>ClassName.bt</code></span>
+        </label>
+        <textarea
+          id="new-class-source"
+          name="source"
+          class="new-class-source mono"
+          rows="2"
+          placeholder="Object subclass: Greeter"
+          phx-mounted={Phoenix.LiveView.JS.focus()}
+        ></textarea>
+        <button class="btn" type="submit" phx-disable-with="Creating…">
+          Create
+        </button>
+      </form>
       <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
         <div :if={@browser_error} class="io-block err">{@browser_error}</div>
         <%= if @browser_classes == [] do %>
@@ -4869,6 +4977,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                   browser_classes={@browser_classes}
                   selected_class={@selected_class}
                   browser_error={@browser_error}
+                  role={@role}
+                  new_class_open={@new_class_open}
                 />
                 <.system_browser_methods
                   browser_protocols={@browser_protocols}
@@ -5525,34 +5635,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </button>
                       </div>
                     </form>
-
-                    <%!-- NEW FILE (BT-2293, ADR 0082 Phase 5): create a brand-new
-                         class from a source definition at a target `.bt` path
-                         (`Workspace newClass:at:`). Self-contained owner-only form
-                         (its own source + path), so it never depends on the method
-                         editor's tab state. The new-class entry appears in the
-                         Changes pane and is written to disk on the next flush. --%>
-                    <form id="new-file-form" phx-submit="new_file" class="new-file-form">
-                      <label class="new-file-label">
-                        New File <span class="muted-note">— create a class</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="path"
-                        class="new-file-path mono"
-                        placeholder="src/greeter.bt"
-                        autocomplete="off"
-                      />
-                      <textarea
-                        name="source"
-                        class="new-file-source mono"
-                        rows="2"
-                        placeholder="Object subclass: Greeter"
-                      ></textarea>
-                      <button class="btn" type="submit" phx-disable-with="Creating…">
-                        New File
-                      </button>
-                    </form>
+                    <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
+                         affordance now lives in the System Browser head (class-
+                         oriented, collapsed by default), not here under the method
+                         editor — see `system_browser_classes`. --%>
                   <% else %>
                     <p class="muted-note">
                       Your role is read-only — evaluation and editing are disabled. You can

@@ -222,6 +222,15 @@
   flex: none;
 }
 .panel-head .panel-close:hover { color: var(--ink); background: var(--hover); }
+/* New Class ＋ toggle (BT-2293): a header icon button matching `.panel-close`
+   chrome; `.on` reflects the open form so it reads as a pressed toggle. */
+.panel-head .panel-icon {
+  border: 0; background: transparent; cursor: pointer; color: var(--faint);
+  font-size: 14px; padding: 0 4px; line-height: 1; border-radius: 4px;
+  flex: none;
+}
+.panel-head .panel-icon:hover { color: var(--ink); background: var(--hover); }
+.panel-head .panel-icon.on { color: var(--accent); background: var(--hover); }
 
 /* top-bar panel toggle buttons */
 .topbar .panel-toggles { display: flex; gap: 4px; }
@@ -733,21 +742,22 @@
 }
 .btn-link:hover { color: var(--accent); }
 
-/* New File form (BT-2293): the System Browser's create-a-class affordance under
-   the method editor — a path input + a compact source box + submit. */
-.new-file-form {
-  display: grid; grid-template-columns: 1fr auto; gap: .5rem; margin-top: .75rem;
-  padding-top: .6rem; border-top: 1px solid var(--line-soft); align-items: start;
+/* New Class form (BT-2293): the System Browser's collapsible create-a-class
+   affordance under the panel head — a compact source box + submit. The `.bt`
+   path is derived from the class name server-side, so there is no path field. */
+.new-class-form {
+  display: grid; grid-template-columns: 1fr auto; gap: .5rem; flex: none;
+  padding: .6rem 10px; border-bottom: 1px solid var(--line); align-items: start;
+  background: var(--panel-2);
 }
-.new-file-label { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--ink); }
-.new-file-path, .new-file-source {
+.new-class-label { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--ink); }
+.new-class-source {
   border: 1px solid var(--line); background: var(--code-bg); border-radius: 6px;
   padding: 6px 9px; font-size: 12.5px; color: var(--ink); outline: none;
+  grid-column: 1; resize: vertical;
 }
-.new-file-path:focus, .new-file-source:focus { border-color: var(--accent); }
-.new-file-path { grid-column: 1 / -1; }
-.new-file-source { grid-column: 1; resize: vertical; }
-.new-file-form .btn { grid-column: 2; grid-row: 3; align-self: end; }
+.new-class-source:focus { border-color: var(--accent); }
+.new-class-form .btn { grid-column: 2; align-self: end; }
 
 .field {
   border: 1px solid var(--line); background: var(--code-bg); border-radius: 6px;

@@ -1020,7 +1020,7 @@ defmodule BtAttach.Workspace do
   @doc """
   Create a brand-new class from a source String at a target path (ADR 0082
   Phase 5 `Workspace newClass:at:`, BT-2293). This is the System Browser's
-  "New File" action — the in-memory class install + a durable
+  "New Class" action — the in-memory class install + a durable
   `kind: "new-class"` ChangeLog entry; the `.bt` file itself is written later on
   `flush/0`.
 
@@ -1029,7 +1029,7 @@ defmodule BtAttach.Workspace do
   (`{ok, ClassObjects} | {error, Reason}`) rather than the raising FFI surface
   (`beamtalk_workspace_interface_primitives:newClass/2`). `source` is the class
   definition (e.g. `"Object subclass: Greeter"`), `path` the in-project target
-  (e.g. `"src/greeter.bt"`).
+  (e.g. `"src/Greeter.bt"`, as the LiveView derives from the class name).
 
   Returns:
 
