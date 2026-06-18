@@ -514,7 +514,10 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
     {BackingFile, Content} = backing_source(Backing),
     %% `source_origin` keys editability off where the .erl lives: stdlib and
     %% dependency native are read-only; project-owned native is the seam where a
-    %% future R/W phase enables editing (BT-2578 out-of-scope follow-up).
+    %% future R/W phase enables editing (BT-2578 out-of-scope follow-up). Also
+    %% require a resolved backing file: a project class whose source was stripped
+    %% from the release (`BackingFile = null`) has nothing to edit, so it must not
+    %% advertise `editable` (Claude review).
     SourceOrigin = source_origin_of(ModName, BackingFile),
     Clauses = handle_call_clause_lines(Content),
     {value, #{
@@ -522,7 +525,7 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
         <<"backing_module">> => atom_to_binary(Backing, utf8),
         <<"source_file">> => BackingFile,
         <<"source_origin">> => SourceOrigin,
-        <<"editable">> => SourceOrigin =:= <<"project">>,
+        <<"editable">> => SourceOrigin =:= <<"project">> andalso BackingFile =/= null,
         <<"content">> => Content,
         <<"clauses">> => Clauses,
         <<"selected_clause">> => selected_clause(Clauses, Selector)
@@ -575,8 +578,8 @@ backing_source_file(Backing) ->
 %% lowercase atom like `readLine`) becomes `#{selector, line}`. Generic clauses
 %% — `handle_call({Selector, Args, _}, …)`, the catch-all `handle_call(Msg, …)`
 %% — bind variables (uppercase / `_`), match no selector, and are skipped.
-%% Matches single-line clause heads; a head split across lines is mapped on its
-%% opening line (the comma-terminated first element satisfies the per-line regex).
+%% Matches single-line clause heads only; a head split across multiple lines is
+%% not captured (the selector and its trailing comma must appear on one line).
 -spec handle_call_clause_lines(binary() | null) -> [map()].
 handle_call_clause_lines(null) ->
     [];
