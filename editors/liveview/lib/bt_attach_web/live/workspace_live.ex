@@ -1200,9 +1200,18 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Toggle the System Browser's "New Class" form open/closed (BT-2293). Collapsed
   # by default so it doesn't occupy the class tree's space until the owner wants
-  # to create a class; the ＋ button in the browser head flips it.
+  # to create a class; the ＋ button in the browser head flips it. Opening the
+  # form clears any stale validation/create status from a prior attempt so the
+  # user gets a clean slate.
   def handle_event("toggle_new_class", _params, socket) do
-    {:noreply, assign(socket, new_class_open: !socket.assigns.new_class_open)}
+    opening? = !socket.assigns.new_class_open
+
+    socket =
+      if opening?,
+        do: assign(socket, save_error: nil, save_result: nil),
+        else: socket
+
+    {:noreply, assign(socket, new_class_open: opening?)}
   end
 
   # Create a brand-new class from the New Class form's source ("New Class",
@@ -4501,7 +4510,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           class={["panel-icon", @new_class_open && "on"]}
           phx-click="toggle_new_class"
           aria-expanded={to_string(@new_class_open)}
-          aria-controls="new-class-form"
+          aria-controls={@new_class_open && "new-class-form"}
           aria-label="New class"
           title="New class"
         >
@@ -4529,7 +4538,8 @@ defmodule BtAttachWeb.WorkspaceLive do
         class="new-class-form"
       >
         <label class="new-class-label" for="new-class-source">
-          New Class <span class="muted-note">— path derived from the class name</span>
+          New Class
+          <span class="muted-note">— saved under <code>src/</code> as <code>ClassName.bt</code></span>
         </label>
         <textarea
           id="new-class-source"
