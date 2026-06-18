@@ -516,7 +516,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # ── Phase 1 JS hook foundation (BT-2485, BT-2539) ───────────────────────────
 
   test "the editor hooks are present on the owner's connected render (BT-2485)", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/")
+    # The method editor's CmEditor (and its `select_source` stamp) only mount once
+    # a tab is open — the cockpit now starts empty. Open a def tab, then assert the
+    # editor hooks are wired.
+    {_view, html, _class} = open_fresh_def_tab(conn)
 
     # The method editor is CodeMirror (the CmEditor hook, BT-2539): ⌘S submits via
     # KeyboardShortcuts and the selection rides select_source — the CodeEditor
