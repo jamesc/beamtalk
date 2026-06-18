@@ -364,8 +364,9 @@ method_field(MethodObj, Key) ->
 %% The class-definition pane: class header, state slots, and full comment. State
 %% is field reflection (ADR 0035) — names + default expressions, no user code.
 %% The definition string is the class skeleton (`Super subclass: Name` + state
-%% slots), method bodies excluded (Pharo convention). File-less (ClassBuilder)
-%% classes have null definition + origin = runtime.
+%% slots), method bodies excluded (Pharo convention), synthesized from reflection
+%% for every loaded class. File-less (ClassBuilder) and stdlib classes keep the
+%% skeleton; `origin = runtime` (not the definition) is what flags no disk source.
 -spec browse_class_definition(atom()) -> beamtalk_repl_ops:op_result().
 browse_class_definition(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
@@ -376,7 +377,7 @@ browse_class_definition(ClassName) ->
             ModName = beamtalk_runtime_api:module_name(ClassPid),
             SourceFile = source_file_of(ModName),
             State = state_slots(ClassPid),
-            Definition = class_definition_text(ClassName, Super, State, SourceFile),
+            Definition = class_definition_text(ClassName, Super, State),
             %% BT-2578: native-backed classes (ADR 0056) carry their backing
             %% Erlang module name so the System Browser can badge them and offer
             %% `browse-native-source`. Read from the facade module's
@@ -446,13 +447,15 @@ default_text(Value) ->
     iolist_to_binary(io_lib:format("~p", [Value])).
 
 %% Synthesize the class-definition skeleton: header + state slots, method bodies
-%% excluded. `null` for file-less classes (ClassBuilder) — the browser shows "no
-%% source (programmatic class)" (ADR 0096, consistent with ADR 0085's non-goal).
--spec class_definition_text(atom(), atom() | none, [map()], binary() | null) ->
-    binary() | null.
-class_definition_text(_ClassName, _Super, _State, null) ->
-    null;
-class_definition_text(ClassName, Super, State, _SourceFile) ->
+%% excluded. Derived purely from the loaded class' reflected superclass + state
+%% (ADR 0035), so it is available for *every* loaded class — file-backed user
+%% classes, stdlib classes (whose BEAM carries no `beamtalk_source` attribute, so
+%% `source_file_of` is null), and file-less ClassBuilder classes alike. The
+%% runtime/disk distinction lives in `origin` (null SourceFile → runtime), not in
+%% the skeleton: a class that is loaded always has a representable shape, and
+%% returning null here only stranded stdlib classes on an empty editor.
+-spec class_definition_text(atom(), atom() | none, [map()]) -> binary().
+class_definition_text(ClassName, Super, State) ->
     SuperName =
         case Super of
             none -> <<"Object">>;

@@ -153,11 +153,14 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
     test "opening a class definition renders the class comment as docs", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      # "+ def" opens the active class' (Counter) definition tab, which reads the
-      # class comment for its doc block.
+      # Select Counter, then open its definition via the System Browser's "class
+      # definition" entry — it reads the class comment for the doc block. (The
+      # editor now opens with no tab, so there is no "+ def" until one is open.)
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
       html =
         view
-        |> element(~s(button[phx-click="open_definition"]))
+        |> element(~s([phx-click="browser_open_definition"]))
         |> render_click()
 
       assert html =~ ~s(class="doc-block")
@@ -175,9 +178,11 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
          %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
       html =
         view
-        |> element(~s(button[phx-click="open_definition"]))
+        |> element(~s([phx-click="browser_open_definition"]))
         |> render_click()
 
       # The editable body (distinct from the doc block) carries the class

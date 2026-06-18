@@ -608,8 +608,16 @@ browse_tests(#{class_name := Class}) ->
                 <<"The canonical live object.\nSecond line ignored.">>,
                 maps:get(<<"comment">>, Value)
             ),
-            %% File-less fixture → null definition, runtime origin.
-            ?assertEqual(null, maps:get(<<"definition">>, Value)),
+            %% File-less fixture: the skeleton is still synthesized from the
+            %% loaded class' reflected super + state (BT-2570) — a null
+            %% `source_file` only flips `origin` to runtime, never the definition.
+            Definition = maps:get(<<"definition">>, Value),
+            ?assert(is_binary(Definition)),
+            ?assertNotEqual(<<>>, Definition),
+            ?assertEqual(
+                binary:match(Definition, <<" subclass: ", Class/binary>>) =/= nomatch,
+                true
+            ),
             ?assertEqual(<<"runtime">>, maps:get(<<"origin">>, Value))
         end},
         {"no-user-code: browse never invokes a method whose body would crash", fun() ->
