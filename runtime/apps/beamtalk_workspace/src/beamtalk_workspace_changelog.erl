@@ -278,13 +278,14 @@ for audit.
 """.
 -spec active_entries() -> [entry()].
 active_entries() ->
-    [
-        E
-     || E <- entries(),
-        not E#entry.prior_epoch,
-        not E#entry.orphan,
-        not E#entry.flushed
-    ].
+    [E || E <- entries(), is_active(E)].
+
+%% Whether an entry is part of the active dirty view: current epoch, not
+%% orphaned, and not yet flushed to disk. Shared by `active_entries/0` and the
+%% shadow computation (`survivor_seqs/1`) so both agree on what "active" means.
+-spec is_active(#entry{}) -> boolean().
+is_active(#entry{prior_epoch = Prior, orphan = Orphan, flushed = Flushed}) ->
+    (not Prior) andalso (not Orphan) andalso (not Flushed).
 
 -doc """
 Return the entries that are candidates for `Workspace flush` (ADR 0082 Phase 2):
@@ -448,9 +449,11 @@ revert_selector_binary(Sel) when is_atom(Sel) -> atom_to_binary(Sel, utf8).
 %%% value objects wrap. `change_entries/0` returns *every* entry (the
 %%% `ChangeLog` object holds the full set so `select:` can still reach
 %%% prior-epoch / orphan entries); the active/dirty filtering lives on the
-%%% Beamtalk side using the per-entry `active` flag. `dirtyMethods/0` is
-%%% computed here because it groups *active* entries by class into Beamtalk
-%%% `Set` values.
+%%% Beamtalk side using the per-entry `active` and `shadowed` flags (the default
+%%% pending view is active-and-not-shadowed, collapsing repeated patches/reverts
+%%% of one method to its latest entry). `dirtyMethods/0` is computed here because
+%%% it groups *active* entries by class into Beamtalk `Set` values (the Set
+%%% already collapses duplicate selectors, so it needs no shadow filter).
 
 -doc """
 Return the workspace ChangeLog as a `ChangeLog` value-object map.
@@ -484,7 +487,36 @@ flag in Beamtalk. Internal helper for `changeLog/0`; not used by the stdlib API
 """.
 -spec change_entries() -> [map()].
 change_entries() ->
-    [entry_to_value(E) || E <- entries()].
+    All = entries(),
+    Survivors = survivor_seqs(All),
+    [entry_to_value(E, Survivors) || E <- All].
+
+%% For each `(class, selector)` target, the seq of the most-recent *active*
+%% entry — the "survivor" that `Workspace flush` would apply and that the
+%% pending-changes view shows. Every other active entry for the same target is
+%% *shadowed*: an older patch (or a patch superseded by a revert, since a revert
+%% is itself a patch — ADR 0082 "Undo") that newer state replaced. Mirrors
+%% `beamtalk_workspace_flush:shadow_duplicates/1` so the displayed dirty set
+%% matches what flush actually writes. Inactive entries (prior-epoch / orphan /
+%% flushed) never survive and never shadow.
+-spec survivor_seqs([#entry{}]) -> #{{binary(), binary() | undefined} => non_neg_integer()}.
+survivor_seqs(Entries) ->
+    lists:foldl(
+        fun(E, Acc) ->
+            case is_active(E) of
+                false ->
+                    Acc;
+                true ->
+                    Key = {E#entry.class, E#entry.selector},
+                    case Acc of
+                        #{Key := Max} when Max >= E#entry.seq -> Acc;
+                        _ -> Acc#{Key => E#entry.seq}
+                    end
+            end
+        end,
+        #{},
+        Entries
+    ).
 
 -doc """
 Return the dirty methods derived from the *active* entries as a Beamtalk
@@ -521,10 +553,17 @@ dirty_selector(#entry{selector = Sel}) -> binary_to_atom(Sel, utf8).
 %% Build a `ChangeEntry` value-object map from an `#entry{}` record. Field keys
 %% match the `field:` declarations in `ChangeEntry.bt`; `self.field` reads them.
 %% Atoms (selector, kind, intent, authorKind) are surfaced as Beamtalk Symbols;
-%% the derived `active` flag is `true` iff the entry is current-epoch and not an
-%% orphan (the default dirty view).
--spec entry_to_value(#entry{}) -> map().
-entry_to_value(#entry{} = E) ->
+%% the derived `active` flag is `true` iff the entry is current-epoch, not an
+%% orphan, and not flushed (the default dirty view). The derived `shadowed` flag
+%% is `true` iff the entry is active but a *newer* active entry exists for the
+%% same `(class, selector)` — an older patch superseded by a later patch/revert.
+%% `Survivors` maps each `(class, selector)` to its surviving (highest) seq.
+-spec entry_to_value(#entry{}, map()) -> map().
+entry_to_value(#entry{} = E, Survivors) ->
+    Active = is_active(E),
+    Shadowed =
+        Active andalso
+            maps:get({E#entry.class, E#entry.selector}, Survivors, E#entry.seq) =/= E#entry.seq,
     #{
         '$beamtalk_class' => 'ChangeEntry',
         seq => E#entry.seq,
@@ -538,10 +577,8 @@ entry_to_value(#entry{} = E) ->
         orphan => E#entry.orphan,
         priorEpoch => E#entry.prior_epoch,
         flushed => E#entry.flushed,
-        active =>
-            (not E#entry.prior_epoch) andalso
-            (not E#entry.orphan) andalso
-            (not E#entry.flushed)
+        active => Active,
+        shadowed => Shadowed
     }.
 
 -spec selector_symbol(binary() | undefined) -> atom() | nil.

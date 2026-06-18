@@ -31,6 +31,7 @@ sealed typed Value subclass: ChangeEntry
   field: orphan :: Boolean = false
   field: priorEpoch :: Boolean = false
   field: active :: Boolean = false
+  field: shadowed :: Boolean = false
 
   /// The monotonic sequence number assigned when the entry was logged.
   ///
@@ -109,6 +110,18 @@ sealed typed Value subclass: ChangeEntry
   /// Whether the entry is part of the active dirty view: current epoch and not
   /// orphaned. Active entries are the live, re-appliable changes.
   isActive -> Boolean => self.active
+
+  /// Whether this entry is shadowed by a newer active entry for the same
+  /// `(class, selector)` — an older patch superseded by a later patch or revert
+  /// (a revert is itself a patch, ADR 0082 "Undo"). Shadowed entries are kept
+  /// for audit but excluded from the default pending view, which shows only the
+  /// latest entry per method (mirroring what `Workspace flush` applies).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes select: [:e | e isShadowed]   // superseded entries
+  /// ```
+  isShadowed -> Boolean => self.shadowed
 
   /// Whether this entry created a new class (kind `#'new-class'`, no selector).
   isNewClass -> Boolean => self.kind =:= #'new-class'

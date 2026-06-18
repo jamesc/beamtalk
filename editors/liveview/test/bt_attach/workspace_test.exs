@@ -119,6 +119,62 @@ defmodule BtAttach.WorkspaceTest do
     end
   end
 
+  describe "pending_rows/1 — collapse the Changes pane to one row per method (BT-2574)" do
+    # A change-entry value map as it arrives over distribution from
+    # `beamtalk_workspace_changelog:change_entries/0` (atom keys; className /
+    # selector / kind as atoms; derived `active` + `shadowed` booleans).
+    defp entry(seq, selector, opts) do
+      %{
+        seq: seq,
+        className: :Counter,
+        selector: selector,
+        kind: :instance,
+        intent: :durable,
+        flushable: true,
+        flushed: false,
+        authorKind: :human,
+        active: Keyword.get(opts, :active, true),
+        shadowed: Keyword.get(opts, :shadowed, false)
+      }
+    end
+
+    test "drops shadowed entries, keeps active survivors, newest-first" do
+      # Counter>>increment patched then reverted (the older entry is shadowed),
+      # plus an unrelated Counter>>decrement patch.
+      entries = [
+        entry(0, :increment, shadowed: true),
+        entry(1, :increment, shadowed: false),
+        entry(2, :decrement, shadowed: false)
+      ]
+
+      rows = Workspace.pending_rows(entries)
+
+      assert length(rows) == 2
+      # change_entries/0 is oldest-first; pending_rows renders newest-first.
+      assert Enum.map(rows, & &1.selector) == ["decrement", "increment"]
+    end
+
+    test "drops inactive entries entirely" do
+      assert Workspace.pending_rows([entry(0, :render, active: false)]) == []
+    end
+
+    test "a missing shadowed key (older workspace build) is treated as not shadowed" do
+      raw = %{
+        seq: 0,
+        className: :Counter,
+        selector: :increment,
+        kind: :instance,
+        intent: :durable,
+        flushable: true,
+        flushed: false,
+        authorKind: :human,
+        active: true
+      }
+
+      assert [%{selector: "increment"}] = Workspace.pending_rows([raw])
+    end
+  end
+
   describe "browse-surface wrappers (System Browser data source, ADR 0095 / BT-2488)" do
     # No live workspace here, so the RPC targets an unconnected node. The
     # contract under test: the wrappers route through `dispatch_browse/2` and

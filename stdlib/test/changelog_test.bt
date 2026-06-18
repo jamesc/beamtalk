@@ -81,11 +81,36 @@ TestCase subclass: ChangeLogTest
         #active => true
       }
 
+  // A shadowed active entry: an older Counter>>increment superseded by a newer
+  // patch (or revert — a revert is itself a patch, ADR 0082 "Undo"). Active but
+  // excluded from the default pending view so the view collapses to one row per
+  // method (BT-2574).
+  shadowedEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 0,
+        #className => #Counter,
+        #selector => #increment,
+        #kind => #instance,
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #human,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true,
+        #shadowed => true
+      }
+
   // A ChangeLog holding two active entries plus one orphan.
   mixedLog =>
     ChangeLog new: #{
       #entries => #(self orphanEntry, self activeEntry, self activeAgentEntry)
     }
+
+  // A ChangeLog holding the latest Counter>>increment plus its shadowed
+  // predecessor (the patch-then-revert shape that motivated BT-2574).
+  shadowedLog =>
+    ChangeLog new: #{#entries => #(self shadowedEntry, self activeEntry)}
 
   emptyLog => ChangeLog new
 
@@ -115,6 +140,23 @@ TestCase subclass: ChangeLogTest
 
   testAllEntriesIncludeOrphan =>
     self assert: self mixedLog allEntries size equals: 3
+
+  // --- shadowed entries collapse the pending view to one row per method (BT-2574) ---
+  testShadowedExcludedFromActiveEntries =>
+    self assert: self shadowedLog activeEntries size equals: 1
+
+  testShadowedSurvivorIsLatest =>
+    self assert: self shadowedLog activeEntries first seq equals: 1
+
+  testShadowedLogSizeCountsOnlyLatest =>
+    self assert: self shadowedLog size equals: 1
+
+  testShadowedLogAllEntriesIncludeShadowed =>
+    self assert: self shadowedLog allEntries size equals: 2
+
+  testSelectCanReachShadowed =>
+    shadowed := self shadowedLog select: [:e | e isShadowed]
+    self assert: shadowed size equals: 1
 
   // --- do: iterates only ACTIVE entries ---
   testDoVisitsOnlyActiveEntries =>
@@ -164,6 +206,10 @@ TestCase subclass: ChangeLogTest
   testEntryIsAgent => self assert: self activeAgentEntry isAgent
 
   testEntryIsActive => self assert: self activeEntry isActive
+
+  testEntryIsNotShadowedByDefault => self deny: self activeEntry isShadowed
+
+  testShadowedEntryIsShadowed => self assert: self shadowedEntry isShadowed
 
   testOrphanEntryIsOrphan => self assert: self orphanEntry isOrphan
 
