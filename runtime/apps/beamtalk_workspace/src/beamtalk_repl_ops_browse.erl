@@ -517,7 +517,7 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
     %% future R/W phase enables editing (BT-2578 out-of-scope follow-up). Also
     %% require a resolved backing file: a project class whose source was stripped
     %% from the release (`BackingFile = null`) has nothing to edit, so it must not
-    %% advertise `editable` (Claude review).
+    %% advertise `editable`.
     SourceOrigin = source_origin_of(ModName, BackingFile),
     Clauses = handle_call_clause_lines(Content),
     {value, #{
@@ -545,9 +545,8 @@ backing_source(Backing) ->
             %% `unicode:characters_to_binary/1` returns an `{error, _, _}` /
             %% `{incomplete, _, _}` tuple (not a binary) for a malformed path, which
             %% must not leak into the result map as `source_file`. Fall back to a
-            %% raw Latin-1 binary so the field is always a binary (CodeRabbit / Claude
-            %% review). Build-machine paths are virtually always UTF-8, so the
-            %% fallback is for the pathological case only.
+            %% raw Latin-1 binary so the field is always a binary. Build-machine
+            %% paths are virtually always UTF-8, so the fallback is pathological-only.
             PathBin =
                 case unicode:characters_to_binary(Path) of
                     B when is_binary(B) -> B;
@@ -852,7 +851,7 @@ disk_source(ClassName) ->
         Src when is_list(Src) ->
             %% Guard the error/incomplete tuple the same way `backing_source/1`
             %% does, so a malformed stored source never leaks a non-binary into
-            %% the disk_differs comparison (Claude review).
+            %% the disk_differs comparison.
             case unicode:characters_to_binary(Src) of
                 B when is_binary(B) -> B;
                 _ -> list_to_binary(Src)
