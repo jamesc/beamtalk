@@ -4525,7 +4525,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           class={["panel-icon", @new_class_open && "on"]}
           phx-click="toggle_new_class"
           aria-expanded={to_string(@new_class_open)}
-          aria-controls={@new_class_open && "new-class-form"}
+          aria-controls={if @new_class_open, do: "new-class-form"}
           aria-label="New class"
           title="New class"
         >
