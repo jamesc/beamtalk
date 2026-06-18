@@ -72,6 +72,65 @@ describe_ops_method_source_requires_class_side_selector_test() ->
     ?assert(lists:member(<<"selector">>, Params)).
 
 %%====================================================================
+%% browse-native-source — describe + pure helpers (BT-2578)
+%%====================================================================
+
+describe_ops_has_native_source_key_test() ->
+    Ops = beamtalk_repl_ops_browse:describe_ops(),
+    ?assert(maps:is_key(<<"browse-native-source">>, Ops)),
+    #{<<"browse-native-source">> := Info} = Ops,
+    ?assert(lists:member(<<"class">>, maps:get(<<"params">>, Info))).
+
+%% The `handle_call` clause line-map: quoted-atom and bare-atom selectors are
+%% captured with their 1-based line; generic clauses (uppercase var, catch-all)
+%% are skipped. Mirrors the real `beamtalk_subprocess` clause shapes.
+native_handle_call_clause_lines_test() ->
+    Content = iolist_to_binary([
+        "init(Config) -> {ok, #{}}.\n",
+        "handle_call({Selector, Args, Ctx}, From, State) ->\n",
+        "    handle_call({Selector, Args}, From, State);\n",
+        "handle_call({'writeLine:', [Data]}, _From, State) ->\n",
+        "    {reply, nil, State};\n",
+        "handle_call({readLine, []}, From, State) ->\n",
+        "    {noreply, register_waiter(stdout, From, State)};\n",
+        "handle_call(Msg, _From, State) ->\n",
+        "    {reply, {error, unknown}, State}.\n"
+    ]),
+    Clauses = beamtalk_repl_ops_browse:handle_call_clause_lines(Content),
+    Pairs = [{maps:get(<<"selector">>, C), maps:get(<<"line">>, C)} || C <- Clauses],
+    %% Only the two concrete selectors, at their real lines (1-based).
+    ?assertEqual([{<<"writeLine:">>, 4}, {<<"readLine">>, 6}], Pairs).
+
+native_clause_lines_null_content_is_empty_test() ->
+    ?assertEqual([], beamtalk_repl_ops_browse:handle_call_clause_lines(null)).
+
+native_clause_selector_skips_generic_clauses_test() ->
+    ?assertEqual(
+        none,
+        beamtalk_repl_ops_browse:clause_selector(
+            <<"handle_call({Selector, Args, Ctx}, From, State) ->">>
+        )
+    ),
+    ?assertEqual(
+        none, beamtalk_repl_ops_browse:clause_selector(<<"handle_call(Msg, _From, State) ->">>)
+    ),
+    ?assertEqual(
+        {ok, <<"readLine">>},
+        beamtalk_repl_ops_browse:clause_selector(<<"handle_call({readLine, []}, From, S) ->">>)
+    ).
+
+native_self_delegate_source_marker_test() ->
+    ?assert(
+        beamtalk_repl_ops_browse:is_self_delegate_source(
+            <<"writeLine: data :: String -> Nil => self delegate">>
+        )
+    ),
+    ?assertNot(
+        beamtalk_repl_ops_browse:is_self_delegate_source(<<"value =>\n  ^ self.value">>)
+    ),
+    ?assertNot(beamtalk_repl_ops_browse:is_self_delegate_source(null)).
+
+%%====================================================================
 %% Validation error paths (no live class needed)
 %%====================================================================
 
@@ -302,6 +361,34 @@ browse_tests(#{class_name := Class}) ->
             ?assert(
                 lists:member(SourceOrigin, [<<"stdlib">>, <<"project">>, <<"dependency">>]) orelse
                     binary:match(SourceOrigin, <<"dependency:">>) =/= nomatch
+            )
+        end},
+        {"browse-class-definition reports native=false for a plain class", fun() ->
+            %% BT-2578: a fixture class with no native facade meta is not
+            %% native-backed; backing_module is null.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-class-definition">>,
+                    #{<<"class">> => Class},
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(false, maps:get(<<"native">>, Value)),
+            ?assertEqual(null, maps:get(<<"backing_module">>, Value))
+        end},
+        {"browse-native-source errors for a non-native class", fun() ->
+            %% BT-2578: the op only applies to native: classes (ADR 0056).
+            Response = beamtalk_repl_ops_browse:handle(
+                <<"browse-native-source">>,
+                #{<<"class">> => Class},
+                make_msg(),
+                self()
+            ),
+            Decoded = assert_error_response(Response),
+            ?assertNotEqual(
+                nomatch,
+                binary:match(maps:get(<<"error">>, Decoded), <<"not native-backed">>)
             )
         end},
         {"browse-protocols groups selectors with line and source_status", fun() ->

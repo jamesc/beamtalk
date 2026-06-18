@@ -66,6 +66,12 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 
 -export([handle/4, handle_term/4, describe_ops/0, source_origin_of/2]).
 
+-ifdef(TEST).
+%% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
+%% delegate-source marker have no live-class dependency.
+-export([handle_call_clause_lines/1, clause_selector/1, is_self_delegate_source/1]).
+-endif.
+
 -doc """
 Handle a browse op for the WebSocket transport — encodes the term result to
 JSON at the edge. Dist-attached clients call `handle_term/4` directly.
@@ -103,9 +109,16 @@ handle_term(<<"browse-class-definition">>, Params, _Msg, _SessionPid) ->
             browse_class_definition(ClassName);
         {error, Reason} ->
             arg_error(<<"browse-class-definition">>, Reason)
+    end;
+handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
+    case validate_class(Params) of
+        {ok, ClassName} ->
+            browse_native_source(ClassName, optional_selector(Params));
+        {error, Reason} ->
+            arg_error(<<"browse-native-source">>, Reason)
     end.
 
--doc "Advertise the four browse ops in `describe`.".
+-doc "Advertise the browse ops in `describe`.".
 -spec describe_ops() -> map().
 describe_ops() ->
     #{
@@ -114,7 +127,10 @@ describe_ops() ->
         <<"browse-method-source">> => #{
             <<"params">> => [<<"class">>, <<"side">>, <<"selector">>]
         },
-        <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]}
+        <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]},
+        %% `selector` is optional: present → also resolve the matching
+        %% `handle_call` clause; absent → whole-module view (BT-2578).
+        <<"browse-native-source">> => #{<<"params">> => [<<"class">>]}
     }.
 
 %%% ====================================================================
@@ -276,6 +292,15 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 <<"side">> => side_to_binary(ClassSide),
                 <<"selector">> => atom_to_binary(Selector, utf8),
                 <<"source">> => Source,
+                %% BT-2578: true when this is a `self delegate` method (ADR 0056)
+                %% on a native-backed class — the real implementation lives in a
+                %% `handle_call` clause of the backing module, reachable via
+                %% `browse-native-source`. Best-effort: the class must be native
+                %% and the stored body must be the recognised `self delegate`
+                %% marker (the compiler's `is_self_delegate` predicate).
+                <<"native_delegate">> =>
+                    meta_is_native(native_meta_of(ModName)) andalso
+                    is_self_delegate_source(Source),
                 %% BT-2558: the method's `///` doc-comment and rendered
                 %% signature, carried alongside the editable source so the
                 %% System Browser can present a read-only documentation block.
@@ -349,6 +374,11 @@ browse_class_definition(ClassName) ->
             SourceFile = source_file_of(ModName),
             State = state_slots(ClassPid),
             Definition = class_definition_text(ClassName, Super, State, SourceFile),
+            %% BT-2578: native-backed classes (ADR 0056) carry their backing
+            %% Erlang module name so the System Browser can badge them and offer
+            %% `browse-native-source`. Read from the facade module's
+            %% `__beamtalk_meta/0` (`native => true, backing_module => atom()`).
+            NativeMeta = native_meta_of(ModName),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
                 <<"superclass">> => atom_or_null(Super),
@@ -356,6 +386,8 @@ browse_class_definition(ClassName) ->
                 <<"definition">> => Definition,
                 <<"state">> => State,
                 <<"comment">> => class_doc(ClassPid),
+                <<"native">> => meta_is_native(NativeMeta),
+                <<"backing_module">> => atom_or_null(meta_backing_module(NativeMeta)),
                 <<"origin">> => origin_of(SourceFile),
                 <<"source_origin">> => source_origin_of(ModName, SourceFile),
                 %% The definition pane renders a *synthesized* class skeleton
@@ -433,6 +465,195 @@ class_definition_text(ClassName, Super, State, _SourceFile) ->
 -spec default_suffix(binary() | null) -> iolist().
 default_suffix(null) -> [];
 default_suffix(Default) -> [<<" = ">>, Default].
+
+%%% ====================================================================
+%%% Op 5 — browse-native-source (BT-2578)
+%%% ====================================================================
+
+%% The backing Erlang source for a `native:` class (ADR 0056). A native class
+%% only has Beamtalk *delegating* methods (`=> self delegate`); the real logic is
+%% gen_server callbacks (`handle_call/3`, `handle_info/2`) in a SEPARATE module
+%% (e.g. `Subprocess` → `beamtalk_subprocess`). So the reliable unit is the whole
+%% backing module, with a best-effort `handle_call` clause line-map and, when a
+%% `selector` is given, the matching clause (the selector↔clause mapping is loose
+%% — e.g. `Subprocess>>readLine` replies from `handle_info`, not its `handle_call`
+%% clause). Read-only; `editable` reflects `source_origin` (project-owned native
+%% is editable in a future R/W phase, stdlib/dependency never).
+-spec browse_native_source(atom(), atom() | undefined) -> beamtalk_repl_ops:op_result().
+browse_native_source(ClassName, Selector) ->
+    case beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined ->
+            not_found_error(<<"browse-native-source">>, ClassName);
+        ClassPid ->
+            ModName = beamtalk_runtime_api:module_name(ClassPid),
+            NativeMeta = native_meta_of(ModName),
+            case meta_backing_module(NativeMeta) of
+                none ->
+                    arg_error(
+                        <<"browse-native-source">>,
+                        iolist_to_binary([
+                            <<"class `">>,
+                            atom_to_binary(ClassName, utf8),
+                            <<"` is not native-backed">>
+                        ])
+                    );
+                Backing when is_atom(Backing) ->
+                    native_source_value(ClassName, ModName, Backing, Selector)
+            end
+    end.
+
+-spec native_source_value(atom(), atom(), atom(), atom() | undefined) ->
+    beamtalk_repl_ops:op_result().
+native_source_value(ClassName, ModName, Backing, Selector) ->
+    {BackingFile, Content} = backing_source(Backing),
+    %% `source_origin` keys editability off where the .erl lives: stdlib and
+    %% dependency native are read-only; project-owned native is the seam where a
+    %% future R/W phase enables editing (BT-2578 out-of-scope follow-up).
+    SourceOrigin = source_origin_of(ModName, BackingFile),
+    Clauses = handle_call_clause_lines(Content),
+    {value, #{
+        <<"class">> => atom_to_binary(ClassName, utf8),
+        <<"backing_module">> => atom_to_binary(Backing, utf8),
+        <<"source_file">> => BackingFile,
+        <<"source_origin">> => SourceOrigin,
+        <<"editable">> => SourceOrigin =:= <<"project">>,
+        <<"content">> => Content,
+        <<"clauses">> => Clauses,
+        <<"selected_clause">> => selected_clause(Clauses, Selector)
+    }}.
+
+%% The backing module's on-disk `.erl` and its content. The source path comes
+%% from the module's own compile info (`module_info(compile)` → `source`), so a
+%% `.beam`-only release (no shipped source) degrades to `{null, null}` —
+%% "source not available" — rather than an error. A path that no longer exists
+%% (moved/release-stripped) returns its known path with `null` content.
+-spec backing_source(atom()) -> {binary() | null, binary() | null}.
+backing_source(Backing) ->
+    case backing_source_file(Backing) of
+        undefined ->
+            {null, null};
+        Path ->
+            PathBin = unicode:characters_to_binary(Path),
+            case file:read_file(Path) of
+                {ok, Bin} -> {PathBin, Bin};
+                {error, _} -> {PathBin, null}
+            end
+    end.
+
+-spec backing_source_file(atom()) -> string() | undefined.
+backing_source_file(Backing) ->
+    try Backing:module_info(compile) of
+        Info when is_list(Info) ->
+            case lists:keyfind(source, 1, Info) of
+                {source, Path} when is_list(Path) -> Path;
+                _ -> undefined
+            end;
+        _ ->
+            undefined
+    catch
+        _:_ -> undefined
+    end.
+
+%% Best-effort `handle_call` clause line-map: each clause whose first message
+%% element is a concrete selector (a quoted atom like `'writeLine:'` or a bare
+%% lowercase atom like `readLine`) becomes `#{selector, line}`. Generic clauses
+%% — `handle_call({Selector, Args, _}, …)`, the catch-all `handle_call(Msg, …)`
+%% — bind variables (uppercase / `_`), match no selector, and are skipped.
+-spec handle_call_clause_lines(binary() | null) -> [map()].
+handle_call_clause_lines(null) ->
+    [];
+handle_call_clause_lines(Content) when is_binary(Content) ->
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    {Rows, _} = lists:foldl(
+        fun(Line, {Acc, N}) ->
+            case clause_selector(Line) of
+                {ok, Sel} -> {[#{<<"selector">> => Sel, <<"line">> => N} | Acc], N + 1};
+                none -> {Acc, N + 1}
+            end
+        end,
+        {[], 1},
+        Lines
+    ),
+    lists:reverse(Rows).
+
+%% A line's `handle_call` selector, or `none`. The first tuple element of the
+%% call message, captured whether written as a quoted atom (`'writeLine:'`) or a
+%% bare lowercase atom (`readLine`). The lowercase-initial requirement excludes
+%% the generic clauses that bind variables (`{Selector, Args, _}`, `Msg`). A
+%% single capture group avoids `re`'s truncation of trailing unmatched groups.
+-spec clause_selector(binary()) -> {ok, binary()} | none.
+clause_selector(Line) ->
+    Pattern = <<"handle_call\\(\\{\\s*'?([a-z][A-Za-z0-9_:]*)'?\\s*,">>,
+    case re:run(Line, Pattern, [{capture, all_but_first, binary}]) of
+        {match, [Sel]} when byte_size(Sel) > 0 -> {ok, Sel};
+        _ -> none
+    end.
+
+%% The clause row for a requested selector, or `null` (no selector asked, or no
+%% matching `handle_call` clause — a delegate whose work lives elsewhere).
+-spec selected_clause([map()], atom() | undefined) -> map() | null.
+selected_clause(_Clauses, undefined) ->
+    null;
+selected_clause(Clauses, Selector) ->
+    SelBin = atom_to_binary(Selector, utf8),
+    case lists:search(fun(#{<<"selector">> := S}) -> S =:= SelBin end, Clauses) of
+        {value, Row} -> Row;
+        false -> null
+    end.
+
+%% Native facade metadata (ADR 0056): the facade module exports
+%% `__beamtalk_meta/0` carrying `native => true` and `backing_module => atom()`.
+%% Non-native / non-Beamtalk modules don't export it → `#{}`.
+-spec native_meta_of(atom()) -> map().
+native_meta_of(ModName) when is_atom(ModName) ->
+    case erlang:function_exported(ModName, '__beamtalk_meta', 0) of
+        true ->
+            try ModName:'__beamtalk_meta'() of
+                Meta when is_map(Meta) -> Meta;
+                _ -> #{}
+            catch
+                _:_ -> #{}
+            end;
+        false ->
+            #{}
+    end.
+
+-spec meta_is_native(map()) -> boolean().
+meta_is_native(Meta) ->
+    maps:get(native, Meta, false) =:= true.
+
+-spec meta_backing_module(map()) -> atom() | none.
+meta_backing_module(Meta) ->
+    case maps:get(backing_module, Meta, none) of
+        M when is_atom(M), M =/= none, M =/= undefined -> M;
+        _ -> none
+    end.
+
+%% Best-effort: the compiler recognises a method body that is exactly the unary
+%% send `self delegate` (`MethodDefinition::is_self_delegate`). The stored source
+%% carries that body verbatim, so a `self delegate` substring is a reliable
+%% marker without re-parsing the AST here.
+-spec is_self_delegate_source(binary() | null) -> boolean().
+is_self_delegate_source(Source) when is_binary(Source) ->
+    binary:match(Source, <<"self delegate">>) =/= nomatch;
+is_self_delegate_source(_) ->
+    false.
+
+%% Optional `selector` param for `browse-native-source`: absent/empty → no clause
+%% selection; otherwise resolved to an existing atom (an unknown selector reads as
+%% a sentinel → no matching clause, never an atom-table growth).
+-spec optional_selector(map()) -> atom() | undefined.
+optional_selector(Params) ->
+    case maps:get(<<"selector">>, Params, undefined) of
+        Sel when is_binary(Sel), byte_size(Sel) > 0 ->
+            try
+                binary_to_existing_atom(Sel, utf8)
+            catch
+                error:badarg -> '__browse_unknown_selector__'
+            end;
+        _ ->
+            undefined
+    end.
 
 %%% ====================================================================
 %%% Divergence — origin / disk_differs
