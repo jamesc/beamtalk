@@ -139,15 +139,20 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
 handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% BT-2556: parse-only diagnostics for the cockpit CodeMirror editors. `code`
     %% is the FULL editor buffer (not a line prefix). We run the compiler's
-    %% side-effect-free `diagnostics/1` path — parse + semantic check via the
+    %% side-effect-free `diagnostics/2` path — parse + semantic check via the
     %% Rust port's `diagnostics` command — which compiles for DIAGNOSIS ONLY: it
     %% emits no module, installs nothing, never touches the image or the
     %% ChangeLog, and runs no user code. That makes it safe to fire on every
     %% keystroke and a `:read` op (the Observer may see diagnostics). Each entry
     %% carries byte-offset `start`/`end` spans + a `severity` + a `message`; the
     %% client maps spans to editor positions and severities to squiggles.
+    %% `mode` (BT-2569) selects the parse grammar: <<"expression">> (default,
+    %% top-level script — the Workspace + REPL editors) or <<"method">> (a bare
+    %% method body — the System Browser method editor, where the `=>` body
+    %% separator is not a valid top-level token).
     Code = maps:get(<<"code">>, Params, <<>>),
-    {diagnostics, diagnostics_for(Code)};
+    Mode = maps:get(<<"mode">>, Params, <<"expression">>),
+    {diagnostics, diagnostics_for(Code, Mode)};
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
@@ -830,25 +835,34 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
 -doc """
 Compute parse-only diagnostics for an editor buffer (BT-2556).
 
-`Code` is the full buffer source. Delegates to `beamtalk_compiler:diagnostics/1`
-— the side-effect-free parse + semantic-check path (the Rust port's
-`diagnostics` command): it never generates code, installs a module, mutates the
-image, or appends to the ChangeLog. Each diagnostic is a map with `message`,
-`severity`, and byte-offset `start`/`end` keys.
+`Code` is the full buffer source; `Mode` selects the parse grammar
+(`<<"expression">>` for a top-level script, `<<"method">>` for a bare method
+body). Delegates to `beamtalk_compiler:diagnostics/2` — the side-effect-free
+parse + semantic-check path (the Rust port's `diagnostics` command): it never
+generates code, installs a module, mutates the image, or appends to the
+ChangeLog. Each diagnostic is a map with `message`, `severity`, and byte-offset
+`start`/`end` keys.
 
 An empty buffer short-circuits to `[]` (nothing to diagnose). A compiler-port
 failure (`{error, _}` — port down / timed out) also degrades to `[]`: diagnostics
 are advisory and fire on every keystroke, so a transient port hiccup must not
 surface an error to the editor.
 """.
--spec diagnostics_for(binary()) -> [map()].
-diagnostics_for(<<>>) ->
+-spec diagnostics_for(binary(), binary()) -> [map()].
+diagnostics_for(<<>>, _Mode) ->
     [];
-diagnostics_for(Code) when is_binary(Code) ->
-    case beamtalk_compiler:diagnostics(Code) of
+diagnostics_for(Code, Mode) when is_binary(Code), is_binary(Mode) ->
+    case beamtalk_compiler:diagnostics(Code, Mode) of
         {ok, Diagnostics} when is_list(Diagnostics) -> Diagnostics;
         {error, _Reason} -> []
-    end.
+    end;
+%% A non-binary `code`/`mode` (a raw TCP/MCP client can send either as a JSON
+%% number/bool, not just the LiveView surface) degrades to `[]` rather than
+%% crashing the session — diagnostics are advisory and fire on every keystroke,
+%% so this matches the `{error, _}` degradation above and keeps the `binary()`
+%% spec honest at the Erlang boundary (BT-2569).
+diagnostics_for(_, _) ->
+    [].
 
 -doc """
 Resolve hover documentation for the hovered token (BT-2555).
@@ -1833,8 +1847,11 @@ base_ops() ->
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         %% BT-2555: live-image hover docs for the cockpit editors.
         <<"hover">> => #{<<"params">> => [<<"code">>]},
-        %% BT-2556: parse-only diagnostics for the cockpit editors.
-        <<"diagnostics">> => #{<<"params">> => [<<"code">>]},
+        %% BT-2556: parse-only diagnostics for the cockpit editors. BT-2569:
+        %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar.
+        <<"diagnostics">> => #{
+            <<"params">> => [<<"code">>], <<"optional">> => [<<"mode">>]
+        },
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
         %% BT-2557: discover TestCase subclasses for the cockpit test-runner pane.

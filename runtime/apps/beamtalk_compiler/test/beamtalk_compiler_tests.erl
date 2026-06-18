@@ -38,6 +38,10 @@ compiler_test_() ->
         {"compile file with no class returns error", fun compile_file_no_class/0},
         {"diagnostics returns structured diagnostics", fun diagnostics_succeeds/0},
         {"diagnostics for invalid source includes errors", fun diagnostics_errors/0},
+        {"diagnostics method mode accepts a bare method body",
+            fun diagnostics_method_mode_accepts_bare_body/0},
+        {"diagnostics method mode reports a broken body",
+            fun diagnostics_method_mode_reports_broken_body/0},
         {"version returns binary", fun version_succeeds/0},
         {"compile_core_erlang in memory", fun compile_core_erlang_in_memory/0},
         {"compile_core_erlang with invalid source", fun compile_core_erlang_invalid/0},
@@ -136,6 +140,22 @@ diagnostics_errors() ->
     ?assert(is_map(First)),
     ?assert(is_binary(maps:get(message, First))),
     ?assert(is_binary(maps:get(severity, First))).
+
+diagnostics_method_mode_accepts_bare_body() ->
+    %% BT-2569: a bare method body is a false parse error under the default
+    %% (expression) grammar — `=>` is not a valid top-level token — but parses
+    %% clean in method mode.
+    Body = <<"decrement => self.value := self.value - 1">>,
+    {ok, ExprDiags} = beamtalk_compiler:diagnostics(Body, <<"expression">>),
+    ?assert(length(ExprDiags) > 0),
+    {ok, MethodDiags} = beamtalk_compiler:diagnostics(Body, <<"method">>),
+    ?assertEqual([], MethodDiags).
+
+diagnostics_method_mode_reports_broken_body() ->
+    %% The parse-only method path still reports genuine errors (here `:=` with no
+    %% right-hand side), so it is not a no-op.
+    {ok, Diags} = beamtalk_compiler:diagnostics(<<"decrement => self.value :=">>, <<"method">>),
+    ?assert(length(Diags) > 0).
 
 version_succeeds() ->
     {ok, Version} = beamtalk_compiler:version(),

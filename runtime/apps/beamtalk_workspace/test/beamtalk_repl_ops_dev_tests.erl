@@ -304,6 +304,19 @@ diagnostics_missing_code_returns_empty_term_test() ->
         beamtalk_repl_ops_dev:handle_term(<<"diagnostics">>, #{}, Msg, self())
     ).
 
+diagnostics_non_binary_mode_returns_empty_term_test() ->
+    %% BT-2569: a non-binary `mode` (a raw TCP/MCP client could send a JSON
+    %% number) degrades to [] at the Erlang boundary via the diagnostics_for/2
+    %% catch-all, rather than crashing the session. No compiler/port call is made,
+    %% so this is covered without a running workspace.
+    Msg = make_msg(<<"diagnostics">>, <<"dg-4">>, undefined, false),
+    ?assertEqual(
+        {diagnostics, []},
+        beamtalk_repl_ops_dev:handle_term(
+            <<"diagnostics">>, #{<<"code">> => <<"x">>, <<"mode">> => 42}, Msg, self()
+        )
+    ).
+
 diagnostics_empty_code_encodes_done_status_test() ->
     %% handle/4 runs the term through encode_diagnostics -> WebSocket JSON shape.
     Msg = make_msg(<<"diagnostics">>, <<"dg-3">>, undefined, false),

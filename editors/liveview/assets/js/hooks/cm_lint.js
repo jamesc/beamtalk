@@ -129,10 +129,16 @@ function clamp(n, lo, hi) {
 // Promise stays pending — benign (no diagnostics ever appear; CM drops the
 // pending lint when the editor is destroyed) and the same accepted gap as
 // `completionQuery` / `hoverQuery`.
-export function lintQuery(pushEvent) {
+// `mode` (BT-2569) selects the backend parse grammar — "method" for the System
+// Browser method-editor tabs (a bare method body, where the `=>` body separator
+// is not a valid top-level token), or null/absent for the Workspace + REPL
+// editors (the server defaults to "expression"). When set, it rides the same
+// `diagnostics` event alongside `code`.
+export function lintQuery(pushEvent, mode = null) {
   return (code) =>
     new Promise((resolve) => {
-      pushEvent("diagnostics", { code }, (reply) => {
+      const payload = mode ? { code, mode } : { code }
+      pushEvent("diagnostics", payload, (reply) => {
         resolve((reply && reply.diagnostics) || [])
       })
     })

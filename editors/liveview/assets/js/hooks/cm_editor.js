@@ -126,8 +126,15 @@ export const CmEditor = {
     // editors — a read-only buffer has nothing to fix, so squiggles would just
     // be noise. The source debounces (idle delay) so typing never floods the
     // workspace; the op runs no user code (`:read`, parse-only).
+    // data-lint-mode (BT-2569) selects the parse grammar the backend analyses the
+    // buffer under. The method-editor *method* tabs set "method" (the buffer is a
+    // bare method body — `=>` is not a valid top-level token, so the default
+    // script grammar false-positives); the Workspace editor + the :def tab leave
+    // it unset → "expression" on the server. Re-read per mount, so a tab switch
+    // (which re-keys this element) picks up the new tab's mode.
     if (!readOnly) {
-      extensions.push(backendLint(lintQuery(this.pushEvent.bind(this))))
+      const lintMode = this.el.dataset.lintMode || null
+      extensions.push(backendLint(lintQuery(this.pushEvent.bind(this), lintMode)))
     }
 
     this.view = new EditorView({

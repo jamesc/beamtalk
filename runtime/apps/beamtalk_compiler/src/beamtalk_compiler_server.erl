@@ -28,6 +28,7 @@ to avoid temp files on disk (BT-48).
     compile/2,
     compile_method/3,
     diagnostics/1,
+    diagnostics/2,
     version/0,
     compile_core_erlang/1,
     register_class/2,
@@ -154,7 +155,13 @@ compile_method(ClassSource, MethodSource, Options) ->
 -spec diagnostics(binary()) ->
     {ok, [map()]} | {error, [binary()]}.
 diagnostics(Source) ->
-    gen_server:call(?MODULE, {diagnostics, Source}, 30000).
+    diagnostics(Source, <<"expression">>).
+
+-doc "Get diagnostics for source code under a parse `Mode' (no code generation).".
+-spec diagnostics(binary(), binary()) ->
+    {ok, [map()]} | {error, [binary()]}.
+diagnostics(Source, Mode) ->
+    gen_server:call(?MODULE, {diagnostics, Source, Mode}, 30000).
 
 -doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.
@@ -501,8 +508,8 @@ handle_call({resolve_completion_type, Expression}, _From, State) ->
         State#state.port, Expression, State#state.classes
     ),
     {reply, Result, State};
-handle_call({diagnostics, Source}, _From, State) ->
-    Result = do_diagnostics(State#state.port, Source),
+handle_call({diagnostics, Source, Mode}, _From, State) ->
+    Result = do_diagnostics(State#state.port, Source, Mode),
     {reply, Result, State};
 handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
     Result = beamtalk_compiler_port:find_senders_in_source(
@@ -833,9 +840,11 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
             {error, [#{message => <<"Compiler port response is malformed">>}]}
     end.
 
-%% Send a diagnostics request via the port.
-do_diagnostics(Port, Source) ->
-    Request = #{command => diagnostics, source => Source},
+%% Send a diagnostics request via the port. `Mode' selects the parse grammar
+%% (BT-2569): `<<"expression">>' (default, top-level script) or `<<"method">>'
+%% (bare method body — the System Browser method editor).
+do_diagnostics(Port, Source, Mode) ->
+    Request = #{command => diagnostics, source => Source, mode => Mode},
     case send_port_request(Port, Request, 30000) of
         {ok, Response} ->
             handle_diagnostics_response(Response);

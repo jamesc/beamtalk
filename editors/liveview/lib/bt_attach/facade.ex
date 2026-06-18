@@ -268,10 +268,22 @@ defmodule BtAttach.Facade do
   # only `code` is required. Capability `:read` (no user code), so the Observer
   # role sees diagnostics too. A non-binary `code` is `:invalid_params` with no
   # dist call, matching `:complete`/`:hover`.
-  defp invoke(:diagnostics, %{code: code}, _ctx) do
-    if is_binary(code),
-      do: client().diagnostics(code),
-      else: {:error, :invalid_params}
+  # `mode` (BT-2569) selects the parse grammar: `"expression"` (default — a
+  # top-level script) or `"method"` (a bare method body, the System Browser
+  # method editor). Absent → `"expression"`, so the Workspace/REPL editors are
+  # unaffected. A non-binary `code` is `:invalid_params` with no dist call.
+  defp invoke(:diagnostics, %{code: code} = params, _ctx) do
+    if is_binary(code) do
+      # Normalise `mode` to a known binary at the facade boundary — the shared
+      # capability gate for every caller, not just the LiveView. Anything but
+      # "method" degrades to the safe default, so a caller that bypasses the
+      # LiveView event whitelist can't push a non-binary into
+      # `Workspace.diagnostics/2`'s `is_binary(mode)` guard (BT-2569).
+      mode = if Map.get(params, :mode) == "method", do: "method", else: "expression"
+      client().diagnostics(code, mode)
+    else
+      {:error, :invalid_params}
+    end
   end
 
   # BT-2557: the cockpit test-runner pane. `list_tests` discovers test classes
