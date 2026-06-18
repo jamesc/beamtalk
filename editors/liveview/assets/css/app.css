@@ -405,10 +405,16 @@
 /* Cap the height only when expanded, so a long doc scrolls instead of crowding
    the editor; collapsed, the block hugs its single summary line. */
 .doc-block.open { max-height: 40%; }
+/* `white-space: normal` (not `pre-wrap`): this rule is inherited by the toggle's
+   `.doc-caret` / `.doc-sig-text` spans, whose content carries the HEEx template's
+   own indentation whitespace and newlines. `pre-wrap` would render that leading
+   whitespace verbatim — shoving the caret + signature far to the right (so the
+   line reads as "centred") and adding blank lines that balloon the block.
+   `normal` collapses it; long signatures still wrap via `word-break`. */
 .doc-block .doc-sig {
   color: var(--accent-2); font-family: var(--code-font, monospace);
   font-size: 12px; font-weight: 600;
-  white-space: pre-wrap; word-break: break-word;
+  white-space: normal; word-break: break-word;
 }
 /* The signature-as-toggle: a full-width, borderless button that reads as the
    plain signature line, with a disclosure caret. Only `.open` draws the divider
