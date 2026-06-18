@@ -835,11 +835,13 @@ get_context_completions(Line, Bindings) when is_binary(Line) ->
 -doc """
 Compute parse-only diagnostics for an editor buffer (BT-2556).
 
-`Code` is the full buffer source. Delegates to `beamtalk_compiler:diagnostics/1`
-— the side-effect-free parse + semantic-check path (the Rust port's
-`diagnostics` command): it never generates code, installs a module, mutates the
-image, or appends to the ChangeLog. Each diagnostic is a map with `message`,
-`severity`, and byte-offset `start`/`end` keys.
+`Code` is the full buffer source; `Mode` selects the parse grammar
+(`<<"expression">>` for a top-level script, `<<"method">>` for a bare method
+body). Delegates to `beamtalk_compiler:diagnostics/2` — the side-effect-free
+parse + semantic-check path (the Rust port's `diagnostics` command): it never
+generates code, installs a module, mutates the image, or appends to the
+ChangeLog. Each diagnostic is a map with `message`, `severity`, and byte-offset
+`start`/`end` keys.
 
 An empty buffer short-circuits to `[]` (nothing to diagnose). A compiler-port
 failure (`{error, _}` — port down / timed out) also degrades to `[]`: diagnostics

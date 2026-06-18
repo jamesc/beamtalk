@@ -16,7 +16,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
 
 - `compile_expression/3' — Compile a REPL expression
 - `compile/2' — Compile a file/class definition (`:load')
-- `diagnostics/1' — Get parse/semantic diagnostics only
+- `diagnostics/1' — Get parse/semantic diagnostics only (default "expression" mode)
+- `diagnostics/2' — Get parse/semantic diagnostics under a named parse mode
 - `version/0' — Get compiler version
 - `compile_core_erlang/1' — Core Erlang → BEAM bytecode (in-memory)
 """.
