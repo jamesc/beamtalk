@@ -179,7 +179,7 @@
 
 /* main grid: System Browser | editor + workspace dock | bindings + inspector */
 .cockpit {
-  flex: 1; min-height: 0; display: grid; gap: var(--gap);
+  flex: 1; min-height: 0; display: grid; gap: var(--gap); position: relative;
   grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) var(--inspector-w, 348px);
   transition: grid-template-columns 200ms ease;
 }
@@ -254,9 +254,14 @@
 
 /* ---------- System Browser (BT-2491, ported from the spike) ---------- */
 
-/* the left column splits between the class tree and the method list */
+/* the left column splits between the class tree and the method list, with a
+   draggable gutter between them (BT-2576). The class tree (top pane) is sized by
+   the `--browser-split` var the SplitDrag hook writes; the method list flexes to
+   fill the rest. */
 .browser-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
-.browser-split .panel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.browser-split .panel { display: flex; flex-direction: column; min-height: 0; }
+.browser-split > .panel:first-of-type { flex: 0 0 var(--browser-split, 50%); }
+.browser-split > .panel:last-of-type { flex: 1 1 0; }
 
 /* segmented control (view + side toggles) */
 .seg { display: inline-flex; background: var(--panel-3); border: 1px solid var(--line); border-radius: 6px; padding: 1px; }
@@ -619,10 +624,35 @@
 .btn .k { font-family: var(--code-font, ui-monospace, monospace); font-size: 10px; color: var(--faint); }
 .kbdhint { font-size: 10.5px; color: var(--faint); }
 
-/* right column splits between bindings and inspector */
+/* right column splits between bindings and inspector, with a draggable gutter
+   (BT-2576). Bindings (top pane) is sized by `--right-split`; the Inspector
+   flexes to fill the rest. */
 .right-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
-.bindings-panel { flex: 1; min-height: 0; }
-.inspector-panel { flex: 1; min-height: 0; }
+.bindings-panel { flex: 0 0 var(--right-split, 50%); min-height: 0; }
+.inspector-panel { flex: 1 1 0; min-height: 0; }
+
+/* ── resizeable splitters (BT-2576) ─────────────────────────────────────────
+   Draggable dividers driven by the SplitDrag hook. A vertical gutter sits in the
+   flex gap between two stacked panels (`.browser-split`, `.right-split`); a
+   horizontal gutter overlays a cockpit column seam — absolute, so the 3-column
+   grid template and the BT-2559 collapse rules are left untouched. Both are slim
+   hit targets that tint on hover. */
+.split-gutter { flex: none; background: transparent; border-radius: 3px; }
+.split-gutter:hover { background: var(--accent); }
+.split-gutter-y { height: 6px; margin: calc(var(--gap) / -2) 0; cursor: row-resize; }
+.split-gutter-x {
+  position: absolute; top: 0; bottom: 0; width: 8px; z-index: 6; cursor: col-resize;
+}
+.col-gutter-left { left: var(--browser-w, 286px); transform: translateX(calc(var(--gap) / 2 - 4px)); }
+.col-gutter-right { right: var(--inspector-w, 348px); transform: translateX(calc(4px - var(--gap) / 2)); }
+/* a collapsed side column hides its seam gutter (BT-2559 toggles) */
+.cockpit.browser-hidden .col-gutter-left { display: none; }
+.cockpit.inspector-hidden .col-gutter-right { display: none; }
+/* hold the resize cursor across the whole drag, and freeze the column-width
+   transition so a horizontal drag tracks the pointer instead of easing behind it */
+body.row-resizing { cursor: row-resize; user-select: none; }
+body.col-resizing { cursor: col-resize; user-select: none; }
+body.col-resizing .cockpit { transition: none; }
 
 /* ============================================================================
    Bindings + Inspector (BT-2486, epic BT-2482 Phase 1)
