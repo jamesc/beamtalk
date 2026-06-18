@@ -210,7 +210,7 @@ revisiting any decision here.
 ### Decided sub-decisions
 
 - **Shell: Tauri.** The desktop shell is a **Tauri (Rust) app**, not Electron.
-  Two reasons. First, **language coherence**: the Beamtalk compiler/CLI is
+  Three reasons. First, **language coherence**: the Beamtalk compiler/CLI is
   already Rust, so a Rust shell keeps the toolchain in one language — the broker
   logic (discovery, spawn, port allocation, child reaping) is ordinary Rust
   process handling, reviewable by the same people who own `beamtalk-cli`.
@@ -218,6 +218,18 @@ revisiting any decision here.
   ~100 MB Electron runtime would be pure overhead on a binary we can't shrink;
   Tauri's system-webview model avoids that. The shell does very little
   (spawn → probe → window), so Tauri's thinner JS ecosystem is not a cost here.
+  Third, **OS-reserved keybindings**: a native shell owns its window's menu and
+  accelerator table, so chords the browser refuses to surrender — `Ctrl/Cmd-W`,
+  `Ctrl/Cmd-N`, `Ctrl-T`, `Ctrl-Shift-T` — become bindable IDE actions (e.g.
+  `Ctrl/Cmd-W` closing the focused code pane rather than the OS killing the tab).
+  In a plain browser tab these chords are handled by the browser chrome before
+  the page sees a cancelable event, so `preventDefault()` is silently ignored;
+  the `KeyboardShortcuts` hook (`assets/js/hooks/keyboard_shortcuts.js`) can only
+  claim the non-reserved chords (⌘S/⌘D/⌘P/⌘I). This is a property the no-shell
+  coordinator's **PWA** path cannot match: an installed PWA standalone window
+  still lets the browser/OS consume `Ctrl/Cmd-W` (it closes the PWA window), and
+  the page still cannot `preventDefault` it — so editor-grade key ownership is a
+  concrete capability that tips the spike's shell decision toward Tauri.
   Caveat: the spike (Implementation §6) builds the no-shell coordinator
   alternative alongside and must confirm the Rust shell earns its keep over it
   before the CI build lane is committed.
@@ -369,7 +381,9 @@ build this *first* and justify the Tauri shell against it. The Tauri case rests
 on things the coordinator can't easily do: enforcing the loopback/no-OIDC
 posture and `SECRET_KEY_BASE` provisioning *outside* the BEAM (a coordinator
 front would have to spawn children with the same care anyway), true per-window
-OS integration, and reaping orphaned child processes on crash. If those don't
+OS integration, **ownership of OS-reserved keybindings** (`Ctrl/Cmd-W` etc. as
+IDE actions — see "Shell: Tauri"; a PWA window still cedes these to the browser),
+and reaping orphaned child processes on crash. If those don't
 prove load-bearing in the spike, the coordinator wins and this ADR's
 shell choice should flip.
 
