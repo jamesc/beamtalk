@@ -2447,7 +2447,9 @@ Object subclass: Counter
         let prev = map_get(m, "prev_source")
             .and_then(term_to_string)
             .expect("prev_source present");
-        assert!(prev.starts_with("increment =>"), "got: {prev:?}");
+        // The span is a verbatim full-line slice, so it carries the method's
+        // leading indentation (and its doc comment, when present — BT-2577).
+        assert!(prev.starts_with("  increment =>"), "got: {prev:?}");
         assert!(
             prev.ends_with('\n'),
             "span includes trailing newline: {prev:?}"
@@ -2481,7 +2483,7 @@ Object subclass: Counter
         let prev = map_get(m, "prev_source")
             .and_then(term_to_string)
             .expect("prev_source present");
-        assert!(prev.starts_with("class new =>"), "got: {prev:?}");
+        assert!(prev.starts_with("  class new =>"), "got: {prev:?}");
     }
 
     #[test]

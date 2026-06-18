@@ -29,6 +29,7 @@ flush_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
         fun empty_log_returns_empty_summary/1,
         fun single_method_splice_writes_atomically/1,
+        fun doc_commented_method_flush_preserves_indent_and_doc/1,
         fun shadowed_entry_is_marked_flushed/1,
         fun multi_method_splice_in_one_file/1,
         fun multiple_files_each_flushed/1,
@@ -139,6 +140,84 @@ single_method_splice_writes_atomically(#{proj_dir := ProjDir}) ->
         %% No .tmp left over after rename.
         ?_assertEqual(false, filelib:is_regular(File ++ ".tmp"))
     ].
+
+%% BT-2577 regression: editing a doc-commented, indented method and flushing must
+%% preserve the file indentation and the single doc comment — not duplicate the
+%% doc or dedent the method. The span is the verbatim doc-inclusive slice (what
+%% `resolve_method_span` now returns); the stored body is the compiler's
+%% canonical column-0 form (`unparse_method`); flush re-indents it to the span's
+%% base before splicing.
+doc_commented_method_flush_preserves_indent_and_doc(#{proj_dir := ProjDir}) ->
+    File = filename:join([ProjDir, "src", "counter.bt"]),
+    Original = <<
+        "Actor subclass: Counter\n"
+        "  /// Decrease by one.\n"
+        "  decrement -> Integer => self.value := self.value - 1\n"
+        "\n"
+        "  /// The next thing.\n"
+        "  next => 2\n"
+        "end\n"
+    >>,
+    ok = file:write_file(File, Original),
+    %% The span covers the verbatim doc-inclusive, indented slice.
+    Slice = <<"  /// Decrease by one.\n  decrement -> Integer => self.value := self.value - 1\n">>,
+    {Start, End, OldBody} = locate(Original, Slice),
+    %% The stored ChangeLog body is the compiler's canonical column-0 form.
+    NewBody = <<"/// Decrease by one.\ndecrement -> Integer => self.value := self.value - 2\n">>,
+    {ok, _} = beamtalk_workspace_changelog:append(
+        method_input(
+            <<"Counter">>, <<"decrement">>, NewBody, OldBody, list_to_binary(File), Start, End
+        )
+    ),
+    {ok, _Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(File),
+    Expected = <<
+        "Actor subclass: Counter\n"
+        "  /// Decrease by one.\n"
+        "  decrement -> Integer => self.value := self.value - 2\n"
+        "\n"
+        "  /// The next thing.\n"
+        "  next => 2\n"
+        "end\n"
+    >>,
+    [
+        ?_assertEqual(Expected, Final),
+        %% The doc comment is not duplicated.
+        ?_assertEqual(1, length(binary:matches(Final, <<"/// Decrease by one.">>))),
+        %% The following method is untouched.
+        ?_assertNotEqual(nomatch, binary:match(Final, <<"  /// The next thing.\n  next => 2\n">>))
+    ].
+
+%%====================================================================
+%% reindent/2 (BT-2577)
+%%====================================================================
+
+reindent_shifts_canonical_body_to_base_test() ->
+    ?assertEqual(
+        <<"  /// doc\n  decrement => self.v - 2\n">>,
+        beamtalk_workspace_flush:reindent(
+            <<"  ">>, <<"/// doc\ndecrement => self.v - 2\n">>
+        )
+    ).
+
+reindent_preserves_relative_indentation_test() ->
+    %% Column-0 selector with a 2-space body line shifts to base 2 / base+2.
+    ?assertEqual(
+        <<"  foo =>\n    body\n">>,
+        beamtalk_workspace_flush:reindent(<<"  ">>, <<"foo =>\n  body\n">>)
+    ).
+
+reindent_empty_base_is_identity_test() ->
+    ?assertEqual(
+        <<"foo => 1\n">>,
+        beamtalk_workspace_flush:reindent(<<>>, <<"foo => 1\n">>)
+    ).
+
+reindent_blank_lines_stay_empty_test() ->
+    ?assertEqual(
+        <<"  a\n\n  b\n">>,
+        beamtalk_workspace_flush:reindent(<<"  ">>, <<"a\n\nb\n">>)
+    ).
 
 shadowed_entry_is_marked_flushed(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "counter.bt"]),

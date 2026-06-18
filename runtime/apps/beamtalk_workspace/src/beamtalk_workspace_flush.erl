@@ -116,6 +116,7 @@ zero conflicts, an empty `skipped` list, and `files` reflecting the renamed set.
 %% Exported for tests.
 -export([
     splice/3,
+    reindent/2,
     group_by_file/1,
     complete_flush/4,
     filter_shadowed_by_survivor/2,
@@ -711,7 +712,15 @@ splice_with_prev(Body, Entry, Start, End, PrevBody) ->
                 true ->
                     case beamtalk_workspace_changelog:read_source_body(Entry) of
                         {ok, NewSrc} ->
-                            {ok, splice(Body, {Start, End}, NewSrc)};
+                            %% The stored body is the compiler's canonical
+                            %% `unparse_method` form (column-0, doc comment
+                            %% included), while the span it replaces is the
+                            %% verbatim, file-indented disk slice (BT-2577). Shift
+                            %% the body to the span's base indentation before
+                            %% splicing so flush preserves the file's indentation
+                            %% and never duplicates or dedents the doc comment.
+                            Reindented = reindent(base_indent(PrevBody), NewSrc),
+                            {ok, splice(Body, {Start, End}, Reindented)};
                         {error, Reason} ->
                             {error, source_body_error(File, Reason)}
                     end
@@ -735,6 +744,82 @@ splice(Body, {Start, End}, Replacement) ->
     Before = binary:part(Body, 0, Start),
     After = binary:part(Body, End, byte_size(Body) - End),
     <<Before/binary, Replacement/binary, After/binary>>.
+
+-doc """
+Shift `Src` so its least-indented line sits at `Base` indentation, preserving
+relative indentation (BT-2577). The stored ChangeLog body is the compiler's
+canonical `unparse_method` form — column-0 with 2-space relative steps — but the
+span it replaces is file-indented, so flush re-indents the body to match before
+splicing. Blank lines are emitted empty (no trailing whitespace). Pure helper
+exported for tests.
+""".
+-spec reindent(binary(), binary()) -> binary().
+reindent(Base, Src) ->
+    Lines = binary:split(Src, <<"\n">>, [global]),
+    Min = min_indent(Lines, undefined),
+    Shifted = [shift_line(Base, Min, Line) || Line <- Lines],
+    iolist_to_binary(lists:join(<<"\n">>, Shifted)).
+
+%% The leading whitespace (spaces/tabs) of the first line of `Body` — the base
+%% indentation of the on-disk method definition the span covers.
+-spec base_indent(binary()) -> binary().
+base_indent(Body) ->
+    First =
+        case binary:split(Body, <<"\n">>) of
+            [Line | _] -> Line;
+            [] -> <<>>
+        end,
+    leading_ws(First).
+
+%% The least leading-whitespace width across the non-blank lines (the canonical
+%% body's own base indent, normally 0). Blank lines are ignored. `undefined`
+%% (no non-blank line) collapses to 0.
+-spec min_indent([binary()], non_neg_integer() | undefined) -> non_neg_integer().
+min_indent([], undefined) ->
+    0;
+min_indent([], Acc) ->
+    Acc;
+min_indent([Line | Rest], Acc) ->
+    case is_blank(Line) of
+        true ->
+            min_indent(Rest, Acc);
+        false ->
+            Width = byte_size(leading_ws(Line)),
+            min_indent(Rest, min_def(Acc, Width))
+    end.
+
+-spec min_def(non_neg_integer() | undefined, non_neg_integer()) -> non_neg_integer().
+min_def(undefined, Width) -> Width;
+min_def(Acc, Width) -> min(Acc, Width).
+
+%% Re-indent one line: drop its `Min` leading whitespace bytes (its share of the
+%% canonical base indent) and prepend `Base`. Blank lines stay empty.
+-spec shift_line(binary(), non_neg_integer(), binary()) -> binary().
+shift_line(Base, Min, Line) ->
+    case is_blank(Line) of
+        true ->
+            <<>>;
+        false ->
+            Stripped = binary:part(Line, Min, byte_size(Line) - Min),
+            <<Base/binary, Stripped/binary>>
+    end.
+
+%% The leading run of spaces/tabs in `Line`.
+-spec leading_ws(binary()) -> binary().
+leading_ws(Line) ->
+    leading_ws(Line, 0).
+
+leading_ws(Line, N) ->
+    case Line of
+        <<_:N/binary, C, _/binary>> when C =:= $\s; C =:= $\t ->
+            leading_ws(Line, N + 1);
+        _ ->
+            binary:part(Line, 0, N)
+    end.
+
+-spec is_blank(binary()) -> boolean().
+is_blank(Line) ->
+    byte_size(leading_ws(Line)) =:= byte_size(Line).
 
 %% Append a method body (which itself may or may not end in a newline) after a
 %% blank-line separator. Used for `selector_not_found` entries — a brand-new
