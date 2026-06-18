@@ -1175,10 +1175,10 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("tab_select", _params, socket), do: {:noreply, socket}
 
-  # Close a tab (the spike's × affordance). The last tab is never closable — the
-  # editor always holds ≥1 tab — so a close request that would empty the strip is
-  # ignored. Closing the active tab moves focus to the previous (or first)
-  # remaining tab.
+  # Close a tab (the spike's × affordance). The strip may empty completely — the
+  # editor then shows its empty state (no default tab is re-seeded). Closing the
+  # active tab moves focus to the previous remaining tab, or clears focus when it
+  # was the last one open.
   def handle_event("tab_close", %{"id" => id}, socket) do
     {:noreply, close_tab(socket, id)}
   end
@@ -1204,13 +1204,61 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("browser_open_definition", _params, socket), do: {:noreply, socket}
 
+  # Open a blank "new method" tab for the *selected* class (the System Browser's
+  # "new method" entry). A new-method tab is a `:method` tab with no selector yet —
+  # the only editor surface that still shows a selector input (the breadcrumb can't
+  # name a selector that doesn't exist), so the author types the selector + body.
+  # The starter tab used to fill this role on startup; it now opens on demand only.
+  def handle_event("new_method", %{"class" => class}, %{assigns: %{role: :owner}} = socket)
+      when is_binary(class) and class != "" do
+    # Author on whichever side the browser is showing (instance/class), so "new
+    # method" while viewing the class side opens a class-side tab.
+    {:noreply, open_new_method(socket, class, socket.assigns.browser_side)}
+  end
+
+  # Non-owner (Observer) or malformed payload: a no-op. Authoring is owner-only —
+  # the entry is rendered only for `:owner`, and a crafted event from a read-only
+  # role must not even open a (non-savable) scratch tab in their strip.
+  def handle_event("new_method", _params, socket), do: {:noreply, socket}
+
   # Track edits to the active tab so its dirty dot reflects unsaved changes
   # (BT-2494). The save_method form's `phx-change` reports the live source on
   # each keystroke; we stash it on the active tab and recompute its dirty flag
   # (source != the last-compiled base). Client-supplied, so a non-binary / absent
   # source is ignored rather than crashing.
-  def handle_event("edit_source", %{"source" => source}, socket) when is_binary(source) do
-    {:noreply, track_edit(socket, source)}
+  #
+  # On a *new-method* tab the form also carries the visible `selector` input. That
+  # input is controlled (`value={@edit_selector}`) and NOT `phx-update="ignore"`,
+  # so without capturing it here the server re-render (fired by typing in the
+  # CodeMirror source) would patch it back to `""` and wipe the author's typed
+  # selector — the next ⌘S would then fail the empty-selector guard. Mirror the
+  # payload's selector into `@edit_selector` so it survives the edit-source churn.
+  def handle_event("edit_source", %{"source" => source} = params, socket)
+      when is_binary(source) do
+    socket = track_edit(socket, source)
+
+    socket =
+      case active_tab(socket.assigns) do
+        %{new: true} ->
+          case Map.get(params, "selector") do
+            sel when is_binary(sel) ->
+              # Mirror into BOTH the assign (so this render keeps the value) AND
+              # the tab struct (so `sync_active/2` restores it when the user
+              # switches away and back — otherwise the tab's `selector: ""` would
+              # wipe the typed name on re-focus).
+              socket
+              |> assign(edit_selector: sel)
+              |> update_active_tab(fn tab -> %{tab | selector: sel} end)
+
+            _ ->
+              socket
+          end
+
+        _ ->
+          socket
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("edit_source", _params, socket), do: {:noreply, socket}
@@ -2267,6 +2315,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               flush_error: nil
             )
             |> compile_clean(tab_id, source)
+            |> promote_new_method_tab(tab_id, class, selector)
             |> assign_changes()
 
           {:error, reason} ->
@@ -2802,7 +2851,8 @@ defmodule BtAttachWeb.WorkspaceLive do
           # The method's `///` doc-comment + signature for the read-only doc
           # block (BT-2558); nil when the method carries no doc / signature.
           doc: info.doc,
-          signature: info.signature
+          signature: info.signature,
+          new: false
         }
 
         socket
@@ -2954,7 +3004,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   # graceful no-op — there is nothing to query. `kind` is `:senders` |
   # `:implementors`; the facade op name matches.
   defp run_nav_query(socket, kind) do
-    selector = active_tab(socket.assigns).selector
+    selector =
+      case active_tab(socket.assigns) do
+        %{selector: sel} -> sel
+        nil -> nil
+      end
 
     if is_binary(selector) and selector != "" do
       case Facade.dispatch(kind, %{selector: selector}, ctx(socket)) do
@@ -3088,11 +3142,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   # write-surface handler reads them unchanged.
   #
   #   %{
-  #     id: stable string id (method-key or "def:<Class>"),
+  #     id: stable string id (method-key, "def:<Class>", or "new:<Class>"),
   #     kind: :method | :def,
   #     class: "Counter",
   #     side: "instance" | "class",     # methods only
-  #     selector: "increment",          # methods only
+  #     selector: "increment",          # methods only ("" for an unsaved new method)
   #     source: live edit buffer,
   #     base: last-compiled source (dirty = source != base),
   #     dirty: boolean,
@@ -3100,48 +3154,30 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     runtime_only: boolean,   # methods only — sourceless runtime method at open
   #     disk_source: binary | nil, # methods only — on-disk body captured at open (BT-2550); nil when unknown
   #     doc: binary | nil,       # BT-2558 read-only doc block: method `///` doc / class comment
-  #     signature: binary | nil  # BT-2558 method signature (nil for a class-definition tab)
+  #     signature: binary | nil, # BT-2558 method signature (nil for a class-definition tab)
+  #     new: boolean             # an unsaved "new method" tab (selector input shown, not the breadcrumb)
   #   }
   #
-  # The cockpit opens with one starter method tab so the editor is never empty
-  # (the strip always holds ≥1 tab) and the ⌘S / Save Method e2e flow has a tab
-  # to compile into.
-
+  # The cockpit opens with NO tabs — the editor shows an empty state until the
+  # user opens something (a method or class definition from the System Browser).
+  # `:active_tab` is `nil` while the strip is empty; the render guards on it and
+  # shows the empty-state panel instead of the editor form. Edit-backing assigns
+  # stay `""` (set just before this in the assign chain) until a tab is focused.
   defp init_tabs(socket) do
-    tab = %{
-      id: "method:Counter:instance:increment",
-      kind: :method,
-      class: "Counter",
-      side: "instance",
-      selector: "increment",
-      source: "",
-      base: "",
-      dirty: false,
-      disk_differs: false,
-      runtime_only: false,
-      disk_source: nil,
-      doc: nil,
-      signature: nil
-    }
-
     socket
-    |> assign(:tabs, [tab])
-    |> assign(:active_tab, tab.id)
-    # Mirror the starter tab into the form-backing edit assigns NOW, so the
-    # method editor's class/selector/source inputs match the breadcrumb from the
-    # first connected render (BT-2518). Without this, the inputs stay `""` until
-    # the user clicks the tab (`tab_select` → `sync_active/2`), so a ⌘S /
-    # Compile on open fails with "Enter a class name to save a method."
-    |> sync_active(tab)
+    |> assign(:tabs, [])
+    |> assign(:active_tab, nil)
   end
 
   defp find_tab(socket, id), do: Enum.find(socket.assigns.tabs, &(&1.id == id))
 
-  # The focused tab. Takes the bare `assigns` (not the socket) so the render
-  # template can call it for the breadcrumb / dirty-state too; falls back to the
-  # first tab if the active id somehow no longer maps (the strip is never empty).
+  # The focused tab, or `nil` when the strip is empty (startup, or after the last
+  # tab is closed) — callers and the render guard on the nil. Takes the bare
+  # `assigns` (not the socket) so the template can call it for the breadcrumb /
+  # dirty-state; falls back to the first tab if a non-nil active id somehow no
+  # longer maps.
   defp active_tab(%{tabs: tabs, active_tab: id}) do
-    Enum.find(tabs, &(&1.id == id)) || List.first(tabs)
+    (id && Enum.find(tabs, &(&1.id == id))) || List.first(tabs)
   end
 
   # Focus a tab by id and mirror its class/selector/source into the form-backing
@@ -3172,25 +3208,48 @@ defmodule BtAttachWeb.WorkspaceLive do
     )
   end
 
-  # Close a tab, keeping at least one open. Closing the active tab moves focus to
-  # the previous remaining tab (or the first), re-syncing the form assigns.
+  # Close a tab. The strip may go empty (the editor then shows its empty state) —
+  # closing the active tab moves focus to the previous remaining tab, or clears
+  # focus (`active_tab: nil`, edit assigns reset) when it was the last one.
   defp close_tab(socket, id) do
     tabs = socket.assigns.tabs
 
-    if length(tabs) <= 1 or not Enum.any?(tabs, &(&1.id == id)) do
+    if not Enum.any?(tabs, &(&1.id == id)) do
       socket
     else
       idx = Enum.find_index(tabs, &(&1.id == id))
       remaining = List.delete_at(tabs, idx)
       socket = assign(socket, :tabs, remaining)
 
-      if socket.assigns.active_tab == id do
-        next = Enum.at(remaining, max(idx - 1, 0))
-        sync_active(assign(socket, :active_tab, next.id), next)
-      else
-        socket
+      cond do
+        socket.assigns.active_tab != id ->
+          socket
+
+        remaining == [] ->
+          clear_active(socket)
+
+        true ->
+          next = Enum.at(remaining, max(idx - 1, 0))
+          sync_active(assign(socket, :active_tab, next.id), next)
       end
     end
+  end
+
+  # Drop focus to the empty state: no active tab, edit-backing assigns reset to
+  # the same blanks `init_tabs/1` starts from, and any stale save/flush result
+  # cleared so the next opened tab starts clean.
+  defp clear_active(socket) do
+    assign(socket,
+      active_tab: nil,
+      edit_class: "",
+      edit_selector: "",
+      edit_source: "",
+      edit_selection: nil,
+      save_result: nil,
+      save_error: nil,
+      flush_result: nil,
+      flush_error: nil
+    )
   end
 
   # Open (or re-focus) a class-definition tab for the active tab's class. A def
@@ -3198,7 +3257,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # first open it also reads the class' comment (BT-2558) so the editor can show
   # it as a read-only documentation block above the editable definition body.
   defp open_definition(socket) do
-    open_definition(socket, active_tab(socket.assigns).class)
+    # The "+ def" affordance opens the *active* tab's class — a no-op when the
+    # strip is empty (nothing focused to take a class from). The button is hidden
+    # in that state, so this guard is just belt-and-braces against a stale click.
+    case active_tab(socket.assigns) do
+      %{class: class} -> open_definition(socket, class)
+      nil -> socket
+    end
   end
 
   # Open (or re-focus) a class-definition tab for a named class — the System
@@ -3247,7 +3312,8 @@ defmodule BtAttachWeb.WorkspaceLive do
           # The class comment as the doc block; no per-method signature on a
           # class-definition tab.
           doc: comment,
-          signature: nil
+          signature: nil,
+          new: false
         }
 
         socket
@@ -3255,6 +3321,47 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> assign(:active_tab, id)
         |> sync_active(tab)
     end
+  end
+
+  # Open (or re-focus) a blank "new method" tab for a class on `side`
+  # ("instance"/"class"): a `:method` tab whose selector is not yet chosen
+  # (`selector: ""`, `new: true`). The author fills the selector (via the
+  # new-method-only selector input) and types the body; saving drives the same
+  # write-surface `save` as any method. One blank new-method tab per (class, side)
+  # — re-clicking re-focuses rather than stacking empties.
+  defp open_new_method(socket, class, side) do
+    id = "new:" <> class <> ":" <> side
+
+    case find_tab(socket, id) do
+      %{} -> activate_tab(socket, id)
+      nil -> add_new_method_tab(socket, id, class, side)
+    end
+  end
+
+  defp add_new_method_tab(socket, id, class, side) do
+    tab = %{
+      id: id,
+      kind: :method,
+      class: class,
+      side: side,
+      selector: "",
+      source: "",
+      base: "",
+      dirty: false,
+      disk_differs: false,
+      runtime_only: false,
+      disk_source: nil,
+      doc: nil,
+      signature: nil,
+      # The new-method marker: drives the selector input + breadcrumb label, and
+      # keeps the tab id stable (no selector to key on yet).
+      new: true
+    }
+
+    socket
+    |> assign(:tabs, socket.assigns.tabs ++ [tab])
+    |> assign(:active_tab, id)
+    |> sync_active(tab)
   end
 
   # Record a keystroke edit on the active tab and recompute its dirty flag
@@ -3270,8 +3377,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # After a successful compile, clear the saved tab's dirty dot and re-base it on
-  # the compiled source. `tab_id` is nil for the historical no-tab save payload —
-  # then there's nothing to reconcile.
+  # the compiled source. `tab_id` is nil for the historical no-tab save payload (or
+  # `""` from the empty-state hidden form) — neither matches an open tab, so
+  # there's nothing to reconcile and the update is a harmless no-op.
   #
   # A `:method` save is an in-memory live `>>` patch (logged to the ChangeLog) that
   # is *not* flushed to disk, so a successful compile *may* diverge the live body
@@ -3289,6 +3397,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # differ. With no known disk body (`nil` — a runtime-only or already-diverged
   # method) we conservatively flag, matching the prior behaviour.
   defp compile_clean(socket, nil, _source), do: socket
+  defp compile_clean(socket, "", _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
     update_active_tab_by_id(socket, tab_id, fn tab ->
@@ -3313,6 +3422,75 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp compiled_disk_differs(%{kind: :method}, _source), do: true
   defp compiled_disk_differs(%{disk_differs: existing}, _source), do: existing
 
+  # After a successful save *from a new-method tab*, promote it to an ordinary
+  # method tab: stamp the author-supplied `selector`, flip `new: false`, and re-key
+  # the tab id to the canonical `method:<class>:<side>:<selector>` so it matches
+  # what `open_method_tab` would create. Without this the tab keeps `selector: ""`,
+  # so `sync_active` re-seeds the selector input to "" on the post-save re-render
+  # (wiping what the author typed) and a second ⌘S trips the empty-selector guard;
+  # it would also leave a stale `new:<class>` tab alongside a later real method tab
+  # for the same selector. A no-op for ordinary method/def tabs (the guard only
+  # matches `new: true`). When a canonical method tab for the selector is already
+  # open, the scratch tab is dropped and that existing tab is focused (no duplicate,
+  # no stale "Class ▸ new" left behind). `focus_tab_keep_banner/3` refreshes the
+  # edit assigns so the now-hidden selector reflects the saved name.
+  defp promote_new_method_tab(socket, tab_id, class, selector) do
+    case find_tab(socket, tab_id) do
+      %{new: true, side: side, source: source} = tab ->
+        new_id = "method:" <> class <> ":" <> side <> ":" <> selector
+        tabs = socket.assigns.tabs
+
+        case find_tab(socket, new_id) do
+          nil ->
+            # Re-key the scratch tab in place into the canonical method tab.
+            promoted = %{tab | id: new_id, selector: selector, new: false}
+            replaced = Enum.map(tabs, fn t -> if t.id == tab_id, do: promoted, else: t end)
+            focus_tab_keep_banner(socket, replaced, promoted)
+
+          existing ->
+            # A canonical method tab for this selector is already open: drop the
+            # redundant scratch tab and focus the existing one, rather than leaving
+            # a stale "Class ▸ new" tab alongside it. Re-base that tab on the body
+            # just compiled (same post-compile treatment `compile_clean/3` gives the
+            # in-place path) so the editor shows the saved source, not its browse
+            # snapshot.
+            rebased = %{
+              existing
+              | source: source,
+                base: source,
+                dirty: false,
+                disk_differs: compiled_disk_differs(existing, source)
+            }
+
+            replaced =
+              tabs
+              |> Enum.reject(&(&1.id == tab_id))
+              |> Enum.map(fn t -> if t.id == new_id, do: rebased, else: t end)
+
+            focus_tab_keep_banner(socket, replaced, rebased)
+        end
+
+      _ ->
+        socket
+    end
+  end
+
+  # Focus `tab` and mirror it into the edit assigns *without* clearing the
+  # save/flush result banners. `sync_active/2` resets those (the "switching tabs
+  # starts clean" rule), which is wrong mid-save: promotion runs as part of a
+  # successful save and must keep the "Saved …" banner it just set.
+  defp focus_tab_keep_banner(socket, tabs, tab) do
+    socket
+    |> assign(:tabs, tabs)
+    |> assign(:active_tab, tab.id)
+    |> assign(
+      edit_class: tab.class,
+      edit_selector: tab.selector,
+      edit_source: tab.source,
+      edit_selection: nil
+    )
+  end
+
   defp update_active_tab(socket, fun),
     do: update_active_tab_by_id(socket, socket.assigns.active_tab, fun)
 
@@ -3323,13 +3501,19 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # The Class › side › selector breadcrumb label parts for the active tab.
   defp breadcrumb(%{kind: :def, class: class}), do: {class, nil, "class definition"}
+  defp breadcrumb(%{new: true, class: class, side: side}), do: {class, side, "new method"}
   defp breadcrumb(%{class: class, side: side, selector: selector}), do: {class, side, selector}
 
   # The method shown in the focused tab as a `%{class, side, selector}` ref (or nil
   # for a class-definition tab), so the System Browser can highlight the matching
-  # method row. Takes bare `assigns` for the render template.
+  # method row. Takes bare `assigns` for the render template. An unsaved new-method
+  # tab has no real selector yet (`new: true`, `selector: ""`), so it highlights
+  # nothing — returning a `selector: ""` ref would never match a row anyway.
   defp selected_method_ref(assigns) do
     case active_tab(assigns) do
+      %{new: true} ->
+        nil
+
       %{kind: :method, class: class, side: side, selector: selector} ->
         %{class: class, side: side, selector: selector}
 
@@ -4722,6 +4906,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The class whose *definition* tab is focused (or nil) — highlights the "class
   # definition" entry when the editor is showing this class's definition.
   attr :active_def, :string, default: nil
+  # The viewer's role — the "new method" authoring entry is owner-only (Observers
+  # get a read-only browser).
+  attr :role, :atom, required: true
 
   defp system_browser_methods(assigns) do
     assigns =
@@ -4755,6 +4942,19 @@ defmodule BtAttachWeb.WorkspaceLive do
             >
               <span class="twig" style="color: var(--accent);">▸</span>
               <span class="mname mono">class definition</span>
+            </div>
+            <%!-- new method entry (owner-only): opens a blank :method tab for the
+                 selected class so a brand-new method can be authored on demand —
+                 the role the starter tab used to play before the editor opened
+                 empty. --%>
+            <div
+              :if={@role == :owner}
+              class="row"
+              phx-click="new_method"
+              phx-value-class={@selected_class}
+            >
+              <span class="twig" style="color: var(--accent);">+</span>
+              <span class="mname mono">new method</span>
             </div>
           </div>
           <%!-- protocol filter row: ∗ "all" + one row per protocol --%>
@@ -4853,9 +5053,6 @@ defmodule BtAttachWeb.WorkspaceLive do
           {site["class"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span> » {site[
             "method"
           ]}
-        </span>
-        <span :if={site["source_file"]} class="nav-loc mono">
-          {site["source_file"]}:{site["line"]}
         </span>
       </button>
     </div>
@@ -5096,6 +5293,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   browser_side={@browser_side}
                   active_method={selected_method_ref(assigns)}
                   active_def={selected_def_ref(assigns)}
+                  role={@role}
                 />
               </div>
             </div>
@@ -5550,23 +5748,23 @@ defmodule BtAttachWeb.WorkspaceLive do
                   >
                     <span :if={t.dirty} class="modot" title="unsaved edits"></span>
                     <span class="tab-label mono">
-                      {if t.kind == :def, do: t.class <> " ▸ def", else: t.selector}
+                      {cond do
+                        t.kind == :def -> t.class <> " ▸ def"
+                        t.new -> t.class <> " ▸ new"
+                        true -> t.selector
+                      end}
                     </span>
-                    <span
-                      :if={length(@tabs) > 1}
-                      class="x"
-                      title="Close tab"
-                      phx-click="tab_close"
-                      phx-value-id={t.id}
-                    >
+                    <span class="x" title="Close tab" phx-click="tab_close" phx-value-id={t.id}>
                       ×
                     </span>
                   </button>
                   <span class="spacer"></span>
                   <%!-- "+ def" opens (or focuses) the active class's definition
-                       tab — saving it compiles the class (ADR 0082). --%>
+                       tab — saving it compiles the class (ADR 0082). Hidden when
+                       nothing is open: it takes its class from the active tab, so
+                       there is no class to open a definition for. --%>
                   <button
-                    :if={@role == :owner}
+                    :if={@role == :owner and @active_tab}
                     type="button"
                     class="tab tab-add"
                     title="Open class definition"
@@ -5576,18 +5774,29 @@ defmodule BtAttachWeb.WorkspaceLive do
                   </button>
                 </div>
 
-                <%!-- breadcrumb: Class › side › selector for the active tab. --%>
-                <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
-                <div class="editor-meta">
-                  <span class="crumb">
-                    <b>{bc_class}</b>
-                    <span :if={bc_side} class="sep">›</span>
-                    <span :if={bc_side} class="mono">{bc_side}</span>
-                    <span class="sep">›</span>
-                    <span class="mono">{bc_sel}</span>
-                  </span>
-                  <span class="spacer"></span>
-                  <%!-- image-divergence badges carried from the browse snapshot
+                <%!-- Operation feedback (save / compile / new-class / revert /
+                     flush) — rendered above the editor/empty-state split so it
+                     shows whether or not a tab is focused. A method or class save
+                     posted from the empty-state form (no active tab) still surfaces
+                     its "Saved …" / error banner here. --%>
+                <div :if={@save_result} class="io-block ok">{@save_result}</div>
+                <div :if={@save_error} class="io-block err">{@save_error}</div>
+                <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
+                <div :if={@flush_error} class="io-block err">{@flush_error}</div>
+
+                <%= if @active_tab do %>
+                  <%!-- breadcrumb: Class › side › selector for the active tab. --%>
+                  <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
+                  <div class="editor-meta">
+                    <span class="crumb">
+                      <b>{bc_class}</b>
+                      <span :if={bc_side} class="sep">›</span>
+                      <span :if={bc_side} class="mono">{bc_side}</span>
+                      <span class="sep">›</span>
+                      <span class="mono">{bc_sel}</span>
+                    </span>
+                    <span class="spacer"></span>
+                    <%!-- image-divergence badges carried from the browse snapshot
                        (the indicators the old read-only Method Source pane showed):
                        an unflushed live `>>` patch, or a sourceless runtime
                        method. A runtime-only method (no on-disk body) is
@@ -5595,119 +5804,138 @@ defmodule BtAttachWeb.WorkspaceLive do
                        no disk counterpart for the image to "differ" from, so the
                        'image differs from disk' tooltip would be misleading — the
                        ⚡ runtime badge below is the honest signal there. --%>
-                  <span
-                    :if={active_tab(assigns).disk_differs and not active_tab(assigns).runtime_only}
-                    class="runtime-tag"
-                    title="unflushed live patch (image differs from disk)"
-                  >
-                    unflushed
-                  </span>
-                  <span
-                    :if={active_tab(assigns).runtime_only}
-                    class="runtime-tag"
-                    title="runtime-only (no source on disk)"
-                  >
-                    ⚡
-                  </span>
-                  <span :if={@role != :owner} class="meta-note read-only">read-only · Observer</span>
-                  <span :if={@role == :owner and active_tab(assigns).dirty} class="meta-note edited">
-                    edited — ⌘S to compile
-                  </span>
-                  <span :if={@role == :owner and not active_tab(assigns).dirty} class="meta-note">
-                    in image
-                  </span>
-                </div>
+                    <span
+                      :if={active_tab(assigns).disk_differs and not active_tab(assigns).runtime_only}
+                      class="runtime-tag"
+                      title="unflushed live patch (image differs from disk)"
+                    >
+                      unflushed
+                    </span>
+                    <span
+                      :if={active_tab(assigns).runtime_only}
+                      class="runtime-tag"
+                      title="runtime-only (no source on disk)"
+                    >
+                      ⚡
+                    </span>
+                    <span :if={@role != :owner} class="meta-note read-only">
+                      read-only · Observer
+                    </span>
+                    <span :if={@role == :owner and active_tab(assigns).new} class="meta-note edited">
+                      new method — ⌘S to compile
+                    </span>
+                    <span
+                      :if={
+                        @role == :owner and not active_tab(assigns).new and active_tab(assigns).dirty
+                      }
+                      class="meta-note edited"
+                    >
+                      edited — ⌘S to compile
+                    </span>
+                    <span
+                      :if={
+                        @role == :owner and not active_tab(assigns).new and
+                          not active_tab(assigns).dirty
+                      }
+                      class="meta-note"
+                    >
+                      in image
+                    </span>
+                  </div>
 
-                <div class="panel-body">
-                  <%!-- Read-only documentation block (BT-2558): the active
+                  <div class="panel-body">
+                    <%!-- Read-only documentation block (BT-2558): the active
                        method's signature + rendered `///` doc-comment, or — on a
                        class-definition tab — the class comment. Distinct from the
                        editable source body below, and shown to every role (it
                        rides the `:read`-capability browse ops). The doc text is
                        rendered to safe HTML by `BtAttach.DocFormat` (author text
                        is escaped first), so `{...}` interpolation is safe. --%>
-                  <% doc_tab = active_tab(assigns) %>
-                  <section
-                    :if={doc_tab.doc || doc_tab.signature}
-                    class={"doc-block" <> if(doc_tab.doc && @doc_expanded, do: " open", else: "")}
-                    aria-label="Documentation"
-                  >
-                    <%!-- When the tab carries a `///` doc / class comment the
+                    <% doc_tab = active_tab(assigns) %>
+                    <section
+                      :if={doc_tab.doc || doc_tab.signature}
+                      class={"doc-block" <> if(doc_tab.doc && @doc_expanded, do: " open", else: "")}
+                      aria-label="Documentation"
+                    >
+                      <%!-- When the tab carries a `///` doc / class comment the
                          signature line doubles as the collapse toggle (the body is
                          also present verbatim in the editable source below, so it
                          stays hidden until asked for). A method with only a
                          signature has nothing to expand, so it renders as a plain,
                          non-interactive line. --%>
-                    <%= if doc_tab.doc do %>
-                      <button
-                        type="button"
-                        class="doc-sig doc-toggle"
-                        phx-click="toggle_doc"
-                        aria-expanded={to_string(@doc_expanded)}
-                        aria-controls={if @doc_expanded, do: "doc-body-content"}
-                        title={
-                          if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"
-                        }
-                      >
-                        <span class="doc-caret" aria-hidden="true">
-                          {if @doc_expanded, do: "▾", else: "▸"}
-                        </span>
-                        <span class="doc-sig-text">
-                          {doc_tab.signature || doc_summary_label(doc_tab)}
-                        </span>
-                      </button>
-                      <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
-                        {BtAttach.DocFormat.to_html(doc_tab.doc)}
-                      </div>
-                    <% else %>
-                      <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
-                    <% end %>
-                  </section>
-                  <%= if @role == :owner do %>
-                    <%!-- ⌘S submits this editor form via the KeyboardShortcuts
+                      <%= if doc_tab.doc do %>
+                        <button
+                          type="button"
+                          class="doc-sig doc-toggle"
+                          phx-click="toggle_doc"
+                          aria-expanded={to_string(@doc_expanded)}
+                          aria-controls={if @doc_expanded, do: "doc-body-content"}
+                          title={
+                            if @doc_expanded,
+                              do: "Collapse documentation",
+                              else: "Expand documentation"
+                          }
+                        >
+                          <span class="doc-caret" aria-hidden="true">
+                            {if @doc_expanded, do: "▾", else: "▸"}
+                          </span>
+                          <span class="doc-sig-text">
+                            {doc_tab.signature || doc_summary_label(doc_tab)}
+                          </span>
+                        </button>
+                        <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
+                          {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                        </div>
+                      <% else %>
+                        <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
+                      <% end %>
+                    </section>
+                    <%= if @role == :owner do %>
+                      <%!-- ⌘S submits this editor form via the KeyboardShortcuts
                          hook (BT-2485): the chord request-submits the form so
                          the class/selector/source/tab ride the normal phx-submit,
                          exactly as clicking "Compile" would. `phx-change` reports
                          live edits so the active tab's dirty dot tracks them. --%>
-                    <form
-                      id="method-editor-form"
-                      phx-submit="save_method"
-                      phx-change="edit_source"
-                      phx-hook="KeyboardShortcuts"
-                      data-scope="window"
-                      data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
-                    >
-                      <%!-- the active tab id rides every compile so the handler
+                      <form
+                        id="method-editor-form"
+                        phx-submit="save_method"
+                        phx-change="edit_source"
+                        phx-hook="KeyboardShortcuts"
+                        data-scope="window"
+                        data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                      >
+                        <%!-- the active tab id rides every compile so the handler
                            knows which tab to clean and whether it's a class
                            definition. --%>
-                      <input type="hidden" name="tab" value={@active_tab} />
-                      <%!-- a method tab edits class + selector inline; a class-
-                           definition tab carries them as hidden fields (the class
-                           name) so the form payload shape is unchanged. --%>
-                      <%= if active_tab(assigns).kind == :def do %>
+                        <input type="hidden" name="tab" value={@active_tab} />
+                        <%!-- Class + selector ride the form as hidden fields — the
+                           breadcrumb above is the canonical display of "which
+                           class › selector this tab edits", so the old editable
+                           inputs were redundant for an EXISTING method. The one
+                           exception is a "new method" tab: its selector doesn't
+                           exist yet (the breadcrumb can't name it), so it keeps a
+                           visible selector input for the author to fill. The
+                           save_method payload (class + selector + source) shape is
+                           identical in every case. --%>
                         <input type="hidden" name="class" value={@edit_class} />
-                        <input type="hidden" name="selector" value="▸ class definition" />
-                      <% else %>
-                        <div style="display:flex; gap:.5rem; margin-bottom:.5rem;">
-                          <input
-                            class="field"
-                            name="class"
-                            value={@edit_class}
-                            placeholder="Class (e.g. Counter)"
-                            autocomplete="off"
-                            style="flex:1;"
-                          />
-                          <input
-                            class="field"
-                            name="selector"
-                            value={@edit_selector}
-                            placeholder="selector (e.g. increment)"
-                            autocomplete="off"
-                            style="flex:1;"
-                          />
-                        </div>
-                      <% end %>
-                      <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
+                        <%= cond do %>
+                          <% active_tab(assigns).kind == :def -> %>
+                            <input type="hidden" name="selector" value="▸ class definition" />
+                          <% active_tab(assigns).new -> %>
+                            <label class="new-method-selector">
+                              <span class="nm-label mono">selector</span>
+                              <input
+                                class="field"
+                                name="selector"
+                                value={@edit_selector}
+                                autocomplete="off"
+                                spellcheck="false"
+                              />
+                            </label>
+                          <% true -> %>
+                            <input type="hidden" name="selector" value={@edit_selector} />
+                        <% end %>
+                        <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
                            tab id (`@active_tab`) so switching tabs remounts the
                            CmEditor hook and the editor picks up the new tab's
                            source. The hidden <textarea name="source"> stays the
@@ -5717,88 +5945,105 @@ defmodule BtAttachWeb.WorkspaceLive do
                            phx-change="edit_source" dirty-dot tracking with the
                            300 ms debounce. Selection reports ride select_source
                            via data-select-event, kept in `:edit_selection`. --%>
-                      <div
-                        id={"method-editor-overlay-" <> @active_tab}
-                        class="cm-wrap field"
-                        phx-hook="CmEditor"
-                        data-select-event="select_source"
-                        data-tab-id={@active_tab}
-                        data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
-                        data-placeholder={
-                          if active_tab(assigns).kind == :def,
-                            do: "Actor subclass: Counter\n  state: value = 0",
-                            else: "increment => self.value := self.value + 1"
-                        }
-                      >
-                        <textarea
-                          id={"method-editor-source-" <> @active_tab}
-                          class="cm-field"
-                          name="source"
-                          spellcheck="false"
-                          autocomplete="off"
-                          phx-debounce="300"
-                          phx-update="ignore"
-                          hidden
-                        ><%= @edit_source %></textarea>
                         <div
-                          class="cm-host"
-                          id={"method-editor-cm-" <> @active_tab}
-                          phx-update="ignore"
+                          id={"method-editor-overlay-" <> @active_tab}
+                          class="cm-wrap field"
+                          phx-hook="CmEditor"
+                          data-select-event="select_source"
+                          data-tab-id={@active_tab}
+                          data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
                         >
+                          <textarea
+                            id={"method-editor-source-" <> @active_tab}
+                            class="cm-field"
+                            name="source"
+                            spellcheck="false"
+                            autocomplete="off"
+                            phx-debounce="300"
+                            phx-update="ignore"
+                            hidden
+                          ><%= @edit_source %></textarea>
+                          <div
+                            class="cm-host"
+                            id={"method-editor-cm-" <> @active_tab}
+                            phx-update="ignore"
+                          >
+                          </div>
                         </div>
-                      </div>
-                      <%!-- Single action row (BT-2495): Senders / Implementors on
+                        <%!-- Single action row (BT-2495): Senders / Implementors on
                            the left, Compile / Save All pushed to the right. The nav
                            buttons are type="button" (they fire phx-click, never
                            submit) and only show on a method tab. Observers get the
                            same nav row in the read-only branch below. --%>
-                      <div class="editor-actions">
-                        <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                          <button class="btn" type="button" phx-click="senders">
-                            Senders
+                        <div class="editor-actions">
+                          <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                            <button class="btn" type="button" phx-click="senders">
+                              Senders
+                            </button>
+                            <button class="btn" type="button" phx-click="implementors">
+                              Implementors
+                            </button>
+                            <.nav_popover nav={@nav_popover} />
+                          </div>
+                          <span class="spacer"></span>
+                          <button class="btn primary" type="submit">
+                            Compile <span class="k">⌘S</span>
                           </button>
-                          <button class="btn" type="button" phx-click="implementors">
-                            Implementors
+                          <button class="btn" type="button" phx-click="flush">
+                            Save All to Disk (flush)
                           </button>
-                          <.nav_popover nav={@nav_popover} />
                         </div>
-                        <span class="spacer"></span>
-                        <button class="btn primary" type="submit">
-                          Compile <span class="k">⌘S</span>
-                        </button>
-                        <button class="btn" type="button" phx-click="flush">
-                          Save All to Disk (flush)
-                        </button>
-                      </div>
-                    </form>
-                    <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
+                      </form>
+                      <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
                          affordance now lives in the System Browser head (class-
                          oriented, collapsed by default), not here under the method
                          editor — see `system_browser_classes`. --%>
-                  <% else %>
-                    <p class="muted-note">
-                      Your role is read-only — evaluation and editing are disabled. You can
-                      still browse bindings, follow references in the Inspector, and watch
-                      the live Transcript.
-                    </p>
-                    <%!-- Observers still get Senders / Implementors navigation
+                    <% else %>
+                      <p class="muted-note">
+                        Your role is read-only — evaluation and editing are disabled. You can
+                        still browse bindings, follow references in the Inspector, and watch
+                        the live Transcript.
+                      </p>
+                      <%!-- Observers still get Senders / Implementors navigation
                          (BT-2495); both ride the read-only `nav-query` op. --%>
-                    <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                      <button class="btn" type="button" phx-click="senders">
-                        Senders
-                      </button>
-                      <button class="btn" type="button" phx-click="implementors">
-                        Implementors
-                      </button>
-                      <.nav_popover nav={@nav_popover} />
+                      <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                        <button class="btn" type="button" phx-click="senders">
+                          Senders
+                        </button>
+                        <button class="btn" type="button" phx-click="implementors">
+                          Implementors
+                        </button>
+                        <.nav_popover nav={@nav_popover} />
+                      </div>
+                    <% end %>
+                  </div>
+                <% else %>
+                  <%!-- Empty state: the cockpit opens with no tab and lands here
+                     after the last tab is closed. No CodeMirror placeholder
+                     (which read as fake content); a plain hint instead. The
+                     `save_method` form is still rendered (hidden, no editor) so
+                     the BT-2409 e2e save flow — which posts class/selector/source
+                     directly — keeps working without a focused tab; the handler
+                     tolerates an absent `tab` and validates an empty class. --%>
+                  <div class="panel-body">
+                    <div class="empty">
+                      Nothing open. Pick a method, or open a <span class="mono">▸ class definition</span>, from the System
+                      Browser to start editing.
                     </div>
-                  <% end %>
-
-                  <div :if={@save_result} class="io-block ok">{@save_result}</div>
-                  <div :if={@save_error} class="io-block err">{@save_error}</div>
-                  <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
-                  <div :if={@flush_error} class="io-block err">{@flush_error}</div>
-                </div>
+                    <form
+                      :if={@role == :owner}
+                      id="method-editor-form"
+                      phx-submit="save_method"
+                      phx-change="edit_source"
+                      hidden
+                    >
+                      <input type="hidden" name="tab" value="" />
+                      <input type="hidden" name="class" value="" />
+                      <input type="hidden" name="selector" value="" />
+                      <input type="hidden" name="source" value="" />
+                    </form>
+                  </div>
+                <% end %>
               </div>
             </div>
 

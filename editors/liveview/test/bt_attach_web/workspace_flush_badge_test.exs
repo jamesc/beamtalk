@@ -253,11 +253,162 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
 
       # Match the escape-safe tail of the compiled body: the rendered buffer HTML-
       # escapes `=>`, but `:= self.value + 2` survives verbatim and is unique to the
-      # compiled body. The editor's `data-placeholder` carries the "+ 1" disk body
-      # unconditionally, so we assert the compiled body is present (the "+ 2" tail)
-      # rather than refuting the disk body. Pre-fix, the re-activated buffer reverts
-      # to the on-disk stub ("+ 1") and this tail is absent.
+      # compiled body. Pre-fix, the re-activated buffer reverts to the on-disk stub
+      # ("+ 1") and this tail is absent.
       assert reactivate_html =~ ":= self.value + 2"
+    end
+  end
+
+  describe "new-method authoring (explicit affordance)" do
+    test "the System Browser opens a blank new-method tab the author can save", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Select Counter (always in the stub), then use the owner-only "new method"
+      # entry — the editor opens with no tab now, so authoring a brand-new method
+      # is an explicit action rather than a default startup tab.
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      opened =
+        view
+        |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+        |> render_click()
+
+      # A new-method tab is open: the breadcrumb reads "new method" (no selector
+      # exists yet), and — uniquely among tabs — it shows a visible selector input
+      # for the author to fill.
+      assert opened =~ "new method"
+      assert opened =~ "new-method-selector"
+      assert opened =~ "Counter ▸ new"
+
+      # Authoring + saving drives the same write-surface `save` as any method: the
+      # author-supplied selector rides the form, so the save reports it by name.
+      saved =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "greet",
+          "source" => ~s|greet => "hi"|,
+          "tab" => "new:Counter:instance"
+        })
+
+      assert saved =~ "Saved greet on Counter"
+
+      # The new-method tab is promoted to an ordinary method tab on save: the tab
+      # label / breadcrumb now name the saved selector and the new-method-only
+      # selector input is gone — so the author's selector survives and a second
+      # ⌘S doesn't trip the empty-selector guard (the BT-review regression).
+      assert saved =~ "greet"
+      refute saved =~ "Counter ▸ new"
+      refute saved =~ "new-method-selector"
+    end
+
+    test "saving a new method with no selector is a local validation error", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # The selector input is blank until the author fills it — saving then trips
+      # the same empty-selector guard a method save always has.
+      html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "",
+          "source" => ~s|=> "hi"|,
+          "tab" => "new:Counter:instance"
+        })
+
+      assert html =~ "Enter a selector"
+    end
+
+    test "a new-method tab keeps the typed selector across source edits", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # Typing in the CodeMirror source fires the form's phx-change="edit_source"
+      # carrying the selector input's current value. Without capturing it the
+      # server re-render would patch the (controlled, non-ignored) selector field
+      # back to "" — so a later ⌘S would fail the empty-selector guard. Drive that
+      # event and confirm the typed selector survives.
+      html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_change(%{"source" => ~s|greet => "hi"|, "selector" => "greet"})
+
+      assert html =~ ~s(name="selector" value="greet")
+    end
+
+    test "a new-method tab's typed selector survives a tab switch", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      # Open an existing method tab (to switch to) and a new-method tab.
+      view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # Type a selector — captured on the source change into both the assign and
+      # the tab struct.
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_change(%{"source" => ~s|greet => "hi"|, "selector" => "greet"})
+
+      # Switch away to the increment tab, then back to the new-method tab.
+      view
+      |> element(
+        ~s(button[phx-click="tab_select"][phx-value-id="method:Counter:instance:increment"])
+      )
+      |> render_click()
+
+      html =
+        view
+        |> element(~s(button[phx-click="tab_select"][phx-value-id="new:Counter:instance"]))
+        |> render_click()
+
+      # `sync_active` restores the selector from the tab struct, not a blank "".
+      assert html =~ ~s(name="selector" value="greet")
+    end
+
+    test "saving a new method whose selector is already open folds into that tab", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      # Open the existing `increment` method tab, then a blank new-method tab.
+      view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # Author the new method under a selector that is *already* open. On save the
+      # scratch new-method tab is dropped and the existing `increment` tab focused —
+      # no duplicate, no stale "Counter ▸ new" — and the save banner still shows.
+      saved =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "increment",
+          "source" => "increment => self.value := self.value + 1",
+          "tab" => "new:Counter:instance"
+        })
+
+      assert saved =~ "Saved increment on Counter"
+      refute saved =~ "Counter ▸ new"
+      refute saved =~ "new-method-selector"
     end
   end
 end
