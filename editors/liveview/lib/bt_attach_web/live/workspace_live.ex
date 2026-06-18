@@ -1241,8 +1241,17 @@ defmodule BtAttachWeb.WorkspaceLive do
       case active_tab(socket.assigns) do
         %{new: true} ->
           case Map.get(params, "selector") do
-            sel when is_binary(sel) -> assign(socket, edit_selector: sel)
-            _ -> socket
+            sel when is_binary(sel) ->
+              # Mirror into BOTH the assign (so this render keeps the value) AND
+              # the tab struct (so `sync_active/2` restores it when the user
+              # switches away and back — otherwise the tab's `selector: ""` would
+              # wipe the typed name on re-focus).
+              socket
+              |> assign(edit_selector: sel)
+              |> update_active_tab(fn tab -> %{tab | selector: sel} end)
+
+            _ ->
+              socket
           end
 
         _ ->

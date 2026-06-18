@@ -349,6 +349,39 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       assert html =~ ~s(name="selector" value="greet")
     end
 
+    test "a new-method tab's typed selector survives a tab switch", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      # Open an existing method tab (to switch to) and a new-method tab.
+      view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # Type a selector — captured on the source change into both the assign and
+      # the tab struct.
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_change(%{"source" => ~s|greet => "hi"|, "selector" => "greet"})
+
+      # Switch away to the increment tab, then back to the new-method tab.
+      view
+      |> element(
+        ~s(button[phx-click="tab_select"][phx-value-id="method:Counter:instance:increment"])
+      )
+      |> render_click()
+
+      html =
+        view
+        |> element(~s(button[phx-click="tab_select"][phx-value-id="new:Counter:instance"]))
+        |> render_click()
+
+      # `sync_active` restores the selector from the tab struct, not a blank "".
+      assert html =~ ~s(name="selector" value="greet")
+    end
+
     test "saving a new method whose selector is already open folds into that tab", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
