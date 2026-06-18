@@ -27,11 +27,14 @@
 //! # Span boundaries
 //!
 //! The returned span covers:
-//! - **start**: the first significant token of the definition. For a class-body
-//!   method that is the first modifier or the selector (whichever comes first);
-//!   leading doc comments and indentation are *excluded* (they are not part of
-//!   the method body the patcher replaces). For a standalone `Class >> selector`
-//!   extension the start is the class-name token.
+//! - **start**: the beginning of the line of the method's first **leading
+//!   comment** (its `///` doc comment, when present), including that line's
+//!   indentation; or, when the method has no leading comment, the beginning of
+//!   the method's own line (including its indentation). The doc comment and
+//!   indentation are *included* so the span is the verbatim, full-line region a
+//!   user edits and `Workspace flush` rewrites — a method's doc comment is part
+//!   of its definition (BT-2577). For a standalone `Class >> selector` extension
+//!   the same rule applies, anchored at the class-name line.
 //! - **end**: the byte immediately after the trailing newline that terminates
 //!   the last source line of the body (so the span includes the body and its
 //!   trailing newline, per ADR 0082's "start..end including body and trailing
@@ -172,7 +175,8 @@ pub(crate) fn resolve_in_module(
     side: MethodSide,
 ) -> Result<Span, SpanResolveError> {
     // Each match contributes the *AST span* of its definition (whose end is the
-    // last body token; the trailing newline is added later by `definition_span`).
+    // last body token; the trailing newline and leading doc comment are added by
+    // `definition_span`).
     let mut matches: Vec<Span> = Vec::new();
     let mut class_seen = false;
 
@@ -243,14 +247,54 @@ fn collect_matches(
 
 /// Computes the definition span for a method whose AST span is `method_span`.
 ///
-/// The AST span ends at the last body expression's last token. The definition
-/// span extends that end forward across the remainder of the body's final line,
-/// up to and including the terminating newline, so the splice covers the body
-/// and its trailing newline (ADR 0082). The start is unchanged.
+/// The start backs up to the beginning of the method's own line (including its
+/// indentation) and then across any contiguous preceding `///` doc-comment lines
+/// (the method's doc block), so the span includes the doc comment and indentation
+/// (BT-2577). The doc comment lives in `MethodDefinition::doc_comment` without a
+/// span, so it is located here from the source text rather than the AST. The end
+/// extends past the trailing newline of the last body line (ADR 0082). The result
+/// is a verbatim, full-line slice: splicing it back is an exact no-op.
 fn definition_span(source: &str, method_span: Span) -> Span {
-    let start = method_span.start();
+    let method_line_start = line_start(source, method_span.start());
+    let start = doc_block_start(source, method_line_start);
     let end = extend_to_line_end(source, method_span.end());
     Span::new(start, end)
+}
+
+/// Returns the byte offset of the start of the line containing `offset` — the
+/// byte just after the preceding newline, or 0 at the start of the file.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "source files over 4GB are not supported (Span uses u32)"
+)]
+fn line_start(source: &str, offset: u32) -> u32 {
+    let bytes = source.as_bytes();
+    let mut i = (offset as usize).min(bytes.len());
+    while i > 0 && bytes[i - 1] != b'\n' {
+        i -= 1;
+    }
+    i as u32
+}
+
+/// Walks backward from `method_line_start` (the start of the method's own line)
+/// across contiguous preceding lines that are `///` doc-comment lines, returning
+/// the start offset of the earliest such line — i.e. the start of the method's
+/// doc block. Stops at the first line that is not a `///` comment (a blank line,
+/// a regular `//` comment, or another definition), so only the doc comment
+/// directly attached to the method is pulled in (BT-2577).
+fn doc_block_start(source: &str, method_line_start: u32) -> u32 {
+    let mut start = method_line_start;
+    while start > 0 {
+        // The line immediately above: from its start up to `start`.
+        let prev_line_start = line_start(source, start - 1);
+        let line = &source[prev_line_start as usize..start as usize];
+        if line.trim_start().starts_with("///") {
+            start = prev_line_start;
+        } else {
+            break;
+        }
+    }
+    start
 }
 
 /// Returns the byte offset just past the next newline at or after `offset`,
@@ -337,7 +381,13 @@ typed Object subclass: AtomicCounter
         let span = resolve(ATOMIC, "AtomicCounter", "increment", MethodSide::Instance)
             .expect("increment should resolve");
         let text = &ATOMIC[span.as_range()];
-        assert!(text.starts_with("increment -> Integer =>"), "got: {text:?}");
+        // The span is the verbatim full-line slice: indented doc comment first,
+        // then the method, through the trailing newline (BT-2577).
+        assert!(
+            text.starts_with("  /// Atomically add 1"),
+            "span starts at the indented doc line: {text:?}"
+        );
+        assert!(text.contains("increment -> Integer =>"), "got: {text:?}");
         assert!(
             text.ends_with('\n'),
             "span should include trailing newline: {text:?}"
@@ -357,15 +407,17 @@ typed Object subclass: AtomicCounter
         .expect("incrementBy: should resolve");
         let text = &ATOMIC[span.as_range()];
         assert!(
-            text.starts_with("incrementBy: n :: Integer"),
-            "got: {text:?}"
+            text.contains("/// Atomically add N"),
+            "doc included: {text:?}"
         );
+        assert!(text.contains("incrementBy: n :: Integer"), "got: {text:?}");
         // Multi-line body: the `=>` is on one line, the call on the next.
         assert!(
             text.contains("by: n"),
             "should cover full multi-line body: {text:?}"
         );
         assert!(text.ends_with('\n'));
+        assert_eq!(splice(ATOMIC, span, text), ATOMIC);
     }
 
     #[test]
@@ -373,8 +425,13 @@ typed Object subclass: AtomicCounter
         let span = resolve(ATOMIC, "AtomicCounter", "new:", MethodSide::Class)
             .expect("class new: should resolve");
         let text = &ATOMIC[span.as_range()];
-        assert!(text.starts_with("class sealed new: name"), "got: {text:?}");
+        assert!(
+            text.contains("/// Create a new named counter"),
+            "doc included: {text:?}"
+        );
+        assert!(text.contains("class sealed new: name"), "got: {text:?}");
         assert!(text.ends_with('\n'));
+        assert_eq!(splice(ATOMIC, span, text), ATOMIC);
     }
 
     #[test]
@@ -438,7 +495,8 @@ typed Object subclass: AtomicCounter
         let src = "Object subclass: Vec\n  + other => self\n";
         let span = resolve(src, "Vec", "+", MethodSide::Instance).expect("+ should resolve");
         let text = &src[span.as_range()];
-        assert!(text.starts_with("+ other =>"), "got: {text:?}");
+        // No doc comment: the span starts at the method's own indentation.
+        assert_eq!(text, "  + other => self\n", "got: {text:?}");
         assert_eq!(splice(src, span, text), src);
     }
 
@@ -452,16 +510,60 @@ typed Object subclass: AtomicCounter
     }
 
     #[test]
-    fn doc_comment_is_excluded_from_span() {
-        // The doc comment precedes the method but is not part of the span.
+    fn doc_comment_is_included_in_span() {
+        // A method's leading doc comment is part of its definition span so the
+        // editor and `Workspace flush` operate on the same verbatim region
+        // (BT-2577 — previously excluding it caused flush to duplicate the doc).
         let span = resolve(ATOMIC, "AtomicCounter", "value", MethodSide::Instance)
             .expect("value resolves");
         let text = &ATOMIC[span.as_range()];
         assert!(
-            !text.contains("///"),
-            "doc comment must be excluded: {text:?}"
+            text.starts_with("  /// Read the current value."),
+            "doc comment included, indented: {text:?}"
         );
-        assert!(text.starts_with("value -> Integer =>"));
+        assert!(text.contains("value -> Integer =>"));
+        // Verbatim full-line slice: round-trips exactly.
+        assert_eq!(splice(ATOMIC, span, text), ATOMIC);
+    }
+
+    #[test]
+    fn span_without_doc_starts_at_indentation() {
+        // No leading comment: the span still backs up to the method's own
+        // indentation so the splice carries it (BT-2577).
+        let src = "Object subclass: C\n  foo => 1\n";
+        let span = resolve(src, "C", "foo", MethodSide::Instance).expect("foo resolves");
+        assert_eq!(&src[span.as_range()], "  foo => 1\n");
+    }
+
+    #[test]
+    fn replacing_a_doc_commented_method_does_not_duplicate_the_doc() {
+        // The exact corruption from BT-2577: editing a doc-commented method and
+        // flushing duplicated the doc and mangled the next method. With the
+        // doc-inclusive span, splicing the edited verbatim slice round-trips.
+        let src = "Actor subclass: Counter\n\
+                   \x20 /// Decrease by one.\n\
+                   \x20 decrement -> Integer => self.value := self.value - 1\n\
+                   \n\
+                   \x20 /// The next thing.\n\
+                   \x20 next => 2\n";
+        let span =
+            resolve(src, "Counter", "decrement", MethodSide::Instance).expect("decrement resolves");
+        // What the editor sends back: the verbatim slice with only the body changed.
+        let edited =
+            "  /// Decrease by one.\n  decrement -> Integer => self.value := self.value - 2\n";
+        let out = splice(src, span, edited);
+        assert_eq!(
+            out,
+            "Actor subclass: Counter\n\
+             \x20 /// Decrease by one.\n\
+             \x20 decrement -> Integer => self.value := self.value - 2\n\
+             \n\
+             \x20 /// The next thing.\n\
+             \x20 next => 2\n"
+        );
+        // The doc appears exactly once and the following method is intact.
+        assert_eq!(out.matches("/// Decrease by one.").count(), 1);
+        assert!(out.contains("  /// The next thing.\n  next => 2\n"));
     }
 
     #[test]
