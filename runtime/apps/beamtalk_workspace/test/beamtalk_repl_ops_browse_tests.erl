@@ -119,16 +119,26 @@ native_clause_selector_skips_generic_clauses_test() ->
         beamtalk_repl_ops_browse:clause_selector(<<"handle_call({readLine, []}, From, S) ->">>)
     ).
 
-native_self_delegate_source_marker_test() ->
-    ?assert(
-        beamtalk_repl_ops_browse:is_self_delegate_source(
-            <<"writeLine: data :: String -> Nil => self delegate">>
-        )
-    ),
-    ?assertNot(
-        beamtalk_repl_ops_browse:is_self_delegate_source(<<"value =>\n  ^ self.value">>)
-    ),
-    ?assertNot(beamtalk_repl_ops_browse:is_self_delegate_source(null)).
+%% native_delegate is keyed off the facade's `dispatch_<selector>` exports — the
+%% compiler's own `is_self_delegate` decision (native_facade.rs), not a body-text
+%% guess. The dispatch name embeds the selector verbatim (keyword colon included),
+%% so an exact name match distinguishes a delegate from a same-prefixed method.
+native_delegate_exported_marker_test() ->
+    %% Mirrors the real `beamtalk_subprocess` facade exports.
+    Exports = [
+        {spawn, 0},
+        {dispatch_readLine, 1},
+        {'dispatch_writeLine:', 2},
+        {'__beamtalk_meta', 0}
+    ],
+    ?assert(beamtalk_repl_ops_browse:delegate_exported(Exports, readLine)),
+    ?assert(beamtalk_repl_ops_browse:delegate_exported(Exports, 'writeLine:')),
+    %% A non-delegate selector (no dispatch export) is not a delegate.
+    ?assertNot(beamtalk_repl_ops_browse:delegate_exported(Exports, 'open:args:')),
+    %% Exact match, not prefix: `readLine` must not be matched by a `readLine:`
+    %% query (or vice versa).
+    ?assertNot(beamtalk_repl_ops_browse:delegate_exported(Exports, 'readLine:')),
+    ?assertNot(beamtalk_repl_ops_browse:delegate_exported([], readLine)).
 
 %%====================================================================
 %% Validation error paths (no live class needed)

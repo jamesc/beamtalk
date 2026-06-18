@@ -69,7 +69,7 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 -ifdef(TEST).
 %% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
 %% delegate-source marker have no live-class dependency.
--export([handle_call_clause_lines/1, clause_selector/1, is_self_delegate_source/1]).
+-export([handle_call_clause_lines/1, clause_selector/1, delegate_exported/2]).
 -endif.
 
 -doc """
@@ -295,12 +295,12 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 %% BT-2578: true when this is a `self delegate` method (ADR 0056)
                 %% on a native-backed class — the real implementation lives in a
                 %% `handle_call` clause of the backing module, reachable via
-                %% `browse-native-source`. Best-effort: the class must be native
-                %% and the stored body must be the recognised `self delegate`
-                %% marker (the compiler's `is_self_delegate` predicate).
-                <<"native_delegate">> =>
-                    meta_is_native(native_meta_of(ModName)) andalso
-                    is_self_delegate_source(Source),
+                %% `browse-native-source`. The signal is the compiler's own
+                %% `is_self_delegate` decision, made visible at runtime: the native
+                %% facade generates a `dispatch_<selector>` function ONLY for a
+                %% `self delegate` method (native_facade.rs), so its export is a
+                %% precise marker — no body-text heuristic.
+                <<"native_delegate">> => is_native_delegate(ModName, ClassSide, Selector),
                 %% BT-2558: the method's `///` doc-comment and rendered
                 %% signature, carried alongside the editable source so the
                 %% System Browser can present a read-only documentation block.
@@ -629,15 +629,32 @@ meta_backing_module(Meta) ->
         _ -> none
     end.
 
-%% Best-effort: the compiler recognises a method body that is exactly the unary
-%% send `self delegate` (`MethodDefinition::is_self_delegate`). The stored source
-%% carries that body verbatim, so a `self delegate` substring is a reliable
-%% marker without re-parsing the AST here.
--spec is_self_delegate_source(binary() | null) -> boolean().
-is_self_delegate_source(Source) when is_binary(Source) ->
-    binary:match(Source, <<"self delegate">>) =/= nomatch;
-is_self_delegate_source(_) ->
+%% True when `Selector` (instance side) is a `self delegate` method on the native
+%% facade `ModName`. The compiler emits a `dispatch_<selector>` function ONLY for
+%% a `self delegate` method (native_facade.rs collects `is_self_delegate()` methods
+%% and generates one dispatch fun each), so the presence of that export is the
+%% compiler's own decision surfaced at runtime — not a body-text guess. Class-side
+%% selectors are never delegated this way, so they are always `false`.
+-spec is_native_delegate(atom(), boolean(), atom()) -> boolean().
+is_native_delegate(ModName, false, Selector) when is_atom(ModName) ->
+    Exports =
+        try
+            ModName:module_info(exports)
+        catch
+            _:_ -> []
+        end,
+    delegate_exported(Exports, Selector);
+is_native_delegate(_ModName, _ClassSide, _Selector) ->
     false.
+
+%% Pure: does `Exports` contain a `dispatch_<Selector>` function (any arity)? The
+%% dispatch fun name embeds the selector verbatim, keyword colon included
+%% (`dispatch_readLine`, `'dispatch_writeLine:'`), so an exact name compare is
+%% exact — no arity arithmetic, no atom-table growth.
+-spec delegate_exported([{atom(), arity()}], atom()) -> boolean().
+delegate_exported(Exports, Selector) ->
+    Target = "dispatch_" ++ atom_to_list(Selector),
+    lists:any(fun({Name, _Arity}) -> atom_to_list(Name) =:= Target end, Exports).
 
 %% Optional `selector` param for `browse-native-source`: absent/empty → no clause
 %% selection; otherwise resolved to an existing atom (an unknown selector reads as
