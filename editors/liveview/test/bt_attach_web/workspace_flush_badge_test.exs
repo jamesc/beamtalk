@@ -293,6 +293,14 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
         })
 
       assert saved =~ "Saved greet on Counter"
+
+      # The new-method tab is promoted to an ordinary method tab on save: the tab
+      # label / breadcrumb now name the saved selector and the new-method-only
+      # selector input is gone — so the author's selector survives and a second
+      # ⌘S doesn't trip the empty-selector guard (the BT-review regression).
+      assert saved =~ "greet"
+      refute saved =~ "Counter ▸ new"
+      refute saved =~ "new-method-selector"
     end
 
     test "saving a new method with no selector is a local validation error", %{conn: conn} do

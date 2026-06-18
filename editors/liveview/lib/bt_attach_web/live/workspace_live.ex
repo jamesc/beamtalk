@@ -1209,11 +1209,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # the only editor surface that still shows a selector input (the breadcrumb can't
   # name a selector that doesn't exist), so the author types the selector + body.
   # The starter tab used to fill this role on startup; it now opens on demand only.
-  def handle_event("new_method", %{"class" => class}, socket)
+  def handle_event("new_method", %{"class" => class}, %{assigns: %{role: :owner}} = socket)
       when is_binary(class) and class != "" do
     {:noreply, open_new_method(socket, class)}
   end
 
+  # Non-owner (Observer) or malformed payload: a no-op. Authoring is owner-only —
+  # the entry is rendered only for `:owner`, and a crafted event from a read-only
+  # role must not even open a (non-savable) scratch tab in their strip.
   def handle_event("new_method", _params, socket), do: {:noreply, socket}
 
   # Track edits to the active tab so its dirty dot reflects unsaved changes
@@ -2279,6 +2282,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               flush_error: nil
             )
             |> compile_clean(tab_id, source)
+            |> promote_new_method_tab(tab_id, class, selector)
             |> assign_changes()
 
           {:error, reason} ->
@@ -3339,8 +3343,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # After a successful compile, clear the saved tab's dirty dot and re-base it on
-  # the compiled source. `tab_id` is nil for the historical no-tab save payload —
-  # then there's nothing to reconcile.
+  # the compiled source. `tab_id` is nil for the historical no-tab save payload (or
+  # `""` from the empty-state hidden form) — neither matches an open tab, so
+  # there's nothing to reconcile and the update is a harmless no-op.
   #
   # A `:method` save is an in-memory live `>>` patch (logged to the ChangeLog) that
   # is *not* flushed to disk, so a successful compile *may* diverge the live body
@@ -3382,6 +3387,47 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp compiled_disk_differs(%{kind: :method}, _source), do: true
   defp compiled_disk_differs(%{disk_differs: existing}, _source), do: existing
 
+  # After a successful save *from a new-method tab*, promote it to an ordinary
+  # method tab: stamp the author-supplied `selector`, flip `new: false`, and re-key
+  # the tab id to the canonical `method:<class>:<side>:<selector>` so it matches
+  # what `open_method_tab` would create. Without this the tab keeps `selector: ""`,
+  # so `sync_active` re-seeds the selector input to "" on the post-save re-render
+  # (wiping what the author typed) and a second ⌘S trips the empty-selector guard;
+  # it would also leave a stale `new:<class>` tab alongside a later real method tab
+  # for the same selector. A no-op for ordinary method/def tabs (the guard only
+  # matches `new: true`) and when the canonical id is already open (re-keying would
+  # collide — keep the existing tab focused instead). `sync_active` refreshes the
+  # edit assigns so the now-hidden selector reflects the saved name.
+  defp promote_new_method_tab(socket, tab_id, class, selector) do
+    case find_tab(socket, tab_id) do
+      %{new: true, side: side} = tab ->
+        new_id = "method:" <> class <> ":" <> side <> ":" <> selector
+
+        if find_tab(socket, new_id) do
+          socket
+        else
+          promoted = %{tab | id: new_id, selector: selector, new: false}
+
+          # Mirror the promoted tab into the edit assigns directly rather than via
+          # `sync_active/2`: the latter clears `save_result`/`save_error`, which
+          # would wipe the "Saved …" banner this very save just set (promotion runs
+          # mid-save, not on a user tab-switch).
+          socket
+          |> update_active_tab_by_id(tab_id, fn _ -> promoted end)
+          |> assign(:active_tab, new_id)
+          |> assign(
+            edit_class: promoted.class,
+            edit_selector: promoted.selector,
+            edit_source: promoted.source,
+            edit_selection: nil
+          )
+        end
+
+      _ ->
+        socket
+    end
+  end
+
   defp update_active_tab(socket, fun),
     do: update_active_tab_by_id(socket, socket.assigns.active_tab, fun)
 
@@ -3397,9 +3443,14 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # The method shown in the focused tab as a `%{class, side, selector}` ref (or nil
   # for a class-definition tab), so the System Browser can highlight the matching
-  # method row. Takes bare `assigns` for the render template.
+  # method row. Takes bare `assigns` for the render template. An unsaved new-method
+  # tab has no real selector yet (`new: true`, `selector: ""`), so it highlights
+  # nothing — returning a `selector: ""` ref would never match a row anyway.
   defp selected_method_ref(assigns) do
     case active_tab(assigns) do
+      %{new: true} ->
+        nil
+
       %{kind: :method, class: class, side: side, selector: selector} ->
         %{class: class, side: side, selector: selector}
 
@@ -4940,9 +4991,6 @@ defmodule BtAttachWeb.WorkspaceLive do
             "method"
           ]}
         </span>
-        <span :if={site["source_file"]} class="nav-loc mono">
-          {site["source_file"]}:{site["line"]}
-        </span>
       </button>
     </div>
     """
@@ -5608,6 +5656,16 @@ defmodule BtAttachWeb.WorkspaceLive do
                   </button>
                 </div>
 
+                <%!-- Operation feedback (save / compile / new-class / revert /
+                     flush) — rendered above the editor/empty-state split so it
+                     shows whether or not a tab is focused. A method or class save
+                     posted from the empty-state form (no active tab) still surfaces
+                     its "Saved …" / error banner here. --%>
+                <div :if={@save_result} class="io-block ok">{@save_result}</div>
+                <div :if={@save_error} class="io-block err">{@save_error}</div>
+                <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
+                <div :if={@flush_error} class="io-block err">{@flush_error}</div>
+
                 <%= if @active_tab do %>
                   <%!-- breadcrumb: Class › side › selector for the active tab. --%>
                   <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
@@ -5826,11 +5884,6 @@ defmodule BtAttachWeb.WorkspaceLive do
                         <.nav_popover nav={@nav_popover} />
                       </div>
                     <% end %>
-
-                    <div :if={@save_result} class="io-block ok">{@save_result}</div>
-                    <div :if={@save_error} class="io-block err">{@save_error}</div>
-                    <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
-                    <div :if={@flush_error} class="io-block err">{@flush_error}</div>
                   </div>
                 <% else %>
                   <%!-- Empty state: the cockpit opens with no tab and lands here

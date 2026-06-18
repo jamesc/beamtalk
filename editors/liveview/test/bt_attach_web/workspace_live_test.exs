@@ -551,12 +551,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "the select_source hook event is accepted and ignored when malformed (BT-2485)", %{
     conn: conn
   } do
-    {:ok, view, _html} = live(conn, "/")
-
     # A well-formed selection payload stamped with the *active* tab id is stored
     # (BT-2549: the stamp is what the guard matches against). Open a tab first —
     # the strip starts empty, so there is no active tab to stamp until one opens.
-    html = open_object_def_tab(view)
+    {view, html, _class} = open_fresh_def_tab(conn)
     tab_id = active_tab_id(html)
 
     assert render_hook(view, "select_source", %{
@@ -575,8 +573,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   end
 
   test "select_source ignores a stale stamp from a departing tab (BT-2549)", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/")
-    html = open_object_def_tab(view)
+    {view, html, _class} = open_fresh_def_tab(conn)
     active = active_tab_id(html)
 
     # Seed a real selection for the active tab so we can prove the stale event
@@ -612,9 +609,8 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # The method editor stamps its CmEditor element with the active tab id so each
   # selection push can be matched against the live tab (BT-2549).
   test "the method editor stamps its CmEditor with the active tab id (BT-2549)", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/")
     # The CmEditor only mounts once a tab is open (the strip starts empty).
-    html = open_object_def_tab(view)
+    {_view, html, _class} = open_fresh_def_tab(conn)
 
     assert html =~ ~s(data-select-event="select_source")
     assert html =~ ~s(data-tab-id="#{active_tab_id(html)}")
@@ -623,7 +619,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # ── Phase 2 tabbed method editor (BT-2494) ──────────────────────────────────
 
   test "the method editor renders a tab strip + breadcrumb (BT-2494)", %{conn: conn} do
-    {:ok, view, mount_html} = live(conn, "/")
+    {:ok, _view, mount_html} = live(conn, "/")
 
     # The cockpit opens with an EMPTY strip (no starter tab): the tab strip and
     # the hidden save_method form are present, but the breadcrumb and "+ def"
@@ -636,34 +632,30 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     # Opening a class definition gives a live active tab: the breadcrumb, the
     # "+ def" affordance, and the tab-select control all render.
-    html = open_object_def_tab(view)
+    {_view, html, class} = open_fresh_def_tab(conn)
     assert html =~ "editor-meta"
     assert html =~ ~s(phx-click="tab_select")
     assert html =~ ~s(phx-click="open_definition")
     assert html =~ "+ def"
     # The breadcrumb shows Class › … for the active tab.
-    assert html =~ "Object"
+    assert html =~ class
     assert html =~ "class definition"
   end
 
   test "opening a class definition adds a + def tab and switches to it (BT-2494)", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/")
-
     # Open a tab first (the strip starts empty), then "+ def" opens (or re-focuses)
     # the active class's definition tab — a tab whose compile evals the class
     # definition. The tab label carries the ▸ def marker and the breadcrumb shows
     # the class-definition form.
-    open_object_def_tab(view)
+    {view, _html, class} = open_fresh_def_tab(conn)
     html = view |> element(~s(button[phx-click="open_definition"])) |> render_click()
-    assert html =~ "Object ▸ def"
+    assert html =~ "#{class} ▸ def"
     assert html =~ "class definition"
   end
 
   test "a dirty edit marks the active tab with a dirty dot (BT-2494)", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/")
-
     # Open a def tab; it opens clean (no dirty dot), reporting "in image".
-    open_object_def_tab(view)
+    {view, _html, class} = open_fresh_def_tab(conn)
     assert render(view) =~ "in image"
     refute render(view) =~ "modot"
 
@@ -673,7 +665,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     edited =
       view
       |> form("#method-editor-form")
-      |> render_change(%{"source" => "Object subclass: Object\n  state: x = 1"})
+      |> render_change(%{"source" => "Actor subclass: #{class}\n  state: x = 1"})
 
     assert edited =~ "modot"
     assert edited =~ "edited"
@@ -1880,15 +1872,37 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   # Open (and focus) a class-definition tab so the editor has a live active tab to
   # assert against. The cockpit now opens with an EMPTY tab strip (no starter tab),
-  # so a test that needs an editor tab opens one first. Object is always in the
-  # image, so its definition tab is a dependency-free way to populate the editor.
-  # Returns the post-open HTML.
-  defp open_object_def_tab(view) do
-    view |> element(~s(div[phx-value-class="Object"])) |> render_click()
+  # so a test that needs an editor tab opens one first. Uses a freshly-defined
+  # per-test Actor class (defined via eval, then picked up by a remount's
+  # browse-classes snapshot) rather than a built-in — the same define → remount →
+  # `browser_open_definition` path the passing "selecting a class" test exercises,
+  # so it does not depend on how any particular built-in class browses. Returns
+  # `{view, html, class}` (the post-open html + the synthesized class name, which
+  # the breadcrumb / tab label show).
+  defp open_fresh_def_tab(conn) do
+    suffix = System.unique_integer([:positive])
+    class = "TabHost#{suffix}"
+
+    {:ok, view, _} = live(conn, "/")
 
     view
-    |> element(~s(div[phx-click="browser_open_definition"][phx-value-class="Object"]))
-    |> render_click()
+    |> form("#eval-form")
+    |> render_submit(%{
+      expr: "Actor subclass: #{class}\n  state: value = 0\n\n  value => self.value"
+    })
+
+    # browse-classes is a mount snapshot — remount so the tree includes the class.
+    {:ok, view, _} = live(conn, "/")
+    assert eventually(fn -> render(view) =~ class end)
+
+    view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
+
+    html =
+      view
+      |> element(~s(div[phx-click="browser_open_definition"][phx-value-class="#{class}"]))
+      |> render_click()
+
+    {view, html, class}
   end
 
   # The active method-editor tab id, read from the CmEditor element's stamp

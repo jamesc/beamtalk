@@ -1084,7 +1084,6 @@
   color: var(--accent-2); background: var(--accent-soft);
   border-radius: 3px; padding: 0 4px; margin: 0 3px;
 }
-.nav-loc { font-size: 10.5px; color: var(--faint); }
 
 /* ── floating inspector windows (BT-2493, epic BT-2482 Phase 3) ──────────────
    The Float-mode overlay: draggable, stackable inspector windows. The overlay
