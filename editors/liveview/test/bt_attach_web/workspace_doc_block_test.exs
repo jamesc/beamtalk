@@ -105,5 +105,19 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
       assert html =~ "The Counter class."
       assert html =~ ~s(<h4 class="doc-h">Overview</h4>)
     end
+
+    test "opening a class definition seeds the editor with the class skeleton",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      html =
+        view
+        |> element(~s(button[phx-click="open_definition"]))
+        |> render_click()
+
+      # The editable body (distinct from the doc block) carries the class
+      # skeleton the browse op returns — not an empty editor.
+      assert html =~ "Object subclass: Counter"
+    end
   end
 end

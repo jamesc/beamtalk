@@ -2899,9 +2899,30 @@ defmodule BtAttachWeb.WorkspaceLive do
   # This is the same comment `Beamtalk help:` renders, so the browser and the
   # `help:` send agree on the docs for a class.
   defp class_comment(socket, class) do
+    {_definition, comment} = class_definition_info(socket, class)
+    comment
+  end
+
+  # The class' editable definition skeleton (`browse-class-definition` →
+  # `definition`, the synthesized `Super subclass: Name` header + state slots)
+  # paired with its doc-block comment, fetched in one browse op. Returns
+  # `{definition, comment}` where `definition` is a binary (`""` for a file-less
+  # ClassBuilder class with no skeleton, so the editor body is always a string)
+  # and `comment` is the rendered doc text or `nil`. `{"", nil}` if the browse
+  # fails — the tab then opens empty rather than erroring.
+  defp class_definition_info(socket, class) do
     case Facade.dispatch(:browse_class_definition, %{class: class}, ctx(socket)) do
-      {:value, %{"comment" => comment}} -> doc_text(comment)
-      _ -> nil
+      {:value, %{} = result} ->
+        definition =
+          case Map.get(result, "definition") do
+            text when is_binary(text) -> text
+            _ -> ""
+          end
+
+        {definition, doc_text(Map.get(result, "comment"))}
+
+      _ ->
+        {"", nil}
     end
   end
 
@@ -3177,14 +3198,21 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> activate_tab(id)
 
       nil ->
+        # Fetch the class skeleton (header + state slots) and its comment in one
+        # browse op: the skeleton seeds the editable definition body, the comment
+        # the read-only doc block. Without the skeleton the editor opened empty —
+        # the doc block rendered but the class definition itself was missing
+        # (BT-2558 only wired the comment).
+        {definition, comment} = class_definition_info(socket, class)
+
         tab = %{
           id: id,
           kind: :def,
           class: class,
           side: nil,
           selector: nil,
-          source: "",
-          base: "",
+          source: definition,
+          base: definition,
           dirty: false,
           disk_differs: false,
           runtime_only: false,
@@ -3192,7 +3220,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           disk_source: nil,
           # The class comment as the doc block; no per-method signature on a
           # class-definition tab.
-          doc: class_comment(socket, class),
+          doc: comment,
           signature: nil
         }
 
