@@ -515,9 +515,9 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
     %% `source_origin` keys editability off where the .erl lives: stdlib and
     %% dependency native are read-only; project-owned native is the seam where a
     %% future R/W phase enables editing (BT-2578 out-of-scope follow-up). Also
-    %% require a resolved backing file: a project class whose source was stripped
-    %% from the release (`BackingFile = null`) has nothing to edit, so it must not
-    %% advertise `editable`.
+    %% require the source content to be present: a project class whose `.erl` was
+    %% stripped from the release (or is unreadable) has nothing to edit even
+    %% though its build-time path is known, so it must not advertise `editable`.
     SourceOrigin = source_origin_of(ModName, BackingFile),
     Clauses = handle_call_clause_lines(Content),
     {value, #{
@@ -525,7 +525,7 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
         <<"backing_module">> => atom_to_binary(Backing, utf8),
         <<"source_file">> => BackingFile,
         <<"source_origin">> => SourceOrigin,
-        <<"editable">> => SourceOrigin =:= <<"project">> andalso BackingFile =/= null,
+        <<"editable">> => SourceOrigin =:= <<"project">> andalso Content =/= null,
         <<"content">> => Content,
         <<"clauses">> => Clauses,
         <<"selected_clause">> => selected_clause(Clauses, Selector)
