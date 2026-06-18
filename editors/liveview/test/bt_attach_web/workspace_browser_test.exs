@@ -808,6 +808,143 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     )
   end
 
+  test "dragging the right split gutter resizes the Bindings pane and persists (BT-2576)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#right-split-gutter")
+    # Drag the Bindings/Inspector divider DOWN — the top pane (Bindings) grows.
+    |> evaluate(
+      "(() => { window.__bh0 = document.getElementById('bindings-panel').offsetHeight; return true; })()"
+    )
+    |> drag_split("right-split-gutter", 0, 120)
+    |> assert_eventually(
+      "document.getElementById('bindings-panel').offsetHeight > window.__bh0 + 20",
+      "dragging the right gutter down did not enlarge the Bindings pane"
+    )
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.right-split')).getPropertyValue('--right-split')",
+      fn v ->
+        assert v =~ ~r/\d+px/, "the --right-split var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    |> evaluate("window.localStorage.getItem('bt.split.right')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the right split size was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  test "dragging the right column gutter widens the Inspector column and persists (BT-2576)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#col-gutter-right")
+    # The third cockpit column (`.cockpit > .col`, the gutters are not `.col`) is
+    # the Inspector/Bindings column. Drag its seam gutter to the LEFT — the column
+    # grows toward the centre (driving the `--inspector-w` grid track).
+    |> evaluate(
+      "(() => { window.__iw0 = document.querySelectorAll('.cockpit > .col')[2].offsetWidth; return true; })()"
+    )
+    |> drag_split("col-gutter-right", -90, 0)
+    |> assert_eventually(
+      "document.querySelectorAll('.cockpit > .col')[2].offsetWidth > window.__iw0 + 20",
+      "dragging the right column gutter left did not widen the Inspector column"
+    )
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.cockpit')).getPropertyValue('--inspector-w')",
+      fn v ->
+        assert v =~ ~r/\d+px/, "the --inspector-w var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    |> evaluate("window.localStorage.getItem('bt.split.inspector-w')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the column width was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  # ── System Browser navigation (BT-2491) ─────────────────────────────────────
+  #
+  # Selecting a class to load its protocols + methods, and the Hierarchy/Category
+  # + instance/class view toggles, are connected-render round-trips through the
+  # BT-2488 browse ops (ADR 0096). The `ScrollToSelected` hook scrolls the tree to
+  # the chosen class. None of this runs in `Phoenix.LiveViewTest` (no `app.js`).
+
+  test "the System Browser selects a class, loads its protocols, and toggles views (BT-2491)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    # The tree lists the live image's classes (the e2e workspace loads the project).
+    |> assert_has("#system-browser-tree .row")
+    # Select the first class in the tree (the tree holds only class rows until one
+    # is picked): the bottom pane loads its protocol filter + method list over the
+    # live browse ops — the `.sb-protocols` row appears only once a class is set.
+    # Clicking via the DOM (the phx-click lives on the `.row`) sidesteps a
+    # strict-mode multi-match and does not depend on any specific class name.
+    |> evaluate("""
+    (() => {
+      const r = document.querySelector("#system-browser-tree .row");
+      if (!r) throw new Error("no class rows in the System Browser tree");
+      r.click();
+      return true;
+    })()
+    """)
+    |> assert_has(".sb-protocols")
+    # The Category view toggle re-groups the tree (a server round-trip); its
+    # segmented button becomes the selected one.
+    |> click("button[phx-value-view='category']")
+    |> assert_has("button[phx-value-view='category'][aria-selected='true']")
+    # The class-side toggle switches to the metaclass side.
+    |> click("button[phx-value-side='class']")
+    |> assert_has("button[phx-value-side='class'][aria-selected='true']")
+  end
+
+  # ── panel collapse / dismiss (BT-2559) ──────────────────────────────────────
+  #
+  # The dismissable side panels + their top-bar re-open toggles drive the cockpit
+  # grid's collapse classes. The seam gutters (BT-2576) must hide with their
+  # column and return when it reopens — a CSS-driven, connected-render behaviour.
+
+  test "collapsing a side panel hides its column + seam gutter, and reopening restores them (BT-2559)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#system-browser")
+    # Both seam gutters start visible.
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-left')).display !== 'none'",
+      "the left seam gutter should be visible while the browser is shown"
+    )
+    # Dismiss the System Browser via its panel × (close_browser): the cockpit goes
+    # browser-hidden and the left seam gutter disappears with the column.
+    |> click("#system-browser button[phx-click='close_browser']")
+    |> assert_has(".cockpit.browser-hidden")
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-left')).display === 'none'",
+      "the left seam gutter should hide when the browser column collapses"
+    )
+    # Reopen via the top-bar toggle: the column + its gutter come back.
+    |> click("button[phx-click='toggle_browser']")
+    |> refute_has(".cockpit.browser-hidden")
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-left')).display !== 'none'",
+      "the left seam gutter should return when the browser column reopens"
+    )
+    # The same for the Inspector/Bindings column and its right seam gutter.
+    |> click("#inspector-panel button[phx-click='close_inspector']")
+    |> assert_has(".cockpit.inspector-hidden")
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-right')).display === 'none'",
+      "the right seam gutter should hide when the inspector column collapses"
+    )
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   # Drive the SplitDrag hook through a full mousedown→mousemove→mouseup drag of the
