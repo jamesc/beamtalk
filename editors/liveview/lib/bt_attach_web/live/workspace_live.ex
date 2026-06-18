@@ -4555,7 +4555,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp system_browser_classes(assigns) do
     ~H"""
-    <div id="system-browser" class="panel" style="flex:1;">
+    <div id="system-browser" class="panel">
       <div class="panel-head">
         System Browser <span class="spacer"></span>
         <div class="seg" role="tablist" aria-label="Class tree view">
@@ -4730,7 +4730,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:total_methods, protocol_method_count(assigns.browser_protocols))
 
     ~H"""
-    <div class="panel" style="flex:1;">
+    <div class="panel">
       <div class="panel-head">
         <%= if @selected_class do %>
           {if @browser_side == "class", do: @selected_class <> " class", else: @selected_class}
@@ -5018,6 +5018,43 @@ defmodule BtAttachWeb.WorkspaceLive do
             !@show_browser && "browser-hidden",
             !@show_inspector && "inspector-hidden"
           ]}>
+            <%!-- Column-width dividers (BT-2576): drag a seam to widen/narrow the
+                 System Browser (left) or Inspector (right) column. Absolutely
+                 positioned over the grid seams so the 3-column template and the
+                 collapse rules stay intact; each hides when its column is
+                 collapsed (`.cockpit.browser-hidden` / `.inspector-hidden`). --%>
+            <div
+              id="col-gutter-left"
+              class="split-gutter split-gutter-x col-gutter-left"
+              phx-hook="SplitDrag"
+              phx-update="ignore"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize the System Browser column"
+              data-split="browser-w"
+              data-axis="x"
+              data-edge="start"
+              data-var="--browser-w"
+              data-min="160"
+              data-min-other="420"
+            >
+            </div>
+            <div
+              id="col-gutter-right"
+              class="split-gutter split-gutter-x col-gutter-right"
+              phx-hook="SplitDrag"
+              phx-update="ignore"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize the Inspector column"
+              data-split="inspector-w"
+              data-axis="x"
+              data-edge="end"
+              data-var="--inspector-w"
+              data-min="200"
+              data-min-other="420"
+            >
+            </div>
             <%!-- LEFT — System Browser (BT-2491, 286px).
                  A class tree (Hierarchy / Category views, instance/class side
                  toggle) over a protocol-grouped method list, driven by the
@@ -5034,6 +5071,24 @@ defmodule BtAttachWeb.WorkspaceLive do
                   role={@role}
                   new_class_open={@new_class_open}
                 />
+                <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
+                     the method list ("more class, less method"). --%>
+                <div
+                  id="browser-split-gutter"
+                  class="split-gutter split-gutter-y"
+                  phx-hook="SplitDrag"
+                  phx-update="ignore"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="Resize the class tree and method list"
+                  data-split="browser"
+                  data-axis="y"
+                  data-edge="start"
+                  data-var="--browser-split"
+                  data-min="80"
+                  data-min-other="120"
+                >
+                </div>
                 <.system_browser_methods
                   browser_protocols={@browser_protocols}
                   selected_protocol={@selected_protocol}
@@ -5789,6 +5844,25 @@ defmodule BtAttachWeb.WorkspaceLive do
                       </div>
                     <% end %>
                   </div>
+                </div>
+
+                <%!-- Draggable divider (BT-2576): rebalances Bindings vs. the
+                     Inspector. --%>
+                <div
+                  id="right-split-gutter"
+                  class="split-gutter split-gutter-y"
+                  phx-hook="SplitDrag"
+                  phx-update="ignore"
+                  role="separator"
+                  aria-orientation="horizontal"
+                  aria-label="Resize the Bindings and Inspector panels"
+                  data-split="right"
+                  data-axis="y"
+                  data-edge="start"
+                  data-var="--right-split"
+                  data-min="80"
+                  data-min-other="120"
+                >
                 </div>
 
                 <div id="inspector-panel" class="panel insp inspector-panel">

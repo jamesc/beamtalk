@@ -23,6 +23,9 @@
 //   WindowDrag        — drags a floating inspector window by its title bar and
 //                       raises it to the front on click; reports the final
 //                       position on drop (BT-2493, epic BT-2482 Phase 3)
+//   SplitDrag         — drags a cockpit divider to resize stacked panels
+//                       (class/method, bindings/inspector) or a side column's
+//                       width; persists the size to localStorage (BT-2576)
 //
 // The Workspace dock and method editor (later Phase 1 issues) build on these.
 
@@ -33,6 +36,7 @@ import { TweaksPanel } from "./tweaks_panel"
 import { FieldFlash } from "./field_flash"
 import { OmniSearch } from "./omni_search"
 import { WindowDrag } from "./window_drag"
+import { SplitDrag } from "./split_drag"
 import { ScrollToSelected } from "./scroll_to_selected"
 
 export const Hooks = {
@@ -43,5 +47,6 @@ export const Hooks = {
   FieldFlash,
   OmniSearch,
   WindowDrag,
+  SplitDrag,
   ScrollToSelected,
 }

@@ -717,7 +717,278 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     )
   end
 
+  # ── Phase 3 resizeable cockpit splitters (BT-2576) ──────────────────────────
+  #
+  # The `SplitDrag` hook (`split_drag.js`) drags a divider to resize the stacked
+  # panels (class tree vs. method list, Bindings vs. Inspector) or a side column's
+  # width, moving the element via a CSS var for a no-latency drag and persisting
+  # the final size to `localStorage` — like the Tweaks panel's theme/density, NOT
+  # the server. The drag motion, the localStorage write, and the restore-on-mount
+  # are all client JS that `Phoenix.LiveViewTest` never runs (it never loads
+  # `app.js`), so they MUST run in a real browser (the e2e lane).
+
+  test "dragging the browser split gutter resizes the class tree and persists (BT-2576)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#browser-split-gutter")
+    # Snapshot the class-tree pane's height, then drag the divider DOWN — the top
+    # pane (class tree) should grow ("more class, less method").
+    |> evaluate(
+      "(() => { window.__h0 = document.getElementById('system-browser').offsetHeight; return true; })()"
+    )
+    |> drag_split("browser-split-gutter", 0, 120)
+    # The drag really moved layout, not just a var: the class-tree pane is taller.
+    |> assert_eventually(
+      "document.getElementById('system-browser').offsetHeight > window.__h0 + 20",
+      "dragging the browser gutter down did not enlarge the class tree"
+    )
+    # The hook drove the size through the `--browser-split` var on the container…
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.browser-split')).getPropertyValue('--browser-split')",
+      fn v ->
+        assert v =~ ~r/\d+px/,
+               "the --browser-split var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    # …and persisted the final size to localStorage (no server round-trip).
+    |> evaluate("window.localStorage.getItem('bt.split.browser')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the browser split size was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  test "dragging the left column gutter widens the System Browser column and persists (BT-2576)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#col-gutter-left")
+    # Snapshot the left column's width, then drag its seam gutter to the RIGHT —
+    # the System Browser column should widen (driving the `--browser-w` grid track).
+    |> evaluate(
+      "(() => { window.__w0 = document.querySelector('.cockpit > .col').offsetWidth; return true; })()"
+    )
+    |> drag_split("col-gutter-left", 90, 0)
+    |> assert_eventually(
+      "document.querySelector('.cockpit > .col').offsetWidth > window.__w0 + 20",
+      "dragging the left column gutter right did not widen the System Browser column"
+    )
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.cockpit')).getPropertyValue('--browser-w')",
+      fn v ->
+        assert v =~ ~r/\d+px/, "the --browser-w var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    |> evaluate("window.localStorage.getItem('bt.split.browser-w')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the column width was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  test "a saved split size is restored on the next load (BT-2576)", %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#browser-split-gutter")
+    # Drag to set a non-default size, persisted to localStorage.
+    |> drag_split("browser-split-gutter", 0, 100)
+    |> evaluate("window.localStorage.getItem('bt.split.browser')", fn saved ->
+      assert is_binary(saved) and saved =~ "px", "the drag did not persist a size"
+    end)
+    # Reload the page: JS globals reset but localStorage survives, so the hook's
+    # `restore()` on mount must re-apply the saved `--browser-split` size — proving
+    # the split survives a reload / LiveView reconnect with no server state.
+    |> visit("/")
+    |> assert_has("#browser-split-gutter")
+    |> assert_eventually(
+      "getComputedStyle(document.querySelector('.browser-split')).getPropertyValue('--browser-split').trim() === window.localStorage.getItem('bt.split.browser')",
+      "the saved browser split size was not restored on reload"
+    )
+  end
+
+  test "dragging the right split gutter resizes the Bindings pane and persists (BT-2576)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#right-split-gutter")
+    # Drag the Bindings/Inspector divider DOWN — the top pane (Bindings) grows.
+    |> evaluate(
+      "(() => { window.__bh0 = document.getElementById('bindings-panel').offsetHeight; return true; })()"
+    )
+    |> drag_split("right-split-gutter", 0, 120)
+    |> assert_eventually(
+      "document.getElementById('bindings-panel').offsetHeight > window.__bh0 + 20",
+      "dragging the right gutter down did not enlarge the Bindings pane"
+    )
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.right-split')).getPropertyValue('--right-split')",
+      fn v ->
+        assert v =~ ~r/\d+px/, "the --right-split var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    |> evaluate("window.localStorage.getItem('bt.split.right')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the right split size was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  test "dragging the right column gutter widens the Inspector column and persists (BT-2576)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#col-gutter-right")
+    # The third cockpit column (`.cockpit > .col`, the gutters are not `.col`) is
+    # the Inspector/Bindings column. Drag its seam gutter to the LEFT — the column
+    # grows toward the centre (driving the `--inspector-w` grid track).
+    |> evaluate(
+      "(() => { window.__iw0 = document.querySelectorAll('.cockpit > .col')[2].offsetWidth; return true; })()"
+    )
+    |> drag_split("col-gutter-right", -90, 0)
+    |> assert_eventually(
+      "document.querySelectorAll('.cockpit > .col')[2].offsetWidth > window.__iw0 + 20",
+      "dragging the right column gutter left did not widen the Inspector column"
+    )
+    |> evaluate(
+      "getComputedStyle(document.querySelector('.cockpit')).getPropertyValue('--inspector-w')",
+      fn v ->
+        assert v =~ ~r/\d+px/, "the --inspector-w var was not set to a px size, got #{inspect(v)}"
+      end
+    )
+    |> evaluate("window.localStorage.getItem('bt.split.inspector-w')", fn stored ->
+      assert is_binary(stored) and stored =~ "px",
+             "the column width was not persisted to localStorage, got #{inspect(stored)}"
+    end)
+  end
+
+  # ── System Browser navigation (BT-2491) ─────────────────────────────────────
+  #
+  # Selecting a class to load its protocols + methods, and the Hierarchy/Category
+  # + instance/class view toggles, are connected-render round-trips through the
+  # BT-2488 browse ops (ADR 0096). The `ScrollToSelected` hook scrolls the tree to
+  # the chosen class. None of this runs in `Phoenix.LiveViewTest` (no `app.js`).
+
+  test "the System Browser selects a class, loads its protocols, and toggles views (BT-2491)", %{
+    conn: conn
+  } do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    # The tree lists the live image's classes (the e2e workspace loads the project).
+    |> assert_has("#system-browser-tree .row")
+    # Select the first class in the tree (the tree holds only class rows until one
+    # is picked): the bottom pane loads its protocol filter + method list over the
+    # live browse ops — the `.sb-protocols` row appears only once a class is set.
+    # Clicking via the DOM (the phx-click lives on the `.row`) sidesteps a
+    # strict-mode multi-match and does not depend on any specific class name.
+    |> evaluate("""
+    (() => {
+      const r = document.querySelector("#system-browser-tree .row");
+      if (!r) throw new Error("no class rows in the System Browser tree");
+      r.click();
+      return true;
+    })()
+    """)
+    |> assert_has(".sb-protocols")
+    # The Category view toggle re-groups the tree (a server round-trip); its
+    # segmented button becomes the selected one.
+    |> click("button[phx-value-view='category']")
+    |> assert_has("button[phx-value-view='category'][aria-selected='true']")
+    # The class-side toggle switches to the metaclass side.
+    |> click("button[phx-value-side='class']")
+    |> assert_has("button[phx-value-side='class'][aria-selected='true']")
+  end
+
+  # ── panel collapse / dismiss (BT-2559) ──────────────────────────────────────
+  #
+  # The dismissable side panels + their top-bar re-open toggles drive the cockpit
+  # grid's collapse classes. The seam gutters (BT-2576) must hide with their
+  # column and return when it reopens — a CSS-driven, connected-render behaviour.
+
+  test "collapsing a side panel hides its column + seam gutter, and reopening restores them (BT-2559)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has(".att-label", text: "attached")
+    |> assert_has("#system-browser")
+    # Both seam gutters start visible.
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-left')).display !== 'none'",
+      "the left seam gutter should be visible while the browser is shown"
+    )
+    # Dismiss the System Browser via its panel × (close_browser): the cockpit goes
+    # browser-hidden and the left seam gutter disappears with the column.
+    |> click("#system-browser button[phx-click='close_browser']")
+    |> assert_has(".cockpit.browser-hidden")
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-left')).display === 'none'",
+      "the left seam gutter should hide when the browser column collapses"
+    )
+    # Reopen via the top-bar toggle: the column + its gutter come back.
+    |> click("button[phx-click='toggle_browser']")
+    |> refute_has(".cockpit.browser-hidden")
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-left')).display !== 'none'",
+      "the left seam gutter should return when the browser column reopens"
+    )
+    # The same for the Inspector/Bindings column and its right seam gutter.
+    |> click("#inspector-panel button[phx-click='close_inspector']")
+    |> assert_has(".cockpit.inspector-hidden")
+    |> assert_eventually(
+      "getComputedStyle(document.getElementById('col-gutter-right')).display === 'none'",
+      "the right seam gutter should hide when the inspector column collapses"
+    )
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  # Drive the SplitDrag hook through a full mousedown→mousemove→mouseup drag of the
+  # gutter `gutter_id`, moving the pointer by (`dx`, `dy`) from the gutter's centre.
+  # The hook binds mousedown on the gutter and mousemove/mouseup on `document`, so
+  # we dispatch the down on the gutter and the move/up on the document — exactly
+  # the event path a real pointer drag takes.
+  defp drag_split(conn, gutter_id, dx, dy) do
+    evaluate(conn, """
+    (() => {
+      const g = document.getElementById(#{Jason.encode!(gutter_id)});
+      if (!g) throw new Error("gutter not found: " + #{Jason.encode!(gutter_id)});
+      const r = g.getBoundingClientRect();
+      const x = r.left + r.width / 2, y = r.top + r.height / 2;
+      g.dispatchEvent(new MouseEvent("mousedown", {bubbles: true, button: 0, clientX: x, clientY: y}));
+      document.dispatchEvent(new MouseEvent("mousemove", {bubbles: true, clientX: x + #{dx}, clientY: y + #{dy}}));
+      document.dispatchEvent(new MouseEvent("mouseup", {bubbles: true, button: 0}));
+    })()
+    """)
+  end
+
+  # Poll the browser until the JS boolean expression `expr` is truthy, failing
+  # with `msg` if it never becomes true within the window. Layout/var changes
+  # settle a frame or two after the drag (and a restore lands after the connected
+  # mount), so a single read can race; this polls past that, like the FieldFlash /
+  # ArrowUp-recall waiters above. The Promise rejection surfaces as a test failure.
+  defp assert_eventually(conn, expr, msg) do
+    evaluate(conn, """
+    new Promise((resolve, reject) => {
+      const start = Date.now();
+      const tick = () => {
+        let ok = false;
+        // A throw here means the DOM isn't ready yet (e.g. a queried node is
+        // still null mid-render) — treat it as "not true yet" and keep polling;
+        // a genuinely wrong `expr` still surfaces as the timeout below.
+        try { ok = (#{expr}); } catch (_e) {}
+        if (ok) return resolve(true);
+        if (Date.now() - start > 3000) return reject(new Error(#{Jason.encode!(msg)}));
+        requestAnimationFrame(tick);
+      };
+      tick();
+    })
+    """)
+  end
 
   # Type `query` into the omni search input and fire the `keyup` event the server
   # listens for (phx-keyup="omni_search"), so the results popover re-renders.
