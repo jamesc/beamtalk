@@ -61,45 +61,7 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // Generate a recursive function:
-        // letrec '_LoopN'/0 = fun () ->
-        //     let _CondFun = <condition> in
-        //     case apply _CondFun& () of
-        //       'true' -> let _BodyFun = <body> in
-        //                let _ = apply _BodyFun& () in apply '_LoopN'/0 ()
-        //       'false' -> 'nil'
-        //     end
-        // in apply '_LoopN'/0 ()
-
-        let loop_fn = self.fresh_temp_var("Loop");
-        let cond_var = self.fresh_temp_var("CondFun");
-        let cond_code = self.expression_doc(condition)?;
-        let body_var = self.fresh_temp_var("BodyFun");
-        let body_code = self.expression_doc(body)?;
-
-        let doc = docvec![
-            "letrec ",
-            leaf::fname(loop_fn.clone(), 0),
-            " = fun () -> let ",
-            leaf::var(cond_var.clone()),
-            " = ",
-            cond_code,
-            " in case apply ",
-            leaf::var(cond_var),
-            " () of <'true'> when 'true' -> let ",
-            leaf::var(body_var.clone()),
-            " = ",
-            body_code,
-            " in let _ = apply ",
-            leaf::var(body_var),
-            " () in apply ",
-            leaf::fname(loop_fn.clone(), 0),
-            " () <'false'> when 'true' -> 'nil' end in apply ",
-            leaf::fname(loop_fn, 0),
-            " ()",
-        ];
-
-        Ok(doc)
+        self.generate_while_simple(condition, body, false)
     }
 
     pub(in crate::codegen::core_erlang) fn generate_while_true_with_mutations(
@@ -146,7 +108,35 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // Generate: whileFalse is whileTrue with negated condition
+        self.generate_while_simple(condition, body, true)
+    }
+
+    /// Shared letrec loop structure for `whileTrue:` (negate=false) and `whileFalse:` (negate=true).
+    ///
+    /// Generates a recursive function:
+    /// ```text
+    /// letrec '_LoopN'/0 = fun () ->
+    ///     let _CondFun = <condition> in
+    ///     case apply _CondFun () of
+    ///       <continue_atom> when 'true' -> let _BodyFun = <body> in
+    ///                                      let _ = apply _BodyFun () in
+    ///                                      apply '_LoopN'/0 ()
+    ///       <exit_atom> when 'true' -> 'nil'
+    ///     end
+    /// in apply '_LoopN'/0 ()
+    /// ```
+    fn generate_while_simple(
+        &mut self,
+        condition: &Expression,
+        body: &Expression,
+        negate: bool,
+    ) -> Result<Document<'static>> {
+        let (continue_atom, exit_atom) = if negate {
+            ("'false'", "'true'")
+        } else {
+            ("'true'", "'false'")
+        };
+
         let loop_fn = self.fresh_temp_var("Loop");
         let cond_var = self.fresh_temp_var("CondFun");
         let cond_code = self.expression_doc(condition)?;
@@ -162,7 +152,9 @@ impl CoreErlangGenerator {
             cond_code,
             " in case apply ",
             leaf::var(cond_var),
-            " () of <'false'> when 'true' -> let ",
+            " () of <",
+            continue_atom,
+            "> when 'true' -> let ",
             leaf::var(body_var.clone()),
             " = ",
             body_code,
@@ -170,7 +162,9 @@ impl CoreErlangGenerator {
             leaf::var(body_var),
             " () in apply ",
             leaf::fname(loop_fn.clone(), 0),
-            " () <'true'> when 'true' -> 'nil' end in apply ",
+            " () <",
+            exit_atom,
+            "> when 'true' -> 'nil' end in apply ",
             leaf::fname(loop_fn, 0),
             " ()",
         ];
