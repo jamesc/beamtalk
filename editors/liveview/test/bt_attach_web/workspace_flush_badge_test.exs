@@ -289,7 +289,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
           "class" => "Counter",
           "selector" => "greet",
           "source" => ~s|greet => "hi"|,
-          "tab" => "new:Counter"
+          "tab" => "new:Counter:instance"
         })
 
       assert saved =~ "Saved greet on Counter"
@@ -321,7 +321,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
           "class" => "Counter",
           "selector" => "",
           "source" => ~s|=> "hi"|,
-          "tab" => "new:Counter"
+          "tab" => "new:Counter:instance"
         })
 
       assert html =~ "Enter a selector"
@@ -370,7 +370,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
           "class" => "Counter",
           "selector" => "increment",
           "source" => "increment => self.value := self.value + 1",
-          "tab" => "new:Counter"
+          "tab" => "new:Counter:instance"
         })
 
       assert saved =~ "Saved increment on Counter"

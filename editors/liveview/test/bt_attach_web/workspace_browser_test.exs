@@ -310,12 +310,12 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # the form's KeyboardShortcuts hook, which request-submits the form so
     # class/selector/source ride the normal save_method — no button click.
     |> press("[id^='method-editor-overlay-'] .cm-content", "Control+s")
-    # The save is a server round-trip (WorkspaceLive compiles `Counter >>
-    # increment` before assigning `save_result`); under parallel CI load that
-    # can outlast the 2s default assertion poll. Wait on the banner explicitly
-    # with a generous window (BT-2529) — the assertion returns the instant the
-    # text appears, so passing runs are not slowed.
-    |> assert_has("#method-editor", text: "Saved increment on Counter", timeout: 10_000)
+    # The save is a server round-trip (WorkspaceLive compiles `KsCounter >>
+    # ksBump` before assigning `save_result`); under parallel CI load that can
+    # outlast the 2s default assertion poll. Wait on the banner explicitly with a
+    # generous window (BT-2529) — the assertion returns the instant the text
+    # appears, so passing runs are not slowed.
+    |> assert_has("#method-editor", text: "Saved ksBump on KsCounter", timeout: 10_000)
   end
 
   test "the TweaksPanel hook reskins the IDE client-side and persists it (BT-2487)", %{conn: conn} do
@@ -533,14 +533,16 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
     # Define two classes that both implement a uniquely-named selector, so it has
-    # real implementors to trace. Open its method tab via the omni search (live
-    # nav-symbols index — no browser remount race); the Implementors query runs on
-    # the active tab's selector, so the method need only exist (no ⌘S save here).
+    # real implementors to trace. The class names must NOT contain the selector
+    # substring, or the omni search matches the class rows too and Enter opens a
+    # class instead of the method. Open the method tab via omni (live nav-symbols
+    # index — no browser remount race); the Implementors query runs on the active
+    # tab's selector, so the method need only exist (no ⌘S save here).
     |> eval_do(
-      "Actor subclass: NavTraceA\n  state: value = 0\n\n  navTrace => self.value := self.value + 1"
+      "Actor subclass: TracerOne\n  state: value = 0\n\n  navTrace => self.value := self.value + 1"
     )
     |> eval_do(
-      "Actor subclass: NavTraceB\n  state: value = 0\n\n  navTrace => self.value := self.value + 2"
+      "Actor subclass: TracerTwo\n  state: value = 0\n\n  navTrace => self.value := self.value + 2"
     )
     |> omni_type("navTrace")
     |> assert_has(".omni-results .omni-row", text: "navTrace")

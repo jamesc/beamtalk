@@ -1211,7 +1211,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The starter tab used to fill this role on startup; it now opens on demand only.
   def handle_event("new_method", %{"class" => class}, %{assigns: %{role: :owner}} = socket)
       when is_binary(class) and class != "" do
-    {:noreply, open_new_method(socket, class)}
+    # Author on whichever side the browser is showing (instance/class), so "new
+    # method" while viewing the class side opens a class-side tab.
+    {:noreply, open_new_method(socket, class, socket.assigns.browser_side)}
   end
 
   # Non-owner (Observer) or malformed payload: a no-op. Authoring is owner-only —
@@ -3312,26 +3314,27 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Open (or re-focus) a blank "new method" tab for a class: a `:method` tab whose
-  # selector is not yet chosen (`selector: ""`, `new: true`). The author fills the
-  # selector (via the new-method-only selector input) and types the body; saving
-  # drives the same write-surface `save` as any method. One blank new-method tab
-  # per class — re-clicking re-focuses rather than stacking empties.
-  defp open_new_method(socket, class) do
-    id = "new:" <> class
+  # Open (or re-focus) a blank "new method" tab for a class on `side`
+  # ("instance"/"class"): a `:method` tab whose selector is not yet chosen
+  # (`selector: ""`, `new: true`). The author fills the selector (via the
+  # new-method-only selector input) and types the body; saving drives the same
+  # write-surface `save` as any method. One blank new-method tab per (class, side)
+  # — re-clicking re-focuses rather than stacking empties.
+  defp open_new_method(socket, class, side) do
+    id = "new:" <> class <> ":" <> side
 
     case find_tab(socket, id) do
       %{} -> activate_tab(socket, id)
-      nil -> add_new_method_tab(socket, id, class)
+      nil -> add_new_method_tab(socket, id, class, side)
     end
   end
 
-  defp add_new_method_tab(socket, id, class) do
+  defp add_new_method_tab(socket, id, class, side) do
     tab = %{
       id: id,
       kind: :method,
       class: class,
-      side: "instance",
+      side: side,
       selector: "",
       source: "",
       base: "",
