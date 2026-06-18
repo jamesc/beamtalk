@@ -291,26 +291,22 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define a class with a method, then open that method tab from the System
-    # Browser. Opening via the browser (rather than the omni search) leaves keyboard
-    # focus in the editor, not the omni input — so the ⌘S keydown below actually
-    # reaches the form's KeyboardShortcuts hook. `assert_has(..., timeout)` waits out
-    # the browse-classes-snapshot lag on the remount before clicking each row. The
-    # opened method tab carries its selector as a hidden form field, so ⌘S
-    # re-compiles a real `KsCounter >> ksBump` with only the edited body. (The
-    # starter tab no longer opens on mount, so authoring goes through an opened
-    # method.)
+    # Define a class with a method and open its tab via the omni search — the live
+    # nav-symbols index sees it without a browser remount (avoiding the
+    # browse-classes-snapshot race). Then CLICK the opened tab: omni's Enter leaves
+    # keyboard focus in the omni input, whose hook stops keydown propagation, so ⌘S
+    # would never reach the form's window-scoped KeyboardShortcuts hook; clicking
+    # the tab moves focus back into the editor (the original starter-tab test did
+    # the same tab-click before ⌘S). The tab carries its selector as a hidden field,
+    # so ⌘S re-compiles `KsCounter >> ksBump` with the edited body.
     |> eval_do(
       "Actor subclass: KsCounter\n  state: value = 0\n\n  ksBump => self.value := self.value + 1"
     )
-    |> visit("/")
-    |> assert_has("#workspace-editor-overlay .cm-content")
-    |> assert_has(~s(div[phx-click="browser_select_class"][phx-value-class="KsCounter"]),
-      timeout: 10_000
-    )
-    |> click(~s(div[phx-click="browser_select_class"][phx-value-class="KsCounter"]))
-    |> assert_has(~s(div[phx-value-selector="ksBump"]), timeout: 10_000)
-    |> click(~s(div[phx-value-selector="ksBump"]))
+    |> omni_type("ksBump")
+    |> assert_has(".omni-results .omni-row", text: "ksBump")
+    |> omni_key("Enter")
+    |> assert_has("#method-editor .tabstrip", text: "ksBump")
+    |> click(".tabstrip button[role='tab']")
     |> set_method_source("ksBump => self.value := self.value + 2")
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
     # data-shortcuts "mod+s" → submit): the keydown bubbles out of CodeMirror to
