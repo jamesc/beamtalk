@@ -3388,6 +3388,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # differ. With no known disk body (`nil` — a runtime-only or already-diverged
   # method) we conservatively flag, matching the prior behaviour.
   defp compile_clean(socket, nil, _source), do: socket
+  defp compile_clean(socket, "", _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
     update_active_tab_by_id(socket, tab_id, fn tab ->

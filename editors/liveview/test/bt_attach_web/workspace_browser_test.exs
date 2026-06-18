@@ -291,20 +291,27 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define a class with a uniquely-named method, then open that method tab via
-    # the omni search — its nav-symbols index updates live on the eval, so no
-    # browser remount (and its browse-classes-snapshot race) is needed. The opened
-    # method tab carries its selector as a hidden form field, so ⌘S re-compiles a
-    # real `KsCounter >> ksBump` with only the edited body. (The starter tab no
-    # longer opens on mount, so authoring goes through an opened method.)
+    # Define a class with a method, then open that method tab from the System
+    # Browser. Opening via the browser (rather than the omni search) leaves keyboard
+    # focus in the editor, not the omni input — so the ⌘S keydown below actually
+    # reaches the form's KeyboardShortcuts hook. `assert_has(..., timeout)` waits out
+    # the browse-classes-snapshot lag on the remount before clicking each row. The
+    # opened method tab carries its selector as a hidden form field, so ⌘S
+    # re-compiles a real `KsCounter >> ksBump` with only the edited body. (The
+    # starter tab no longer opens on mount, so authoring goes through an opened
+    # method.)
     |> eval_do(
       "Actor subclass: KsCounter\n  state: value = 0\n\n  ksBump => self.value := self.value + 1"
     )
-    |> omni_type("ksBump")
-    |> assert_has(".omni-results .omni-row", text: "ksBump")
-    |> omni_key("Enter")
-    |> assert_has("#method-editor .tabstrip", text: "ksBump")
-    |> set_method_source("ksBump => self.value := self.value + 1")
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    |> assert_has(~s(div[phx-click="browser_select_class"][phx-value-class="KsCounter"]),
+      timeout: 10_000
+    )
+    |> click(~s(div[phx-click="browser_select_class"][phx-value-class="KsCounter"]))
+    |> assert_has(~s(div[phx-value-selector="ksBump"]), timeout: 10_000)
+    |> click(~s(div[phx-value-selector="ksBump"]))
+    |> set_method_source("ksBump => self.value := self.value + 2")
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
     # data-shortcuts "mod+s" → submit): the keydown bubbles out of CodeMirror to
     # the form's KeyboardShortcuts hook, which request-submits the form so
