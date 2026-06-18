@@ -180,14 +180,14 @@
 /* main grid: System Browser | editor + workspace dock | bindings + inspector */
 .cockpit {
   flex: 1; min-height: 0; display: grid; gap: var(--gap); position: relative;
-  grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) var(--inspector-w, 348px);
+  grid-template-columns: minmax(0, var(--browser-w, 286px)) minmax(0, 1fr) minmax(0, var(--inspector-w, 348px));
   transition: grid-template-columns 200ms ease;
 }
 .cockpit.browser-hidden {
-  grid-template-columns: 0px minmax(0, 1fr) var(--inspector-w, 348px);
+  grid-template-columns: 0px minmax(0, 1fr) minmax(0, var(--inspector-w, 348px));
 }
 .cockpit.inspector-hidden {
-  grid-template-columns: var(--browser-w, 286px) minmax(0, 1fr) 0px;
+  grid-template-columns: minmax(0, var(--browser-w, 286px)) minmax(0, 1fr) 0px;
 }
 .cockpit.browser-hidden.inspector-hidden {
   grid-template-columns: 0px minmax(0, 1fr) 0px;
@@ -257,10 +257,12 @@
 /* the left column splits between the class tree and the method list, with a
    draggable gutter between them (BT-2576). The class tree (top pane) is sized by
    the `--browser-split` var the SplitDrag hook writes; the method list flexes to
-   fill the rest. */
+   fill the rest. The top pane may shrink below its basis (`flex: 0 1`) so a size
+   saved on a taller viewport — or a later window shrink — can never overflow the
+   column and clip the method list; it only ever grows up to its basis. */
 .browser-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
 .browser-split .panel { display: flex; flex-direction: column; min-height: 0; }
-.browser-split > .panel:first-of-type { flex: 0 0 var(--browser-split, 50%); }
+.browser-split > .panel:first-of-type { flex: 0 1 var(--browser-split, 50%); }
 .browser-split > .panel:last-of-type { flex: 1 1 0; }
 
 /* segmented control (view + side toggles) */
@@ -626,9 +628,10 @@
 
 /* right column splits between bindings and inspector, with a draggable gutter
    (BT-2576). Bindings (top pane) is sized by `--right-split`; the Inspector
-   flexes to fill the rest. */
+   flexes to fill the rest. `flex: 0 1` lets Bindings shrink below its basis so a
+   saved size can't overflow a shorter column (see `.browser-split`). */
 .right-split { display: flex; flex-direction: column; gap: var(--gap); flex: 1; min-height: 0; }
-.bindings-panel { flex: 0 0 var(--right-split, 50%); min-height: 0; }
+.bindings-panel { flex: 0 1 var(--right-split, 50%); min-height: 0; }
 .inspector-panel { flex: 1 1 0; min-height: 0; }
 
 /* ── resizeable splitters (BT-2576) ─────────────────────────────────────────
