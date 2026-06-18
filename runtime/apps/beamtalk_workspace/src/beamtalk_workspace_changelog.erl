@@ -140,7 +140,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 ]).
 
 %% Exported for tests only.
--export([changes_dir/1, entry_to_json/1, entry_from_json/1]).
+-export([changes_dir/1, entry_to_json/1, entry_from_json/1, body_delta/2]).
 
 -define(ETS_TABLE, beamtalk_changelog_entries).
 %% Bounded ring: keep at most this many entries on disk before rotating older
@@ -564,6 +564,14 @@ entry_to_value(#entry{} = E, Survivors) ->
     Shadowed =
         Active andalso
             maps:get({E#entry.class, E#entry.selector}, Survivors, E#entry.seq) =/= E#entry.seq,
+    %% Only the live pending candidates (active, not shadowed) are diffed against
+    %% disk — that bounds the file-read + parse work to the dirty set, and the
+    %% rest are excluded from the pending view anyway.
+    {Clean, Diff} =
+        case Active andalso not Shadowed of
+            true -> method_delta(E);
+            false -> {false, undefined}
+        end,
     #{
         '$beamtalk_class' => 'ChangeEntry',
         seq => E#entry.seq,
@@ -578,8 +586,131 @@ entry_to_value(#entry{} = E, Survivors) ->
         priorEpoch => E#entry.prior_epoch,
         flushed => E#entry.flushed,
         active => Active,
-        shadowed => Shadowed
+        shadowed => Shadowed,
+        clean => Clean,
+        diff => diff_value(Diff)
     }.
+
+%% nil for "no diff" (clean / not computable), so Beamtalk reads it as the nil
+%% object; otherwise the unified-diff binary.
+-spec diff_value(binary() | undefined) -> binary() | nil.
+diff_value(undefined) -> nil;
+diff_value(Diff) when is_binary(Diff) -> Diff.
+
+%% Compute the net delta of a pending entry against the current on-disk body
+%% (ADR 0082 Phase 5+, BT-2575): `{Clean, Diff}` where `Clean` is true iff the
+%% installed in-memory body matches disk (so the entry has been reverted back to
+%% its on-disk state and should drop out of the pending view), and `Diff` is the
+%% on-disk → in-memory unified diff (or `undefined` when clean or not
+%% computable). Best-effort: any failure (no workspace, unreadable file, parse
+%% error, non-method entry) degrades to `{false, undefined}` — the entry stays
+%% visible as pending without a diff, never crashing the listing.
+-spec method_delta(#entry{}) -> {boolean(), binary() | undefined}.
+method_delta(#entry{kind = 'new-class'} = E) ->
+    %% A new class has no on-disk counterpart until flush — always pending,
+    %% rendered as an all-added diff of the full class source.
+    case read_source_body(E) of
+        {ok, MemBody} -> {false, beamtalk_workspace_diff:unified(<<>>, MemBody)};
+        _ -> {false, undefined}
+    end;
+method_delta(#entry{kind = Kind, selector = Selector, source_file = File} = E) when
+    (Kind =:= instance orelse Kind =:= class), is_binary(Selector), is_binary(File)
+->
+    try
+        case {read_source_body(E), file:read_file(File)} of
+            {{ok, MemBody}, {ok, DiskSource}} ->
+                body_delta(disk_method_body(DiskSource, E#entry.class, Selector, Kind), MemBody);
+            _ ->
+                {false, undefined}
+        end
+    catch
+        _:_ -> {false, undefined}
+    end;
+method_delta(_E) ->
+    {false, undefined}.
+
+%% The method's current body on disk. A selector absent from the file is a
+%% brand-new method added live — its prior body is empty (the whole patch is an
+%% addition). Any other resolution error throws so the caller degrades to "no
+%% diff" rather than reporting a misleading clean/dirty verdict.
+-spec disk_method_body(binary(), binary(), binary(), instance | class) -> binary().
+disk_method_body(DiskSource, Class, Selector, Kind) ->
+    case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Kind) of
+        {ok, _Span, Body} -> Body;
+        {error, selector_not_found, _} -> <<>>;
+        {error, _Reason, _Msg} -> throw(span_unresolved)
+    end.
+
+-doc """
+Compare an on-disk method body with the installed in-memory body and return
+`{Clean, Diff}` (ADR 0082, BT-2575). Both sides are normalised first —
+trailing whitespace trimmed and the common leading indentation stripped — so the
+comparison and diff are on *content*, not layout. This is deliberate (per the
+"whitespace-only reformat vs real change" criterion): the on-disk span is
+file-indented and doc-inclusive (BT-2577) while the stored body is the compiler's
+canonical column-0 form, so without the dedent every doc-commented method would
+read as dirty with an indentation-noise diff. `Clean = true` (no diff) when the
+normalised bodies are equal — the revert-to-disk case that drops out of the
+pending view. Exported for tests. (BT-2584 will make a single representation
+flow end-to-end and retire this normalisation.)
+""".
+-spec body_delta(binary(), binary()) -> {boolean(), binary() | undefined}.
+body_delta(DiskBody, MemBody) ->
+    Disk = normalize_body(DiskBody),
+    Mem = normalize_body(MemBody),
+    case Disk =:= Mem of
+        true -> {true, undefined};
+        false -> {false, beamtalk_workspace_diff:unified(Disk, Mem)}
+    end.
+
+%% Trim trailing whitespace and strip the common leading indentation shared by
+%% all non-blank lines, so a file-indented body and a column-0 body compare on
+%% content. Blank lines collapse to empty.
+-spec normalize_body(binary()) -> binary().
+normalize_body(Bin) ->
+    Lines = binary:split(Bin, <<"\n">>, [global]),
+    Indent = common_indent(Lines, infinity),
+    Dedented = [strip_indent(Indent, Line) || Line <- Lines],
+    rstrip(iolist_to_binary(lists:join(<<"\n">>, Dedented))).
+
+-spec rstrip(binary()) -> binary().
+rstrip(Bin) ->
+    %% string:trim/2 returns chardata; force a binary so the `=:=` compares bytes.
+    unicode:characters_to_binary(string:trim(Bin, trailing)).
+
+%% The least leading-whitespace width across non-blank lines (blank lines ignored).
+-spec common_indent([binary()], non_neg_integer() | infinity) -> non_neg_integer().
+common_indent([], infinity) ->
+    0;
+common_indent([], Acc) ->
+    Acc;
+common_indent([Line | Rest], Acc) ->
+    case is_blank_line(Line) of
+        true -> common_indent(Rest, Acc);
+        false -> common_indent(Rest, min_indent(Acc, ws_width(Line)))
+    end.
+
+-spec min_indent(non_neg_integer() | infinity, non_neg_integer()) -> non_neg_integer().
+min_indent(infinity, Width) -> Width;
+min_indent(Acc, Width) -> min(Acc, Width).
+
+%% Drop up to `N` leading whitespace bytes from `Line` (a blank line becomes empty).
+-spec strip_indent(non_neg_integer(), binary()) -> binary().
+strip_indent(_N, Line) when Line =:= <<>> ->
+    <<>>;
+strip_indent(N, Line) ->
+    Drop = min(N, ws_width(Line)),
+    binary:part(Line, Drop, byte_size(Line) - Drop).
+
+%% Count the leading run of spaces/tabs.
+-spec ws_width(binary()) -> non_neg_integer().
+ws_width(Line) -> ws_width(Line, 0).
+
+ws_width(<<C, Rest/binary>>, N) when C =:= $\s; C =:= $\t -> ws_width(Rest, N + 1);
+ws_width(_Line, N) -> N.
+
+-spec is_blank_line(binary()) -> boolean().
+is_blank_line(Line) -> ws_width(Line) =:= byte_size(Line).
 
 -spec selector_symbol(binary() | undefined) -> atom() | nil.
 selector_symbol(undefined) -> nil;

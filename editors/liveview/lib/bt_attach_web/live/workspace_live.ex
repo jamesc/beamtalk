@@ -5715,6 +5715,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <th>Intent</th>
                             <th>Flushable</th>
                             <th>Author</th>
+                            <%!-- net-vs-disk diff column (BT-2575) --%>
+                            <th>Change</th>
                             <%!-- revert column (BT-2293): owner-only --%>
                             <th :if={@role == :owner}></th>
                           </tr>
@@ -5726,6 +5728,19 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <td>{c.intent}</td>
                             <td>{if c.flushable, do: "yes", else: "no"}</td>
                             <td>{c.author_kind}</td>
+                            <%!-- The net change vs disk (ADR 0082 Phase 5,
+                                 BT-2575): an expandable unified diff (on-disk →
+                                 in-memory). A method reverted back to its on-disk
+                                 body has no net change and never reaches this
+                                 pane (`activeEntries` drops it), so a row always
+                                 carries a real diff; the `:if` is defensive for
+                                 entries whose diff could not be computed. --%>
+                            <td>
+                              <details :if={c[:diff]} class="bt-diff-disclosure">
+                                <summary>diff</summary>
+                                <pre class="bt-diff">{c[:diff]}</pre>
+                              </details>
+                            </td>
                             <%!-- Revert one pending method patch (ADR 0082
                                  Phase 5). Owner-only (`revert` is an :execute
                                  op). Only *instance-side* method patches are

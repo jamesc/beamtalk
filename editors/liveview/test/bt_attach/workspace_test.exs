@@ -134,7 +134,9 @@ defmodule BtAttach.WorkspaceTest do
         flushed: false,
         authorKind: :human,
         active: Keyword.get(opts, :active, true),
-        shadowed: Keyword.get(opts, :shadowed, false)
+        shadowed: Keyword.get(opts, :shadowed, false),
+        clean: Keyword.get(opts, :clean, false),
+        diff: Keyword.get(opts, :diff, nil)
       }
     end
 
@@ -172,6 +174,20 @@ defmodule BtAttach.WorkspaceTest do
       }
 
       assert [%{selector: "increment"}] = Workspace.pending_rows([raw])
+    end
+
+    test "drops clean entries (reverted back to disk — disappear when clean)" do
+      assert Workspace.pending_rows([entry(0, :increment, clean: true)]) == []
+    end
+
+    test "carries the net-vs-disk diff onto the row" do
+      [row] = Workspace.pending_rows([entry(0, :increment, diff: "- a\n+ b\n")])
+      assert row.diff == "- a\n+ b\n"
+    end
+
+    test "a row with no computed diff carries nil" do
+      [row] = Workspace.pending_rows([entry(0, :increment, [])])
+      assert row.diff == nil
     end
   end
 

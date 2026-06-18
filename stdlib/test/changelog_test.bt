@@ -112,6 +112,45 @@ TestCase subclass: ChangeLogTest
   shadowedLog =>
     ChangeLog new: #{#entries => #(self shadowedEntry, self activeEntry)}
 
+  // A clean active entry: reverted back to its on-disk body, so there is no net
+  // change. Active but excluded from the pending view ("disappear when clean",
+  // BT-2575) — still reachable via select: for audit.
+  cleanEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 4,
+        #className => #Counter,
+        #selector => #reset,
+        #kind => #instance,
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #human,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true,
+        #clean => true
+      }
+
+  // An active entry carrying a net-vs-disk diff (BT-2575).
+  diffEntry =>
+    ChangeEntry
+      new: #{
+        #seq => 5,
+        #className => #Counter,
+        #selector => #increment,
+        #kind => #instance,
+        #intent => #durable,
+        #flushable => true,
+        #authorKind => #human,
+        #orphan => false,
+        #priorEpoch => false,
+        #active => true,
+        #diff => "- self.v + 1\n+ self.v + 2\n"
+      }
+
+  // A ChangeLog holding one dirty entry plus one clean (reverted-to-disk) entry.
+  cleanLog => ChangeLog new: #{#entries => #(self cleanEntry, self activeEntry)}
+
   emptyLog => ChangeLog new
 
   // --- Empty ChangeLog ---
@@ -157,6 +196,22 @@ TestCase subclass: ChangeLogTest
   testSelectCanReachShadowed =>
     shadowed := self shadowedLog select: [:e | e isShadowed]
     self assert: shadowed size equals: 1
+
+  // --- clean entries disappear from the pending view (BT-2575) ---
+  testCleanExcludedFromActiveEntries =>
+    self assert: self cleanLog activeEntries size equals: 1
+
+  testCleanLogSizeExcludesClean => self assert: self cleanLog size equals: 1
+
+  testCleanLogAllEntriesIncludeClean =>
+    self assert: self cleanLog allEntries size equals: 2
+
+  testSelectCanReachClean =>
+    cleans := self cleanLog select: [:e | e isClean]
+    self assert: cleans size equals: 1
+
+  testActiveSurvivorOfCleanLogIsDirty =>
+    self assert: self cleanLog activeEntries first isClean not
 
   // --- do: iterates only ACTIVE entries ---
   testDoVisitsOnlyActiveEntries =>
@@ -210,6 +265,15 @@ TestCase subclass: ChangeLogTest
   testEntryIsNotShadowedByDefault => self deny: self activeEntry isShadowed
 
   testShadowedEntryIsShadowed => self assert: self shadowedEntry isShadowed
+
+  testEntryIsNotCleanByDefault => self deny: self activeEntry isClean
+
+  testCleanEntryIsClean => self assert: self cleanEntry isClean
+
+  testEntryDiffNilByDefault => self assert: self activeEntry diff isNil
+
+  testEntryDiffAccessor =>
+    self assert: self diffEntry diff equals: "- self.v + 1\n+ self.v + 2\n"
 
   testOrphanEntryIsOrphan => self assert: self orphanEntry isOrphan
 
