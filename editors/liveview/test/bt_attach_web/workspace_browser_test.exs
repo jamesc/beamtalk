@@ -146,13 +146,14 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define the class the starter method tab targets, then select that tab so the
-    # method editor mounts in :method kind (data-lint-mode="method"). The
-    # method-editor CmEditor then lints in METHOD mode — the buffer is a bare
-    # method body, parsed with `parse_method` rather than the top-level script
-    # grammar (`diagnostics` event carries `mode: "method"`).
-    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
-    |> click(".tabstrip button[role='tab']")
+    # Open a blank "new method" tab on an always-present class (Object): a :method
+    # tab (data-lint-mode="method"), so the method-editor CmEditor lints in METHOD
+    # mode — the buffer is a bare method body, parsed with `parse_method` rather
+    # than the top-level script grammar (`diagnostics` carries `mode: "method"`).
+    # The cockpit opens with no tab now, so we open one explicitly; the test never
+    # saves, so the class identity is irrelevant to method-mode linting.
+    |> click(~s(div[phx-click="browser_select_class"][phx-value-class="Object"]))
+    |> click(~s(div[phx-click="new_method"][phx-value-class="Object"]))
     # A genuinely broken body still squiggles (`:=` with no right-hand side), so
     # the method editor really is linting — not silently disabled.
     |> set_method_source("increment => self.value :=")
@@ -290,10 +291,16 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define the class the starter method tab targets, then select that tab so its
-    # class/selector load into the method-editor fields.
+    # Define Counter so the ⌘S save compiles `Counter >> increment` against a real
+    # class. Re-visit to refresh the System Browser tree (browse-classes is a mount
+    # snapshot), then open a blank "new method" tab on Counter and author
+    # `increment` — the authoring path the starter tab used to provide on startup.
     |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
-    |> click(".tabstrip button[role='tab']")
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    |> click(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
+    |> click(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+    |> set_text("#method-editor-form input[name='selector']", "increment")
     |> set_method_source("increment => self.value := self.value + 1")
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
     # data-shortcuts "mod+s" → submit): the keydown bubbles out of CodeMirror to
@@ -522,25 +529,24 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define a class whose method sends a selector we can then trace. The starter
-    # tab targets Counter#increment, so `Counter` MUST exist before ⌘S can save
-    # `increment` onto it — define it here rather than leaning on another test
-    # having defined it first (the suite shares one workspace and runs in a
-    # seed-randomised order, so that ordering is not guaranteed: BT-2528). A
-    # second class (NavCounter) gives `increment` a real implementor to trace.
+    # Define a class whose method sends a selector we can then trace. `Counter`
+    # MUST exist before ⌘S can save `increment` onto it — define it here rather
+    # than leaning on another test having defined it first (the suite shares one
+    # workspace and runs in a seed-randomised order, so that ordering is not
+    # guaranteed: BT-2528). A second class (NavCounter) gives `increment` a real
+    # implementor to trace.
     |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
     |> eval_do(
       "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
     )
-    # Define Counter itself: the Ctrl+S save below compiles `Counter >> increment`,
-    # which requires the class to EXIST in the workspace. Tests share one
-    # persistent workspace and ExUnit shuffles order per seed, so relying on
-    # another test (the Ctrl+S one) to have defined Counter is a seed-dependent
-    # flake — the exact failure seen on main + BT-2493 CI runs.
-    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
-    # Select the starter method tab so the active selector is `increment`, then
-    # open the Implementors popover for it.
-    |> click(".tabstrip button[role='tab']")
+    # Re-visit to refresh the System Browser tree (browse-classes is a mount
+    # snapshot), then open a blank "new method" tab on Counter and author
+    # `increment` — the starter tab used to provide this authoring surface.
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    |> click(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
+    |> click(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+    |> set_text("#method-editor-form input[name='selector']", "increment")
     |> set_method_source("increment => self.value := self.value + 1")
     |> press("[id^='method-editor-overlay-'] .cm-content", "Control+s")
     # The Ctrl+S save is a server round-trip: WorkspaceLive compiles `Counter >>

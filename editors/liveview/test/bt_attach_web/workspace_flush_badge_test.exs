@@ -253,11 +253,70 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
 
       # Match the escape-safe tail of the compiled body: the rendered buffer HTML-
       # escapes `=>`, but `:= self.value + 2` survives verbatim and is unique to the
-      # compiled body. The editor's `data-placeholder` carries the "+ 1" disk body
-      # unconditionally, so we assert the compiled body is present (the "+ 2" tail)
-      # rather than refuting the disk body. Pre-fix, the re-activated buffer reverts
-      # to the on-disk stub ("+ 1") and this tail is absent.
+      # compiled body. Pre-fix, the re-activated buffer reverts to the on-disk stub
+      # ("+ 1") and this tail is absent.
       assert reactivate_html =~ ":= self.value + 2"
+    end
+  end
+
+  describe "new-method authoring (explicit affordance)" do
+    test "the System Browser opens a blank new-method tab the author can save", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Select Counter (always in the stub), then use the owner-only "new method"
+      # entry — the editor opens with no tab now, so authoring a brand-new method
+      # is an explicit action rather than a default startup tab.
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      opened =
+        view
+        |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+        |> render_click()
+
+      # A new-method tab is open: the breadcrumb reads "new method" (no selector
+      # exists yet), and — uniquely among tabs — it shows a visible selector input
+      # for the author to fill.
+      assert opened =~ "new method"
+      assert opened =~ "new-method-selector"
+      assert opened =~ "Counter ▸ new"
+
+      # Authoring + saving drives the same write-surface `save` as any method: the
+      # author-supplied selector rides the form, so the save reports it by name.
+      saved =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "greet",
+          "source" => ~s|greet => "hi"|,
+          "tab" => "new:Counter"
+        })
+
+      assert saved =~ "Saved greet on Counter"
+    end
+
+    test "saving a new method with no selector is a local validation error", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # The selector input is blank until the author fills it — saving then trips
+      # the same empty-selector guard a method save always has.
+      html =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "",
+          "source" => ~s|=> "hi"|,
+          "tab" => "new:Counter"
+        })
+
+      assert html =~ "Enter a selector"
     end
   end
 end
