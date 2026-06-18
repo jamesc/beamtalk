@@ -191,6 +191,17 @@ pub(crate) fn should_stop_workspace(ephemeral: bool, beam_guard_present: bool) -
     ephemeral && !beam_guard_present
 }
 
+/// Decide whether to enter the interactive (rustyline) REPL loop.
+///
+/// Only when stdin is an interactive terminal. For any non-TTY stdin (a pipe, a
+/// file redirect, or the null device) the workspace node is already started and
+/// its port printed, so there is nothing for an interactive loop to do — and
+/// entering it hangs on Windows, where rustyline does not return EOF for a
+/// redirected stdin handle the way it does on Unix (BT-2568).
+pub(crate) fn should_enter_interactive_repl(stdin_is_terminal: bool) -> bool {
+    stdin_is_terminal
+}
+
 /// Start the interactive REPL session.
 ///
 /// Connects to (or spawns) a workspace BEAM node, then enters the
@@ -473,8 +484,33 @@ pub fn run(
 
     println!();
 
-    // Enter the shared REPL loop (also used by `beamtalk workspace attach`)
-    let repl_res = repl_loop(&mut client, &connect_host, connect_port, &cookie);
+    // Enter the shared interactive REPL loop (also used by `beamtalk workspace
+    // attach`) only when stdin is an interactive terminal. For ANY non-TTY stdin
+    // — a pipe, a file redirect, or the null device — we skip it: by this point
+    // the detached workspace node is already up and its port has been printed,
+    // so a non-interactive invocation (e.g. `beamtalk-mcp --start`, which runs
+    // `beamtalk repl --port 0` with stdin redirected from null) has nothing more
+    // to do here. Non-interactive use is served by the port-based protocol and
+    // `beamtalk run`/`exec`, not by piping source into the REPL's stdin.
+    //
+    // This also fixes a Windows-only hang (BT-2568). On Unix, rustyline returns
+    // EOF for a redirected/null stdin, so the loop previously exited there (a
+    // piped `echo expr | beamtalk repl` was read to EOF and is now skipped
+    // instead — an intentional, undocumented-path change). On Windows rustyline
+    // does NOT return EOF for a redirected stdin handle, so `repl_loop` blocked
+    // forever: `beamtalk repl` never exited and the parent `beamtalk-mcp
+    // --start` (which waits on it) blocked until its MCP `initialize` timed out.
+    // Gating on a TTY makes the command exit promptly on every platform; the
+    // interactive TTY path is unchanged.
+    let repl_res =
+        if should_enter_interactive_repl(std::io::IsTerminal::is_terminal(&std::io::stdin())) {
+            repl_loop(&mut client, &connect_host, connect_port, &cookie)
+        } else {
+            tracing::debug!(
+                "stdin is not a terminal — workspace is started; skipping interactive REPL loop"
+            );
+            Ok(())
+        };
 
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
 
@@ -509,6 +545,23 @@ mod ephemeral_tests {
     #[test]
     fn not_stop_when_guard_present() {
         assert!(!should_stop_workspace(true, true));
+    }
+}
+
+#[cfg(test)]
+mod interactive_repl_tests {
+    use super::should_enter_interactive_repl;
+
+    #[test]
+    fn enters_loop_on_a_tty() {
+        assert!(should_enter_interactive_repl(true));
+    }
+
+    #[test]
+    fn skips_loop_when_stdin_not_a_terminal() {
+        // The BT-2568 guard: a pipe / redirect / null stdin must NOT enter the
+        // interactive loop (it hangs on Windows). The workspace is already up.
+        assert!(!should_enter_interactive_repl(false));
     }
 }
 
