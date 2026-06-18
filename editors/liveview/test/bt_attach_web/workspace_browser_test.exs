@@ -141,6 +141,30 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> refute_has(".cm-lintRange-error")
   end
 
+  test "the method editor lints a bare method body, not a top-level script (BT-2569)",
+       %{conn: conn} do
+    conn
+    |> visit("/")
+    |> assert_has("#workspace-editor-overlay .cm-content")
+    # Define the class the starter method tab targets, then select that tab so the
+    # method editor mounts in :method kind (data-lint-mode="method"). The
+    # method-editor CmEditor then lints in METHOD mode — the buffer is a bare
+    # method body, parsed with `parse_method` rather than the top-level script
+    # grammar (`diagnostics` event carries `mode: "method"`).
+    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
+    |> click(".tabstrip button[role='tab']")
+    # A genuinely broken body still squiggles (`:=` with no right-hand side), so
+    # the method editor really is linting — not silently disabled.
+    |> set_method_source("increment => self.value :=")
+    |> assert_has(".cm-lintRange-error")
+    # The fix: a VALID bare method body. Under the old top-level grammar the `=>`
+    # body separator tripped a false `Unexpected token: expected expression, found
+    # ⇒` squiggle (the bug this guards). Method mode parses it clean, so the next
+    # debounced lint clears the mark.
+    |> set_method_source("increment => self.value := self.value + 1")
+    |> refute_has(".cm-lintRange-error")
+  end
+
   test "the Tests pane discovers + runs a TestCase in a real browser (BT-2557)", %{conn: conn} do
     conn
     |> visit("/")

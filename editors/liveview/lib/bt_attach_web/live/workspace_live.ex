@@ -702,9 +702,17 @@ defmodule BtAttachWeb.WorkspaceLive do
   # contract — a coalesced request's reply would never arrive — so the throttle
   # is deliberately upstream of the round-trip, not in this handler.
   @impl true
-  def handle_event("diagnostics", %{"code" => code}, socket) when is_binary(code) do
+  def handle_event("diagnostics", %{"code" => code} = params, socket) when is_binary(code) do
+    # `mode` (BT-2569) selects the parse grammar. The method-editor CmEditor sends
+    # "method" (a bare method body — `=>` is not a valid top-level token, so the
+    # default script grammar would false-positive); the Workspace + REPL editors
+    # send nothing → "expression". Normalise to one of the two known values so a
+    # malformed client `mode` can't crash the `is_binary/1`-guarded client call —
+    # anything but "method" degrades to the safe default.
+    mode = if Map.get(params, "mode") == "method", do: "method", else: "expression"
+
     diagnostics =
-      case Facade.dispatch(:diagnostics, %{code: code}, ctx(socket)) do
+      case Facade.dispatch(:diagnostics, %{code: code, mode: mode}, ctx(socket)) do
         {:ok, list} when is_list(list) -> list
         _ -> []
       end
@@ -5636,6 +5644,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                         phx-hook="CmEditor"
                         data-select-event="select_source"
                         data-tab-id={@active_tab}
+                        data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
                         data-placeholder={
                           if active_tab(assigns).kind == :def,
                             do: "Actor subclass: Counter\n  state: value = 0",

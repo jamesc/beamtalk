@@ -27,6 +27,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     compile/2,
     compile_method/3,
     diagnostics/1,
+    diagnostics/2,
     version/0,
     compile_core_erlang/1,
     resolve_completion_type/1,
@@ -130,7 +131,25 @@ Returns `{ok, [#{message, severity, start, end}]}' or `{error, Diagnostics}'.
 -spec diagnostics(binary()) ->
     {ok, [map()]} | {error, [binary()]}.
 diagnostics(Source) ->
-    beamtalk_compiler_server:diagnostics(Source).
+    diagnostics(Source, <<"expression">>).
+
+-doc """
+Get diagnostics for source code under a parse `Mode` (no code generation).
+
+`Mode' selects the grammar the buffer is analysed under (BT-2569):
+
+  * `<<"expression">>' — a top-level script (the default): full-module parse
+    plus semantic analysis.
+  * `<<"method">>' — a BARE method body (the System Browser method editor),
+    parsed with the standalone method grammar so the `=>' body separator no
+    longer trips a false `expected expression' error. Parse-only: a method has
+    no class context here, so semantic checks (which would false-positive on
+    field/`self' references) are deferred to Compile.
+""".
+-spec diagnostics(binary(), binary()) ->
+    {ok, [map()]} | {error, [binary()]}.
+diagnostics(Source, Mode) ->
+    beamtalk_compiler_server:diagnostics(Source, Mode).
 
 -doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.

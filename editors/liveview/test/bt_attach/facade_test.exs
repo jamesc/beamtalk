@@ -63,10 +63,11 @@ defmodule BtAttach.FacadeTest do
     def hover(pid, code),
       do: record({:hover, pid, code}) && {:ok, "== Integer < Number =="}
 
-    # BT-2556: parse-only diagnostics for the CodeMirror editors.
-    def diagnostics(code),
+    # BT-2556: parse-only diagnostics for the CodeMirror editors. BT-2569: `mode`
+    # selects the parse grammar ("expression" | "method").
+    def diagnostics(code, mode),
       do:
-        record({:diagnostics, code}) &&
+        record({:diagnostics, code, mode}) &&
           {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
 
     # BT-2557: test-runner pane — discovery + run.
@@ -346,7 +347,16 @@ defmodule BtAttach.FacadeTest do
       assert Facade.dispatch(:diagnostics, %{code: "1 +"}) ==
                {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
 
-      assert {:diagnostics, "1 +"} in RecordingClient.calls()
+      # No `mode` given → the default "expression" grammar (the Workspace/REPL
+      # editors).
+      assert {:diagnostics, "1 +", "expression"} in RecordingClient.calls()
+    end
+
+    test "diagnostics forwards the parse mode for the method editor (BT-2569)" do
+      assert Facade.dispatch(:diagnostics, %{code: "decrement => self.value", mode: "method"}) ==
+               {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+      assert {:diagnostics, "decrement => self.value", "method"} in RecordingClient.calls()
     end
 
     test "a bad shape is invalid params, with no dist call" do

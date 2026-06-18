@@ -268,9 +268,13 @@ defmodule BtAttach.Facade do
   # only `code` is required. Capability `:read` (no user code), so the Observer
   # role sees diagnostics too. A non-binary `code` is `:invalid_params` with no
   # dist call, matching `:complete`/`:hover`.
-  defp invoke(:diagnostics, %{code: code}, _ctx) do
+  # `mode` (BT-2569) selects the parse grammar: `"expression"` (default — a
+  # top-level script) or `"method"` (a bare method body, the System Browser
+  # method editor). Absent → `"expression"`, so the Workspace/REPL editors are
+  # unaffected. A non-binary `code` is `:invalid_params` with no dist call.
+  defp invoke(:diagnostics, %{code: code} = params, _ctx) do
     if is_binary(code),
-      do: client().diagnostics(code),
+      do: client().diagnostics(code, Map.get(params, :mode, "expression")),
       else: {:error, :invalid_params}
   end
 

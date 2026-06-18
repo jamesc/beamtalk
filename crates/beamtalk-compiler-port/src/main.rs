@@ -1542,39 +1542,59 @@ fn handle_compile_method(request: &Map) -> Term {
 }
 
 /// Handle a `diagnostics` request (syntax/semantic check only).
+///
+/// The optional `mode` field selects the grammar the buffer is analysed under:
+///
+///   * absent / `"expression"` — the buffer is a top-level script (the cockpit
+///     Workspace + REPL editors): full-module `parse` + semantic analysis.
+///   * `"method"` — the buffer is a BARE method body (the System Browser
+///     method-editor tabs, e.g. `decrement => self.value := self.value - 1`).
+///     A bare body is not a valid top-level construct, so `parse` reports a
+///     false `expected expression, found =>` at the method-body separator
+///     (BT-2569). We parse it with `parse_method` (the same standalone entry
+///     `compile_method` uses) and return PARSE-ONLY diagnostics: a method
+///     analysed outside its class has no field/`self`/type context, so running
+///     semantic analysis here would emit false positives. Those checks run on
+///     Compile (`compile_method`, which has class context); live squiggles
+///     cover syntax.
 fn handle_diagnostics(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
     };
 
-    // Parse the source
+    let mode = map_get(request, "mode").and_then(term_to_string);
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-
-    // Run semantic analysis
-    let all_diagnostics =
+    let diagnostics = if mode.as_deref() == Some("method") {
+        let (_method, parse_diagnostics) = beamtalk_core::source_analysis::parse_method(tokens);
+        parse_diagnostics
+    } else {
+        let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
         beamtalk_core::queries::diagnostic_provider::compute_diagnostics_with_known_vars(
             &module,
             parse_diagnostics,
             &[],
-        );
+        )
+    };
 
-    let all_diags: Vec<DiagInfo> = all_diagnostics
-        .iter()
-        .map(|d| DiagInfo {
-            message: d.message.to_string(),
-            severity: match d.severity {
-                beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
-                beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
-                beamtalk_core::source_analysis::Severity::Lint => "lint".to_string(),
-                beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
-            },
-            start: d.span.start(),
-            end: d.span.end(),
-        })
-        .collect();
+    let all_diags: Vec<DiagInfo> = diagnostics.iter().map(diag_info).collect();
 
     diagnostics_ok_response(&all_diags)
+}
+
+/// Map a compiler `Diagnostic` to the wire `DiagInfo` (byte-offset span +
+/// stringified severity) the cockpit's `@codemirror/lint` source consumes.
+fn diag_info(d: &beamtalk_core::source_analysis::Diagnostic) -> DiagInfo {
+    DiagInfo {
+        message: d.message.to_string(),
+        severity: match d.severity {
+            beamtalk_core::source_analysis::Severity::Error => "error".to_string(),
+            beamtalk_core::source_analysis::Severity::Warning => "warning".to_string(),
+            beamtalk_core::source_analysis::Severity::Lint => "lint".to_string(),
+            beamtalk_core::source_analysis::Severity::Hint => "hint".to_string(),
+        },
+        start: d.span.start(),
+        end: d.span.end(),
+    }
 }
 
 /// Handle a `version` request.
@@ -2838,6 +2858,67 @@ mod property_tests {
     }
 
     const COMPILE_METHOD_CLASS: &str = "Actor subclass: EventStore\n  state: events = #{}\n\n  initialize -> Nil =>\n    self.events := #{}";
+
+    #[test]
+    fn diagnostics_method_mode_accepts_a_bare_method_body() {
+        // BT-2569: the System Browser method editor sends a BARE method body. Under
+        // the default (expression) grammar the `=>` body separator is not a valid
+        // top-level token, so the parser reports a false
+        // `Unexpected token: expected expression, found ⇒` — the bug. With
+        // `mode: "method"` the body parses with `parse_method` and is clean.
+        let body = "decrement => self.value := self.value - 1";
+
+        // Default (expression) grammar: the bug — a false parse error on `=>`.
+        let expr_request = Term::from(Map::from([
+            (atom("command"), atom("diagnostics")),
+            (atom("source"), binary(body)),
+        ]));
+        let expr_response = handle_request(&expr_request);
+        assert_eq!(response_status(&expr_response).as_deref(), Some("ok"));
+        assert!(
+            !response_diagnostics(&expr_response)
+                .expect("diagnostics")
+                .elements
+                .is_empty(),
+            "expression grammar should reject a bare method body (regression guard)"
+        );
+
+        // Method grammar: the same body parses clean — no diagnostics.
+        let method_request = Term::from(Map::from([
+            (atom("command"), atom("diagnostics")),
+            (atom("source"), binary(body)),
+            (atom("mode"), binary("method")),
+        ]));
+        let method_response = handle_request(&method_request);
+        assert_eq!(response_status(&method_response).as_deref(), Some("ok"));
+        assert!(
+            response_diagnostics(&method_response)
+                .expect("diagnostics")
+                .elements
+                .is_empty(),
+            "method grammar should accept a valid bare method body: {method_response:?}"
+        );
+    }
+
+    #[test]
+    fn diagnostics_method_mode_still_reports_a_broken_body() {
+        // The parse-only method path is not a no-op: a genuinely broken body (`:=`
+        // with no right-hand side) still produces diagnostics in method mode.
+        let request = Term::from(Map::from([
+            (atom("command"), atom("diagnostics")),
+            (atom("source"), binary("decrement => self.value :=")),
+            (atom("mode"), binary("method")),
+        ]));
+        let response = handle_request(&request);
+        assert_eq!(response_status(&response).as_deref(), Some("ok"));
+        assert!(
+            !response_diagnostics(&response)
+                .expect("diagnostics")
+                .elements
+                .is_empty(),
+            "a broken method body should still produce diagnostics: {response:?}"
+        );
+    }
 
     #[test]
     fn compile_method_preserves_source_and_compiles() {

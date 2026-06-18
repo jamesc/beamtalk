@@ -419,8 +419,19 @@ defmodule BtAttach.Workspace do
   `{:error, reason}` on a dispatch failure — JSON never crosses the Attach path.
   """
   @spec diagnostics(String.t()) :: {:ok, [map()]} | {:error, term()}
-  def diagnostics(code) when is_binary(code) do
-    case dispatch_diagnostics(code) do
+  def diagnostics(code) when is_binary(code), do: diagnostics(code, "expression")
+
+  @doc """
+  Like `diagnostics/1`, but `mode` selects the parse grammar (BT-2569):
+  `"expression"` (default — a top-level script, the Workspace + REPL editors) or
+  `"method"` (a bare method body — the System Browser method editor, where the
+  `=>` body separator is not a valid top-level token, so the default grammar
+  reports a false `expected expression, found ⇒`). Method mode is parse-only:
+  a method has no class context here, so semantic checks run on Compile.
+  """
+  @spec diagnostics(String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
+  def diagnostics(code, mode) when is_binary(code) and is_binary(mode) do
+    case dispatch_diagnostics(code, mode) do
       {:diagnostics, list} when is_list(list) ->
         {:ok, Enum.map(list, &normalize_diagnostic/1)}
 
@@ -693,13 +704,14 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # Build the `diagnostics` request as a flat map (`code` top-level), decode it on
-  # the workspace node, and dispatch through the term-returning op layer so the
-  # `{diagnostics, _}` term arrives live (no JSON edge). No session pid is needed
-  # — diagnostics are workspace-global parse-only analysis — so `self()` is passed
-  # only to satisfy `dispatch/4`'s arity, mirroring `dispatch_browse/2`.
-  defp dispatch_diagnostics(code) do
-    request = %{"op" => "diagnostics", "code" => code}
+  # Build the `diagnostics` request as a flat map (`code` + `mode` top-level),
+  # decode it on the workspace node, and dispatch through the term-returning op
+  # layer so the `{diagnostics, _}` term arrives live (no JSON edge). No session
+  # pid is needed — diagnostics are workspace-global parse-only analysis — so
+  # `self()` is passed only to satisfy `dispatch/4`'s arity, mirroring
+  # `dispatch_browse/2`. `mode` (BT-2569) selects the parse grammar.
+  defp dispatch_diagnostics(code, mode) do
+    request = %{"op" => "diagnostics", "code" => code, "mode" => mode}
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->

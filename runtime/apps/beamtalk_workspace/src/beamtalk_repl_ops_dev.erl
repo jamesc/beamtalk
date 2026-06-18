@@ -146,8 +146,13 @@ handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% keystroke and a `:read` op (the Observer may see diagnostics). Each entry
     %% carries byte-offset `start`/`end` spans + a `severity` + a `message`; the
     %% client maps spans to editor positions and severities to squiggles.
+    %% `mode` (BT-2569) selects the parse grammar: <<"expression">> (default,
+    %% top-level script — the Workspace + REPL editors) or <<"method">> (a bare
+    %% method body — the System Browser method editor, where the `=>` body
+    %% separator is not a valid top-level token).
     Code = maps:get(<<"code">>, Params, <<>>),
-    {diagnostics, diagnostics_for(Code)};
+    Mode = maps:get(<<"mode">>, Params, <<"expression">>),
+    {diagnostics, diagnostics_for(Code, Mode)};
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
@@ -841,11 +846,11 @@ failure (`{error, _}` — port down / timed out) also degrades to `[]`: diagnost
 are advisory and fire on every keystroke, so a transient port hiccup must not
 surface an error to the editor.
 """.
--spec diagnostics_for(binary()) -> [map()].
-diagnostics_for(<<>>) ->
+-spec diagnostics_for(binary(), binary()) -> [map()].
+diagnostics_for(<<>>, _Mode) ->
     [];
-diagnostics_for(Code) when is_binary(Code) ->
-    case beamtalk_compiler:diagnostics(Code) of
+diagnostics_for(Code, Mode) when is_binary(Code) ->
+    case beamtalk_compiler:diagnostics(Code, Mode) of
         {ok, Diagnostics} when is_list(Diagnostics) -> Diagnostics;
         {error, _Reason} -> []
     end.
@@ -1833,8 +1838,11 @@ base_ops() ->
         <<"complete">> => #{<<"params">> => [<<"code">>], <<"optional">> => [<<"cursor">>]},
         %% BT-2555: live-image hover docs for the cockpit editors.
         <<"hover">> => #{<<"params">> => [<<"code">>]},
-        %% BT-2556: parse-only diagnostics for the cockpit editors.
-        <<"diagnostics">> => #{<<"params">> => [<<"code">>]},
+        %% BT-2556: parse-only diagnostics for the cockpit editors. BT-2569:
+        %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar.
+        <<"diagnostics">> => #{
+            <<"params">> => [<<"code">>], <<"optional">> => [<<"mode">>]
+        },
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
         %% BT-2557: discover TestCase subclasses for the cockpit test-runner pane.
