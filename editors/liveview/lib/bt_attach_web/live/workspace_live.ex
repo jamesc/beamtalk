@@ -2893,23 +2893,15 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp doc_text(_), do: nil
 
-  # The class' comment text (`browse-class-definition` → `comment`) for the
-  # class-definition tab's read-only doc block (BT-2558). `nil` when the class
-  # carries no comment or the browse fails — the editor then shows no doc block.
-  # This is the same comment `Beamtalk help:` renders, so the browser and the
-  # `help:` send agree on the docs for a class.
-  defp class_comment(socket, class) do
-    {_definition, comment} = class_definition_info(socket, class)
-    comment
-  end
-
   # The class' editable definition skeleton (`browse-class-definition` →
   # `definition`, the synthesized `Super subclass: Name` header + state slots)
   # paired with its doc-block comment, fetched in one browse op. Returns
   # `{definition, comment}` where `definition` is a binary (`""` for a file-less
   # ClassBuilder class with no skeleton, so the editor body is always a string)
-  # and `comment` is the rendered doc text or `nil`. `{"", nil}` if the browse
-  # fails — the tab then opens empty rather than erroring.
+  # and `comment` is the rendered doc text or `nil` (the same comment
+  # `Beamtalk help:` renders, so the browser and `help:` agree on a class' docs).
+  # `{"", nil}` if the browse fails — the tab then opens empty rather than
+  # erroring.
   defp class_definition_info(socket, class) do
     case Facade.dispatch(:browse_class_definition, %{class: class}, ctx(socket)) do
       {:value, %{} = result} ->
@@ -3190,8 +3182,11 @@ defmodule BtAttachWeb.WorkspaceLive do
         # doc block from the live image so an out-of-band class comment change
         # (MCP `save_class`, a `>>` patch) shows on re-focus instead of the
         # snapshot taken at first open. Only `doc:` is touched — the editable
-        # definition buffer and its dirty flag are left untouched.
-        refreshed = %{existing | doc: class_comment(socket, class)}
+        # definition buffer and its dirty flag are left untouched, so an
+        # in-progress edit survives a tab switch. The skeleton `definition` the
+        # browse also returns is intentionally discarded here.
+        {_definition, comment} = class_definition_info(socket, class)
+        refreshed = %{existing | doc: comment}
 
         socket
         |> update_active_tab_by_id(id, fn _ -> refreshed end)
