@@ -87,14 +87,15 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       assert Process.alive?(view.pid)
     end
 
-    test "the New File form is hidden for an Observer (BT-2293)", %{conn: conn} do
-      # `new_class` is an :execute op, so the write-surface "New File" affordance
-      # is owner-gated in the template (same as the eval form) — an Observer must
-      # not see it.
+    test "the New Class affordance is hidden for an Observer (BT-2293)", %{conn: conn} do
+      # `new_class` is an :execute op, so the System Browser's "New Class"
+      # affordance is owner-gated in the template (same as the eval form) — an
+      # Observer must see neither the ＋ toggle nor the form it reveals.
       {:ok, _view, html} = live(observer_conn(conn), "/")
       assert html =~ "read-only (Observer)"
-      refute html =~ ~s(id="new-file-form")
-      refute html =~ ~s(phx-submit="new_file")
+      refute html =~ ~s(phx-click="toggle_new_class")
+      refute html =~ ~s(id="new-class-form")
+      refute html =~ ~s(phx-submit="new_class")
     end
 
     test "the Tests pane is read-only for an Observer: catalogue listed, Run hidden, run refused (BT-2557)",
@@ -435,63 +436,78 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
   end
 
-  test "the New File form is present on the owner's connected render (BT-2293)", %{conn: conn} do
-    {:ok, _view, html} = live(conn, "/")
+  test "the New Class toggle is present on the owner's connected render (BT-2293)", %{conn: conn} do
+    {:ok, view, html} = live(conn, "/")
 
-    # The System Browser's "New File" affordance: a self-contained source + path
-    # form that drives `Workspace newClass:at:`.
-    assert html =~ ~s(id="new-file-form")
-    assert html =~ ~s(phx-submit="new_file")
-    assert html =~ ~s(name="path")
-    assert html =~ ~s(name="source")
+    # The System Browser's "New Class" affordance is collapsed by default (it must
+    # not crowd the class tree): only the ＋ toggle shows on the connected render.
+    assert html =~ ~s(phx-click="toggle_new_class")
+    refute html =~ ~s(id="new-class-form")
+
+    # Toggling it open reveals the source-only form (no path field — the `.bt`
+    # path is derived from the declared class name server-side).
+    opened = view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
+    assert opened =~ ~s(id="new-class-form")
+    assert opened =~ ~s(phx-submit="new_class")
+    assert opened =~ ~s(name="source")
+    refute opened =~ ~s(name="path")
   end
 
-  test "New File validates an empty path before any create (BT-2293)", %{conn: conn} do
+  test "New Class validates an empty source before any create (BT-2293)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
+    view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
 
     html =
       view
-      |> form("#new-file-form")
-      |> render_submit(%{"source" => "Object subclass: Greeter", "path" => ""})
-
-    assert html =~ "Enter a target path"
-  end
-
-  test "New File validates an empty source before any create (BT-2293)", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/")
-
-    html =
-      view
-      |> form("#new-file-form")
-      |> render_submit(%{"source" => "", "path" => "src/greeter.bt"})
+      |> form("#new-class-form")
+      |> render_submit(%{"source" => ""})
 
     assert html =~ "Enter a class definition"
   end
 
-  test "New File creates a class end-to-end via newClass:at: (BT-2293)", %{conn: conn} do
+  test "New Class rejects source with no class header (BT-2293)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
-    suffix = System.unique_integer([:positive])
-    class = "Greeter#{suffix}"
-    # The declared class name must match the path basename (snake_cased); a
-    # single-word name + numeric suffix maps cleanly (`Greeter12` ↔ `greeter12`).
-    path = "src/greeter#{suffix}.bt"
+    view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
 
-    # Drive a real `newClass:at:` round-trip — the success path the validation
-    # tests don't reach: button → `:new_class` facade op → workspace
-    # `beamtalk_repl_eval:new_class/2`. Phase 1 installs the class in memory and
-    # logs a durable new-class ChangeEntry; the `.bt` file is only written on
-    # flush, so this leaves no on-disk artifact. A wiring bug (wrong RPC module
-    # or transposed source/path args) would fail here, not just in validation.
+    # No `… subclass: Name` header → there is no class name to derive a path from,
+    # so the LiveView surfaces a friendly hint rather than dispatching a doomed
+    # round-trip.
     html =
       view
-      |> form("#new-file-form")
-      |> render_submit(%{"source" => "Object subclass: #{class}", "path" => path})
+      |> form("#new-class-form")
+      |> render_submit(%{"source" => "1 + 1"})
+
+    assert html =~ "Couldn't find a class name"
+  end
+
+  test "New Class creates a class end-to-end via newClass:at: (BT-2293)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
+    suffix = System.unique_integer([:positive])
+    class = "Greeter#{suffix}"
+    # The path is derived from the declared class name: `Greeter12` → its exact
+    # PascalCase basename `src/Greeter12.bt` (the stdlib convention the runtime's
+    # `newClass:at:` validation accepts as an exact match).
+    path = "src/#{class}.bt"
+
+    # Drive a real `newClass:at:` round-trip — the success path the validation
+    # tests don't reach: form (source only) → derived path → `:new_class` facade
+    # op → workspace `beamtalk_repl_eval:new_class/2`. Phase 1 installs the class
+    # in memory and logs a durable new-class ChangeEntry; the `.bt` file is only
+    # written on flush, so this leaves no on-disk artifact. A derivation bug
+    # (wrong basename/case) would fail here, not just in validation.
+    html =
+      view
+      |> form("#new-class-form")
+      |> render_submit(%{"source" => "Object subclass: #{class}"})
 
     assert html =~ "Created new class — #{path}"
     refute html =~ "beamtalk_error"
     refute html =~ "{:error"
     # ChangeLog coherence: the new-class entry is now in the Changes viewer.
     assert html =~ class
+    # The form collapses again after a successful create.
+    refute html =~ ~s(id="new-class-form")
   end
 
   # ── Phase 1 JS hook foundation (BT-2485, BT-2539) ───────────────────────────

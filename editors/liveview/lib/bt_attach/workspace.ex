@@ -1020,7 +1020,7 @@ defmodule BtAttach.Workspace do
   @doc """
   Create a brand-new class from a source String at a target path (ADR 0082
   Phase 5 `Workspace newClass:at:`, BT-2293). This is the System Browser's
-  "New File" action — the in-memory class install + a durable
+  "New Class" action — the in-memory class install + a durable
   `kind: "new-class"` ChangeLog entry; the `.bt` file itself is written later on
   `flush/0`.
 
