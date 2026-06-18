@@ -359,6 +359,22 @@ defmodule BtAttach.FacadeTest do
       assert {:diagnostics, "decrement => self.value", "method"} in RecordingClient.calls()
     end
 
+    test "an unknown or non-binary mode normalises to expression at the facade (BT-2569)" do
+      # The facade is the shared boundary: anything but "method" degrades to the
+      # safe default, so a non-binary mode never reaches the `is_binary/1`-guarded
+      # client call. Both an unknown string and a non-binary normalise to "expression".
+      assert Facade.dispatch(:diagnostics, %{code: "x", mode: "bogus"}) ==
+               {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+      assert Facade.dispatch(:diagnostics, %{code: "x", mode: 42}) ==
+               {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+      calls = RecordingClient.calls()
+      assert {:diagnostics, "x", "expression"} in calls
+      refute {:diagnostics, "x", "bogus"} in calls
+      refute {:diagnostics, "x", 42} in calls
+    end
+
     test "a bad shape is invalid params, with no dist call" do
       # Non-binary code → no diagnostics round-trip. Diagnostics need no session,
       # so the only shape check is on `code`.

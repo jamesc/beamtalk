@@ -849,11 +849,18 @@ surface an error to the editor.
 -spec diagnostics_for(binary(), binary()) -> [map()].
 diagnostics_for(<<>>, _Mode) ->
     [];
-diagnostics_for(Code, Mode) when is_binary(Code) ->
+diagnostics_for(Code, Mode) when is_binary(Code), is_binary(Mode) ->
     case beamtalk_compiler:diagnostics(Code, Mode) of
         {ok, Diagnostics} when is_list(Diagnostics) -> Diagnostics;
         {error, _Reason} -> []
-    end.
+    end;
+%% A non-binary `code`/`mode` (a raw TCP/MCP client can send either as a JSON
+%% number/bool, not just the LiveView surface) degrades to `[]` rather than
+%% crashing the session — diagnostics are advisory and fire on every keystroke,
+%% so this matches the `{error, _}` degradation above and keeps the `binary()`
+%% spec honest at the Erlang boundary (BT-2569).
+diagnostics_for(_, _) ->
+    [].
 
 -doc """
 Resolve hover documentation for the hovered token (BT-2555).

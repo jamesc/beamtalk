@@ -706,13 +706,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     # `mode` (BT-2569) selects the parse grammar. The method-editor CmEditor sends
     # "method" (a bare method body — `=>` is not a valid top-level token, so the
     # default script grammar would false-positive); the Workspace + REPL editors
-    # send nothing → "expression". Normalise to one of the two known values so a
-    # malformed client `mode` can't crash the `is_binary/1`-guarded client call —
-    # anything but "method" degrades to the safe default.
-    mode = if Map.get(params, "mode") == "method", do: "method", else: "expression"
-
+    # send nothing. Forward the raw client value — the facade normalises it to a
+    # known binary ("method" | "expression"), the single boundary for every caller.
     diagnostics =
-      case Facade.dispatch(:diagnostics, %{code: code, mode: mode}, ctx(socket)) do
+      case Facade.dispatch(
+             :diagnostics,
+             %{code: code, mode: Map.get(params, "mode")},
+             ctx(socket)
+           ) do
         {:ok, list} when is_list(list) -> list
         _ -> []
       end

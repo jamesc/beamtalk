@@ -401,7 +401,7 @@ defmodule BtAttach.Workspace do
   data source.
 
   Reuses the compiler's **side-effect-free** `diagnostics` path (the Rust port's
-  `diagnostics` command behind `beamtalk_compiler:diagnostics/1`): the buffer is
+  `diagnostics` command behind `beamtalk_compiler:diagnostics/2`): the buffer is
   parsed and semantically checked for DIAGNOSIS ONLY — it generates no code,
   installs no module, mutates no image state, appends nothing to the ChangeLog,
   and runs no user code. That makes it safe to fire on every keystroke and
