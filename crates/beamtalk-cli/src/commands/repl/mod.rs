@@ -473,8 +473,29 @@ pub fn run(
 
     println!();
 
-    // Enter the shared REPL loop (also used by `beamtalk workspace attach`)
-    let repl_res = repl_loop(&mut client, &connect_host, connect_port, &cookie);
+    // Enter the shared REPL loop (also used by `beamtalk workspace attach`) —
+    // but only when stdin is an interactive terminal. A non-interactive
+    // invocation (e.g. `beamtalk-mcp --start`, which runs `beamtalk repl
+    // --port 0` with stdin redirected from null) just needs the workspace node
+    // bootstrapped; by this point the detached node is already up and its port
+    // has been printed above, so there is nothing for an interactive loop to do.
+    //
+    // Entering rustyline's readline loop without a terminal hangs on Windows:
+    // unlike Unix — where a null/closed stdin yields EOF and the loop exits
+    // immediately — rustyline does not return EOF for a redirected stdin handle
+    // on Windows, so `beamtalk repl --port 0` never exits and the parent
+    // `beamtalk-mcp --start` (which waits on it) blocks until its MCP
+    // `initialize` times out (BT-2568). Skipping the loop when stdin is not a
+    // terminal makes the command exit promptly on every platform; the
+    // interactive TTY path is unchanged.
+    let repl_res = if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        repl_loop(&mut client, &connect_host, connect_port, &cookie)
+    } else {
+        tracing::debug!(
+            "stdin is not a terminal — workspace is started; skipping interactive REPL loop"
+        );
+        Ok(())
+    };
 
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
 
