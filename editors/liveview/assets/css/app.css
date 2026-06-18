@@ -389,18 +389,45 @@
    docs. `flex: none` so it sits above the growing CodeMirror editor; the body
    scrolls if a long doc would otherwise crowd the editor out. The HTML is
    produced by `BtAttach.DocFormat` (a small, escaped Markdown subset).
+
+   Collapsible (BT-2558): the same `///` text is already present verbatim in the
+   editable source below, so the rendered body would otherwise show it twice and
+   eat the top of the editor. The signature line is always visible and doubles as
+   a collapse toggle (`.doc-toggle`); the `.doc-body` only renders when the block
+   is `.open`. Collapsed, `.doc-block` is just the one-line summary.
    ========================================================================== */
 .doc-block {
-  flex: none; max-height: 40%; overflow: auto;
+  flex: none; overflow: auto;
   margin-bottom: 8px; padding: 8px 10px;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
   font-size: 12px; line-height: 1.5; color: var(--muted);
 }
+/* Cap the height only when expanded, so a long doc scrolls instead of crowding
+   the editor; collapsed, the block hugs its single summary line. */
+.doc-block.open { max-height: 40%; }
 .doc-block .doc-sig {
   color: var(--accent-2); font-family: var(--code-font, monospace);
-  font-size: 12px; font-weight: 600; margin-bottom: 6px;
-  padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  font-size: 12px; font-weight: 600;
   white-space: pre-wrap; word-break: break-word;
+}
+/* The signature-as-toggle: a full-width, borderless button that reads as the
+   plain signature line, with a disclosure caret. Only `.open` draws the divider
+   under it (a separator above the body). */
+.doc-block button.doc-toggle {
+  display: flex; align-items: baseline; gap: 6px;
+  width: 100%; margin: 0; padding: 0; text-align: left;
+  background: none; border: none; cursor: pointer;
+}
+.doc-block.open button.doc-toggle {
+  margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+}
+.doc-block .doc-caret { color: var(--muted); font-size: 10px; flex: none; }
+.doc-block .doc-sig-text { flex: 1 1 auto; min-width: 0; }
+/* The signature-only (non-collapsible) line keeps its original spacing/divider.
+   Scoped to `div.doc-sig` so it doesn't also hit the toggle button (which shares
+   the `.doc-sig` class but draws its divider only when `.open`). */
+.doc-block > div.doc-sig {
+  margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
 }
 .doc-block .doc-body .doc-h {
   color: var(--ink); font-size: 12px; font-weight: 700;
