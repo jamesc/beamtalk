@@ -3395,37 +3395,49 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (wiping what the author typed) and a second ⌘S trips the empty-selector guard;
   # it would also leave a stale `new:<class>` tab alongside a later real method tab
   # for the same selector. A no-op for ordinary method/def tabs (the guard only
-  # matches `new: true`) and when the canonical id is already open (re-keying would
-  # collide — keep the existing tab focused instead). `sync_active` refreshes the
+  # matches `new: true`). When a canonical method tab for the selector is already
+  # open, the scratch tab is dropped and that existing tab is focused (no duplicate,
+  # no stale "Class ▸ new" left behind). `focus_tab_keep_banner/3` refreshes the
   # edit assigns so the now-hidden selector reflects the saved name.
   defp promote_new_method_tab(socket, tab_id, class, selector) do
     case find_tab(socket, tab_id) do
       %{new: true, side: side} = tab ->
         new_id = "method:" <> class <> ":" <> side <> ":" <> selector
+        tabs = socket.assigns.tabs
 
-        if find_tab(socket, new_id) do
-          socket
-        else
-          promoted = %{tab | id: new_id, selector: selector, new: false}
+        case find_tab(socket, new_id) do
+          nil ->
+            # Re-key the scratch tab in place into the canonical method tab.
+            promoted = %{tab | id: new_id, selector: selector, new: false}
+            replaced = Enum.map(tabs, fn t -> if t.id == tab_id, do: promoted, else: t end)
+            focus_tab_keep_banner(socket, replaced, promoted)
 
-          # Mirror the promoted tab into the edit assigns directly rather than via
-          # `sync_active/2`: the latter clears `save_result`/`save_error`, which
-          # would wipe the "Saved …" banner this very save just set (promotion runs
-          # mid-save, not on a user tab-switch).
-          socket
-          |> update_active_tab_by_id(tab_id, fn _ -> promoted end)
-          |> assign(:active_tab, new_id)
-          |> assign(
-            edit_class: promoted.class,
-            edit_selector: promoted.selector,
-            edit_source: promoted.source,
-            edit_selection: nil
-          )
+          existing ->
+            # A canonical method tab for this selector is already open: drop the
+            # redundant scratch tab and focus the existing one, rather than leaving
+            # a stale "Class ▸ new" tab alongside it.
+            focus_tab_keep_banner(socket, Enum.reject(tabs, &(&1.id == tab_id)), existing)
         end
 
       _ ->
         socket
     end
+  end
+
+  # Focus `tab` and mirror it into the edit assigns *without* clearing the
+  # save/flush result banners. `sync_active/2` resets those (the "switching tabs
+  # starts clean" rule), which is wrong mid-save: promotion runs as part of a
+  # successful save and must keep the "Saved …" banner it just set.
+  defp focus_tab_keep_banner(socket, tabs, tab) do
+    socket
+    |> assign(:tabs, tabs)
+    |> assign(:active_tab, tab.id)
+    |> assign(
+      edit_class: tab.class,
+      edit_selector: tab.selector,
+      edit_source: tab.source,
+      edit_selection: nil
+    )
   end
 
   defp update_active_tab(socket, fun),

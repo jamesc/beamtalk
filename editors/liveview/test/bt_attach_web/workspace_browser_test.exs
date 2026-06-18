@@ -291,16 +291,18 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define Counter so the ⌘S save compiles `Counter >> increment` against a real
-    # class. Re-visit to refresh the System Browser tree (browse-classes is a mount
-    # snapshot), then open a blank "new method" tab on Counter and author
-    # `increment` — the authoring path the starter tab used to provide on startup.
-    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
+    # Define Counter *with* `increment` so the ⌘S save re-compiles an existing
+    # method against a real class. Re-visit to refresh the System Browser tree
+    # (browse-classes is a mount snapshot), then open the existing `increment`
+    # method tab from the browser — its selector rides the form as a hidden field,
+    # so ⌘S needs only the edited body (the starter tab no longer opens on mount).
+    |> eval_do(
+      "Actor subclass: Counter\n  state: value = 0\n\n  increment => self.value := self.value + 1\n\n  value => self.value"
+    )
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
     |> click(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
-    |> click(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
-    |> set_text("#method-editor-form input[name='selector']", "increment")
+    |> click(~s(div[phx-value-selector="increment"]))
     |> set_method_source("increment => self.value := self.value + 1")
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
     # data-shortcuts "mod+s" → submit): the keydown bubbles out of CodeMirror to
@@ -529,24 +531,24 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
-    # Define a class whose method sends a selector we can then trace. `Counter`
-    # MUST exist before ⌘S can save `increment` onto it — define it here rather
-    # than leaning on another test having defined it first (the suite shares one
-    # workspace and runs in a seed-randomised order, so that ordering is not
-    # guaranteed: BT-2528). A second class (NavCounter) gives `increment` a real
-    # implementor to trace.
-    |> eval_do("Actor subclass: Counter\n  state: value = 0\n\n  value => self.value")
+    # Define Counter *with* `increment` (the selector we trace) so it exists to
+    # open + re-save. Define it here rather than leaning on another test having
+    # done so (the suite shares one workspace and runs in seed-randomised order, so
+    # that ordering is not guaranteed: BT-2528). A second class (NavCounter) gives
+    # `increment` a real implementor to trace.
+    |> eval_do(
+      "Actor subclass: Counter\n  state: value = 0\n\n  increment => self.value := self.value + 1\n\n  value => self.value"
+    )
     |> eval_do(
       "Actor subclass: NavCounter\n  state: value = 0\n\n  step => self.value := self.value + 1"
     )
     # Re-visit to refresh the System Browser tree (browse-classes is a mount
-    # snapshot), then open a blank "new method" tab on Counter and author
-    # `increment` — the starter tab used to provide this authoring surface.
+    # snapshot), then open the existing `increment` method tab from the browser
+    # (its selector rides the form as a hidden field) and re-save it with ⌘S.
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
     |> click(~s(div[phx-click="browser_select_class"][phx-value-class="Counter"]))
-    |> click(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
-    |> set_text("#method-editor-form input[name='selector']", "increment")
+    |> click(~s(div[phx-value-selector="increment"]))
     |> set_method_source("increment => self.value := self.value + 1")
     |> press("[id^='method-editor-overlay-'] .cm-content", "Control+s")
     # The Ctrl+S save is a server round-trip: WorkspaceLive compiles `Counter >>

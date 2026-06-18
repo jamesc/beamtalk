@@ -326,5 +326,34 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
 
       assert html =~ "Enter a selector"
     end
+
+    test "saving a new method whose selector is already open folds into that tab", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      # Open the existing `increment` method tab, then a blank new-method tab.
+      view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      # Author the new method under a selector that is *already* open. On save the
+      # scratch new-method tab is dropped and the existing `increment` tab focused —
+      # no duplicate, no stale "Counter ▸ new" — and the save banner still shows.
+      saved =
+        view
+        |> form("form[phx-submit='save_method']")
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "increment",
+          "source" => "increment => self.value := self.value + 1",
+          "tab" => "new:Counter"
+        })
+
+      assert saved =~ "Saved increment on Counter"
+      refute saved =~ "Counter ▸ new"
+      refute saved =~ "new-method-selector"
+    end
   end
 end
