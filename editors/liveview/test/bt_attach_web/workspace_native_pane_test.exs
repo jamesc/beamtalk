@@ -60,6 +60,34 @@ defmodule BtAttachWeb.WorkspaceNativePaneTest do
   end
 
   describe "native backing-source pane (BT-2578)" do
+    test "navigating the tree to a native: class reaches its read-only Erlang pane",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Real user flow through the System Browser DOM: pick the native: class in
+      # the tree, open its "class definition" entry, then toggle the Erlang pane —
+      # no synthetic events.
+      view
+      |> element(~s([phx-click="browser_select_class"][phx-value-class="Subprocess"]))
+      |> render_click()
+
+      html =
+        view
+        |> element(~s(.sb-classdef [phx-click="browser_open_definition"]))
+        |> render_click()
+
+      assert html =~ "Erlang backend"
+      assert html =~ "beamtalk_subprocess"
+
+      html =
+        view
+        |> element(~s(button[phx-click="browser_open_native"]))
+        |> render_click()
+
+      assert html =~ ~s(class="native-pre")
+      assert html =~ "handle_call({readLine"
+    end
+
     test "a native: class badges its backing module and toggles its source", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 

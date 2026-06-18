@@ -148,7 +148,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Browse ops ───────────────────────────────────────────────────────────
 
   def browse_classes do
-    base = [%{"name" => "Counter", "source_file" => "src/counter.bt"}]
+    base = [
+      %{"name" => "Counter", "source_file" => "src/counter.bt"},
+      # BT-2578: a native: class in the tree so the System Browser's "Erlang
+      # backend" badge + native pane can be reached by real navigation.
+      %{"name" => "Subprocess", "source_file" => "src/subprocess.bt"}
+    ]
 
     extra =
       get(:defined_classes)
@@ -161,11 +166,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def browse_protocols(class, side) do
     selectors =
-      if side == "instance" and
-           (class == "Counter" or MapSet.member?(get(:defined_classes), class)) do
-        [%{"selector" => "value"}, %{"selector" => "increment"}]
-      else
-        []
+      cond do
+        side == "instance" and class == "Subprocess" ->
+          # BT-2578: `self delegate` facade methods on the native: class.
+          [%{"selector" => "readLine"}, %{"selector" => "writeLine:"}]
+
+        side == "instance" and
+            (class == "Counter" or MapSet.member?(get(:defined_classes), class)) ->
+          [%{"selector" => "value"}, %{"selector" => "increment"}]
+
+        true ->
+          []
       end
 
     {:value, %{"protocols" => [%{"name" => "all", "selectors" => selectors}]}}
