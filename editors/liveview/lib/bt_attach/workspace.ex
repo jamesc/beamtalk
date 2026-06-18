@@ -1029,7 +1029,7 @@ defmodule BtAttach.Workspace do
   (`{ok, ClassObjects} | {error, Reason}`) rather than the raising FFI surface
   (`beamtalk_workspace_interface_primitives:newClass/2`). `source` is the class
   definition (e.g. `"Object subclass: Greeter"`), `path` the in-project target
-  (e.g. `"src/greeter.bt"`).
+  (e.g. `"src/Greeter.bt"`, as the LiveView derives from the class name).
 
   Returns:
 

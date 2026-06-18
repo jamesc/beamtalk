@@ -1206,9 +1206,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   def handle_event("toggle_new_class", _params, socket) do
     opening? = !socket.assigns.new_class_open
 
+    # Clear the whole shared status area on open (all four assigns, matching
+    # `status_error/2`) so no stale save *or* flush banner lingers behind the
+    # freshly-opened form.
     socket =
       if opening?,
-        do: assign(socket, save_error: nil, save_result: nil),
+        do:
+          assign(socket,
+            save_error: nil,
+            save_result: nil,
+            flush_error: nil,
+            flush_result: nil
+          ),
         else: socket
 
     {:noreply, assign(socket, new_class_open: opening?)}
@@ -2339,6 +2348,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   # convention) basename match, so the PascalCase name maps cleanly. Returns
   # `:error` when no `… subclass: Name` header is present so the caller can surface
   # a friendly "looks like a class definition?" message instead of a path error.
+  #
+  # The `src/` prefix is assumed — it's the canonical package source dir the
+  # runtime resolves (`resolve_package_module` tries `src/` then `test/`). A
+  # project with a different layout would get a `target_outside_project` error at
+  # creation time (not silently on flush). If per-project source dirs ever land,
+  # this is the spot to read the configured dir instead of hardcoding `src/`.
   @new_class_name_re ~r/\bsubclass:\s*([A-Z][A-Za-z0-9_]*)/
   defp derive_class_path(source) do
     case Regex.run(@new_class_name_re, source) do
