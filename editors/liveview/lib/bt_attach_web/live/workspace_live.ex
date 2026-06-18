@@ -5557,6 +5557,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                         class="doc-sig doc-toggle"
                         phx-click="toggle_doc"
                         aria-expanded={to_string(@doc_expanded)}
+                        aria-controls={if @doc_expanded, do: "doc-body-content"}
                         title={
                           if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"
                         }
@@ -5568,7 +5569,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           {doc_tab.signature || doc_summary_label(doc_tab)}
                         </span>
                       </button>
-                      <div :if={@doc_expanded} class="doc-body">
+                      <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
                         {BtAttach.DocFormat.to_html(doc_tab.doc)}
                       </div>
                     <% else %>
