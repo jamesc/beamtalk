@@ -82,6 +82,7 @@ defmodule BtAttach.SessionRegistry do
       :reap_timer,
       :reap_tag,
       :window_stash,
+      :doc_stash,
       :owner_pid
     ]
   end
@@ -163,6 +164,38 @@ defmodule BtAttach.SessionRegistry do
   def window_stash(server \\ __MODULE__, token)
   def window_stash(_server, token) when not is_binary(token), do: nil
   def window_stash(server, token), do: GenServer.call(server, {:take_stash, token})
+
+  @doc """
+  Stash `token`'s method-editor doc-block expand state so a resume can restore it.
+
+  Called from the LiveView's `terminate/2` alongside `release/1`. The read-only
+  doc block's expand/collapse state (`:doc_expanded`) is a socket assign, so a
+  reconnect — which mounts a brand-new process with `:doc_expanded` back at its
+  collapsed default — would otherwise re-collapse a block the user had expanded
+  on any transient socket drop, redeploy, or laptop wake (BT-2570). The stash
+  rides the registry entry (Phoenix-node memory that outlives the reconnect) and
+  is read back by `doc_stash/2` on the resuming mount. A `nil`/non-binary or
+  unknown token is a harmless no-op; the stash dies with the entry when the
+  session is reaped, so a genuinely-closed tab leaves nothing.
+  """
+  @spec stash_doc(GenServer.server(), term(), term()) :: :ok
+  def stash_doc(server \\ __MODULE__, token, expanded)
+  def stash_doc(_server, token, _expanded) when not is_binary(token), do: :ok
+
+  def stash_doc(server, token, expanded),
+    do: GenServer.call(server, {:stash_doc, token, expanded})
+
+  @doc """
+  Read (and clear) `token`'s stashed doc-block expand state, or `nil` when none.
+
+  Read once by the resuming mount after `checkout/1` resumes the session; the
+  stash is cleared so a later re-render can't replay a stale value. A
+  `nil`/non-binary or unknown token returns `nil`.
+  """
+  @spec doc_stash(GenServer.server(), term()) :: term() | nil
+  def doc_stash(server \\ __MODULE__, token)
+  def doc_stash(_server, token) when not is_binary(token), do: nil
+  def doc_stash(server, token), do: GenServer.call(server, {:take_doc_stash, token})
 
   @doc """
   Mark `token`'s session releasable: schedule a grace-period reap.
@@ -249,6 +282,28 @@ defmodule BtAttach.SessionRegistry do
     case Map.fetch(state.entries, token) do
       {:ok, %Entry{window_stash: stash} = entry} ->
         {:reply, stash, put_entry(state, token, %Entry{entry | window_stash: nil})}
+
+      :error ->
+        {:reply, nil, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:stash_doc, token, expanded}, _from, state) do
+    case Map.fetch(state.entries, token) do
+      {:ok, %Entry{} = entry} ->
+        {:reply, :ok, put_entry(state, token, %Entry{entry | doc_stash: expanded})}
+
+      :error ->
+        {:reply, :ok, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:take_doc_stash, token}, _from, state) do
+    case Map.fetch(state.entries, token) do
+      {:ok, %Entry{doc_stash: stash} = entry} ->
+        {:reply, stash, put_entry(state, token, %Entry{entry | doc_stash: nil})}
 
       :error ->
         {:reply, nil, state}
