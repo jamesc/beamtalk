@@ -552,3 +552,130 @@ For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending change
   - `docs/development/surface-parity.md` — drift contract this ADR must satisfy
   - Pharo `.changes` file model: <https://books.pharo.org/booklet-PharoToolingHandbook/pdf/2017-02-PharoToolingHandbook.pdf>
   - LSP `workspace/applyEdit`: <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_applyEdit>
+
+## Amendment 1 — Cockpit Positioning: live-first (agents) / git-first (humans)
+
+**Status: Accepted (2026-06-19), decided in BT-2585.** This section refines —
+it does not overturn — the accepted decision above: the two-layer model stands,
+and this pins down which layer is the *primary* surface for which *audience*.
+The question surfaced while building the LiveView IDE ChangeLog UX (BT-2573:
+collapse duplicate reverts; net-vs-disk diff / "disappear when clean"; BT-2577:
+flush corruption).
+
+**Decision in one line:** split by **surface** — the **LiveView cockpit is the
+human surface and is git-first** (`autoflush: true` default; diff/revert/history
+come from git; the cockpit ChangeLog shrinks to a dirty indicator), while
+**MCP is the agent surface and is ChangeLog-first** (the structured pre-flush
+audit trail + machine-readable net-vs-disk diff is where agents work).
+
+### Problem
+
+The accepted design makes the running image the source of truth between edits,
+with the ChangeLog as the dirty-state tracker and undo store and `flush` as the
+reconciliation step. Building UX on top of it raised the worry that the
+ChangeLog **re-implements what files + git already provide** (`Workspace changes`
+≈ `git status`, `ChangeEntry diff` ≈ `git diff`, `ChangeLog revert:` ≈
+`git checkout`). For a Smalltalk live-programming tool that is expected; for a
+"nicer editor for Beamtalk" audience it is novel surface that fights file+git
+muscle memory. The question: how much should the cockpit lean on git, and is the
+ChangeLog redundant?
+
+### Prior art — Pharo: `.changes` + Iceberg are two layers, not one
+
+Pharo answers this by running **two layers deliberately**:
+
+- **`.changes`** — an append-only log of every method accept, written
+  immediately (accept = installed in image + chunk appended; there is no
+  "flush"). Image-scoped, fine-grained, for crash recovery and method-level
+  undo. A recovery/power tool, not the daily diff surface.
+- **Iceberg** — a first-class IDE tool wrapping *real* git (libgit2): real
+  `status`, diffs, staging, commit, push/pull, branch, history, conflict
+  resolution, with **Tonel** (one human-readable file per class) as the on-disk
+  format. Pharo did **not** reinvent diff/history/branch — it surfaces actual
+  git, prominently, in the IDE.
+
+The decisive observation: **Pharo needs Iceberg+Tonel only because its image is
+the source of truth** — it must *project* the image into files to talk to git.
+Beamtalk made the opposite choice (ADR 0004 / principle #5): `.bt` files already
+*are* the source of truth and the git working tree. So once a change is flushed,
+`git diff` / `status` / `log` / `blame` work directly on the real files — no
+Tonel, no projection bridge. We get for free the subsystem Pharo had to build.
+
+This reframes the redundancy worry. The ChangeLog and git operate at **different
+layers**, separated by `flush`:
+
+| Layer | Tool | What its diff shows | Primary audience |
+|-------|------|---------------------|------------------|
+| In-memory, **pre-flush** | ChangeLog (`ChangeEntry diff`, `revert:`, disappear-when-clean) | memory ↔ disk — *what flush will write* | agents + power users |
+| On-disk, **post-flush** | git (panel in cockpit) | disk ↔ HEAD | humans |
+| History | git (`log` / `blame` / branch) | commit graph | humans |
+
+The ChangeLog's diff is **memory ↔ disk**, which **git cannot show** (it is not
+on disk yet) — so it is *complementary*, not redundant. The redundancy only
+appears if the ChangeLog is also made the history/branch/blame tool; that is
+git's job, and ours is already file-native, so we should **expose git in the
+cockpit** rather than rebuild it.
+
+### Decision
+
+Keep both layers, mirroring Pharo's `.changes`/Iceberg split, but with our
+file-native advantage — and assign each layer to the audience it serves best,
+**by surface**:
+
+- **LiveView cockpit = humans = git-first.** `autoflush: true` is the default:
+  a per-method **Save** writes through to the `.bt` file immediately ("save
+  means save"). Humans get diff / revert / history from **git**, surfaced
+  directly in the cockpit (the post-flush layer — see the git panel, BT-2586).
+  The in-cockpit ChangeLog is **not** a full viewer; it collapses to a
+  lightweight **"unsaved live edits" dirty indicator**, meaningful only when a
+  user opts into the live-no-flush mode. Live-edit-without-flush is the
+  *special* mode here, not the default.
+- **MCP = agents = ChangeLog-first.** Agents stay in the **pre-flush** layer:
+  they batch edits, inspect the structured audit trail and the machine-readable
+  net-vs-disk diff (BT-2575), and `revert:` — all before crossing the `flush`
+  seam. No autoflush; the ChangeLog *is* the agent's working surface.
+
+Both actors cross the same `flush` seam and use the same underlying operations;
+they differ only in **which layer is primary** and in the **autoflush default**.
+This keeps each layer doing what it is best at (the ChangeLog shows the
+memory↔disk diff git cannot; git owns disk↔HEAD history we should not rebuild)
+and preserves the agent-native thesis without imposing image semantics on
+file-oriented humans.
+
+**Alternatives considered.** *(1) Live-programming-first for everyone* —
+ChangeLog/flush/diff/revert core, autoflush off by default for all; maximises
+the live story but maximises newcomer friction and forces image semantics on
+humans who think in files. *(2) Editor-first for everyone* — autoflush on for
+all, drop the bespoke ChangeLog in favour of raw git; minimises novelty but
+discards the agent-facing audit trail and the one diff git cannot show
+(memory↔disk). Both were rejected for collapsing two genuinely different
+audiences into one model; the surface split keeps both without compromise.
+
+### Consequences
+
+- `autoflush` default becomes **per-surface**, not a single global switch:
+  `true` on the LiveView cockpit (human), `false` on MCP (agent). This relaxes
+  the "one switch, applied uniformly across all surfaces" statement under
+  *Behaviour* above to a per-surface default; the switch itself still exists and
+  the operation is identical everywhere.
+- BT-2575 (net-vs-disk diff / disappear-when-clean) **ships as the agent/MCP
+  pre-flush surface** — the diff git cannot show. It is no longer held; it
+  landed during this work.
+- BT-2293 is **re-scoped** to the human cockpit: per-method Save autoflushes by
+  default + a workspace dirty indicator; the rich ChangeLog viewer (list /
+  per-entry diff / `revert:`) is dropped from the cockpit and lives on the agent
+  MCP surface instead.
+- A **git panel in the cockpit** (BT-2586) is the human-facing post-flush VCS
+  surface — the Iceberg-equivalent, but thin: `.bt` files are already git's
+  working tree, so it is a shell-out to git + a LiveView view, no Tonel /
+  projection layer. Promoted to the cockpit's primary human VCS affordance.
+- Surface parity is preserved: the *operations* remain identical across
+  surfaces; only the *default* (autoflush) and the *primary affordance*
+  (git panel for humans vs ChangeLog for agents) differ by surface — analogous
+  to existing surface-specific presentation notes.
+
+### Non-goals
+
+This amendment does not revisit ADR 0004 (memory-only hot reload) or the
+byte-span splice mechanism. It is purely about which model is the *default,
+primary* surface for which *actor*.
