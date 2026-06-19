@@ -874,7 +874,9 @@ pub fn check_native_delegate<'a>(
 /// optional, so the match does not require them to balance.
 #[must_use]
 pub fn clause_selector(line: &str) -> Option<&str> {
-    // ^\s*
+    // ^\s* — the whitespace class is PCRE non-Unicode `\s` minus `\n`: callers
+    // (`handle_call_clause_line`) pre-split on `\n`, so no line reaching here can
+    // begin with one. The remaining members (space, tab, CR, VT, FF) match `\s`.
     let rest = line.trim_start_matches([' ', '\t', '\r', '\u{0b}', '\u{0c}']);
     // handle_call(
     let rest = rest.strip_prefix("handle_call(")?;

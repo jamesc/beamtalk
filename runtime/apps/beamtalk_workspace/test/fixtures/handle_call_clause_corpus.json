@@ -102,7 +102,7 @@
   {
     "line": "\thandle_call({readLine, []}, F, S) ->",
     "selector": "readLine",
-    "why": "drift canary: a tab indent matches — pins the whitespace set (Rust explicit ' \\t\\r\\v\\f' = PCRE non-Unicode \\s) against edits to either side"
+    "why": "drift canary: a tab indent matches — pins the whitespace set (Rust explicit ' \\t\\r\\v\\f', i.e. PCRE non-Unicode \\s minus the pre-split \\n) against edits to either side"
   },
   {
     "line": "handle_call({readLine}, From, State) ->",

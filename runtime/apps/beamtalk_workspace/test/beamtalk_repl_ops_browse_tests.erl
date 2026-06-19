@@ -176,7 +176,11 @@ load_clause_corpus() ->
         "fixtures",
         "handle_call_clause_corpus.json"
     ]),
-    {ok, Bin} = file:read_file(Path),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
     json:decode(Bin).
 
 find_project_root("/") ->
