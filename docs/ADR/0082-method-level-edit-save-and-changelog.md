@@ -552,3 +552,74 @@ For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending change
   - `docs/development/surface-parity.md` — drift contract this ADR must satisfy
   - Pharo `.changes` file model: <https://books.pharo.org/booklet-PharoToolingHandbook/pdf/2017-02-PharoToolingHandbook.pdf>
   - LSP `workspace/applyEdit`: <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#workspace_applyEdit>
+
+## Amendment 1 — Cockpit Positioning: live-first (agents) / git-first (humans)
+
+**Status: Proposed (2026-06-19) — pending decision, tracked in BT-2585.** This
+section does not change the accepted decision above; it records a positioning
+question that surfaced while building the LiveView IDE ChangeLog UX (BT-2573:
+collapse duplicate reverts; net-vs-disk diff / "disappear when clean"; BT-2577:
+flush corruption) and proposes an answer for sign-off.
+
+### Problem
+
+The accepted design makes the running image the source of truth between edits,
+with the ChangeLog as the dirty-state tracker and undo store and `flush` as the
+reconciliation step. Building UX on top of it revealed that **most ChangeLog
+features re-implement what files + git already provide for free**:
+
+| ChangeLog feature | Git equivalent |
+|-------------------|----------------|
+| `Workspace changes` (dirty set) | `git status` |
+| `ChangeEntry diff` (net vs disk) | `git diff` |
+| `ChangeLog revert:` | `git checkout -- <file>` |
+| "disappear when clean" (BT-2575) | git's own unmodified notion |
+
+For a **Smalltalk live-programming** tool this is correct and the divergence
+from a file-based editor (VS Code) is the point — you are editing a *running
+image*, not files, so the image needs its own dirty/undo/diff model. For a
+**"nicer editor for Beamtalk"** audience it is a large novel surface that fights
+file+git muscle memory. The risk is building Smalltalk-path features while
+reasoning with VS-Code-path instincts — satisfying neither.
+
+### Options
+
+- **(1) Live-programming-first (one model for everyone).** ChangeLog, flush,
+  diff, revert are core; autoflush stays off by default; the VS Code gap is
+  intentional. Maximises the live story; maximises newcomer friction.
+- **(2) Editor-first (one model for everyone).** Lean on files + git: autoflush
+  on by default (save means save), surface real `git status`/`git diff` instead
+  of a bespoke ChangeLog, and make live-no-flush editing the *special* mode.
+  Minimises novelty; discards much of the ChangeLog UX investment.
+- **(3) Split by actor (recommended).** **Live-first for agents**,
+  **git-first for humans.** Agents (MCP/LiveView automation) benefit most from
+  the structured ChangeLog audit trail and machine-readable diff — keep the full
+  model for them. Humans default to `autoflush: true` and lean on git for diff /
+  revert / history; the ChangeLog remains available but is not the primary
+  human-facing surface. This is coherent (each actor gets the model that fits)
+  rather than straining one model across both, and it preserves the
+  agent-native thesis without imposing image semantics on file-oriented humans.
+
+### Proposed consequences (if option 3 is accepted)
+
+- `autoflush` default becomes actor-dependent: `true` for human sessions,
+  `false` for agent sessions (a per-session default, not a global switch — note
+  this interacts with the "one switch, applied uniformly across all surfaces"
+  statement under *Behaviour* above, which would need to be relaxed to
+  per-session).
+- BT-2575 (net-vs-disk diff / disappear-when-clean) ships as an
+  **agent-facing** capability (and the LiveView ChangeLog viewer for power
+  users), not as core human workflow. It is currently **held** pending this
+  decision.
+- BT-2293 (ChangeLog viewer / per-method Save / Save All) is re-scoped against
+  the chosen positioning.
+- Surface parity is preserved: the *operations* remain identical across
+  surfaces; only the *default* (autoflush) and the *primary human affordance*
+  (git vs ChangeLog) differ by actor — analogous to existing surface-specific
+  presentation notes.
+
+### Non-goals
+
+This amendment does not revisit ADR 0004 (memory-only hot reload) or the
+byte-span splice mechanism. It is purely about which model is the *default,
+primary* surface for which *actor*.
