@@ -1,0 +1,50 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot test for actor conditional-mutation codegen (GH-2644).
+//
+// Exercises the four mutation-threading functions in
+// crates/beamtalk-core/src/codegen/core_erlang/control_flow/conditionals.rs
+// that were previously uncovered by snapshot/unit tests:
+//
+//   generate_if_true_with_mutations      — incrementIf:
+//   generate_if_false_with_mutations     — decrementIfNot:
+//   generate_if_true_if_false_with_mutations — setByFlag:
+//   generate_if_not_nil_with_mutations   — setTagIfPresent:
+//
+// Also exercises the non-empty path through seed_conditional_locals (BT-2355):
+// a local variable declared before the conditional and mutated inside a branch
+// must be seeded into the pre-conditional state map so the non-taken branch
+// and post-conditional extraction still see a consistent state.
+
+Actor subclass: ConditionalActor
+  state: count :: Integer = 0
+  state: tag = nil
+
+  // generate_if_true_with_mutations: field mutation in the true branch only.
+  incrementIf: flag =>
+    flag ifTrue: [self.count := self.count + 1]
+    self.count
+
+  // generate_if_false_with_mutations: field mutation in the false branch only.
+  decrementIfNot: flag =>
+    flag ifFalse: [self.count := self.count - 1]
+    self.count
+
+  // generate_if_true_if_false_with_mutations: field mutations in both branches.
+  setByFlag: flag =>
+    flag ifTrue: [self.count := 1] ifFalse: [self.count := -1]
+    self.count
+
+  // generate_if_not_nil_with_mutations: field mutation when receiver is non-nil.
+  setTagIfPresent: value =>
+    value ifNotNil: [:v | self.tag := v]
+    self.tag
+
+  // seed_conditional_locals non-empty path (BT-2355): outer local `n` is
+  // declared before the ifTrue: and mutated inside its block, so it must be
+  // seeded into the pre-conditional state map.
+  localConditional: flag =>
+    n := 0
+    flag ifTrue: [n := self.count + 1]
+    n
