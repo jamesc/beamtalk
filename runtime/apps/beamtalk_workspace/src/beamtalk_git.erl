@@ -185,13 +185,13 @@ git_commit(_Message) ->
     {error, arg_error(git_commit, <<"commit message must be a String">>)}.
 
 -doc """
-Discard a working-tree change for a single path (`git checkout -- <path>`).
+Discard a working-tree change for a single path (`git restore -- <path>`).
 
 The human counterpart to the agent ChangeLog `revert:`. Returns `{ok, nil}`.
 """.
 -spec git_revert_file(binary()) -> {ok, nil} | {error, #beamtalk_error{}}.
 git_revert_file(Path) when is_binary(Path) ->
-    mutate(git_revert_file, [<<"checkout">>, <<"--">>, Path], <<"git checkout failed">>);
+    mutate(git_revert_file, [<<"restore">>, <<"--">>, Path], <<"git restore failed">>);
 git_revert_file(_Path) ->
     {error, arg_error(git_revert_file, <<"path must be a String">>)}.
 
@@ -486,7 +486,7 @@ classify_char($T) -> type_changed;
 classify_char(_) -> unmodified.
 
 %%% ============================================================================
-%%% Log parsing (git log --format=%H<FS>%h<FS>%s<FS>%an<FS>%aI<RS>)
+%%% Log parsing (git log --format=%H<FS>%h<FS>%an<FS>%aI<FS>%s<RS>)
 %%% ============================================================================
 
 -spec parse_log(binary()) -> [map()].
