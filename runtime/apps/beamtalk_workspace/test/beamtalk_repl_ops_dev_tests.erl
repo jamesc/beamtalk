@@ -326,6 +326,58 @@ diagnostics_empty_code_encodes_done_status_test() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 %%====================================================================
+%% normalize_diagnostics_mode/1 -- diagnostics mode normalisation (BT-2572)
+%%
+%% The Erlang op boundary normalises an unknown-binary `mode` to
+%% <<"expression">>, mirroring the Elixir BtAttach.Facade (anything but
+%% "method" -> "expression"). A non-binary `mode` is passed through unchanged so
+%% diagnostics_for/2's catch-all still degrades it to [] (BT-2569). These are
+%% white-box checks of the pure normaliser, so no compiler/port is needed.
+%%====================================================================
+
+diagnostics_unknown_binary_mode_normalised_to_expression_test() ->
+    %% BT-2572: an unknown binary mode (e.g. <<"foo">>) is normalised to the safe
+    %% default at the Erlang layer, not just in the Rust port.
+    ?assertEqual(
+        <<"expression">>,
+        beamtalk_repl_ops_dev:normalize_diagnostics_mode(<<"foo">>)
+    ).
+
+diagnostics_method_mode_preserved_test() ->
+    %% No behaviour change for the known <<"method">> mode.
+    ?assertEqual(
+        <<"method">>,
+        beamtalk_repl_ops_dev:normalize_diagnostics_mode(<<"method">>)
+    ).
+
+diagnostics_expression_mode_preserved_test() ->
+    %% No behaviour change for the known <<"expression">> mode.
+    ?assertEqual(
+        <<"expression">>,
+        beamtalk_repl_ops_dev:normalize_diagnostics_mode(<<"expression">>)
+    ).
+
+diagnostics_empty_binary_mode_normalised_to_expression_test() ->
+    %% An empty binary is "not method" and so normalises to expression.
+    ?assertEqual(
+        <<"expression">>,
+        beamtalk_repl_ops_dev:normalize_diagnostics_mode(<<>>)
+    ).
+
+diagnostics_non_binary_mode_passed_through_unchanged_test() ->
+    %% A non-binary mode is NOT normalised — it is passed through so the
+    %% diagnostics_for/2 catch-all degrades it to [] (BT-2569), rather than being
+    %% silently coerced into expression mode.
+    ?assertEqual(
+        42,
+        beamtalk_repl_ops_dev:normalize_diagnostics_mode(42)
+    ),
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:normalize_diagnostics_mode(undefined)
+    ).
+
+%%====================================================================
 %% handle/4 -- show-codegen class+selector (BT-1236)
 %%====================================================================
 
