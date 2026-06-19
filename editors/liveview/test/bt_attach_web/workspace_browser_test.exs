@@ -291,14 +291,14 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
   # that the cockpit opened on mount; PR #2637 removed that tab, so the setup now
   # opens a method tab itself via omni search (the live nav-symbols index sees the
   # freshly-eval'd class without a browser remount, avoiding the browse-classes
-  # snapshot race that the System Browser path hit). The earlier blind rewrite
-  # failed because ⌘S was sent with Playwright's `press(".cm-content", ...)`,
-  # which depends on keyboard focus landing in the editor — and omni's Enter
-  # leaves focus in the omni input, so the chord never reached the form hook even
-  # after a tab-click. The fix decouples ⌘S from focus: `#method-editor-form` is
-  # `data-scope="window"`, so its KeyboardShortcuts hook listens on `window`;
-  # `press_save/1` dispatches the chord directly on `window`, which reaches the
-  # hook deterministically wherever focus sits. The ⌘S hook itself is unchanged.
+  # snapshot race that the System Browser path hit). `press_save/1` then sends a
+  # REAL (trusted) ⌘/Ctrl+S via Playwright's `press/3`, which focuses the method
+  # editor first (so focus is deterministic after omni's Enter) and dispatches a
+  # trusted keydown that bubbles to `window`, where `#method-editor-form`'s
+  # `data-scope="window"` KeyboardShortcuts hook listens and request-submits the
+  # form. (An earlier rewrite used a synthetic `dispatchEvent` on `window`; its
+  # untrusted event reached the hook but did not drive the save through to the
+  # banner in CI.) The ⌘S hook itself is unchanged.
   test "the KeyboardShortcuts hook compiles a method on ⌘/Ctrl+S (BT-2485)", %{conn: conn} do
     conn
     |> visit("/")
@@ -319,8 +319,8 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
     # data-shortcuts "mod+s" → submit): the window-scoped KeyboardShortcuts hook
     # request-submits the form so class/selector/source ride the normal
-    # save_method — no button click. `press_save/1` fires the chord on `window`
-    # (where the hook listens), so it doesn't depend on editor focus.
+    # save_method — no button click. `press_save/1` sends a trusted ⌘/Ctrl+S that
+    # bubbles to `window` after focusing the editor.
     |> press_save()
     # The save is a server round-trip (WorkspaceLive compiles `KsCounter >>
     # ksBump` before assigning `save_result`); under parallel CI load that can
@@ -1034,33 +1034,20 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> evaluate("new Promise((resolve) => setTimeout(resolve, 200))")
   end
 
-  # Fire a ⌘S / Ctrl+S keydown the way the window-scoped method-editor form hook
-  # actually listens for it. `#method-editor-form` carries `data-scope="window"`,
-  # so its KeyboardShortcuts hook attaches its `keydown` listener to `window`
-  # (not the form element). Dispatching the chord on `window` directly therefore
-  # reaches the hook regardless of where keyboard focus currently sits — the
-  # focus dependency that made the Playwright `press(".cm-content", "Control+s")`
-  # path flaky after opening a method tab via omni search (omni's Enter leaves
-  # keyboard focus in the omni input, and a tab-click refocus still raced). We
-  # set BOTH ctrlKey and metaKey so the chord matches on Linux/CI (Ctrl) and
-  # macOS (Cmd); the hook's `isMod` accepts either, and we omit Alt/Shift so it
-  # isn't rejected. `cancelable: true` lets the hook's preventDefault take
-  # effect, matching a real keypress.
+  # Fire a REAL (trusted) ⌘S / Ctrl+S the way a user would. `press/3` focuses the
+  # target first, then dispatches a trusted keydown through Playwright's keyboard
+  # — handled identically to a user keypress (unlike a synthetic `dispatchEvent`,
+  # whose `isTrusted: false` event did not drive the save through to the banner in
+  # CI). We focus the method editor's CodeMirror content so focus is deterministic
+  # regardless of where omni's Enter left it; the trusted keydown then bubbles to
+  # `window`, where `#method-editor-form`'s `data-scope="window"` KeyboardShortcuts
+  # hook listens (`mod+s` -> request-submit, so class/selector/source ride the
+  # normal save_method). `ControlOrMeta` is Ctrl on Linux/CI and Cmd on macOS —
+  # both satisfy the hook's `isMod`; Ctrl+S is not a CodeMirror binding, so the
+  # chord propagates rather than editing the doc.
   defp press_save(conn) do
     conn
-    |> evaluate("""
-    (() => {
-      const opts = {
-        bubbles: true,
-        cancelable: true,
-        key: "s",
-        code: "KeyS",
-        ctrlKey: true,
-        metaKey: true,
-      };
-      window.dispatchEvent(new KeyboardEvent("keydown", opts));
-    })()
-    """)
+    |> press("[id^='method-editor-overlay-'] .cm-content", "ControlOrMeta+s")
     |> evaluate("new Promise((resolve) => setTimeout(resolve, 200))")
   end
 
