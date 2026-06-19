@@ -82,6 +82,10 @@ defmodule BtAttach.Facade do
     browse_protocols: :read,
     browse_method_source: :read,
     browse_class_definition: :read,
+    # BT-2578: the native backing-source view. Pure reflection over the facade
+    # module's `__beamtalk_meta/0` + the backing module's on-disk `.erl` (read
+    # only — no user code), so it is `:read`, safe for the Observer role.
+    browse_native_source: :read,
     # BT-2495 (Cockpit Phase 3): the navigation aids — Senders/Implementors
     # popovers (`senders`/`implementors`) and the top-bar omni search (`symbols`).
     # Each is a thin `:read` facade over the navigation channel the LSP/MCP
@@ -208,6 +212,16 @@ defmodule BtAttach.Facade do
   defp invoke(:browse_class_definition, %{class: class}, _ctx) do
     if is_binary(class),
       do: client().browse_class_definition(class),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2578: the backing Erlang source of a native: class. `selector` is
+  # optional — present → also resolve the matching `handle_call` clause; absent
+  # → whole-module view. A non-native class comes back as a structured
+  # `#beamtalk_error{}` workspace-side.
+  defp invoke(:browse_native_source, %{class: class} = params, _ctx) do
+    if is_binary(class),
+      do: client().browse_native_source(class, Map.get(params, :selector)),
       else: {:error, :invalid_params}
   end
 

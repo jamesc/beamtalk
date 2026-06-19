@@ -488,6 +488,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:selected_protocol, nil)
       |> assign(:browser_protocols, [])
       |> assign(:browser_error, nil)
+      # BT-2578: the read-only native backing-source pane. `nil` = collapsed;
+      # otherwise a map carrying the fetched Erlang source for one class
+      # (lazily loaded on the def tab's "View Erlang source" toggle).
+      # Single-slot: only one class's native pane is expanded at a time — opening
+      # a second replaces this value, and `native_shown?/2` scopes display to the
+      # active tab's class (per-tab pane state is intentionally not kept).
+      |> assign(:native_view, nil)
       # New Class form (BT-2293): the System Browser's owner-only create-a-class
       # affordance, collapsed by default (it lives in the browser head's ＋ button)
       # so it never crowds the class tree until wanted.
@@ -1203,6 +1210,37 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("browser_open_definition", _params, socket), do: {:noreply, socket}
+
+  # BT-2578: toggle the read-only native backing-source pane on a class-definition
+  # tab. A native: class (ADR 0056) only has `self delegate` facade methods — the
+  # real logic lives in the backing gen_server module's `handle_call` clauses — so
+  # this surfaces that module's `.erl` read-only. The backing source is lazily
+  # fetched on first open (a `:read` op, safe for the Observer) and cached on
+  # `native_view`; a second click collapses it.
+  def handle_event("browser_open_native", %{"class" => class}, socket)
+      when is_binary(class) and class != "" do
+    if native_shown?(socket.assigns, class) do
+      {:noreply, assign(socket, native_view: nil)}
+    else
+      {:noreply, assign(socket, native_view: load_native_view(socket, class))}
+    end
+  end
+
+  def handle_event("browser_open_native", _params, socket), do: {:noreply, socket}
+
+  # BT-2578: jump from a `self delegate` method to its Erlang implementation.
+  # Opens (or focuses) the class-definition tab and expands the native pane with
+  # the method's selector resolved to its matching `handle_call` clause (which the
+  # pane highlights). The selector→clause mapping is best-effort: a delegate that
+  # completes in `handle_info` resolves to no clause, and the pane says so rather
+  # than pretending.
+  def handle_event("browser_jump_native", %{"class" => class, "selector" => selector}, socket)
+      when is_binary(class) and class != "" and is_binary(selector) do
+    socket = open_definition(socket, class)
+    {:noreply, assign(socket, native_view: load_native_view(socket, class, selector))}
+  end
+
+  def handle_event("browser_jump_native", _params, socket), do: {:noreply, socket}
 
   # Open a blank "new method" tab for the *selected* class (the System Browser's
   # "new method" entry). A new-method tab is a `:method` tab with no selector yet —
@@ -2816,7 +2854,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                 # out-of-band edit to the method's `///` doc / signature is
                 # reflected when the clean tab is re-activated.
                 doc: info.doc,
-                signature: info.signature
+                signature: info.signature,
+                # Re-derive the native-delegate flag from the live image too.
+                native_delegate: info.native_delegate
             }
 
             socket
@@ -2852,6 +2892,11 @@ defmodule BtAttachWeb.WorkspaceLive do
           # block (BT-2558); nil when the method carries no doc / signature.
           doc: info.doc,
           signature: info.signature,
+          # BT-2578: native backing module is a class-level fact, never set on a
+          # method tab; `native_delegate` marks a `self delegate` method whose
+          # implementation lives in the backing module (the jump affordance).
+          native_module: nil,
+          native_delegate: info.native_delegate,
           new: false
         }
 
@@ -2882,7 +2927,11 @@ defmodule BtAttachWeb.WorkspaceLive do
           # editor can show a read-only doc block alongside the editable body.
           # `nil` when the method has no doc / no resolvable signature.
           doc: doc_text(result["doc"]),
-          signature: doc_text(result["signature"])
+          signature: doc_text(result["signature"]),
+          # BT-2578: a `self delegate` method (ADR 0056) on a native: class — its
+          # real implementation lives in the backing module's `handle_call`
+          # clauses, reachable via the "→ Erlang implementation" jump.
+          native_delegate: result["native_delegate"] == true
         }
 
       # Facade returned a value but not the expected map (sourceless / malformed
@@ -2904,7 +2953,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Defaults for a method with no resolvable image source: an empty editable buffer
   # and no divergence badges (and no doc block — BT-2558).
   defp empty_source_info,
-    do: %{source: "", disk_differs: false, runtime_only: false, doc: nil, signature: nil}
+    do: %{
+      source: "",
+      disk_differs: false,
+      runtime_only: false,
+      doc: nil,
+      signature: nil,
+      native_delegate: false
+    }
 
   # The on-disk method body to diff a later compile against (BT-2550 item 2). We
   # can only know it when the image matched disk at open: `disk_differs: false` and
@@ -2992,12 +3048,93 @@ defmodule BtAttachWeb.WorkspaceLive do
             _ -> ""
           end
 
-        {definition, doc_text(Map.get(result, "comment"))}
+        {definition, doc_text(Map.get(result, "comment")), native_backing_module(result)}
 
       _ ->
-        {"", nil}
+        {"", nil, nil}
     end
   end
+
+  # BT-2578: the backing Erlang module name of a native: class (ADR 0056), or
+  # nil for an ordinary class. Drives the "Erlang backend" badge + the read-only
+  # native pane on a class-definition tab.
+  defp native_backing_module(%{"native" => true} = result) do
+    case Map.get(result, "backing_module") do
+      mod when is_binary(mod) and mod != "" -> mod
+      _ -> nil
+    end
+  end
+
+  defp native_backing_module(_result), do: nil
+
+  # BT-2578: fetch a native class's backing Erlang source for the read-only pane.
+  # `content: nil` is the honest "source not available" empty state (a `.beam`-only
+  # build that shipped no `.erl`); a non-native class / dispatch failure carries an
+  # `error` string instead.
+  defp load_native_view(socket, class, selector \\ nil) do
+    base = %{
+      class: class,
+      backing_module: nil,
+      source_file: nil,
+      source_origin: nil,
+      editable: false,
+      content: nil,
+      clauses: [],
+      # The selector a method→clause jump asked for, and the matching clause the
+      # backend resolved (or nil — a delegate may complete in `handle_info`).
+      requested_selector: selector,
+      selected_clause: nil,
+      error: nil
+    }
+
+    params = if selector, do: %{class: class, selector: selector}, else: %{class: class}
+
+    case Facade.dispatch(:browse_native_source, params, ctx(socket)) do
+      {:value, %{} = r} ->
+        %{
+          base
+          | backing_module: Map.get(r, "backing_module"),
+            # The Erlang op returns the atom `null` for absent values, which
+            # arrives over distribution as the Elixir atom `:null` (NOT `nil`).
+            # Normalise so template `is_nil/1` guards and `:if` truthiness behave
+            # (a raw `:null` is truthy and `is_nil(:null)` is false) — otherwise
+            # the "no matching handle_call clause" explanation never renders and a
+            # stripped-source path would interpolate as ":null" (BT-2578).
+            source_file: binary_or_nil(Map.get(r, "source_file")),
+            source_origin: Map.get(r, "source_origin"),
+            editable: Map.get(r, "editable") == true,
+            content: nonempty_string(Map.get(r, "content")),
+            clauses: Map.get(r, "clauses", []),
+            selected_clause: map_or_nil(Map.get(r, "selected_clause"))
+        }
+
+      {:error, reason} ->
+        %{base | error: facade_error(reason)}
+
+      _ ->
+        %{base | error: "Could not load Erlang source."}
+    end
+  end
+
+  # True when a clause row is the one a jump selected (selector + line match).
+  defp clause_active?(%{"selector" => s, "line" => l}, %{"selector" => s, "line" => l}), do: true
+  defp clause_active?(_clause, _selected), do: false
+
+  defp nonempty_string(s) when is_binary(s) and s != "", do: s
+  defp nonempty_string(_), do: nil
+
+  # Normalise the Erlang `null` atom (delivered as `:null` over distribution) and
+  # any non-conforming value to a clean Elixir `nil` / typed value, so template
+  # guards (`is_nil/1`, `:if`) and interpolation behave (BT-2578).
+  defp map_or_nil(m) when is_map(m), do: m
+  defp map_or_nil(_), do: nil
+
+  defp binary_or_nil(b) when is_binary(b), do: b
+  defp binary_or_nil(_), do: nil
+
+  # True when the native pane is currently showing `class`'s backing source.
+  defp native_shown?(%{native_view: %{class: shown}}, class), do: shown == class
+  defp native_shown?(_assigns, _class), do: false
 
   # Query senders/implementors of the active method's selector (`nav-query`) and
   # open the result popover. A tab with no selector (a class-definition tab) is a
@@ -3281,8 +3418,18 @@ defmodule BtAttachWeb.WorkspaceLive do
         # definition buffer and its dirty flag are left untouched, so an
         # in-progress edit survives a tab switch. The skeleton `definition` the
         # browse also returns is intentionally discarded here.
-        {_definition, comment} = class_definition_info(socket, class)
-        refreshed = %{existing | doc: comment}
+        {_definition, comment, native_module} = class_definition_info(socket, class)
+        # Keep the prior backing module if the re-fetch fails transiently
+        # (workspace unreachable → `{"", nil, nil}`): a `nil` here would hide the
+        # "Erlang backend" badge + pane toggle on an already-open tab while
+        # `@native_view` still holds the fetched source. A successful re-fetch
+        # always wins (the class of a `def:` tab does not change between
+        # activations, so a non-nil result is the same module).
+        refreshed = %{
+          existing
+          | doc: comment,
+            native_module: native_module || existing.native_module
+        }
 
         socket
         |> update_active_tab_by_id(id, fn _ -> refreshed end)
@@ -3294,7 +3441,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         # the read-only doc block. Without the skeleton the editor opened empty —
         # the doc block rendered but the class definition itself was missing
         # (BT-2558 only wired the comment).
-        {definition, comment} = class_definition_info(socket, class)
+        {definition, comment, native_module} = class_definition_info(socket, class)
 
         tab = %{
           id: id,
@@ -3313,6 +3460,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           # class-definition tab.
           doc: comment,
           signature: nil,
+          # BT-2578: the backing Erlang module (native: classes only), nil
+          # otherwise — gates the "Erlang backend" badge + read-only native pane.
+          native_module: native_module,
           new: false
         }
 
@@ -3353,6 +3503,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       disk_source: nil,
       doc: nil,
       signature: nil,
+      # BT-2578: a blank new-method tab is never a native delegate (no selector
+      # yet); the keys must still be present so the editor render's dot-access
+      # holds for every :method tab.
+      native_module: nil,
+      native_delegate: false,
       # The new-method marker: drives the selector input + breadcrumb label, and
       # keeps the tab id stable (no selector to key on yet).
       new: true
@@ -5889,6 +6044,105 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <% else %>
                         <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
                       <% end %>
+                    </section>
+                    <%!-- BT-2578: on a `self delegate` method (ADR 0056), a jump
+                       to its Erlang implementation. Opens the class-definition
+                       tab's native pane with this selector's `handle_call` clause
+                       highlighted. Every role sees it (the op is `:read`). --%>
+                    <div
+                      :if={doc_tab.kind == :method and doc_tab.native_delegate}
+                      class="native-delegate-link"
+                    >
+                      <span class="native-badge">Native delegate</span>
+                      <span class="native-delegate-note">Implemented in the Erlang backend.</span>
+                      <button
+                        type="button"
+                        class="native-toggle"
+                        phx-click="browser_jump_native"
+                        phx-value-class={doc_tab.class}
+                        phx-value-selector={doc_tab.selector}
+                      >
+                        → Erlang implementation
+                      </button>
+                    </div>
+                    <%!-- BT-2578: read-only native backing-source pane. On a
+                       class-definition tab for a native: class (ADR 0056) it
+                       badges the backing gen_server module and, on toggle, shows
+                       that module's `.erl` read-only — the real logic lives in
+                       its `handle_call` clauses, not the `self delegate` facade
+                       methods. The `browse-native-source` op is `:read`, so every
+                       role sees it. `content == nil` degrades to a clear empty
+                       state, not an error. --%>
+                    <section
+                      :if={doc_tab.kind == :def and doc_tab.native_module}
+                      class="native-block"
+                      aria-label="Native implementation"
+                    >
+                      <div class="native-head">
+                        <span class="native-badge">Erlang backend</span>
+                        <code class="native-module mono">{doc_tab.native_module}</code>
+                        <button
+                          type="button"
+                          class="native-toggle"
+                          phx-click="browser_open_native"
+                          phx-value-class={doc_tab.class}
+                          aria-expanded={to_string(native_shown?(assigns, doc_tab.class))}
+                        >
+                          {if native_shown?(assigns, doc_tab.class),
+                            do: "Hide Erlang source",
+                            else: "View Erlang source"}
+                        </button>
+                      </div>
+                      <div :if={native_shown?(assigns, doc_tab.class)} class="native-body">
+                        <div :if={@native_view.error} class="io-block err">{@native_view.error}</div>
+                        <%= if @native_view.content do %>
+                          <div class="native-meta mono">
+                            <span :if={@native_view.source_file}>{@native_view.source_file}</span>
+                            <span class="native-origin">
+                              {@native_view.source_origin}{if @native_view.editable,
+                                do: " · editable",
+                                else: " · read-only"}
+                            </span>
+                          </div>
+                          <ul :if={@native_view.clauses != []} class="native-clauses">
+                            <li
+                              :for={c <- @native_view.clauses}
+                              class={
+                              "mono" <>
+                                if(clause_active?(c, @native_view.selected_clause),
+                                  do: " native-clause-active",
+                                  else: ""
+                                )
+                            }
+                              aria-current={clause_active?(c, @native_view.selected_clause) && "true"}
+                            >
+                              {c["selector"]}<span class="muted-note"> · line {c["line"]}</span>
+                            </li>
+                          </ul>
+                          <%!-- A delegate the backend could not map to a `handle_call`
+                             clause (it replies from `handle_info` / a helper): say so
+                             rather than silently highlighting nothing. --%>
+                          <div
+                            :if={
+                              @native_view.requested_selector &&
+                                is_nil(@native_view.selected_clause)
+                            }
+                            class="muted-note"
+                          >
+                            No direct <code class="mono">handle_call</code>
+                            clause for <code class="mono">{@native_view.requested_selector}</code>
+                            — this delegate completes in <code class="mono">handle_info</code>
+                            or a helper.
+                          </div>
+                          <pre class="native-pre"><code>{@native_view.content}</code></pre>
+                        <% else %>
+                          <div :if={is_nil(@native_view.error)} class="muted-note">
+                            Erlang source not available — the backing module
+                            <code class="mono">{doc_tab.native_module}</code>
+                            shipped without source.
+                          </div>
+                        <% end %>
+                      </div>
                     </section>
                     <%= if @role == :owner do %>
                       <%!-- ⌘S submits this editor form via the KeyboardShortcuts

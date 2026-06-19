@@ -473,6 +473,64 @@
   background: none; padding: 0; font-size: 11.5px; white-space: pre;
 }
 
+/* ----------------------------------------------------------------------------
+   Native backing-source pane (BT-2578)
+   ----------------------------------------------------------------------------
+   On a class-definition tab for a `native:` class (ADR 0056), an "Erlang
+   backend" badge names the backing gen_server module; the toggle reveals that
+   module's `.erl` read-only. Mirrors `.doc-block`'s framed, muted treatment so
+   the read-only Erlang sits visually apart from the editable Beamtalk source. */
+.native-block {
+  flex: none; overflow: auto;
+  margin-bottom: 8px; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; line-height: 1.5; color: var(--muted);
+}
+.native-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.native-badge {
+  flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--accent-2);
+}
+.native-module { flex: 1 1 auto; min-width: 0; color: var(--ink); font-size: 11.5px; }
+.native-toggle {
+  flex: none; margin: 0; padding: 2px 8px; cursor: pointer;
+  background: none; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 4px; font-size: 11px;
+}
+.native-toggle:hover { color: var(--ink); border-color: var(--muted); }
+.native-body { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.native-meta {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 6px; font-size: 11px; color: var(--muted);
+}
+.native-meta .native-origin { flex: none; }
+.native-clauses { margin: 0 0 8px; padding-left: 16px; font-size: 11.5px; }
+.native-clauses li { margin: 2px 0; color: var(--ink); }
+/* The clause a method→clause jump landed on (BT-2578): a highlighted target so
+   the loose selector→handle_call mapping reads as a deliberate landing, not a
+   guess buried in the list. */
+.native-clauses li.native-clause-active {
+  color: var(--accent-2); font-weight: 600;
+  background: var(--code-bg); border-radius: 3px; padding: 1px 4px; margin-left: -4px;
+}
+/* The "Native delegate → Erlang implementation" affordance on a `self delegate`
+   method tab: a one-line muted strip mirroring the native pane's badge. */
+.native-delegate-link {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px; padding: 8px 10px;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; color: var(--muted);
+}
+.native-delegate-link .native-delegate-note { flex: 1 1 auto; min-width: 0; }
+.native-pre {
+  margin: 0; padding: 8px 10px; overflow-x: auto;
+  background: var(--code-bg); border-radius: 4px;
+}
+.native-pre code {
+  font-family: var(--code-font, monospace); font-size: 11.5px;
+  white-space: pre; color: var(--ink);
+}
+
 /* ============================================================================
    Workspace dock — tabbed Workspace / Transcript / Changes (BT-2490)
    ----------------------------------------------------------------------------

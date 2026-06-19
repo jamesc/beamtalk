@@ -10,8 +10,8 @@ Op handlers for the System Browser browse facade (ADR 0096, BT-2488).
 
 The LiveView IDE's System Browser (ADR 0017 Phase 3, epic BT-2482) renders the
 four-pane Smalltalk navigator — *classes → protocols → selectors → method
-source* plus a class-definition pane. These four read-only term-ops populate
-those panes against a live workspace, sourced **static-first / live-augmented**
+source* plus a class-definition pane. These read-only term-ops populate those
+panes against a live workspace, sourced **static-first / live-augmented**
 (ADR 0024) with image/disk divergence carried as explicit per-row metadata
 (never silently merged):
 
@@ -21,6 +21,7 @@ those panes against a live workspace, sourced **static-first / live-augmented**
 | `browse-protocols` | protocol + selector tree | `{value, ProtocolTree}` |
 | `browse-method-source` | method source pane | `{value, MethodSource}` |
 | `browse-class-definition` | class-definition pane | `{value, ClassDefinition}` |
+| `browse-native-source` | read-only native pane | `{value, NativeSource}` |
 
 ## Term contract (BT-2399)
 
@@ -34,11 +35,13 @@ only at the WebSocket edge. Validation failures return
 
 ## Read-only / no-user-code guarantee (ADR 0091 Observer gate)
 
-All four ops are **pure reflection**: class metadata (`get_doc`, `is_sealed`,
+All these ops are **pure reflection**: class metadata (`get_doc`, `is_sealed`,
 `is_abstract`, `is_internal`, `instance_variables`, `field_defaults`), xref rows
-(`beamtalk_xref:defined_selectors/2`, `method_info/3`), and stored method text
+(`beamtalk_xref:defined_selectors/2`, `method_info/3`), stored method text
 (`{method, Sel}` / `{class_method, Sel}` → `__source__` / `__doc__` /
-`__signature__`). None sends a
+`__signature__`), and — for `browse-native-source` — the facade's
+`__beamtalk_meta/0` plus the backing module's on-disk `.erl` (read only).
+None sends a
 user-defined method to a value (no `printOn:` / `displayString` / `printString`),
 so the browse data source is safe to grant the **Observer** role (ADR 0091
 Decision 4). This is asserted, not assumed (see the tests).
@@ -66,6 +69,12 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 
 -export([handle/4, handle_term/4, describe_ops/0, source_origin_of/2]).
 
+-ifdef(TEST).
+%% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
+%% delegate-source marker have no live-class dependency.
+-export([handle_call_clause_lines/1, clause_selector/1, delegate_exported/2]).
+-endif.
+
 -doc """
 Handle a browse op for the WebSocket transport — encodes the term result to
 JSON at the edge. Dist-attached clients call `handle_term/4` directly.
@@ -75,7 +84,7 @@ handle(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(handle_term(Op, Params, Msg, SessionPid), Msg).
 
 -doc """
-Term-returning handler for the four browse ops (ADR 0096). Returns
+Term-returning handler for the browse ops (ADR 0096). Returns
 `{value, JsonValue}` on success or `{error, #beamtalk_error{}}` on a validation
 failure (unknown class, bad side, missing selector).
 """.
@@ -103,9 +112,16 @@ handle_term(<<"browse-class-definition">>, Params, _Msg, _SessionPid) ->
             browse_class_definition(ClassName);
         {error, Reason} ->
             arg_error(<<"browse-class-definition">>, Reason)
+    end;
+handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
+    case validate_class(Params) of
+        {ok, ClassName} ->
+            browse_native_source(ClassName, optional_selector(Params));
+        {error, Reason} ->
+            arg_error(<<"browse-native-source">>, Reason)
     end.
 
--doc "Advertise the four browse ops in `describe`.".
+-doc "Advertise the browse ops in `describe`.".
 -spec describe_ops() -> map().
 describe_ops() ->
     #{
@@ -114,7 +130,10 @@ describe_ops() ->
         <<"browse-method-source">> => #{
             <<"params">> => [<<"class">>, <<"side">>, <<"selector">>]
         },
-        <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]}
+        <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]},
+        %% `selector` is optional: present → also resolve the matching
+        %% `handle_call` clause; absent → whole-module view (BT-2578).
+        <<"browse-native-source">> => #{<<"params">> => [<<"class">>]}
     }.
 
 %%% ====================================================================
@@ -276,6 +295,15 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 <<"side">> => side_to_binary(ClassSide),
                 <<"selector">> => atom_to_binary(Selector, utf8),
                 <<"source">> => Source,
+                %% BT-2578: true when this is a `self delegate` method (ADR 0056)
+                %% on a native-backed class — the real implementation lives in a
+                %% `handle_call` clause of the backing module, reachable via
+                %% `browse-native-source`. The signal is the compiler's own
+                %% `is_self_delegate` decision, made visible at runtime: the native
+                %% facade generates a `dispatch_<selector>` function ONLY for a
+                %% `self delegate` method (native_facade.rs), so its export is a
+                %% precise marker — no body-text heuristic.
+                <<"native_delegate">> => is_native_delegate(ModName, ClassSide, Selector),
                 %% BT-2558: the method's `///` doc-comment and rendered
                 %% signature, carried alongside the editable source so the
                 %% System Browser can present a read-only documentation block.
@@ -350,6 +378,11 @@ browse_class_definition(ClassName) ->
             SourceFile = source_file_of(ModName),
             State = state_slots(ClassPid),
             Definition = class_definition_text(ClassName, Super, State),
+            %% BT-2578: native-backed classes (ADR 0056) carry their backing
+            %% Erlang module name so the System Browser can badge them and offer
+            %% `browse-native-source`. Read from the facade module's
+            %% `__beamtalk_meta/0` (`native => true, backing_module => atom()`).
+            NativeMeta = native_meta_of(ModName),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
                 <<"superclass">> => atom_or_null(Super),
@@ -357,6 +390,8 @@ browse_class_definition(ClassName) ->
                 <<"definition">> => Definition,
                 <<"state">> => State,
                 <<"comment">> => class_doc(ClassPid),
+                <<"native">> => meta_is_native(NativeMeta),
+                <<"backing_module">> => atom_or_null(meta_backing_module(NativeMeta)),
                 <<"origin">> => origin_of(SourceFile),
                 <<"source_origin">> => source_origin_of(ModName, SourceFile),
                 %% The definition pane renders a *synthesized* class skeleton
@@ -436,6 +471,230 @@ class_definition_text(ClassName, Super, State) ->
 -spec default_suffix(binary() | null) -> iolist().
 default_suffix(null) -> [];
 default_suffix(Default) -> [<<" = ">>, Default].
+
+%%% ====================================================================
+%%% Op 5 — browse-native-source (BT-2578)
+%%% ====================================================================
+
+%% The backing Erlang source for a `native:` class (ADR 0056). A native class
+%% only has Beamtalk *delegating* methods (`=> self delegate`); the real logic is
+%% gen_server callbacks (`handle_call/3`, `handle_info/2`) in a SEPARATE module
+%% (e.g. `Subprocess` → `beamtalk_subprocess`). So the reliable unit is the whole
+%% backing module, with a best-effort `handle_call` clause line-map and, when a
+%% `selector` is given, the matching clause (the selector↔clause mapping is loose
+%% — e.g. `Subprocess>>readLine` replies from `handle_info`, not its `handle_call`
+%% clause). Read-only; `editable` reflects `source_origin` (project-owned native
+%% is editable in a future R/W phase, stdlib/dependency never).
+-spec browse_native_source(atom(), atom() | undefined) -> beamtalk_repl_ops:op_result().
+browse_native_source(ClassName, Selector) ->
+    case beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined ->
+            not_found_error(<<"browse-native-source">>, ClassName);
+        ClassPid ->
+            ModName = beamtalk_runtime_api:module_name(ClassPid),
+            NativeMeta = native_meta_of(ModName),
+            case meta_backing_module(NativeMeta) of
+                none ->
+                    arg_error(
+                        <<"browse-native-source">>,
+                        iolist_to_binary([
+                            <<"class `">>,
+                            atom_to_binary(ClassName, utf8),
+                            <<"` is not native-backed">>
+                        ])
+                    );
+                Backing when is_atom(Backing) ->
+                    native_source_value(ClassName, ModName, Backing, Selector)
+            end
+    end.
+
+-spec native_source_value(atom(), atom(), atom(), atom() | undefined) ->
+    beamtalk_repl_ops:op_result().
+native_source_value(ClassName, ModName, Backing, Selector) ->
+    {BackingFile, Content} = backing_source(Backing),
+    %% `source_origin` keys editability off where the .erl lives: stdlib and
+    %% dependency native are read-only; project-owned native is the seam where a
+    %% future R/W phase enables editing (BT-2578 out-of-scope follow-up). Also
+    %% require the source content to be present: a project class whose `.erl` was
+    %% stripped from the release (or is unreadable) has nothing to edit even
+    %% though its build-time path is known, so it must not advertise `editable`.
+    SourceOrigin = source_origin_of(ModName, BackingFile),
+    Clauses = handle_call_clause_lines(Content),
+    {value, #{
+        <<"class">> => atom_to_binary(ClassName, utf8),
+        <<"backing_module">> => atom_to_binary(Backing, utf8),
+        <<"source_file">> => BackingFile,
+        <<"source_origin">> => SourceOrigin,
+        <<"editable">> => SourceOrigin =:= <<"project">> andalso Content =/= null,
+        <<"content">> => Content,
+        <<"clauses">> => Clauses,
+        <<"selected_clause">> => selected_clause(Clauses, Selector)
+    }}.
+
+%% The backing module's on-disk `.erl` and its content. The source path comes
+%% from the module's own compile info (`module_info(compile)` → `source`), so a
+%% `.beam`-only release (no shipped source) degrades to `{null, null}` —
+%% "source not available" — rather than an error. A path that no longer exists
+%% (moved/release-stripped) returns its known path with `null` content.
+-spec backing_source(atom()) -> {binary() | null, binary() | null}.
+backing_source(Backing) ->
+    case backing_source_file(Backing) of
+        undefined ->
+            {null, null};
+        Path ->
+            %% `unicode:characters_to_binary/1` returns an `{error, _, _}` /
+            %% `{incomplete, _, _}` tuple (not a binary) for a malformed path, which
+            %% must not leak into the result map as `source_file`. Fall back to a
+            %% raw Latin-1 binary so the field is always a binary. Build-machine
+            %% paths are virtually always UTF-8, so the fallback is pathological-only.
+            PathBin =
+                case unicode:characters_to_binary(Path) of
+                    B when is_binary(B) -> B;
+                    _ -> list_to_binary(Path)
+                end,
+            case file:read_file(Path) of
+                {ok, Bin} -> {PathBin, Bin};
+                {error, _} -> {PathBin, null}
+            end
+    end.
+
+-spec backing_source_file(atom()) -> string() | undefined.
+backing_source_file(Backing) ->
+    try Backing:module_info(compile) of
+        Info when is_list(Info) ->
+            case lists:keyfind(source, 1, Info) of
+                {source, Path} when is_list(Path) -> Path;
+                _ -> undefined
+            end;
+        _ ->
+            undefined
+    catch
+        _:_ -> undefined
+    end.
+
+%% Best-effort `handle_call` clause line-map: each clause whose first message
+%% element is a concrete selector (a quoted atom like `'writeLine:'` or a bare
+%% lowercase atom like `readLine`) becomes `#{selector, line}`. Generic clauses
+%% — `handle_call({Selector, Args, _}, …)`, the catch-all `handle_call(Msg, …)`
+%% — bind variables (uppercase / `_`), match no selector, and are skipped.
+%% Matches single-line clause heads only; a head split across multiple lines is
+%% not captured (the selector and its trailing comma must appear on one line).
+-spec handle_call_clause_lines(binary() | null) -> [map()].
+handle_call_clause_lines(null) ->
+    [];
+handle_call_clause_lines(Content) when is_binary(Content) ->
+    Lines = binary:split(Content, <<"\n">>, [global]),
+    {Rows, _} = lists:foldl(
+        fun(Line, {Acc, N}) ->
+            case clause_selector(Line) of
+                {ok, Sel} -> {[#{<<"selector">> => Sel, <<"line">> => N} | Acc], N + 1};
+                none -> {Acc, N + 1}
+            end
+        end,
+        {[], 1},
+        Lines
+    ),
+    lists:reverse(Rows).
+
+%% A line's `handle_call` selector, or `none`. The first tuple element of the
+%% call message, captured whether written as a quoted atom (`'writeLine:'`) or a
+%% bare lowercase atom (`readLine`). The lowercase-initial requirement excludes
+%% the generic clauses that bind variables (`{Selector, Args, _}`, `Msg`). A
+%% single capture group avoids `re`'s truncation of trailing unmatched groups.
+-spec clause_selector(binary()) -> {ok, binary()} | none.
+clause_selector(Line) ->
+    %% Anchored to line start (after optional indentation): a `handle_call`
+    %% mention mid-line — inside a comment (`%% see handle_call({foo, …`) or an
+    %% assignment (`R = handle_call({…`) — is not a clause head and must not
+    %% produce a spurious clause row.
+    Pattern = <<"^\\s*handle_call\\(\\{\\s*'?([a-z][A-Za-z0-9_:]*)'?\\s*,">>,
+    case re:run(Line, Pattern, [{capture, all_but_first, binary}]) of
+        {match, [Sel]} when byte_size(Sel) > 0 -> {ok, Sel};
+        _ -> none
+    end.
+
+%% The clause row for a requested selector, or `null` (no selector asked, or no
+%% matching `handle_call` clause — a delegate whose work lives elsewhere).
+-spec selected_clause([map()], atom() | undefined) -> map() | null.
+selected_clause(_Clauses, undefined) ->
+    null;
+selected_clause(Clauses, Selector) ->
+    SelBin = atom_to_binary(Selector, utf8),
+    case lists:search(fun(#{<<"selector">> := S}) -> S =:= SelBin end, Clauses) of
+        {value, Row} -> Row;
+        false -> null
+    end.
+
+%% Native facade metadata (ADR 0056): the facade module exports
+%% `__beamtalk_meta/0` carrying `native => true` and `backing_module => atom()`.
+%% Non-native / non-Beamtalk modules don't export it → `#{}`.
+-spec native_meta_of(atom()) -> map().
+native_meta_of(ModName) when is_atom(ModName) ->
+    case erlang:function_exported(ModName, '__beamtalk_meta', 0) of
+        true ->
+            try ModName:'__beamtalk_meta'() of
+                Meta when is_map(Meta) -> Meta;
+                _ -> #{}
+            catch
+                _:_ -> #{}
+            end;
+        false ->
+            #{}
+    end.
+
+-spec meta_is_native(map()) -> boolean().
+meta_is_native(Meta) ->
+    maps:get(native, Meta, false) =:= true.
+
+-spec meta_backing_module(map()) -> atom() | none.
+meta_backing_module(Meta) ->
+    case maps:get(backing_module, Meta, none) of
+        M when is_atom(M), M =/= none, M =/= undefined -> M;
+        _ -> none
+    end.
+
+%% True when `Selector` (instance side) is a `self delegate` method on the native
+%% facade `ModName`. The compiler emits a `dispatch_<selector>` function ONLY for
+%% a `self delegate` method (native_facade.rs collects `is_self_delegate()` methods
+%% and generates one dispatch fun each), so the presence of that export is the
+%% compiler's own decision surfaced at runtime — not a body-text guess. Class-side
+%% selectors are never delegated this way, so they are always `false`.
+-spec is_native_delegate(atom(), boolean(), atom()) -> boolean().
+is_native_delegate(ModName, false, Selector) when is_atom(ModName) ->
+    Exports =
+        try
+            ModName:module_info(exports)
+        catch
+            _:_ -> []
+        end,
+    delegate_exported(Exports, Selector);
+is_native_delegate(_ModName, _ClassSide, _Selector) ->
+    false.
+
+%% Pure: does `Exports` contain a `dispatch_<Selector>` function (any arity)? The
+%% dispatch fun name embeds the selector verbatim, keyword colon included
+%% (`dispatch_readLine`, `'dispatch_writeLine:'`), so an exact name compare is
+%% exact — no arity arithmetic, no atom-table growth.
+-spec delegate_exported([{atom(), arity()}], atom()) -> boolean().
+delegate_exported(Exports, Selector) ->
+    Target = "dispatch_" ++ atom_to_list(Selector),
+    lists:any(fun({Name, _Arity}) -> atom_to_list(Name) =:= Target end, Exports).
+
+%% Optional `selector` param for `browse-native-source`: absent/empty → no clause
+%% selection; otherwise resolved to an existing atom (an unknown selector reads as
+%% a sentinel → no matching clause, never an atom-table growth).
+-spec optional_selector(map()) -> atom() | undefined.
+optional_selector(Params) ->
+    case maps:get(<<"selector">>, Params, undefined) of
+        Sel when is_binary(Sel), byte_size(Sel) > 0 ->
+            try
+                binary_to_existing_atom(Sel, utf8)
+            catch
+                error:badarg -> '__browse_unknown_selector__'
+            end;
+        _ ->
+            undefined
+    end.
 
 %%% ====================================================================
 %%% Divergence — origin / disk_differs
@@ -587,8 +846,16 @@ disk_read_fallback(Reason, Path, ClassName) ->
 disk_source(ClassName) ->
     NameBin = atom_to_binary(ClassName, utf8),
     case beamtalk_workspace_meta:get_class_source(NameBin) of
-        undefined -> undefined;
-        Src when is_list(Src) -> unicode:characters_to_binary(Src)
+        undefined ->
+            undefined;
+        Src when is_list(Src) ->
+            %% Guard the error/incomplete tuple the same way `backing_source/1`
+            %% does, so a malformed stored source never leaks a non-binary into
+            %% the disk_differs comparison.
+            case unicode:characters_to_binary(Src) of
+                B when is_binary(B) -> B;
+                _ -> list_to_binary(Src)
+            end
     end.
 
 %%% ====================================================================

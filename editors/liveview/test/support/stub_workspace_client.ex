@@ -148,7 +148,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Browse ops ───────────────────────────────────────────────────────────
 
   def browse_classes do
-    base = [%{"name" => "Counter", "source_file" => "src/counter.bt"}]
+    base = [
+      %{"name" => "Counter", "source_file" => "src/counter.bt"},
+      # BT-2578: a native: class in the tree so the System Browser's "Erlang
+      # backend" badge + native pane can be reached by real navigation.
+      %{"name" => "Subprocess", "source_file" => "src/subprocess.bt"}
+    ]
 
     extra =
       get(:defined_classes)
@@ -161,11 +166,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def browse_protocols(class, side) do
     selectors =
-      if side == "instance" and
-           (class == "Counter" or MapSet.member?(get(:defined_classes), class)) do
-        [%{"selector" => "value"}, %{"selector" => "increment"}]
-      else
-        []
+      cond do
+        side == "instance" and class == "Subprocess" ->
+          # BT-2578: `self delegate` facade methods on the native: class.
+          [%{"selector" => "readLine"}, %{"selector" => "writeLine:"}]
+
+        side == "instance" and
+            (class == "Counter" or MapSet.member?(get(:defined_classes), class)) ->
+          [%{"selector" => "value"}, %{"selector" => "increment"}]
+
+        true ->
+          []
       end
 
     {:value, %{"protocols" => [%{"name" => "all", "selectors" => selectors}]}}
@@ -204,7 +215,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        "signature" => signature,
        "source_status" => "indexed",
        "origin" => "both",
-       "disk_differs" => disk_differs
+       "disk_differs" => disk_differs,
+       # BT-2578: methods on the stubbed native: class are `self delegate` facades,
+       # so they carry the native_delegate flag the "→ Erlang implementation" jump
+       # keys off; ordinary classes' methods do not.
+       "native_delegate" => class == "Subprocess"
      }}
   end
 
@@ -214,10 +229,63 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        "class" => class,
        "definition" => "Object subclass: #{class}",
        "comment" => "The #{class} class.\n\n## Overview\nA stubbed class comment.",
+       # BT-2578: `Subprocess` / `Headless` stand in for native: classes (ADR
+       # 0056) so the System Browser's "Erlang backend" badge + native pane can be
+       # exercised (`Subprocess` has shipped source, `Headless` does not); every
+       # other stubbed class is ordinary (native: false).
+       "native" => class in ["Subprocess", "Headless"],
+       "backing_module" => native_backing(class),
        "origin" => "both",
        "disk_differs" => false
      }}
   end
+
+  defp native_backing("Subprocess"), do: "beamtalk_subprocess"
+  defp native_backing("Headless"), do: "beamtalk_headless"
+  defp native_backing(_), do: nil
+
+  # BT-2578: the backing Erlang source of a native: class. `Subprocess` returns a
+  # readable stdlib module + a `handle_call` clause map; `Headless` exercises the
+  # "source not available" empty state (a `.beam`-only build, `content: nil`).
+  def browse_native_source(class, selector \\ nil)
+
+  def browse_native_source("Subprocess", selector) do
+    {:value,
+     %{
+       "class" => "Subprocess",
+       "backing_module" => "beamtalk_subprocess",
+       "source_file" => "apps/beamtalk_stdlib/src/beamtalk_subprocess.erl",
+       "source_origin" => "stdlib",
+       "editable" => false,
+       "content" => "handle_call({readLine, []}, From, State) ->\n    {noreply, State}.\n",
+       "clauses" => [%{"selector" => "readLine", "line" => 1}],
+       # The real op returns the Erlang atom `null` for "no matching clause", which
+       # arrives over distribution as `:null` — NOT `nil`. The stub must mirror
+       # that so the LiveView's normalisation is actually exercised (BT-2578).
+       "selected_clause" =>
+         if(selector == "readLine", do: %{"selector" => "readLine", "line" => 1}, else: :null)
+     }}
+  end
+
+  def browse_native_source("Headless", _selector) do
+    # `.beam`-only build: the Erlang op returns the `null` atom for the absent
+    # source path / content / clause, delivered as `:null` over distribution —
+    # mirror it so the empty-state path is exercised on the real wire shape.
+    {:value,
+     %{
+       "class" => "Headless",
+       "backing_module" => "beamtalk_headless",
+       "source_file" => :null,
+       "source_origin" => "stdlib",
+       "editable" => false,
+       "content" => :null,
+       "clauses" => [],
+       "selected_clause" => :null
+     }}
+  end
+
+  def browse_native_source(class, _selector),
+    do: {:error, "class `#{class}` is not native-backed"}
 
   # ── Navigation ops ───────────────────────────────────────────────────────
 
