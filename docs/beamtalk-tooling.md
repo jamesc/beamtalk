@@ -833,16 +833,16 @@ just web <name>   # Start the LiveView IDE, connecting to workspace <name>
 
 **Current capabilities (Cockpit UI):**
 
-- **Tabbed IDE shell** — Cockpit layout with Workspace/Transcript/Changes dock, docked Inspector, method editor, and tweaks panel. CSS-variable theming (theme/accent/syntax-highlight/density/fonts)
+- **Tabbed IDE shell** — Cockpit layout with Workspace/Transcript/Changes dock, docked Inspector, method editor, and tweaks panel. CSS-variable theming (theme/accent/syntax-highlight/density/fonts). All panel dividers are draggable (vertical and horizontal) with min-size clamps and `localStorage` persistence
 - **Workspace pane** — expression evaluation (doIt/printIt/inspectIt) with display-formatted results, same surface-shared rules as CLI / REPL / MCP
 - **Transcript pane** — real-time captured output via `beamtalk_repl_subscriptions`
 - **Bindings pane** — live session bindings list, updated in real time via the bindings subscription stream; object-valued bindings offer an Inspect action
 - **Inspector pane** — navigable `Inspector` cursor view (ADR 0095) with breadcrumb drill navigation, type/pid chips, and drillable reference-following into nested objects. Live tracking mode: field-flash highlights changed fields on actor state writes, freeze/unfreeze toggle, pid stats chips (queue depth, memory, reductions, status), and poke (evaluate expressions against the inspected object). Inspector instances can be popped out into draggable overlay windows for side-by-side comparison
-- **System Browser pane** — hierarchy view (class tree), category view (grouped by package), protocol/selector panes (instance/class side) with layered protocol categorization, method source viewer, and class definition viewer
-- **Method Editor pane** — tabbed editor with compile/save (⌘S), dirty tracking, breadcrumb navigation, class definition view, and Senders/Implementors navigation popovers
+- **System Browser pane** — hierarchy view (class tree), category view (grouped by package), protocol/selector panes (instance/class side) with layered protocol categorization, method source viewer, class definition viewer, and read-only Erlang backend view for `native:` classes (jump from a `self delegate` facade to the backing `handle_call` clause). New Class form (collapsed-by-default) derives the target path `src/<ClassName>.bt` from the declared class name. Stdlib classes show synthesized definitions from reflection
+- **Method Editor pane** — tabbed editor with compile/save (⌘S), dirty tracking, breadcrumb navigation, class definition view, collapsible doc block (collapsed by default), Senders/Implementors navigation popovers, and "new method" entries for creating methods directly from the browser
 - **Omni search** — top-bar class + selector search with keyboard navigation, backed by the `nav-symbols` index
 - **Changes pane** — ChangeLog view of pending edits; Flush persists all changes to disk
-- **System Browser backend** — four browse ops (`browse-classes`, `browse-protocols`, `browse-method-source`, `browse-class-definition`) through `beamtalk_repl_ops` — pure reflection, Observer-grantable `:read` capability (ADR 0096)
+- **System Browser backend** — five browse ops (`browse-classes`, `browse-protocols`, `browse-method-source`, `browse-class-definition`, `browse-native-source`) through `beamtalk_repl_ops` — pure reflection, Observer-grantable `:read` capability (ADR 0096)
 - **Per-tab session isolation** — each browser tab gets its own workspace-supervised session via a per-tab `sessionStorage` token; bindings and loaded classes persist across evals
 - **Session resume** — reconnecting tabs (LiveView reconnect, page reload) resume their existing session within a grace window instead of starting fresh
 - **Hot-reload coherence** — a method saved in one tab is immediately visible to evals in all tabs (inherent to the shared workspace node in the Attach topology)
