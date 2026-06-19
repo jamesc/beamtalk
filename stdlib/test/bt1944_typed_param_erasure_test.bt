@@ -5,23 +5,24 @@
 // Adding `:: Integer | Nil` should NOT change runtime behavior.
 
 TestCase subclass: TypedParamErasureTest
+  field: actor = nil
+
+  setUp => self withActor: BT1944TypedParamActor spawn
+
+  tearDown => self.actor isNil ifFalse: [self.actor stop]
 
   testUntypedParamNil =>
-    actor := BT1944TypedParamActor spawn
-    actor doUntyped: nil
-    self assert: actor count equals: 1
+    self.actor doUntyped: nil
+    self assert: self.actor count equals: 1
 
   testTypedParamNil =>
-    actor := BT1944TypedParamActor spawn
-    actor doTyped: nil
-    self assert: actor count equals: 1
+    self.actor doTyped: nil
+    self assert: self.actor count equals: 1
 
   testTypedObjectParamNil =>
-    actor := BT1944TypedParamActor spawn
-    actor doTypedObject: nil
-    self assert: actor count equals: 1
+    self.actor doTypedObject: nil
+    self assert: self.actor count equals: 1
 
   testTypedParamInteger =>
-    actor := BT1944TypedParamActor spawn
-    actor doTyped: 42
-    self assert: actor count equals: 1
+    self.actor doTyped: 42
+    self assert: self.actor count equals: 1
