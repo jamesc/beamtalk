@@ -561,6 +561,14 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign_browser_classes()
       |> assign_bindings(pid)
       |> assign_changes()
+      # Git panel (BT-2586): the post-flush VCS surface. Loaded lazily the first
+      # time the Git tab is opened (and refreshed after flush/save), so a page
+      # load never shells out to git for users who never open the tab.
+      |> assign(:git_status, nil)
+      |> assign(:git_log, [])
+      |> assign(:git_error, nil)
+      |> assign(:git_diff, nil)
+      |> assign(:git_diff_path, nil)
       |> stream(:transcript, [])
       |> stream(:repl, [])
     else
@@ -748,12 +756,85 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, socket |> assign(dock_tab: "tests") |> ensure_test_classes()}
   end
 
+  # ADR 0082 Amendment 1 (BT-2586): opening the Git tab refreshes the panel from
+  # real git on the workspace project root (lazy first-open, like Tests).
+  def handle_event("dock_tab", %{"tab" => "git"}, socket) do
+    {:noreply, socket |> assign(dock_tab: "git") |> assign_git()}
+  end
+
   def handle_event("dock_tab", %{"tab" => tab}, socket)
       when tab in ~w(workspace repl transcript changes) do
     {:noreply, assign(socket, dock_tab: tab)}
   end
 
   def handle_event("dock_tab", _params, socket), do: {:noreply, socket}
+
+  # ── Git panel events (ADR 0082 Amendment 1, BT-2586) ─────────────────────────
+  # Read events (refresh, diff) are available to every role; the mutating events
+  # (stage/unstage/commit/revert) are gated by the Facade `:execute` capability
+  # *and* hidden in the template for the Observer role.
+
+  def handle_event("git_refresh", _params, socket) do
+    {:noreply, assign_git(socket)}
+  end
+
+  # Toggle the inline diff for one path: a second click on the same path closes it.
+  def handle_event("git_diff", %{"path" => path}, socket) when is_binary(path) do
+    if socket.assigns.git_diff_path == path do
+      {:noreply, assign(socket, git_diff_path: nil, git_diff: nil)}
+    else
+      case Facade.dispatch(:git_diff, %{path: path}, ctx(socket)) do
+        {:ok, diff} when is_map(diff) ->
+          {:noreply, assign(socket, git_diff_path: path, git_diff: diff, git_error: nil)}
+
+        {:error, reason} ->
+          {:noreply, assign(socket, git_error: facade_error(reason))}
+      end
+    end
+  end
+
+  def handle_event("git_stage", %{"path" => path}, socket) when is_binary(path) do
+    {:noreply, git_mutate_event(socket, :git_stage, %{path: path})}
+  end
+
+  def handle_event("git_unstage", %{"path" => path}, socket) when is_binary(path) do
+    {:noreply, git_mutate_event(socket, :git_unstage, %{path: path})}
+  end
+
+  def handle_event("git_revert", %{"path" => path}, socket) when is_binary(path) do
+    {:noreply, git_mutate_event(socket, :git_revert_file, %{path: path})}
+  end
+
+  def handle_event("git_commit", %{"message" => message}, socket) when is_binary(message) do
+    if String.trim(message) == "" do
+      {:noreply, assign(socket, git_error: "Enter a commit message.")}
+    else
+      {:noreply, git_mutate_event(socket, :git_commit, %{message: message})}
+    end
+  end
+
+  # Malformed git payloads (missing key / non-binary value): surface a git-panel
+  # validation error rather than letting a crafted WebSocket event crash the
+  # LiveView, consistent with the `new_class` / `revert` fallbacks above.
+  def handle_event("git_diff", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid diff request.")}
+  end
+
+  def handle_event("git_stage", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid stage request.")}
+  end
+
+  def handle_event("git_unstage", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid unstage request.")}
+  end
+
+  def handle_event("git_revert", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid revert request.")}
+  end
+
+  def handle_event("git_commit", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid commit request.")}
+  end
 
   # ── Test-runner pane (BT-2557) ───────────────────────────────────────────────
   #
@@ -1795,6 +1876,30 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp facade_error(:forbidden_op), do: "Operation not permitted."
   defp facade_error(reason), do: Workspace.render_error(reason)
 
+  # Run a mutating git op through the Facade (Owner-gated) and refresh the panel
+  # so the new status/log is reflected. An :unauthorized/error result surfaces in
+  # the panel rather than crashing it.
+  defp git_mutate_event(socket, op, params) do
+    case Facade.dispatch(op, params, ctx(socket)) do
+      {:ok, _} -> assign_git(socket)
+      {:error, reason} -> assign(socket, git_error: facade_error(reason))
+    end
+  end
+
+  # Human label for a porcelain status atom (BT-2586). `beamtalk_git` classifies
+  # each XY column into one of these; "—" marks the no-change column.
+  defp git_state_label(:unmodified), do: "—"
+  defp git_state_label(:modified), do: "modified"
+  defp git_state_label(:added), do: "added"
+  defp git_state_label(:deleted), do: "deleted"
+  defp git_state_label(:renamed), do: "renamed"
+  defp git_state_label(:copied), do: "copied"
+  defp git_state_label(:untracked), do: "untracked"
+  defp git_state_label(:ignored), do: "ignored"
+  defp git_state_label(:unmerged), do: "unmerged"
+  defp git_state_label(:type_changed), do: "type-changed"
+  defp git_state_label(other), do: to_string(other)
+
   # The Senders/Implementors popover heading for a nav kind (BT-2495).
   defp nav_kind_label(:senders), do: "Senders"
   defp nav_kind_label(:implementors), do: "Implementors"
@@ -2408,6 +2513,11 @@ defmodule BtAttachWeb.WorkspaceLive do
         )
         |> compile_clean(tab.id, source)
         |> assign_changes()
+        # BT-2586: refresh the git panel when it is open so an on-disk save is
+        # reflected immediately (the pre→post-flush handoff). When a save only
+        # patches the in-memory image (autoflush off, BT-2293), the refresh is a
+        # harmless no-op — git status is unchanged. See BT-2590.
+        |> maybe_refresh_git()
 
       {:error, reason, _output, _warnings} ->
         assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
@@ -2458,6 +2568,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           new_class_open: false
         )
         |> assign_changes()
+        # BT-2586: a new class writes a new `.bt` file to disk; reflect it in the
+        # git panel when it is open.
+        |> maybe_refresh_git()
 
       {:error, reason} ->
         status_error(socket, facade_error(reason))
@@ -2537,10 +2650,21 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> assign(flush_result: Workspace.format_flush_summary(summary), flush_error: nil)
         |> assign_changes()
         |> clear_flushed_badges(was_pending)
+        # BT-2586: a flush writes pending edits to disk, so the post-flush git
+        # panel must reflect them immediately (the pre→post-flush handoff).
+        |> maybe_refresh_git()
 
       {:error, reason} ->
         assign(socket, flush_result: nil, flush_error: facade_error(reason))
     end
+  end
+
+  # Refresh the git panel only when it is the active dock tab. A save/flush that
+  # happens while the user is on another tab leaves git untouched (it reloads
+  # lazily on next open), so the common edit loop never pays for an extra git
+  # shell-out it can't see.
+  defp maybe_refresh_git(socket) do
+    if socket.assigns.dock_tab == "git", do: assign_git(socket), else: socket
   end
 
   @doc false
@@ -2613,6 +2737,40 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       {:error, reason} ->
         assign(socket, changes: [], changes_error: Workspace.render_error(reason))
+    end
+  end
+
+  # ── Git panel data source (ADR 0082 Amendment 1, BT-2586) ────────────────────
+
+  # Load the post-flush git surface: working-tree status + recent log from real
+  # git on the workspace project root. A workspace that is unreachable, not a git
+  # repo, or missing `git` renders an error rather than crashing the pane — the
+  # graceful-degradation requirement. We clear any stale per-file diff on refresh.
+  defp assign_git(socket) do
+    socket
+    |> assign(git_diff_path: nil, git_diff: nil)
+    |> assign_git_status()
+    |> assign_git_log()
+  end
+
+  defp assign_git_status(socket) do
+    case Facade.dispatch(:git_status, %{}, ctx(socket)) do
+      {:ok, status} when is_map(status) ->
+        assign(socket, git_status: status, git_error: nil)
+
+      {:error, reason} ->
+        assign(socket, git_status: nil, git_error: facade_error(reason))
+    end
+  end
+
+  defp assign_git_log(socket) do
+    case Facade.dispatch(:git_log, %{count: 20}, ctx(socket)) do
+      {:ok, commits} when is_list(commits) ->
+        assign(socket, git_log: commits)
+
+      {:error, _reason} ->
+        # The status pane already surfaces the degraded state; keep the log empty.
+        assign(socket, git_log: [])
     end
   end
 
@@ -5511,6 +5669,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                             {"repl", "REPL"},
                             {"transcript", "Transcript"},
                             {"changes", "Changes"},
+                            {"git", "Git"},
                             {"tests", "Tests"}
                           ]
                         }
@@ -5802,6 +5961,146 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </tbody>
                       </table>
                     <% end %>
+                  </div>
+                  <%!-- GIT tab (ADR 0082 Amendment 1, BT-2586): the post-flush,
+                       human-facing VCS surface — disk↔HEAD, distinct from the
+                       Changes pane's memory↔disk dirty view. status/diff/log are
+                       :read (Observer-visible); stage/unstage/commit/revert are
+                       :execute (Owner-gated) and the controls are hidden for the
+                       Observer role. Degrades to an error note when the project
+                       is not a git repo or `git` is absent. --%>
+                  <div class="dock-pane panel-body git-pane" hidden={@dock_tab != "git"}>
+                    <div class="git-toolbar">
+                      <button class="btn-link" type="button" phx-click="git_refresh">
+                        refresh
+                      </button>
+                      <span :if={@git_status} class="muted-note">
+                        <%= if @git_status.branch do %>
+                          on <span class="k">{@git_status.branch}</span>
+                        <% else %>
+                          detached HEAD
+                        <% end %>
+                        <span :if={@git_status.upstream}>
+                          · ↑{@git_status.ahead} ↓{@git_status.behind}
+                        </span>
+                      </span>
+                    </div>
+                    <div :if={@git_error} class="io-block err">{@git_error}</div>
+                    <%= cond do %>
+                      <% is_nil(@git_status) and is_nil(@git_error) -> %>
+                        <p class="muted-note">Loading git status…</p>
+                      <% is_nil(@git_status) -> %>
+                        <%!-- error already shown above --%>
+                      <% @git_status.files == [] -> %>
+                        <p class="muted-note">Working tree clean — nothing to commit.</p>
+                      <% true -> %>
+                        <table class="bt-table">
+                          <thead>
+                            <tr>
+                              <th>Path</th>
+                              <th>Staged</th>
+                              <th>Working</th>
+                              <th></th>
+                              <th :if={@role == :owner}></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr :for={f <- @git_status.files}>
+                              <td class="k">{f.path}</td>
+                              <td>{git_state_label(f.index)}</td>
+                              <td>{git_state_label(f.worktree)}</td>
+                              <td>
+                                <button
+                                  class="btn-link"
+                                  type="button"
+                                  phx-click="git_diff"
+                                  phx-value-path={f.path}
+                                >
+                                  {if @git_diff_path == f.path, do: "hide diff", else: "diff"}
+                                </button>
+                              </td>
+                              <td :if={@role == :owner}>
+                                <%!-- Staged files unstage; everything else stages.
+                                     Tracked changes can also be reverted (discard
+                                     working-tree edits) — the human counterpart to
+                                     the agent ChangeLog `revert:`. --%>
+                                <button
+                                  :if={f.index == :unmodified}
+                                  class="btn-link"
+                                  type="button"
+                                  phx-click="git_stage"
+                                  phx-value-path={f.path}
+                                  phx-disable-with="Staging…"
+                                >
+                                  stage
+                                </button>
+                                <button
+                                  :if={f.index != :unmodified}
+                                  class="btn-link"
+                                  type="button"
+                                  phx-click="git_unstage"
+                                  phx-value-path={f.path}
+                                  phx-disable-with="Unstaging…"
+                                >
+                                  unstage
+                                </button>
+                                <button
+                                  :if={f.worktree not in [:unmodified, :untracked]}
+                                  class="btn-link"
+                                  type="button"
+                                  phx-click="git_revert"
+                                  phx-value-path={f.path}
+                                  data-confirm={"Discard working-tree changes to #{f.path}?"}
+                                  phx-disable-with="Reverting…"
+                                >
+                                  revert
+                                </button>
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                        <div :if={@git_diff} class="git-diff-view">
+                          <p class="muted-note">{@git_diff_path}</p>
+                          <div :if={@git_diff.staged != ""}>
+                            <p class="muted-note">staged</p>
+                            <pre class="bt-diff">{@git_diff.staged}</pre>
+                          </div>
+                          <div :if={@git_diff.worktree != ""}>
+                            <p class="muted-note">working tree</p>
+                            <pre class="bt-diff">{@git_diff.worktree}</pre>
+                          </div>
+                          <p
+                            :if={@git_diff.staged == "" and @git_diff.worktree == ""}
+                            class="muted-note"
+                          >
+                            No textual diff (binary or mode-only change).
+                          </p>
+                        </div>
+                        <%!-- Commit the staged index (Owner only). System `git`
+                             applies hooks/signing/config. --%>
+                        <form :if={@role == :owner} class="git-commit-form" phx-submit="git_commit">
+                          <input
+                            type="text"
+                            name="message"
+                            placeholder="Commit message"
+                            autocomplete="off"
+                          />
+                          <button type="submit" phx-disable-with="Committing…">commit</button>
+                        </form>
+                    <% end %>
+                    <%!-- Recent history (last commits). Read-only, always shown. --%>
+                    <div :if={@git_log != []} class="git-log">
+                      <h4 class="muted-note">Recent commits</h4>
+                      <table class="bt-table">
+                        <tbody>
+                          <tr :for={c <- @git_log}>
+                            <td class="k">{c.short_sha}</td>
+                            <td>{c.subject}</td>
+                            <td class="muted-note">{c.author}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                   <%!-- TESTS tab (BT-2557): the cockpit Test Runner. Discovery
                        (`list_tests`, :read) lists the live image's TestCase

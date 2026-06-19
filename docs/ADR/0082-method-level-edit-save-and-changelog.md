@@ -669,6 +669,20 @@ audiences into one model; the surface split keeps both without compromise.
   surface — the Iceberg-equivalent, but thin: `.bt` files are already git's
   working tree, so it is a shell-out to git + a LiveView view, no Tonel /
   projection layer. Promoted to the cockpit's primary human VCS affordance.
+  Implementation is **shell-out to the system `git` binary, parsed into typed
+  Erlang terms at the seam** — *not* a libgit2 NIF (egit/geef). The "I want
+  data structures, not text" goal is met by parsing porcelain (`status
+  --porcelain=v2 -z`, `log --format=...`) into maps inside the wrapper, which
+  is independent of the process model. A NIF is rejected because: (1) it would
+  be the runtime's only native dependency and a libgit2/NIF crash takes down
+  the whole BEAM node, against the BEAM fault-isolation thesis; (2) it adds a
+  cross-platform native build/link cost to every release and Docker image;
+  (3) this is the human commit surface, where system-`git` fidelity — hooks,
+  GPG signing, credential helpers, full `git config` — is the point, and
+  libgit2 silently skips or reimplements all of it (the very friction Iceberg
+  is known for, which our file-native model lets us avoid). Shell-out also
+  reuses the existing subprocess pattern (ADR 0051, `beamtalk_erlang_proxy`)
+  and keeps the op on the node that holds the `.bt` working tree.
 - Surface parity is preserved: the *operations* remain identical across
   surfaces; only the *default* (autoflush) and the *primary affordance*
   (git panel for humans vs ChangeLog for agents) differ by surface — analogous

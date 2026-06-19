@@ -1172,6 +1172,83 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  @doc """
+  Working-tree git status for the workspace project root (ADR 0082, BT-2586).
+
+  The cockpit's post-flush, human-facing VCS surface. Delegates to the
+  workspace-node `beamtalk_git` module (a shell-out to system `git` parsed into
+  typed Erlang maps), so it runs where the `.bt` working tree lives. Returns
+  `{:ok, status_map}` where `status_map` has `:branch`, `:upstream`, `:ahead`,
+  `:behind` and `:files` (each `%{path:, index:, worktree:}`), or `{:error,
+  reason}` when the workspace is unreachable, the project is not a git repo, or
+  `git` is absent.
+  """
+  def git_status do
+    case rpc(:beamtalk_git, :git_status, []) do
+      {:ok, status} when is_map(status) -> {:ok, status}
+      {:error, reason} -> {:error, structure_error(reason)}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  Unified diff for a single path: working-tree-vs-HEAD and staged-vs-HEAD.
+
+  Returns `{:ok, %{worktree: binary, staged: binary}}` (diff text passed through
+  verbatim), or `{:error, reason}`.
+  """
+  def git_diff(path) when is_binary(path) do
+    case rpc(:beamtalk_git, :git_diff, [path]) do
+      {:ok, diff} when is_map(diff) -> {:ok, diff}
+      {:error, reason} -> {:error, structure_error(reason)}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc """
+  The most recent `count` commits as `{:ok, [%{sha:, short_sha:, subject:,
+  author:, ts:}]}`, or `{:error, reason}`.
+  """
+  def git_log(count) when is_integer(count) and count > 0 do
+    case rpc(:beamtalk_git, :git_log, [count]) do
+      {:ok, commits} when is_list(commits) -> {:ok, commits}
+      {:error, reason} -> {:error, structure_error(reason)}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  @doc "Stage a single path (`git add`). Returns `{:ok, nil}` or `{:error, reason}`."
+  def git_stage(path) when is_binary(path), do: git_mutate(:git_stage, [path])
+
+  @doc "Unstage a single path (`git restore --staged`). Returns `{:ok, nil}` or `{:error, reason}`."
+  def git_unstage(path) when is_binary(path), do: git_mutate(:git_unstage, [path])
+
+  @doc """
+  Commit the staged index with `message` (`git commit -m`). Invokes system `git`
+  so hooks/signing/config apply. Returns `{:ok, nil}` or `{:error, reason}`.
+  """
+  def git_commit(message) when is_binary(message), do: git_mutate(:git_commit, [message])
+
+  @doc """
+  Discard a working-tree change for a single path (`git checkout --`) — the
+  human counterpart to the agent ChangeLog `revert:`. Returns `{:ok, nil}` or
+  `{:error, reason}`.
+  """
+  def git_revert_file(path) when is_binary(path), do: git_mutate(:git_revert_file, [path])
+
+  # Shared transport for the mutating git ops, all of which return {ok, nil}.
+  defp git_mutate(fun, args) do
+    case rpc(:beamtalk_git, fun, args) do
+      {:ok, _} -> {:ok, nil}
+      {:error, reason} -> {:error, structure_error(reason)}
+      {:badrpc, reason} -> {:error, {:unreachable, reason}}
+      other -> {:error, {:unexpected_reply, other}}
+    end
+  end
+
   @doc false
   # Pure: reduce the raw change-entry value maps to the pending view and render
   # display rows newest-first. The pending view is active AND not shadowed, so
