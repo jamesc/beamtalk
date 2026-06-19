@@ -329,34 +329,46 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     # state — the error banner, the posted form fields, and the hook-mirrored
     # source — so a CI failure pinpoints the cause instead of a bare
     # "element not found". (Passing runs resolve the instant the banner appears.)
+    # ISOLATION PROBE (BT-2579): the diagnostic run proved save_method never ran
+    # (neither ok nor err banner) even though the form fields were all correct, so
+    # the break is in chord -> hook -> requestSubmit -> phx-submit. Split it: poll
+    # for the banner after the chord; if absent, call the form's requestSubmit()
+    # DIRECTLY and poll again. `via` tells us which path saved — "chord" (key path
+    # fine), "requestSubmit" (submit/save fine, so the keydown never reached the
+    # window hook), or "none" (the form's phx-submit -> save_method itself is the
+    # break).
     |> evaluate(
       """
       new Promise((resolve) => {
-        const start = Date.now();
-        const grab = (sel) => { const el = document.querySelector(sel); return el ? el.value : null; };
-        const tick = () => {
-          const me = document.querySelector("#method-editor");
-          const ok = me && me.querySelector(".io-block.ok");
-          if (ok && ok.textContent.includes("Saved ksBump on KsCounter")) return resolve({saved: true});
-          if (Date.now() - start > 10000) {
-            const err = me && me.querySelector(".io-block.err");
-            return resolve({
-              saved: false,
-              ok: ok ? ok.textContent.trim() : null,
-              err: err ? err.textContent.trim() : null,
-              form: !!document.querySelector("#method-editor-form"),
-              class: grab("#method-editor-form input[name=class]"),
-              selector: grab("#method-editor-form [name=selector]"),
-              source: grab("[id^='method-editor-source-']")
-            });
-          }
-          requestAnimationFrame(tick);
+        const okText = () => {
+          const ok = document.querySelector("#method-editor .io-block.ok");
+          return ok && ok.textContent.includes("Saved ksBump on KsCounter");
         };
-        tick();
+        const errText = () => {
+          const e = document.querySelector("#method-editor .io-block.err");
+          return e ? e.textContent.trim() : null;
+        };
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        (async () => {
+          for (let i = 0; i < 20 && !okText(); i++) await wait(250);
+          if (okText()) return resolve({saved: true, via: "chord"});
+          const errAfterChord = errText();
+          const f = document.querySelector("#method-editor-form");
+          const hadForm = !!f;
+          if (f) f.requestSubmit();
+          for (let i = 0; i < 20 && !okText(); i++) await wait(250);
+          resolve({
+            saved: okText(),
+            via: okText() ? "requestSubmit" : "none",
+            hadForm: hadForm,
+            errAfterChord: errAfterChord,
+            errAfterSubmit: errText()
+          });
+        })();
       })
       """,
       fn r ->
-        assert r["saved"], "⌘S did not produce the Saved banner; editor state=#{inspect(r)}"
+        assert r["saved"], "⌘S save isolation probe; result=#{inspect(r)}"
       end
     )
   end
