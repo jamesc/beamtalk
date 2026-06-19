@@ -324,10 +324,41 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> press_save()
     # The save is a server round-trip (WorkspaceLive compiles `KsCounter >>
     # ksBump` before assigning `save_result`); under parallel CI load that can
-    # outlast the 2s default assertion poll. Wait on the banner explicitly with a
-    # generous window (BT-2529) — the assertion returns the instant the text
-    # appears, so passing runs are not slowed.
-    |> assert_has("#method-editor", text: "Saved ksBump on KsCounter", timeout: 10_000)
+    # outlast the 2s default assertion poll. Poll for the success banner with a
+    # generous window (BT-2529) and, on timeout, surface the editor's ACTUAL
+    # state — the error banner, the posted form fields, and the hook-mirrored
+    # source — so a CI failure pinpoints the cause instead of a bare
+    # "element not found". (Passing runs resolve the instant the banner appears.)
+    |> evaluate(
+      """
+      new Promise((resolve) => {
+        const start = Date.now();
+        const grab = (sel) => { const el = document.querySelector(sel); return el ? el.value : null; };
+        const tick = () => {
+          const me = document.querySelector("#method-editor");
+          const ok = me && me.querySelector(".io-block.ok");
+          if (ok && ok.textContent.includes("Saved ksBump on KsCounter")) return resolve({saved: true});
+          if (Date.now() - start > 10000) {
+            const err = me && me.querySelector(".io-block.err");
+            return resolve({
+              saved: false,
+              ok: ok ? ok.textContent.trim() : null,
+              err: err ? err.textContent.trim() : null,
+              form: !!document.querySelector("#method-editor-form"),
+              class: grab("#method-editor-form input[name=class]"),
+              selector: grab("#method-editor-form [name=selector]"),
+              source: grab("[id^='method-editor-source-']")
+            });
+          }
+          requestAnimationFrame(tick);
+        };
+        tick();
+      })
+      """,
+      fn r ->
+        assert r["saved"], "⌘S did not produce the Saved banner; editor state=#{inspect(r)}"
+      end
+    )
   end
 
   test "the TweaksPanel hook reskins the IDE client-side and persists it (BT-2487)", %{conn: conn} do
