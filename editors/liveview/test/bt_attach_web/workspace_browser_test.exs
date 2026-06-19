@@ -287,16 +287,26 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has("#inspector-panel .ivar-table", text: "item")
   end
 
-  # QUARANTINED (BT-2579): this test drove ⌘S through the *starter tab* that the
-  # cockpit used to open on mount. With the starter tab removed (this PR), the
-  # rewrite must first open a method tab, but no blind rewrite has reliably made
-  # the editor ⌘S keydown reach the form's KeyboardShortcuts hook in CI — opening
-  # via the System Browser hits the browse-classes remount snapshot race (the
-  # freshly-eval'd class isn't in the tree within the wait window), and opening via
-  # omni search leaves focus where ⌘S doesn't fire the save. The ⌘S hook itself is
-  # unchanged by this PR; re-stabilising this browser-driven setup needs a local
-  # Playwright run (tracked in BT-2579). Skipped to unblock merge rather than land
-  # a flaky gate.
+  # QUARANTINED (@tag :skip) — re-enable is blocked on BT-2588.
+  #
+  # PR #2653 rebuilt this test's setup for the post-#2637 cockpit (no starter
+  # tab): it opens `KsCounter >> ksBump` via omni search (avoiding the System
+  # Browser browse-classes snapshot race), edits the body, fires ⌘S, and asserts
+  # the "Saved …" banner. The setup is left intact so that removing `@tag :skip`
+  # re-enables a working test once BT-2588 lands.
+  #
+  # It stays skipped because CI diagnostic probes proved the ⌘S *keyboard* path
+  # does not reach the save in this environment, while the save itself is fine:
+  #   * Calling `#method-editor-form.requestSubmit()` directly produces the
+  #     banner (e2e green).
+  #   * BOTH a synthetic `window.dispatchEvent` keydown AND a trusted
+  #     `press(".cm-content", "ControlOrMeta+s")` fail to fire `save_method` (no
+  #     ok OR err banner) despite correct class/selector/source form fields.
+  # Since a plain `window.addEventListener("keydown")` fires for any dispatched
+  # event, even the direct window dispatch not saving means the form's
+  # `data-scope="window"` KeyboardShortcuts listener is not receiving the keydown
+  # — likely an app-side issue (possibly affecting real users), tracked in
+  # BT-2588. The sibling ⌘P test passes via an element-level press inside its form.
   @tag :skip
   test "the KeyboardShortcuts hook compiles a method on ⌘/Ctrl+S (BT-2485)", %{conn: conn} do
     conn
@@ -304,12 +314,9 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has("#workspace-editor-overlay .cm-content")
     # Define a class with a method and open its tab via the omni search — the live
     # nav-symbols index sees it without a browser remount (avoiding the
-    # browse-classes-snapshot race). Then CLICK the opened tab: omni's Enter leaves
-    # keyboard focus in the omni input, whose hook stops keydown propagation, so ⌘S
-    # would never reach the form's window-scoped KeyboardShortcuts hook; clicking
-    # the tab moves focus back into the editor (the original starter-tab test did
-    # the same tab-click before ⌘S). The tab carries its selector as a hidden field,
-    # so ⌘S re-compiles `KsCounter >> ksBump` with the edited body.
+    # browse-classes-snapshot race). The opened tab carries its class/selector as
+    # hidden form fields, so ⌘S re-compiles `KsCounter >> ksBump` with the edited
+    # body.
     |> eval_do(
       "Actor subclass: KsCounter\n  state: value = 0\n\n  ksBump => self.value := self.value + 1"
     )
@@ -317,17 +324,19 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     |> assert_has(".omni-results .omni-row", text: "ksBump")
     |> omni_key("Enter")
     |> assert_has("#method-editor .tabstrip", text: "ksBump")
-    |> click(".tabstrip button[role='tab']")
     |> set_method_source("ksBump => self.value := self.value + 2")
     # ⌘S / Ctrl+S is bound on the method-editor form (data-scope="window",
-    # data-shortcuts "mod+s" → submit): the keydown bubbles out of CodeMirror to
-    # the form's KeyboardShortcuts hook, which request-submits the form so
-    # class/selector/source ride the normal save_method — no button click.
-    |> press("[id^='method-editor-overlay-'] .cm-content", "Control+s")
+    # data-shortcuts "mod+s" → submit): the window-scoped KeyboardShortcuts hook
+    # request-submits the form so class/selector/source ride the normal
+    # save_method — no button click. `press_save/1` sends a trusted ⌘/Ctrl+S that
+    # bubbles to `window` after focusing the editor. (Currently a no-op in CI —
+    # the window listener isn't receiving the keydown; see BT-2588 — which is why
+    # this test is @tag :skip.)
+    |> press_save()
     # The save is a server round-trip (WorkspaceLive compiles `KsCounter >>
     # ksBump` before assigning `save_result`); under parallel CI load that can
-    # outlast the 2s default assertion poll. Wait on the banner explicitly with a
-    # generous window (BT-2529) — the assertion returns the instant the text
+    # outlast the 2s default assertion poll, so wait on the banner explicitly with
+    # a generous window (BT-2529) — the assertion returns the instant the text
     # appears, so passing runs are not slowed.
     |> assert_has("#method-editor", text: "Saved ksBump on KsCounter", timeout: 10_000)
   end
@@ -1033,6 +1042,23 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
       el.dispatchEvent(new KeyboardEvent("keyup", opts));
     })()
     """)
+    |> evaluate("new Promise((resolve) => setTimeout(resolve, 200))")
+  end
+
+  # Fire a REAL (trusted) ⌘S / Ctrl+S the way a user would. `press/3` focuses the
+  # target first, then dispatches a trusted keydown through Playwright's keyboard
+  # — handled identically to a user keypress (unlike a synthetic `dispatchEvent`,
+  # whose `isTrusted: false` event did not drive the save through to the banner in
+  # CI). We focus the method editor's CodeMirror content so focus is deterministic
+  # regardless of where omni's Enter left it; the trusted keydown then bubbles to
+  # `window`, where `#method-editor-form`'s `data-scope="window"` KeyboardShortcuts
+  # hook listens (`mod+s` -> request-submit, so class/selector/source ride the
+  # normal save_method). `ControlOrMeta` is Ctrl on Linux/CI and Cmd on macOS —
+  # both satisfy the hook's `isMod`; Ctrl+S is not a CodeMirror binding, so the
+  # chord propagates rather than editing the doc.
+  defp press_save(conn) do
+    conn
+    |> press("[id^='method-editor-overlay-'] .cm-content", "ControlOrMeta+s")
     |> evaluate("new Promise((resolve) => setTimeout(resolve, 200))")
   end
 
