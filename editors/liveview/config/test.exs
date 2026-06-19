@@ -23,6 +23,14 @@ config :phoenix_test,
   playwright: [
     browser: :chromium,
     headless: System.get_env("PLAYWRIGHT_HEADLESS", "true") != "false",
+    # Per-action/navigation timeout. The 2s default (phoenix_test_playwright
+    # 0.14.0 Config schema `timeout: to_timeout(second: 2)`) is too tight for
+    # the first `visit("/")`: the cockpit's interesting UI is behind the
+    # connected render, and on a loaded CI runner connect+first-paint can
+    # exceed 2s, surfacing as `Timeout 2000ms exceeded` (BT-2571). The driver
+    # reads this via `Config.global(:timeout)` and threads it through every
+    # action/navigation (e.g. `visit` -> `Frame.goto`).
+    timeout: 10_000,
     # The 4s default is too tight for a cold Chromium spawn on slower dev
     # machines (e.g. WSL2); CI launches well under either value. The pool must
     # be declared explicitly: the global key only merges into browser_pools
