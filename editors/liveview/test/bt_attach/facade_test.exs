@@ -361,6 +361,7 @@ defmodule BtAttach.FacadeTest do
 
       # Mutating ops are denied, with no dist call.
       assert Facade.dispatch(:git_stage, %{path: "a.bt"}, observer) == {:error, :unauthorized}
+      assert Facade.dispatch(:git_unstage, %{path: "a.bt"}, observer) == {:error, :unauthorized}
       assert Facade.dispatch(:git_commit, %{message: "wip"}, observer) == {:error, :unauthorized}
 
       assert Facade.dispatch(:git_revert_file, %{path: "a.bt"}, observer) ==
@@ -368,7 +369,7 @@ defmodule BtAttach.FacadeTest do
 
       refute Enum.any?(
                RecordingClient.calls(),
-               &(elem(&1, 0) in [:git_stage, :git_commit, :git_revert_file])
+               &(elem(&1, 0) in [:git_stage, :git_unstage, :git_commit, :git_revert_file])
              )
     end
   end

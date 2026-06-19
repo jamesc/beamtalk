@@ -211,9 +211,9 @@ log_single_commit_test() ->
     Bin = log_record(
         <<"abc123def456">>,
         <<"abc123d">>,
-        <<"feat: add git panel">>,
         <<"Jane Dev">>,
-        <<"2026-06-19T10:00:00+00:00">>
+        <<"2026-06-19T10:00:00+00:00">>,
+        <<"feat: add git panel">>
     ),
     [Commit] = beamtalk_git:parse_log(Bin),
     ?assertEqual(<<"abc123def456">>, maps:get(sha, Commit)),
@@ -224,8 +224,8 @@ log_single_commit_test() ->
 
 log_multiple_commits_in_order_test() ->
     Bin = <<
-        (log_record(<<"sha1">>, <<"s1">>, <<"first">>, <<"A">>, <<"t1">>))/binary,
-        (log_record(<<"sha2">>, <<"s2">>, <<"second">>, <<"B">>, <<"t2">>))/binary
+        (log_record(<<"sha1">>, <<"s1">>, <<"A">>, <<"t1">>, <<"first">>))/binary,
+        (log_record(<<"sha2">>, <<"s2">>, <<"B">>, <<"t2">>, <<"second">>))/binary
     >>,
     Commits = beamtalk_git:parse_log(Bin),
     ?assertEqual(2, length(Commits)),
@@ -235,7 +235,7 @@ log_multiple_commits_in_order_test() ->
 %% intact because fields are delimited by US, not whitespace.
 log_subject_with_punctuation_test() ->
     Bin = log_record(
-        <<"sha">>, <<"s">>, <<"fix: handle a, b; c (edge: case)">>, <<"Dev">>, <<"t">>
+        <<"sha">>, <<"s">>, <<"Dev">>, <<"t">>, <<"fix: handle a, b; c (edge: case)">>
     ),
     [Commit] = beamtalk_git:parse_log(Bin),
     ?assertEqual(<<"fix: handle a, b; c (edge: case)">>, maps:get(subject, Commit)).
@@ -246,7 +246,7 @@ log_subject_with_punctuation_test() ->
 log_subject_with_field_separator_test() ->
     FS = 16#1f,
     Subject = <<"weird", FS, "subject">>,
-    Bin = log_record(<<"sha">>, <<"s">>, Subject, <<"Dev">>, <<"t">>),
+    Bin = log_record(<<"sha">>, <<"s">>, <<"Dev">>, <<"t">>, Subject),
     [Commit] = beamtalk_git:parse_log(Bin),
     ?assertEqual(Subject, maps:get(subject, Commit)),
     ?assertEqual(<<"sha">>, maps:get(sha, Commit)).
@@ -282,7 +282,7 @@ nul_join_with_orig(Header, Entry, Orig) ->
 
 %% Build one log record terminated by RS, mirroring the custom --format. Field
 %% order matches git_log/1: %H, %h, %an, %aI, %s (subject LAST).
-log_record(Sha, Short, Subject, Author, Ts) ->
+log_record(Sha, Short, Author, Ts, Subject) ->
     FS = 16#1f,
     RS = 16#1e,
     <<Sha/binary, FS, Short/binary, FS, Author/binary, FS, Ts/binary, FS, Subject/binary, RS>>.

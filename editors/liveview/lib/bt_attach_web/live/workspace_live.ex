@@ -813,6 +813,29 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # Malformed git payloads (missing key / non-binary value): surface a git-panel
+  # validation error rather than letting a crafted WebSocket event crash the
+  # LiveView, consistent with the `new_class` / `revert` fallbacks above.
+  def handle_event("git_diff", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid diff request.")}
+  end
+
+  def handle_event("git_stage", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid stage request.")}
+  end
+
+  def handle_event("git_unstage", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid unstage request.")}
+  end
+
+  def handle_event("git_revert", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid revert request.")}
+  end
+
+  def handle_event("git_commit", _params, socket) do
+    {:noreply, assign(socket, git_error: "Invalid commit request.")}
+  end
+
   # ── Test-runner pane (BT-2557) ───────────────────────────────────────────────
   #
   # The GUI equivalent of a Smalltalk Test Runner: a dock tab that lists the live
@@ -2490,8 +2513,10 @@ defmodule BtAttachWeb.WorkspaceLive do
         )
         |> compile_clean(tab.id, source)
         |> assign_changes()
-        # BT-2586: an autoflushed save lands on disk immediately, so refresh the
-        # git panel when it is open (the pre→post-flush handoff for saves).
+        # BT-2586: refresh the git panel when it is open so an on-disk save is
+        # reflected immediately (the pre→post-flush handoff). When a save only
+        # patches the in-memory image (autoflush off, BT-2293), the refresh is a
+        # harmless no-op — git status is unchanged. See BT-2590.
         |> maybe_refresh_git()
 
       {:error, reason, _output, _warnings} ->
