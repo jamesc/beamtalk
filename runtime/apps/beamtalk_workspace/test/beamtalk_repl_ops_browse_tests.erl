@@ -136,6 +136,61 @@ native_clause_selector_skips_generic_clauses_test() ->
         beamtalk_repl_ops_browse:clause_selector(<<"    R = handle_call({readLine, []}, F, S),">>)
     ).
 
+%% BT-2582 conformance: every case in the shared corpus must resolve the same
+%% selector here as the Rust LSP's `clause_selector` does. The corpus is the
+%% single source of truth both implementations are pinned to; the Rust side
+%% asserts the identical cases in
+%% `definition_provider::tests::clause_selector_matches_shared_corpus`.
+clause_selector_corpus_test() ->
+    Cases = load_clause_corpus(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            Line = maps:get(<<"line">>, Case),
+            Expected =
+                case maps:get(<<"selector">>, Case) of
+                    null -> none;
+                    Sel when is_binary(Sel) -> {ok, Sel}
+                end,
+            Why = maps:get(<<"why">>, Case, <<>>),
+            ?assertEqual(
+                Expected,
+                beamtalk_repl_ops_browse:clause_selector(Line),
+                {corpus_mismatch, Line, Why}
+            )
+        end,
+        Cases
+    ).
+
+%% Load the shared selector-conformance corpus from the repo tree. Walks up from
+%% the test CWD to the project root (the dir holding `Cargo.toml`), then reads
+%% the fixture both surfaces share.
+load_clause_corpus() ->
+    Root = find_project_root(filename:absname("")),
+    Path = filename:join([
+        Root,
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "handle_call_clause_corpus.json"
+    ]),
+    Bin =
+        case file:read_file(Path) of
+            {ok, B} -> B;
+            {error, Reason} -> error({corpus_file_unreadable, Path, Reason})
+        end,
+    json:decode(Bin).
+
+find_project_root("/") ->
+    error(project_root_not_found);
+find_project_root(Dir) ->
+    case filelib:is_regular(filename:join(Dir, "Cargo.toml")) of
+        true -> Dir;
+        false -> find_project_root(filename:dirname(Dir))
+    end.
+
 %% native_delegate is keyed off the facade's `dispatch_<selector>` exports — the
 %% compiler's own `is_self_delegate` decision (native_facade.rs), not a body-text
 %% guess. The dispatch name embeds the selector verbatim (keyword colon included),

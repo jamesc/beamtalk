@@ -790,6 +790,12 @@ fn selector_span_contains(
 pub struct NativeDelegateInfo {
     /// The backing Erlang module name (e.g., `beamtalk_subprocess`).
     pub backing_module: EcoString,
+    /// The delegate method's selector name (e.g., `writeLine:`, `readLine`,
+    /// `open:args:`). Used to resolve the matching `handle_call` clause line in
+    /// the backing `.erl` source via [`handle_call_clause_line`], so the LSP's
+    /// go-to-implementation lands on the same clause the System Browser's
+    /// native-source jump does (BT-2582).
+    pub selector: EcoString,
 }
 
 /// Check if a location from `goto_definition` points to a self-delegate method
@@ -816,6 +822,7 @@ pub fn check_native_delegate<'a>(
                 if method.span == location.span && method.is_self_delegate() {
                     return Some(NativeDelegateInfo {
                         backing_module: backing_module.clone(),
+                        selector: method.selector.name(),
                     });
                 }
             }
@@ -830,6 +837,7 @@ pub fn check_native_delegate<'a>(
                         if let Some(ident) = &class.backing_module {
                             return Some(NativeDelegateInfo {
                                 backing_module: ident.name.clone(),
+                                selector: smd.method.selector.name(),
                             });
                         }
                     }
@@ -838,6 +846,86 @@ pub fn check_native_delegate<'a>(
         }
     }
     None
+}
+
+/// Extracts the concrete `handle_call` selector from a single line of Erlang
+/// source, or `None` if the line is not a `handle_call` clause head with a
+/// concrete selector.
+///
+/// This is the Rust mirror of the runtime's
+/// `beamtalk_repl_ops_browse:clause_selector/1`. Both implementations are pinned
+/// to the shared conformance corpus at
+/// `runtime/apps/beamtalk_workspace/test/fixtures/handle_call_clause_corpus.json`
+/// (BT-2582) so the LSP's go-to-implementation and the System Browser's
+/// native-source jump resolve the same clause for the same selector.
+///
+/// It mirrors the Erlang regex
+/// `^\s*handle_call\(\{\s*'?([a-z][A-Za-z0-9_:]*)'?\s*,` exactly:
+///
+/// - anchored to line start after optional indentation (a mid-line
+///   `handle_call(` in a comment or assignment is not a clause head),
+/// - the first message-tuple element must be a *concrete* selector — a quoted
+///   atom (`'writeLine:'`) or a bare lowercase-initial atom (`readLine`),
+/// - generic clauses that bind a variable (`{Selector, …}`, uppercase-initial)
+///   or a catch-all (`handle_call(Msg, …)`, no opening brace) match nothing and
+///   are skipped.
+///
+/// As in the Erlang regex, the opening and closing quotes are independently
+/// optional, so the match does not require them to balance.
+#[must_use]
+pub fn clause_selector(line: &str) -> Option<&str> {
+    // ^\s* — the whitespace class is PCRE non-Unicode `\s` minus `\n`: callers
+    // (`handle_call_clause_line`) pre-split on `\n`, so no line reaching here can
+    // begin with one. The remaining members (space, tab, CR, VT, FF) match `\s`.
+    let rest = line.trim_start_matches([' ', '\t', '\r', '\u{0b}', '\u{0c}']);
+    // handle_call(
+    let rest = rest.strip_prefix("handle_call(")?;
+    // {
+    let rest = rest.strip_prefix('{')?;
+    // \s*
+    let rest = rest.trim_start_matches([' ', '\t', '\r', '\u{0b}', '\u{0c}']);
+    // '?  (optional opening quote)
+    let rest = rest.strip_prefix('\'').unwrap_or(rest);
+    // [a-z][A-Za-z0-9_:]*
+    let mut chars = rest.char_indices();
+    match chars.next() {
+        Some((_, c)) if c.is_ascii_lowercase() => {}
+        _ => return None,
+    }
+    let mut end = rest.len();
+    for (idx, c) in chars {
+        if c.is_ascii_alphanumeric() || c == '_' || c == ':' {
+            continue;
+        }
+        end = idx;
+        break;
+    }
+    let selector = &rest[..end];
+    let after = &rest[end..];
+    // '?\s*,  — optional closing quote, optional whitespace, then a comma.
+    let after = after.strip_prefix('\'').unwrap_or(after);
+    let after = after.trim_start_matches([' ', '\t', '\r', '\u{0b}', '\u{0c}']);
+    if after.starts_with(',') {
+        Some(selector)
+    } else {
+        None
+    }
+}
+
+/// Resolves the 1-based line number of the `handle_call` clause for `selector`
+/// in the backing module's `.erl` `content`, or `None` if no clause matches
+/// (e.g. a delegate that replies from `handle_info`, or source unavailable).
+///
+/// Scans line-by-line via [`clause_selector`], mirroring the runtime's
+/// `beamtalk_repl_ops_browse:handle_call_clause_lines/1` +
+/// `selected_clause/2`. The first matching clause wins (clause order is dispatch
+/// order in Erlang).
+#[must_use]
+pub fn handle_call_clause_line(content: &str, selector: &str) -> Option<u32> {
+    content
+        .split('\n')
+        .zip(1u32..)
+        .find_map(|(line, n)| (clause_selector(line) == Some(selector)).then_some(n))
 }
 
 /// Info about an Erlang FFI call site for goto-definition.
@@ -1284,7 +1372,9 @@ mod tests {
         let location = Location::new(file.clone(), method_span);
         let result = check_native_delegate(&location, [(&file, &module)]);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().backing_module, "bar_mod");
+        let info = result.unwrap();
+        assert_eq!(info.backing_module, "bar_mod");
+        assert_eq!(info.selector, "doStuff");
     }
 
     #[test]
@@ -1746,5 +1836,119 @@ mod tests {
              to an O(|MRO|×|files|) walk",
             elapsed.as_millis()
         );
+    }
+
+    // BT-2582: `handle_call` clause-selector resolution shared between the LSP
+    // (this module) and the runtime (`beamtalk_repl_ops_browse:clause_selector/1`).
+
+    #[test]
+    fn clause_selector_quoted_keyword() {
+        assert_eq!(
+            clause_selector("handle_call({'writeLine:', [Data]}, _From, State) ->"),
+            Some("writeLine:")
+        );
+    }
+
+    #[test]
+    fn clause_selector_bare_atom() {
+        assert_eq!(
+            clause_selector("handle_call({readLine, []}, From, State) ->"),
+            Some("readLine")
+        );
+    }
+
+    #[test]
+    fn clause_selector_multi_keyword() {
+        assert_eq!(
+            clause_selector("handle_call({'open:args:', [Path, Args]}, _From, State) ->"),
+            Some("open:args:")
+        );
+    }
+
+    #[test]
+    fn clause_selector_indented_head_matches() {
+        assert_eq!(
+            clause_selector("    handle_call({readLine, []}, F, S) ->"),
+            Some("readLine")
+        );
+    }
+
+    #[test]
+    fn clause_selector_skips_generic_and_catch_all() {
+        // {Selector, ...} binds an uppercase variable — not a concrete selector.
+        assert_eq!(
+            clause_selector("handle_call({Selector, Args, Ctx}, From, State) ->"),
+            None
+        );
+        // The bare-variable catch-all clause.
+        assert_eq!(clause_selector("handle_call(Msg, _From, State) ->"), None);
+    }
+
+    #[test]
+    fn clause_selector_skips_non_clause_lines() {
+        // A -spec line is not a clause head (no `{` after the paren).
+        assert_eq!(
+            clause_selector("-spec handle_call(term(), term(), map()) ->"),
+            None
+        );
+        // A comment mentioning handle_call is not a clause head.
+        assert_eq!(
+            clause_selector("%% see handle_call({readLine, []}, ...)"),
+            None
+        );
+        // An assignment calling handle_call is not a clause head.
+        assert_eq!(
+            clause_selector("    R = handle_call({readLine, []}, F, S),"),
+            None
+        );
+        // handle_cast is not handle_call.
+        assert_eq!(
+            clause_selector("handle_cast({readLine, []}, State) ->"),
+            None
+        );
+    }
+
+    #[test]
+    fn handle_call_clause_line_resolves_first_match() {
+        let content = "init(C) -> {ok, C}.\n\
+                       handle_call({Selector, Args}, From, State) ->\n\
+                       handle_call({'writeLine:', [Data]}, _From, State) ->\n\
+                       handle_call({readLine, []}, From, State) ->\n\
+                       handle_call(Msg, _From, State) ->\n";
+        // 1-based line numbers; the generic and catch-all clauses are skipped.
+        assert_eq!(handle_call_clause_line(content, "writeLine:"), Some(3));
+        assert_eq!(handle_call_clause_line(content, "readLine"), Some(4));
+        // A selector with no matching clause (delegate replies elsewhere) → None.
+        assert_eq!(handle_call_clause_line(content, "close"), None);
+    }
+
+    /// BT-2582 conformance: every case in the shared corpus must resolve the
+    /// same selector here as the runtime's `clause_selector/1` does. The corpus
+    /// is the single source of truth both implementations are pinned to; the
+    /// Erlang side asserts the identical cases in
+    /// `beamtalk_repl_ops_browse_tests:clause_selector_corpus_test/0`.
+    #[test]
+    fn clause_selector_matches_shared_corpus() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates/")
+            .parent()
+            .expect("repo root")
+            .join("runtime/apps/beamtalk_workspace/test/fixtures/handle_call_clause_corpus.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let line = case["line"].as_str().expect("case.line is a string");
+            let expected = case["selector"].as_str();
+            let why = case["why"].as_str().unwrap_or("");
+            assert_eq!(
+                clause_selector(line),
+                expected,
+                "corpus mismatch for line {line:?} ({why})"
+            );
+        }
     }
 }
