@@ -1,0 +1,117 @@
+[
+  {
+    "line": "handle_call({'writeLine:', [Data]}, _From, State) ->",
+    "selector": "writeLine:",
+    "why": "quoted keyword selector (single keyword)"
+  },
+  {
+    "line": "handle_call({readLine, []}, From, State) ->",
+    "selector": "readLine",
+    "why": "bare lowercase atom selector"
+  },
+  {
+    "line": "handle_call({'readLine:', [Timeout]}, From, State) when is_integer(Timeout), Timeout > 0 ->",
+    "selector": "readLine:",
+    "why": "quoted selector with a guard on the clause head"
+  },
+  {
+    "line": "handle_call({readStderrLine, []}, From, State) ->",
+    "selector": "readStderrLine",
+    "why": "bare camelCase atom selector"
+  },
+  {
+    "line": "handle_call({'open:args:', [Path, Args]}, _From, State) ->",
+    "selector": "open:args:",
+    "why": "multi-keyword selector (two keywords, two colons)"
+  },
+  {
+    "line": "    handle_call({readLine, []}, F, S) ->",
+    "selector": "readLine",
+    "why": "indented clause head still matches (leading whitespace allowed)"
+  },
+  {
+    "line": "handle_call({ 'writeLine:' , [Data]}, _From, State) ->",
+    "selector": "writeLine:",
+    "why": "whitespace inside the braces around the selector atom"
+  },
+  {
+    "line": "handle_call({Selector, Args, Ctx}, From, State) ->",
+    "selector": null,
+    "why": "generic {Selector, ...} clause binds an uppercase variable — skipped"
+  },
+  {
+    "line": "handle_call({Selector, Args}, From, State) ->",
+    "selector": null,
+    "why": "two-element generic re-dispatch clause — skipped"
+  },
+  {
+    "line": "handle_call(Msg, _From, State) ->",
+    "selector": null,
+    "why": "catch-all clause binds a bare variable — skipped"
+  },
+  {
+    "line": "handle_call(_Other, _From, State) ->",
+    "selector": null,
+    "why": "underscore catch-all clause — skipped"
+  },
+  {
+    "line": "-spec handle_call(term(), term(), map()) ->",
+    "selector": null,
+    "why": "the -spec line is not a clause head (no opening brace after the paren)"
+  },
+  {
+    "line": "%% see handle_call({readLine, []}, ...)",
+    "selector": null,
+    "why": "a comment mentioning handle_call is not a clause head (not anchored to line start)"
+  },
+  {
+    "line": "    R = handle_call({readLine, []}, F, S),",
+    "selector": null,
+    "why": "an assignment calling handle_call is not a clause head (text precedes handle_call)"
+  },
+  {
+    "line": "handle_cast({readLine, []}, State) ->",
+    "selector": null,
+    "why": "handle_cast is not handle_call — never produces a clause row"
+  },
+  {
+    "line": "    {reply, nil, State};",
+    "selector": null,
+    "why": "a clause body line has no selector"
+  },
+  {
+    "line": "",
+    "selector": null,
+    "why": "an empty line has no selector"
+  },
+  {
+    "line": "handle_call({'readLine, []}, From, State) ->",
+    "selector": "readLine",
+    "why": "drift canary: opening quote without a closing quote still matches — the quotes are independently optional (both impls agree)"
+  },
+  {
+    "line": "handle_call({readLine', []}, From, State) ->",
+    "selector": "readLine",
+    "why": "drift canary: closing quote without an opening quote still matches — the quotes are independently optional (both impls agree)"
+  },
+  {
+    "line": "handle_call({'foo'', X}, From, State) ->",
+    "selector": null,
+    "why": "drift canary: only one optional closing quote is consumed, so the second quote blocks the trailing comma — no match (both impls agree)"
+  },
+  {
+    "line": "\thandle_call({readLine, []}, F, S) ->",
+    "selector": "readLine",
+    "why": "drift canary: a tab indent matches — pins the whitespace set (Rust explicit ' \\t\\r\\v\\f' = PCRE non-Unicode \\s) against edits to either side"
+  },
+  {
+    "line": "handle_call({readLine}, From, State) ->",
+    "selector": null,
+    "why": "drift canary: a selector with no comma inside the tuple is not a concrete clause — the trailing comma is mandatory (both impls agree)"
+  },
+  {
+    "line": "handle_call ({readLine, []}, From, State) ->",
+    "selector": null,
+    "why": "drift canary: whitespace between handle_call and the paren breaks the anchored prefix — no match (both impls agree)"
+  }
+]

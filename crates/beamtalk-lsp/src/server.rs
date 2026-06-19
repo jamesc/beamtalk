@@ -1503,10 +1503,31 @@ impl LanguageServer for Backend {
         if let Some(delegate_info) = native_delegate {
             if let Some(erl_path) = self.find_erlang_source_file(&delegate_info.backing_module) {
                 if let Ok(target_uri) = Url::from_file_path(&erl_path) {
+                    // Resolve the matching `handle_call` clause line so the jump
+                    // lands on the same clause the System Browser's native-source
+                    // jump does (BT-2582). If the `.erl` is unreadable or the
+                    // selector has no `handle_call` clause (e.g. a delegate that
+                    // replies from `handle_info`), fall back to the file top.
+                    let range = std::fs::read_to_string(&erl_path)
+                        .ok()
+                        .and_then(|content| {
+                            beamtalk_core::queries::definition_provider::handle_call_clause_line(
+                                &content,
+                                &delegate_info.selector,
+                            )
+                        })
+                        .map_or_else(tower_lsp::lsp_types::Range::default, |line| {
+                            // Clause lines are 1-based; LSP lines are 0-based.
+                            let lsp_line = line.saturating_sub(1);
+                            tower_lsp::lsp_types::Range {
+                                start: tower_lsp::lsp_types::Position::new(lsp_line, 0),
+                                end: tower_lsp::lsp_types::Position::new(lsp_line, 0),
+                            }
+                        });
                     return Ok(Some(GotoDefinitionResponse::Scalar(
                         tower_lsp::lsp_types::Location {
                             uri: target_uri,
-                            range: tower_lsp::lsp_types::Range::default(),
+                            range,
                         },
                     )));
                 }

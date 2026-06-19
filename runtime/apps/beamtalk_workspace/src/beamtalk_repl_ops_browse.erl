@@ -601,6 +601,16 @@ handle_call_clause_lines(Content) when is_binary(Content) ->
 %% bare lowercase atom (`readLine`). The lowercase-initial requirement excludes
 %% the generic clauses that bind variables (`{Selector, Args, _}`, `Msg`). A
 %% single capture group avoids `re`'s truncation of trailing unmatched groups.
+%%
+%% BT-2582: this is one half of a shared selector→clause-line definition. The
+%% Rust LSP mirrors this algorithm in
+%% `definition_provider::clause_selector` (so go-to-implementation lands on the
+%% same clause the System Browser jump does), and both are pinned to the shared
+%% conformance corpus
+%% `test/fixtures/handle_call_clause_corpus.json`
+%% (asserted here by `clause_selector_corpus_test/0` and on the Rust side by
+%% `definition_provider::tests::clause_selector_matches_shared_corpus`). Keep the
+%% regex and the Rust matcher in lockstep; extend the corpus when adding a case.
 -spec clause_selector(binary()) -> {ok, binary()} | none.
 clause_selector(Line) ->
     %% Anchored to line start (after optional indentation): a `handle_call`
