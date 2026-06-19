@@ -39,7 +39,10 @@ Extracted from beamtalk_repl_server (BT-705).
 -ifdef(TEST).
 -export([
     get_session_bindings/1,
-    validate_selector_if_present/4
+    validate_selector_if_present/4,
+    %% BT-2572: white-box test of the diagnostics `mode` normalisation that
+    %% mirrors the Elixir facade at the Erlang op boundary.
+    normalize_diagnostics_mode/1
 ]).
 -endif.
 
@@ -151,7 +154,15 @@ handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% method body — the System Browser method editor, where the `=>` body
     %% separator is not a valid top-level token).
     Code = maps:get(<<"code">>, Params, <<>>),
-    Mode = maps:get(<<"mode">>, Params, <<"expression">>),
+    %% BT-2572: normalise an unknown-binary `mode` to <<"expression">> here, at
+    %% the Erlang op boundary, mirroring the Elixir `BtAttach.Facade` (which maps
+    %% anything but "method" to "expression"). Without this, an unknown binary
+    %% (e.g. <<"foo">>) flowed straight to the Rust port, which only special-cases
+    %% "method" and treats everything else as expression mode — so the runtime
+    %% behaviour was already correct, but the Erlang boundary was more permissive
+    %% than the facade. A non-binary `mode` is passed through unchanged so it
+    %% still degrades to `[]` via the `diagnostics_for/2` catch-all (BT-2569).
+    Mode = normalize_diagnostics_mode(maps:get(<<"mode">>, Params, <<"expression">>)),
     {diagnostics, diagnostics_for(Code, Mode)};
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% BT-1903: Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
@@ -863,6 +874,24 @@ diagnostics_for(Code, Mode) when is_binary(Code), is_binary(Mode) ->
 %% spec honest at the Erlang boundary (BT-2569).
 diagnostics_for(_, _) ->
     [].
+
+-doc """
+Normalise the `diagnostics` `mode` param at the Erlang op boundary (BT-2572).
+
+Mirrors the Elixir `BtAttach.Facade` (`invoke(:diagnostics, ...)`): a binary
+`mode` of <<"method">> is preserved; any other binary (e.g. <<"foo">>) is
+normalised to the safe default <<"expression">>. A non-binary `mode` is passed
+through unchanged so `diagnostics_for/2`'s catch-all still degrades it to `[]`
+(the existing BT-2569 behaviour) rather than silently treating it as expression
+mode.
+""".
+-spec normalize_diagnostics_mode(term()) -> term().
+normalize_diagnostics_mode(<<"method">>) ->
+    <<"method">>;
+normalize_diagnostics_mode(Mode) when is_binary(Mode) ->
+    <<"expression">>;
+normalize_diagnostics_mode(Mode) ->
+    Mode.
 
 -doc """
 Resolve hover documentation for the hovered token (BT-2555).
