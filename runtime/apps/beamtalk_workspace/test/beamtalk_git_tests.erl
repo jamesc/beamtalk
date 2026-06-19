@@ -255,6 +255,20 @@ log_empty_test() ->
     ?assertEqual([], beamtalk_git:parse_log(<<>>)).
 
 %%% ============================================================================
+%%% Argument validation
+%%% ============================================================================
+
+git_commit_rejects_empty_message_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_commit(<<>>)).
+
+%% A whitespace-only message must not slip past the guard into `git commit`.
+git_commit_rejects_whitespace_only_message_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_commit(<<"   ">>)).
+
+git_commit_rejects_non_binary_message_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_commit(42)).
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 

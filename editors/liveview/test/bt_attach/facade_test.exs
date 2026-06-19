@@ -356,6 +356,9 @@ defmodule BtAttach.FacadeTest do
       assert Facade.dispatch(:git_status, %{}, observer) == {:ok, %{branch: "main", files: []}}
       assert Facade.dispatch(:git_log, %{count: 5}, observer) == {:ok, []}
 
+      assert Facade.dispatch(:git_diff, %{path: "src/foo.bt"}, observer) ==
+               {:ok, %{worktree: "", staged: ""}}
+
       # Mutating ops are denied, with no dist call.
       assert Facade.dispatch(:git_stage, %{path: "a.bt"}, observer) == {:error, :unauthorized}
       assert Facade.dispatch(:git_commit, %{message: "wip"}, observer) == {:error, :unauthorized}

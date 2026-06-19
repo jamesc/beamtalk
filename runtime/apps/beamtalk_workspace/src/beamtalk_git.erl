@@ -180,10 +180,15 @@ Invokes system `git` so commit hooks, GPG signing and `user.name`/`user.email`
 config apply. Returns `{ok, nil}`.
 """.
 -spec git_commit(binary()) -> {ok, nil} | {error, #beamtalk_error{}}.
-git_commit(Message) when is_binary(Message), Message =/= <<>> ->
-    mutate(git_commit, [<<"commit">>, <<"-m">>, Message], <<"git commit failed">>);
 git_commit(Message) when is_binary(Message) ->
-    {error, arg_error(git_commit, <<"commit message must not be empty">>)};
+    %% Reject a blank subject (empty or whitespace-only). The LiveView handler
+    %% already trims, but this guards direct callers (REPL/MCP, future surfaces).
+    case string:trim(Message) of
+        <<>> ->
+            {error, arg_error(git_commit, <<"commit message must not be empty">>)};
+        _ ->
+            mutate(git_commit, [<<"commit">>, <<"-m">>, Message], <<"git commit failed">>)
+    end;
 git_commit(_Message) ->
     {error, arg_error(git_commit, <<"commit message must be a String">>)}.
 
