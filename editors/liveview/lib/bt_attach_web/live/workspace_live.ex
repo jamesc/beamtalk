@@ -2364,7 +2364,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               flush_error: nil
             )
             |> compile_clean(tab_id, source)
-            |> promote_new_method_tab(tab_id, class, selector)
+            |> promote_new_method_tab(tab_id, saved_class, selector)
             |> assign_changes()
 
           {:error, reason} ->
@@ -3563,6 +3563,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # differ. With no known disk body (`nil` — a runtime-only or already-diverged
   # method) we conservatively flag, matching the prior behaviour.
   defp compile_clean(socket, nil, _source), do: socket
+  # `""` is the empty-state hidden form's `tab=""` sentinel (no tab to re-base);
+  # short-circuit to a no-op rather than try to look up a tab by an empty id.
   defp compile_clean(socket, "", _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
@@ -3600,10 +3602,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # open, the scratch tab is dropped and that existing tab is focused (no duplicate,
   # no stale "Class ▸ new" left behind). `focus_tab_keep_banner/3` refreshes the
   # edit assigns so the now-hidden selector reflects the saved name.
-  defp promote_new_method_tab(socket, tab_id, class, selector) do
+  defp promote_new_method_tab(socket, tab_id, saved_class, selector) do
     case find_tab(socket, tab_id) do
       %{new: true, side: side, source: source} = tab ->
-        new_id = "method:" <> class <> ":" <> side <> ":" <> selector
+        # Key the id off `saved_class` — the class the Facade reports the method
+        # was actually compiled onto — not the form-submitted class, so the id
+        # always names the class behind it (a crafted event with a mismatched
+        # `class` input can't desync the id from the compiled class).
+        new_id = "method:" <> saved_class <> ":" <> side <> ":" <> selector
         tabs = socket.assigns.tabs
 
         case find_tab(socket, new_id) do
@@ -6202,10 +6208,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                            save_method payload (class + selector + source) shape is
                            identical in every case. --%>
                         <input type="hidden" name="class" value={@edit_class} />
+                        <% tab = active_tab(assigns) %>
                         <%= cond do %>
-                          <% active_tab(assigns).kind == :def -> %>
+                          <% tab.kind == :def -> %>
                             <input type="hidden" name="selector" value="▸ class definition" />
-                          <% active_tab(assigns).new -> %>
+                          <% tab.new -> %>
                             <label class="new-method-selector">
                               <span class="nm-label mono">selector</span>
                               <input
