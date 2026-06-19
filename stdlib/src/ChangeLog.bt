@@ -29,17 +29,20 @@
 sealed typed Value subclass: ChangeLog
   field: entries :: List(ChangeEntry) = #()
 
-  /// Return the active entries: current epoch, not orphaned, and not shadowed
-  /// by a newer entry for the same method.
+  /// Return the active entries: current epoch, not orphaned, not shadowed by a
+  /// newer entry for the same method, and not clean (still differing from disk).
   ///
-  /// This is the live, re-appliable dirty set that the default collection views
-  /// operate on. Repeated patches/reverts of one method (a revert is itself a
-  /// patch, ADR 0082 "Undo") collapse to the latest entry — the one
-  /// `Workspace flush` would apply — so the view shows one row per dirty method
-  /// rather than one per log append. `select:` (which can reach orphaned and
-  /// shadowed entries) uses the full set instead.
+  /// This is the live, dirty-relative-to-disk set that the default collection
+  /// views operate on. Repeated patches/reverts of one method (a revert is
+  /// itself a patch, ADR 0082 "Undo") collapse to the latest entry — the one
+  /// `Workspace flush` would apply. A method reverted back to exactly its
+  /// on-disk body has no net change, so it drops out entirely ("disappear when
+  /// clean", BT-2575). `select:` (which reaches orphaned, shadowed, and clean
+  /// entries) uses the full set instead, so the audit trail stays complete.
   activeEntries -> List(ChangeEntry) =>
-    self.entries select: [:e | e isActive and: [e isShadowed not]]
+    self.entries select: [:e |
+      e isActive and: [e isShadowed not and: [e isClean not]]
+    ]
 
   /// Return all entries, including prior-epoch and orphan entries.
   ///

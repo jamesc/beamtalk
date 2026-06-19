@@ -32,6 +32,8 @@ sealed typed Value subclass: ChangeEntry
   field: priorEpoch :: Boolean = false
   field: active :: Boolean = false
   field: shadowed :: Boolean = false
+  field: clean :: Boolean = false
+  field: diff :: String | Nil = nil
 
   /// The monotonic sequence number assigned when the entry was logged.
   ///
@@ -122,6 +124,28 @@ sealed typed Value subclass: ChangeEntry
   /// Workspace changes select: [:e | e isShadowed]   // superseded entries
   /// ```
   isShadowed -> Boolean => self.shadowed
+
+  /// Whether the installed in-memory body now matches the on-disk body — i.e.
+  /// the method was reverted back to its on-disk state, so there is no net
+  /// change to flush (ADR 0082, BT-2575). Clean entries are excluded from the
+  /// default pending view but remain in the audit log.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes select: [:e | e isClean]   // reverted-to-disk entries
+  /// ```
+  isClean -> Boolean => self.clean
+
+  /// The net change this entry represents, as a unified diff (on-disk →
+  /// in-memory), or nil when the entry is clean or the diff could not be
+  /// computed (ADR 0082, BT-2575). Each line is prefixed `  ` (unchanged),
+  /// `- ` (on disk) or `+ ` (in memory).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Workspace changes do: [:e | Transcript showLine: e diff]
+  /// ```
+  diff -> String | Nil => self.diff
 
   /// Whether this entry created a new class (kind `#'new-class'`, no selector).
   isNewClass -> Boolean => self.kind =:= #'new-class'

@@ -177,6 +177,48 @@ append_new_class_has_no_prev_or_span(#{workspace_id := WsId}) ->
     ].
 
 %%====================================================================
+%% body_delta/2 — net-vs-disk clean check + diff (BT-2575)
+%%====================================================================
+
+%% Bodies that match modulo a trailing newline are clean (no net change) — the
+%% revert-to-disk case that should drop out of the pending view.
+body_delta_clean_modulo_trailing_whitespace_test() ->
+    ?assertEqual(
+        {true, undefined},
+        beamtalk_workspace_changelog:body_delta(
+            <<"inc => self.v + 1\n">>, <<"inc => self.v + 1">>
+        )
+    ).
+
+%% A real content change is dirty and carries the on-disk → in-memory diff.
+body_delta_dirty_emits_diff_test() ->
+    {Clean, Diff} = beamtalk_workspace_changelog:body_delta(
+        <<"inc => self.v + 1">>, <<"inc => self.v + 2">>
+    ),
+    ?assertEqual(false, Clean),
+    ?assertNotEqual(nomatch, binary:match(Diff, <<"- inc => self.v + 1">>)),
+    ?assertNotEqual(nomatch, binary:match(Diff, <<"+ inc => self.v + 2">>)).
+
+%% The on-disk span is file-indented and doc-inclusive (BT-2577); the stored body
+%% is the compiler's column-0 form. Same content modulo indentation → clean (so
+%% "disappear when clean" fires for real doc-commented, indented methods).
+body_delta_clean_modulo_indentation_test() ->
+    ?assertEqual(
+        {true, undefined},
+        beamtalk_workspace_changelog:body_delta(
+            <<"  /// Increase by one.\n  inc => self.v + 1\n">>,
+            <<"/// Increase by one.\ninc => self.v + 1">>
+        )
+    ).
+
+%% A brand-new method (no on-disk body) diffs as all-added.
+body_delta_new_method_all_added_test() ->
+    ?assertEqual(
+        {false, <<"+ doubled => self.v * 2\n">>},
+        beamtalk_workspace_changelog:body_delta(<<>>, <<"doubled => self.v * 2">>)
+    ).
+
+%%====================================================================
 %% JSON round-trip
 %%====================================================================
 
