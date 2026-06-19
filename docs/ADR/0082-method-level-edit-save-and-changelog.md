@@ -555,11 +555,18 @@ For ADR 0046 (VSCode sidebar): no migration. The sidebar gains a "pending change
 
 ## Amendment 1 — Cockpit Positioning: live-first (agents) / git-first (humans)
 
-**Status: Proposed (2026-06-19) — pending decision, tracked in BT-2585.** This
-section does not change the accepted decision above; it records a positioning
-question that surfaced while building the LiveView IDE ChangeLog UX (BT-2573:
+**Status: Accepted (2026-06-19), decided in BT-2585.** This section refines —
+it does not overturn — the accepted decision above: the two-layer model stands,
+and this pins down which layer is the *primary* surface for which *audience*.
+The question surfaced while building the LiveView IDE ChangeLog UX (BT-2573:
 collapse duplicate reverts; net-vs-disk diff / "disappear when clean"; BT-2577:
-flush corruption) and proposes an answer for sign-off.
+flush corruption).
+
+**Decision in one line:** split by **surface** — the **LiveView cockpit is the
+human surface and is git-first** (`autoflush: true` default; diff/revert/history
+come from git; the cockpit ChangeLog shrinks to a dirty indicator), while
+**MCP is the agent surface and is ChangeLog-first** (the structured pre-flush
+audit trail + machine-readable net-vs-disk diff is where agents work).
 
 ### Problem
 
@@ -609,46 +616,63 @@ appears if the ChangeLog is also made the history/branch/blame tool; that is
 git's job, and ours is already file-native, so we should **expose git in the
 cockpit** rather than rebuild it.
 
-### Options
+### Decision
 
-- **(1) Live-programming-first (one model for everyone).** ChangeLog, flush,
-  diff, revert are core; autoflush stays off by default; the VS Code gap is
-  intentional. Maximises the live story; maximises newcomer friction.
-- **(2) Editor-first (one model for everyone).** Lean on files + git: autoflush
-  on by default (save means save), surface real `git status`/`git diff` instead
-  of a bespoke ChangeLog, and make live-no-flush editing the *special* mode.
-  Minimises novelty; discards much of the ChangeLog UX investment.
-- **(3) Two layers, `flush` is the seam (recommended).** Keep both, mirroring
-  Pharo's `.changes`/Iceberg split, with our file-native advantage: the
-  **ChangeLog is the pre-flush layer** (memory↔disk diff, undo, agent audit
-  trail) and **git is the post-flush layer** (disk↔HEAD diff, history, branch),
-  exposed directly in the cockpit. Both actors cross the `flush` seam; they
-  differ only in where they spend time: **agents linger in the ChangeLog layer**
-  (structured audit + machine-readable pre-flush diff), **humans default to
-  `autoflush: true`** and live mostly in the git layer. This is coherent (each
-  layer does what it is best at; neither reinvents the other) and preserves the
-  agent-native thesis without imposing image semantics on file-oriented humans.
+Keep both layers, mirroring Pharo's `.changes`/Iceberg split, but with our
+file-native advantage — and assign each layer to the audience it serves best,
+**by surface**:
 
-### Proposed consequences (if option 3 is accepted)
+- **LiveView cockpit = humans = git-first.** `autoflush: true` is the default:
+  a per-method **Save** writes through to the `.bt` file immediately ("save
+  means save"). Humans get diff / revert / history from **git**, surfaced
+  directly in the cockpit (the post-flush layer — see the git panel, BT-2586).
+  The in-cockpit ChangeLog is **not** a full viewer; it collapses to a
+  lightweight **"unsaved live edits" dirty indicator**, meaningful only when a
+  user opts into the live-no-flush mode. Live-edit-without-flush is the
+  *special* mode here, not the default.
+- **MCP = agents = ChangeLog-first.** Agents stay in the **pre-flush** layer:
+  they batch edits, inspect the structured audit trail and the machine-readable
+  net-vs-disk diff (BT-2575), and `revert:` — all before crossing the `flush`
+  seam. No autoflush; the ChangeLog *is* the agent's working surface.
 
-- `autoflush` default becomes actor-dependent: `true` for human sessions,
-  `false` for agent sessions (a per-session default, not a global switch — note
-  this interacts with the "one switch, applied uniformly across all surfaces"
-  statement under *Behaviour* above, which would need to be relaxed to
-  per-session).
-- BT-2575 (net-vs-disk diff / disappear-when-clean) ships as the **pre-flush**
-  diff git cannot show (agent-facing + a power-user ChangeLog viewer), not as
-  core human workflow. It is currently **held** pending this decision.
-- A **git panel in the cockpit** is added as the human-facing post-flush VCS
-  surface (the Iceberg-equivalent — thin, since `.bt` files are already git's
-  working tree: shell out to git + a LiveView view, no Tonel/projection layer).
-  Tracked separately under the LiveView cleanup epic.
-- BT-2293 (ChangeLog viewer / per-method Save / Save All) is re-scoped against
-  the chosen positioning.
+Both actors cross the same `flush` seam and use the same underlying operations;
+they differ only in **which layer is primary** and in the **autoflush default**.
+This keeps each layer doing what it is best at (the ChangeLog shows the
+memory↔disk diff git cannot; git owns disk↔HEAD history we should not rebuild)
+and preserves the agent-native thesis without imposing image semantics on
+file-oriented humans.
+
+**Alternatives considered.** *(1) Live-programming-first for everyone* —
+ChangeLog/flush/diff/revert core, autoflush off by default for all; maximises
+the live story but maximises newcomer friction and forces image semantics on
+humans who think in files. *(2) Editor-first for everyone* — autoflush on for
+all, drop the bespoke ChangeLog in favour of raw git; minimises novelty but
+discards the agent-facing audit trail and the one diff git cannot show
+(memory↔disk). Both were rejected for collapsing two genuinely different
+audiences into one model; the surface split keeps both without compromise.
+
+### Consequences
+
+- `autoflush` default becomes **per-surface**, not a single global switch:
+  `true` on the LiveView cockpit (human), `false` on MCP (agent). This relaxes
+  the "one switch, applied uniformly across all surfaces" statement under
+  *Behaviour* above to a per-surface default; the switch itself still exists and
+  the operation is identical everywhere.
+- BT-2575 (net-vs-disk diff / disappear-when-clean) **ships as the agent/MCP
+  pre-flush surface** — the diff git cannot show. It is no longer held; it
+  landed during this work.
+- BT-2293 is **re-scoped** to the human cockpit: per-method Save autoflushes by
+  default + a workspace dirty indicator; the rich ChangeLog viewer (list /
+  per-entry diff / `revert:`) is dropped from the cockpit and lives on the agent
+  MCP surface instead.
+- A **git panel in the cockpit** (BT-2586) is the human-facing post-flush VCS
+  surface — the Iceberg-equivalent, but thin: `.bt` files are already git's
+  working tree, so it is a shell-out to git + a LiveView view, no Tonel /
+  projection layer. Promoted to the cockpit's primary human VCS affordance.
 - Surface parity is preserved: the *operations* remain identical across
-  surfaces; only the *default* (autoflush) and the *primary human affordance*
-  (git vs ChangeLog) differ by actor — analogous to existing surface-specific
-  presentation notes.
+  surfaces; only the *default* (autoflush) and the *primary affordance*
+  (git panel for humans vs ChangeLog for agents) differ by surface — analogous
+  to existing surface-specific presentation notes.
 
 ### Non-goals
 
