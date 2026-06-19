@@ -88,6 +88,22 @@ defmodule BtAttach.FacadeTest do
                %{"name" => "testOne", "class" => "FooTest", "status" => "pass", "detail" => ""}
              ]
            }}
+
+    # BT-2586: the cockpit git panel — read ops (status/diff/log) + mutating ops
+    # (stage/unstage/commit/revert).
+    def git_status,
+      do: record({:git_status}) && {:ok, %{branch: "main", files: []}}
+
+    def git_diff(path),
+      do: record({:git_diff, path}) && {:ok, %{worktree: "", staged: ""}}
+
+    def git_log(count),
+      do: record({:git_log, count}) && {:ok, []}
+
+    def git_stage(path), do: record({:git_stage, path}) && {:ok, nil}
+    def git_unstage(path), do: record({:git_unstage, path}) && {:ok, nil}
+    def git_commit(message), do: record({:git_commit, message}) && {:ok, nil}
+    def git_revert_file(path), do: record({:git_revert_file, path}) && {:ok, nil}
   end
 
   setup do
@@ -117,8 +133,14 @@ defmodule BtAttach.FacadeTest do
                      subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
                      browse_class_definition browse_native_source list_tests
-                     senders implementors symbols)a do
+                     senders implementors symbols
+                     git_status git_diff git_log)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
+      end
+
+      # BT-2586: the mutating git ops alter the index/working tree/history → :execute.
+      for execute <- ~w(git_stage git_unstage git_commit git_revert_file)a do
+        assert Facade.capability(execute) == :execute, "#{execute} should be :execute"
       end
 
       # ADR 0092: the privileged `system`-scope supervision view is execute-gated.
@@ -286,6 +308,65 @@ defmodule BtAttach.FacadeTest do
                {:value, %{"sites" => []}}
 
       assert Facade.dispatch(:symbols, %{scope: "all"}, observer) == {:value, %{"classes" => []}}
+    end
+  end
+
+  describe "git panel ops (cockpit VCS surface, ADR 0082 / BT-2586)" do
+    test "read ops route to the client and return its term verbatim" do
+      assert Facade.dispatch(:git_status, %{}) == {:ok, %{branch: "main", files: []}}
+
+      assert Facade.dispatch(:git_diff, %{path: "src/foo.bt"}) ==
+               {:ok, %{worktree: "", staged: ""}}
+
+      assert Facade.dispatch(:git_log, %{count: 5}) == {:ok, []}
+
+      assert {:git_diff, "src/foo.bt"} in RecordingClient.calls()
+      assert {:git_log, 5} in RecordingClient.calls()
+    end
+
+    test "git_log defaults to 20 commits when count is omitted" do
+      assert Facade.dispatch(:git_log, %{}) == {:ok, []}
+      assert {:git_log, 20} in RecordingClient.calls()
+    end
+
+    test "mutating ops route to the client and pass their arg through" do
+      assert Facade.dispatch(:git_stage, %{path: "a.bt"}) == {:ok, nil}
+      assert Facade.dispatch(:git_unstage, %{path: "a.bt"}) == {:ok, nil}
+      assert Facade.dispatch(:git_commit, %{message: "wip"}) == {:ok, nil}
+      assert Facade.dispatch(:git_revert_file, %{path: "a.bt"}) == {:ok, nil}
+
+      assert {:git_stage, "a.bt"} in RecordingClient.calls()
+      assert {:git_unstage, "a.bt"} in RecordingClient.calls()
+      assert {:git_commit, "wip"} in RecordingClient.calls()
+      assert {:git_revert_file, "a.bt"} in RecordingClient.calls()
+    end
+
+    test "a bad shape is invalid params, with no dist call" do
+      assert Facade.dispatch(:git_diff, %{path: 42}) == {:error, :invalid_params}
+      assert Facade.dispatch(:git_log, %{count: 0}) == {:error, :invalid_params}
+      assert Facade.dispatch(:git_commit, %{message: :nope}) == {:error, :invalid_params}
+      assert Facade.dispatch(:git_stage, %{path: nil}) == {:error, :invalid_params}
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may inspect git but not mutate it" do
+      observer = %{role: :observer}
+
+      # Read ops are visible to the Observer.
+      assert Facade.dispatch(:git_status, %{}, observer) == {:ok, %{branch: "main", files: []}}
+      assert Facade.dispatch(:git_log, %{count: 5}, observer) == {:ok, []}
+
+      # Mutating ops are denied, with no dist call.
+      assert Facade.dispatch(:git_stage, %{path: "a.bt"}, observer) == {:error, :unauthorized}
+      assert Facade.dispatch(:git_commit, %{message: "wip"}, observer) == {:error, :unauthorized}
+
+      assert Facade.dispatch(:git_revert_file, %{path: "a.bt"}, observer) ==
+               {:error, :unauthorized}
+
+      refute Enum.any?(
+               RecordingClient.calls(),
+               &(elem(&1, 0) in [:git_stage, :git_commit, :git_revert_file])
+             )
     end
   end
 

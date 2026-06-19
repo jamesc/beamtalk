@@ -115,6 +115,21 @@ defmodule BtAttach.Facade do
     # `eval`), so it is `:execute` — Owner-only, the same gate the eval form uses.
     list_tests: :read,
     run_tests: :execute,
+    # ADR 0082 Amendment 1 (BT-2586): the cockpit git panel — the post-flush,
+    # human-facing VCS surface (disk↔HEAD), distinct from the ChangeLog dirty
+    # indicator (memory↔disk). Read ops (`git_status`/`git_diff`/`git_log`) are
+    # pure inspection of the on-disk working tree — they run no user code — so
+    # they are `:read`, safe for the Observer role. The mutating ops
+    # (`git_stage`/`git_unstage`/`git_commit`/`git_revert_file`) shell out to
+    # system `git` to alter the index/working tree/history, so they are
+    # `:execute` — Owner-only, the same gate `save`/`flush`/`revert` use.
+    git_status: :read,
+    git_diff: :read,
+    git_log: :read,
+    git_stage: :execute,
+    git_unstage: :execute,
+    git_commit: :execute,
+    git_revert_file: :execute,
     kill: :admin,
     rotate_cookie: :admin
   }
@@ -351,6 +366,42 @@ defmodule BtAttach.Facade do
     do: client().unsubscribe_object_changes(term, pid)
 
   defp invoke(:pid_stats, %{term: term}, _ctx), do: client().pid_stats(term)
+
+  # ADR 0082 Amendment 1 (BT-2586): the cockpit git panel. Read ops take no
+  # session/receiver context — they inspect the on-disk working tree directly.
+  # `git_status`/`git_log` need no params; `git_diff` requires a binary `path`.
+  defp invoke(:git_status, _params, _ctx), do: client().git_status()
+
+  defp invoke(:git_diff, %{path: path}, _ctx) do
+    if is_binary(path), do: client().git_diff(path), else: {:error, :invalid_params}
+  end
+
+  defp invoke(:git_log, params, _ctx) do
+    count = Map.get(params, :count, 20)
+
+    if is_integer(count) and count > 0,
+      do: client().git_log(count),
+      else: {:error, :invalid_params}
+  end
+
+  # Mutating git ops (Owner-gated via :execute). `path`/`message` are required
+  # binaries; a bad shape is `:invalid_params` with no dist call, matching the
+  # browse ops.
+  defp invoke(:git_stage, %{path: path}, _ctx) do
+    if is_binary(path), do: client().git_stage(path), else: {:error, :invalid_params}
+  end
+
+  defp invoke(:git_unstage, %{path: path}, _ctx) do
+    if is_binary(path), do: client().git_unstage(path), else: {:error, :invalid_params}
+  end
+
+  defp invoke(:git_commit, %{message: message}, _ctx) do
+    if is_binary(message), do: client().git_commit(message), else: {:error, :invalid_params}
+  end
+
+  defp invoke(:git_revert_file, %{path: path}, _ctx) do
+    if is_binary(path), do: client().git_revert_file(path), else: {:error, :invalid_params}
+  end
 
   defp invoke(op, _params, _ctx), do: {:error, {:unsupported_op, op}}
 
