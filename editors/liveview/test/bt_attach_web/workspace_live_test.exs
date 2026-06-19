@@ -1484,6 +1484,34 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert selected_inspector_mode(html) == "float"
   end
 
+  test "the doc-block expand state survives a socket reconnect (BT-2570)", %{conn: conn} do
+    # A transient socket drop / redeploy / laptop wake must not re-collapse a doc
+    # block the user had expanded: `:doc_expanded` is a socket assign a fresh mount
+    # (which every reconnect is) re-inits to its collapsed default, so terminate/2
+    # stashes it in the registry and the resuming mount restores it. Same token
+    # across two mounts simulates the drop + reconnect (mirrors the window-resume
+    # test above). We drive the `toggle_doc` event and read the restored assign off
+    # the socket — `:doc_expanded` rides the editor toggle independently of whether
+    # any docced method is open, so the resume is asserted at the assign level.
+    conn = with_token(conn, "doc-resume-#{System.unique_integer([:positive])}")
+
+    {:ok, view1, _} = live(conn, "/")
+    assert :sys.get_state(view1.pid).socket.assigns.doc_expanded == false
+
+    # Expand the doc block on the first mount.
+    render_click(view1, "toggle_doc", %{})
+    assert :sys.get_state(view1.pid).socket.assigns.doc_expanded == true
+
+    # Disconnect: terminate/2 stashes the expand state and opens the grace window.
+    GenServer.stop(view1.pid)
+
+    # Reconnect inside the grace window with the SAME token: the session resumes and
+    # the stashed expand state is restored — the new mount comes up expanded even
+    # though its fresh assigns started from the collapsed default.
+    {:ok, view2, _} = live(conn, "/")
+    assert eventually(fn -> :sys.get_state(view2.pid).socket.assigns.doc_expanded == true end)
+  end
+
   test "Tidy windows re-cascades every window back on-screen (BT-2527)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     name = spawn_counter(view)

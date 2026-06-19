@@ -296,6 +296,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               socket
               |> bind_session(session_id, pid)
               |> restore_windows(token, origin)
+              |> restore_doc(token, origin)
 
             {:error, reason} ->
               assign(socket,
@@ -548,7 +549,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       # which is *also* present verbatim in the editable source below — is hidden
       # until the user expands it, so it no longer crowds the editor by default.
       # Server-held (not a native <details>) so the open state survives the
-      # frequent phx-change re-renders morphdom would otherwise reset.
+      # frequent phx-change re-renders morphdom would otherwise reset. This is the
+      # collapsed default for a fresh session; on a reconnect (which mounts a brand-
+      # new process) the prior expand state is restored from the registry stash by
+      # `restore_doc/3`, so an expanded block stays expanded across a socket drop,
+      # redeploy, or laptop wake (BT-2570).
       |> assign(:doc_expanded, false)
       |> assign(:windows, [])
       |> assign(:next_window_id, 1)
@@ -1034,7 +1039,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Expand/collapse the method-editor doc block (BT-2558). The signature stays
   # visible either way; this only reveals/hides the rendered `///` doc body so it
   # doesn't permanently occupy the top of the editor. Sticky across tab switches —
-  # one preference, not per-method — so a user who wants docs open keeps them open.
+  # one preference, not per-method — so a user who wants docs open keeps them open,
+  # and sticky across reconnects too (BT-2570): `terminate/2` stashes this flag in
+  # the registry and `restore_doc/3` re-applies it on the resuming mount, so a
+  # socket drop / redeploy / laptop wake no longer re-collapses an expanded block.
   def handle_event("toggle_doc", _params, socket) do
     {:noreply, assign(socket, doc_expanded: !socket.assigns.doc_expanded)}
   end
@@ -1756,10 +1764,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       case socket.assigns[:token] do
         token when is_binary(token) ->
           # Resumable session: stash the open floating-inspector windows so a
-          # reconnect within the grace window rebuilds the desk (BT-2527 #3), then
-          # defer teardown to the grace window. The stash dies with the entry if
-          # no reconnect arrives, so a genuinely-closed tab leaves nothing behind.
+          # reconnect within the grace window rebuilds the desk (BT-2527 #3), and
+          # likewise stash the doc-block expand state so an expanded block survives
+          # the reconnect rather than re-collapsing (BT-2570), then defer teardown
+          # to the grace window. The stash dies with the entry if no reconnect
+          # arrives, so a genuinely-closed tab leaves nothing behind.
           SessionRegistry.stash_windows(token, build_window_stash(socket))
+          SessionRegistry.stash_doc(token, socket.assigns[:doc_expanded])
           SessionRegistry.release(token)
 
         _ ->
@@ -4092,6 +4103,25 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       _ ->
         socket
+    end
+  end
+
+  # Restore the method-editor doc-block expand state on a genuine session resume
+  # (BT-2570). The block's `:doc_expanded` is a socket assign that a fresh mount —
+  # which every reconnect is — re-inits to its collapsed default, so a user who
+  # expanded it would lose that on any transient socket drop, redeploy, or laptop
+  # wake. `terminate/2` stashes the flag in the registry (Phoenix-node memory that
+  # outlives the reconnect); here we read it back and re-apply it. A fresh session
+  # or a failed bind (not connected) leaves the collapsed default untouched; a
+  # missing stash (nothing was expanded) likewise leaves the default.
+  defp restore_doc(socket, _token, :fresh), do: socket
+
+  defp restore_doc(socket, token, :resumed) do
+    with true <- socket.assigns[:connected],
+         expanded when is_boolean(expanded) <- SessionRegistry.doc_stash(token) do
+      assign(socket, :doc_expanded, expanded)
+    else
+      _ -> socket
     end
   end
 
