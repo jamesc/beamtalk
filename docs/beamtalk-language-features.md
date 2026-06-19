@@ -2845,8 +2845,8 @@ current project's source tree. `Workspace flush` writes only entries where
 | `revert: anEntry` | class | Re-install `prev_source` for that entry (itself a durable patch) |
 | `clear` | `ChangeLog` | Discard every pending entry without writing to disk (memory keeps the patches until restart) |
 | `flushKinds: kinds` | `FlushResult` | Flush only entries matching a Set of `#instance` / `#class` / `#'new-class'` / `#human` / `#agent` symbols (both dimensions AND together) |
-| `allEntries` | `List(ChangeEntry)` | Every logged entry, including prior-epoch, orphan, and shadowed entries |
-| `activeEntries` | `List(ChangeEntry)` | The default view: current-epoch, non-orphaned entries, collapsed to the latest entry per `(class, selector)` — one row per dirty method |
+| `allEntries` | `List(ChangeEntry)` | Every logged entry, including prior-epoch, orphan, shadowed, and clean entries |
+| `activeEntries` | `List(ChangeEntry)` | The default view: current-epoch, non-orphaned entries, collapsed to the latest entry per `(class, selector)` and filtered to those still differing from disk — one row per method that has a net change |
 
 Each `ChangeEntry` carries the patch's body, prior body, byte span, class,
 selector, intent (`durable` / `ephemeral`), flushable flag, `authorKind`
@@ -2860,6 +2860,14 @@ itself a patch (ADR 0082 "Undo") — append multiple entries for the same
 `(class, selector)`. The default view keeps only the latest (the one
 `Workspace flush` would apply) and marks the rest *shadowed*; `e isShadowed`
 identifies them, and `select:` still reaches them for audit.
+
+The latest entry is also compared against the current on-disk body: if it
+matches (the method was reverted back to its on-disk state) the entry is *clean*
+(`e isClean`) and drops out of the default view — there is no net change to
+flush. Each entry that *does* differ carries `e diff`, the net on-disk→in-memory
+unified diff (lines prefixed `  ` / `- ` / `+ `). So `Workspace changes` answers
+"what differs from disk", not "everything I touched this session"; the audit
+trail of every entry stays in `allEntries` / `select:`.
 
 The ChangeLog persists across workspace restart. On restart, the workspace
 assigns a fresh `epoch` and excludes prior-epoch entries from the active view

@@ -105,6 +105,42 @@ defmodule BtAttach.SessionRegistryTest do
     assert SessionRegistry.window_stash(reg, "tab-stash") == nil
   end
 
+  test "stash_doc persists the doc-block state that doc_stash reads once on resume (BT-2570)",
+       %{reg: reg} do
+    pid = fake_session()
+    SessionRegistry.register(reg, "tab-doc", "phoenix-doc", pid)
+
+    # Nothing stashed yet — a first connect has no prior expand state.
+    assert SessionRegistry.doc_stash(reg, "tab-doc") == nil
+
+    # terminate/2 stashes the expanded flag before the grace window opens.
+    assert :ok = SessionRegistry.stash_doc(reg, "tab-doc", true)
+
+    # The resuming mount reads it once and re-applies it...
+    assert SessionRegistry.doc_stash(reg, "tab-doc") == true
+    # ...then it's cleared, so a later re-render can't replay a stale value.
+    assert SessionRegistry.doc_stash(reg, "tab-doc") == nil
+  end
+
+  test "stash_doc round-trips a collapsed state too (BT-2570)", %{reg: reg} do
+    pid = fake_session()
+    SessionRegistry.register(reg, "tab-doc2", "phoenix-doc2", pid)
+
+    # A user who collapsed an expanded block should keep it collapsed on resume:
+    # `false` is a real preference, distinct from "nothing stashed" (`nil`).
+    assert :ok = SessionRegistry.stash_doc(reg, "tab-doc2", false)
+    assert SessionRegistry.doc_stash(reg, "tab-doc2") == false
+    assert SessionRegistry.doc_stash(reg, "tab-doc2") == nil
+  end
+
+  test "a doc stash for an unknown/non-binary token is a harmless no-op (BT-2570)", %{reg: reg} do
+    assert :ok = SessionRegistry.stash_doc(reg, "never", true)
+    assert SessionRegistry.doc_stash(reg, "never") == nil
+
+    assert :ok = SessionRegistry.stash_doc(reg, 123, true)
+    assert SessionRegistry.doc_stash(reg, nil) == nil
+  end
+
   test "a stash for an unknown/non-binary token is a harmless no-op", %{reg: reg} do
     # Unknown token: nothing to attach the stash to, and nothing to read back.
     assert :ok = SessionRegistry.stash_windows(reg, "never", %{windows: []})

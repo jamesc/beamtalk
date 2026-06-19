@@ -134,7 +134,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         intent: "durable",
         flushable: true,
         flushed: false,
-        author_kind: "liveview"
+        author_kind: "liveview",
+        diff: nil
       }
     end)
     |> Enum.reverse()

@@ -1186,13 +1186,16 @@ defmodule BtAttach.Workspace do
   end
 
   # A change entry belongs in the pending view when it is active (current epoch,
-  # not orphaned, not flushed) AND not shadowed by a newer entry for the same
-  # `(class, selector)`. The `shadowed` flag collapses repeated patches/reverts
-  # of one method to its latest entry (a revert is itself a patch, ADR 0082
-  # "Undo"), so the pane shows one row per dirty method — matching `Workspace
-  # changes` on every other surface (`ChangeLog activeEntries`). Older builds of
-  # the workspace may not emit `shadowed`; absence defaults to not-shadowed.
-  defp pending_entry?(%{active: true} = entry), do: Map.get(entry, :shadowed, false) != true
+  # not orphaned, not flushed), NOT shadowed by a newer entry for the same
+  # `(class, selector)`, and NOT clean (still differs from disk). `shadowed`
+  # collapses repeated patches/reverts of one method to its latest entry; `clean`
+  # drops a method reverted back to its on-disk body ("disappear when clean",
+  # BT-2575). Both mirror `ChangeLog activeEntries`, so the pane stays consistent
+  # with `Workspace changes` on every other surface. Older workspace builds may
+  # not emit these flags; absence defaults to not-shadowed / not-clean.
+  defp pending_entry?(%{active: true} = entry),
+    do: Map.get(entry, :shadowed, false) != true and Map.get(entry, :clean, false) != true
+
   defp pending_entry?(_), do: false
 
   @doc """
@@ -1243,13 +1246,21 @@ defmodule BtAttach.Workspace do
       intent: to_string(Map.get(entry, :intent, "")),
       flushable: Map.get(entry, :flushable, false) == true,
       flushed: Map.get(entry, :flushed, false) == true,
-      author_kind: to_string(Map.get(entry, :authorKind, ""))
+      author_kind: to_string(Map.get(entry, :authorKind, "")),
+      diff: present_diff(Map.get(entry, :diff))
     }
   end
 
   # ChangeLog selector is nil for a new-class entry; show a placeholder.
   defp present_selector(nil), do: "(class)"
   defp present_selector(value), do: to_string(value)
+
+  # The net on-disk → in-memory unified diff (BT-2575), or nil when the runtime
+  # computed none (clean, or not computable). `nil` over distribution arrives as
+  # the atom `nil`; anything non-binary degrades to nil so the pane never renders
+  # a junk value.
+  defp present_diff(diff) when is_binary(diff) and diff != "", do: diff
+  defp present_diff(_), do: nil
 
   # Turn a runtime `{error, Reason}` into a structured `#beamtalk_error{}` term so
   # the LiveView renders an actionable message. `ensure_structured_error/1` is the

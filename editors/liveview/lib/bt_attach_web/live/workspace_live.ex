@@ -296,6 +296,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               socket
               |> bind_session(session_id, pid)
               |> restore_windows(token, origin)
+              |> restore_doc(token, origin)
 
             {:error, reason} ->
               assign(socket,
@@ -548,7 +549,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       # which is *also* present verbatim in the editable source below — is hidden
       # until the user expands it, so it no longer crowds the editor by default.
       # Server-held (not a native <details>) so the open state survives the
-      # frequent phx-change re-renders morphdom would otherwise reset.
+      # frequent phx-change re-renders morphdom would otherwise reset. This is the
+      # collapsed default for a fresh session; on a reconnect (which mounts a brand-
+      # new process) the prior expand state is restored from the registry stash by
+      # `restore_doc/3`, so an expanded block stays expanded across a socket drop,
+      # redeploy, or laptop wake (BT-2570).
       |> assign(:doc_expanded, false)
       |> assign(:windows, [])
       |> assign(:next_window_id, 1)
@@ -1034,7 +1039,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Expand/collapse the method-editor doc block (BT-2558). The signature stays
   # visible either way; this only reveals/hides the rendered `///` doc body so it
   # doesn't permanently occupy the top of the editor. Sticky across tab switches —
-  # one preference, not per-method — so a user who wants docs open keeps them open.
+  # one preference, not per-method — so a user who wants docs open keeps them open,
+  # and sticky across reconnects too (BT-2570): `terminate/2` stashes this flag in
+  # the registry and `restore_doc/3` re-applies it on the resuming mount, so a
+  # socket drop / redeploy / laptop wake no longer re-collapses an expanded block.
   def handle_event("toggle_doc", _params, socket) do
     {:noreply, assign(socket, doc_expanded: !socket.assigns.doc_expanded)}
   end
@@ -1756,10 +1764,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       case socket.assigns[:token] do
         token when is_binary(token) ->
           # Resumable session: stash the open floating-inspector windows so a
-          # reconnect within the grace window rebuilds the desk (BT-2527 #3), then
-          # defer teardown to the grace window. The stash dies with the entry if
-          # no reconnect arrives, so a genuinely-closed tab leaves nothing behind.
+          # reconnect within the grace window rebuilds the desk (BT-2527 #3), and
+          # likewise stash the doc-block expand state so an expanded block survives
+          # the reconnect rather than re-collapsing (BT-2570), then defer teardown
+          # to the grace window. The stash dies with the entry if no reconnect
+          # arrives, so a genuinely-closed tab leaves nothing behind.
           SessionRegistry.stash_windows(token, build_window_stash(socket))
+          SessionRegistry.stash_doc(token, socket.assigns[:doc_expanded])
           SessionRegistry.release(token)
 
         _ ->
@@ -2353,7 +2364,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               flush_error: nil
             )
             |> compile_clean(tab_id, source)
-            |> promote_new_method_tab(tab_id, class, selector)
+            |> promote_new_method_tab(tab_id, saved_class, selector)
             |> assign_changes()
 
           {:error, reason} ->
@@ -3552,6 +3563,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # differ. With no known disk body (`nil` — a runtime-only or already-diverged
   # method) we conservatively flag, matching the prior behaviour.
   defp compile_clean(socket, nil, _source), do: socket
+  # `""` is the empty-state hidden form's `tab=""` sentinel (no tab to re-base);
+  # short-circuit to a no-op rather than try to look up a tab by an empty id.
   defp compile_clean(socket, "", _source), do: socket
 
   defp compile_clean(socket, tab_id, source) do
@@ -3589,10 +3602,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # open, the scratch tab is dropped and that existing tab is focused (no duplicate,
   # no stale "Class ▸ new" left behind). `focus_tab_keep_banner/3` refreshes the
   # edit assigns so the now-hidden selector reflects the saved name.
-  defp promote_new_method_tab(socket, tab_id, class, selector) do
+  defp promote_new_method_tab(socket, tab_id, saved_class, selector) do
     case find_tab(socket, tab_id) do
       %{new: true, side: side, source: source} = tab ->
-        new_id = "method:" <> class <> ":" <> side <> ":" <> selector
+        # Key the id off `saved_class` — the class the Facade reports the method
+        # was actually compiled onto — not the form-submitted class, so the id
+        # always names the class behind it (a crafted event with a mismatched
+        # `class` input can't desync the id from the compiled class).
+        new_id = "method:" <> saved_class <> ":" <> side <> ":" <> selector
         tabs = socket.assigns.tabs
 
         case find_tab(socket, new_id) do
@@ -4092,6 +4109,25 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       _ ->
         socket
+    end
+  end
+
+  # Restore the method-editor doc-block expand state on a genuine session resume
+  # (BT-2570). The block's `:doc_expanded` is a socket assign that a fresh mount —
+  # which every reconnect is — re-inits to its collapsed default, so a user who
+  # expanded it would lose that on any transient socket drop, redeploy, or laptop
+  # wake. `terminate/2` stashes the flag in the registry (Phoenix-node memory that
+  # outlives the reconnect); here we read it back and re-apply it. A fresh session
+  # or a failed bind (not connected) leaves the collapsed default untouched; a
+  # missing stash (nothing was expanded) likewise leaves the default.
+  defp restore_doc(socket, _token, :fresh), do: socket
+
+  defp restore_doc(socket, token, :resumed) do
+    with true <- socket.assigns[:connected],
+         expanded when is_boolean(expanded) <- SessionRegistry.doc_stash(token) do
+      assign(socket, :doc_expanded, expanded)
+    else
+      _ -> socket
     end
   end
 
@@ -5715,6 +5751,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <th>Intent</th>
                             <th>Flushable</th>
                             <th>Author</th>
+                            <%!-- net-vs-disk diff column (BT-2575) --%>
+                            <th>Change</th>
                             <%!-- revert column (BT-2293): owner-only --%>
                             <th :if={@role == :owner}></th>
                           </tr>
@@ -5726,6 +5764,19 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <td>{c.intent}</td>
                             <td>{if c.flushable, do: "yes", else: "no"}</td>
                             <td>{c.author_kind}</td>
+                            <%!-- The net change vs disk (ADR 0082 Phase 5,
+                                 BT-2575): an expandable unified diff (on-disk →
+                                 in-memory). A method reverted back to its on-disk
+                                 body has no net change and never reaches this
+                                 pane (`activeEntries` drops it), so a row always
+                                 carries a real diff; the `:if` is defensive for
+                                 entries whose diff could not be computed. --%>
+                            <td>
+                              <details :if={c[:diff]} class="bt-diff-disclosure">
+                                <summary>diff</summary>
+                                <pre class="bt-diff">{c[:diff]}</pre>
+                              </details>
+                            </td>
                             <%!-- Revert one pending method patch (ADR 0082
                                  Phase 5). Owner-only (`revert` is an :execute
                                  op). Only *instance-side* method patches are
@@ -6172,10 +6223,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                            save_method payload (class + selector + source) shape is
                            identical in every case. --%>
                         <input type="hidden" name="class" value={@edit_class} />
+                        <% tab = active_tab(assigns) %>
                         <%= cond do %>
-                          <% active_tab(assigns).kind == :def -> %>
+                          <% tab.kind == :def -> %>
                             <input type="hidden" name="selector" value="▸ class definition" />
-                          <% active_tab(assigns).new -> %>
+                          <% tab.new -> %>
                             <label class="new-method-selector">
                               <span class="nm-label mono">selector</span>
                               <input
