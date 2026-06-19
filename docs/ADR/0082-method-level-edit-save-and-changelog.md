@@ -565,22 +565,49 @@ flush corruption) and proposes an answer for sign-off.
 
 The accepted design makes the running image the source of truth between edits,
 with the ChangeLog as the dirty-state tracker and undo store and `flush` as the
-reconciliation step. Building UX on top of it revealed that **most ChangeLog
-features re-implement what files + git already provide for free**:
+reconciliation step. Building UX on top of it raised the worry that the
+ChangeLog **re-implements what files + git already provide** (`Workspace changes`
+≈ `git status`, `ChangeEntry diff` ≈ `git diff`, `ChangeLog revert:` ≈
+`git checkout`). For a Smalltalk live-programming tool that is expected; for a
+"nicer editor for Beamtalk" audience it is novel surface that fights file+git
+muscle memory. The question: how much should the cockpit lean on git, and is the
+ChangeLog redundant?
 
-| ChangeLog feature | Git equivalent |
-|-------------------|----------------|
-| `Workspace changes` (dirty set) | `git status` |
-| `ChangeEntry diff` (net vs disk) | `git diff` |
-| `ChangeLog revert:` | `git checkout -- <file>` |
-| "disappear when clean" (BT-2575) | git's own unmodified notion |
+### Prior art — Pharo: `.changes` + Iceberg are two layers, not one
 
-For a **Smalltalk live-programming** tool this is correct and the divergence
-from a file-based editor (VS Code) is the point — you are editing a *running
-image*, not files, so the image needs its own dirty/undo/diff model. For a
-**"nicer editor for Beamtalk"** audience it is a large novel surface that fights
-file+git muscle memory. The risk is building Smalltalk-path features while
-reasoning with VS-Code-path instincts — satisfying neither.
+Pharo answers this by running **two layers deliberately**:
+
+- **`.changes`** — an append-only log of every method accept, written
+  immediately (accept = installed in image + chunk appended; there is no
+  "flush"). Image-scoped, fine-grained, for crash recovery and method-level
+  undo. A recovery/power tool, not the daily diff surface.
+- **Iceberg** — a first-class IDE tool wrapping *real* git (libgit2): real
+  `status`, diffs, staging, commit, push/pull, branch, history, conflict
+  resolution, with **Tonel** (one human-readable file per class) as the on-disk
+  format. Pharo did **not** reinvent diff/history/branch — it surfaces actual
+  git, prominently, in the IDE.
+
+The decisive observation: **Pharo needs Iceberg+Tonel only because its image is
+the source of truth** — it must *project* the image into files to talk to git.
+Beamtalk made the opposite choice (ADR 0004 / principle #5): `.bt` files already
+*are* the source of truth and the git working tree. So once a change is flushed,
+`git diff` / `status` / `log` / `blame` work directly on the real files — no
+Tonel, no projection bridge. We get for free the subsystem Pharo had to build.
+
+This reframes the redundancy worry. The ChangeLog and git operate at **different
+layers**, separated by `flush`:
+
+| Layer | Tool | What its diff shows | Primary audience |
+|-------|------|---------------------|------------------|
+| In-memory, **pre-flush** | ChangeLog (`ChangeEntry diff`, `revert:`, disappear-when-clean) | memory ↔ disk — *what flush will write* | agents + power users |
+| On-disk, **post-flush** | git (panel in cockpit) | disk ↔ HEAD | humans |
+| History | git (`log` / `blame` / branch) | commit graph | humans |
+
+The ChangeLog's diff is **memory ↔ disk**, which **git cannot show** (it is not
+on disk yet) — so it is *complementary*, not redundant. The redundancy only
+appears if the ChangeLog is also made the history/branch/blame tool; that is
+git's job, and ours is already file-native, so we should **expose git in the
+cockpit** rather than rebuild it.
 
 ### Options
 
@@ -591,13 +618,15 @@ reasoning with VS-Code-path instincts — satisfying neither.
   on by default (save means save), surface real `git status`/`git diff` instead
   of a bespoke ChangeLog, and make live-no-flush editing the *special* mode.
   Minimises novelty; discards much of the ChangeLog UX investment.
-- **(3) Split by actor (recommended).** **Live-first for agents**,
-  **git-first for humans.** Agents (MCP/LiveView automation) benefit most from
-  the structured ChangeLog audit trail and machine-readable diff — keep the full
-  model for them. Humans default to `autoflush: true` and lean on git for diff /
-  revert / history; the ChangeLog remains available but is not the primary
-  human-facing surface. This is coherent (each actor gets the model that fits)
-  rather than straining one model across both, and it preserves the
+- **(3) Two layers, `flush` is the seam (recommended).** Keep both, mirroring
+  Pharo's `.changes`/Iceberg split, with our file-native advantage: the
+  **ChangeLog is the pre-flush layer** (memory↔disk diff, undo, agent audit
+  trail) and **git is the post-flush layer** (disk↔HEAD diff, history, branch),
+  exposed directly in the cockpit. Both actors cross the `flush` seam; they
+  differ only in where they spend time: **agents linger in the ChangeLog layer**
+  (structured audit + machine-readable pre-flush diff), **humans default to
+  `autoflush: true`** and live mostly in the git layer. This is coherent (each
+  layer does what it is best at; neither reinvents the other) and preserves the
   agent-native thesis without imposing image semantics on file-oriented humans.
 
 ### Proposed consequences (if option 3 is accepted)
@@ -607,10 +636,13 @@ reasoning with VS-Code-path instincts — satisfying neither.
   this interacts with the "one switch, applied uniformly across all surfaces"
   statement under *Behaviour* above, which would need to be relaxed to
   per-session).
-- BT-2575 (net-vs-disk diff / disappear-when-clean) ships as an
-  **agent-facing** capability (and the LiveView ChangeLog viewer for power
-  users), not as core human workflow. It is currently **held** pending this
-  decision.
+- BT-2575 (net-vs-disk diff / disappear-when-clean) ships as the **pre-flush**
+  diff git cannot show (agent-facing + a power-user ChangeLog viewer), not as
+  core human workflow. It is currently **held** pending this decision.
+- A **git panel in the cockpit** is added as the human-facing post-flush VCS
+  surface (the Iceberg-equivalent — thin, since `.bt` files are already git's
+  working tree: shell out to git + a LiveView view, no Tonel/projection layer).
+  Tracked separately under the LiveView cleanup epic.
 - BT-2293 (ChangeLog viewer / per-method Save / Save All) is re-scoped against
   the chosen positioning.
 - Surface parity is preserved: the *operations* remain identical across
