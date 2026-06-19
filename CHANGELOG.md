@@ -138,7 +138,7 @@
 - **LiveView IDE `bin/server` launcher** — the release now includes a `bin/server <workspace-id>` convenience script that resolves node + cookie from `~/.beamtalk/workspaces/` and generates an ephemeral `SECRET_KEY_BASE` if unset (#2555).
 - Fix LiveView IDE eval/inspect/browse sending nested params instead of flat op params to the workspace protocol (BT-2496).
 - Fix LiveView IDE method editor class/selector inputs not populating at mount — fields now sync from the starter tab into edit assigns (BT-2518).
-- **Cockpit: resizeable panels** — all cockpit panel dividers are now draggable (vertical and horizontal), with min-size clamps and `localStorage` persistence across sessions (BT-2576).
+- **Cockpit: resizable panels** — all cockpit panel dividers are now draggable (vertical and horizontal), with min-size clamps and `localStorage` persistence across sessions (BT-2576).
 - **Cockpit: System Browser native-class Erlang source** — `native:` classes show a read-only "Erlang backend" pane on the class-definition tab, with jump-to-implementation from a `self delegate` facade method to the corresponding `handle_call` clause in the backing `.erl` module (BT-2578).
 - **Cockpit: collapsible method-editor doc block** — the method-editor doc block is now collapsed by default (signature line visible as expand/collapse toggle), removing the duplicated doc-comment display between the rendered block and the editable source (BT-2558).
 - **Cockpit: New Class form in System Browser** — the create-a-class widget moves from the method-editor panel into the System Browser header as a collapsed-by-default form; the target path `src/<ClassName>.bt` is derived automatically from the declared class name (BT-2293).
