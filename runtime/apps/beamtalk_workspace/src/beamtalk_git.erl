@@ -91,8 +91,8 @@ git_status() ->
     case run_git(git_status, [<<"status">>, <<"--porcelain=v2">>, <<"-b">>, <<"-z">>]) of
         {ok, Stdout, 0} ->
             {ok, parse_status(Stdout)};
-        {ok, _Stdout, Code} ->
-            {error, exit_error(git_status, Code, <<"git status failed">>)};
+        {ok, Stdout, Code} ->
+            {error, exit_error(git_status, Code, with_stderr(<<"git status failed">>, Stdout))};
         {error, _} = Err ->
             Err
     end.
@@ -110,13 +110,16 @@ git_diff(Path) when is_binary(Path) ->
             case run_git(git_diff, [<<"diff">>, <<"--staged">>, <<"--">>, Path]) of
                 {ok, StagedDiff, 0} ->
                     {ok, #{worktree => WorktreeDiff, staged => StagedDiff}};
-                {ok, _, Code} ->
-                    {error, exit_error(git_diff, Code, <<"git diff --staged failed">>)};
+                {ok, StagedOut, Code} ->
+                    {error,
+                        exit_error(
+                            git_diff, Code, with_stderr(<<"git diff --staged failed">>, StagedOut)
+                        )};
                 {error, _} = Err ->
                     Err
             end;
-        {ok, _, Code} ->
-            {error, exit_error(git_diff, Code, <<"git diff failed">>)};
+        {ok, WorktreeOut, Code} ->
+            {error, exit_error(git_diff, Code, with_stderr(<<"git diff failed">>, WorktreeOut))};
         {error, _} = Err ->
             Err
     end;
@@ -140,8 +143,8 @@ git_log(Count) when is_integer(Count), Count > 0 ->
     case run_git(git_log, Args) of
         {ok, Stdout, 0} ->
             {ok, parse_log(Stdout)};
-        {ok, _, Code} ->
-            {error, exit_error(git_log, Code, <<"git log failed">>)};
+        {ok, Stdout, Code} ->
+            {error, exit_error(git_log, Code, with_stderr(<<"git log failed">>, Stdout))};
         {error, _} = Err ->
             Err
     end;

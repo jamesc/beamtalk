@@ -204,7 +204,7 @@ status_empty_test() ->
     ?assertEqual([], maps:get(files, Status)).
 
 %%% ============================================================================
-%%% Log parsing (git log --format=%H<FS>%h<FS>%s<FS>%an<FS>%aI<RS>)
+%%% Log parsing (git log --format=%H<FS>%h<FS>%an<FS>%aI<FS>%s<RS>)
 %%% ============================================================================
 
 log_single_commit_test() ->
