@@ -3094,12 +3094,18 @@ defmodule BtAttachWeb.WorkspaceLive do
         %{
           base
           | backing_module: Map.get(r, "backing_module"),
-            source_file: Map.get(r, "source_file"),
+            # The Erlang op returns the atom `null` for absent values, which
+            # arrives over distribution as the Elixir atom `:null` (NOT `nil`).
+            # Normalise so template `is_nil/1` guards and `:if` truthiness behave
+            # (a raw `:null` is truthy and `is_nil(:null)` is false) — otherwise
+            # the "no matching handle_call clause" explanation never renders and a
+            # stripped-source path would interpolate as ":null" (BT-2578).
+            source_file: binary_or_nil(Map.get(r, "source_file")),
             source_origin: Map.get(r, "source_origin"),
             editable: Map.get(r, "editable") == true,
             content: nonempty_string(Map.get(r, "content")),
             clauses: Map.get(r, "clauses", []),
-            selected_clause: Map.get(r, "selected_clause")
+            selected_clause: map_or_nil(Map.get(r, "selected_clause"))
         }
 
       {:error, reason} ->
@@ -3116,6 +3122,15 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp nonempty_string(s) when is_binary(s) and s != "", do: s
   defp nonempty_string(_), do: nil
+
+  # Normalise the Erlang `null` atom (delivered as `:null` over distribution) and
+  # any non-conforming value to a clean Elixir `nil` / typed value, so template
+  # guards (`is_nil/1`, `:if`) and interpolation behave (BT-2578).
+  defp map_or_nil(m) when is_map(m), do: m
+  defp map_or_nil(_), do: nil
+
+  defp binary_or_nil(b) when is_binary(b), do: b
+  defp binary_or_nil(_), do: nil
 
   # True when the native pane is currently showing `class`'s backing source.
   defp native_shown?(%{native_view: %{class: shown}}, class), do: shown == class

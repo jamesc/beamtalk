@@ -259,22 +259,28 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        "editable" => false,
        "content" => "handle_call({readLine, []}, From, State) ->\n    {noreply, State}.\n",
        "clauses" => [%{"selector" => "readLine", "line" => 1}],
+       # The real op returns the Erlang atom `null` for "no matching clause", which
+       # arrives over distribution as `:null` — NOT `nil`. The stub must mirror
+       # that so the LiveView's normalisation is actually exercised (BT-2578).
        "selected_clause" =>
-         if(selector == "readLine", do: %{"selector" => "readLine", "line" => 1}, else: nil)
+         if(selector == "readLine", do: %{"selector" => "readLine", "line" => 1}, else: :null)
      }}
   end
 
   def browse_native_source("Headless", _selector) do
+    # `.beam`-only build: the Erlang op returns the `null` atom for the absent
+    # source path / content / clause, delivered as `:null` over distribution —
+    # mirror it so the empty-state path is exercised on the real wire shape.
     {:value,
      %{
        "class" => "Headless",
        "backing_module" => "beamtalk_headless",
-       "source_file" => nil,
+       "source_file" => :null,
        "source_origin" => "stdlib",
        "editable" => false,
-       "content" => nil,
+       "content" => :null,
        "clauses" => [],
-       "selected_clause" => nil
+       "selected_clause" => :null
      }}
   end
 
