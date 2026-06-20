@@ -143,10 +143,10 @@ single_method_splice_writes_atomically(#{proj_dir := ProjDir}) ->
 
 %% BT-2577 regression: editing a doc-commented, indented method and flushing must
 %% preserve the file indentation and the single doc comment — not duplicate the
-%% doc or dedent the method. The span is the verbatim doc-inclusive slice (what
-%% `resolve_method_span` now returns); the stored body is the compiler's
-%% canonical column-0 form (`unparse_method`); flush re-indents it to the span's
-%% base before splicing.
+%% doc or dedent the method. BT-2584: the stored ChangeLog body is now the on-disk
+%% byte-span shape (`source_ref == disk[span]` by construction — the install hook
+%% reshaped the compiler's canonical body via `reindent_method_source`), so flush
+%% splices it verbatim with no reshaping.
 doc_commented_method_flush_preserves_indent_and_doc(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "counter.bt"]),
     Original = <<
@@ -162,8 +162,10 @@ doc_commented_method_flush_preserves_indent_and_doc(#{proj_dir := ProjDir}) ->
     %% The span covers the verbatim doc-inclusive, indented slice.
     Slice = <<"  /// Decrease by one.\n  decrement -> Integer => self.value := self.value - 1\n">>,
     {Start, End, OldBody} = locate(Original, Slice),
-    %% The stored ChangeLog body is the compiler's canonical column-0 form.
-    NewBody = <<"/// Decrease by one.\ndecrement -> Integer => self.value := self.value - 2\n">>,
+    %% BT-2584: the stored ChangeLog body is already in the on-disk byte-span
+    %% shape (file-indented), a drop-in for `disk[span]`.
+    NewBody =
+        <<"  /// Decrease by one.\n  decrement -> Integer => self.value := self.value - 2\n">>,
     {ok, _} = beamtalk_workspace_changelog:append(
         method_input(
             <<"Counter">>, <<"decrement">>, NewBody, OldBody, list_to_binary(File), Start, End
@@ -189,34 +191,30 @@ doc_commented_method_flush_preserves_indent_and_doc(#{proj_dir := ProjDir}) ->
     ].
 
 %%====================================================================
-%% reindent/2 (BT-2577)
+%% Verbatim splice (BT-2584)
 %%====================================================================
 
-reindent_shifts_canonical_body_to_base_test() ->
+%% BT-2584: the stored body is already disk-shaped, so the splice is a verbatim
+%% byte replacement. A doc-inclusive, file-indented body splices in unchanged.
+verbatim_splice_replaces_span_exactly_test() ->
+    Body = <<
+        "Actor subclass: Counter\n"
+        "  /// doc\n"
+        "  decrement => self.v - 1\n"
+        "end\n"
+    >>,
+    Slice = <<"  /// doc\n  decrement => self.v - 1\n">>,
+    Start = byte_size(<<"Actor subclass: Counter\n">>),
+    End = Start + byte_size(Slice),
+    DiskShaped = <<"  /// doc\n  decrement => self.v - 2\n">>,
     ?assertEqual(
-        <<"  /// doc\n  decrement => self.v - 2\n">>,
-        beamtalk_workspace_flush:reindent(
-            <<"  ">>, <<"/// doc\ndecrement => self.v - 2\n">>
-        )
-    ).
-
-reindent_preserves_relative_indentation_test() ->
-    %% Column-0 selector with a 2-space body line shifts to base 2 / base+2.
-    ?assertEqual(
-        <<"  foo =>\n    body\n">>,
-        beamtalk_workspace_flush:reindent(<<"  ">>, <<"foo =>\n  body\n">>)
-    ).
-
-reindent_empty_base_is_identity_test() ->
-    ?assertEqual(
-        <<"foo => 1\n">>,
-        beamtalk_workspace_flush:reindent(<<>>, <<"foo => 1\n">>)
-    ).
-
-reindent_blank_lines_stay_empty_test() ->
-    ?assertEqual(
-        <<"  a\n\n  b\n">>,
-        beamtalk_workspace_flush:reindent(<<"  ">>, <<"a\n\nb\n">>)
+        <<
+            "Actor subclass: Counter\n"
+            "  /// doc\n"
+            "  decrement => self.v - 2\n"
+            "end\n"
+        >>,
+        beamtalk_workspace_flush:splice(Body, {Start, End}, DiskShaped)
     ).
 
 shadowed_entry_is_marked_flushed(#{proj_dir := ProjDir}) ->
