@@ -146,6 +146,9 @@
 - Fix LiveView IDE System Browser not showing stdlib class definitions — class definitions are now synthesized from reflection for every loaded class, independent of a disk source file. The method editor opens to an empty tab strip with a "new method" entry for creating methods directly in the browser (#2637, #2634).
 - Fix LiveView IDE method-editor false `expected expression, found ⇒` diagnostics — the `diagnostics` op now accepts a `mode` parameter so the System Browser parses bare method bodies with `parse_method` instead of the full-module grammar (BT-2569).
 - Fix LiveView IDE method-editor doc block rendering template whitespace — `white-space: pre-wrap` on doc-block spans no longer inherits into toggle/signature elements (#2633).
+- **Cockpit: Git panel** — the LiveView IDE gains a post-flush VCS surface (ADR 0082 Amendment 1): a "Git" dock tab exposing working-tree status, per-file diff, commit log, stage/unstage, commit, and revert — all shell-out to system `git` (not a libgit2 NIF) so hooks, GPG signing, and credential helpers apply. Read ops are Observer-visible; mutating ops are Owner-gated via Facade RBAC. Git ops are cockpit surface-specific — CLI/terminal users use `git` directly (BT-2586).
+- **LSP go-to-implementation lands on `handle_call` clause** — `textDocument/definition` on a `native:` class's `self delegate` method now redirects into the backing `.erl` file and lands on the matching `handle_call` clause line (previously opened the file top). The selector→clause-line algorithm is shared as a conformance corpus between the Rust LSP and the Erlang runtime so both surfaces resolve identically (BT-2582).
+- Fix LiveView IDE doc-block expand state collapsing on WebSocket reconnect — the `:doc_expanded` assign is now stashed/restored across reconnects via the existing `SessionRegistry` pattern, so an expanded doc block survives network blips and redeploys (BT-2570).
 
 ### Internal
 
