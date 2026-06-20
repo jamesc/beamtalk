@@ -153,7 +153,7 @@ browse_classes() ->
         catch
             _:_ -> []
         end,
-    %% BT-2596: the set of loaded TestCase subclasses, computed once, so each row
+    %% BT-2557: the set of loaded TestCase subclasses, computed once, so each row
     %% can carry an `is_test` flag. The browser groups these under a synthetic
     %% "Tests" category — pure reflection over the class hierarchy, no user code.
     TestClasses = sets:from_list(safe_test_classes()),

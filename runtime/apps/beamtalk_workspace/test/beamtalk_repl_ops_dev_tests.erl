@@ -243,7 +243,7 @@ handle_describe_contains_eval_op_test() ->
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"eval">>, Ops)).
 
-%% BT-2596: the load-tests op is advertised so clients can discover the
+%% BT-2557: the load-tests op is advertised so clients can discover the
 %% test-runner pane's "Load tests" affordance.
 handle_describe_contains_load_tests_op_test() ->
     Msg = make_msg(<<"describe">>, <<"d-2b">>, undefined, false),
