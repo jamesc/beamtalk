@@ -269,6 +269,94 @@ git_commit_rejects_non_binary_message_test() ->
     ?assertMatch({error, _}, beamtalk_git:git_commit(42)).
 
 %%% ============================================================================
+%%% Edge paths and error recovery
+%%% ============================================================================
+
+%% An ignored-file entry (`! <path>`) is surfaced with worktree => ignored.
+status_ignored_file_test() ->
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"! .gitignore_cache">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(
+        [#{path => <<".gitignore_cache">>, index => unmodified, worktree => ignored}],
+        maps:get(files, Status)
+    ).
+
+%% An unrecognised line prefix is silently skipped; surrounding valid entries survive.
+status_unknown_prefix_skipped_test() ->
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"? before.bt">>,
+        <<"WEIRD_PREFIX something">>,
+        <<"? after.bt">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    Paths = [maps:get(path, F) || F <- maps:get(files, Status)],
+    ?assertEqual([<<"before.bt">>, <<"after.bt">>], Paths).
+
+%% An ordinary `1` entry with no space in the body (can't split XY from rest)
+%% is silently dropped; other entries are unaffected.
+status_malformed_no_xy_split_skipped_test() ->
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"1 NOSPACE">>,
+        <<"? good.bt">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(
+        [#{path => <<"good.bt">>, index => unmodified, worktree => untracked}],
+        maps:get(files, Status)
+    ).
+
+%% An ordinary `1` entry whose body has XY but too few metadata fields to drop
+%% (drop_fields runs out of spaces) is silently dropped.
+status_malformed_too_few_fields_skipped_test() ->
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"1 .M only_one_field">>,
+        <<"? good.bt">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(
+        [#{path => <<"good.bt">>, index => unmodified, worktree => untracked}],
+        maps:get(files, Status)
+    ).
+
+%% A malformed `# branch.ab` line (not matching `+A -B`) defaults to {0, 0}.
+status_malformed_ahead_behind_test() ->
+    Bin = nul_join([
+        <<"# branch.head main">>,
+        <<"# branch.ab garbage">>
+    ]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(0, maps:get(ahead, Status)),
+    ?assertEqual(0, maps:get(behind, Status)).
+
+%% classify_xy with a binary that is not exactly 2 bytes falls back to
+%% {unmodified, unmodified} rather than crashing.
+classify_xy_non_two_byte_test() ->
+    ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<>>)),
+    ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<"X">>)),
+    ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<"XYZ">>)).
+
+%% The `T` status character maps to type_changed.
+classify_xy_type_changed_test() ->
+    ?assertEqual({type_changed, type_changed}, beamtalk_git:classify_xy(<<"TT">>)),
+    ?assertEqual({type_changed, unmodified}, beamtalk_git:classify_xy(<<"T.">>)).
+
+%% A log record that lacks the required 5 fields (Sha, Short, Author, Ts, Subject+)
+%% is filtered out by parse_log rather than crashing or returning partial data.
+log_too_few_fields_skipped_test() ->
+    FS = 16#1f,
+    RS = 16#1e,
+    ThreeFields = <<"sha", FS, "short", FS, "author", RS>>,
+    FourFields = <<"sha", FS, "short", FS, "author", FS, "ts", RS>>,
+    ?assertEqual([], beamtalk_git:parse_log(ThreeFields)),
+    ?assertEqual([], beamtalk_git:parse_log(FourFields)).
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
