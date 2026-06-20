@@ -6,49 +6,52 @@
 // directly (sync gen_server:call), and method2 is dispatched on that value
 
 TestCase subclass: ActorMessageChainingTest
+  field: a = nil
+
+  setUp => self.a := ActorChainingFixture spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   // Chained send: actor method returning a primitive, chained with printString
   testChainedPrimitiveMethodResult =>
-    a := ActorChainingFixture spawn
     // getValue returns 0 directly; printString dispatches on 0
-    self assert: a getValue printString equals: "0"
+    self assert: self.a getValue printString equals: "0"
 
   // Chained send: method on actor returning itself
   testChainedSelfReturn =>
-    a := ActorChainingFixture spawn
     // getSelf returns the actor directly; getValue dispatches on the actor
-    self assert: a getSelf getValue equals: 0
+    self assert: self.a getSelf getValue equals: 0
 
   // String interpolation with actor values
   testStringInterpolationWithActorValues =>
-    a := ActorChainingFixture spawn
-    a increment
-    self assert: "val={a getValue}" equals: "val=1"
+    self.a increment
+    self assert: "val={self.a getValue}" equals: "val=1"
 
   // Multiple sequential sends
   testSequentialSends =>
-    a := ActorChainingFixture spawn
-    a increment; increment; increment
-    self assert: a getValue equals: 3
+    self.a increment; increment; increment
+    self assert: self.a getValue equals: 3
 
   // Chained send: method dispatched on actor-method result
   testChainedSendOnActorMethodResult =>
-    a := ActorChainingFixture spawnWith: #{#value => 42}
+    // Uses a dedicated local actor (not the setUp `self.a`) to exercise the
+    // keyword `spawnWith:` constructor path; `withValueActor` is a local, since
+    // field access in Beamtalk always goes through `self.`
+    withValueActor := ActorChainingFixture spawnWith: #{#value => 42}
+    // Local actor isn't reachable by tearDown; stop it via ensure: so it's
+    // torn down even if the assertion fails
     // getName returns a string directly; size is dispatched on the string
-    self assert: a getName size equals: 7
+    [
+      self assert: withValueActor getName size equals: 7
+    ] ensure: [withValueActor stop]
 
   // Chained send: getValue → printString (sync dispatch, no intermediary Future)
-  testImplicitChaining =>
-    a := ActorChainingFixture spawn
-    self assert: a getValue printString equals: "0"
+  testImplicitChaining => self assert: self.a getValue printString equals: "0"
 
   // Chained send on string result
-  testChainedOnStringResult =>
-    a := ActorChainingFixture spawn
-    self assert: a getName size equals: 7
+  testChainedOnStringResult => self assert: self.a getName size equals: 7
 
   // Multi-step chaining (actor → actor → primitive)
   testMultiStepChaining =>
-    a := ActorChainingFixture spawn
     // getSelf returns the actor; getValue returns 0; printString dispatches on 0
-    self assert: a getSelf getValue printString equals: "0"
+    self assert: self.a getSelf getValue printString equals: "0"
