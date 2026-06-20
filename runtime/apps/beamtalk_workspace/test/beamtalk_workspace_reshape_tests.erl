@@ -101,9 +101,13 @@ parity_test_() ->
 
 setup_compiler() ->
     application:ensure_all_started(compiler),
+    %% `ensure_all_started/1` returns `{ok, _}` (including `{ok, []}` when the apps
+    %% are already running) — the `{already_started, _}` tuple is from
+    %% `application:start/1`, not this call. Surface a genuine start failure
+    %% (missing port binary, crashed dependency) instead of `badmatch`-crashing.
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
+        {error, Reason} -> error({compiler_start_failed, Reason})
     end,
     ok.
 
