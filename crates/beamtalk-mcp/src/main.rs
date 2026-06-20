@@ -366,9 +366,8 @@ where
             // Overall deadline elapsed mid-read.
             Err(_) => {
                 return Err(format!(
-                    "beamtalk repl did not report a port within {}s — workspace boot stalled.\n\
-                     Captured output:\n{captured}",
-                    timeout.as_secs()
+                    "beamtalk repl did not report a port within {timeout:?} — workspace boot stalled.\n\
+                     Captured output:\n{captured}"
                 )
                 .into());
             }
