@@ -1143,6 +1143,26 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Read the workspace's `autoflush` setting (ADR 0082 Phase 4, BT-2290) — whether a
+  per-method save writes through to disk immediately (`true`) or only patches the
+  live image until an explicit `flush/0` (`false`, the default).
+
+  Reads `beamtalk_workspace_meta:get_setting(autoflush, false)` in a single RPC.
+  Used by the cockpit (BT-2590) to skip the post-save git refresh when autoflush
+  is off: an in-memory-only save leaves the on-disk working tree untouched, so the
+  git shell-out would return an identical result. A workspace that is unreachable
+  or returns a non-boolean defaults to `false` (the safe, no-extra-shell-out
+  choice) rather than crashing the caller.
+  """
+  @spec autoflush() :: boolean()
+  def autoflush do
+    case rpc(:beamtalk_workspace_meta, :get_setting, [:autoflush, false]) do
+      flag when is_boolean(flag) -> flag
+      _other -> false
+    end
+  end
+
+  @doc """
   List the workspace's active change history (ADR 0082 `Workspace changes`) — the
   per-method ChangeLog entries that are dirty (installed in memory, not yet
   flushed to disk). This is the ChangeLog-coherence view: after `save_method/3`,
