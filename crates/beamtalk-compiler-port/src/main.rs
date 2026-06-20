@@ -2010,8 +2010,9 @@ fn handle_resolve_method_span(request: &Map) -> Term {
 /// - `base_indent` (binary, optional): the leading whitespace of the on-disk
 ///   definition's first line (empty = identity)
 ///
-/// Response: `#{status => ok, source => <<...>>}`. Never fails — a pure
-/// string reshape.
+/// Response: `#{status => ok, source => <<...>>}`. The transform itself never
+/// fails — it is a pure string reshape. (The Erlang port wrappers still surface
+/// transport/timeout errors as `{error, port_error, _}` around this call.)
 fn handle_reindent_method_source(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);

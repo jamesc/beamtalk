@@ -903,7 +903,11 @@ reindent_method_source(Port, Source, BaseIndent) when
                         domain => [beamtalk, runtime], status => Status
                     }),
                     {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
+            after 5000 ->
+                %% Shorter than the 30s used by the parse/search commands: this
+                %% is a pure in-memory string reshape, so a stall means a wedged
+                %% port, not a slow operation. Fail fast to limit the blast radius
+                %% on the shared compiler gen_server during a live-patch install.
                 ?LOG_ERROR("Compiler port timeout (reindent)", #{
                     domain => [beamtalk, runtime], port => Port
                 }),
