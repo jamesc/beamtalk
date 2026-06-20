@@ -382,6 +382,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp bind_session(socket, session_id, pid) do
     with :ok <- Facade.dispatch(:subscribe_transcript, %{pid: self()}, ctx(socket)),
          :ok <- Facade.dispatch(:subscribe_bindings, %{pid: self()}, ctx(socket)) do
+      # BT-2598: subscribe to the class-lifecycle push stream so any source change
+      # — a git revert's disk→image reload, another session's flush, an external
+      # edit reloaded into the image — pushes a `ClassLoaded`/`ClassRemoved`
+      # refresh trigger to this LiveView. Best-effort: unlike the transcript /
+      # bindings streams the cockpit can still function without it (open windows
+      # simply fall back to the re-activation re-read), so a subscribe failure is
+      # logged but does not tear down the session.
+      subscribe_classes_best_effort(socket)
+
       socket
       |> assign(:connected, true)
       |> assign(:node, Workspace.node_name())
@@ -601,12 +610,31 @@ defmodule BtAttachWeb.WorkspaceLive do
         # dangling subscriber or an orphaned session behind.
         Workspace.unsubscribe_transcript(self())
         Workspace.unsubscribe_bindings(self())
+        Workspace.unsubscribe_classes(self())
         force_close(socket.assigns[:token], pid)
 
         assign(socket,
           connected: false,
           error: "subscribe failed: #{inspect(other)}"
         )
+    end
+  end
+
+  # BT-2598: best-effort subscribe to the class-lifecycle push stream. A failure
+  # (an older workspace without the wiring, a transient dist hiccup) is logged but
+  # does not fail the mount — the cockpit degrades to the clean-tab re-read on
+  # re-activation rather than a live push, and re-subscribes on the next remount.
+  defp subscribe_classes_best_effort(socket) do
+    case Facade.dispatch(:subscribe_classes, %{pid: self()}, ctx(socket)) do
+      :ok ->
+        :ok
+
+      other ->
+        Logger.warning("subscribe_classes failed (push refresh degraded): #{inspect(other)}",
+          domain: [:beamtalk, :liveview]
+        )
+
+        :ok
     end
   end
 
@@ -1748,6 +1776,24 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # Class-lifecycle push (`classes` stream, BT-2598): a class was (re)loaded or
+  # removed somewhere in the workspace — a git revert's disk→image reload, another
+  # session's flush, an MCP `save_method`, an external edit reloaded into the
+  # image. Like the bindings stream this is a *refresh trigger*, not the data: on
+  # the signal we re-pull the source-dependent surfaces so open windows reflect
+  # the new image without a manual refresh. `:ClassLoaded` covers hot redefinition
+  # (the revert case); `:ClassRemoved` covers a teardown. Both refresh the same
+  # surfaces — the browser class list, the active ChangeLog, and every open clean
+  # method/definition editor tab — so a removed class's stale tab re-reads to its
+  # (now empty / disk) state too.
+  def handle_info(
+        {:beamtalk_announcement, _sub_ref, lifecycle, _handler, _event},
+        socket
+      )
+      when lifecycle in [:ClassLoaded, :ClassRemoved] do
+    {:noreply, refresh_after_source_change(socket)}
+  end
+
   # Per-object change push (BT-2492, backend BT-2489): the watched actor committed
   # a state write. Like the bindings stream this is a *refresh trigger*, not the
   # data — re-read the object's fields + pid stats through the read-surface so the
@@ -1999,11 +2045,131 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Run a mutating git op through the Facade (Owner-gated) and refresh the panel
   # so the new status/log is reflected. An :unauthorized/error result surfaces in
   # the panel rather than crashing it.
+  # A content-mutating git op (revert / `git restore -- <path>`) needs more than a
+  # git-panel refresh: it changes the on-disk working tree, so it must (1) not
+  # silently clobber unflushed in-memory edits for that path, and (2) reload the
+  # affected module(s) into the live image so image == disk and open windows
+  # reflect the reverted code (BT-2598). Routed through `git_revert_event/2`.
+  defp git_mutate_event(socket, :git_revert_file, %{path: path} = params) do
+    if path_has_pending_edits?(socket, path) do
+      # Decision 2: do not revert under unflushed in-memory ChangeLog edits — live
+      # work would be silently lost. Block and tell the user to flush or discard
+      # the pending entry first. No git call is made.
+      assign(socket, git_error: pending_revert_warning(path))
+    else
+      git_revert_event(socket, params)
+    end
+  end
+
+  # Stage / unstage / commit do not change working-tree *content* (the file the
+  # user is editing), so they keep the original behaviour: dispatch and refresh
+  # the git panel only.
   defp git_mutate_event(socket, op, params) do
     case Facade.dispatch(op, params, ctx(socket)) do
       {:ok, _} -> assign_git(socket)
       {:error, reason} -> assign(socket, git_error: facade_error(reason))
     end
+  end
+
+  # Revert the working-tree change, then reload the reverted file into the live
+  # image and refresh every source-dependent surface (browser, ChangeLog, open
+  # editor tabs) plus the git panel. The reload's `ClassLoaded` push *also* drives
+  # the refresh for other connected sessions; reloading + refreshing here makes the
+  # acting session update synchronously rather than waiting on its own push.
+  defp git_revert_event(socket, %{path: path} = params) do
+    case Facade.dispatch(:git_revert_file, params, ctx(socket)) do
+      {:ok, _} ->
+        {reloaded, reload_note} = reload_reverted_path(socket, path)
+
+        socket
+        # The reload reconciled the image to the reverted (disk) body, so the
+        # reloaded class' open tabs are no longer divergent — clear their
+        # `unflushed` badge before the re-read (which would otherwise preserve the
+        # already-set divergence, mirroring `clear_disk_differs/2` after a flush).
+        |> assign(:tabs, clear_disk_differs(socket.assigns.tabs, reloaded))
+        |> refresh_after_source_change()
+        |> assign_git()
+        # A clean revert whose reload failed surfaces its note in the shared
+        # status area (the same slot revert / new-class outcomes use), NOT
+        # `git_error` — `assign_git/1` and the async git load both clear
+        # `git_error`, so the note would not survive there. The working tree was
+        # reverted, but the image may not have reloaded.
+        |> maybe_status_error(reload_note)
+
+      {:error, reason} ->
+        assign(socket, git_error: facade_error(reason))
+    end
+  end
+
+  defp maybe_status_error(socket, nil), do: socket
+  defp maybe_status_error(socket, note), do: status_error(socket, note)
+
+  # Reload the reverted file from disk into the live image (image == disk, BT-2585),
+  # returning the `{class, selector}` set of the reloaded class' currently-open
+  # `:method` tabs (so their `unflushed` badge can be cleared) and a reload-failure
+  # note (or nil). A reload failure (a deleted file, a file with a compile error at
+  # HEAD) is non-fatal: the working tree was still reverted, and the subsequent
+  # refresh re-reads what the image can serve; the note is surfaced afterwards.
+  defp reload_reverted_path(socket, path) do
+    case Facade.dispatch(:reload, %{path: path}, ctx(socket)) do
+      {:ok, class_names} when is_list(class_names) ->
+        {reloaded_tab_keys(socket.assigns.tabs, class_names), nil}
+
+      {:error, reason} ->
+        {MapSet.new(), "Reverted #{path}, but reload failed: #{facade_error(reason)}"}
+    end
+  end
+
+  # The `{class, selector}` keys of open `:method` tabs whose class is among the
+  # just-reloaded class names — the tabs whose `unflushed` badge a revert should
+  # clear (their image body now matches the reverted disk body).
+  defp reloaded_tab_keys(tabs, class_names) do
+    reloaded = MapSet.new(class_names)
+
+    for %{kind: :method, class: class, selector: selector} <- tabs,
+        MapSet.member?(reloaded, class),
+        into: MapSet.new(),
+        do: {class, selector}
+  end
+
+  # Whether the file `path` git is about to revert has unflushed in-memory
+  # ChangeLog edits (BT-2598 decision 2). The cockpit `changes` rows carry only
+  # `class`/`selector`, so map each pending class to its source file via the
+  # browser class list (which carries `source_file`) and compare against `path`.
+  # Path comparison is by trailing-segment match so a project-relative `path`
+  # (`src/Foo.bt`) matches an absolute or differently-rooted `source_file`.
+  defp path_has_pending_edits?(socket, path) do
+    pending_classes =
+      for %{class: class} <- socket.assigns[:changes] || [],
+          is_binary(class),
+          into: MapSet.new(),
+          do: class
+
+    if MapSet.size(pending_classes) == 0 do
+      false
+    else
+      Enum.any?(socket.assigns[:browser_classes] || [], fn row ->
+        is_map(row) and MapSet.member?(pending_classes, row["name"]) and
+          paths_match?(row["source_file"], path)
+      end)
+    end
+  end
+
+  # Two paths refer to the same file when one is a trailing-segment suffix of the
+  # other (so `src/Foo.bt` matches `/abs/project/src/Foo.bt`). Both nil/non-binary
+  # → no match.
+  defp paths_match?(a, b) when is_binary(a) and is_binary(b) do
+    a == b or String.ends_with?(a, "/" <> b) or String.ends_with?(b, "/" <> a)
+  end
+
+  defp paths_match?(_a, _b), do: false
+
+  # The git-panel message shown when a revert is blocked because the file has
+  # unflushed in-memory edits (BT-2598 decision 2) — names the path and the two
+  # ways forward (flush to keep the work on disk, or discard the pending entry).
+  defp pending_revert_warning(path) do
+    "Cannot revert #{path}: it has unflushed in-memory edits. " <>
+      "Flush (Save All to Disk) to keep them, or discard the pending change in the Changes pane first."
   end
 
   # Human label for a porcelain status atom (BT-2586). `beamtalk_git` classifies
@@ -2870,6 +3036,81 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       {:error, reason} ->
         assign(socket, changes: [], changes_error: Workspace.render_error(reason))
+    end
+  end
+
+  # BT-2598: the live image changed (a class was (re)loaded or removed). Re-pull
+  # every source-dependent surface so open windows reflect the new image without a
+  # manual refresh: the browser class list, the active ChangeLog, all open clean
+  # editor tabs (method + definition), and the git panel when it is the active
+  # dock tab (a revert's reload follows a disk change git should reflect too).
+  # Driven by the `classes` push handler, so a git revert, another session's
+  # flush, or an external edit reloaded into the image all converge here.
+  defp refresh_after_source_change(socket) do
+    socket
+    |> assign_browser_classes()
+    |> assign_changes()
+    |> refresh_open_source_tabs()
+    |> maybe_refresh_git()
+  end
+
+  # BT-2598: re-read every open *clean* editor tab from the live image so a source
+  # change that landed out-of-band (a git revert's reload, another session's
+  # flush, an MCP edit) is reflected in the visible buffer. A `dirty` tab is left
+  # untouched — never clobber the user's in-progress work — exactly as the
+  # re-activation re-read in `open_method_tab/4` / `open_definition/2` does; this
+  # generalises that pull into a push so the user need not re-focus the tab. An
+  # empty-source fallback (a since-removed method/class, a transient facade error)
+  # keeps the existing buffer rather than blanking a tab the user is looking at.
+  defp refresh_open_source_tabs(socket) do
+    tabs = Enum.map(socket.assigns.tabs, &refresh_source_tab(socket, &1))
+
+    socket
+    |> assign(:tabs, tabs)
+    |> resync_active_tab(tabs)
+  end
+
+  # Re-read one tab's source from the image. Clean `:method`/`:def` tabs refresh;
+  # dirty tabs and any other shape pass through unchanged.
+  defp refresh_source_tab(socket, %{kind: :method, dirty: false} = tab) do
+    case method_source_info(socket, tab.class, tab.side, tab.selector) do
+      %{source: ""} ->
+        tab
+
+      info ->
+        %{
+          tab
+          | source: info.source,
+            base: info.source,
+            # Pick up *new* divergence from an out-of-band patch, but never clear a
+            # divergence already set locally (mirrors the re-activation invariant).
+            disk_differs: tab.disk_differs or info.disk_differs,
+            runtime_only: info.runtime_only,
+            disk_source: reactivation_disk_source(tab, info),
+            doc: info.doc,
+            signature: info.signature,
+            native_delegate: info.native_delegate
+        }
+    end
+  end
+
+  defp refresh_source_tab(socket, %{kind: :def, dirty: false} = tab) do
+    # Only the read-only doc block is re-read (the editable definition buffer is
+    # left untouched), matching the `:def` re-activation re-read. A failed re-fetch
+    # keeps the prior backing module rather than hiding the "Erlang backend" badge.
+    {_definition, comment, native_module} = class_definition_info(socket, tab.class)
+    %{tab | doc: comment, native_module: native_module || tab.native_module}
+  end
+
+  defp refresh_source_tab(_socket, tab), do: tab
+
+  # Keep the rendered active-tab editor in sync after a push refresh: re-`sync_active`
+  # the active tab so its breadcrumb/badges/doc block re-render from the refreshed
+  # entry. A dirty active tab is untouched above, so this never disturbs an edit.
+  defp resync_active_tab(socket, tabs) do
+    case Enum.find(tabs, &(&1.id == socket.assigns[:active_tab])) do
+      %{dirty: false} = active -> sync_active(socket, active)
+      _ -> socket
     end
   end
 

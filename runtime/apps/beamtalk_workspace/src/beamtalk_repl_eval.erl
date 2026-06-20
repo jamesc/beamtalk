@@ -26,6 +26,11 @@ module loading to beamtalk_repl_loader (BT-863).
 %% BT-845: ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
 -export([reload_class_file/1, reload_class_file/2]).
 
+%% BT-2598 — cockpit reload-from-disk after a content-mutating git op. Reloads a
+%% reverted `.bt` file into the live image (image == disk) and repopulates the
+%% workspace_meta class-source cache. Called via RPC from the LiveView client.
+-export([reload_file/1]).
+
 %% ADR 0082 Phase 1 (BT-2285) — new-class creation backing `Workspace newClass:at:'.
 -export([new_class/2]).
 
@@ -279,6 +284,71 @@ reload_class_file(Path) ->
 -spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
     beamtalk_repl_loader:reload_class_file(Path, ExpectedClassName).
+
+-doc """
+Reload a `.bt` file from disk into the live image, returning the names of the
+classes it defines (BT-2598).
+
+The clean-returning entry the cockpit uses after a content-mutating git op (e.g.
+`git restore -- <path>`): the on-disk working tree has just changed, so the live
+image is re-installed from disk to keep image == disk (git-first / disk-as-
+source-of-truth, BT-2585). The hot redefinition fires a `ClassLoaded`
+announcement on the `classes` stream, so subscribed surfaces (the cockpit) refresh
+their open windows.
+
+Unlike the bare `reload_class_file/1`, this also repopulates the workspace_meta
+class-source cache from the freshly-read file, mirroring the `Workspace load:`
+post-step (`beamtalk_workspace_interface_primitives:handle_load_after_native/1`),
+so a subsequent `Class >> selector` method patch diffs against the reverted body
+rather than a stale pre-revert snapshot.
+
+Returns `{ok, [ClassName :: binary()]}` (the reloaded class names) or
+`{error, Reason}` (a structured reload error: file not found, compile failure,
+etc.). `Path` is a project-relative `.bt` path (the same form git restored).
+""".
+-spec reload_file(string()) -> {ok, [binary()]} | {error, term()}.
+reload_file(Path) ->
+    case beamtalk_repl_loader:reload_class_file(Path) of
+        {ok, ClassNames} ->
+            repopulate_class_sources(Path, ClassNames),
+            {ok, class_name_binaries(ClassNames)};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% BT-2598: repopulate the workspace_meta class-source cache from the just-read
+%% file, mirroring `handle_load_after_native/1`. A read failure is non-fatal —
+%% the reload itself already succeeded — so the cache is simply left untouched.
+-spec repopulate_class_sources(string(), [map()]) -> ok.
+repopulate_class_sources(Path, ClassNames) ->
+    case file:read_file(Path) of
+        {ok, SourceBin} ->
+            SourceStr = binary_to_list(SourceBin),
+            lists:foreach(
+                fun(Entry) ->
+                    case class_name_binary(Entry) of
+                        undefined -> ok;
+                        Bin -> beamtalk_workspace_meta:set_class_source(Bin, SourceStr)
+                    end
+                end,
+                ClassNames
+            );
+        {error, _} ->
+            ok
+    end.
+
+-spec class_name_binaries([map()]) -> [binary()].
+class_name_binaries(ClassNames) ->
+    [Bin || Entry <- ClassNames, (Bin = class_name_binary(Entry)) =/= undefined].
+
+%% Extract a class name as a binary from a reload payload entry, mirroring the
+%% defensive shape-matching in `handle_load_after_native/1` (atom | binary |
+%% string name keys). Returns `undefined` for an unrecognised shape.
+-spec class_name_binary(map()) -> binary() | undefined.
+class_name_binary(#{name := Atom}) when is_atom(Atom) -> atom_to_binary(Atom, utf8);
+class_name_binary(#{name := Bin}) when is_binary(Bin) -> Bin;
+class_name_binary(#{name := Str}) when is_list(Str) -> list_to_binary(Str);
+class_name_binary(_) -> undefined.
 
 -doc """
 Create a brand-new class from a source String at a target path (ADR 0082 Phase 1,
