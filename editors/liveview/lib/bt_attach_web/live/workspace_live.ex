@@ -406,6 +406,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:test_classes, nil)
       |> assign(:test_results, nil)
       |> assign(:tests_error, nil)
+      # BT-2597: a run/load is in flight on the workspace node. Set while the
+      # `:test_op` async task runs so the run/load controls disable themselves —
+      # `phx-disable-with` alone reverts as soon as the (now-immediate) event
+      # handler re-renders, since the work moved off-socket to `start_async`.
+      |> assign(:tests_running, false)
       # REPL tab (BT-2543): a classic TUI request→response scrollback with the
       # input pinned at the bottom. `:repl` is the scrollback stream (so long
       # history never bloats the assigns/diff); `:repl_seq` mints stable entry
@@ -1494,9 +1499,22 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Narrow the class tree by source origin (project / deps / stdlib / all). Pure
   # view state over the already-loaded rows — no workspace round-trip; an unknown
   # value is ignored rather than blanking the tree (BT-2596).
+  #
+  # BT-2597: if the new filter hides the currently-selected class, clear the
+  # selection (and its protocol/method pane) so the right pane can't show a
+  # "ghost" selection for a class no longer visible in the tree.
   def handle_event("browser_source", %{"src" => src}, socket)
       when src in ~w(all project deps stdlib) do
-    {:noreply, assign(socket, browser_source: src)}
+    socket = assign(socket, browser_source: src)
+
+    socket =
+      if selected_class_visible?(socket) do
+        socket
+      else
+        assign(socket, selected_class: nil, selected_protocol: nil, browser_protocols: [])
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("browser_source", _params, socket), do: {:noreply, socket}
@@ -1845,6 +1863,40 @@ defmodule BtAttachWeb.WorkspaceLive do
        git_status: nil,
        git_log: [],
        git_error: "Couldn't load git status — the load failed unexpectedly."
+     )}
+  end
+
+  # BT-2597: the off-socket test run/load (`run_tests/2` / `load_tests/1`)
+  # completed. The task tags its dispatch result `{:run, _}` or `{:load, _}` so
+  # the right result-application path runs; either way the op is no longer in
+  # flight, so the controls re-enable.
+  def handle_async(:test_op, {:ok, {:run, dispatch_result}}, socket) do
+    {:noreply, socket |> apply_test_result(dispatch_result) |> assign(tests_running: false)}
+  end
+
+  def handle_async(:test_op, {:ok, {:load, dispatch_result}}, socket) do
+    {:noreply, socket |> apply_test_load(dispatch_result) |> assign(tests_running: false)}
+  end
+
+  # A newer run/load `cancel_async`-ed this one. Safe as a no-op only because
+  # every `cancel_async(:test_op, …)` is immediately followed by a paired
+  # `start_async(:test_op, …)` (in `run_tests/2` / `load_tests/1`) that has
+  # already set `tests_running: true` — so the replacement task owns the running
+  # state. A future standalone `cancel_async(:test_op, …)` (e.g. a Cancel button)
+  # would need to reset `tests_running` itself. Mirrors the `:git_load` no-op.
+  def handle_async(:test_op, {:exit, :cancelled}, socket), do: {:noreply, socket}
+
+  def handle_async(:test_op, {:exit, reason}, socket) do
+    Logger.error("test run/load crashed: #{inspect(reason)}", domain: [:beamtalk, :liveview])
+
+    # Clear any prior run's results so a stale pass/fail table can't sit beside
+    # the crash banner (a torn read) — matching the `:git_load` crash handler and
+    # the `apply_test_result/2` dispatch-error path.
+    {:noreply,
+     assign(socket,
+       tests_running: false,
+       test_results: nil,
+       tests_error: "The test run failed unexpectedly."
      )}
   end
 
@@ -2931,42 +2983,72 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   # Run all tests (`class` = nil) or a single class (`run_tests`, `:execute`).
-  # The result map drives the per-case render; an error (including an RBAC
-  # denial for a non-Owner) surfaces as `tests_error` and leaves the prior
-  # results in place.
+  #
+  # BT-2597: the run compiles + evaluates user code on the workspace node, which
+  # can take seconds for a large suite — so it runs off-socket in a `:test_op`
+  # `start_async` task (mirroring the git panel's `:git_load`, BT-2590) rather
+  # than blocking the LiveView process. A rapid second action `cancel_async`-es
+  # the in-flight op so only the latest result wins. The result lands in
+  # `handle_async(:test_op, …)`; `tests_running` disables the controls meanwhile.
   defp run_tests(socket, class) do
-    case Facade.dispatch(:run_tests, %{class: class}, ctx(socket)) do
-      {:ok, result} when is_map(result) ->
-        assign(socket, test_results: result, tests_error: nil)
+    ctx = ctx(socket)
 
-      {:error, reason} ->
-        # Clear any prior run's results so a stale pass/fail summary can't sit
-        # next to the new error and confuse what just failed.
-        assign(socket, test_results: nil, tests_error: facade_error(reason))
-    end
+    socket
+    |> assign(tests_running: true, tests_error: nil)
+    |> cancel_async(:test_op, :cancelled)
+    |> start_async(:test_op, fn ->
+      # Off the LiveView process — capture only `ctx`, never `socket`.
+      {:run, Facade.dispatch(:run_tests, %{class: class}, ctx)}
+    end)
   end
 
   # Load the project's test/ files (`load_tests`, `:execute`), then re-discover
   # the catalogue so the newly-loaded TestCase subclasses appear immediately.
-  # A load error (including an RBAC denial for a non-Owner) surfaces as
-  # `tests_error`; on success any compile errors are surfaced too, but the
-  # catalogue still refreshes to show whatever loaded.
+  #
+  # BT-2597: like `run_tests/2`, the load compiles user code, so it runs in the
+  # off-socket `:test_op` task; the result lands in `handle_async(:test_op, …)`.
   defp load_tests(socket) do
-    case Facade.dispatch(:load_tests, %{}, ctx(socket)) do
-      {:ok, %{"errors" => [_ | _] = errors}} ->
-        socket
-        |> assign_test_classes()
-        |> assign(tests_error: load_tests_error(errors))
+    ctx = ctx(socket)
 
-      {:ok, _result} ->
-        socket
-        |> assign_test_classes()
-        |> assign(tests_error: nil)
-
-      {:error, reason} ->
-        assign(socket, tests_error: facade_error(reason))
-    end
+    socket
+    |> assign(tests_running: true, tests_error: nil)
+    |> cancel_async(:test_op, :cancelled)
+    |> start_async(:test_op, fn ->
+      {:load, Facade.dispatch(:load_tests, %{}, ctx)}
+    end)
   end
+
+  # Apply a completed `run_tests` dispatch to the socket. Pure (no dispatch);
+  # shared by `handle_async/3` so the async path and any future sync caller agree
+  # (mirrors `apply_git_status/2`). An error (incl. a non-Owner RBAC denial)
+  # surfaces as `tests_error` and clears any stale results.
+  defp apply_test_result(socket, {:ok, result}) when is_map(result),
+    do: assign(socket, test_results: result, tests_error: nil)
+
+  defp apply_test_result(socket, {:error, reason}),
+    do: assign(socket, test_results: nil, tests_error: facade_error(reason))
+
+  defp apply_test_result(socket, _other),
+    do: assign(socket, test_results: nil, tests_error: facade_error(:unexpected_test_result))
+
+  # Apply a completed `load_tests` dispatch: refresh the catalogue to show
+  # whatever loaded, surfacing partial compile errors as `tests_error`. The
+  # `assign_test_classes/1` re-discovery is a lightweight `:read` reflection (not
+  # the heavy compile), so it stays synchronous here.
+  defp apply_test_load(socket, {:ok, %{"errors" => [_ | _] = errors}}),
+    do: socket |> assign_test_classes() |> assign(tests_error: load_tests_error(errors))
+
+  # `assign_test_classes/1` already clears `tests_error` on a successful
+  # re-discovery and sets it on failure — so it is the last writer, with no
+  # trailing `assign(tests_error: nil)` that would swallow a re-discovery error.
+  defp apply_test_load(socket, {:ok, _result}),
+    do: assign_test_classes(socket)
+
+  defp apply_test_load(socket, {:error, reason}),
+    do: assign(socket, tests_error: facade_error(reason))
+
+  defp apply_test_load(socket, _other),
+    do: assign(socket, tests_error: facade_error(:unexpected_test_result))
 
   # Summarise compile errors from a partial test load into one line. Each error
   # is a `%{"path" => ..., "message" => ...}` map (the load-project error shape).
@@ -3614,6 +3696,17 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp filter_by_source(classes, _src), do: classes
+
+  # True when no class is selected, or the selected class survives the current
+  # source filter (BT-2597). Used to decide whether switching filters should
+  # clear a now-hidden selection.
+  defp selected_class_visible?(%{assigns: %{selected_class: nil}}), do: true
+
+  defp selected_class_visible?(%{assigns: assigns}) do
+    assigns.browser_classes
+    |> filter_by_source(assigns.browser_source)
+    |> Enum.any?(&(Map.get(&1, "name") == assigns.selected_class))
+  end
 
   # The flat method list for the current protocol filter: all selectors across the
   # protocol tree (filter = nil → "all") or just the selected protocol's, each
@@ -6364,12 +6457,16 @@ defmodule BtAttachWeb.WorkspaceLive do
                        editor. --%>
                   <div class="dock-pane panel-body test-pane" hidden={@dock_tab != "tests"}>
                     <div class="test-toolbar">
+                      <%!-- BT-2597: disabled while a run/load is in flight off-socket
+                           (`@tests_running`) — `phx-disable-with` alone reverts the
+                           moment the async event handler re-renders. --%>
                       <button
                         :if={@role == :owner}
                         type="button"
                         class="btn"
                         phx-click="run_tests"
                         phx-disable-with="Running…"
+                        disabled={@tests_running}
                       >
                         Run all
                       </button>
@@ -6383,12 +6480,23 @@ defmodule BtAttachWeb.WorkspaceLive do
                         class="btn ghost"
                         phx-click="load_tests"
                         phx-disable-with="Loading…"
+                        disabled={@tests_running}
                       >
                         Load tests
                       </button>
-                      <button type="button" class="btn ghost" phx-click="tests_refresh">
+                      <%!-- BT-2597: also gated by `@tests_running` — a manual
+                           refresh mid-load issues a synchronous `list_tests`
+                           that would race the in-flight load's own re-discovery
+                           (`apply_test_load`) and could flash a stale catalogue. --%>
+                      <button
+                        type="button"
+                        class="btn ghost"
+                        phx-click="tests_refresh"
+                        disabled={@tests_running}
+                      >
                         Refresh
                       </button>
+                      <span :if={@tests_running} class="muted-note">Running…</span>
                       <span
                         :if={@test_results}
                         class={["test-summary", @test_results["failed"] > 0 && "fail"]}
@@ -6494,6 +6602,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                                   phx-click="run_test_class"
                                   phx-value-class={tc["class"]}
                                   phx-disable-with="Running…"
+                                  disabled={@tests_running}
                                 >
                                   run
                                 </button>

@@ -108,9 +108,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       refute listed =~ "Not authorized"
 
       # Running (`run_tests`) is :execute — the Run controls are owner-gated away,
-      # and a crafted run event is refused by RBAC (BT-2421), not crashed.
+      # and a crafted run event is refused by RBAC (BT-2421), not crashed. BT-2597:
+      # the run dispatches off-socket (`start_async`), so the RBAC refusal lands
+      # via `handle_async` — await it with `render_async/2` before asserting.
       refute listed =~ ~s(phx-click="run_tests")
-      refused = render_hook(view, "run_tests", %{})
+      render_hook(view, "run_tests", %{})
+      refused = render_async(view, 30_000)
       assert refused =~ "Not authorized"
       assert Process.alive?(view.pid)
     end
@@ -137,7 +140,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
       # Run all: the result summary + per-case rows render, with the failing case
       # and its detail surfaced (run-all → test-all op, live session, no CLI).
-      ran = render_hook(view, "run_tests", %{})
+      # BT-2597: the run is off-socket (`start_async(:test_op, …)`), so the hook
+      # returns before results land — `render_async/2` awaits the async task.
+      render_hook(view, "run_tests", %{})
+      ran = render_async(view, 30_000)
       assert ran =~ "testPasses"
       assert ran =~ "testFails"
       assert ran =~ "failed"
@@ -156,8 +162,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       })
 
       render_hook(view, "dock_tab", %{"tab" => "tests"})
-      # Run just this class (the row's "run" button → run_test_class).
-      ran = render_hook(view, "run_test_class", %{"class" => "CockpitRunnerSelectTest"})
+      # Run just this class (the row's "run" button → run_test_class). BT-2597:
+      # off-socket async, so await the task before asserting on the result.
+      render_hook(view, "run_test_class", %{"class" => "CockpitRunnerSelectTest"})
+      ran = render_async(view, 30_000)
       assert ran =~ "testOk"
       assert ran =~ "passed"
       assert Process.alive?(view.pid)
