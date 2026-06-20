@@ -728,7 +728,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "the System Browser renders the class tree with view + side toggles (BT-2491)", %{
     conn: conn
   } do
-    {:ok, _view, html} = live(conn, "/")
+    {:ok, view, html} = live(conn, "/")
 
     # The left column is the spike's System Browser: a Hierarchy / Category view
     # toggle, a class tree, an instance/class side toggle, and a protocol/method
@@ -744,9 +744,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ ~s(phx-click="browser_select_class")
     refute html =~ "Lands in a later Phase 1 issue."
 
-    # The class tree is populated from live browse-classes — a core class like
-    # Object is always in the image.
-    assert html =~ "Object"
+    # The class tree is populated from live browse-classes, now read off-socket at
+    # mount (BT-2591) — await the async mount load, then a core class like Object
+    # is always in the image.
+    assert render_async(view) =~ "Object"
   end
 
   test "selecting a class loads its protocols and methods (BT-2491)", %{conn: conn} do

@@ -577,9 +577,21 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:windows, [])
       |> assign(:next_window_id, 1)
       |> assign(:window_z, 10)
-      |> assign_browser_classes()
-      |> assign_bindings(pid)
-      |> assign_changes()
+      # BT-2591: the four mount-time workspace reads (browser classes, bindings,
+      # ChangeLog, autoflush flag) each cross the node boundary and can block the
+      # connected mount on a slow/unreachable workspace (~5s per RPC worst case)
+      # before the cockpit renders. Seed each with its safe empty/default value so
+      # the panels render their empty state immediately, then lift the reads into a
+      # single off-socket `start_async(:mount_load, …)` task (mirroring the BT-2590
+      # git-panel pattern) whose result lands in `handle_async(:mount_load, …)`. A
+      # slow workspace can no longer block the mount; a degraded read keeps the
+      # seeded default.
+      |> assign(:browser_classes, [])
+      |> assign(:browser_error, nil)
+      |> assign(:bindings, [])
+      |> assign(:bindings_error, nil)
+      |> assign(:changes, [])
+      |> assign(:changes_error, nil)
       # Git panel (BT-2586): the post-flush VCS surface. Loaded lazily the first
       # time the Git tab is opened (and refreshed after flush/save), so a page
       # load never shells out to git for users who never open the tab. The
@@ -598,10 +610,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       # (`Workspace autoflush: true`), which leaves this cached copy stale; the
       # worst case is a missed git-panel refresh after a save (a UX miss, not data
       # loss). Defaults to `false` (no extra shell-out) when the workspace is
-      # unreachable.
-      |> assign_autoflush()
+      # unreachable. Read off-socket with the other mount RPCs (BT-2591).
+      |> assign(:autoflush, false)
       |> stream(:transcript, [])
       |> stream(:repl, [])
+      |> start_mount_load(pid)
     else
       other ->
         Logger.error("subscribe failed: #{inspect(other)}")
@@ -1912,6 +1925,34 @@ defmodule BtAttachWeb.WorkspaceLive do
      )}
   end
 
+  # BT-2591: the off-socket mount load (`start_mount_load/2`) completed. The task
+  # returned the four raw dispatch outcomes; fold them in via the same `apply_*`
+  # helpers the synchronous callers use, so the async path and any sync re-read
+  # agree. Done on the LiveView process for a single coherent render update.
+  def handle_async(:mount_load, {:ok, {browse, bindings, changes, autoflush}}, socket) do
+    socket =
+      socket
+      |> apply_browser_classes(browse)
+      |> apply_bindings(bindings)
+      |> apply_changes(changes)
+      |> apply_autoflush(autoflush)
+
+    {:noreply, socket}
+  end
+
+  # The mount load exited. The assigns keep their safe mount defaults (empty
+  # lists, autoflush off), so the cockpit stays usable — surface the failure in
+  # the log rather than taking down the LiveView.
+  def handle_async(:mount_load, {:exit, :cancelled}, socket), do: {:noreply, socket}
+
+  def handle_async(:mount_load, {:exit, reason}, socket) do
+    Logger.error("workspace mount load crashed: #{inspect(reason)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    {:noreply, socket}
+  end
+
   # BT-2597: the off-socket test run/load (`run_tests/2` / `load_tests/1`)
   # completed. The task tags its dispatch result `{:run, _}` or `{:load, _}` so
   # the right result-application path runs; either way the op is no longer in
@@ -3029,15 +3070,35 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Read the active ChangeLog ("Workspace changes", ADR 0082) and assign display
   # rows. A workspace that is unreachable or returns an unexpected shape renders an
   # error rather than crashing the pane.
-  defp assign_changes(socket) do
-    case Facade.dispatch(:changes, %{}, ctx(socket)) do
-      rows when is_list(rows) ->
-        assign(socket, changes: rows, changes_error: nil)
+  # BT-2591: gather the four mount-time workspace reads into one off-socket task
+  # so a slow/unreachable workspace never blocks the connected mount. Only `ctx`
+  # and `pid` are captured — never the socket. The result lands in
+  # `handle_async(:mount_load, …)`, which folds it via the `apply_*` helpers.
+  defp start_mount_load(socket, pid) do
+    ctx = ctx(socket)
 
-      {:error, reason} ->
-        assign(socket, changes: [], changes_error: Workspace.render_error(reason))
-    end
+    start_async(socket, :mount_load, fn ->
+      {dispatch_browse_classes(ctx), dispatch_bindings(ctx, pid), dispatch_changes(ctx),
+       dispatch_autoflush(ctx)}
+    end)
   end
+
+  defp assign_changes(socket), do: apply_changes(socket, dispatch_changes(ctx(socket)))
+
+  # The off-socket read (BT-2591): the raw `:changes` dispatch, runnable inside a
+  # `start_async` task with only `ctx` captured (never the socket).
+  defp dispatch_changes(ctx), do: Facade.dispatch(:changes, %{}, ctx)
+
+  # Fold a completed `:changes` read into the socket. Total — an unexpected shape
+  # degrades to the empty state with an error rather than crashing the async fold.
+  defp apply_changes(socket, rows) when is_list(rows),
+    do: assign(socket, changes: rows, changes_error: nil)
+
+  defp apply_changes(socket, {:error, reason}),
+    do: assign(socket, changes: [], changes_error: Workspace.render_error(reason))
+
+  defp apply_changes(socket, _other),
+    do: assign(socket, changes: [], changes_error: Workspace.render_error(:unexpected_changes))
 
   # BT-2598: the live image changed (a class was (re)loaded or removed). Re-pull
   # every source-dependent surface so open windows reflect the new image without a
@@ -3187,15 +3248,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   # facade (so RBAC/audit apply uniformly). The client defaults a degraded read to
   # `false`, and an off-vocabulary/denied dispatch (`{:error, _}`) also falls back
   # to `false` — never crash the mount on the settings probe.
-  defp assign_autoflush(socket) do
-    flag =
-      case Facade.dispatch(:autoflush, %{}, ctx(socket)) do
-        bool when is_boolean(bool) -> bool
-        _ -> false
-      end
+  # The off-socket read (BT-2591): the raw `:autoflush` dispatch. The autoflush
+  # flag is read only at mount (off-socket via `start_mount_load/2`); there is no
+  # synchronous `assign_autoflush` wrapper because nothing else re-reads it.
+  defp dispatch_autoflush(ctx), do: Facade.dispatch(:autoflush, %{}, ctx)
 
-    assign(socket, :autoflush, flag)
-  end
+  # Fold a completed `:autoflush` read; any non-boolean (degraded read, denied
+  # dispatch) falls back to `false` — never crash on the settings probe.
+  defp apply_autoflush(socket, flag) when is_boolean(flag), do: assign(socket, :autoflush, flag)
+  defp apply_autoflush(socket, _other), do: assign(socket, :autoflush, false)
 
   # ── Test-runner pane data source (BT-2557) ──────────────────────────────────
 
@@ -3359,15 +3420,23 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Load every class in scope for the class tree (op 1, `browse-classes`). Sorted
   # workspace-side; the rows carry `superclass`/`category`/`origin` so the
   # Hierarchy and Category views and the runtime badge render off one fetch.
-  defp assign_browser_classes(socket) do
-    case Facade.dispatch(:browse_classes, %{}, ctx(socket)) do
-      {:value, rows} when is_list(rows) ->
-        assign(socket, browser_classes: rows, browser_error: nil)
+  defp assign_browser_classes(socket),
+    do: apply_browser_classes(socket, dispatch_browse_classes(ctx(socket)))
 
-      {:error, reason} ->
-        assign(socket, browser_classes: [], browser_error: facade_error(reason))
-    end
-  end
+  # The off-socket read (BT-2591): the raw `:browse_classes` dispatch.
+  defp dispatch_browse_classes(ctx), do: Facade.dispatch(:browse_classes, %{}, ctx)
+
+  # Fold a completed `:browse_classes` read. Total — an unexpected shape degrades
+  # to the empty tree with an error rather than crashing the async fold.
+  defp apply_browser_classes(socket, {:value, rows}) when is_list(rows),
+    do: assign(socket, browser_classes: rows, browser_error: nil)
+
+  defp apply_browser_classes(socket, {:error, reason}),
+    do: assign(socket, browser_classes: [], browser_error: facade_error(reason))
+
+  defp apply_browser_classes(socket, _other),
+    do:
+      assign(socket, browser_classes: [], browser_error: facade_error(:unexpected_browse_classes))
 
   # Load `class`/`side`'s selectors grouped by protocol (op 2, `browse-protocols`)
   # for the protocol filter row + method list. The `protocols` list each carry a
@@ -4419,25 +4488,33 @@ defmodule BtAttachWeb.WorkspaceLive do
   # rows. Each row keeps the live `term` so the Inspector can follow object
   # references without a string round-trip; `inspectable?` flags object-valued
   # bindings the user can drill into.
-  defp assign_bindings(socket, pid) do
-    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
-      {:error, reason} ->
-        assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
+  defp assign_bindings(socket, pid),
+    do: apply_bindings(socket, dispatch_bindings(ctx(socket), pid))
 
-      pairs when is_list(pairs) ->
-        rows =
-          Enum.map(pairs, fn {name, term} ->
-            %{
-              name: name,
-              value: Workspace.render_term(term),
-              inspectable: Workspace.inspectable?(term),
-              kind: term_kind(term)
-            }
-          end)
+  # The off-socket read (BT-2591): the raw `:bindings` dispatch for `pid`.
+  defp dispatch_bindings(ctx, pid), do: Facade.dispatch(:bindings, %{session_pid: pid}, ctx)
 
-        assign(socket, bindings: rows, bindings_error: nil)
-    end
+  # Fold a completed `:bindings` read into the pane rows. Total — an unexpected
+  # shape degrades to the empty pane with an error rather than crashing.
+  defp apply_bindings(socket, pairs) when is_list(pairs) do
+    rows =
+      Enum.map(pairs, fn {name, term} ->
+        %{
+          name: name,
+          value: Workspace.render_term(term),
+          inspectable: Workspace.inspectable?(term),
+          kind: term_kind(term)
+        }
+      end)
+
+    assign(socket, bindings: rows, bindings_error: nil)
   end
+
+  defp apply_bindings(socket, {:error, reason}),
+    do: assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
+
+  defp apply_bindings(socket, _other),
+    do: assign(socket, bindings: [], bindings_error: Workspace.render_error(:unexpected_bindings))
 
   # Inspect a binding selected by name: resolve its live term from the current
   # binding list, then inspect that term. The term — not a string — drives the op.
