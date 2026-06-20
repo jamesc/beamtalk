@@ -269,8 +269,210 @@ git_commit_rejects_non_binary_message_test() ->
     ?assertMatch({error, _}, beamtalk_git:git_commit(42)).
 
 %%% ============================================================================
+%%% Subdirectory-project cwd/pathspec consistency (BT-2608)
+%%%
+%%% These spawn a real `git` against a throwaway repo whose project root is a
+%%% *subdirectory* of the repo toplevel. They prove that the path `git status`
+%%% reports (repo-root-relative) is the same path that revert/stage/unstage
+%%% accept — the bug was that mutating ops ran with cwd = project subdir, so the
+%%% repo-root-relative pathspec was re-prefixed and matched nothing.
+%%% ============================================================================
+
+%% `git rev-parse --show-toplevel` from a project subdir resolves to the repo
+%% toplevel, not the subdir.
+repo_toplevel_resolves_to_top_from_subdir_test() ->
+    with_subdir_repo(fun(Top, ProjectDir, _RelFile) ->
+        {ok, Resolved} = beamtalk_git:repo_toplevel(git_status, ProjectDir),
+        ?assertEqual(canonical(Top), canonical(Resolved))
+    end).
+
+%% The end-to-end fix: a file modified in a subdir project is reported by
+%% `git status` with a repo-root-relative path, and `git restore` with that
+%% exact path (run at the toplevel) succeeds and discards the change.
+revert_in_subdir_project_succeeds_test() ->
+    with_subdir_repo(fun(_Top, ProjectDir, RelFile) ->
+        {ok, Top} = beamtalk_git:repo_toplevel(git_revert_file, ProjectDir),
+        %% Status reports the file under its repo-root-relative path.
+        {ok, StatusOut, 0} = beamtalk_git:run_git_in(
+            git_status, [<<"status">>, <<"--porcelain=v2">>, <<"-b">>, <<"-z">>], Top
+        ),
+        Status = beamtalk_git:parse_status(StatusOut),
+        Paths = [maps:get(path, F) || F <- maps:get(files, Status)],
+        ?assert(lists:member(RelFile, Paths)),
+        %% Revert with that exact repo-root-relative path, at the toplevel.
+        {ok, _, RevCode} = beamtalk_git:run_git_in(
+            git_revert_file, [<<"restore">>, <<"--">>, RelFile], Top
+        ),
+        ?assertEqual(0, RevCode),
+        %% The working tree is clean again for that path.
+        {ok, AfterOut, 0} = beamtalk_git:run_git_in(
+            git_status, [<<"status">>, <<"--porcelain=v2">>, <<"-b">>, <<"-z">>], Top
+        ),
+        AfterStatus = beamtalk_git:parse_status(AfterOut),
+        AfterPaths = [maps:get(path, F) || F <- maps:get(files, AfterStatus)],
+        ?assertNot(lists:member(RelFile, AfterPaths))
+    end).
+
+%% Stage then unstage a subdir-project file using its repo-root-relative path,
+%% mirroring git_stage/1 and git_unstage/1 which share the same cwd assumption.
+stage_and_unstage_in_subdir_project_succeeds_test() ->
+    with_subdir_repo(fun(_Top, ProjectDir, RelFile) ->
+        {ok, Top} = beamtalk_git:repo_toplevel(git_stage, ProjectDir),
+        {ok, _, AddCode} = beamtalk_git:run_git_in(
+            git_stage, [<<"add">>, <<"--">>, RelFile], Top
+        ),
+        ?assertEqual(0, AddCode),
+        StagedStatus = beamtalk_git:parse_status(
+            element(
+                2,
+                beamtalk_git:run_git_in(
+                    git_status, [<<"status">>, <<"--porcelain=v2">>, <<"-b">>, <<"-z">>], Top
+                )
+            )
+        ),
+        ?assert(
+            lists:any(
+                fun(F) ->
+                    maps:get(path, F) =:= RelFile andalso
+                        maps:get(index, F) =/= unmodified
+                end,
+                maps:get(files, StagedStatus)
+            )
+        ),
+        {ok, _, UnstageCode} = beamtalk_git:run_git_in(
+            git_unstage, [<<"restore">>, <<"--staged">>, <<"--">>, RelFile], Top
+        ),
+        ?assertEqual(0, UnstageCode)
+    end).
+
+%% Regression guard: when the project root *is* the repo toplevel, resolution is
+%% a no-op and revert still works (the common case must not regress).
+revert_when_project_is_repo_root_succeeds_test() ->
+    with_repo_root_project(fun(Top, RelFile) ->
+        {ok, Resolved} = beamtalk_git:repo_toplevel(git_revert_file, Top),
+        ?assertEqual(canonical(Top), canonical(Resolved)),
+        {ok, _, RevCode} = beamtalk_git:run_git_in(
+            git_revert_file, [<<"restore">>, <<"--">>, RelFile], Top
+        ),
+        ?assertEqual(0, RevCode)
+    end).
+
+%% `git_diff/1` shared the same cwd contract as the mutating ops and had the
+%% same latent subdir bug: diffing a repo-root-relative path from the subdir
+%% silently returned empty. At the toplevel it now produces a real diff
+%% (BT-2608 review: lock the diff path-base in too).
+diff_in_subdir_project_returns_nonempty_test() ->
+    with_subdir_repo(fun(_Top, ProjectDir, RelFile) ->
+        {ok, Top} = beamtalk_git:repo_toplevel(git_diff, ProjectDir),
+        {ok, Diff, 0} = beamtalk_git:run_git_in(
+            git_diff, [<<"diff">>, <<"--">>, RelFile], Top
+        ),
+        %% Non-empty unified diff mentioning the file means the pathspec matched.
+        ?assertNotEqual(<<>>, Diff),
+        ?assertNotEqual(nomatch, binary:match(Diff, RelFile))
+    end).
+
+%% repo_toplevel/2 surfaces the structured not-a-git-repository error when the
+%% project dir is outside any git repo, rather than crashing (covers the
+%% not_a_repo_error branch end to end).
+repo_toplevel_outside_repo_errors_test() ->
+    Dir = make_temp_dir(),
+    try
+        ?assertMatch(
+            {error, _},
+            beamtalk_git:repo_toplevel(git_status, list_to_binary(Dir))
+        )
+    after
+        rm_rf(Dir)
+    end.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
+
+%% Resolve symlinks so macOS `/tmp` → `/private/tmp` compares equal to the path
+%% `git rev-parse --show-toplevel` reports. `pwd -P` follows every symlink.
+canonical(Path) when is_binary(Path) ->
+    list_to_binary(canonical(binary_to_list(Path)));
+canonical(Path) ->
+    string:trim(os:cmd("cd " ++ shell_quote(Path) ++ " && pwd -P")).
+
+%% Create a throwaway git repo with a committed file inside a *subdirectory*
+%% project, modify that file, run Fun(Toplevel, ProjectDir, RepoRelFile), then
+%% clean up. RepoRelFile is the path as `git status` reports it (repo-root
+%% relative, e.g. <<"sub/proj/src/counter.bt">>).
+with_subdir_repo(Fun) ->
+    Top = make_temp_repo(),
+    try
+        ProjectRel = "sub/proj",
+        FileRel = ProjectRel ++ "/src/counter.bt",
+        ok = filelib:ensure_dir(filename:join(Top, FileRel)),
+        ok = file:write_file(filename:join(Top, FileRel), <<"original\n">>),
+        git_in(Top, ["add", "-A"]),
+        commit(Top),
+        ok = file:write_file(filename:join(Top, FileRel), <<"modified\n">>),
+        Fun(
+            list_to_binary(Top),
+            list_to_binary(filename:join(Top, ProjectRel)),
+            list_to_binary(FileRel)
+        )
+    after
+        rm_rf(Top)
+    end.
+
+%% As above but the project root *is* the repo toplevel (no subdir).
+with_repo_root_project(Fun) ->
+    Top = make_temp_repo(),
+    try
+        FileRel = "src/counter.bt",
+        ok = filelib:ensure_dir(filename:join(Top, FileRel)),
+        ok = file:write_file(filename:join(Top, FileRel), <<"original\n">>),
+        git_in(Top, ["add", "-A"]),
+        commit(Top),
+        ok = file:write_file(filename:join(Top, FileRel), <<"modified\n">>),
+        Fun(list_to_binary(Top), list_to_binary(FileRel))
+    after
+        rm_rf(Top)
+    end.
+
+%% Create a unique empty temp dir (not a git repo).
+make_temp_dir() ->
+    Base = filename:basedir(user_cache, "beamtalk_git_test"),
+    ok = filelib:ensure_dir(filename:join(Base, "x")),
+    Unique = lists:flatten(
+        io_lib:format("repo_~p_~p", [erlang:unique_integer([positive]), os:getpid()])
+    ),
+    Dir = filename:join(Base, Unique),
+    ok = file:make_dir(Dir),
+    Dir.
+
+%% Create a unique temp dir and `git init` it with a deterministic identity.
+make_temp_repo() ->
+    Dir = make_temp_dir(),
+    git_in(Dir, ["init", "-q"]),
+    git_in(Dir, ["config", "user.email", "test@example.com"]),
+    git_in(Dir, ["config", "user.name", "Test"]),
+    git_in(Dir, ["config", "commit.gpgsign", "false"]),
+    Dir.
+
+commit(Dir) ->
+    git_in(Dir, ["commit", "-q", "-m", "init"]).
+
+%% Run git synchronously in Dir via os:cmd, asserting it does not blow up. Used
+%% only for test *setup* (the code under test is beamtalk_git's own runner).
+git_in(Dir, Args) ->
+    Cmd =
+        "git -C " ++ shell_quote(Dir) ++ " " ++
+            string:join([shell_quote(A) || A <- Args], " "),
+    _ = os:cmd(Cmd),
+    ok.
+
+shell_quote(S) ->
+    "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'".
+
+rm_rf(Dir) ->
+    _ = os:cmd("rm -rf " ++ shell_quote(Dir)),
+    ok.
 
 %% Join records with a trailing NUL after each, matching `-z` output.
 nul_join(Records) ->

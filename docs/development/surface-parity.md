@@ -130,7 +130,7 @@ The git ops are **`surface-specific` to the LiveView cockpit** — the human-fac
 | -- | `surface-specific: use git directly` | -- | -- | `surface-specific: LiveView cockpit Git panel` | `git_log` — last N commits (`sha`/`short_sha`/`subject`/`author`/`ts`) parsed from `git log --format=...`. Facade `:git_log`, `:read` capability — Observer-visible. |
 | -- | `surface-specific: use git directly` | -- | -- | `surface-specific: LiveView cockpit Git panel` | `git_stage` / `git_unstage` — stage (`git add`) / unstage (`git restore --staged`) a path. Facade `:git_stage` / `:git_unstage`, `:execute` capability — Owner-gated. |
 | -- | `surface-specific: use git directly` | -- | -- | `surface-specific: LiveView cockpit Git panel` | `git_commit` — commit the staged index (`git commit -m`); system `git` applies hooks/signing/config. Facade `:git_commit`, `:execute` capability — Owner-gated. |
-| -- | `surface-specific: use git directly` | -- | -- | `surface-specific: LiveView cockpit Git panel` | `git_revert_file` — discard a working-tree change (`git checkout -- <path>`), the human counterpart to the agent ChangeLog `revert:`. Facade `:git_revert_file`, `:execute` capability — Owner-gated. |
+| -- | `surface-specific: use git directly` | -- | -- | `surface-specific: LiveView cockpit Git panel` | `git_revert_file` — discard a working-tree change (`git restore -- <path>`), the human counterpart to the agent ChangeLog `revert:`. Facade `:git_revert_file`, `:execute` capability — Owner-gated. |
 
 ## Navigation Operations
 
