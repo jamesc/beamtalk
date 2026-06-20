@@ -534,11 +534,13 @@ mod tests {
 
     #[tokio::test]
     async fn read_port_from_boot_returns_on_port_line() {
-        // The port line need not be the last line; reading stops as soon as it
-        // appears (we must not depend on EOF — that's the Windows hang, BT-2568).
+        // The port line need not be the last line — the function must stop as
+        // soon as it appears rather than reading on to EOF (depending on EOF is
+        // the Windows hang, BT-2568). The genuine never-EOF case is covered by
+        // read_port_from_boot_errors_on_timeout.
         let out = b"Welcome to beamtalk REPL\n\
                     Connected to REPL backend on port 9876.\n\
-                    extra line that never arrives at EOF\n"
+                    trailing line after the port\n"
             .as_slice();
         let (port, captured) = read_port_from_boot(out, std::time::Duration::from_secs(5))
             .await
