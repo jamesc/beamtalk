@@ -575,8 +575,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       # per-method save only touches disk when autoflush is on; when off, a save
       # patches the live image only, so the on-disk git working tree is unchanged
       # and the post-save git refresh is skipped. Read once at mount — the cockpit
-      # exposes no autoflush toggle, so it can't drift within a session — and
-      # defaults to `false` (no extra shell-out) when the workspace is unreachable.
+      # has no autoflush toggle, but the flag can still change via REPL/MCP
+      # (`Workspace autoflush: true`), which leaves this cached copy stale; the
+      # worst case is a missed git-panel refresh after a save (a UX miss, not data
+      # loss). Defaults to `false` (no extra shell-out) when the workspace is
+      # unreachable.
       |> assign_autoflush()
       |> stream(:transcript, [])
       |> stream(:repl, [])
@@ -2808,9 +2811,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # off-socket in a single `start_async` task: the socket stays responsive while
   # git runs, the panel shows its "Loading git status…" placeholder, and the
   # results land in `handle_async(:git_load, …)`. A rapid second Refresh first
-  # `cancel_async`-es the in-flight load (killing its Task, so we never run two
-  # concurrent git shell-outs at the workspace node) and then starts the fresh
-  # one — only the latest load wins the panel, and concurrency is bounded to one.
+  # `cancel_async`-es the in-flight load (killing the LiveView-side Task so only
+  # the latest load can update the panel — the workspace-side RPC may still
+  # complete, but its response is discarded) and then starts the fresh
+  # one — only the latest load wins the panel, and the LiveView is never blocked.
   #
   # A workspace that is unreachable, not a git repo, or missing `git` renders an
   # error rather than crashing the pane — the graceful-degradation requirement. We
