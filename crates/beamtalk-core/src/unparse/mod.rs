@@ -72,6 +72,74 @@ pub fn unparse_class(class: &ClassDefinition) -> String {
     unparse_class_definition(class).to_pretty_string()
 }
 
+/// Re-indents a canonical (column-0) method source so its least-indented line
+/// sits at `base_indent`, preserving relative indentation (BT-2584).
+///
+/// [`unparse_method`] always emits a method at column 0 with 2-space relative
+/// steps. On disk, that same method is indented under its class body (typically
+/// 2 spaces). To make the stored `source_ref` a *drop-in* for the on-disk
+/// byte-span slice — `source_ref == disk[span]` by construction, so flush can
+/// splice it verbatim with no reshaping — this function shifts the canonical
+/// body to the span's base indentation. It is the single sanctioned reshape,
+/// replacing the former `beamtalk_workspace_flush:reindent/2` Erlang heuristic.
+///
+/// Semantics, matching the byte-span slice [`crate::source_analysis::method_span`]
+/// produces:
+///
+/// - The least leading-whitespace width across **non-blank** lines (normally 0
+///   for canonical output) is stripped from every line, then `base_indent` is
+///   prepended — so relative indentation inside the body is preserved.
+/// - **Blank lines** (whitespace-only, including empty) are emitted empty: no
+///   `base_indent`, no trailing whitespace. This mirrors how the disk slice
+///   renders blank lines between a doc comment and its method, and avoids
+///   introducing trailing-whitespace drift.
+/// - A trailing newline (the span includes the body's terminating newline) is
+///   preserved: a final empty segment after the last `\n` stays empty.
+///
+/// `base_indent` is expected to be a run of spaces/tabs (the leading whitespace
+/// of the on-disk definition's first line); any other content is prepended
+/// verbatim. An empty `base_indent` makes this the identity transform for
+/// canonical input.
+#[must_use]
+pub fn reindent_method_source(base_indent: &str, source: &str) -> String {
+    let min_indent = source
+        .split('\n')
+        .filter(|line| !is_blank_line(line))
+        .map(leading_ws_len)
+        .min()
+        .unwrap_or(0);
+
+    let mut out = String::with_capacity(source.len() + source.len() / 8);
+    let mut first = true;
+    for line in source.split('\n') {
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        if is_blank_line(line) {
+            // Blank lines stay empty — no base indent, no trailing whitespace.
+            continue;
+        }
+        out.push_str(base_indent);
+        // `min_indent` counts ASCII whitespace bytes, which are single-byte, so
+        // the byte slice is always on a char boundary.
+        out.push_str(&line[min_indent..]);
+    }
+    out
+}
+
+/// The number of leading space/tab bytes in `line`.
+fn leading_ws_len(line: &str) -> usize {
+    line.bytes()
+        .take_while(|&b| b == b' ' || b == b'\t')
+        .count()
+}
+
+/// Whether `line` is blank: empty or only spaces/tabs.
+fn is_blank_line(line: &str) -> bool {
+    leading_ws_len(line) == line.len()
+}
+
 /// Unparses a method signature for help display (BT-988).
 ///
 /// Renders `selector params -> ReturnType` without `sealed` prefix or ` =>` suffix.
@@ -3028,5 +3096,84 @@ mod tests {
         // Verifies all three escape rules fire correctly in one input and that
         // replacement order does not corrupt any of them.
         assert_eq!(escape_string_literal("\\\"\\{"), "\\\\\\\"\\\\\\{");
+    }
+
+    // --- reindent_method_source (BT-2584) ---
+
+    #[test]
+    fn reindent_empty_base_is_identity_for_canonical() {
+        // Canonical (column-0) input + empty base indent is a no-op.
+        let src = "foo => 1\n";
+        assert_eq!(reindent_method_source("", src), src);
+    }
+
+    #[test]
+    fn reindent_shifts_canonical_body_to_base() {
+        // A column-0 single-line method shifted to 2-space class-body indent.
+        assert_eq!(reindent_method_source("  ", "foo => 1\n"), "  foo => 1\n");
+    }
+
+    #[test]
+    fn reindent_preserves_relative_indentation() {
+        // A multi-line body keeps its 2-space relative step under the new base.
+        assert_eq!(
+            reindent_method_source("  ", "foo =>\n  body\n"),
+            "  foo =>\n    body\n"
+        );
+    }
+
+    #[test]
+    fn reindent_blank_line_between_doc_and_method_stays_empty() {
+        // Trivia edge case: a blank line between a doc comment and the method.
+        // The blank line is emitted empty (no base indent, no trailing space).
+        let src = "/// doc\n\nfoo => 1\n";
+        assert_eq!(
+            reindent_method_source("  ", src),
+            "  /// doc\n\n  foo => 1\n"
+        );
+    }
+
+    #[test]
+    fn reindent_inline_comment_preserved() {
+        // Trivia edge case: an inline `//` trailing comment rides along verbatim
+        // (it is part of the line's non-whitespace content).
+        let src = "foo => 1  // bump\n";
+        assert_eq!(reindent_method_source("  ", src), "  foo => 1  // bump\n");
+    }
+
+    #[test]
+    fn reindent_multi_line_signature_keeps_continuation_indent() {
+        // Trivia edge case: a multi-line signature/body. Every non-blank line is
+        // shifted by the same base; relative structure is preserved.
+        let src = "incrementBy: n =>\n  (Erlang counter)\n    incrementBy: self by: n\n";
+        assert_eq!(
+            reindent_method_source("  ", src),
+            "  incrementBy: n =>\n    (Erlang counter)\n      incrementBy: self by: n\n"
+        );
+    }
+
+    #[test]
+    fn reindent_tab_base_indent() {
+        // Trivia edge case: tab-indented files. A tab base indent is prepended
+        // verbatim to every non-blank line.
+        assert_eq!(
+            reindent_method_source("\t", "foo =>\n  body\n"),
+            "\tfoo =>\n\t  body\n"
+        );
+    }
+
+    #[test]
+    fn reindent_no_trailing_newline_is_preserved() {
+        // The disk slice clamps to EOF when the final body line has no trailing
+        // newline; reindent must not add one.
+        assert_eq!(reindent_method_source("  ", "foo => 1"), "  foo => 1");
+    }
+
+    #[test]
+    fn reindent_is_idempotent_on_disk_shape() {
+        // Re-indenting already-disk-shaped source to the same base is a no-op:
+        // the min-indent strip removes exactly the base it re-prepends.
+        let disk = "  /// doc\n\n  foo =>\n    body\n";
+        assert_eq!(reindent_method_source("  ", disk), disk);
     }
 }

@@ -39,7 +39,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     find_field_writers_in_source/2,
     find_ffi_sites_in_source/4,
     find_announce_sites_in_source/1,
-    resolve_method_span/4
+    resolve_method_span/4,
+    reindent_method_source/2
 ]).
 
 -doc """
@@ -355,3 +356,20 @@ Backs the `>>' / `compile:source:' install hook.
     | {error, atom(), binary()}.
 resolve_method_span(Source, ClassName, Selector, Side) ->
     beamtalk_compiler_server:resolve_method_span(Source, ClassName, Selector, Side).
+
+-doc """
+Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
+
+Shifts the compiler's canonical `unparse_method' output to the on-disk
+byte-span shape so the live-patch install hook can store a `source' that is a
+drop-in for `disk[span]' — making `source_ref == disk[span]' by construction
+and retiring the former `beamtalk_workspace_flush:reindent/2' splice reshape.
+
+`BaseIndent' is the leading whitespace (spaces/tabs) of the on-disk
+definition's first line; an empty `BaseIndent' is the identity transform.
+Returns `{ok, Source}' or `{error, Reason, Message}'.
+""".
+-spec reindent_method_source(binary(), binary()) ->
+    {ok, binary()} | {error, atom(), binary()}.
+reindent_method_source(Source, BaseIndent) ->
+    beamtalk_compiler_server:reindent_method_source(Source, BaseIndent).

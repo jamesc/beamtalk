@@ -40,7 +40,8 @@ to avoid temp files on disk (BT-48).
     find_field_writers_in_source/2,
     find_ffi_sites_in_source/4,
     find_announce_sites_in_source/1,
-    resolve_method_span/4
+    resolve_method_span/4,
+    reindent_method_source/2
 ]).
 
 %% gen_server callbacks
@@ -382,6 +383,26 @@ resolve_method_span(Source, ClassName, Selector, Side) ->
     end.
 
 -doc """
+Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
+
+Produces the on-disk byte-span shape from the compiler's canonical
+`unparse_method' output, so the live-patch install hook can store a
+`source' that is a drop-in for `disk[span]'. Returns `{ok, Source}' or
+`{error, Reason, Message}' on transport failure.
+""".
+-spec reindent_method_source(binary(), binary()) ->
+    {ok, binary()} | {error, atom(), binary()}.
+reindent_method_source(Source, BaseIndent) ->
+    try
+        gen_server:call(?MODULE, {reindent_method_source, Source, BaseIndent}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Register a class with its metadata in the compiler server cache.
 
 ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -549,6 +570,11 @@ handle_call({find_announce_sites_in_source, Source}, _From, State) ->
 handle_call({resolve_method_span, Source, ClassName, Selector, Side}, _From, State) ->
     Result = beamtalk_compiler_port:resolve_method_span(
         State#state.port, Source, ClassName, Selector, Side
+    ),
+    {reply, Result, State};
+handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->
+    Result = beamtalk_compiler_port:reindent_method_source(
+        State#state.port, Source, BaseIndent
     ),
     {reply, Result, State};
 handle_call(version, _From, State) ->
