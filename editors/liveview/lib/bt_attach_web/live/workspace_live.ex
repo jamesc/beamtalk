@@ -563,12 +563,24 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign_changes()
       # Git panel (BT-2586): the post-flush VCS surface. Loaded lazily the first
       # time the Git tab is opened (and refreshed after flush/save), so a page
-      # load never shells out to git for users who never open the tab.
+      # load never shells out to git for users who never open the tab. The
+      # status/log loads run off-socket via `start_async` (BT-2590), so opening
+      # the tab / refreshing never blocks other socket events while git runs.
       |> assign(:git_status, nil)
       |> assign(:git_log, [])
       |> assign(:git_error, nil)
       |> assign(:git_diff, nil)
       |> assign(:git_diff_path, nil)
+      # BT-2590 (S2): the workspace `autoflush` flag (ADR 0082 Phase 4). A
+      # per-method save only touches disk when autoflush is on; when off, a save
+      # patches the live image only, so the on-disk git working tree is unchanged
+      # and the post-save git refresh is skipped. Read once at mount — the cockpit
+      # has no autoflush toggle, but the flag can still change via REPL/MCP
+      # (`Workspace autoflush: true`), which leaves this cached copy stale; the
+      # worst case is a missed git-panel refresh after a save (a UX miss, not data
+      # loss). Defaults to `false` (no extra shell-out) when the workspace is
+      # unreachable.
+      |> assign_autoflush()
       |> stream(:transcript, [])
       |> stream(:repl, [])
     else
@@ -1780,6 +1792,40 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
+  # BT-2590 (S1): the off-socket git load (`assign_git/1`'s `start_async`)
+  # completed. The task returned `{status_result, log_result}` — the raw
+  # `Facade.dispatch` outcomes — which we fold into the panel assigns here, on the
+  # LiveView process, so the render is driven from a single coherent update.
+  @impl true
+  def handle_async(:git_load, {:ok, {status_result, log_result}}, socket) do
+    socket =
+      socket
+      |> apply_git_status(status_result)
+      |> apply_git_log(log_result)
+
+    {:noreply, socket}
+  end
+
+  # The git-load task exited. A real crash surfaces as a git-panel error rather
+  # than taking down the LiveView. The `:cancelled` clause is a defensive no-op:
+  # `assign_git/1` `cancel_async`-es the prior load before starting a new one, and
+  # while LiveView normally prunes that stale ref before its exit is delivered, we
+  # guard the atom explicitly so a cancellation can never render a spurious error.
+  # On a genuine failure we reset BOTH status and log so the panel can't show a
+  # stale commit list beside the error banner (a torn read).
+  def handle_async(:git_load, {:exit, :cancelled}, socket), do: {:noreply, socket}
+
+  def handle_async(:git_load, {:exit, reason}, socket) do
+    Logger.error("git panel load crashed: #{inspect(reason)}", domain: [:beamtalk, :liveview])
+
+    {:noreply,
+     assign(socket,
+       git_status: nil,
+       git_log: [],
+       git_error: "Couldn't load git status — the load failed unexpectedly."
+     )}
+  end
+
   # True when `pid` is the pid backing the currently-watched object term — so a
   # late push for an object we've since navigated away from (or never watched) is
   # ignored rather than spuriously re-reading + flashing the current head. Kept
@@ -2513,11 +2559,11 @@ defmodule BtAttachWeb.WorkspaceLive do
         )
         |> compile_clean(tab.id, source)
         |> assign_changes()
-        # BT-2586: refresh the git panel when it is open so an on-disk save is
-        # reflected immediately (the pre→post-flush handoff). When a save only
-        # patches the in-memory image (autoflush off, BT-2293), the refresh is a
-        # harmless no-op — git status is unchanged. See BT-2590.
-        |> maybe_refresh_git()
+        # BT-2586/BT-2590: refresh the git panel when it is open AND autoflush is
+        # on — only then did the save write through to disk. With autoflush off
+        # the save patches the live image only, so the on-disk working tree is
+        # unchanged and the git shell-out is skipped (no redundant refresh).
+        |> maybe_refresh_git_after_save()
 
       {:error, reason, _output, _warnings} ->
         assign(socket, save_result: nil, save_error: Workspace.render_error(reason))
@@ -2568,9 +2614,13 @@ defmodule BtAttachWeb.WorkspaceLive do
           new_class_open: false
         )
         |> assign_changes()
-        # BT-2586: a new class writes a new `.bt` file to disk; reflect it in the
-        # git panel when it is open.
-        |> maybe_refresh_git()
+        # BT-2586/BT-2590: a new class only writes its `.bt` file to disk when
+        # autoflush is on (it is otherwise a durable in-memory ChangeLog entry,
+        # written at the next flush — `maybe_autoflush(durable)` in
+        # beamtalk_repl_loader). So reflect it in the git panel only when autoflush
+        # is on, matching the save path; with autoflush off the working tree is
+        # unchanged and the shell-out is skipped.
+        |> maybe_refresh_git_after_save()
 
       {:error, reason} ->
         status_error(socket, facade_error(reason))
@@ -2659,12 +2709,21 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Refresh the git panel only when it is the active dock tab. A save/flush that
+  # Refresh the git panel only when it is the active dock tab. A flush that
   # happens while the user is on another tab leaves git untouched (it reloads
   # lazily on next open), so the common edit loop never pays for an extra git
-  # shell-out it can't see.
+  # shell-out it can't see. Used by the flush path, which always changes disk.
   defp maybe_refresh_git(socket) do
     if socket.assigns.dock_tab == "git", do: assign_git(socket), else: socket
+  end
+
+  # BT-2590 (S2): refresh the git panel after a *save* only when autoflush is on.
+  # With autoflush off a per-method save patches the live image only — the on-disk
+  # working tree is unchanged, so the git shell-out would return an identical
+  # result and is pure waste. When autoflush is on the save wrote through to disk,
+  # so the panel must reflect it (gated, as ever, on the Git tab being active).
+  defp maybe_refresh_git_after_save(socket) do
+    if socket.assigns.autoflush, do: maybe_refresh_git(socket), else: socket
   end
 
   @doc false
@@ -2743,35 +2802,84 @@ defmodule BtAttachWeb.WorkspaceLive do
   # ── Git panel data source (ADR 0082 Amendment 1, BT-2586) ────────────────────
 
   # Load the post-flush git surface: working-tree status + recent log from real
-  # git on the workspace project root. A workspace that is unreachable, not a git
-  # repo, or missing `git` renders an error rather than crashing the pane — the
-  # graceful-degradation requirement. We clear any stale per-file diff on refresh.
+  # git on the workspace project root.
+  #
+  # BT-2590 (S1): both git ops cross the node boundary into the workspace's
+  # `collect/5` loop, each bounded by the workspace's `GIT_TIMEOUT_MS = 30_000`, so
+  # a hung git could otherwise leave the LiveView socket unresponsive for ~60s per
+  # call — blocking tab switches, saves, and clicks. We therefore run the two reads
+  # off-socket in a single `start_async` task: the socket stays responsive while
+  # git runs, the panel shows its "Loading git status…" placeholder, and the
+  # results land in `handle_async(:git_load, …)`. A rapid second Refresh first
+  # `cancel_async`-es the in-flight load (killing the LiveView-side Task so only
+  # the latest load can update the panel — the workspace-side RPC may still
+  # complete, but its response is discarded) and then starts the fresh
+  # one — only the latest load wins the panel, and the LiveView is never blocked.
+  #
+  # A workspace that is unreachable, not a git repo, or missing `git` renders an
+  # error rather than crashing the pane — the graceful-degradation requirement. We
+  # clear any stale per-file diff and reset to the loading state on each refresh.
   defp assign_git(socket) do
+    ctx = ctx(socket)
+
     socket
-    |> assign(git_diff_path: nil, git_diff: nil)
-    |> assign_git_status()
-    |> assign_git_log()
+    |> assign(git_diff_path: nil, git_diff: nil, git_status: nil, git_log: [], git_error: nil)
+    |> cancel_async(:git_load, :cancelled)
+    |> start_async(:git_load, fn ->
+      # Runs in a Task off the LiveView process — never touch `socket` here, only
+      # the captured `ctx`. Both reads are gathered so the panel updates atomically.
+      {Facade.dispatch(:git_status, %{}, ctx), Facade.dispatch(:git_log, %{count: 20}, ctx)}
+    end)
   end
 
-  defp assign_git_status(socket) do
-    case Facade.dispatch(:git_status, %{}, ctx(socket)) do
-      {:ok, status} when is_map(status) ->
-        assign(socket, git_status: status, git_error: nil)
+  # Apply a completed git status read to the socket. Pure (no dispatch); shared by
+  # `handle_async/3` so the async result path and any future sync caller agree.
+  # Kept total — an unexpected shape (an off-vocabulary facade reply, a malformed
+  # status) degrades to a panel error rather than crashing the LiveView.
+  defp apply_git_status(socket, {:ok, status}) when is_map(status),
+    do: assign(socket, git_status: status, git_error: nil)
 
-      {:error, reason} ->
-        assign(socket, git_status: nil, git_error: facade_error(reason))
-    end
+  defp apply_git_status(socket, {:error, reason}),
+    do: assign(socket, git_status: nil, git_error: facade_error(reason))
+
+  defp apply_git_status(socket, _other),
+    do: assign(socket, git_status: nil, git_error: facade_error(:unexpected_git_status))
+
+  # Apply a completed git log read.
+  defp apply_git_log(socket, {:ok, commits}) when is_list(commits),
+    do: assign(socket, git_log: commits)
+
+  defp apply_git_log(socket, {:error, reason}),
+    do: log_failed(socket, facade_error(reason))
+
+  defp apply_git_log(socket, _other),
+    do: log_failed(socket, facade_error(:unexpected_git_log))
+
+  # A git-log read failed. Clear the list, and surface the error only if the
+  # status read hasn't already reported one — when both fail together the status
+  # pane already shows the degraded state, but a fast status beside an
+  # independently-failed log (e.g. a large-history timeout) would otherwise leave
+  # a valid branch next to a mysteriously empty commit list with no explanation.
+  defp log_failed(socket, error) do
+    socket = assign(socket, git_log: [])
+
+    if socket.assigns.git_error,
+      do: socket,
+      else: assign(socket, git_error: error)
   end
 
-  defp assign_git_log(socket) do
-    case Facade.dispatch(:git_log, %{count: 20}, ctx(socket)) do
-      {:ok, commits} when is_list(commits) ->
-        assign(socket, git_log: commits)
+  # BT-2590 (S2): read the workspace `autoflush` flag once at mount via the read
+  # facade (so RBAC/audit apply uniformly). The client defaults a degraded read to
+  # `false`, and an off-vocabulary/denied dispatch (`{:error, _}`) also falls back
+  # to `false` — never crash the mount on the settings probe.
+  defp assign_autoflush(socket) do
+    flag =
+      case Facade.dispatch(:autoflush, %{}, ctx(socket)) do
+        bool when is_boolean(bool) -> bool
+        _ -> false
+      end
 
-      {:error, _reason} ->
-        # The status pane already surfaces the degraded state; keep the log empty.
-        assign(socket, git_log: [])
-    end
+    assign(socket, :autoflush, flag)
   end
 
   # ── Test-runner pane data source (BT-2557) ──────────────────────────────────
