@@ -1472,10 +1472,10 @@ store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSou
     case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
         {ok, Reindented} ->
             %% The disk byte-span ends in a trailing newline unless the method is
-            %% the last line of the file with no terminator (ADR 0082). The
-            %% compiler's canonical body has no trailing newline. Match the disk
-            %% slice's trailing-newline state so the splice is a true drop-in and
-            %% never glues the next line or leaves a stray blank one (BT-2584).
+            %% the last line of the file with no terminator (ADR 0082). Match that
+            %% trailing-newline state on the reshaped body — regardless of whether
+            %% the canonical body carries its own — so the splice is a true drop-in
+            %% and never glues the next line or leaves a stray blank one (BT-2584).
             DiskShaped = match_trailing_newline(Reindented, PrevSource),
             Base#{
                 source => DiskShaped,
@@ -1534,11 +1534,9 @@ strip_trailing_newlines(Bin) ->
 %% indentation of the on-disk method definition the span covers.
 -spec leading_ws(binary()) -> binary().
 leading_ws(Body) ->
-    First =
-        case binary:split(Body, <<"\n">>) of
-            [Line | _] -> Line;
-            [] -> <<>>
-        end,
+    %% `binary:split/2' always returns a non-empty list (the whole binary when
+    %% the delimiter is absent), so the first element is the first line.
+    [First | _] = binary:split(Body, <<"\n">>),
     leading_ws(First, 0).
 
 leading_ws(Line, N) ->

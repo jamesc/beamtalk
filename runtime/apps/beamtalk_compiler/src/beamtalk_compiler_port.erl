@@ -875,7 +875,7 @@ verbatim with no reshaping. Pure string transform: returns `{ok, Source}' or,
 on a transport failure, `{error, port_error, Message}'.
 """.
 -spec reindent_method_source(port(), binary(), binary()) ->
-    {ok, binary()} | {error, port_error, binary()}.
+    {ok, binary()} | {error, port_error | bad_argument, binary()}.
 reindent_method_source(Port, Source, BaseIndent) when
     is_binary(Source), is_binary(BaseIndent)
 ->
@@ -920,7 +920,9 @@ reindent_method_source(Port, Source, BaseIndent) when
                 domain => [beamtalk, runtime], port => Port
             }),
             {error, port_error, <<"Compiler port is not available">>}
-    end.
+    end;
+reindent_method_source(_Port, _Source, _BaseIndent) ->
+    {error, bad_argument, <<"reindent_method_source: source and base_indent must be binary">>}.
 
 -spec handle_reindent_response(map()) -> {ok, binary()} | {error, port_error, binary()}.
 handle_reindent_response(#{status := ok, source := Source}) when is_binary(Source) ->
