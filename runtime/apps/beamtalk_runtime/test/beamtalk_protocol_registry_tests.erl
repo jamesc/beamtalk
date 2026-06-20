@@ -54,6 +54,22 @@ register_simple_protocol_test() ->
     ?assert(beamtalk_protocol_registry:is_protocol('Printable')),
     ?assertEqual(Proto, beamtalk_protocol_registry:protocol_info('Printable')).
 
+register_protocol_with_module_test() ->
+    %% BT-2615: the `module` key (the protocol's defining BEAM module) round-trips
+    %% through registration so the System Browser can resolve a protocol class
+    %% object's origin (the dispatch module beamtalk_protocol_object carries none).
+    setup(),
+    Proto = #{
+        name => 'Printable',
+        module => 'bt@stdlib@printable',
+        required_methods => [#{selector => 'asString', arity => 0}],
+        type_params => [],
+        extending => undefined
+    },
+    ok = beamtalk_protocol_registry:register_protocol(Proto),
+    Info = beamtalk_protocol_registry:protocol_info('Printable'),
+    ?assertEqual('bt@stdlib@printable', maps:get(module, Info)).
+
 register_protocol_with_type_params_test() ->
     setup(),
     Proto = #{
