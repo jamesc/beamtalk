@@ -32,9 +32,12 @@ TestCase subclass: ActorMessageChainingTest
 
   // Chained send: method dispatched on actor-method result
   testChainedSendOnActorMethodResult =>
-    a := ActorChainingFixture spawnWith: #{#value => 42}
+    // Uses a dedicated local actor (not the setUp `self.a`) to exercise the
+    // keyword `spawnWith:` constructor path; `withValueActor` is a local, since
+    // field access in Beamtalk always goes through `self.`
+    withValueActor := ActorChainingFixture spawnWith: #{#value => 42}
     // getName returns a string directly; size is dispatched on the string
-    self assert: a getName size equals: 7
+    self assert: withValueActor getName size equals: 7
 
   // Chained send: getValue → printString (sync dispatch, no intermediary Future)
   testImplicitChaining => self assert: self.a getValue printString equals: "0"
