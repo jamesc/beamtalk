@@ -63,7 +63,18 @@ pub fn unparse_module(module: &Module) -> String {
 /// synthesized methods.
 #[must_use]
 pub fn unparse_method(method: &MethodDefinition) -> String {
-    unparse_method_definition(method).to_pretty_string()
+    // The per-method source is the method's *edit unit*, and must match the
+    // byte span the resolver assigns it (ADR 0082 / BT-2584: `source_ref ==
+    // disk[span]`). That span deliberately starts at the method's `///` doc
+    // block or its own line, excluding any leading non-doc `//` comments —
+    // notably `// === section ===` dividers, which are inter-method file
+    // structure, not part of the method (BT-2577). Emitting them here would
+    // make the stored/compiled source diverge from disk, so a no-op cockpit
+    // save/flush would duplicate the divider (BT-2594). Whole-file unparse
+    // (`unparse_class` / `unparse_module`) still preserves them in place.
+    // A future change will surface section dividers as first-class method
+    // categories instead of free comments (BT-2601).
+    unparse_method_definition_inner(method, nil(), EmitLeadingComments::No).to_pretty_string()
 }
 
 /// Unparses a [`ClassDefinition`] to source text.
@@ -630,15 +641,36 @@ fn unparse_method_definition_with_prefix(
     method: &MethodDefinition,
     prefix: Document<'static>,
 ) -> Document<'static> {
+    unparse_method_definition_inner(method, prefix, EmitLeadingComments::Yes)
+}
+
+/// Whether to emit a method's leading non-doc comments. Whole-file unparse keeps
+/// them (file fidelity); the per-method [`unparse_method`] drops them so the
+/// per-method source matches its byte span (BT-2594 — see `unparse_method`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EmitLeadingComments {
+    Yes,
+    No,
+}
+
+fn unparse_method_definition_inner(
+    method: &MethodDefinition,
+    prefix: Document<'static>,
+    emit_leading: EmitLeadingComments,
+) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
 
-    // Non-doc leading comments
-    docs.extend(unparse_comment_attachment_leading(&method.comments));
+    // Non-doc leading comments (section dividers etc.) — emitted only on the
+    // whole-file path; the per-method edit unit excludes them (BT-2594).
+    let emit_leading = emit_leading == EmitLeadingComments::Yes;
+    if emit_leading {
+        docs.extend(unparse_comment_attachment_leading(&method.comments));
+    }
 
     // Doc comment — emit `///` for empty lines (no trailing space)
     if let Some(doc) = &method.doc_comment {
         // Blank line between leading comments and doc comment (e.g. section separators)
-        if !method.comments.leading.is_empty() {
+        if emit_leading && !method.comments.leading.is_empty() {
             docs.push(line());
         }
         for line_text in doc.lines() {
