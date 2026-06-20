@@ -45,6 +45,11 @@ defmodule BtAttach.Facade do
     new_class: :execute,
     revert: :execute,
     flush: :execute,
+    # BT-2590: read the workspace `autoflush` setting (ADR 0082 Phase 4) so the
+    # cockpit can skip a redundant post-save git refresh when autoflush is off
+    # (an in-memory-only save leaves the working tree untouched). Pure settings
+    # read — runs no user code — so it is `:read`, safe for the Observer role.
+    autoflush: :read,
     reload: :execute,
     info: :read,
     inspect: :read,
@@ -330,6 +335,11 @@ defmodule BtAttach.Facade do
   defp invoke(:run_tests, _params, _ctx), do: client().run_tests(nil)
 
   defp invoke(:flush, _params, _ctx), do: client().flush()
+
+  # BT-2590: the workspace `autoflush` boolean. Returns the flag directly (never a
+  # `{:ok, _}` tuple — the client defaults a degraded read to `false`), so the
+  # caller can branch on it without unwrapping.
+  defp invoke(:autoflush, _params, _ctx), do: client().autoflush()
 
   defp invoke(:save, %{class: class, selector: selector, source: source}, _ctx),
     do: client().save_method(class, selector, source)

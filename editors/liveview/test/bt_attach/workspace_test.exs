@@ -260,6 +260,13 @@ defmodule BtAttach.WorkspaceTest do
       assert_raise FunctionClauseError, fn -> apply(Workspace, :git_commit, [:wip]) end
       assert_raise FunctionClauseError, fn -> apply(Workspace, :git_stage, [42]) end
     end
+
+    # BT-2590: the autoflush read defaults to `false` (the safe no-extra-shell-out
+    # choice) when the workspace is unreachable — a `{:badrpc, :nodedown}` is not a
+    # boolean, so the wrapper falls through to `false` rather than crashing.
+    test "autoflush against an unreachable workspace defaults to false" do
+      assert Workspace.autoflush() == false
+    end
   end
 
   describe "navigation-surface wrappers (Senders/Implementors + omni search, BT-2495)" do

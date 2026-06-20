@@ -23,6 +23,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # current *image* body, which after a `>>` compile is the compiled
               # body — so the stub serves this over the hardcoded on-disk body.
               compiled_sources: %{},
+              # BT-2590: the simulated `autoflush` flag (default off) and seeded
+              # git panel results, so a test can exercise the post-save refresh
+              # gate and the async git load without a real workspace node.
+              autoflush: false,
+              git_status: nil,
+              git_log: nil,
               calls: []
   end
 
@@ -141,10 +147,48 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     |> Enum.reverse()
   end
 
+  # BT-2590: the workspace `autoflush` flag, read at mount. Defaults to `false`
+  # (matching the production default), so a per-method save in a test patches the
+  # image only and the post-save git refresh is skipped — unless a test flips it
+  # via `set_autoflush/1`.
+  def autoflush, do: get(:autoflush) || false
+
+  @doc "Test helper: set the simulated `autoflush` flag."
+  def set_autoflush(flag) when is_boolean(flag), do: put(:autoflush, flag)
+
   # ── New File + Revert ────────────────────────────────────────────────────
 
   def new_class(_source, path), do: {:ok, path}
   def revert(class, _selector), do: {:ok, class}
+
+  # ── Git panel (BT-2586, BT-2590) ──────────────────────────────────────────
+  # A clean working tree by default; a test can seed status/log via the helpers.
+
+  def git_status do
+    record({:git_status})
+    get(:git_status) || {:ok, default_git_status()}
+  end
+
+  def git_log(count) do
+    record({:git_log, count})
+    get(:git_log) || {:ok, []}
+  end
+
+  def git_diff(path), do: record({:git_diff, path}) && {:ok, %{worktree: "", staged: ""}}
+  def git_stage(path), do: record({:git_stage, path}) && {:ok, nil}
+  def git_unstage(path), do: record({:git_unstage, path}) && {:ok, nil}
+  def git_commit(message), do: record({:git_commit, message}) && {:ok, nil}
+  def git_revert_file(path), do: record({:git_revert_file, path}) && {:ok, nil}
+
+  @doc "Test helper: seed the simulated `git_status` result."
+  def set_git_status(result), do: put(:git_status, result)
+
+  @doc "Test helper: seed the simulated `git_log` result."
+  def set_git_log(result), do: put(:git_log, result)
+
+  defp default_git_status do
+    %{branch: "main", upstream: nil, ahead: 0, behind: 0, files: []}
+  end
 
   # ── Browse ops ───────────────────────────────────────────────────────────
 
@@ -322,4 +366,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Call recording ───────────────────────────────────────────────────────
 
   def calls, do: get(:calls)
+
+  @doc "Test helper: reset the recorded call log (BT-2590)."
+  def clear_calls, do: put(:calls, [])
 end
