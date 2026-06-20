@@ -176,4 +176,42 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       assert Process.alive?(view.pid)
     end
   end
+
+  describe "F3: source filter renders as a compact dropdown (BT-2603)" do
+    test "renders a <select name=src> instead of a segmented control", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      html = render(view)
+
+      # The source-origin filter is a <select> (so it can't overflow the panel
+      # head) carrying the `src` field the handler reads. All four options are
+      # present and reachable, and the current selection ("all") is marked.
+      assert html =~ ~s(<select name="src")
+      assert html =~ ~s(aria-label="Class source filter")
+      assert html =~ ~s(<option value="all" selected="selected">)
+      assert html =~ ~s(<option value="project">)
+      assert html =~ ~s(<option value="deps">)
+      assert html =~ ~s(<option value="stdlib">)
+      assert html =~ "All"
+      assert html =~ "Proj"
+      assert html =~ "Deps"
+      assert html =~ "Std"
+    end
+
+    test "changing the dropdown dispatches the browser_source event", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      assert render(view) =~ "increment"
+
+      # Driving the rendered <select> (not a bare event) still narrows the tree:
+      # the phx-change form posts `%{"src" => "stdlib"}` to the unchanged handler.
+      html =
+        view
+        |> form(~s(form[phx-change="browser_source"]), %{"src" => "stdlib"})
+        |> render_change()
+
+      refute html =~ "increment"
+      assert Process.alive?(view.pid)
+    end
+  end
 end

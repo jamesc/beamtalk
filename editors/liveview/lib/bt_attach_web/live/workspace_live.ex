@@ -5667,27 +5667,31 @@ defmodule BtAttachWeb.WorkspaceLive do
           </button>
         </div>
         <%!-- BT-2557: source-origin filter — narrow the tree to project / deps /
-             stdlib so a project's own classes aren't buried under the stdlib. --%>
-        <div class="seg" role="tablist" aria-label="Class source filter">
-          <button
-            :for={
-              {src, label} <- [
-                {"all", "All"},
-                {"project", "Proj"},
-                {"deps", "Deps"},
-                {"stdlib", "Std"}
-              ]
-            }
-            type="button"
-            role="tab"
-            class={[@browser_source == src && "on"]}
-            aria-selected={to_string(@browser_source == src)}
-            phx-click="browser_source"
-            phx-value-src={src}
-          >
-            {label}
-          </button>
-        </div>
+             stdlib so a project's own classes aren't buried under the stdlib.
+             BT-2603: a compact <select> rather than a segmented control so it
+             keeps a fixed, small width and never overflows / clips off the side
+             of a narrow panel head. The posted field is `src`, so the existing
+             `handle_event("browser_source", %{"src" => src}, ...)` is unchanged;
+             `phx-change` fires on each selection and the native <select> carries
+             its own keyboard + listbox aria semantics. --%>
+        <form phx-change="browser_source" class="src-filter">
+          <select name="src" class="src-select" aria-label="Class source filter">
+            <option
+              :for={
+                {src, label} <- [
+                  {"all", "All"},
+                  {"project", "Proj"},
+                  {"deps", "Deps"},
+                  {"stdlib", "Std"}
+                ]
+              }
+              value={src}
+              selected={@browser_source == src}
+            >
+              {label}
+            </option>
+          </select>
+        </form>
         <%!-- New Class (BT-2293): owner-only ＋ toggle. Reveals the inline create
              form below; the new class then appears right in the tree under it. --%>
         <button
