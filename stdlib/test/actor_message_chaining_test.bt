@@ -38,10 +38,12 @@ TestCase subclass: ActorMessageChainingTest
     // keyword `spawnWith:` constructor path; `withValueActor` is a local, since
     // field access in Beamtalk always goes through `self.`
     withValueActor := ActorChainingFixture spawnWith: #{#value => 42}
+    // Local actor isn't reachable by tearDown; stop it via ensure: so it's
+    // torn down even if the assertion fails
     // getName returns a string directly; size is dispatched on the string
-    self assert: withValueActor getName size equals: 7
-    // Local actor isn't reachable by tearDown, so stop it inline to avoid a leak
-    withValueActor stop
+    [
+      self assert: withValueActor getName size equals: 7
+    ] ensure: [withValueActor stop]
 
   // Chained send: getValue → printString (sync dispatch, no intermediary Future)
   testImplicitChaining => self assert: self.a getValue printString equals: "0"
