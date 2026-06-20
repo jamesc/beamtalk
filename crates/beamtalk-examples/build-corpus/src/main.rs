@@ -12,26 +12,46 @@ use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 
 fn main() {
     let root = find_repo_root();
+    let corpus = generate_corpus(&root);
+    let json = serde_json::to_string_pretty(&corpus).expect("serialization must succeed");
+
+    let output_path = root.join("crates/beamtalk-examples/corpus.json");
+    fs::write(&output_path, format!("{json}\n")).expect("failed to write corpus.json");
+
+    eprintln!(
+        "Wrote {} entries to {}",
+        corpus.entries.len(),
+        output_path.display()
+    );
+}
+
+/// Build the corpus from the repository sources rooted at `root`.
+///
+/// Pure (no I/O beyond reading the source tree): given the same source tree it
+/// always returns the same `Corpus` — entries are sorted by id and every entry's
+/// tags are sorted+deduped, so `serde_json` serialization is byte-stable. The
+/// `corpus_generation_is_deterministic` test pins this invariant (BT-2595).
+fn generate_corpus(root: &Path) -> Corpus {
     let mut entries = Vec::new();
 
     // .bt fixture files — whole-file entries
-    extract_bt_dir(&root, "stdlib/test/fixtures", None, &mut entries);
-    extract_bt_dir(&root, "tests/repl-protocol/fixtures", None, &mut entries);
-    extract_bt_dir(&root, "docs/learning/fixtures", None, &mut entries);
+    extract_bt_dir(root, "stdlib/test/fixtures", None, &mut entries);
+    extract_bt_dir(root, "tests/repl-protocol/fixtures", None, &mut entries);
+    extract_bt_dir(root, "docs/learning/fixtures", None, &mut entries);
 
     // .bt test files — whole-file entries (tests show how to *use* patterns)
-    extract_bt_dir(&root, "stdlib/test", Some("/fixtures/"), &mut entries);
+    extract_bt_dir(root, "stdlib/test", Some("/fixtures/"), &mut entries);
 
     // .bt example files
-    extract_bt_dir(&root, "examples", None, &mut entries);
+    extract_bt_dir(root, "examples", None, &mut entries);
 
     // .md learning docs — extract fenced beamtalk code blocks
-    extract_md_files(&root, "docs/learning", &mut entries);
+    extract_md_files(root, "docs/learning", &mut entries);
 
     // beamtalk-language-features.md
     let lang_features = root.join("docs/beamtalk-language-features.md");
     if lang_features.exists() {
-        extract_md_code_blocks(&root, &lang_features, &mut entries);
+        extract_md_code_blocks(root, &lang_features, &mut entries);
     }
 
     // Add synonym tags for common vocabulary mismatches
@@ -56,17 +76,7 @@ fn main() {
         );
     }
 
-    let corpus = Corpus { entries };
-    let json = serde_json::to_string_pretty(&corpus).expect("serialization must succeed");
-
-    let output_path = root.join("crates/beamtalk-examples/corpus.json");
-    fs::write(&output_path, format!("{json}\n")).expect("failed to write corpus.json");
-
-    eprintln!(
-        "Wrote {} entries to {}",
-        corpus.entries.len(),
-        output_path.display()
-    );
+    Corpus { entries }
 }
 
 /// Find the repository root by walking up from the current directory.
@@ -233,6 +243,13 @@ fn explanation_from_comments(source: &str) -> String {
 }
 
 /// Walk a directory for .bt files in sorted order.
+///
+/// Uses strict errors and *panics* on a walk failure rather than silently
+/// yielding an empty vec: a transient read error (e.g. concurrent filesystem
+/// activity in CI) must not silently drop a whole directory's entries, which
+/// would produce a truncated `corpus.json` and surface as a confusing,
+/// non-deterministic "corpus out of date" diff (BT-2595). A build that cannot
+/// read its inputs must fail loudly, not emit a partial corpus.
 fn walk_bt_files(dir: &Path) -> Vec<PathBuf> {
     use beamtalk_core::file_walker::FileWalker;
 
@@ -240,9 +257,8 @@ fn walk_bt_files(dir: &Path) -> Vec<PathBuf> {
         return Vec::new();
     }
     FileWalker::source_files()
-        .strict_errors(false)
         .walk_pathbuf(dir)
-        .unwrap_or_default()
+        .unwrap_or_else(|e| panic!("failed to walk '{}' for corpus build: {e:?}", dir.display()))
 }
 
 /// Extract .bt files from a directory as whole-file corpus entries.
@@ -496,5 +512,37 @@ fn add_synonym_tags(entries: &mut [CorpusEntry]) {
             }
         }
         entry.tags.extend(new_tags);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression guard for BT-2595: the `check-corpus` CI gate regenerates
+    /// `corpus.json` and diffs it against the committed copy, so generation must
+    /// be byte-stable across runs. Two back-to-back builds of the same source
+    /// tree must serialize identically — entries sorted by id, tags sorted+
+    /// deduped, no hash-collection field leaking iteration order.
+    #[test]
+    fn corpus_generation_is_deterministic() {
+        let root = find_repo_root();
+
+        let first = serde_json::to_string_pretty(&generate_corpus(&root))
+            .expect("serialization must succeed");
+        let second = serde_json::to_string_pretty(&generate_corpus(&root))
+            .expect("serialization must succeed");
+
+        assert_eq!(
+            first, second,
+            "corpus generation is non-deterministic: two builds of the same \
+             source tree produced different output"
+        );
+        // A non-empty corpus also guards against a silent walk truncation
+        // (e.g. a swallowed directory read error) regressing to an empty build.
+        assert!(
+            !first.is_empty() && first.contains("\"id\""),
+            "corpus generation produced no entries"
+        );
     }
 }
