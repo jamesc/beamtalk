@@ -10,6 +10,8 @@ TestCase subclass: ActorMessageChainingTest
 
   setUp => self.a := ActorChainingFixture spawn
 
+  tearDown => self.a isNil ifFalse: [self.a stop]
+
   // Chained send: actor method returning a primitive, chained with printString
   testChainedPrimitiveMethodResult =>
     // getValue returns 0 directly; printString dispatches on 0
