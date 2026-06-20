@@ -29,6 +29,13 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               autoflush: false,
               git_status: nil,
               git_log: nil,
+              # BT-2597: seeded test-runner pane results so the async run/load
+              # path (`start_async(:test_op, …)` → `handle_async`) can be
+              # exercised without a real workspace node. `nil` = use the canned
+              # default; a test can override to drive error/partial-load paths.
+              test_classes: nil,
+              run_tests_result: nil,
+              load_tests_result: nil,
               calls: []
   end
 
@@ -190,20 +197,79 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     %{branch: "main", upstream: nil, ahead: 0, behind: 0, files: []}
   end
 
+  # ── Test-runner pane (BT-2557, async in BT-2597) ──────────────────────────
+  # Canned catalogue + run/load results so the Tests pane's `start_async`
+  # (`:test_op`) path can be driven without a real workspace node. Each can be
+  # overridden via the `set_*` helpers to exercise error / partial-load paths.
+
+  def list_tests do
+    record({:list_tests})
+    get(:test_classes) || {:ok, default_test_classes()}
+  end
+
+  def run_tests(class) do
+    record({:run_tests, class})
+    get(:run_tests_result) || {:ok, default_run_result()}
+  end
+
+  def load_tests do
+    record({:load_tests})
+    get(:load_tests_result) || {:ok, default_load_result()}
+  end
+
+  @doc "Test helper: seed the simulated `list_tests` result."
+  def set_test_classes(result), do: put(:test_classes, result)
+
+  @doc "Test helper: seed the simulated `run_tests` result."
+  def set_run_tests(result), do: put(:run_tests_result, result)
+
+  @doc "Test helper: seed the simulated `load_tests` result."
+  def set_load_tests(result), do: put(:load_tests_result, result)
+
+  defp default_test_classes do
+    [%{"class" => "StubDemoTest", "selectors" => ["testOne", "testTwo"]}]
+  end
+
+  defp default_run_result do
+    %{
+      "total" => 2,
+      "passed" => 1,
+      "failed" => 1,
+      "skipped" => 0,
+      "duration" => 0.05,
+      "tests" => [
+        %{"name" => "testOne", "class" => "StubDemoTest", "status" => "pass", "detail" => ""},
+        %{"name" => "testTwo", "class" => "StubDemoTest", "status" => "fail", "detail" => "boom"}
+      ]
+    }
+  end
+
+  defp default_load_result do
+    %{"classes" => ["StubDemoTest"], "errors" => [], "summary" => "Reloaded 1 of 1 files"}
+  end
+
   # ── Browse ops ───────────────────────────────────────────────────────────
 
   def browse_classes do
     base = [
-      %{"name" => "Counter", "source_file" => "src/counter.bt"},
+      %{"name" => "Counter", "source_file" => "src/counter.bt", "source_origin" => "project"},
       # BT-2578: a native: class in the tree so the System Browser's "Erlang
       # backend" badge + native pane can be reached by real navigation.
-      %{"name" => "Subprocess", "source_file" => "src/subprocess.bt"}
+      %{
+        "name" => "Subprocess",
+        "source_file" => "src/subprocess.bt",
+        "source_origin" => "project"
+      }
     ]
 
     extra =
       get(:defined_classes)
       |> Enum.map(fn name ->
-        %{"name" => name, "source_file" => "src/#{Macro.underscore(name)}.bt"}
+        %{
+          "name" => name,
+          "source_file" => "src/#{Macro.underscore(name)}.bt",
+          "source_origin" => "project"
+        }
       end)
 
     {:value, base ++ extra}

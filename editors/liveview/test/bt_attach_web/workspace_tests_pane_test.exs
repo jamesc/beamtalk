@@ -1,0 +1,179 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+defmodule BtAttachWeb.WorkspaceTestsPaneTest do
+  @moduledoc """
+  Integration tests for the cockpit Tests pane's non-blocking run/load and the
+  System Browser source filter's selection handling (BT-2597), driven through the
+  full LiveView stack against the fully-stubbed workspace client
+  (`StubWorkspaceClient`). No `:workspace` tag, so this runs in the bare
+  `mix test` lane.
+
+  Covers the two BT-2597 acceptance criteria:
+
+    * F1 — `run_tests` / `load_tests` run off-socket via `start_async(:test_op, …)`
+      so the event handler returns immediately and the result fills in from
+      `handle_async`; an error degrades to a `tests_error` rather than crashing.
+    * F2 — switching to a source filter that hides the selected class clears the
+      selection (and its method pane).
+  """
+  use BtAttachWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias BtAttachWeb.StubWorkspaceClient
+
+  setup do
+    Application.put_env(:bt_attach, :workspace_client, StubWorkspaceClient)
+
+    Application.put_env(:bt_attach, :oidc, %{
+      issuer: "https://idp",
+      client_id: "id",
+      redirect_uri: "https://ide/callback",
+      groups_claim: "groups",
+      client_secret: "x",
+      roles: %{"owner" => ["beamtalk-owners"], "observer" => ["beamtalk-observers"]}
+    })
+
+    Application.put_env(:bt_attach, :session_ttl_secs, 3600)
+
+    on_exit(fn ->
+      Application.delete_env(:bt_attach, :workspace_client)
+      Application.delete_env(:bt_attach, :oidc)
+      Application.delete_env(:bt_attach, :session_ttl_secs)
+      StubWorkspaceClient.stop_state(2_000)
+    end)
+
+    {:ok, _} = StubWorkspaceClient.start_state()
+
+    :ok
+  end
+
+  defp owner_conn(conn) do
+    Plug.Test.init_test_session(conn, %{
+      "bt_user" => %{"sub" => "alice", "groups" => ["beamtalk-owners"]},
+      "bt_logged_in_at" => System.system_time(:second)
+    })
+  end
+
+  describe "F1: non-blocking test run/load (start_async, BT-2597)" do
+    test "Run all resolves off-socket and renders per-case pass/fail", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Opening the Tests tab discovers the stub catalogue.
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render(view) =~ "StubDemoTest"
+
+      # Run all kicks off the `:test_op` async task and returns immediately; the
+      # per-case rows land once the async result resolves via handle_async.
+      render_click(view, "run_tests")
+      html = render_async(view)
+
+      assert html =~ "testOne"
+      assert html =~ "testTwo"
+      assert html =~ "failed"
+      assert Process.alive?(view.pid)
+    end
+
+    test "Load tests resolves off-socket and refreshes the catalogue", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      render_click(view, "load_tests")
+      html = render_async(view)
+
+      # The post-load re-discovery shows the catalogue, and no error banner.
+      assert html =~ "StubDemoTest"
+      refute html =~ "failed to load"
+      assert Process.alive?(view.pid)
+    end
+
+    test "a run error degrades to a pane error, not a LiveView crash", %{conn: conn} do
+      # The async task's dispatch returns an error; `apply_test_result/2` folds it
+      # into `tests_error` and the socket survives (no per-case results shown).
+      StubWorkspaceClient.set_run_tests({:error, :workspace_unreachable})
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      render_click(view, "run_tests")
+      html = render_async(view)
+
+      refute html =~ "testOne"
+      assert Process.alive?(view.pid)
+    end
+
+    test "an unexpected run reply shape degrades, not crashes", %{conn: conn} do
+      # A non-{:ok,_}/{:error,_} reply must hit the total `apply_test_result/2`
+      # clause rather than crashing handle_async on an unmatched shape.
+      StubWorkspaceClient.set_run_tests(:bogus)
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      render_click(view, "run_tests")
+      html = render_async(view)
+
+      assert html =~ "unexpected_test_result"
+      assert Process.alive?(view.pid)
+    end
+
+    test "a load error degrades to a pane error, not a LiveView crash", %{conn: conn} do
+      # `apply_test_load(socket, {:error, reason})` surfaces the error and the
+      # socket survives (symmetric with the run-error path).
+      StubWorkspaceClient.set_load_tests({:error, :unauthorized})
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      render_click(view, "load_tests")
+      html = render_async(view)
+
+      assert html =~ "Not authorized"
+      assert Process.alive?(view.pid)
+    end
+
+    test "an unexpected load reply shape degrades, not crashes", %{conn: conn} do
+      # A non-{:ok,_}/{:error,_} reply must hit the total `apply_test_load/2`
+      # clause rather than crashing handle_async on an unmatched shape.
+      StubWorkspaceClient.set_load_tests(:bogus)
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      render_click(view, "load_tests")
+      html = render_async(view)
+
+      assert html =~ "unexpected_test_result"
+      assert Process.alive?(view.pid)
+    end
+  end
+
+  describe "F2: source filter clears a now-hidden selection (BT-2597)" do
+    test "switching to a filter that hides the selected class clears it", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Select a project class — its instance selectors fill the method pane.
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      assert render(view) =~ "increment"
+
+      # Narrowing to "stdlib" hides the project class; its selection (and method
+      # pane) is cleared rather than left as a ghost.
+      html = render_click(view, "browser_source", %{"src" => "stdlib"})
+      refute html =~ "increment"
+      assert Process.alive?(view.pid)
+    end
+
+    test "switching to a filter that still shows the class keeps the selection", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+      assert render(view) =~ "increment"
+
+      # "Project" still includes Counter, so the selection (and method pane) stays.
+      html = render_click(view, "browser_source", %{"src" => "project"})
+      assert html =~ "increment"
+      assert Process.alive?(view.pid)
+    end
+  end
+end
