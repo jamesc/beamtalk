@@ -554,21 +554,56 @@ patch_side_class_test() ->
 %% span_error_entry/3 (ADR 0082 Phase 1, BT-2283)
 %%====================================================================
 
-span_error_entry_new_method_is_flushable_test() ->
-    %% A brand-new method (not yet on disk) keeps the entry flushable: a later
-    %% flush appends it.
-    Base = #{class => <<"Counter">>},
-    Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, selector_not_found),
-    ?assertEqual(true, maps:get(flushable, Entry)),
-    ?assertEqual(<<"src/counter.bt">>, maps:get(source_file, Entry)).
-
 span_error_entry_other_error_downgrades_test() ->
     %% A genuine resolution failure (ambiguous, port down) downgrades to
-    %% memory-only with a reason.
+    %% memory-only with a reason. The brand-new-method (`selector_not_found')
+    %% case no longer routes here — it is handled by new_method_entry/3 (BT-2583).
     Base = #{class => <<"Counter">>},
     Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, ambiguous),
     ?assertEqual(false, maps:get(flushable, Entry)),
     ?assertEqual(<<"span_unresolved:ambiguous">>, maps:get(not_flushable_reason, Entry)).
+
+%%====================================================================
+%% sibling_method_indent/1 (BT-2583)
+%%
+%% Pure base-indent derivation: the leading whitespace of the first indented,
+%% non-comment, non-blank line of the class body — the sibling-method step a
+%% brand-new method is reshaped to before flush appends it.
+%%====================================================================
+
+sibling_method_indent_two_space_member_test() ->
+    %% A 2-space-indented method/field is the typical stdlib convention.
+    Disk = <<"Object subclass: Counter\n  value => 0\n  step => 1\n">>,
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+
+sibling_method_indent_skips_leading_comments_test() ->
+    %% Doc/line comments above the first member do not set the indentation step;
+    %% the first indented *member* line does.
+    Disk = <<
+        "Object subclass: Counter\n"
+        "  /// A counter.\n"
+        "  value => 0\n"
+    >>,
+    %% The comment line is itself indented 2 spaces, so the step is still 2 —
+    %% but the helper must reach a member line, not stop on the class header.
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+
+sibling_method_indent_four_space_member_test() ->
+    %% A non-standard 4-space body is honoured (we copy the sibling, not a
+    %% hard-coded 2).
+    Disk = <<"Object subclass: Counter\n    value => 0\n">>,
+    ?assertEqual(<<"    ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+
+sibling_method_indent_empty_body_falls_back_test() ->
+    %% A class with no indented member yet falls back to the 2-space default.
+    Disk = <<"Object subclass: Counter\n">>,
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+
+sibling_method_indent_skips_unindented_comment_test() ->
+    %% A column-0 line comment is not a member; the indented member below it sets
+    %% the step.
+    Disk = <<"// header\nObject subclass: Counter\n  value => 0\n">>,
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
 
 %%====================================================================
 %% declared_class_name/1 (ADR 0082 Phase 1, BT-2285)
@@ -1095,6 +1130,9 @@ loader_integration_test_() ->
             end},
             {"reload_method_definition autoflush", fun() ->
                 t_reload_method_definition_autoflush(Proj)
+            end},
+            {"new method flushes at class body indentation (BT-2583)", fun() ->
+                t_new_method_appends_indented(Proj)
             end}
         ]
     end}.
@@ -1403,3 +1441,59 @@ t_reload_method_definition_autoflush(Proj) ->
     after
         beamtalk_workspace_meta:set_setting(autoflush, false)
     end.
+
+%% BT-2583: a brand-new method (no prior on-disk span) flushed to a 2-space
+%% indented class body is written at that indentation, NOT at column 0. The
+%% install hook reshapes the compiler's canonical column-0 body to the class's
+%% sibling-method indentation at store time (new_method_entry/3), so flush's
+%% verbatim append lands an indented method.
+t_new_method_appends_indented(_Proj) ->
+    %% Use the live workspace project_path so the patched class's sourceFile is
+    %% classified flushable (robust against any workspace_meta restart between
+    %% setup and execution — same convention as t_reload_method_definition_existing).
+    Proj = live_project_dir(),
+    %% Start from a clean ChangeLog so flush/0 only acts on this test's entry
+    %% (the integration fixture's log is shared across sub-tests).
+    ok = beamtalk_workspace_changelog:clear(),
+    %% A 2-space-indented class body with one sibling method. The brand-new
+    %% method must be appended at that 2-space indentation, not at column 0.
+    Path = write_bt_under(
+        Proj,
+        "src",
+        "IndentAppend.bt",
+        <<"Actor subclass: IndentAppend\n  state: v = 1\n\n  value -> Integer =>\n    self.v\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% `bumped' does not exist on disk → selector_not_found → new_method_entry/3.
+    %% The structured install path carries a real method body (unlike the bare
+    %% `>>' path), so the reshaped, appended source is non-empty.
+    {ok, _, _, _, _} = beamtalk_repl_loader:install_method(
+        <<"IndentAppend">>,
+        <<"bumped">>,
+        <<"bumped -> Integer =>\n  self.v + 1">>,
+        durable,
+        <<"test">>,
+        human,
+        [],
+        State1
+    ),
+    {ok, _Summary} = beamtalk_workspace_flush:flush(),
+    {ok, Final} = file:read_file(Path),
+    Lines = binary:split(Final, <<"\n">>, [global]),
+    %% The appended method's signature line must carry the class body's 2-space
+    %% indent — i.e. the column-0 bug is gone.
+    SigLines = [L || L <- Lines, contains(L, <<"bumped -> Integer">>)],
+    ?assertMatch([_ | _], SigLines),
+    lists:foreach(
+        fun(L) ->
+            ?assertMatch(<<"  bumped", _/binary>>, L),
+            %% And not be at column 0.
+            ?assertNotMatch(<<"bumped", _/binary>>, L)
+        end,
+        SigLines
+    ).
+
+%% True iff Needle occurs anywhere in Haystack.
+contains(Haystack, Needle) ->
+    binary:match(Haystack, Needle) =/= nomatch.
