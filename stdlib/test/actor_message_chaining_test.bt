@@ -38,6 +38,8 @@ TestCase subclass: ActorMessageChainingTest
     withValueActor := ActorChainingFixture spawnWith: #{#value => 42}
     // getName returns a string directly; size is dispatched on the string
     self assert: withValueActor getName size equals: 7
+    // Local actor isn't reachable by tearDown, so stop it inline to avoid a leak
+    withValueActor stop
 
   // Chained send: getValue → printString (sync dispatch, no intermediary Future)
   testImplicitChaining => self assert: self.a getValue printString equals: "0"
