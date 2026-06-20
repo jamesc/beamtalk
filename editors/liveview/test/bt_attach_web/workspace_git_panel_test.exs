@@ -100,6 +100,23 @@ defmodule BtAttachWeb.WorkspaceGitPanelTest do
       assert eventually(fn -> render(view) =~ "unexpected_git_status" end)
       assert Process.alive?(view.pid)
     end
+
+    test "an independently-failed log surfaces an error beside a good status", %{conn: conn} do
+      # Status succeeds but the log read fails on its own — the panel must not show
+      # a valid branch beside a silently-empty commit list. `apply_git_log/2`
+      # surfaces the log error because status left `git_error` clear.
+      StubWorkspaceClient.set_git_status(
+        {:ok, %{branch: "feature", upstream: nil, ahead: 0, behind: 0, files: []}}
+      )
+
+      StubWorkspaceClient.set_git_log({:error, :git_timeout})
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "git"})
+
+      assert eventually(fn -> render(view) =~ "git_timeout" end)
+      assert Process.alive?(view.pid)
+    end
   end
 
   describe "S2: autoflush-gated post-save git refresh (BT-2590)" do

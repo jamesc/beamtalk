@@ -2845,14 +2845,28 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp apply_git_status(socket, _other),
     do: assign(socket, git_status: nil, git_error: facade_error(:unexpected_git_status))
 
-  # Apply a completed git log read. A failed (or unexpected) log keeps the list
-  # empty — the status pane already surfaces the degraded state, so we don't
-  # double-report it.
+  # Apply a completed git log read.
   defp apply_git_log(socket, {:ok, commits}) when is_list(commits),
     do: assign(socket, git_log: commits)
 
+  defp apply_git_log(socket, {:error, reason}),
+    do: log_failed(socket, facade_error(reason))
+
   defp apply_git_log(socket, _other),
-    do: assign(socket, git_log: [])
+    do: log_failed(socket, facade_error(:unexpected_git_log))
+
+  # A git-log read failed. Clear the list, and surface the error only if the
+  # status read hasn't already reported one — when both fail together the status
+  # pane already shows the degraded state, but a fast status beside an
+  # independently-failed log (e.g. a large-history timeout) would otherwise leave
+  # a valid branch next to a mysteriously empty commit list with no explanation.
+  defp log_failed(socket, error) do
+    socket = assign(socket, git_log: [])
+
+    if socket.assigns.git_error,
+      do: socket,
+      else: assign(socket, git_error: error)
+  end
 
   # BT-2590 (S2): read the workspace `autoflush` flag once at mount via the read
   # facade (so RBAC/audit apply uniformly). The client defaults a degraded read to
