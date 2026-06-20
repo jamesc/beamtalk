@@ -78,7 +78,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       {:ok, view, html} = live(observer_conn(conn), "/")
       assert html =~ "read-only (Observer)"
       assert html =~ ~s(id="system-browser")
-      assert html =~ ~s(phx-click="browser_select_class")
+      # The class-tree rows (each a `browser_select_class` div) load from the
+      # off-socket mount read (BT-2591) — await the async load before asserting.
+      assert render_async(view) =~ ~s(phx-click="browser_select_class")
 
       # A class-tree click from an Observer re-renders without a "Not authorized"
       # refusal — browse is a read op, so the read-only role may browse.
@@ -741,13 +743,14 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ ~s(phx-click="browser_side")
     assert html =~ ~s(phx-value-side="instance")
     assert html =~ ~s(phx-value-side="class")
-    assert html =~ ~s(phx-click="browser_select_class")
     refute html =~ "Lands in a later Phase 1 issue."
 
-    # The class tree is populated from live browse-classes, now read off-socket at
-    # mount (BT-2591) — await the async mount load, then a core class like Object
-    # is always in the image.
-    assert render_async(view) =~ "Object"
+    # The class tree (each row a `browser_select_class` div) is populated from live
+    # browse-classes, now read off-socket at mount (BT-2591) — await the async
+    # mount load, then the rows render and a core class like Object is in the image.
+    awaited = render_async(view)
+    assert awaited =~ ~s(phx-click="browser_select_class")
+    assert awaited =~ "Object"
   end
 
   test "selecting a class loads its protocols and methods (BT-2491)", %{conn: conn} do
