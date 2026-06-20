@@ -276,7 +276,10 @@ mod tests {
 
     #[test]
     fn test_parse_repl_port_typical() {
-        let stdout = "Welcome to beamtalk REPL\nConnected to REPL backend on port 9876.\n  Workspace: abc123def456 (new)\n";
+        // Mirrors real `beamtalk repl` output order: the Workspace line is
+        // printed before the port line (repl/mod.rs). Parsing is order-agnostic,
+        // but the fixture matches reality so it can't mislead a maintainer.
+        let stdout = "Welcome to beamtalk REPL\n  Workspace: abc123def456 (new)\nConnected to REPL backend on port 9876.\n";
         assert_eq!(parse_repl_port(stdout), Some(9876));
     }
 
@@ -296,7 +299,8 @@ mod tests {
 
     #[test]
     fn test_parse_workspace_id_typical() {
-        let stdout = "Connected to REPL backend on port 9876.\n  Workspace: abc123def456 (new)\n";
+        // Real output order: Workspace line precedes the port line (repl/mod.rs).
+        let stdout = "  Workspace: abc123def456 (new)\nConnected to REPL backend on port 9876.\n";
         assert_eq!(parse_workspace_id(stdout), Some("abc123def456".to_string()));
     }
 

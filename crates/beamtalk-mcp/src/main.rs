@@ -32,6 +32,7 @@ use std::sync::Arc;
 
 use clap::{ArgAction, Parser};
 use rmcp::{ServiceExt, transport::stdio};
+use tokio::io::AsyncBufReadExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{self, EnvFilter, reload};
@@ -189,8 +190,17 @@ async fn resolve_port_and_cookie(
 ///
 /// Shells out to `beamtalk repl --port 0 --timeout N` with stdin closed so the
 /// process exits once the workspace node is up. The node continues running
-/// detached. Parses the assigned port from stdout and reads the cookie from
-/// workspace storage.
+/// detached. The assigned port is read by **streaming** `beamtalk repl` stdout
+/// line-by-line until the port line appears, rather than waiting for the pipe to
+/// reach EOF. This is essential on Windows (BT-2568): the detached BEAM
+/// grandchild node inherits `beamtalk repl`'s stdout pipe handle (Rust spawns
+/// children with `bInheritHandles = TRUE` and Windows has no `CLOEXEC`), so the
+/// write end stays open after `beamtalk repl` itself exits. An EOF-based read
+/// (`.output()`) therefore blocks forever even though the workspace is fully up,
+/// which is what stalled `beamtalk-mcp --start` and timed out the MCP
+/// `initialize` handshake. Reading only until the port line decouples us from
+/// the leaked pipe; a bounded timeout makes a genuinely stuck boot fail loudly
+/// instead of hanging. The cookie is then read from workspace storage.
 async fn start_workspace(
     workspace_id: Option<&str>,
 ) -> Result<(u16, String, Option<String>), Box<dyn std::error::Error>> {
@@ -199,9 +209,20 @@ async fn start_workspace(
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(14400); // 4 hours
 
+    // Cap the wait for `beamtalk repl` to report its port. A stuck boot now fails
+    // with a clear error instead of hanging the MCP server indefinitely (BT-2568).
+    let boot_timeout_secs: u64 = std::env::var("BEAMTALK_WORKSPACE_BOOT_TIMEOUT_SECS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(120);
+
     eprintln!("No running workspace found — starting beamtalk workspace...");
 
-    let output = tokio::process::Command::new("beamtalk")
+    // stderr is inherited (surfaces `beamtalk repl` diagnostics on the MCP
+    // server's own stderr log) rather than piped: a piped stderr would face the
+    // same Windows grandchild-handle-inheritance leak as stdout, and draining it
+    // would be one more thing that can block boot.
+    let mut child = tokio::process::Command::new("beamtalk")
         .args([
             "repl",
             "--port",
@@ -211,9 +232,8 @@ async fn start_workspace(
         ])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .await
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
         .map_err(|e| -> Box<dyn std::error::Error> {
             if e.kind() == std::io::ErrorKind::NotFound {
                 "beamtalk not found on PATH — install beamtalk or start the workspace manually \
@@ -224,33 +244,36 @@ async fn start_workspace(
             }
         })?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("failed to capture beamtalk repl stdout")?;
 
-    // Check exit status before parsing stdout
-    if !output.status.success() {
-        return Err(format!(
-            "beamtalk repl exited with {} — workspace failed to start.\n\
-             stdout: {stdout}\nstderr: {stderr}",
-            output.status
-        )
-        .into());
-    }
+    // Stream stdout until the port line appears (or we time out). Note: port and
+    // workspace ID parsing depends on `beamtalk repl` stdout format — if REPL
+    // output changes, update `parse_repl_port` / `parse_workspace_id` and tests.
+    let (port, captured) =
+        read_port_from_boot(stdout, std::time::Duration::from_secs(boot_timeout_secs))
+            .await
+            .map_err(|e| -> Box<dyn std::error::Error> {
+                // The launcher is best-effort cleaned up; the detached node (if any) is
+                // independent and unaffected.
+                let _ = child.start_kill();
+                e
+            })?;
 
-    // Note: port and workspace ID parsing depends on `beamtalk repl` stdout format.
-    // If REPL output changes, update these parsers and the tests below.
-    let port = parse_repl_port(&stdout).ok_or_else(|| {
-        format!(
-            "beamtalk repl succeeded but did not report a port.\n\
-             stdout: {stdout}\nstderr: {stderr}"
-        )
-    })?;
+    // Reap the launcher in the background so it doesn't linger as a zombie. We do
+    // NOT block on it: on Windows the leaked stdout pipe means we can't rely on
+    // the process being fully drainable, and the workspace node is already up.
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
 
     // Determine workspace ID: use explicit ID, or parse from stdout, or derive from cwd
     let ws_id = if let Some(id) = workspace_id {
         id.to_string()
     } else {
-        parse_workspace_id(&stdout).unwrap_or_else(|| {
+        parse_workspace_id(&captured).unwrap_or_else(|| {
             std::env::current_dir()
                 .ok()
                 .and_then(|p| workspace::generate_workspace_id(&p))
@@ -277,6 +300,79 @@ async fn start_workspace(
     eprintln!("Workspace ready on port {port}");
 
     Ok((port, cookie, Some(ws_id)))
+}
+
+/// Read `beamtalk repl` stdout until the assigned port is reported.
+///
+/// Streams the launcher's stdout line-by-line, accumulating it, and returns as
+/// soon as `parse_repl_port` matches a line — without waiting for EOF. This
+/// avoids the Windows hang where the detached BEAM grandchild keeps the stdout
+/// pipe's write end open (BT-2568). The whole read is bounded by `timeout`; on
+/// expiry, or if stdout closes before a port is seen, a clear error is returned.
+///
+/// Output-ordering invariant: `beamtalk repl` MUST print the `Workspace: <id>`
+/// line *before* the port line. Reading stops at the port line, so any line
+/// emitted after it (the workspace ID included) is not captured and
+/// `parse_workspace_id` would fall back to the cwd-derived ID. The fallback keeps
+/// the workspace usable, but the ordering is a protocol contract between the REPL
+/// output layer and this reader — do not reorder those lines in `beamtalk repl`
+/// without updating `read_port_from_boot`. The
+/// `read_port_from_boot_captures_workspace_line_before_port` test pins it.
+///
+/// Returns the parsed port and the captured stdout (for workspace-ID parsing).
+async fn read_port_from_boot<R>(
+    stdout: R,
+    timeout: std::time::Duration,
+) -> Result<(u16, String), Box<dyn std::error::Error>>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+    let mut captured = String::new();
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(format!(
+                "beamtalk repl did not report a port within {timeout:?} — workspace boot stalled.\n\
+                 Captured output:\n{captured}"
+            )
+            .into());
+        }
+
+        match tokio::time::timeout(remaining, lines.next_line()).await {
+            // A line arrived.
+            Ok(Ok(Some(line))) => {
+                let port = parse_repl_port(&line);
+                captured.push_str(&line);
+                captured.push('\n');
+                if let Some(port) = port {
+                    return Ok((port, captured));
+                }
+            }
+            // stdout reached EOF before a port line — the launcher exited early.
+            Ok(Ok(None)) => {
+                return Err(format!(
+                    "beamtalk repl stdout closed before reporting a port — \
+                     workspace failed to start.\nCaptured output:\n{captured}"
+                )
+                .into());
+            }
+            // I/O error reading the pipe.
+            Ok(Err(e)) => {
+                return Err(format!("error reading beamtalk repl output: {e}").into());
+            }
+            // Overall deadline elapsed mid-read.
+            Err(_) => {
+                return Err(format!(
+                    "beamtalk repl did not report a port within {timeout:?} — workspace boot stalled.\n\
+                     Captured output:\n{captured}"
+                )
+                .into());
+            }
+        }
+    }
 }
 
 /// Poll TCP until the server accepts connections or the timeout expires.
@@ -434,5 +530,74 @@ mod tests {
             path_str.contains(".beamtalk") && path_str.contains("workspaces"),
             "Signal path should be under .beamtalk/workspaces/, got: {path_str}"
         );
+    }
+
+    #[tokio::test]
+    async fn read_port_from_boot_returns_on_port_line() {
+        // The port line need not be the last line — the function must stop as
+        // soon as it appears rather than reading on to EOF (depending on EOF is
+        // the Windows hang, BT-2568). The genuine never-EOF case is covered by
+        // read_port_from_boot_errors_on_timeout.
+        let out = b"Welcome to beamtalk REPL\n\
+                    Connected to REPL backend on port 9876.\n\
+                    trailing line after the port\n"
+            .as_slice();
+        let (port, captured) = read_port_from_boot(out, std::time::Duration::from_secs(5))
+            .await
+            .expect("should parse port");
+        assert_eq!(port, 9876);
+        assert!(captured.contains("Connected to REPL backend on port 9876."));
+    }
+
+    #[tokio::test]
+    async fn read_port_from_boot_captures_workspace_line_before_port() {
+        // The workspace line is printed before the port line, so the captured
+        // text used for workspace-ID parsing includes it.
+        let out = b"  Workspace: abc123def456 (new)\n\
+                    Connected to REPL backend on port 5555.\n"
+            .as_slice();
+        let (port, captured) = read_port_from_boot(out, std::time::Duration::from_secs(5))
+            .await
+            .expect("should parse port");
+        assert_eq!(port, 5555);
+        assert_eq!(
+            parse_workspace_id(&captured),
+            Some("abc123def456".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn read_port_from_boot_errors_on_eof_without_port() {
+        let out = b"Welcome to beamtalk REPL\nsome other output\n".as_slice();
+        let err = read_port_from_boot(out, std::time::Duration::from_secs(5))
+            .await
+            .expect_err("should error when no port is reported");
+        assert!(
+            err.to_string().contains("before reporting a port"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_port_from_boot_errors_on_timeout() {
+        // A stream that never closes and never emits a port line should time out
+        // and return the "boot stalled" error — not hang forever. This is the
+        // Windows hazard (BT-2568): the detached BEAM grandchild holds the stdout
+        // pipe open so EOF never arrives, so the deadline must bound the wait.
+        use tokio::io::AsyncWriteExt;
+        let (reader, mut writer) = tokio::io::duplex(256);
+        writer
+            .write_all(b"startup line with no port\n")
+            .await
+            .unwrap();
+        // writer is intentionally kept open so the stream never reaches EOF.
+        let err = read_port_from_boot(reader, std::time::Duration::from_millis(50))
+            .await
+            .expect_err("should time out");
+        assert!(
+            err.to_string().contains("boot stalled"),
+            "unexpected error: {err}"
+        );
+        drop(writer);
     }
 }
