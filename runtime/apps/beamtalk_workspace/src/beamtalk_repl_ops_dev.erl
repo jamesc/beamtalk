@@ -489,7 +489,7 @@ handle_term(<<"list-tests">>, _Params, _Msg, _SessionPid) ->
     ],
     {value, #{<<"classes">> => Classes}};
 handle_term(<<"load-tests">>, _Params, _Msg, _SessionPid) ->
-    %% BT-2596: load the project's `test/` files into the live image so the
+    %% BT-2557: load the project's `test/` files into the live image so the
     %% cockpit test-runner pane (and the System Browser's "Tests" group) surface
     %% TestCase subclasses without a CLI `beamtalk test` round-trip. Plain
     %% `load-project` defaults to include_tests=false, so opening a project never
@@ -1918,7 +1918,7 @@ base_ops() ->
         <<"test-all">> => #{<<"params">> => []},
         %% BT-2557: discover TestCase subclasses for the cockpit test-runner pane.
         <<"list-tests">> => #{<<"params">> => []},
-        %% BT-2596: load the project's test/ files so the runner/browser see them.
+        %% BT-2557: load the project's test/ files so the runner/browser see them.
         <<"load-tests">> => #{<<"params">> => []},
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
         <<"load-project">> => #{

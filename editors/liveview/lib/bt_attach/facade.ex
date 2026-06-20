@@ -127,7 +127,7 @@ defmodule BtAttach.Facade do
     # `eval`), so it is `:execute` — Owner-only, the same gate the eval form uses.
     list_tests: :read,
     run_tests: :execute,
-    # BT-2596: load the project's test/ files into the live image (compiles +
+    # BT-2557: load the project's test/ files into the live image (compiles +
     # loads user test code, mutating the image), so it is `:execute` — Owner-only,
     # the same gate `run_tests`/`eval` use. Populates the test-runner catalogue
     # and the System Browser "Tests" group from an empty (src-only) image.
@@ -346,7 +346,7 @@ defmodule BtAttach.Facade do
 
   defp invoke(:run_tests, _params, _ctx), do: client().run_tests(nil)
 
-  # BT-2596: load the project's test/ files into the live image so the runner
+  # BT-2557: load the project's test/ files into the live image so the runner
   # catalogue + System Browser "Tests" group are populated (no args).
   defp invoke(:load_tests, _params, _ctx), do: client().load_tests()
 

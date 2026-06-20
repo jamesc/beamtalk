@@ -560,7 +560,7 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Load the project's `test/` files into the live image via the `load-tests` op
-  (BT-2596) — the test-runner pane's "Load tests" affordance.
+  (BT-2557) — the test-runner pane's "Load tests" affordance.
 
   Plain project loads default to `include_tests=false`, so a freshly-opened
   image holds only `src/` classes and the runner catalogue is empty. This op

@@ -572,7 +572,7 @@ Run all loaded TestCase subclasses and return aggregated results. Each test entr
 {"id": "msg-052", "results": {"class": "All", "total": 0, "passed": 0, "failed": 0, "duration": 0.0, "tests": []}, "status": ["done"]}
 ```
 
-#### `load-tests` — Load the Project's Test Files (BT-2596)
+#### `load-tests` — Load the Project's Test Files (BT-2557)
 
 Load the project's `test/` `.bt` files into the live image so subsequent
 `list-tests` / `test-all` calls (the LiveView IDE Tests pane) see them. Plain

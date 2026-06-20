@@ -417,7 +417,7 @@ browse_tests(#{class_name := Class}) ->
             )
         end},
         {"browse-classes is_test is false for a non-TestCase class", fun() ->
-            %% BT-2596: is_test flags loaded TestCase subclasses so the browser
+            %% BT-2557: is_test flags loaded TestCase subclasses so the browser
             %% can group them under a "Tests" category. The fixture class does not
             %% descend from TestCase, so the flag is a plain boolean false.
             Value = decode_value(

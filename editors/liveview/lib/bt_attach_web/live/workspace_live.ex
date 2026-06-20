@@ -498,7 +498,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       # shows. All four browse ops are `:read`, so the pane works for the Observer
       # role too.
       |> assign(:browser_view, "hierarchy")
-      # BT-2596: source-origin filter for the class tree (`source_origin` field on
+      # BT-2557: source-origin filter for the class tree (`source_origin` field on
       # each browse row). "all" preserves the prior behaviour (everything shown);
       # "project" / "deps" / "stdlib" narrow the tree so a project's own classes
       # aren't buried under the stdlib.
@@ -909,7 +909,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Load the project's test/ files into the live image, then re-discover the
   # catalogue (`load_tests`, `:execute` — Owner-only). A freshly-opened project
-  # holds only src/ classes, so without this the catalogue is empty (BT-2596).
+  # holds only src/ classes, so without this the catalogue is empty (BT-2557).
   def handle_event("load_tests", _params, socket) do
     {:noreply, load_tests(socket)}
   end
@@ -1526,7 +1526,7 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Narrow the class tree by source origin (project / deps / stdlib / all). Pure
   # view state over the already-loaded rows — no workspace round-trip; an unknown
-  # value is ignored rather than blanking the tree (BT-2596).
+  # value is ignored rather than blanking the tree (BT-2557).
   #
   # BT-2597: if the new filter hides the currently-selected class, clear the
   # selection (and its protocol/method pane) so the right pane can't show a
@@ -3907,7 +3907,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # name, the groups themselves sorted by category. A class with no category falls
   # into an "(uncategorized)" bucket rather than vanishing.
   #
-  # BT-2596: TestCase subclasses (`is_test`) are pulled into a dedicated "Tests"
+  # BT-2557: TestCase subclasses (`is_test`) are pulled into a dedicated "Tests"
   # bucket regardless of their package — the browser surfaces them as a category
   # so a project's tests are one click away once loaded.
   defp category_groups(classes) do
@@ -3922,7 +3922,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp class_category_bucket(%{"is_test" => true}), do: "Tests"
   defp class_category_bucket(class), do: Map.get(class, "category") || "(uncategorized)"
 
-  # Narrow class rows by source origin (BT-2596). `source_origin` is "project",
+  # Narrow class rows by source origin (BT-2557). `source_origin` is "project",
   # "stdlib", or "dependency:<pkg>" (browse-classes). "all" is the identity
   # filter; an unknown filter also passes everything through (fail-open so the
   # tree is never silently blanked).
@@ -5629,7 +5629,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :browser_view, :string, required: true
   attr :browser_side, :string, required: true
   attr :browser_classes, :list, required: true
-  # BT-2596: source-origin filter ("all" | "project" | "deps" | "stdlib").
+  # BT-2557: source-origin filter ("all" | "project" | "deps" | "stdlib").
   attr :browser_source, :string, default: "all"
   attr :selected_class, :string, default: nil
   attr :browser_error, :string, default: nil
@@ -5640,7 +5640,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :new_class_open, :boolean, default: false
 
   defp system_browser_classes(assigns) do
-    # BT-2596: filter the rows once, up front, so both the hierarchy and category
+    # BT-2557: filter the rows once, up front, so both the hierarchy and category
     # views (and the empty-state check) render the same source-scoped set.
     assigns =
       assign(
@@ -5666,7 +5666,7 @@ defmodule BtAttachWeb.WorkspaceLive do
             {label}
           </button>
         </div>
-        <%!-- BT-2596: source-origin filter — narrow the tree to project / deps /
+        <%!-- BT-2557: source-origin filter — narrow the tree to project / deps /
              stdlib so a project's own classes aren't buried under the stdlib. --%>
         <div class="seg" role="tablist" aria-label="Class source filter">
           <button
@@ -6711,7 +6711,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                       >
                         Run all
                       </button>
-                      <%!-- Load the project's test/ files into the image (BT-2596).
+                      <%!-- Load the project's test/ files into the image (BT-2557).
                            A freshly-opened project loads only src/, so the
                            catalogue is empty until tests are loaded. Owner-only
                            (it compiles + loads user code). --%>

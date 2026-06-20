@@ -89,7 +89,7 @@ defmodule BtAttach.FacadeTest do
              ]
            }}
 
-    # BT-2596: load the project's test/ files into the live image.
+    # BT-2557: load the project's test/ files into the live image.
     def load_tests,
       do:
         record({:load_tests}) &&
@@ -134,7 +134,7 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:reload) == :execute
       # BT-2557: running tests evaluates code → :execute; discovery is :read.
       assert Facade.capability(:run_tests) == :execute
-      # BT-2596: loading test files compiles + loads user code → :execute.
+      # BT-2557: loading test files compiles + loads user code → :execute.
       assert Facade.capability(:load_tests) == :execute
 
       for read <- ~w(info inspect bindings actors processes sessions complete hover
@@ -534,7 +534,7 @@ defmodule BtAttach.FacadeTest do
       assert RecordingClient.calls() == []
     end
 
-    test "load_tests routes to the client (BT-2596)" do
+    test "load_tests routes to the client (BT-2557)" do
       assert {:ok, %{"classes" => ["FooTest"]}} = Facade.dispatch(:load_tests, %{})
       assert {:load_tests} in RecordingClient.calls()
     end
