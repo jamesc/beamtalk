@@ -558,6 +558,39 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  @doc """
+  Load the project's `test/` files into the live image via the `load-tests` op
+  (BT-2596) — the test-runner pane's "Load tests" affordance.
+
+  Plain project loads default to `include_tests=false`, so a freshly-opened
+  image holds only `src/` classes and the runner catalogue is empty. This op
+  delegates to the shared `sync_project/2` with `include_tests=true`, compiling
+  and loading the `test/` `.bt` files (mutating the image), so the facade gates
+  it `:execute` (Owner-only) — the same gate `run_tests` uses.
+
+  Returns `{:ok, %{"classes" => [binary], "errors" => [map], "summary" =>
+  binary}}` on success, or `{:error, reason}` on a dispatch failure.
+  """
+  @spec load_tests() :: {:ok, map()} | {:error, term()}
+  def load_tests do
+    case dispatch_simple("load-tests", %{}) do
+      {:value, %{"classes" => _} = result} ->
+        {:ok, result}
+
+      {:value, other} ->
+        {:error, {:unexpected_reply, other}}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
   # Project a backend `TestResult` term (atom-keyed, live `tests` list) onto a
   # string-keyed wire map the LiveView can render directly.
   defp normalize_test_result(result) when is_map(result) do

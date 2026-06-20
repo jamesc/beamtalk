@@ -153,11 +153,25 @@ browse_classes() ->
         catch
             _:_ -> []
         end,
-    Rows = lists:filtermap(fun class_row/1, ClassPids),
+    %% BT-2596: the set of loaded TestCase subclasses, computed once, so each row
+    %% can carry an `is_test` flag. The browser groups these under a synthetic
+    %% "Tests" category — pure reflection over the class hierarchy, no user code.
+    TestClasses = sets:from_list(safe_test_classes()),
+    Rows = lists:filtermap(fun(Pid) -> class_row(Pid, TestClasses) end, ClassPids),
     lists:sort(fun(A, B) -> maps:get(<<"name">>, A) =< maps:get(<<"name">>, B) end, Rows).
 
--spec class_row(pid()) -> {true, map()} | false.
-class_row(Pid) ->
+%% The loaded TestCase subclass atoms, or [] if discovery raises (the browser
+%% must still list classes even when the test registry is unavailable).
+-spec safe_test_classes() -> [atom()].
+safe_test_classes() ->
+    try
+        beamtalk_test_case:find_test_classes()
+    catch
+        _:_ -> []
+    end.
+
+-spec class_row(pid(), sets:set(atom())) -> {true, map()} | false.
+class_row(Pid, TestClasses) ->
     try
         Name = beamtalk_runtime_api:class_name(Pid),
         Super = beamtalk_runtime_api:superclass(Pid),
@@ -173,7 +187,8 @@ class_row(Pid) ->
             <<"internal">> => safe_bool(fun() -> beamtalk_runtime_api:is_internal(Pid) end),
             <<"source_file">> => SourceFile,
             <<"origin">> => origin_of(SourceFile),
-            <<"source_origin">> => source_origin_of(ModName, SourceFile)
+            <<"source_origin">> => source_origin_of(ModName, SourceFile),
+            <<"is_test">> => sets:is_element(Name, TestClasses)
         }}
     catch
         exit:{noproc, _} ->
