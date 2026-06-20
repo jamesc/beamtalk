@@ -93,9 +93,27 @@ defmodule BtAttachWeb.WorkspaceLiveReconcileTest do
     test "leaves a :def tab (no selector) untouched without raising" do
       def_tab = %{id: "def:Counter", kind: :def, class: "Counter", disk_differs: true}
 
-      # Would raise on `tab.selector` if the `:method` guard didn't short-circuit.
+      # A flushed *method* key keys on `{class, selector}`; a `:def` tab keys on
+      # `{class, :def}`, so a method key never clears a def tab (and never raises
+      # on the def tab's absent `selector`).
       assert WorkspaceLive.clear_disk_differs([def_tab], MapSet.new([{"Counter", "increment"}])) ==
                [def_tab]
+    end
+
+    test "clears a :def tab when its {class, :def} key is in the flushed set (BT-2600)" do
+      # A revert that reloaded the class header keys the def tab as `{class, :def}`,
+      # so the open def tab's `unflushed` badge clears without a re-open.
+      def_tab = %{id: "def:Counter", kind: :def, class: "Counter", disk_differs: true}
+      other_def = %{id: "def:Greeter", kind: :def, class: "Greeter", disk_differs: true}
+
+      assert [
+               %{class: "Counter", disk_differs: false},
+               %{class: "Greeter", disk_differs: true}
+             ] =
+               WorkspaceLive.clear_disk_differs(
+                 [def_tab, other_def],
+                 MapSet.new([{"Counter", :def}])
+               )
     end
   end
 
