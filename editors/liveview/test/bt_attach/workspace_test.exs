@@ -230,6 +230,38 @@ defmodule BtAttach.WorkspaceTest do
     end
   end
 
+  describe "git-surface wrappers (cockpit VCS surface, ADR 0082 / BT-2586)" do
+    # No live workspace here, so the RPC targets an unconnected node. The
+    # contract: every git wrapper surfaces a `{:badrpc, :nodedown}` as
+    # `{:error, {:unreachable, _}}` rather than crashing — the graceful
+    # degradation the panel relies on when the project is unreachable.
+    test "git_status against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.git_status()
+    end
+
+    test "git_diff against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.git_diff("src/foo.bt")
+    end
+
+    test "git_log against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.git_log(10)
+    end
+
+    test "the mutating git wrappers degrade to an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.git_stage("a.bt")
+      assert {:error, {:unreachable, _}} = Workspace.git_unstage("a.bt")
+      assert {:error, {:unreachable, _}} = Workspace.git_commit("wip")
+      assert {:error, {:unreachable, _}} = Workspace.git_revert_file("a.bt")
+    end
+
+    test "the git wrappers reject non-binary / non-positive arguments (guard contract)" do
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :git_diff, [:src]) end
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :git_log, [0]) end
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :git_commit, [:wip]) end
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :git_stage, [42]) end
+    end
+  end
+
   describe "navigation-surface wrappers (Senders/Implementors + omni search, BT-2495)" do
     # No live workspace: the RPC targets an unconnected node, so the wrappers must
     # surface `{:badrpc, :nodedown}` as `{:error, {:unreachable, _}}` through
