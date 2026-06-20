@@ -71,15 +71,8 @@ fn visit_abstract_instantiation(
             span,
             ..
         } => {
-            let receiver_name = match receiver.as_ref() {
-                Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
-                Expression::ClassReference { name, .. } => Some(name.name.as_str()),
-                _ => None,
-            };
-
-            if let Some(name) = receiver_name {
+            if let Some(name) = receiver_class_name(receiver) {
                 let selector_name = selector.name();
-
                 if is_instantiation_selector(&selector_name) && hierarchy.is_abstract(name) {
                     diagnostics.push(abstract_class_error(name, *span));
                 }
@@ -88,12 +81,7 @@ fn visit_abstract_instantiation(
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            let receiver_name = match receiver.as_ref() {
-                Expression::Identifier(Identifier { name, .. }) => Some(name.as_str()),
-                Expression::ClassReference { name, .. } => Some(name.name.as_str()),
-                _ => None,
-            };
-            if let Some(name) = receiver_name {
+            if let Some(name) = receiver_class_name(receiver) {
                 for msg in messages {
                     let sel = msg.selector.name();
                     if is_instantiation_selector(&sel) && hierarchy.is_abstract(name) {

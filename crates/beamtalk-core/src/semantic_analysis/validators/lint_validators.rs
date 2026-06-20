@@ -106,6 +106,16 @@ fn dead_branch_hint(is_true: bool, selector: WellKnownSelector) -> &'static str 
     }
 }
 
+/// Returns `Some(true)` if `receiver` is the identifier `true`, `Some(false)` if `false`,
+/// or `None` for any other expression.
+fn literal_bool_receiver(receiver: &Expression) -> Option<bool> {
+    match receiver {
+        Expression::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
+        Expression::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
+        _ => None,
+    }
+}
+
 /// Checks a single expression node for literal boolean conditional patterns.
 ///
 /// Called by [`walk_module`] via [`check_literal_boolean_condition`]; the walker
@@ -118,12 +128,7 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
         ..
     } = expr
     {
-        let literal_val = match receiver.as_ref() {
-            Expression::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
-            Expression::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
-            _ => None,
-        };
-        if let Some(is_true) = literal_val {
+        if let Some(is_true) = literal_bool_receiver(receiver) {
             if let Some(well_known) = boolean_conditional(selector) {
                 let literal_name = if is_true { "true" } else { "false" };
                 diagnostics.push(
@@ -140,12 +145,7 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
         receiver, messages, ..
     } = expr
     {
-        let literal_val = match receiver.as_ref() {
-            Expression::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
-            Expression::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
-            _ => None,
-        };
-        if let Some(is_true) = literal_val {
+        if let Some(is_true) = literal_bool_receiver(receiver) {
             let literal_name = if is_true { "true" } else { "false" };
             for msg in messages {
                 if let Some(well_known) = boolean_conditional(&msg.selector) {
