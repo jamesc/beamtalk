@@ -54,6 +54,8 @@ Extracted from beamtalk_repl_eval (BT-863).
     patch_side/1,
     classify_source_file/1,
     span_error_entry/3,
+    new_method_entry/3,
+    sibling_method_indent/1,
     %% ADR 0082 Phase 1 (BT-2285): pure validation helpers for new_class/2.
     declared_class_name/1,
     validate_new_class/3,
@@ -1449,12 +1451,88 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
     case beamtalk_compiler:resolve_method_span(DiskSource, ClassNameBin, SelectorBin, Side) of
         {ok, Span, PrevSource} ->
             store_disk_shaped_entry(Base, SourceFile, Span, PrevSource);
-        {error, Reason, _Message} ->
+        {error, selector_not_found, _Message} ->
             %% Selector absent on disk (a brand-new method added live) is normal:
             %% record a flushable entry with no prev span — a later flush appends
-            %% the method. Other resolution errors downgrade to memory-only.
+            %% the method. The compiler's canonical body is column-0, but the
+            %% class body on disk is indented, so reshape the body to the class's
+            %% sibling-method indentation at store time (BT-2583) — mirroring
+            %% `store_disk_shaped_entry`'s reshape — so flush's `append_method`
+            %% stays a verbatim append into an indented body.
+            new_method_entry(Base, SourceFile, DiskSource);
+        {error, Reason, _Message} ->
+            %% Any other resolution failure downgrades to memory-only.
             span_error_entry(Base, SourceFile, Reason)
     end.
+
+%% Reshape a brand-new method (no prior on-disk span) to the target class body's
+%% indentation at store time, so flush's `append_method' stays a verbatim append
+%% (BT-2583). The compiler's canonical `unparse_method' body is column-0, but the
+%% class body on disk is indented; an un-reshaped append would write the method
+%% at column 0 into an indented class. The base indentation is derived from a
+%% sibling method already on disk (falling back to the project's 2-space step),
+%% mirroring `store_disk_shaped_entry''s store-time reshape. If the reshape FFI is
+%% unavailable, downgrade to memory-only rather than store a column-0 body that
+%% flush would append un-indented.
+-spec new_method_entry(map(), binary(), binary()) -> map().
+new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
+    BaseIndent = sibling_method_indent(DiskSource),
+    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
+        {ok, Reindented} ->
+            Base#{source => Reindented, flushable => true, source_file => SourceFile};
+        {error, ReindentReason, _Msg} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not reshape new-method body to class indentation; "
+                "recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReindentReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
+    end.
+
+%% Derive the base indentation for a brand-new method from the class body on
+%% disk: the leading whitespace of the first indented, non-blank, non-comment
+%% line (a sibling method or field definition). Falls back to the project's
+%% 2-space convention when the class body has no indented member yet (e.g. an
+%% empty class). Comment lines (`//`, `///`) and the unindented class header are
+%% skipped so the step reflects member indentation, not column 0.
+-spec sibling_method_indent(binary()) -> binary().
+sibling_method_indent(DiskSource) ->
+    Lines = binary:split(DiskSource, <<"\n">>, [global]),
+    sibling_method_indent_lines(Lines).
+
+-spec sibling_method_indent_lines([binary()]) -> binary().
+sibling_method_indent_lines([]) ->
+    default_method_indent();
+sibling_method_indent_lines([Line | Rest]) ->
+    Indent = leading_ws(Line),
+    Content = strip_leading_ws(Line),
+    case Indent =/= <<>> andalso not is_comment_or_blank(Content) of
+        true -> Indent;
+        false -> sibling_method_indent_lines(Rest)
+    end.
+
+%% The project's default member indentation: two spaces (ADR 0082 / stdlib
+%% convention). Used for a class with no indented member to copy.
+-spec default_method_indent() -> binary().
+default_method_indent() -> <<"  ">>.
+
+%% True for a line whose content (leading whitespace already stripped) is empty
+%% or a line comment — such lines do not establish member indentation.
+-spec is_comment_or_blank(binary()) -> boolean().
+is_comment_or_blank(<<>>) -> true;
+is_comment_or_blank(<<"//", _/binary>>) -> true;
+is_comment_or_blank(_) -> false.
+
+%% Drop the leading run of spaces/tabs from a line.
+-spec strip_leading_ws(binary()) -> binary().
+strip_leading_ws(<<C, Rest/binary>>) when C =:= $\s; C =:= $\t ->
+    strip_leading_ws(Rest);
+strip_leading_ws(Bin) ->
+    Bin.
 
 %% Reshape the stored `source' (the compiler's canonical column-0
 %% `unparse_method' body) to the on-disk byte-span shape so the ChangeEntry's
@@ -1547,9 +1625,11 @@ leading_ws(Line, N) ->
             binary:part(Line, 0, N)
     end.
 
+%% A genuine span-resolution failure (`ambiguous', a port/transport error, ...)
+%% downgrades the entry to memory-only with a reason. The brand-new-method case
+%% (`selector_not_found') does NOT come here — it is reshaped and recorded
+%% flushable by `new_method_entry/3' (BT-2583).
 -spec span_error_entry(map(), binary(), atom()) -> map().
-span_error_entry(Base, SourceFile, selector_not_found) ->
-    Base#{flushable => true, source_file => SourceFile};
 span_error_entry(Base, _SourceFile, Reason) ->
     Base#{
         flushable => false,
