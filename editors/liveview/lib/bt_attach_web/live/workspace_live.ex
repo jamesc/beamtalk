@@ -3920,6 +3920,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp class_category_bucket(%{"is_test" => true}), do: "Tests"
+  # BT-2615: protocol class objects (ADR 0068) declare no package, so they would
+  # otherwise land in "(uncategorized)". Group them under a dedicated "Protocols"
+  # bucket — mirroring the "Tests" treatment — so a project's protocols are one
+  # click away and don't masquerade as uncategorized classes.
+  defp class_category_bucket(%{"is_protocol" => true}), do: "Protocols"
   defp class_category_bucket(class), do: Map.get(class, "category") || "(uncategorized)"
 
   # Narrow class rows by source origin (BT-2557). `source_origin` is "project",

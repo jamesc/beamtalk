@@ -17,10 +17,16 @@ compiled modules during `on_load` via `register_protocol/1`.
 Each protocol is stored as a map:
 ```erlang
 #{name => 'Printable',
+  module => 'bt@stdlib@printable',
   required_methods => [#{'selector' => 'asString', 'arity' => 0}],
   type_params => [],
   extending => undefined}
 ```
+
+The `module` key records the BEAM module the protocol was defined in (BT-2615).
+A protocol class object is dispatched by the shared `beamtalk_protocol_object`
+module, so this is the only place that retains the protocol's true origin —
+the System Browser reads it to badge a protocol stdlib vs project.
 
 ## Query API
 
@@ -99,6 +105,10 @@ protocols. The `Info` map must contain:
 - `required_methods` (list of maps): Each with `selector` (atom) and `arity` (integer)
 - `type_params` (list of atoms): Type parameter names, or `[]`
 - `extending` (atom or `undefined`): Parent protocol name
+
+It may also carry (BT-2615):
+- `module` (atom): the BEAM module the protocol was defined in (e.g.
+  `bt@stdlib@printable`), used to resolve the protocol class object's origin.
 
 Duplicate registrations overwrite the previous entry (idempotent for hot reload).
 """.

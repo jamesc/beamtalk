@@ -175,7 +175,7 @@ class_row(Pid, TestClasses) ->
     try
         Name = beamtalk_runtime_api:class_name(Pid),
         Super = beamtalk_runtime_api:superclass(Pid),
-        ModName = beamtalk_runtime_api:module_name(Pid),
+        ModName = origin_module(Name, beamtalk_runtime_api:module_name(Pid)),
         SourceFile = source_file_of(ModName),
         {true, #{
             <<"name">> => atom_to_binary(Name, utf8),
@@ -188,7 +188,13 @@ class_row(Pid, TestClasses) ->
             <<"source_file">> => SourceFile,
             <<"origin">> => origin_of(SourceFile),
             <<"source_origin">> => source_origin_of(ModName, SourceFile),
-            <<"is_test">> => sets:is_element(Name, TestClasses)
+            <<"is_test">> => sets:is_element(Name, TestClasses),
+            %% BT-2615: protocol class objects (ADR 0068) are sealed abstract
+            %% subclasses of Protocol with no declared package, so they would
+            %% otherwise fall into the "(uncategorized)" bucket. Flag them so the
+            %% browser groups them under a dedicated "Protocols" category — pure
+            %% registry reflection, mirroring the `is_test` → "Tests" treatment.
+            <<"is_protocol">> => safe_bool(fun() -> beamtalk_runtime_api:is_protocol(Name) end)
         }}
     catch
         exit:{noproc, _} ->
@@ -215,18 +221,65 @@ class_row(Pid, TestClasses) ->
 -spec browse_protocols(atom(), boolean()) -> beamtalk_repl_ops:op_result().
 browse_protocols(ClassName, ClassSide) ->
     Selectors = beamtalk_xref:defined_selectors(ClassName, ClassSide),
-    SourceFile = source_file_for_class(ClassName),
-    ModName = mod_name_for_class(ClassName),
+    %% BT-2615: resolve the protocol's defining module (else the shared
+    %% `beamtalk_protocol_object` dispatch module) so the method rows' source
+    %% badges match where the protocol actually lives (stdlib vs project).
+    ModName = origin_module(ClassName, mod_name_for_class(ClassName)),
+    SourceFile = source_file_of(ModName),
     SelectorRows = [
         selector_row(ClassName, ClassSide, Sel, SourceFile, ModName)
      || Sel <- Selectors
     ],
-    Grouped = group_by_protocol(SelectorRows),
+    %% BT-2615: a protocol class object (ADR 0068) carries no instance methods of
+    %% its own — its xref rows are just the class-side reflection methods
+    %% (`requiredMethods` / `conformingClasses`), so the instance side comes back
+    %% empty and the browser shows "no methods". Surface the protocol's *required
+    %% members* (registry reflection, no user code) so a protocol's contract is
+    %% visible: the required instance selectors on the instance side, the required
+    %% class selectors on the class side, grouped under a "requirements" protocol.
+    RequirementRows = protocol_requirement_rows(ClassName, ClassSide, SourceFile, ModName),
+    Grouped = group_by_protocol(SelectorRows ++ RequirementRows),
     {value, #{
         <<"class">> => atom_to_binary(ClassName, utf8),
         <<"side">> => side_to_binary(ClassSide),
         <<"protocols">> => Grouped
     }}.
+
+%% The required-member rows for a protocol class object, or [] for a non-protocol
+%% class. Instance side surfaces `required_methods`; class side surfaces
+%% `required_class_methods` (BT-2615). The members are signatures, not implemented
+%% methods — they have no openable source — so each row is `unindexed_runtime_fun`
+%% / `runtime` origin, the same shape the browser already renders for a sourceless
+%% selector. Reflection over the protocol registry only; no user code is run.
+-spec protocol_requirement_rows(atom(), boolean(), binary() | null, atom()) -> [map()].
+protocol_requirement_rows(ClassName, ClassSide, SourceFile, ModName) ->
+    case beamtalk_runtime_api:protocol_info(ClassName) of
+        Info when is_map(Info) ->
+            Key =
+                case ClassSide of
+                    true -> required_class_methods;
+                    false -> required_methods
+                end,
+            Members = maps:get(Key, Info, []),
+            [
+                requirement_row(Selector, SourceFile, ModName)
+             || #{selector := Selector} <- Members
+            ];
+        _ ->
+            []
+    end.
+
+-spec requirement_row(atom(), binary() | null, atom()) -> map().
+requirement_row(Selector, SourceFile, ModName) ->
+    #{
+        <<"selector">> => atom_to_binary(Selector, utf8),
+        <<"line">> => null,
+        <<"source_status">> => <<"unindexed_runtime_fun">>,
+        <<"origin">> => <<"runtime">>,
+        <<"source_origin">> => source_origin_of(ModName, SourceFile),
+        %% carried internally for grouping; stripped before emit
+        '__protocol__' => <<"requirements">>
+    }.
 
 -spec selector_row(atom(), boolean(), atom(), binary() | null, atom()) -> map().
 selector_row(ClassName, ClassSide, Selector, SourceFile, ModName) ->
@@ -389,7 +442,10 @@ browse_class_definition(ClassName) ->
             not_found_error(<<"browse-class-definition">>, ClassName);
         ClassPid ->
             Super = beamtalk_runtime_api:superclass(ClassPid),
-            ModName = beamtalk_runtime_api:module_name(ClassPid),
+            %% BT-2615: a protocol class object's dispatch module is the shared
+            %% `beamtalk_protocol_object`; resolve its defining module so the
+            %% definition pane's category/origin/source_origin are accurate.
+            ModName = origin_module(ClassName, beamtalk_runtime_api:module_name(ClassPid)),
             SourceFile = source_file_of(ModName),
             State = state_slots(ClassPid),
             Definition = class_definition_text(ClassName, Super, State),
@@ -991,6 +1047,24 @@ mod_name_for_class(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined -> undefined;
         Pid -> beamtalk_runtime_api:module_name(Pid)
+    end.
+
+%% The module whose package + on-disk source determine a class's origin badges
+%% (category, origin, source_origin). For an ordinary class this is its own
+%% dispatch module. A protocol class object (ADR 0068) is dispatched by the shared
+%% `beamtalk_protocol_object` module, which carries no package and no
+%% `beamtalk_source` — so origin would wrongly read "runtime"/"project" for every
+%% protocol, stdlib ones included. BT-2615: resolve the protocol's *defining*
+%% module from the registry (recorded at registration via the codegen `module`
+%% key) so a stdlib protocol like `Printable` (`bt@stdlib@printable`) is badged
+%% stdlib and a project protocol is badged project. Falls back to the dispatch
+%% module for non-protocols and for protocols compiled before the `module` key
+%% existed.
+-spec origin_module(atom(), atom()) -> atom().
+origin_module(ClassName, ModName) ->
+    case beamtalk_runtime_api:protocol_info(ClassName) of
+        #{module := M} when is_atom(M) -> M;
+        _ -> ModName
     end.
 
 -spec source_file_of(atom()) -> binary() | null.
