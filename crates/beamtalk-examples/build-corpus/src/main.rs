@@ -519,11 +519,13 @@ fn add_synonym_tags(entries: &mut [CorpusEntry]) {
 mod tests {
     use super::*;
 
-    /// Regression guard for BT-2595: the `check-corpus` CI gate regenerates
-    /// `corpus.json` and diffs it against the committed copy, so generation must
-    /// be byte-stable across runs. Two back-to-back builds of the same source
+    /// Regression guard for BT-2595: two back-to-back builds of the same source
     /// tree must serialize identically — entries sorted by id, tags sorted+
-    /// deduped, no hash-collection field leaking iteration order.
+    /// deduped, no hash-collection field leaking iteration order. This pins the
+    /// in-process invariant (the ordering logic); the *cross-process* guarantee
+    /// — a fresh process producing the same bytes — is enforced separately by the
+    /// `check-corpus` CI gate, which regenerates `corpus.json` and diffs it
+    /// against the committed copy.
     #[test]
     fn corpus_generation_is_deterministic() {
         let root = find_repo_root();
