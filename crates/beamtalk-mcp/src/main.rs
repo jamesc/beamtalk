@@ -335,9 +335,8 @@ where
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             return Err(format!(
-                "beamtalk repl did not report a port within {}s — workspace boot stalled.\n\
-                 Captured output:\n{captured}",
-                timeout.as_secs()
+                "beamtalk repl did not report a port within {timeout:?} — workspace boot stalled.\n\
+                 Captured output:\n{captured}"
             )
             .into());
         }
