@@ -411,9 +411,20 @@ browse_tests(#{class_name := Class}) ->
                     <<"internal">>,
                     <<"source_file">>,
                     <<"origin">>,
-                    <<"source_origin">>
+                    <<"source_origin">>,
+                    <<"is_test">>
                 ]
             )
+        end},
+        {"browse-classes is_test is false for a non-TestCase class", fun() ->
+            %% BT-2596: is_test flags loaded TestCase subclasses so the browser
+            %% can group them under a "Tests" category. The fixture class does not
+            %% descend from TestCase, so the flag is a plain boolean false.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Class),
+            ?assertEqual(false, maps:get(<<"is_test">>, Row))
         end},
         {"browse-classes comment is the first line of the class doc", fun() ->
             Value = decode_value(

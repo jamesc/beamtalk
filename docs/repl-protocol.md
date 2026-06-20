@@ -572,6 +572,38 @@ Run all loaded TestCase subclasses and return aggregated results. Each test entr
 {"id": "msg-052", "results": {"class": "All", "total": 0, "passed": 0, "failed": 0, "duration": 0.0, "tests": []}, "status": ["done"]}
 ```
 
+#### `load-tests` — Load the Project's Test Files (BT-2596)
+
+Load the project's `test/` `.bt` files into the live image so subsequent
+`list-tests` / `test-all` calls (the LiveView IDE Tests pane) see them. Plain
+`load-project` defaults to `include_tests=false`, so a freshly-opened project
+loads only `src/` and the test catalogue starts empty. This op delegates to the
+same incremental sync as `load-project`, scoped to the project's `test/`
+directory (`include_tests=true`) and to the workspace's current working
+directory (the project root). It compiles + loads user test code, so it carries
+the `:execute` capability (Owner-only) at the facade.
+
+**Request:**
+```json
+{"op": "load-tests", "id": "msg-053"}
+```
+
+**Response:**
+```json
+{
+  "id": "msg-053",
+  "value": {
+    "classes": ["CounterTest", "MathTest"],
+    "errors": [],
+    "summary": "Reloaded 2 of 2 files"
+  }
+}
+```
+
+`errors` is a (possibly empty) list of structured compile-error maps (the same
+shape `load-project` returns), so a partial load still reports which test files
+failed.
+
 ### Navigation Operations
 
 #### `nav-query` — Structured Navigation Query (BT-2239)
@@ -766,7 +798,7 @@ Returns the list of supported operations with their parameters, protocol version
 }
 ```
 
-The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version. (The `clear` and `bindings` ops were removed in BT-2369 / ADR 0081 Phase 6 — read and reset session state via `eval` of the `Session` API.)
+The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `list-tests`, `load-tests`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version. (The `clear` and `bindings` ops were removed in BT-2369 / ADR 0081 Phase 6 — read and reset session state via `eval` of the `Session` API.)
 
 > **BT-2091 (protocol 2.0):** The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed. Use `Beamtalk help: ClassName`, `Workspace load: "path"`, `ClassName reload`, and `Workspace classes` via the `eval` op instead.
 

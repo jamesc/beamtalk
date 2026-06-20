@@ -160,6 +160,7 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"methods">>;
     Op =:= <<"list-classes">>;
     Op =:= <<"list-tests">>;
+    Op =:= <<"load-tests">>;
     Op =:= <<"show-codegen">>;
     Op =:= <<"test">>;
     Op =:= <<"test-all">>;

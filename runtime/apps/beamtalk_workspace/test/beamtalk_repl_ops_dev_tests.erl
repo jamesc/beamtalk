@@ -243,6 +243,15 @@ handle_describe_contains_eval_op_test() ->
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"eval">>, Ops)).
 
+%% BT-2596: the load-tests op is advertised so clients can discover the
+%% test-runner pane's "Load tests" affordance.
+handle_describe_contains_load_tests_op_test() ->
+    Msg = make_msg(<<"describe">>, <<"d-2b">>, undefined, false),
+    Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
+    Decoded = json:decode(Result),
+    Ops = maps:get(<<"ops">>, Decoded),
+    ?assert(maps:is_key(<<"load-tests">>, Ops)).
+
 handle_describe_contains_versions_test() ->
     Msg = make_msg(<<"describe">>, <<"d-3">>, undefined, false),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),

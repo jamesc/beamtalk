@@ -484,6 +484,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       # shows. All four browse ops are `:read`, so the pane works for the Observer
       # role too.
       |> assign(:browser_view, "hierarchy")
+      # BT-2596: source-origin filter for the class tree (`source_origin` field on
+      # each browse row). "all" preserves the prior behaviour (everything shown);
+      # "project" / "deps" / "stdlib" narrow the tree so a project's own classes
+      # aren't buried under the stdlib.
+      |> assign(:browser_source, "all")
       |> assign(:browser_side, "instance")
       |> assign(:selected_class, nil)
       |> assign(:selected_protocol, nil)
@@ -867,6 +872,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Run every loaded TestCase subclass (`test-all`).
   def handle_event("run_tests", _params, socket) do
     {:noreply, run_tests(socket, nil)}
+  end
+
+  # Load the project's test/ files into the live image, then re-discover the
+  # catalogue (`load_tests`, `:execute` — Owner-only). A freshly-opened project
+  # holds only src/ classes, so without this the catalogue is empty (BT-2596).
+  def handle_event("load_tests", _params, socket) do
+    {:noreply, load_tests(socket)}
   end
 
   # Run a single selected test class (`test`, `class` = the row's class).
@@ -1478,6 +1490,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("browser_view", _params, socket), do: {:noreply, socket}
+
+  # Narrow the class tree by source origin (project / deps / stdlib / all). Pure
+  # view state over the already-loaded rows — no workspace round-trip; an unknown
+  # value is ignored rather than blanking the tree (BT-2596).
+  def handle_event("browser_source", %{"src" => src}, socket)
+      when src in ~w(all project deps stdlib) do
+    {:noreply, assign(socket, browser_source: src)}
+  end
+
+  def handle_event("browser_source", _params, socket), do: {:noreply, socket}
 
   # Toggle the instance/class side. The protocol/method list is class-side
   # specific (a class's instance methods differ from its class methods), so
@@ -2924,6 +2946,70 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # Load the project's test/ files (`load_tests`, `:execute`), then re-discover
+  # the catalogue so the newly-loaded TestCase subclasses appear immediately.
+  # A load error (including an RBAC denial for a non-Owner) surfaces as
+  # `tests_error`; on success any compile errors are surfaced too, but the
+  # catalogue still refreshes to show whatever loaded.
+  defp load_tests(socket) do
+    case Facade.dispatch(:load_tests, %{}, ctx(socket)) do
+      {:ok, %{"errors" => [_ | _] = errors}} ->
+        socket
+        |> assign_test_classes()
+        |> assign(tests_error: load_tests_error(errors))
+
+      {:ok, _result} ->
+        socket
+        |> assign_test_classes()
+        |> assign(tests_error: nil)
+
+      {:error, reason} ->
+        assign(socket, tests_error: facade_error(reason))
+    end
+  end
+
+  # Summarise compile errors from a partial test load into one line. Each error
+  # is a `%{"path" => ..., "message" => ...}` map (the load-project error shape).
+  defp load_tests_error(errors) do
+    count = length(errors)
+    first = errors |> List.first() |> Map.get("message", "")
+    "#{count} test file(s) failed to load: #{first}"
+  end
+
+  # Render the aggregate run duration (seconds, from the runtime TestResult) in a
+  # human unit: sub-second runs in ms, longer runs in seconds. A non-number (an
+  # unexpected wire shape) renders nothing rather than crashing the summary.
+  defp format_test_duration(seconds) when is_number(seconds) and seconds < 1.0 do
+    "#{round(seconds * 1000)} ms"
+  end
+
+  defp format_test_duration(seconds) when is_number(seconds) do
+    "#{:erlang.float_to_binary(seconds * 1.0, decimals: 2)} s"
+  end
+
+  defp format_test_duration(_), do: ""
+
+  # Per-class pass/fail tally from the last run, keyed by class name, so the
+  # catalogue can show "2✓ 1✗" next to each class without re-running. Returns nil
+  # when there are no results yet or the class had no cases in the last run.
+  defp test_class_tally(nil, _class), do: nil
+
+  defp test_class_tally(test_results, class) when is_map(test_results) do
+    cases = for t <- test_results["tests"] || [], t["class"] == class, do: t["status"]
+
+    case cases do
+      [] ->
+        nil
+
+      _ ->
+        %{
+          passed: Enum.count(cases, &(&1 == "pass")),
+          failed: Enum.count(cases, &(&1 == "fail")),
+          skipped: Enum.count(cases, &(&1 == "skip"))
+        }
+    end
+  end
+
   # Short status glyph for a per-case result row.
   defp test_status_label("pass"), do: "✓ pass"
   defp test_status_label("fail"), do: "✗ fail"
@@ -3497,14 +3583,37 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Category: `{category, [class_row]}` groups, each group's classes sorted by
   # name, the groups themselves sorted by category. A class with no category falls
   # into an "(uncategorized)" bucket rather than vanishing.
+  #
+  # BT-2596: TestCase subclasses (`is_test`) are pulled into a dedicated "Tests"
+  # bucket regardless of their package — the browser surfaces them as a category
+  # so a project's tests are one click away once loaded.
   defp category_groups(classes) do
     classes
-    |> Enum.group_by(fn c -> Map.get(c, "category") || "(uncategorized)" end)
+    |> Enum.group_by(&class_category_bucket/1)
     |> Enum.sort_by(fn {category, _} -> category end)
     |> Enum.map(fn {category, rows} ->
       {category, Enum.sort_by(rows, &Map.get(&1, "name"))}
     end)
   end
+
+  defp class_category_bucket(%{"is_test" => true}), do: "Tests"
+  defp class_category_bucket(class), do: Map.get(class, "category") || "(uncategorized)"
+
+  # Narrow class rows by source origin (BT-2596). `source_origin` is "project",
+  # "stdlib", or "dependency:<pkg>" (browse-classes). "all" is the identity
+  # filter; an unknown filter also passes everything through (fail-open so the
+  # tree is never silently blanked).
+  defp filter_by_source(classes, "all"), do: classes
+
+  defp filter_by_source(classes, "deps") do
+    Enum.filter(classes, &String.starts_with?(Map.get(&1, "source_origin", ""), "dependency:"))
+  end
+
+  defp filter_by_source(classes, src) when src in ~w(project stdlib) do
+    Enum.filter(classes, &(Map.get(&1, "source_origin") == src))
+  end
+
+  defp filter_by_source(classes, _src), do: classes
 
   # The flat method list for the current protocol filter: all selectors across the
   # protocol tree (filter = nil → "all") or just the selected protocol's, each
@@ -5186,6 +5295,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :browser_view, :string, required: true
   attr :browser_side, :string, required: true
   attr :browser_classes, :list, required: true
+  # BT-2596: source-origin filter ("all" | "project" | "deps" | "stdlib").
+  attr :browser_source, :string, default: "all"
   attr :selected_class, :string, default: nil
   attr :browser_error, :string, default: nil
   # Owner-only "New Class" affordance (BT-2293): `role` gates the ＋ button (only
@@ -5195,6 +5306,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :new_class_open, :boolean, default: false
 
   defp system_browser_classes(assigns) do
+    # BT-2596: filter the rows once, up front, so both the hierarchy and category
+    # views (and the empty-state check) render the same source-scoped set.
+    assigns =
+      assign(
+        assigns,
+        :visible_classes,
+        filter_by_source(assigns.browser_classes, assigns.browser_source)
+      )
+
     ~H"""
     <div id="system-browser" class="panel">
       <div class="panel-head">
@@ -5208,6 +5328,28 @@ defmodule BtAttachWeb.WorkspaceLive do
             aria-selected={to_string(@browser_view == view)}
             phx-click="browser_view"
             phx-value-view={view}
+          >
+            {label}
+          </button>
+        </div>
+        <%!-- BT-2596: source-origin filter — narrow the tree to project / deps /
+             stdlib so a project's own classes aren't buried under the stdlib. --%>
+        <div class="seg" role="tablist" aria-label="Class source filter">
+          <button
+            :for={
+              {src, label} <- [
+                {"all", "All"},
+                {"project", "Proj"},
+                {"deps", "Deps"},
+                {"stdlib", "Std"}
+              ]
+            }
+            type="button"
+            role="tab"
+            class={[@browser_source == src && "on"]}
+            aria-selected={to_string(@browser_source == src)}
+            phx-click="browser_source"
+            phx-value-src={src}
           >
             {label}
           </button>
@@ -5265,27 +5407,30 @@ defmodule BtAttachWeb.WorkspaceLive do
       </form>
       <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
         <div :if={@browser_error} class="io-block err">{@browser_error}</div>
-        <%= if @browser_classes == [] do %>
-          <p :if={!@browser_error} class="muted-note">No classes in the image yet.</p>
-        <% else %>
-          <div class="tree">
-            <%= if @browser_view == "category" do %>
-              <div :for={{category, rows} <- category_groups(@browser_classes)} class="cat-group">
-                <div class="cat-row">{category}</div>
+        <%= cond do %>
+          <% @browser_classes == [] -> %>
+            <p :if={!@browser_error} class="muted-note">No classes in the image yet.</p>
+          <% @visible_classes == [] -> %>
+            <p class="muted-note">No classes match this source filter.</p>
+          <% true -> %>
+            <div class="tree">
+              <%= if @browser_view == "category" do %>
+                <div :for={{category, rows} <- category_groups(@visible_classes)} class="cat-group">
+                  <div class="cat-row">{category}</div>
+                  <.class_rows
+                    rows={Enum.map(rows, &{&1, 1})}
+                    selected_class={@selected_class}
+                    browser_side={@browser_side}
+                  />
+                </div>
+              <% else %>
                 <.class_rows
-                  rows={Enum.map(rows, &{&1, 1})}
+                  rows={hierarchy_rows(@visible_classes)}
                   selected_class={@selected_class}
                   browser_side={@browser_side}
                 />
-              </div>
-            <% else %>
-              <.class_rows
-                rows={hierarchy_rows(@browser_classes)}
-                selected_class={@selected_class}
-                browser_side={@browser_side}
-              />
-            <% end %>
-          </div>
+              <% end %>
+            </div>
         <% end %>
       </div>
       <div class="actionbar sb-side">
@@ -5718,6 +5863,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               <div class="browser-split">
                 <.system_browser_classes
                   browser_view={@browser_view}
+                  browser_source={@browser_source}
                   browser_side={@browser_side}
                   browser_classes={@browser_classes}
                   selected_class={@selected_class}
@@ -6227,6 +6373,19 @@ defmodule BtAttachWeb.WorkspaceLive do
                       >
                         Run all
                       </button>
+                      <%!-- Load the project's test/ files into the image (BT-2596).
+                           A freshly-opened project loads only src/, so the
+                           catalogue is empty until tests are loaded. Owner-only
+                           (it compiles + loads user code). --%>
+                      <button
+                        :if={@role == :owner}
+                        type="button"
+                        class="btn ghost"
+                        phx-click="load_tests"
+                        phx-disable-with="Loading…"
+                      >
+                        Load tests
+                      </button>
                       <button type="button" class="btn ghost" phx-click="tests_refresh">
                         Refresh
                       </button>
@@ -6239,6 +6398,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                         }>, {@test_results["failed"]} failed</span>
                         <span :if={@test_results["skipped"] > 0}>
                           , {@test_results["skipped"]} skipped
+                        </span>
+                        <span :if={@test_results["duration"]} class="test-duration">
+                          · {format_test_duration(@test_results["duration"])}
                         </span>
                       </span>
                     </div>
@@ -6290,8 +6452,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                         <p class="muted-note">Loading tests…</p>
                       <% @test_classes == [] -> %>
                         <p class="muted-note">
-                          No TestCase subclasses loaded. Define one
-                          (<code>TestCase subclass: …</code>) or sync your project.
+                          No TestCase subclasses loaded. Press <strong>Load tests</strong>
+                          to load your project's <code>test/</code>
+                          files, or define one
+                          (<code>TestCase subclass: …</code>).
                         </p>
                       <% true -> %>
                         <table class="bt-table test-catalogue">
@@ -6299,6 +6463,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <tr>
                               <th>Class</th>
                               <th>Tests</th>
+                              <th>Last run</th>
                               <th :if={@role == :owner}></th>
                             </tr>
                           </thead>
@@ -6306,6 +6471,22 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <tr :for={tc <- @test_classes}>
                               <td class="k">{tc["class"]}</td>
                               <td>{length(tc["selectors"])}</td>
+                              <td class="test-tally">
+                                <%= case test_class_tally(@test_results, tc["class"]) do %>
+                                  <% nil -> %>
+                                    <span class="muted-note">—</span>
+                                  <% tally -> %>
+                                    <span :if={tally.passed > 0} class="st-pass">
+                                      {tally.passed}✓
+                                    </span>
+                                    <span :if={tally.failed > 0} class="st-fail">
+                                      {tally.failed}✗
+                                    </span>
+                                    <span :if={tally.skipped > 0} class="st-skip">
+                                      {tally.skipped}○
+                                    </span>
+                                <% end %>
+                              </td>
                               <td :if={@role == :owner}>
                                 <button
                                   type="button"
