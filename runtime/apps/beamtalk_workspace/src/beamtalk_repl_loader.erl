@@ -1467,8 +1467,7 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
 -spec store_disk_shaped_entry(
     map(), binary(), #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()
 ) -> map().
-store_disk_shaped_entry(Base, SourceFile, Span, PrevSource) ->
-    Canonical = maps:get(source, Base, <<>>),
+store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
     BaseIndent = leading_ws(PrevSource),
     case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
         {ok, Reindented} ->
