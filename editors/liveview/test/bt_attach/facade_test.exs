@@ -104,6 +104,9 @@ defmodule BtAttach.FacadeTest do
     def git_unstage(path), do: record({:git_unstage, path}) && {:ok, nil}
     def git_commit(message), do: record({:git_commit, message}) && {:ok, nil}
     def git_revert_file(path), do: record({:git_revert_file, path}) && {:ok, nil}
+
+    # BT-2590: the autoflush flag read returns a bare boolean (not a tuple).
+    def autoflush, do: record({:autoflush}) && true
   end
 
   setup do
@@ -134,7 +137,8 @@ defmodule BtAttach.FacadeTest do
                      browse_classes browse_protocols browse_method_source
                      browse_class_definition browse_native_source list_tests
                      senders implementors symbols
-                     git_status git_diff git_log)a do
+                     git_status git_diff git_log
+                     autoflush)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
       end
 
@@ -327,6 +331,16 @@ defmodule BtAttach.FacadeTest do
     test "git_log defaults to 20 commits when count is omitted" do
       assert Facade.dispatch(:git_log, %{}) == {:ok, []}
       assert {:git_log, 20} in RecordingClient.calls()
+    end
+
+    test "autoflush routes to the client and returns the bare boolean (BT-2590)" do
+      assert Facade.dispatch(:autoflush, %{}) == true
+      assert {:autoflush} in RecordingClient.calls()
+    end
+
+    test "the observer role may read autoflush (read capability, BT-2590)" do
+      assert Facade.dispatch(:autoflush, %{}, %{role: :observer}) == true
+      assert {:autoflush} in RecordingClient.calls()
     end
 
     test "mutating ops route to the client and pass their arg through" do
