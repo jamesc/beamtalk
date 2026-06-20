@@ -5674,7 +5674,11 @@ defmodule BtAttachWeb.WorkspaceLive do
              `handle_event("browser_source", %{"src" => src}, ...)` is unchanged;
              `phx-change` fires on each selection and the native <select> carries
              its own keyboard + listbox aria semantics. --%>
-        <form phx-change="browser_source" class="src-filter">
+        <%!-- `onsubmit="return false"`: this form only carries `phx-change`; there
+             is deliberately no submit path (selection drives the filter). The
+             guard makes a stray native submit — `form.submit()`, or a future
+             field added here — a no-op rather than an unhandled LiveView event. --%>
+        <form phx-change="browser_source" onsubmit="return false" class="src-filter">
           <select name="src" class="src-select" aria-label="Class source filter">
             <option
               :for={
