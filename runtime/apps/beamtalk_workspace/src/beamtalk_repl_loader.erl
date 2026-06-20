@@ -1448,17 +1448,103 @@ add_span_or_downgrade(Base, ClassNameBin, SelectorBin, Side, SourceFile, AbsPath
 resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource) ->
     case beamtalk_compiler:resolve_method_span(DiskSource, ClassNameBin, SelectorBin, Side) of
         {ok, Span, PrevSource} ->
-            Base#{
-                flushable => true,
-                source_file => SourceFile,
-                span => Span,
-                prev_source => PrevSource
-            };
+            store_disk_shaped_entry(Base, SourceFile, Span, PrevSource);
         {error, Reason, _Message} ->
             %% Selector absent on disk (a brand-new method added live) is normal:
             %% record a flushable entry with no prev span — a later flush appends
             %% the method. Other resolution errors downgrade to memory-only.
             span_error_entry(Base, SourceFile, Reason)
+    end.
+
+%% Reshape the stored `source' (the compiler's canonical column-0
+%% `unparse_method' body) to the on-disk byte-span shape so the ChangeEntry's
+%% `source_ref' is a drop-in for `disk[span]' — `source_ref == disk[span]' by
+%% construction (BT-2584). A later `Workspace flush' then splices it verbatim
+%% with no reindent. The base indentation is the leading whitespace of the disk
+%% slice (`PrevSource') the patch replaces. If the reshape FFI is unavailable,
+%% downgrade to memory-only rather than store a column-0 body that flush would
+%% splice into an indented region and corrupt the file.
+-spec store_disk_shaped_entry(
+    map(), binary(), #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()
+) -> map().
+store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
+    BaseIndent = leading_ws(PrevSource),
+    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
+        {ok, Reindented} ->
+            %% The disk byte-span ends in a trailing newline unless the method is
+            %% the last line of the file with no terminator (ADR 0082). Match that
+            %% trailing-newline state on the reshaped body — regardless of whether
+            %% the canonical body carries its own — so the splice is a true drop-in
+            %% and never glues the next line or leaves a stray blank one (BT-2584).
+            DiskShaped = match_trailing_newline(Reindented, PrevSource),
+            Base#{
+                source => DiskShaped,
+                flushable => true,
+                source_file => SourceFile,
+                span => Span,
+                prev_source => PrevSource
+            };
+        {error, ReindentReason, _Msg} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not reshape patch body to disk indentation; "
+                "recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReindentReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
+    end.
+
+%% Make `Source''s trailing-newline state match `Reference''s: append a single
+%% `\n' when the reference ends in one and the source does not; strip trailing
+%% `\n's when the reference has none (the clamped-at-EOF last-method case). Keeps
+%% the reshaped body a true drop-in for the disk slice it replaces.
+-spec match_trailing_newline(binary(), binary()) -> binary().
+match_trailing_newline(Source, Reference) ->
+    case ends_with_newline(Reference) of
+        true -> ensure_trailing_newline(Source);
+        false -> strip_trailing_newlines(Source)
+    end.
+
+-spec ends_with_newline(binary()) -> boolean().
+ends_with_newline(<<>>) -> false;
+ends_with_newline(Bin) -> binary:last(Bin) =:= $\n.
+
+-spec ensure_trailing_newline(binary()) -> binary().
+ensure_trailing_newline(<<>>) ->
+    <<"\n">>;
+ensure_trailing_newline(Bin) ->
+    case binary:last(Bin) of
+        $\n -> Bin;
+        _ -> <<Bin/binary, "\n">>
+    end.
+
+-spec strip_trailing_newlines(binary()) -> binary().
+strip_trailing_newlines(<<>>) ->
+    <<>>;
+strip_trailing_newlines(Bin) ->
+    case binary:last(Bin) of
+        $\n -> strip_trailing_newlines(binary:part(Bin, 0, byte_size(Bin) - 1));
+        _ -> Bin
+    end.
+
+%% The leading run of spaces/tabs of the first line of `Body' — the base
+%% indentation of the on-disk method definition the span covers.
+-spec leading_ws(binary()) -> binary().
+leading_ws(Body) ->
+    %% `binary:split/2' always returns a non-empty list (the whole binary when
+    %% the delimiter is absent), so the first element is the first line.
+    [First | _] = binary:split(Body, <<"\n">>),
+    leading_ws(First, 0).
+
+leading_ws(Line, N) ->
+    case Line of
+        <<_:N/binary, C, _/binary>> when C =:= $\s; C =:= $\t ->
+            leading_ws(Line, N + 1);
+        _ ->
+            binary:part(Line, 0, N)
     end.
 
 -spec span_error_entry(map(), binary(), atom()) -> map().

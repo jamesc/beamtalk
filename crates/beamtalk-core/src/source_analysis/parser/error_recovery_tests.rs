@@ -105,9 +105,14 @@ proptest! {
     #[test]
     fn parse_always_produces_result(input in "\\PC{1,300}") {
         // Skip whitespace-only and comment-only input — these legitimately
-        // produce empty modules with no diagnostics.
+        // produce empty modules with no diagnostics. Both line (`//`) and block
+        // (`/* */`) comment-only inputs are excluded (e.g. `/**/`).
         let trimmed = input.trim();
-        prop_assume!(!trimmed.is_empty() && !trimmed.starts_with("//"));
+        prop_assume!(
+            !trimmed.is_empty()
+                && !trimmed.starts_with("//")
+                && !trimmed.starts_with("/*")
+        );
 
         let tokens = lex_with_eof(&input);
         let (module, diags) = parse(tokens);
