@@ -310,6 +310,15 @@ async fn start_workspace(
 /// pipe's write end open (BT-2568). The whole read is bounded by `timeout`; on
 /// expiry, or if stdout closes before a port is seen, a clear error is returned.
 ///
+/// Output-ordering invariant: `beamtalk repl` MUST print the `Workspace: <id>`
+/// line *before* the port line. Reading stops at the port line, so any line
+/// emitted after it (the workspace ID included) is not captured and
+/// `parse_workspace_id` would fall back to the cwd-derived ID. The fallback keeps
+/// the workspace usable, but the ordering is a protocol contract between the REPL
+/// output layer and this reader — do not reorder those lines in `beamtalk repl`
+/// without updating `read_port_from_boot`. The
+/// `read_port_from_boot_captures_workspace_line_before_port` test pins it.
+///
 /// Returns the parsed port and the captured stdout (for workspace-ID parsing).
 async fn read_port_from_boot<R>(
     stdout: R,
@@ -567,5 +576,28 @@ mod tests {
             err.to_string().contains("before reporting a port"),
             "unexpected error: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn read_port_from_boot_errors_on_timeout() {
+        // A stream that never closes and never emits a port line should time out
+        // and return the "boot stalled" error — not hang forever. This is the
+        // Windows hazard (BT-2568): the detached BEAM grandchild holds the stdout
+        // pipe open so EOF never arrives, so the deadline must bound the wait.
+        use tokio::io::AsyncWriteExt;
+        let (reader, mut writer) = tokio::io::duplex(256);
+        writer
+            .write_all(b"startup line with no port\n")
+            .await
+            .unwrap();
+        // writer is intentionally kept open so the stream never reaches EOF.
+        let err = read_port_from_boot(reader, std::time::Duration::from_millis(50))
+            .await
+            .expect_err("should time out");
+        assert!(
+            err.to_string().contains("boot stalled"),
+            "unexpected error: {err}"
+        );
+        drop(writer);
     }
 }
