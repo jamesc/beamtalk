@@ -1186,3 +1186,152 @@ fn parse_binary_method_with_class_metatype_param() {
         "Expected ClassOf(Actor), got {param_ty:?}"
     );
 }
+
+// ==========================================================================
+// Singleton type annotations (`#foo`) — subtypes of `Symbol` (ADR 0068, BT-2627)
+// ==========================================================================
+
+/// Helper: assert a `TypeAnnotation` is the singleton `#name`.
+fn assert_singleton(ty: &TypeAnnotation, name: &str) {
+    match ty {
+        TypeAnnotation::Singleton { name: n, .. } => assert_eq!(n.as_str(), name),
+        other => panic!("expected singleton #{name}, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_bare_singleton_param() {
+    let module = parse_ok(
+        "Object subclass: D
+  m: x :: #infinity => x",
+    );
+    let param = &module.classes[0].methods[0].parameters[0];
+    assert_singleton(param.type_annotation.as_ref().unwrap(), "infinity");
+}
+
+#[test]
+fn parse_singleton_union_param() {
+    let module = parse_ok(
+        "Object subclass: D
+  m: x :: Integer | #infinity => x",
+    );
+    let ty = module.classes[0].methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    let TypeAnnotation::Union { types, .. } = ty else {
+        panic!("expected union, got {ty:?}");
+    };
+    assert_eq!(types.len(), 2);
+    assert!(matches!(&types[0], TypeAnnotation::Simple(id) if id.name == "Integer"));
+    assert_singleton(&types[1], "infinity");
+}
+
+#[test]
+fn parse_multi_singleton_union_param() {
+    let module = parse_ok(
+        "Object subclass: D
+  restart: policy :: #temporary | #transient | #permanent => policy",
+    );
+    let ty = module.classes[0].methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    let TypeAnnotation::Union { types, .. } = ty else {
+        panic!("expected union, got {ty:?}");
+    };
+    assert_eq!(types.len(), 3);
+    assert_singleton(&types[0], "temporary");
+    assert_singleton(&types[1], "transient");
+    assert_singleton(&types[2], "permanent");
+}
+
+#[test]
+fn parse_singleton_union_return_type() {
+    let module = parse_ok(
+        "Object subclass: D
+  m -> Integer | #infinity => 1",
+    );
+    let ty = module.classes[0].methods[0].return_type.as_ref().unwrap();
+    let TypeAnnotation::Union { types, .. } = ty else {
+        panic!("expected union return type, got {ty:?}");
+    };
+    assert_eq!(types.len(), 2);
+    assert_singleton(&types[1], "infinity");
+}
+
+#[test]
+fn parse_singleton_union_field() {
+    let module = parse_ok(
+        "Object subclass: D
+  field: timeout :: Integer | #infinity = 1",
+    );
+    let ty = module.classes[0].state[0].type_annotation.as_ref().unwrap();
+    let TypeAnnotation::Union { types, .. } = ty else {
+        panic!("expected union field type, got {ty:?}");
+    };
+    assert_singleton(&types[1], "infinity");
+}
+
+#[test]
+fn parse_singleton_in_binary_method_param() {
+    let module = parse_ok(
+        "Object subclass: D
+  + other :: Integer | #infinity => other",
+    );
+    let ty = module.classes[0].methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    assert!(matches!(ty, TypeAnnotation::Union { .. }));
+}
+
+#[test]
+fn parse_singleton_inside_generic_param() {
+    let module = parse_ok(
+        "Object subclass: D
+  m: xs :: List(#infinity) => xs",
+    );
+    let ty = module.classes[0].methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    else {
+        panic!("expected generic, got {ty:?}");
+    };
+    assert_eq!(base.name, "List");
+    assert_singleton(&parameters[0], "infinity");
+}
+
+#[test]
+fn parse_singleton_does_not_consume_class_suffix() {
+    // BT-2627 review: `#foo` is a single token with no metatype surface, so the
+    // signature lookahead must not consume a trailing `class` (which would
+    // diverge from `parse_single_type_annotation` and orphan the `class`). A
+    // valid singleton union still parses cleanly...
+    let module = parse_ok(
+        "Object subclass: D
+  m: x :: Integer | #infinity => x",
+    );
+    assert!(matches!(
+        module.classes[0].methods[0].parameters[0].type_annotation,
+        Some(TypeAnnotation::Union { .. })
+    ));
+
+    // ...and the bare singleton resolves to exactly the `Singleton`, leaving the
+    // following token untouched (here a real next statement).
+    let module2 = parse_ok(
+        "Object subclass: D
+  m: x :: #infinity => x",
+    );
+    assert_singleton(
+        module2.classes[0].methods[0].parameters[0]
+            .type_annotation
+            .as_ref()
+            .unwrap(),
+        "infinity",
+    );
+}
