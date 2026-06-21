@@ -3924,29 +3924,39 @@ fn test_method_xref_baked_into_register_class() {
         code.contains("'source_status' => 'indexed'"),
         "rows should be tagged indexed. Got:\n{code}"
     );
+    // BT-2614: the actor's compiler-injected class-side `new`/`new:`/`spawn`/`spawn:`
+    // are emitted as synthetic xref rows so the System Browser matches runtime
+    // `Counter class allMethods`. They are class-side, synthetic, and carry a
+    // synthetic_origin (the class-header line). Bound the methodXref payload to the
+    // next class-info field (`'classState'`) so the assertions below cannot be
+    // satisfied by unrelated parts of the generated module.
+    let mx_start = code.find("'methodXref' => [").expect("methodXref present");
+    let mx_tail = &code[mx_start..];
+    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+
     // The optional synthetic_origin key is omitted for the user-authored indexed
     // rows. Scope the check to the `increment` row (an indexed user method) so it
-    // is not tripped by the BT-2614 synthetic actor-constructor rows below, which
-    // legitimately carry synthetic_origin.
-    let inc_pos = code
+    // is not tripped by the BT-2614 synthetic actor-constructor rows, which
+    // legitimately carry synthetic_origin. The increment row runs from its
+    // `'selector' => 'increment'` key up to the start of the next xref row — NOT
+    // the first nested `}~`, which would truncate the slice mid-row inside the
+    // `sends` list (BT-2622).
+    let inc_pos = mx_seg
         .find("'selector' => 'increment'")
         .expect("increment row present");
-    let inc_row = &code[inc_pos
-        ..code[inc_pos..]
-            .find("}~")
-            .map_or(code.len(), |o| inc_pos + o)];
+    let inc_after = &mx_seg[inc_pos..];
+    // A `}~, ~{` sequence is the *row* separator in the methodXref list — it only
+    // appears between top-level rows, never inside one (nested `sends`/`references`
+    // maps close with `}~]`, not `}~, ~{`). Bounding here keeps the slice to the
+    // single increment row instead of truncating at the first nested `}~`.
+    let inc_row = match inc_after.find("}~, ~{") {
+        Some(end) => &inc_after[..end],
+        None => inc_after,
+    };
     assert!(
         !inc_row.contains("synthetic_origin"),
         "synthetic_origin must be omitted for the indexed increment row. Got:\n{inc_row}"
     );
-
-    // BT-2614: the actor's compiler-injected class-side `new`/`new:`/`spawn`/`spawn:`
-    // are emitted as synthetic xref rows so the System Browser matches runtime
-    // `Counter class allMethods`. They are class-side, synthetic, and carry a
-    // synthetic_origin (the class-header line).
-    let mx_start = code.find("'methodXref' => [").expect("methodXref present");
-    let mx_tail = &code[mx_start..];
-    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
     for sel in ["new", "new:", "spawn", "spawn:"] {
         assert!(
             mx_seg.contains(&format!("'selector' => '{sel}'")),

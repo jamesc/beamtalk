@@ -374,6 +374,16 @@ browse_xref() ->
         %% print* prefix path (distinct from the exact-name `printString` match):
         %% `printDetails` must reach the prefix heuristic and land in "printing".
         method_row('printDetails', 106, indexed, class_body),
+        %% BT-2622: a synthetic *instance-side* slot whose name collides with an
+        %% actor constructor (`state: new :: Integer = 0` → synthetic accessor
+        %% `new`). It must bucket "accessing" by `class_side`, NOT "instance
+        %% creation" — the old selector-name convention would have misclassified
+        %% it. `new:`/`spawn`/`spawn:` are exercised the same way, so all four
+        %% colliding constructor names are covered on the instance side.
+        method_row('new', 108, synthetic, class_body),
+        method_row('new:', 108, synthetic, class_body),
+        method_row('spawn', 108, synthetic, class_body),
+        method_row('spawn:', 108, synthetic, class_body),
         %% BT-2614: compiler-injected synthetic class-side constructors. An actor's
         %% codegen emits `new`/`new:`/`spawn`/`spawn:` as sourceless exported
         %% functions; these rows are how the System Browser surfaces them (badged
@@ -565,7 +575,14 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"syntheticExt">>)),
             %% print* prefix path (not the exact-name `printString` match):
             %% `printDetails` must reach the prefix heuristic and land in "printing".
-            ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>))
+            ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>)),
+            %% BT-2622: instance-side synthetic slots whose names collide with the
+            %% actor constructors must classify by `class_side` (accessing), NOT by
+            %% the selector-name convention (which would say "instance creation").
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"new">>)),
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"new:">>)),
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn">>)),
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn:">>))
         end},
         {"browse-protocols surfaces injected synthetic class-side constructors", fun() ->
             %% BT-2614: the compiler-injected `new`/`new:`/`spawn`/`spawn:` an
