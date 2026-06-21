@@ -21,7 +21,7 @@ mod is_kind_of;
 mod is_nil;
 mod is_result;
 mod responds_to;
-mod singleton_eq;
+pub(crate) mod singleton_eq;
 
 /// A single narrowing pattern.
 ///
