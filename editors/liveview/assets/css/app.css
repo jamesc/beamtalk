@@ -144,7 +144,7 @@
 .topbar {
   display: flex; align-items: center; gap: 14px;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 9px; padding: 0 12px; height: 46px;
+  border-radius: 9px; padding: 0 12px; height: 38px;
   box-shadow: var(--shadow); flex: none;
 }
 .brand { display: flex; align-items: baseline; gap: 8px; }
@@ -465,55 +465,31 @@
    ========================================================================== */
 .doc-block {
   flex: none; overflow: auto;
-  margin-bottom: 8px; padding: 8px 10px;
+  margin-bottom: 6px; padding: 3px 10px;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; line-height: 1.4; color: var(--muted);
+}
+
+/* Inline doc toggle on the breadcrumb line (BT-2604): a compact button that
+   shows the caret + "Class comment" / "Documentation" label without taking a
+   full row. Positioned after the breadcrumb, before the spacer. */
+.doc-toggle-inline {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin: 0; padding: 0 6px; border: none; background: none;
+  cursor: pointer; color: var(--accent-2); font-size: 11px;
+  font-family: var(--code-font, monospace); font-weight: 600;
+  white-space: nowrap; flex: none;
+}
+.doc-toggle-inline:hover { color: var(--accent); }
+.doc-toggle-inline .doc-caret { font-size: 9px; color: var(--muted); }
+.doc-toggle-inline .doc-label { /* inherits color from parent */ }
+/* Inline doc body: rendered below the breadcrumb when the doc toggle is open.
+   A subtle panel that doesn't need the old full-width bordered box. */
+.doc-body-inline {
+  padding: 8px 12px; margin-bottom: 6px;
+  background: var(--panel-2); border-radius: 6px;
   font-size: 12px; line-height: 1.5; color: var(--muted);
-}
-/* Cap the height only when expanded, so a long doc scrolls instead of crowding
-   the editor; collapsed, the block hugs its single summary line. */
-.doc-block.open { max-height: 40%; }
-/* `white-space: normal` (not `pre-wrap`): this rule is inherited by the toggle's
-   `.doc-caret` / `.doc-sig-text` spans, whose content carries the HEEx template's
-   own indentation whitespace and newlines. `pre-wrap` would render that leading
-   whitespace verbatim — shoving the caret + signature far to the right (so the
-   line reads as "centred") and adding blank lines that balloon the block.
-   `normal` collapses it; long signatures still wrap via `word-break`. */
-.doc-block .doc-sig {
-  color: var(--accent-2); font-family: var(--code-font, monospace);
-  font-size: 12px; font-weight: 600;
-  white-space: normal; word-break: break-word;
-}
-/* The signature-as-toggle: a full-width, borderless button that reads as the
-   plain signature line, with a disclosure caret. Only `.open` draws the divider
-   under it (a separator above the body). */
-.doc-block button.doc-toggle {
-  display: flex; align-items: baseline; gap: 6px;
-  width: 100%; margin: 0; padding: 0; text-align: left;
-  background: none; border: none; cursor: pointer;
-}
-.doc-block.open button.doc-toggle {
-  margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
-}
-.doc-block .doc-caret { color: var(--muted); font-size: 10px; flex: none; }
-.doc-block .doc-sig-text { flex: 1 1 auto; min-width: 0; }
-.doc-block .doc-body .doc-h {
-  color: var(--ink); font-size: 12px; font-weight: 700;
-  margin: 8px 0 4px; line-height: 1.3;
-}
-.doc-block .doc-body .doc-h:first-child { margin-top: 0; }
-.doc-block .doc-body .doc-p { margin: 4px 0; }
-.doc-block .doc-body .doc-list { margin: 4px 0; padding-left: 18px; }
-.doc-block .doc-body .doc-list li { margin: 2px 0; }
-.doc-block .doc-body code {
-  font-family: var(--code-font, monospace); font-size: 11.5px;
-  background: var(--code-bg); padding: 1px 4px; border-radius: 3px;
-}
-.doc-block .doc-body .doc-code {
-  margin: 6px 0; padding: 8px 10px; overflow-x: auto;
-  background: var(--code-bg); border-radius: 4px;
-}
-.doc-block .doc-body .doc-code code {
-  background: none; padding: 0; font-size: 11.5px; white-space: pre;
+  max-height: 40%; overflow: auto;
 }
 
 /* ----------------------------------------------------------------------------
@@ -754,7 +730,7 @@
    hit targets that tint on hover. */
 .split-gutter { flex: none; background: transparent; border-radius: 3px; }
 .split-gutter:hover { background: var(--accent); }
-.split-gutter-y { height: 6px; margin: calc(var(--gap) / -2) 0; cursor: row-resize; }
+.split-gutter-y { height: 8px; margin: calc(var(--gap) / -2) 0; cursor: row-resize; }
 .split-gutter-x {
   position: absolute; top: 0; bottom: 0; width: 8px; z-index: 6; cursor: col-resize;
 }
@@ -910,6 +886,7 @@ body.col-resizing .cockpit { transition: none; }
 .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
 .btn.ghost:hover { background: var(--hover); color: var(--ink); }
 .btn:disabled { opacity: .4; cursor: default; }
+.btn-sm { padding: 3px 8px; font-size: 11px; border-radius: 5px; }
 
 /* inline text-button (ChangeLog revert, BT-2293): minimal affordance inside a
    data-table row, not a full chrome button. */

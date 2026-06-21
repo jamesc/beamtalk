@@ -58,7 +58,7 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
   end
 
   describe "method doc block (BT-2558)" do
-    test "selecting a method shows its signature and rendered doc-comment", %{conn: conn} do
+    test "selecting a method shows a doc toggle and rendered doc-comment", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
       # Select Counter (always present in the stub), then open the `increment`
@@ -70,20 +70,20 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
         |> element(~s(div[phx-value-selector="increment"]))
         |> render_click()
 
-      # The doc block is present, distinct from the editable source.
-      assert html =~ ~s(class="doc-block")
-      # Signature (HEEx-escaped `->`) — always visible as the collapse toggle.
-      assert html =~ "increment -&gt; Counter"
-      # Collapsed by default (BT-2558): the rendered body (which is also present
-      # verbatim in the editable source) is hidden until expanded, so the docs
-      # aren't shown twice and don't crowd the editor.
-      refute html =~ ~s(class="doc-body")
+      # The doc toggle is inline on the breadcrumb line, and the expanded body
+      # is a separate div below it.
+      assert html =~ ~s(class="doc-toggle-inline")
+      assert html =~ "Documentation"
+      refute html =~ "increment -&gt; Counter"
+      # Collapsed by default (BT-2558): the rendered body is hidden until
+      # expanded, so the docs aren't shown twice and don't crowd the editor.
+      refute html =~ ~s(class="doc-body-inline")
 
       # Expanding the block reveals the rendered Markdown: prose, a heading, fenced
-      # code. The signature line doubles as the toggle (phx-click="toggle_doc").
+      # code. The generic label doubles as the toggle (phx-click="toggle_doc").
       html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
 
-      assert html =~ ~s(class="doc-body")
+      assert html =~ ~s(class="doc-body-inline")
       assert html =~ "Increment the counter by one."
       assert html =~ ~s(<h4 class="doc-h">Examples</h4>)
       assert html =~ "<code>c increment</code>"
@@ -99,15 +99,9 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
         |> element(~s(div[phx-value-selector="value"]))
         |> render_click()
 
-      # BT-2604: with no `///` doc-comment the read-only doc block earns no space.
-      # A bare signature line would only duplicate the breadcrumb and the editable
-      # source below, so the whole block collapses away — the source sits directly
-      # under the breadcrumb.
-      refute html =~ ~s(class="doc-block")
-      refute html =~ ~s(class="doc-body")
-      # No bare signature line is left behind either — the breadcrumb still names
-      # the method, so the source sits directly beneath it.
-      refute html =~ ~s(class="doc-sig")
+      # BT-2604: with no `///` doc-comment the inline doc toggle earns no space.
+      refute html =~ ~s(class="doc-toggle-inline")
+      refute html =~ ~s(class="doc-body-inline")
     end
 
     test "the expanded state is sticky across tab switches", %{conn: conn} do
@@ -118,17 +112,17 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
 
       # Expand the doc'd method's block.
       html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
-      assert html =~ ~s(class="doc-body")
+      assert html =~ ~s(class="doc-body-inline")
 
-      # Switching to a method with no doc renders no doc block at all (BT-2604),
+      # Switching to a method with no doc renders no doc toggle at all (BT-2604),
       # but must not reset the expand preference…
       html = view |> element(~s(div[phx-value-selector="value"])) |> render_click()
-      refute html =~ ~s(class="doc-block")
-      refute html =~ ~s(class="doc-body")
+      refute html =~ ~s(class="doc-toggle-inline")
+      refute html =~ ~s(class="doc-body-inline")
 
       # …so returning to the doc'd method shows the body again *without* re-toggling.
       html = view |> element(~s(div[phx-value-selector="increment"])) |> render_click()
-      assert html =~ ~s(class="doc-body")
+      assert html =~ ~s(class="doc-body-inline")
       assert html =~ "Increment the counter by one."
     end
   end
@@ -146,11 +140,12 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
         |> element(~s(div[phx-value-selector="increment"]))
         |> render_click()
 
-      assert html =~ ~s(class="doc-block")
-      assert html =~ "increment -&gt; Counter"
+      assert html =~ ~s(class="doc-toggle-inline")
+      assert html =~ "Documentation"
+      refute html =~ "increment -&gt; Counter"
       # The toggle is present and expands the body for an observer too.
       html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
-      assert html =~ ~s(class="doc-body")
+      assert html =~ ~s(class="doc-body-inline")
       assert html =~ "Increment the counter by one."
     end
   end
@@ -169,7 +164,7 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
         |> element(~s([phx-click="browser_open_definition"]))
         |> render_click()
 
-      assert html =~ ~s(class="doc-block")
+      assert html =~ ~s(class="doc-toggle-inline")
       # A class-definition tab has no signature, so the toggle reads "Class comment".
       assert html =~ "Class comment"
 
