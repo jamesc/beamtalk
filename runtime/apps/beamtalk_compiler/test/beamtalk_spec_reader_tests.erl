@@ -368,6 +368,26 @@ map_type_singleton_union_too_wide_falls_back_test() ->
         beamtalk_spec_reader:map_type({type, 0, union, Branches})
     ).
 
+%% Documented limitation (BT-2632): a pure-atom enumeration that *contains* the
+%% bare atom `error` (or `ok`) is intercepted by ADR-0076 ok/error Result
+%% recognition before the singleton-union path runs, so it does NOT become a
+%% singleton union. This locks in the current behaviour for `logLevel/0`'s
+%% `... | error | ...` spec; tightening it is deferred to BT-2647. The
+%% user-facing `Beamtalk logLevel` type is carried by the source annotation, not
+%% this inferred type.
+map_type_singleton_union_with_error_atom_is_result_not_singleton_test() ->
+    ?assertEqual(
+        <<"Result(Dynamic, Nil) | Symbol">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {atom, 0, emergency},
+                {atom, 0, error},
+                {atom, 0, info},
+                {atom, 0, debug}
+            ]}
+        )
+    ).
+
 %% Duplicate atoms are deduped; a union that collapses to a single member is
 %% rejected as a singleton union and falls back to `Symbol` (BT-2647 defers the
 %% lone-atom case).
