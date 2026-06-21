@@ -673,3 +673,143 @@ fn is_assignable_to_integer_or_string() {
         &hierarchy
     ));
 }
+
+// ── BT-2624: singleton members in unions ────────────────────────────────
+
+/// Infer `x <selector>` (optionally with `arg`) where `x :: Integer | #infinity`,
+/// returning the inferred type and the rendered diagnostics (`"Severity: msg"`).
+fn infer_singleton_union_send(
+    selector: MessageSelector,
+    args: Vec<Expression>,
+) -> (InferredType, Vec<String>) {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            selector,
+            args,
+        ))],
+        span(),
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["Integer", "#infinity"]));
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    let diags = checker
+        .diagnostics()
+        .iter()
+        .map(|d| format!("{:?}: {}", d.severity, d.message))
+        .collect();
+    (ty, diags)
+}
+
+/// BT-2624 (item 2): the equality alias `=` on a union receiver is a universal
+/// comparison — it returns Boolean without a spurious "does not understand '='".
+#[test]
+fn bt2624_union_equality_alias_returns_boolean_no_warning() {
+    let (ty, diags) = infer_singleton_union_send(
+        MessageSelector::Binary("=".into()),
+        vec![Expression::Literal(
+            Literal::Symbol("infinity".into()),
+            span(),
+        )],
+    );
+    assert_eq!(ty, InferredType::known("Boolean"));
+    assert!(
+        diags.iter().all(|d| !d.contains("understand")),
+        "no DNU expected for `=` on a union, got: {diags:?}"
+    );
+}
+
+/// BT-2624 (item 2/3): identity comparison `=:=` on a singleton-bearing union
+/// returns Boolean, not Dynamic — the singleton member no longer poisons it.
+#[test]
+fn bt2624_union_identity_comparison_returns_boolean_not_dynamic() {
+    let (ty, diags) = infer_singleton_union_send(
+        MessageSelector::Binary("=:=".into()),
+        vec![Expression::Literal(
+            Literal::Symbol("infinity".into()),
+            span(),
+        )],
+    );
+    assert_eq!(ty, InferredType::known("Boolean"));
+    assert!(diags.is_empty(), "no diagnostics expected, got: {diags:?}");
+}
+
+/// BT-2624 (item 3): a singleton member resolves its inherited `Symbol` methods,
+/// so a method every member understands (`asString`) infers a concrete type
+/// rather than `Dynamic`, with no warning.
+#[test]
+fn bt2624_union_singleton_resolves_inherited_symbol_method() {
+    let (ty, diags) = infer_singleton_union_send(MessageSelector::Unary("asString".into()), vec![]);
+    assert_eq!(ty, InferredType::known("String"));
+    assert!(
+        diags.iter().all(|d| !d.contains("understand")),
+        "asString resolves on both members, got: {diags:?}"
+    );
+}
+
+/// BT-2624 (item 3): when NO member understands the selector, the singleton is
+/// resolved (via Symbol) too, so this is a definite failure — a Warning, not a
+/// downgraded Hint. (Two members → the plural "do not understand" wording.)
+#[test]
+fn bt2624_union_singleton_genuine_nonresponder_warns() {
+    let (_ty, diags) =
+        infer_singleton_union_send(MessageSelector::Unary("frobnicate".into()), vec![]);
+    let dnu: Vec<_> = diags.iter().filter(|d| d.contains("understand")).collect();
+    assert_eq!(dnu.len(), 1, "expected one DNU diagnostic, got: {diags:?}");
+    assert!(
+        dnu[0].starts_with("Warning:"),
+        "a definite non-responder should warn, not hint: {dnu:?}"
+    );
+    assert!(
+        dnu[0].contains("Integer") && dnu[0].contains("#infinity"),
+        "both members should be named: {dnu:?}"
+    );
+}
+
+/// BT-2624 (item 3): when only the singleton fails to respond, the singleton is
+/// surfaced by name in a Hint (previously it was silently masked as Dynamic).
+#[test]
+fn bt2624_union_singleton_partial_nonresponder_hints_singleton() {
+    let (ty, diags) = infer_singleton_union_send(MessageSelector::Unary("abs".into()), vec![]);
+    assert_eq!(ty, InferredType::known("Integer"));
+    let dnu: Vec<_> = diags.iter().filter(|d| d.contains("understand")).collect();
+    assert_eq!(dnu.len(), 1, "expected one DNU hint, got: {diags:?}");
+    assert!(
+        dnu[0].starts_with("Hint:") && dnu[0].contains("#infinity"),
+        "Integer responds but #infinity does not — hint should name the singleton: {dnu:?}"
+    );
+}
+
+/// BT-2624 (review follow-up): `#foo class` on a union resolves through
+/// `Symbol`, so a singleton member's `Self class` return is `Symbol class`
+/// (`Meta("Symbol")`) — not a phantom `Meta("#foo")`. A union of singletons
+/// collapses to a single `Meta("Symbol")`.
+#[test]
+fn bt2624_union_singleton_class_resolves_to_symbol_metatype() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("class".into()),
+            vec![],
+        ))],
+        span(),
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
+}

@@ -977,7 +977,7 @@ impl TypeChecker {
             Self::detect_narrowing(receiver)
                 .map(|info| self.refine_responds_to_narrowing(info))
                 .map(|info| Self::refine_result_narrowing(info, env, hierarchy))
-                .map(|info| Self::refine_singleton_narrowing(info, env, hierarchy))
+                .map(|info| self.refine_singleton_narrowing(info, env, hierarchy, receiver.span()))
         } else {
             None
         };
@@ -1869,6 +1869,14 @@ impl TypeChecker {
     /// - ALL non-nil members respond → no warning, return union of return types.
     /// - SOME non-nil members respond → DNU hint naming the non-responding members.
     /// - NO non-nil members respond → existing DNU warning.
+    ///
+    /// Note: the equality / identity comparison operators (`=`, `==`, `=:=`,
+    /// `/=`, `=/=`) short-circuit to `Boolean` without per-member resolution
+    /// (see the inline note). A member class that overrides `=` to return
+    /// something other than `Boolean` would therefore still infer `Boolean`
+    /// here — an intentional tradeoff matching the non-union `Meta` path, since
+    /// these operators are part of the universal `Object`/`ProtoObject`
+    /// protocol and are not modelled as per-class hierarchy methods.
     #[allow(clippy::too_many_lines)]
     fn infer_union_message_send(
         &mut self,
@@ -1893,6 +1901,21 @@ impl TypeChecker {
             return InferredType::Dynamic(DynamicReason::DynamicReceiver);
         }
 
+        // BT-2624: The equality / identity comparison operators (`=`, `==`,
+        // `=:=`, `/=`, `=/=`) are universal value/identity comparisons every
+        // object supports at runtime via the `Object`/`ProtoObject` protocol,
+        // but they are not modelled as per-class hierarchy methods (bare `=` is
+        // a codegen alias for `=:=`, BT-952). The non-union `Meta` receiver path
+        // already special-cases them for exactly this reason — mirror it here so
+        // a union receiver does not spuriously report that a concrete member
+        // (e.g. `Integer does not understand '='`) or a singleton member fails
+        // to understand the operator. This also keeps the idiomatic
+        // `unionVar = #singleton` narrowing guard (BT-2617) warning-free. These
+        // selectors always return `Boolean`.
+        if is_equality_comparison_op(selector) {
+            return InferredType::known("Boolean");
+        }
+
         for member in members {
             // Dynamic members: no warning, contribute Dynamic to return type.
             let Some(member_name) = member.as_known() else {
@@ -1907,19 +1930,34 @@ impl TypeChecker {
             if WellKnownClass::from_str(member_name).is_some_and(WellKnownClass::is_nil_class) {
                 continue;
             }
-            if !hierarchy.has_class(member_name) {
+            // BT-2624: A singleton member (`#foo`) is a subtype of `Symbol` (see
+            // the singleton-as-Symbol convention in `type_resolver`). Resolve its
+            // method set through `Symbol` so inherited methods (`asString`,
+            // `printString`, `=:=`, …) are visible. Without this, `#foo` looks
+            // like an unknown class and is treated as an *uncertain* member,
+            // which both poisons the union's return type with `Dynamic` (a
+            // genuine responder like `=:=` then infers `Dynamic` instead of
+            // `Boolean`) and downgrades genuine non-responder warnings to hints.
+            // The original `member_name` (`#foo`) is still used for the
+            // user-facing missing-selector message and for `Self`-typed returns.
+            let resolve_name: &str = if member_name.starts_with('#') {
+                "Symbol"
+            } else {
+                member_name.as_str()
+            };
+            if !hierarchy.has_class(resolve_name) {
                 uncertain_member_count += 1;
                 return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 continue;
             }
-            if hierarchy.has_instance_dnu_override(member_name) {
+            if hierarchy.has_instance_dnu_override(resolve_name) {
                 uncertain_member_count += 1;
                 return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
                 continue;
             }
-            if hierarchy.resolves_selector(member_name, selector) {
+            if hierarchy.resolves_selector(resolve_name, selector) {
                 responding_count += 1;
-                if let Some(method) = hierarchy.find_method(member_name, selector) {
+                if let Some(method) = hierarchy.find_method(resolve_name, selector) {
                     if let Some(ref ret_ty) = method.return_type {
                         if ret_ty.as_str() == "Self" {
                             // Self resolves to the concrete member type (with type args)
@@ -1927,8 +1965,10 @@ impl TypeChecker {
                         } else if ret_ty.as_str() == "Self class" {
                             // ADR 0083: `Self class` resolves to the metatype of
                             // the concrete union member (was Dynamic pre-0083,
-                            // BT-1952).
-                            return_types.push(InferredType::meta(member_name.clone()));
+                            // BT-1952). Use `resolve_name` so a singleton member
+                            // yields `Symbol class` (`#foo class` is `Symbol` at
+                            // runtime), not a phantom `Meta("#foo")` (BT-2624).
+                            return_types.push(InferredType::meta(EcoString::from(resolve_name)));
                         } else if let Some(meta_class) = ret_ty
                             .as_str()
                             .strip_suffix(" class")
@@ -2164,14 +2204,45 @@ impl TypeChecker {
     /// `#infinity` ⇒ `Integer`). For an inequality (`/=`, `=/=`) the two
     /// branches are swapped.
     pub(super) fn refine_singleton_narrowing(
+        &mut self,
         mut info: NarrowingInfo,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
+        test_span: Span,
     ) -> NarrowingInfo {
         let Some(eq) = info.singleton_eq.clone() else {
             return info;
         };
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+
+        // BT-2624 (item 1): when the tested singleton can never be a value of
+        // the variable's current type, the comparison is statically decidable —
+        // an equality test (`= #foo`) can never hold and an inequality test
+        // (`/= #foo`) always holds. Only flag this when certain: skip `Dynamic`
+        // (unknown) and `Never` (the branch is already unreachable), and skip
+        // when any member admits the singleton (it is the singleton itself, or
+        // `Symbol`/one of its supertypes).
+        if !matches!(current_ty, InferredType::Dynamic(_) | InferredType::Never)
+            && !Self::type_admits_singleton(&current_ty, &eq.singleton, hierarchy)
+        {
+            let ty_display = current_ty.display_for_diagnostic().unwrap_or_default();
+            let message = if eq.negated {
+                format!(
+                    "comparison is always true: `{}` is never a value of `{ty_display}`",
+                    eq.singleton
+                )
+            } else {
+                format!(
+                    "comparison can never be true: `{}` is not a value of `{ty_display}`",
+                    eq.singleton
+                )
+            };
+            self.diagnostics.push(
+                Diagnostic::hint(message, test_span)
+                    .with_category(crate::source_analysis::DiagnosticCategory::Type),
+            );
+        }
+
         let matched = InferredType::known(eq.singleton.clone());
         let remainder = Self::union_without(&current_ty, &eq.singleton);
         if eq.negated {
@@ -2225,6 +2296,37 @@ impl TypeChecker {
             }
             InferredType::Known { class_name, .. } if class_name == removed => InferredType::Never,
             _ => ty.clone(),
+        }
+    }
+
+    /// BT-2624: Whether the singleton `singleton` (`#foo`) could be a runtime
+    /// value of `ty`. A member admits the singleton when it *is* that singleton,
+    /// or when it is a supertype of every singleton — `Symbol` or one of its
+    /// ancestors (`Object`, `ProtoObject`). Other concrete members (`Integer`, a
+    /// *different* singleton, …) do not admit it. `Dynamic` admits anything, so
+    /// callers stay conservative when the type is unknown.
+    fn type_admits_singleton(
+        ty: &InferredType,
+        singleton: &EcoString,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        match ty {
+            InferredType::Dynamic(_) => true,
+            InferredType::Union { members, .. } => members
+                .iter()
+                .any(|m| Self::type_admits_singleton(m, singleton, hierarchy)),
+            InferredType::Known { class_name, .. } => {
+                class_name == singleton
+                    || class_name == "Symbol"
+                    || hierarchy
+                        .superclass_chain("Symbol")
+                        .iter()
+                        .any(|c| c == class_name)
+            }
+            // `Meta`, `Never`, etc. do not admit a singleton: a class object or
+            // a divergent value can never equal a symbol literal, so a
+            // `metaVar = #foo` test is correctly flagged "can never be true".
+            _ => false,
         }
     }
 
