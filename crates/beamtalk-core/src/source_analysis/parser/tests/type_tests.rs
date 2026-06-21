@@ -1420,3 +1420,40 @@ fn parse_class_metatype_generic_in_return_type() {
         parameters[0]
     );
 }
+
+#[test]
+fn parse_class_metatype_in_generic_union_arg() {
+    // BT-2630: `List(Actor class | Nil)` — metatype in union position within
+    // generic args. The lookahead's pipe-union loop must also consume the
+    // `class` suffix in lock-step with `parse_single_type_annotation`.
+    let module = parse_ok(
+        "Object subclass: Foo
+  m: x :: List(Actor class | Nil) => x",
+    );
+    let ty = module.classes[0].methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    else {
+        panic!("expected generic, got {ty:?}");
+    };
+    assert_eq!(base.name, "List");
+    assert_eq!(parameters.len(), 1);
+    let TypeAnnotation::Union { types, .. } = &parameters[0] else {
+        panic!("expected union arg, got {:?}", parameters[0]);
+    };
+    assert_eq!(types.len(), 2);
+    assert!(
+        matches!(&types[0], TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"),
+        "Expected ClassOf(Actor), got {:?}",
+        types[0]
+    );
+    assert!(
+        matches!(&types[1], TypeAnnotation::Simple(id) if id.name == "Nil"),
+        "Expected Simple(Nil), got {:?}",
+        types[1]
+    );
+}

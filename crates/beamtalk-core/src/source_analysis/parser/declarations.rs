@@ -542,7 +542,8 @@ impl Parser {
     /// malformed (e.g., missing closing paren or non-identifier content).
     ///
     /// Also handles bounded type parameters: `(T :: Printable, E)` — skips the
-    /// `:: Bound` portion when present (ADR 0068 Phase 2d).
+    /// `:: Bound` portion when present (ADR 0068 Phase 2d). Also handles `class`
+    /// metatype suffixes in type argument position: `List(Actor class)` (BT-2630).
     pub(super) fn skip_paren_type_params(&self, offset: usize) -> Option<usize> {
         debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
         let mut o = offset + 1; // past `(`
