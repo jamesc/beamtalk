@@ -420,4 +420,67 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       refute saved =~ "new-method-selector"
     end
   end
+
+  describe "new-method selector derivation: modifier + -> disambiguation (BT-2625)" do
+    # The breadcrumb derives the selector live from the typed body. For a method
+    # *header* that begins with a modifier (`class`/`internal`/`sealed`) followed
+    # by `->`, the shape is ambiguous without type context:
+    #
+    #   * `sealed -> Self => …`  — a *unary* method named `sealed` with a return
+    #     type, so the derived selector is the modifier word.
+    #   * `sealed -> arg => …`   — a `sealed` *binary* method whose selector is
+    #     `->`, so the modifier is stripped and the selector is `->`.
+    #
+    # Disambiguate by the token after `->`: Capitalized = return Type (keep the
+    # modifier as the unary selector), lowercase = binary argument (strip the
+    # modifier, `->` is the selector). The breadcrumb is the only surface for this
+    # client-side parse — the authoritative parse still runs server-side on save.
+
+    # Drive the new-method tab body and return the rendered breadcrumb selector
+    # span (HTML-escaped, so `->` reads as `-&gt;`).
+    defp derived_breadcrumb(view, source) do
+      view
+      |> form("form[phx-submit='save_method']")
+      |> render_change(%{"source" => source})
+    end
+
+    setup %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
+
+      view
+      |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
+      |> render_click()
+
+      {:ok, view: view}
+    end
+
+    for modifier <- ["class", "internal", "sealed"] do
+      test "#{modifier} => body derives `#{modifier}` (modifier word is the unary selector)",
+           %{view: view} do
+        html = derived_breadcrumb(view, ~s|#{unquote(modifier)} => "hi"|)
+        assert html =~ ~s(<span class="mono">#{unquote(modifier)}</span>)
+      end
+
+      test "#{modifier} -> ReturnType => body derives `#{modifier}` (unary with return type)",
+           %{view: view} do
+        html = derived_breadcrumb(view, ~s|#{unquote(modifier)} -> Self => self|)
+        assert html =~ ~s(<span class="mono">#{unquote(modifier)}</span>)
+      end
+
+      test "#{modifier} -> arg => body derives `->` (modifier-stripped binary selector)",
+           %{view: view} do
+        html = derived_breadcrumb(view, ~s|#{unquote(modifier)} -> other => self|)
+        assert html =~ ~s(<span class="mono">-&gt;</span>)
+        refute html =~ ~s(<span class="mono">#{unquote(modifier)}</span>)
+      end
+
+      test "#{modifier} other => body derives a real unary selector (modifier stripped)",
+           %{view: view} do
+        html = derived_breadcrumb(view, ~s|#{unquote(modifier)} increment => self|)
+        assert html =~ ~s(<span class="mono">increment</span>)
+        refute html =~ ~s(<span class="mono">#{unquote(modifier)}</span>)
+      end
+    end
+  end
 end
