@@ -977,7 +977,7 @@ impl TypeChecker {
             Self::detect_narrowing(receiver)
                 .map(|info| self.refine_responds_to_narrowing(info))
                 .map(|info| Self::refine_result_narrowing(info, env, hierarchy))
-                .map(|info| self.refine_singleton_narrowing(info, env, hierarchy, receiver.span()))
+                .map(|info| Self::refine_singleton_narrowing(info, env, hierarchy))
         } else {
             None
         };
@@ -1423,22 +1423,26 @@ impl TypeChecker {
             }
         }
 
-        // Union-typed receiver: check selector on ALL members, warn if any lacks it.
-        // Return type is the union of member return types.
-        if let InferredType::Union { ref members, .. } = receiver_ty {
-            // BT-2631: a standalone singleton (in)equality send on a union
-            // receiver (`flag := unionVar =:= #west`) is statically decidable
-            // when `#west` can never be a member of the union — but
-            // `infer_union_message_send` short-circuits equality ops to
-            // `Boolean` before any membership check. Mirror the guard-scoped
-            // hint (`refine_singleton_narrowing`) here so the warning fires
-            // regardless of whether the comparison guards an `ifTrue:`. The
-            // receiver is the union operand, so its already-resolved
-            // `receiver_ty` is the variable's current type.
-            if let MessageSelector::Binary(op) = selector {
-                if let Some(eq) = narrowing::detect_singleton_eq(receiver, op, arguments) {
+        // BT-2631: a standalone singleton (in)equality send (`flag := unionVar
+        // =:= #west`) is statically decidable when `#west` can never be a member
+        // of the union — but `infer_union_message_send` short-circuits equality
+        // ops to `Boolean` before any membership check. Emit the same hint as the
+        // guard-scoped path here (and only here): an `ifTrue:`-guarded comparison
+        // is itself a `MessageSend` whose receiver is inferred through this path,
+        // so this is the single emitter for both guarded and bare comparisons —
+        // `refine_singleton_narrowing` deliberately no longer emits, avoiding a
+        // double hint. The union operand may be either side (`unionVar = #west`
+        // or `#west = unionVar`), so consult both operand types.
+        if let MessageSelector::Binary(op) = selector {
+            if let Some(eq) = narrowing::detect_singleton_eq(receiver, op, arguments) {
+                let arg_ty = arg_types.first();
+                let union_ty = [Some(&receiver_ty), arg_ty]
+                    .into_iter()
+                    .flatten()
+                    .find(|t| matches!(t, InferredType::Union { .. }));
+                if let Some(union_ty) = union_ty {
                     self.check_impossible_singleton_comparison(
-                        &receiver_ty,
+                        union_ty,
                         &eq.info.singleton,
                         eq.info.negated,
                         hierarchy,
@@ -1446,6 +1450,11 @@ impl TypeChecker {
                     );
                 }
             }
+        }
+
+        // Union-typed receiver: check selector on ALL members, warn if any lacks it.
+        // Return type is the union of member return types.
+        if let InferredType::Union { ref members, .. } = receiver_ty {
             return self.infer_union_message_send(members, &selector_name, span, hierarchy);
         }
 
@@ -2223,30 +2232,23 @@ impl TypeChecker {
     /// variable's type with that singleton removed (`Integer | #infinity` minus
     /// `#infinity` ⇒ `Integer`). For an inequality (`/=`, `=/=`) the two
     /// branches are swapped.
+    ///
+    /// BT-2624 (item 1) / BT-2631: the "comparison can never be true / always
+    /// true" hint for a statically decidable singleton test is *not* emitted
+    /// here. A guarded comparison (`unionVar = #foo ifTrue: …`) has its receiver
+    /// — the `=` send — inferred through `infer_message_send_with_receiver_ty`,
+    /// whose `check_impossible_singleton_comparison` is the single emitter for
+    /// both guarded and bare comparisons. Emitting here too would duplicate the
+    /// hint. This method only refines the branch types.
     pub(super) fn refine_singleton_narrowing(
-        &mut self,
         mut info: NarrowingInfo,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
-        test_span: Span,
     ) -> NarrowingInfo {
         let Some(eq) = info.singleton_eq.clone() else {
             return info;
         };
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
-
-        // BT-2624 (item 1): when the tested singleton can never be a value of
-        // the variable's current type, the comparison is statically decidable.
-        // Shared with the standalone-send path (BT-2631) so guard-scoped
-        // (`unionVar = #foo ifTrue: …`) and bare (`flag := unionVar =:= #foo`)
-        // equality tests warn identically.
-        self.check_impossible_singleton_comparison(
-            &current_ty,
-            &eq.singleton,
-            eq.negated,
-            hierarchy,
-            test_span,
-        );
 
         let matched = InferredType::known(eq.singleton.clone());
         let remainder = Self::union_without(&current_ty, &eq.singleton);
