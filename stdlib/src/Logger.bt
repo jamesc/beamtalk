@@ -111,5 +111,5 @@ sealed typed Object subclass: Logger
   /// Logger setLevel: #warning
   /// // => nil
   /// ```
-  class sealed setLevel: level :: Symbol -> Nil =>
+  class sealed setLevel: level :: #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug -> Nil =>
     (Erlang beamtalk_logger) setLevel: level

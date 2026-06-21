@@ -31,7 +31,7 @@ abstract Object subclass: Supervisor
   ///
   /// Valid values: `#oneForOne`, `#oneForAll`, `#restForOne`.
   /// Default: `#oneForOne`.
-  class strategy -> Symbol => #oneForOne
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForOne
 
   /// Maximum number of restarts within `restartWindow` seconds.
   ///

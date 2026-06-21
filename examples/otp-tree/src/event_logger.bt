@@ -9,7 +9,7 @@
 Actor subclass: EventLogger
   state: events = #()
 
-  class supervisionPolicy -> Symbol => #permanent
+  class supervisionPolicy -> #permanent | #transient | #temporary => #permanent
 
   log: message => self.events := self.events add: message
 

@@ -43,7 +43,7 @@ typed Value subclass: SupervisionSpec
   ///
   /// Defaults to `#temporary`. Set to the actor's `supervisionPolicy` when
   /// created via `ActorClass supervisionSpec`.
-  field: restart :: Symbol = #temporary
+  field: restart :: #permanent | #transient | #temporary = #temporary
   /// Optional initialization arguments passed via `spawnWith:`.
   ///
   /// nil means no args (use `spawn`); any non-nil value is passed to `spawnWith:`.
@@ -93,7 +93,7 @@ typed Value subclass: SupervisionSpec
   // to the actor's init/1 — any payload shape the actor accepts is valid.
 
   /// Return a new spec with id and restart overridden.
-  withId: anId :: Symbol withRestart: policy :: Symbol -> SupervisionSpec =>
+  withId: anId :: Symbol withRestart: policy :: #permanent | #transient | #temporary -> SupervisionSpec =>
     (self withId: anId) withRestart: policy
 
   /// Return a new spec with id and args overridden.
@@ -101,11 +101,11 @@ typed Value subclass: SupervisionSpec
     (self withId: anId) withArgs: someArgs
 
   /// Return a new spec with id, restart, and args all overridden.
-  withId: anId :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
+  withId: anId :: Symbol withRestart: policy :: #permanent | #transient | #temporary withArgs: someArgs :: Object -> SupervisionSpec =>
     ((self withId: anId) withRestart: policy) withArgs: someArgs
 
   /// Return a new spec with name and restart overridden.
-  withName: aName :: Symbol withRestart: policy :: Symbol -> SupervisionSpec =>
+  withName: aName :: Symbol withRestart: policy :: #permanent | #transient | #temporary -> SupervisionSpec =>
     (self withName: aName) withRestart: policy
 
   /// Return a new spec with name and args overridden.
@@ -113,7 +113,7 @@ typed Value subclass: SupervisionSpec
     (self withName: aName) withArgs: someArgs
 
   /// Return a new spec with name, restart, and args all overridden.
-  withName: aName :: Symbol withRestart: policy :: Symbol withArgs: someArgs :: Object -> SupervisionSpec =>
+  withName: aName :: Symbol withRestart: policy :: #permanent | #transient | #temporary withArgs: someArgs :: Object -> SupervisionSpec =>
     ((self withName: aName) withRestart: policy) withArgs: someArgs
 
   // === Display ===
