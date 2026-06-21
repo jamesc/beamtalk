@@ -59,7 +59,7 @@ impl CoreErlangGenerator {
     fn state_acc_var_doc(state_version: usize) -> Document<'static> {
         match state_version {
             0 => docvec!["StateAcc"],
-            n => leaf::var(format!("StateAcc{n}")),
+            n => leaf::var(super::super::util::versioned_var("StateAcc", n)),
         }
     }
 
