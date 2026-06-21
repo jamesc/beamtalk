@@ -311,22 +311,34 @@
 .cat-row:hover, .row:hover { background: var(--hover); }
 .row.sel, .cat-row.sel { background: var(--sel); color: var(--sel-ink); }
 .row .twig { color: var(--faint); width: 12px; flex: none; text-align: center; }
-.row .cls { font-family: var(--code-font, monospace); font-size: 12.5px; }
+/* The class name takes the flexible space and truncates with an ellipsis so the
+   trailing badges (BT-2610) are pushed into a consistent right-pinned column and
+   never clipped — the full name stays available via the row `title` tooltip. */
+.row .cls {
+  font-family: var(--code-font, monospace); font-size: 12.5px;
+  flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .row.subclass { padding-left: 24px; }
 .row.subclass2 { padding-left: 38px; }
 .row .meta { margin-left: auto; color: var(--faint); font-size: 10.5px; }
 .method-row .mname { font-family: var(--code-font, monospace); }
+/* Trailing badges never shrink or wrap, so they stay fully visible regardless of
+   class-name length or panel width (BT-2610). `.cls` flex-grow pins them right; the
+   row `gap` supplies spacing, so no per-badge `margin-left: auto` is needed. */
 .row .pill {
+  flex: none;
   font-size: 9.5px; font-weight: 700; letter-spacing: .03em; padding: 0 5px; border-radius: 4px;
-  background: var(--accent-soft); color: var(--accent-2); margin-left: auto;
+  background: var(--accent-soft); color: var(--accent-2);
 }
 .row .runtime-tag {
-  margin-left: auto; font-size: 11px; font-weight: 700;
+  flex: none; font-size: 11px; font-weight: 700;
   color: var(--t-symbol);
 }
 .row .source-origin-tag {
+  flex: none;
   font-size: 9px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
-  padding: 0 4px; border-radius: 3px; margin-left: 4px;
+  padding: 0 4px; border-radius: 3px;
 }
 .row .source-origin-tag.stdlib { background: #e8d5f5; color: #7c3aed; }
 .row .source-origin-tag.dependency { background: #fef3c7; color: #b45309; }
