@@ -374,6 +374,16 @@ browse_xref() ->
         %% print* prefix path (distinct from the exact-name `printString` match):
         %% `printDetails` must reach the prefix heuristic and land in "printing".
         method_row('printDetails', 106, indexed, class_body),
+        %% BT-2622: a synthetic *instance-side* slot whose name collides with an
+        %% actor constructor (`state: new :: Integer = 0` → synthetic accessor
+        %% `new`). It must bucket "accessing" by `class_side`, NOT "instance
+        %% creation" — the old selector-name convention would have misclassified
+        %% it. `new:`/`spawn`/`spawn:` are exercised the same way, so all four
+        %% colliding constructor names are covered on the instance side.
+        method_row('new', 108, synthetic, class_body),
+        method_row('new:', 108, synthetic, class_body),
+        method_row('spawn', 108, synthetic, class_body),
+        method_row('spawn:', 108, synthetic, class_body),
         %% BT-2614: compiler-injected synthetic class-side constructors. An actor's
         %% codegen emits `new`/`new:`/`spawn`/`spawn:` as sourceless exported
         %% functions; these rows are how the System Browser surfaces them (badged
@@ -497,6 +507,22 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(false, maps:get(<<"native">>, Value)),
             ?assertEqual(null, maps:get(<<"backing_module">>, Value))
         end},
+        {"browse-class-definition carries reflected sealed/abstract modifiers", fun() ->
+            %% BT-2605: op 4 surfaces the same sealed/abstract reflection op 1
+            %% (browse-classes) carries, so the IDE editor header can badge them
+            %% without parsing the synthesized definition skeleton. A plain fixture
+            %% class is neither sealed nor abstract.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-class-definition">>,
+                    #{<<"class">> => Class},
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(false, maps:get(<<"sealed">>, Value)),
+            ?assertEqual(false, maps:get(<<"abstract">>, Value))
+        end},
         {"browse-native-source errors for a non-native class", fun() ->
             %% BT-2578: the op only applies to native: classes (ADR 0056).
             Response = beamtalk_repl_ops_browse:handle(
@@ -565,7 +591,14 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"syntheticExt">>)),
             %% print* prefix path (not the exact-name `printString` match):
             %% `printDetails` must reach the prefix heuristic and land in "printing".
-            ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>))
+            ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>)),
+            %% BT-2622: instance-side synthetic slots whose names collide with the
+            %% actor constructors must classify by `class_side` (accessing), NOT by
+            %% the selector-name convention (which would say "instance creation").
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"new">>)),
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"new:">>)),
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn">>)),
+            ?assertEqual(<<"accessing">>, protocol_of(Protocols, <<"spawn:">>))
         end},
         {"browse-protocols surfaces injected synthetic class-side constructors", fun() ->
             %% BT-2614: the compiler-injected `new`/`new:`/`spawn`/`spawn:` an

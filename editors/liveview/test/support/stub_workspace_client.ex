@@ -329,7 +329,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         "name" => "Subprocess",
         "source_file" => "src/subprocess.bt",
         "source_origin" => "project"
-      }
+      },
+      # BT-2605: a class whose header carries leading modifiers (`sealed typed`),
+      # so the editor's class/method modifier badges can be reached by navigation.
+      %{"name" => "Ledger", "source_file" => "src/ledger.bt", "source_origin" => "project"}
     ]
 
     extra =
@@ -353,7 +356,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
           [%{"selector" => "readLine"}, %{"selector" => "writeLine:"}]
 
         side == "instance" and
-            (class == "Counter" or MapSet.member?(get(:defined_classes), class)) ->
+            (class == "Counter" or class == "Ledger" or
+               MapSet.member?(get(:defined_classes), class)) ->
           [%{"selector" => "value"}, %{"selector" => "increment"}]
 
         true ->
@@ -409,6 +413,20 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   def browse_class_definition(class) do
+    if get(:fail_class_definition) do
+      # BT-2605: simulate a transient workspace failure so the editor's
+      # keep-prior-badges-on-failure fallback can be exercised. Mirrors the real
+      # `{:error, _}` the facade returns when the workspace is unreachable.
+      {:error, :unreachable}
+    else
+      browse_class_definition_ok(class)
+    end
+  end
+
+  @doc "BT-2605: force `browse_class_definition/1` to fail (transient-outage simulation)."
+  def fail_class_definition(flag) when is_boolean(flag), do: put(:fail_class_definition, flag)
+
+  defp browse_class_definition_ok(class) do
     {:value,
      %{
        "class" => class,
@@ -420,6 +438,13 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        # other stubbed class is ordinary (native: false).
        "native" => class in ["Subprocess", "Headless"],
        "backing_module" => native_backing(class),
+       # BT-2605: reflected class modifiers (sealed/abstract), mirroring the real
+       # op-4 result keys (booleans from runtime reflection, NOT parsed from the
+       # `definition` skeleton). `Ledger` is sealed, `Shape` abstract; every other
+       # stubbed class carries neither. (`browse_class_definition` answers for any
+       # class name, so `Shape` need not be in the class tree to be opened.)
+       "sealed" => class == "Ledger",
+       "abstract" => class == "Shape",
        "origin" => "both",
        "disk_differs" => false
      }}

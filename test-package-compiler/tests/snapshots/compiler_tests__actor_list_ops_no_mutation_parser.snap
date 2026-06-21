@@ -1,0 +1,2298 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [],
+    method_definitions: [],
+    protocols: [],
+    expressions: [
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Snapshot tests for list operations WITHOUT outer-scope mutations, defined",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "as block-valued bindings (identifier := [...]) so the compiler generates",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "a dispatch-table entry for each, exercising the simple (no-foldl) codegen",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "paths in search_ops.rs, transform_ops.rs, filter_ops.rs, and basic_ops.rs.",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Workspace-level field initializers whose RHS has no side effects are",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "dead-eliminated by the compiler, so ws_list_ops_simple and",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "ws_list_ops_search never invoke the no-mutation codegen paths.",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Using block-valued bindings (value IS a Block AST node) puts each",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "method in the dispatch table, forcing codegen to run.",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "numbers",
+                        span: Span {
+                            start: 708,
+                            end: 715,
+                        },
+                    },
+                ),
+                value: ListLiteral {
+                    elements: [
+                        Literal(
+                            Integer(
+                                1,
+                            ),
+                            Span {
+                                start: 721,
+                                end: 722,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                2,
+                            ),
+                            Span {
+                                start: 724,
+                                end: 725,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                3,
+                            ),
+                            Span {
+                                start: 727,
+                                end: 728,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                4,
+                            ),
+                            Span {
+                                start: 730,
+                                end: 731,
+                            },
+                        ),
+                        Literal(
+                            Integer(
+                                5,
+                            ),
+                            Span {
+                                start: 733,
+                                end: 734,
+                            },
+                        ),
+                    ],
+                    tail: None,
+                    span: Span {
+                        start: 719,
+                        end: 735,
+                    },
+                },
+                type_annotation: None,
+                span: Span {
+                    start: 708,
+                    end: 735,
+                },
+            },
+            preceding_blank_line: false,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "search_ops.rs — generate_list_any_satisfy (no mutations → lists:any/2)",
+                        span: Span {
+                            start: 815,
+                            end: 823,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "checkAny",
+                        span: Span {
+                            start: 815,
+                            end: 823,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 830,
+                                                end: 837,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "anySatisfy:",
+                                                span: Span {
+                                                    start: 838,
+                                                    end: 849,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 852,
+                                                            end: 853,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 856,
+                                                                        end: 857,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        3,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 860,
+                                                                        end: 861,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 856,
+                                                                end: 861,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 850,
+                                                    end: 862,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 830,
+                                        end: 862,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 829,
+                            end: 863,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 815,
+                    end: 863,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "search_ops.rs — generate_list_all_satisfy (no mutations → lists:all/2)",
+                        span: Span {
+                            start: 943,
+                            end: 951,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "checkAll",
+                        span: Span {
+                            start: 943,
+                            end: 951,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 958,
+                                                end: 965,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "allSatisfy:",
+                                                span: Span {
+                                                    start: 966,
+                                                    end: 977,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 980,
+                                                            end: 981,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 984,
+                                                                        end: 985,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        0,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 988,
+                                                                        end: 989,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 984,
+                                                                end: 989,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 978,
+                                                    end: 990,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 958,
+                                        end: 990,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 957,
+                            end: 991,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 943,
+                    end: 991,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "search_ops.rs — generate_list_detect (no mutations → beamtalk_list:detect/2)",
+                        span: Span {
+                            start: 1077,
+                            end: 1086,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "findFirst",
+                        span: Span {
+                            start: 1077,
+                            end: 1086,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 1092,
+                                                end: 1099,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "detect:",
+                                                span: Span {
+                                                    start: 1100,
+                                                    end: 1107,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 1110,
+                                                            end: 1111,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 1114,
+                                                                        end: 1115,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        3,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1118,
+                                                                        end: 1119,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1114,
+                                                                end: 1119,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1108,
+                                                    end: 1120,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1092,
+                                        end: 1120,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 1091,
+                            end: 1121,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 1077,
+                    end: 1121,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "search_ops.rs — generate_list_detect_if_none / generate_detect_if_none_simple",
+                        span: Span {
+                            start: 1206,
+                            end: 1216,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "findOrFall",
+                        span: Span {
+                            start: 1206,
+                            end: 1216,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 1221,
+                                                end: 1228,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "detect:",
+                                                span: Span {
+                                                    start: 1229,
+                                                    end: 1236,
+                                                },
+                                            },
+                                            KeywordPart {
+                                                keyword: "ifNone:",
+                                                span: Span {
+                                                    start: 1251,
+                                                    end: 1258,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 1239,
+                                                            end: 1240,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 1243,
+                                                                        end: 1244,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        10,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1247,
+                                                                        end: 1249,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1243,
+                                                                end: 1249,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1237,
+                                                    end: 1250,
+                                                },
+                                            },
+                                        ),
+                                        Block(
+                                            Block {
+                                                parameters: [],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: Literal(
+                                                            Integer(
+                                                                0,
+                                                            ),
+                                                            Span {
+                                                                start: 1260,
+                                                                end: 1261,
+                                                            },
+                                                        ),
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1259,
+                                                    end: 1262,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1221,
+                                        end: 1262,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 1220,
+                            end: 1263,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 1206,
+                    end: 1263,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "transform_ops.rs — generate_list_count (no mutations → lists:filter + erlang:length)",
+                        span: Span {
+                            start: 1357,
+                            end: 1367,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "countEvens",
+                        span: Span {
+                            start: 1357,
+                            end: 1367,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 1372,
+                                                end: 1379,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "count:",
+                                                span: Span {
+                                                    start: 1380,
+                                                    end: 1386,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 1389,
+                                                            end: 1390,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 1393,
+                                                                        end: 1394,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        2,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1397,
+                                                                        end: 1398,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1393,
+                                                                end: 1398,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1387,
+                                                    end: 1399,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1372,
+                                        end: 1399,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 1371,
+                            end: 1400,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 1357,
+                    end: 1400,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "transform_ops.rs — generate_list_flat_map (no mutations → lists:flatmap/2)",
+                        span: Span {
+                            start: 1484,
+                            end: 1491,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "doubled",
+                        span: Span {
+                            start: 1484,
+                            end: 1491,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 1499,
+                                                end: 1506,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "flatMap:",
+                                                span: Span {
+                                                    start: 1507,
+                                                    end: 1515,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 1518,
+                                                            end: 1519,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: ListLiteral {
+                                                            elements: [
+                                                                Identifier(
+                                                                    Identifier {
+                                                                        name: "n",
+                                                                        span: Span {
+                                                                            start: 1524,
+                                                                            end: 1525,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                                Identifier(
+                                                                    Identifier {
+                                                                        name: "n",
+                                                                        span: Span {
+                                                                            start: 1527,
+                                                                            end: 1528,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            tail: None,
+                                                            span: Span {
+                                                                start: 1522,
+                                                                end: 1529,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1516,
+                                                    end: 1530,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1499,
+                                        end: 1530,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 1498,
+                            end: 1531,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 1484,
+                    end: 1531,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "transform_ops.rs — generate_list_take_while (no mutations → lists:takewhile/2)",
+                        span: Span {
+                            start: 1619,
+                            end: 1628,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "smallOnes",
+                        span: Span {
+                            start: 1619,
+                            end: 1628,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 1634,
+                                                end: 1641,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "takeWhile:",
+                                                span: Span {
+                                                    start: 1642,
+                                                    end: 1652,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 1655,
+                                                            end: 1656,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 1659,
+                                                                        end: 1660,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "<",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        4,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1663,
+                                                                        end: 1664,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1659,
+                                                                end: 1664,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1653,
+                                                    end: 1665,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1634,
+                                        end: 1665,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 1633,
+                            end: 1666,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 1619,
+                    end: 1666,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "transform_ops.rs — generate_list_drop_while (no mutations → lists:dropwhile/2)",
+                        span: Span {
+                            start: 1754,
+                            end: 1761,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "bigOnes",
+                        span: Span {
+                            start: 1754,
+                            end: 1761,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 1769,
+                                                end: 1776,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "dropWhile:",
+                                                span: Span {
+                                                    start: 1777,
+                                                    end: 1787,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 1790,
+                                                            end: 1791,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 1794,
+                                                                        end: 1795,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "<",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        3,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1798,
+                                                                        end: 1799,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1794,
+                                                                end: 1799,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1788,
+                                                    end: 1800,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1769,
+                                        end: 1800,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 1768,
+                            end: 1801,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 1754,
+                    end: 1801,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "transform_ops.rs — generate_list_partition (no mutations → beamtalk_list:partition/2)",
+                        span: Span {
+                            start: 1896,
+                            end: 1901,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "split",
+                        span: Span {
+                            start: 1896,
+                            end: 1901,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 1911,
+                                                end: 1918,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "partition:",
+                                                span: Span {
+                                                    start: 1919,
+                                                    end: 1929,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 1932,
+                                                            end: 1933,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 1936,
+                                                                        end: 1937,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        3,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 1940,
+                                                                        end: 1941,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 1936,
+                                                                end: 1941,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 1930,
+                                                    end: 1942,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 1911,
+                                        end: 1942,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 1910,
+                            end: 1943,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 1896,
+                    end: 1943,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "transform_ops.rs — generate_list_group_by (no mutations → beamtalk_list:group_by/2)",
+                        span: Span {
+                            start: 2036,
+                            end: 2043,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "grouped",
+                        span: Span {
+                            start: 2036,
+                            end: 2043,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 2051,
+                                                end: 2058,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "groupBy:",
+                                                span: Span {
+                                                    start: 2059,
+                                                    end: 2067,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 2070,
+                                                            end: 2071,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 2074,
+                                                                        end: 2075,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        2,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 2078,
+                                                                        end: 2079,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 2074,
+                                                                end: 2079,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 2068,
+                                                    end: 2080,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 2051,
+                                        end: 2080,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 2050,
+                            end: 2081,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 2036,
+                    end: 2081,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "transform_ops.rs — generate_list_inject_into (no mutations → lists:foldl/3 simple)",
+                        span: Span {
+                            start: 2173,
+                            end: 2179,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "sumAll",
+                        span: Span {
+                            start: 2173,
+                            end: 2179,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 2188,
+                                                end: 2195,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "inject:",
+                                                span: Span {
+                                                    start: 2196,
+                                                    end: 2203,
+                                                },
+                                            },
+                                            KeywordPart {
+                                                keyword: "into:",
+                                                span: Span {
+                                                    start: 2206,
+                                                    end: 2211,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                0,
+                                            ),
+                                            Span {
+                                                start: 2204,
+                                                end: 2205,
+                                            },
+                                        ),
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "acc",
+                                                        span: Span {
+                                                            start: 2214,
+                                                            end: 2217,
+                                                        },
+                                                    },
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 2219,
+                                                            end: 2220,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "acc",
+                                                                    span: Span {
+                                                                        start: 2223,
+                                                                        end: 2226,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Identifier(
+                                                                    Identifier {
+                                                                        name: "n",
+                                                                        span: Span {
+                                                                            start: 2229,
+                                                                            end: 2230,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 2223,
+                                                                end: 2230,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 2212,
+                                                    end: 2231,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 2188,
+                                        end: 2231,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 2187,
+                            end: 2232,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 2173,
+                    end: 2232,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "filter_ops.rs — generate_list_select (no mutations → lists:filter/2)",
+                        span: Span {
+                            start: 2310,
+                            end: 2318,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "selected",
+                        span: Span {
+                            start: 2310,
+                            end: 2318,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 2325,
+                                                end: 2332,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "select:",
+                                                span: Span {
+                                                    start: 2333,
+                                                    end: 2340,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 2343,
+                                                            end: 2344,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 2347,
+                                                                        end: 2348,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        3,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 2351,
+                                                                        end: 2352,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 2347,
+                                                                end: 2352,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 2341,
+                                                    end: 2353,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 2325,
+                                        end: 2353,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 2324,
+                            end: 2354,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 2310,
+                    end: 2354,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "filter_ops.rs — generate_list_reject (no mutations → lists:filter/2 + complement)",
+                        span: Span {
+                            start: 2445,
+                            end: 2453,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "rejected",
+                        span: Span {
+                            start: 2445,
+                            end: 2453,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 2460,
+                                                end: 2467,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "reject:",
+                                                span: Span {
+                                                    start: 2468,
+                                                    end: 2475,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 2478,
+                                                            end: 2479,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 2482,
+                                                                        end: 2483,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                ">",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        3,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 2486,
+                                                                        end: 2487,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 2482,
+                                                                end: 2487,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 2476,
+                                                    end: 2488,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 2460,
+                                        end: 2488,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 2459,
+                            end: 2489,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 2445,
+                    end: 2489,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "basic_ops.rs — generate_list_do (no mutations → lists:foreach/2)",
+                        span: Span {
+                            start: 2563,
+                            end: 2571,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "iterated",
+                        span: Span {
+                            start: 2563,
+                            end: 2571,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 2578,
+                                                end: 2585,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "do:",
+                                                span: Span {
+                                                    start: 2586,
+                                                    end: 2589,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 2592,
+                                                            end: 2593,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 2596,
+                                                                        end: 2597,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Literal(
+                                                                    Integer(
+                                                                        1,
+                                                                    ),
+                                                                    Span {
+                                                                        start: 2600,
+                                                                        end: 2601,
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 2596,
+                                                                end: 2601,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 2590,
+                                                    end: 2602,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 2578,
+                                        end: 2602,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 2577,
+                            end: 2603,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 2563,
+                    end: 2603,
+                },
+            },
+            preceding_blank_line: true,
+        },
+        ExpressionStatement {
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "basic_ops.rs — generate_list_collect (no mutations → lists:map/2)",
+                        span: Span {
+                            start: 2678,
+                            end: 2687,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                ],
+                trailing: None,
+            },
+            expression: Assignment {
+                target: Identifier(
+                    Identifier {
+                        name: "collected",
+                        span: Span {
+                            start: 2678,
+                            end: 2687,
+                        },
+                    },
+                ),
+                value: Block(
+                    Block {
+                        parameters: [],
+                        body: [
+                            ExpressionStatement {
+                                comments: CommentAttachment {
+                                    leading: [],
+                                    trailing: None,
+                                },
+                                expression: MessageSend {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "numbers",
+                                            span: Span {
+                                                start: 2693,
+                                                end: 2700,
+                                            },
+                                        },
+                                    ),
+                                    selector: Keyword(
+                                        [
+                                            KeywordPart {
+                                                keyword: "collect:",
+                                                span: Span {
+                                                    start: 2701,
+                                                    end: 2709,
+                                                },
+                                            },
+                                        ],
+                                    ),
+                                    arguments: [
+                                        Block(
+                                            Block {
+                                                parameters: [
+                                                    BlockParameter {
+                                                        name: "n",
+                                                        span: Span {
+                                                            start: 2712,
+                                                            end: 2713,
+                                                        },
+                                                    },
+                                                ],
+                                                body: [
+                                                    ExpressionStatement {
+                                                        comments: CommentAttachment {
+                                                            leading: [],
+                                                            trailing: None,
+                                                        },
+                                                        expression: MessageSend {
+                                                            receiver: Identifier(
+                                                                Identifier {
+                                                                    name: "n",
+                                                                    span: Span {
+                                                                        start: 2716,
+                                                                        end: 2717,
+                                                                    },
+                                                                },
+                                                            ),
+                                                            selector: Binary(
+                                                                "+",
+                                                            ),
+                                                            arguments: [
+                                                                Identifier(
+                                                                    Identifier {
+                                                                        name: "n",
+                                                                        span: Span {
+                                                                            start: 2720,
+                                                                            end: 2721,
+                                                                        },
+                                                                    },
+                                                                ),
+                                                            ],
+                                                            is_cast: false,
+                                                            span: Span {
+                                                                start: 2716,
+                                                                end: 2721,
+                                                            },
+                                                        },
+                                                        preceding_blank_line: false,
+                                                    },
+                                                ],
+                                                span: Span {
+                                                    start: 2710,
+                                                    end: 2722,
+                                                },
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 2693,
+                                        end: 2722,
+                                    },
+                                },
+                                preceding_blank_line: false,
+                            },
+                        ],
+                        span: Span {
+                            start: 2692,
+                            end: 2723,
+                        },
+                    },
+                ),
+                type_annotation: None,
+                span: Span {
+                    start: 2678,
+                    end: 2723,
+                },
+            },
+            preceding_blank_line: true,
+        },
+    ],
+    span: Span {
+        start: 708,
+        end: 2723,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

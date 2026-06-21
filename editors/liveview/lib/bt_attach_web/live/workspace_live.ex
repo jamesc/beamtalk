@@ -1746,11 +1746,35 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("select_workspace", _params, socket), do: {:noreply, socket}
 
+  # Cap on the Transcript pane depth: the client keeps the most recent N lines
+  # (via `stream_insert(:transcript, …, limit: -N)`), bounding the DOM in step
+  # with the producer's 1000-entry ring buffer (`beamtalk_transcript_stream`).
+  # A burst of `Transcript show:` output can't grow the rendered pane unbounded.
+  @transcript_scrollback_limit 1000
+
   # Transcript push, delivered directly over distribution to this LiveView pid.
+  #
+  # BT-2609: a high-output expression (e.g. `Hanoi solve: 8`) fans out one
+  # `{:transcript_output, _}` message *per line* from `beamtalk_transcript_stream`.
+  # Inserting each individually means one render + diff push per line — a render
+  # storm that floods the LiveView mailbox and stalls the socket (the apparent
+  # "REPL hang"). Instead, drain every `{:transcript_output, _}` already queued in
+  # the mailbox and `stream_insert` the whole burst in a single render pass. Each
+  # insert carries `limit: -@transcript_scrollback_limit` so the rendered DOM
+  # stays bounded in step with the producer's 1000-entry ring buffer — the pane
+  # can't grow without limit. No line is dropped on our side: every drained
+  # message is inserted; only lines that scroll past the depth cap are evicted by
+  # the client (consistent with the REPL scrollback, BT-2543).
   @impl true
   def handle_info({:transcript_output, text}, socket) do
-    line = %{id: System.unique_integer([:positive]), text: to_string(text)}
-    {:noreply, stream_insert(socket, :transcript, line)}
+    lines = drain_transcript([transcript_line(text)])
+
+    socket =
+      Enum.reduce(lines, socket, fn line, acc ->
+        stream_insert(acc, :transcript, line, limit: -@transcript_scrollback_limit)
+      end)
+
+    {:noreply, socket}
   end
 
   # Bindings-changed push (`bindings` stream): a *signal*, not the data. Since
@@ -2329,6 +2353,38 @@ defmodule BtAttachWeb.WorkspaceLive do
   # untrusted, so a missing / negative / non-integer value collapses to nil.
   defp clamp_offset(n) when is_integer(n) and n >= 0, do: n
   defp clamp_offset(_), do: nil
+
+  # ── Transcript helpers (BT-2609) ─────────────────────────────────────────────
+
+  # Selectively drain every `{:transcript_output, _}` already sitting in the
+  # mailbox (zero-timeout receive) and accumulate the rendered line maps. The
+  # caller seeds `acc` with the line that triggered the handle_info, so the
+  # whole queued burst is coalesced into one batch of stream inserts — one
+  # render pass instead of one per line. Order is preserved (acc is built in
+  # arrival order, reversed once at the end).
+  #
+  # The drain is capped at @transcript_scrollback_limit per pass: the upstream
+  # ring buffer bounds server-side *history*, not how many messages are already
+  # queued in this pid's mailbox (concurrent high-output evals, or a slow client
+  # backing up renders, can pile up more than the cap). Without a cap a single
+  # handle_info could hold the callback draining thousands of entries. Anything
+  # beyond the cap stays in the mailbox and triggers another handle_info pass
+  # naturally — no lines are lost, and the per-callback work stays bounded.
+  defp drain_transcript(acc) when length(acc) >= @transcript_scrollback_limit do
+    Enum.reverse(acc)
+  end
+
+  defp drain_transcript(acc) do
+    receive do
+      {:transcript_output, text} -> drain_transcript([transcript_line(text) | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp transcript_line(text) do
+    %{id: System.unique_integer([:positive]), text: to_string(text)}
+  end
 
   # ── REPL helpers (BT-2543) ───────────────────────────────────────────────────
 
@@ -3154,8 +3210,23 @@ defmodule BtAttachWeb.WorkspaceLive do
     # Only the read-only doc block is re-read (the editable definition buffer is
     # left untouched), matching the `:def` re-activation re-read. A failed re-fetch
     # keeps the prior backing module rather than hiding the "Erlang backend" badge.
-    {_definition, comment, native_module} = class_definition_info(socket, tab.class)
-    %{tab | doc: comment, native_module: native_module || tab.native_module}
+    # BT-2605: the reflected modifier badges (sealed/abstract/native) are refreshed
+    # from the same fetch so a recompile-into/out-of a modifier shows on push
+    # refresh; a transient failure (native_module nil) keeps the prior native flag.
+    {_definition, comment, native_module, class_modifiers} =
+      class_definition_info(socket, tab.class)
+
+    resolved_native = native_module || tab.native_module
+
+    %{
+      tab
+      | doc: comment,
+        native_module: resolved_native,
+        # `nil` modifiers signal a transient fetch failure — keep the prior list
+        # rather than clearing the badges (BT-2605 review).
+        class_modifiers: class_modifiers || tab.class_modifiers,
+        class_native: is_binary(resolved_native) and resolved_native != ""
+    }
   end
 
   defp refresh_source_tab(_socket, tab), do: tab
@@ -3609,6 +3680,10 @@ defmodule BtAttachWeb.WorkspaceLive do
 
       nil ->
         info = method_source_info(socket, class, side, selector)
+        # BT-2605: fetch the owning class once so the editor can badge the
+        # class-level modifiers (sealed/abstract/native) alongside the method.
+        {_def, _comment, class_native_module, class_modifiers} =
+          class_definition_info(socket, class)
 
         tab = %{
           id: id,
@@ -3639,6 +3714,10 @@ defmodule BtAttachWeb.WorkspaceLive do
           # implementation lives in the backing module (the jump affordance).
           native_module: nil,
           native_delegate: info.native_delegate,
+          # BT-2605: class-level modifier badges for the header (sealed/abstract/
+          # native), reflected off the owning class.
+          class_modifiers: class_modifiers,
+          class_native: is_binary(class_native_module) and class_native_module != "",
           new: false
         }
 
@@ -3790,11 +3869,25 @@ defmodule BtAttachWeb.WorkspaceLive do
             _ -> ""
           end
 
-        {definition, doc_text(Map.get(result, "comment")), native_backing_module(result)}
+        {definition, doc_text(Map.get(result, "comment")), native_backing_module(result),
+         class_modifiers_from(result)}
 
       _ ->
-        {"", nil, nil}
+        # Failure sentinel: `nil` modifiers (distinct from `[]`, a plain class with
+        # no modifiers) so a transient fetch failure can be told apart from a real
+        # empty result and the caller can keep the prior badges (BT-2605 review).
+        {"", nil, nil, nil}
     end
+  end
+
+  # BT-2605: the reflected class-level modifiers for the editor-header badges, in a
+  # stable display order. These are *runtime reflection* booleans from
+  # `browse-class-definition` (op 4) — not parsed from the `definition` skeleton,
+  # which carries no leading modifier keywords. A missing/false flag contributes no
+  # badge. (`typed` is a compile-time annotation with no runtime reflection today;
+  # see BT-2605 follow-up — it is intentionally absent until the runtime exposes it.)
+  defp class_modifiers_from(result) do
+    Enum.filter([:sealed, :abstract], &(Map.get(result, Atom.to_string(&1)) == true))
   end
 
   # BT-2578: the backing Erlang module name of a native: class (ADR 0056), or
@@ -4073,6 +4166,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     disk_source: binary | nil, # methods only — on-disk body captured at open (BT-2550); nil when unknown
   #     doc: binary | nil,       # BT-2558 read-only doc block: method `///` doc / class comment
   #     signature: binary | nil, # BT-2558 method signature (nil for a class-definition tab)
+  #     class_modifiers: [:sealed | :abstract] | nil, # BT-2605 reflected class modifiers; nil = transient fetch failure (no badges)
+  #     class_native: boolean,   # BT-2605 native: class flag, for the Native badge (all tab kinds)
   #     new: boolean             # an unsaved "new method" tab (selector input shown, not the breadcrumb)
   #   }
   #
@@ -4199,17 +4294,26 @@ defmodule BtAttachWeb.WorkspaceLive do
         # definition buffer and its dirty flag are left untouched, so an
         # in-progress edit survives a tab switch. The skeleton `definition` the
         # browse also returns is intentionally discarded here.
-        {_definition, comment, native_module} = class_definition_info(socket, class)
+        {_definition, comment, native_module, class_modifiers} =
+          class_definition_info(socket, class)
+
         # Keep the prior backing module if the re-fetch fails transiently
-        # (workspace unreachable → `{"", nil, nil}`): a `nil` here would hide the
-        # "Erlang backend" badge + pane toggle on an already-open tab while
+        # (workspace unreachable → `{"", nil, nil, []}`): a `nil` here would hide
+        # the "Erlang backend" badge + pane toggle on an already-open tab while
         # `@native_view` still holds the fetched source. A successful re-fetch
         # always wins (the class of a `def:` tab does not change between
         # activations, so a non-nil result is the same module).
+        resolved_native = native_module || existing.native_module
+
         refreshed = %{
           existing
           | doc: comment,
-            native_module: native_module || existing.native_module
+            native_module: resolved_native,
+            # BT-2605: refresh the reflected modifier badges off the same fetch; a
+            # `nil` result is the transient-failure sentinel, so keep the prior
+            # list rather than clearing the badges (BT-2605 review).
+            class_modifiers: class_modifiers || existing.class_modifiers,
+            class_native: is_binary(resolved_native) and resolved_native != ""
         }
 
         socket
@@ -4222,7 +4326,8 @@ defmodule BtAttachWeb.WorkspaceLive do
         # the read-only doc block. Without the skeleton the editor opened empty —
         # the doc block rendered but the class definition itself was missing
         # (BT-2558 only wired the comment).
-        {definition, comment, native_module} = class_definition_info(socket, class)
+        {definition, comment, native_module, class_modifiers} =
+          class_definition_info(socket, class)
 
         tab = %{
           id: id,
@@ -4244,6 +4349,11 @@ defmodule BtAttachWeb.WorkspaceLive do
           # BT-2578: the backing Erlang module (native: classes only), nil
           # otherwise — gates the "Erlang backend" badge + read-only native pane.
           native_module: native_module,
+          # BT-2605: reflected class modifiers (sealed/abstract) + native flag for
+          # the header modifier badges. `class_native` is kept distinct from
+          # `native_module` so the badge can also show on method tabs of the class.
+          class_modifiers: class_modifiers,
+          class_native: is_binary(native_module) and native_module != "",
           new: false
         }
 
@@ -4270,6 +4380,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp add_new_method_tab(socket, id, class, side) do
+    # BT-2605: the class already exists, so fetch it to badge the class-level
+    # modifiers (sealed/abstract/native) on the new-method tab.
+    {_def, _comment, native_module, class_modifiers} = class_definition_info(socket, class)
+
     tab = %{
       id: id,
       kind: :method,
@@ -4286,9 +4400,15 @@ defmodule BtAttachWeb.WorkspaceLive do
       signature: nil,
       # BT-2578: a blank new-method tab is never a native delegate (no selector
       # yet); the keys must still be present so the editor render's dot-access
-      # holds for every :method tab.
+      # holds for every :method tab. `native_module` stays nil on method tabs (it
+      # gates the :def-only native pane); the header's Native *badge* reads the
+      # separate `class_native` flag below.
       native_module: nil,
       native_delegate: false,
+      # BT-2605: class-level modifier badges (sealed/abstract/native) for the
+      # header — class-level facts, so they show on method tabs of the class too.
+      class_modifiers: class_modifiers,
+      class_native: is_binary(native_module) and native_module != "",
       # The new-method marker: drives the selector input + breadcrumb label, and
       # keeps the tab id stable (no selector to key on yet).
       new: true
@@ -4455,6 +4575,59 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp breadcrumb(%{class: class, side: side, selector: selector}), do: {class, side, selector}
+
+  # BT-2605: the colored modifier badges shown in the editor header for the active
+  # tab. Each entry is `%{label, class, title}` — `label` is the visible text,
+  # `class` the CSS modifier class (`.modifier-tag.<class>`), `title` the
+  # accessible tooltip naming the modifier. Returns `[]` when the tab carries no
+  # modifiers (an instance-side method on a plain class shows nothing). Order is
+  # stable: side (Class) first, then class modifiers (sealed/abstract), then
+  # native — mirroring the apidocs' labels (Sealed/Abstract) for docs↔IDE parity.
+  defp modifier_badges(tab) do
+    side_badge(tab) ++ class_modifier_badges(tab) ++ native_badge(tab)
+  end
+
+  # A class-side method gets a distinct "Class" badge; instance-side methods and
+  # class-definition tabs get none here. `:def` tabs have `side: nil`.
+  defp side_badge(%{side: "class"}) do
+    [%{label: "Class", class: "side", title: "Class-side method"}]
+  end
+
+  defp side_badge(_tab), do: []
+
+  # The reflected class-level modifiers (`sealed`, `abstract`) cached on the tab —
+  # present on every tab kind (BT-2605 threads it onto method tabs too). Labels are
+  # capitalized to match the apidocs.
+  defp class_modifier_badges(%{class_modifiers: mods}) when is_list(mods) do
+    Enum.map(mods, &class_modifier_badge/1)
+  end
+
+  # No modifier list (key absent, or `nil` from a transient fetch failure) → no
+  # class-modifier badges.
+  defp class_modifier_badges(_tab), do: []
+
+  # The canonical class-modifier badge labels/colors, keyed by the reflected
+  # modifier atom. Kept exhaustive against `class_modifiers_from/1`'s atom set so a
+  # future modifier is a compile-visible addition in both places.
+  defp class_modifier_badge(:sealed),
+    do: %{label: "Sealed", class: "sealed", title: "Cannot be subclassed by user code"}
+
+  defp class_modifier_badge(:abstract),
+    do: %{
+      label: "Abstract",
+      class: "abstract",
+      title: "Must be subclassed; not directly instantiable"
+    }
+
+  # A `native:` class (ADR 0056) gets a Native badge. The flag is `class_native`
+  # (set on every tab kind) rather than `native_module` so the badge shows on
+  # method tabs too, while `native_module` stays reserved for the :def-only native
+  # pane.
+  defp native_badge(%{class_native: true}) do
+    [%{label: "Native", class: "native", title: "Backed by an Erlang module (native: class)"}]
+  end
+
+  defp native_badge(_tab), do: []
 
   # Parse the selector from a method's source signature (BT-2606), returning `""`
   # when no valid signature is present yet. The author writes the full method
@@ -7166,6 +7339,19 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <span :if={bc_side} class="mono">{bc_side}</span>
                       <span class="sep">›</span>
                       <span class="mono">{bc_sel}</span>
+                    </span>
+                    <%!-- BT-2605: class/method modifier badges (Class / Sealed /
+                       Abstract / Native) derived from the active tab's side +
+                       reflected class modifiers. Sit next to the breadcrumb, left
+                       of the spacer, so the image-divergence badges keep the right
+                       edge. Empty list → nothing rendered. --%>
+                    <span
+                      :for={badge <- modifier_badges(active_tab(assigns))}
+                      class={"modifier-tag #{badge.class}"}
+                      title={badge.title}
+                      aria-label={badge.title}
+                    >
+                      {badge.label}
                     </span>
                     <span class="spacer"></span>
                     <%!-- image-divergence badges carried from the browse snapshot

@@ -292,7 +292,7 @@ selector_row(ClassName, ClassSide, Selector, SourceFile, ModName) ->
         <<"origin">> => origin_for_provenance(Provenance, SourceFile),
         <<"source_origin">> => source_origin_of(ModName, SourceFile),
         %% carried internally for grouping; stripped before emit
-        '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus)
+        '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide)
     }.
 
 -spec info_fields(beamtalk_xref:method_info() | undefined) ->
@@ -305,7 +305,7 @@ info_fields(_) ->
     {null, unindexed_runtime_fun, put_method}.
 
 %% Group selector rows into sorted protocol buckets. The protocol of a selector
-%% is decided by `protocol_for_selector/4` (ADR 0096): a declared category if
+%% is decided by `protocol_for_selector/5` (ADR 0096): a declared category if
 %% one exists, else the xref-extension source fact, else a Pharo-convention
 %% selector-name heuristic; unrecognised selectors fall into "as yet
 %% unclassified". Selectors within a protocol are sorted; protocols are sorted.
@@ -471,6 +471,14 @@ browse_class_definition(ClassName) ->
                 <<"comment">> => class_doc(ClassPid),
                 <<"native">> => meta_is_native(NativeMeta),
                 <<"backing_module">> => atom_or_null(meta_backing_module(NativeMeta)),
+                %% BT-2605: reflected class modifiers for the IDE's editor-header
+                %% modifier badges. The synthesized `definition` skeleton above
+                %% carries no leading modifier keywords, so these come from the
+                %% same runtime reflection op 1 (`browse-classes`) uses — not a
+                %% string parse. (`typed` is a compile-time annotation with no
+                %% runtime reflection today, so it is not surfaced here.)
+                <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
+                <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
                 <<"origin">> => origin_of(SourceFile),
                 <<"source_origin">> => source_origin_of(ModName, SourceFile),
                 %% The definition pane renders a *synthesized* class skeleton
@@ -1146,20 +1154,21 @@ first_line(Doc) when is_binary(Doc) ->
     atom(),
     beamtalk_xref:method_info() | undefined,
     beamtalk_xref:provenance(),
-    beamtalk_xref:source_status()
+    beamtalk_xref:source_status(),
+    boolean()
 ) -> binary().
-protocol_for_selector(Selector, Info, Provenance, SourceStatus) ->
+protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide) ->
     case declared_protocol(Info) of
         Category when is_binary(Category) ->
             %% Tier 1 — declared category (author ground truth).
             Category;
         undefined ->
-            protocol_from_source(Selector, Provenance, SourceStatus)
+            protocol_from_source(Selector, Provenance, SourceStatus, ClassSide)
     end.
 
 %% Tier 1 hook: the method's declared protocol category, or `undefined` when none
 %% is declared. Beamtalk's `beamtalk_xref:method_info/3` does not carry a category
-%% field today (see `protocol_for_selector/4`), so the `category` key is absent
+%% field today (see `protocol_for_selector/5`), so the `category` key is absent
 %% and this returns `undefined`. It is the one place to wire a real category once
 %% xref (or a method pragma) surfaces one — reading it here keeps the decision
 %% precedence (declared > provenance > name) in a single function with no other
@@ -1178,27 +1187,26 @@ declared_protocol(_Info) ->
 %% construction. An extension-provenance selector is "extensions" (source fact).
 %% Otherwise fall to the selector-name heuristic.
 -spec protocol_from_source(
-    atom(), beamtalk_xref:provenance(), beamtalk_xref:source_status()
+    atom(), beamtalk_xref:provenance(), beamtalk_xref:source_status(), boolean()
 ) -> binary().
-protocol_from_source(Selector, _Provenance, synthetic) ->
+protocol_from_source(_Selector, _Provenance, synthetic, ClassSide) ->
     %% Synthetic methods are compiler-generated. Two kinds:
     %%   * BT-2614: the actor class-side constructors `new`/`new:`/`spawn`/`spawn:`
     %%     are "instance creation" — the canonical Pharo protocol for them.
     %%   * value-type field accessors (ADR 0087) are "accessing" by construction.
-    %% The selector name disambiguates exactly (a user accessor is never named
-    %% `new`/`spawn`), so no `class_side` threading is required.
-    case Selector of
-        'new' -> <<"instance creation">>;
-        'new:' -> <<"instance creation">>;
-        'spawn' -> <<"instance creation">>;
-        'spawn:' -> <<"instance creation">>;
-        _ -> <<"accessing">>
+    %% Classify by `class_side`, not the selector name: a class-side synthetic
+    %% method is a constructor, an instance-side one is an accessor. This avoids
+    %% misclassifying an instance-side synthetic slot that happens to be named
+    %% `new`/`spawn` (e.g. `state: new :: Integer = 0`) as "instance creation".
+    case ClassSide of
+        true -> <<"instance creation">>;
+        false -> <<"accessing">>
     end;
-protocol_from_source(_Selector, extension, _SourceStatus) ->
+protocol_from_source(_Selector, extension, _SourceStatus, _ClassSide) ->
     %% Tier 2 — package-extension provenance (ADR 0066) is a source fact that
     %% outranks the name heuristic.
     <<"extensions">>;
-protocol_from_source(Selector, _Provenance, _SourceStatus) ->
+protocol_from_source(Selector, _Provenance, _SourceStatus, _ClassSide) ->
     %% Tier 3 — Pharo-convention name heuristic.
     protocol_from_name(Selector).
 
