@@ -322,7 +322,14 @@
 .row.subclass { padding-left: 24px; }
 .row.subclass2 { padding-left: 38px; }
 .row .meta { margin-left: auto; color: var(--faint); font-size: 10.5px; }
-.method-row .mname { font-family: var(--code-font, monospace); }
+/* Method rows are also `.row`, so the same right-pinned badge column applies
+   (BT-2610): the selector name grows + truncates so the trailing origin/runtime
+   badges stay pinned right instead of bunching after the name. */
+.method-row .mname {
+  font-family: var(--code-font, monospace);
+  flex: 1 1 auto; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 /* Trailing badges never shrink or wrap, so they stay fully visible regardless of
    class-name length or panel width (BT-2610). `.cls` flex-grow pins them right; the
    row `gap` supplies spacing, so no per-badge `margin-left: auto` is needed. */
