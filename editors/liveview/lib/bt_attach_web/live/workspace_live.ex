@@ -1196,8 +1196,27 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, assign(socket, show_browser: false)}
   end
 
+  # Close *only* the Inspector pane (BT-2611), not the whole right column. The `×`
+  # lives in the Inspector sub-pane header, so it must dismiss just the Inspector
+  # and leave the Bindings pane (and the column) visible — the whole-column
+  # show/hide stays on `toggle_inspector`/`.panel-toggle`. We reset the inspector
+  # target/rows/crumbs/error back to the empty state and tear down the live
+  # subscription via `track_object(nil)` so re-inspecting an object later rebinds
+  # cleanly. Unfreeze too, so a frozen pane doesn't reopen stale on the next
+  # inspect. `show_inspector` is intentionally left untouched.
   def handle_event("close_inspector", _params, socket) do
-    {:noreply, assign(socket, show_inspector: false)}
+    socket =
+      socket
+      |> assign(
+        inspect_target: nil,
+        inspect_rows: [],
+        inspect_crumbs: [],
+        inspect_error: nil,
+        inspect_frozen: false
+      )
+      |> track_object(nil)
+
+    {:noreply, socket}
   end
 
   # Drill into an object-valued field of a *floating window* (BT-2493): the field
@@ -7434,8 +7453,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                       type="button"
                       class="panel-close"
                       phx-click="close_inspector"
-                      aria-label="Close the Inspector and Bindings column"
-                      title="Close the Inspector + Bindings column"
+                      aria-label="Close the Inspector (the Bindings pane stays open)"
+                      title="Close the Inspector (the Bindings pane stays open)"
                     >
                       ×
                     </button>
