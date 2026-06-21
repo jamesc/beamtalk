@@ -37,13 +37,13 @@
 /// @see Actor#withTimeout:
 typed Actor subclass: TimeoutProxy
   state: target :: Actor | Nil = nil
-  state: timeoutMs :: Integer | Symbol = 5000
+  state: timeoutMs :: Integer | #infinity = 5000
 
   /// Set the target actor to forward messages to.
   setTarget: newTarget :: Actor -> Actor => self.target := newTarget
 
   /// Set the timeout in milliseconds (or `#infinity`).
-  setTimeoutMs: ms :: Integer | Symbol -> Integer | Symbol =>
+  setTimeoutMs: ms :: Integer | #infinity -> Integer | #infinity =>
     self.timeoutMs := ms
 
   /// Forward all unknown messages to the target with the configured timeout.

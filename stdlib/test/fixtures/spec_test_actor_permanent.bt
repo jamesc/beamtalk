@@ -6,6 +6,6 @@
 Actor subclass: SpecTestActorPermanent
   state: value = 0
 
-  class supervisionPolicy -> Symbol => #permanent
+  class supervisionPolicy -> #permanent | #transient | #temporary => #permanent
 
   getValue => self.value

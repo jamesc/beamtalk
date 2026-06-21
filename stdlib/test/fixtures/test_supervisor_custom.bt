@@ -7,7 +7,7 @@ Supervisor subclass: TestSupervisorCustom
 
   class children => #()
 
-  class strategy -> Symbol => #oneForAll
+  class strategy -> #oneForOne | #oneForAll | #restForOne => #oneForAll
 
   class maxRestarts -> Integer => 3
 

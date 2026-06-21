@@ -131,7 +131,7 @@ Object subclass: Actor
   /// Actor supervisionPolicy           // => #temporary
   /// DatabasePool supervisionPolicy    // => #permanent (if overridden)
   /// ```
-  class supervisionPolicy -> Symbol => #temporary
+  class supervisionPolicy -> #permanent | #transient | #temporary => #temporary
 
   /// Whether this class is a supervisor.
   ///
@@ -230,7 +230,7 @@ Object subclass: Actor
   /// slowDb query: sql              // forwarded with 30s timeout
   /// slowDb stop                    // stop the proxy when done
   /// ```
-  withTimeout: ms :: Integer | Symbol -> TimeoutProxy =>
+  withTimeout: ms :: Integer | #infinity -> TimeoutProxy =>
     proxy := TimeoutProxy spawn
     proxy setTarget: self
     proxy setTimeoutMs: ms

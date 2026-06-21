@@ -53,7 +53,7 @@ typed Object subclass: Ets(K, V)
   /// cache := Ets new: #myCache type: #set
   /// counters := Ets new: #counters type: #set
   /// ```
-  class sealed new: name :: Symbol type: tableType :: Symbol -> Ets =>
+  class sealed new: name :: Symbol type: tableType :: #set | #orderedSet | #bag | #duplicateBag -> Ets =>
     (Erlang beamtalk_ets) new: name type: tableType
 
   /// Look up an existing named ETS table (class method).
@@ -91,7 +91,7 @@ typed Object subclass: Ets(K, V)
   /// ```beamtalk
   /// table := Ets newOrExisting: #events type: #set
   /// ```
-  class sealed newOrExisting: name :: Symbol type: tableType :: Symbol -> Ets =>
+  class sealed newOrExisting: name :: Symbol type: tableType :: #set | #orderedSet | #bag | #duplicateBag -> Ets =>
     (Erlang beamtalk_ets) newOrExisting: name type: tableType
 
   /// Look up a key. Returns the value, or `nil` if the key is absent.
