@@ -507,7 +507,8 @@ fn test_refine_singleton_eq_splits_union() {
         vec![symbol_lit("infinity")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
     assert_eq!(refined.true_type, InferredType::known("#infinity"));
     assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
 }
@@ -524,7 +525,8 @@ fn test_refine_singleton_inequality_swaps_branches() {
         vec![symbol_lit("infinity")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
     assert_eq!(refined.true_type, InferredType::known("Integer"));
     assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
 }
@@ -545,7 +547,8 @@ fn test_refine_singleton_eq_multi_member_union_keeps_rest() {
         vec![symbol_lit("north")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
     assert_eq!(refined.true_type, InferredType::known("#north"));
     assert_eq!(
         refined.false_type,
@@ -566,7 +569,8 @@ fn test_refine_singleton_eq_all_removed_is_never() {
         vec![symbol_lit("north")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
     assert_eq!(refined.true_type, InferredType::known("#north"));
     assert_eq!(refined.false_type, Some(InferredType::Never));
 }
@@ -584,7 +588,8 @@ fn test_refine_singleton_eq_dynamic_variable_keeps_false_dynamic() {
         vec![symbol_lit("foo")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
     assert_eq!(refined.true_type, InferredType::known("#foo"));
     assert_eq!(
         refined.false_type,
@@ -606,9 +611,104 @@ fn test_refine_singleton_symbol_left_inequality_swaps_branches() {
         vec![var("ms")],
     );
     let info = TypeChecker::detect_narrowing(&expr).unwrap();
-    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    let mut checker = TypeChecker::new();
+    let refined = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
     assert_eq!(refined.true_type, InferredType::known("Integer"));
     assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
+}
+
+/// BT-2624 (item 1): testing a variable against a singleton it can never hold
+/// (`#west` is not a member of `#north | #south`) is statically false — emit a
+/// "can never be true" hint and do NOT flag the present-member case.
+#[test]
+fn bt2624_singleton_eq_impossible_member_emits_hint() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("d", InferredType::simple_union(&["#north", "#south"]));
+    let expr = msg_send(
+        var("d"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("west")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let mut checker = TypeChecker::new();
+    let _ = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
+    let hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("can never be true"))
+        .collect();
+    assert_eq!(
+        hints.len(),
+        1,
+        "expected one impossibility hint, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        hints[0].message.contains("#west") && hints[0].message.contains("#north | #south"),
+        "hint should name the singleton and the type: {}",
+        hints[0].message
+    );
+}
+
+/// BT-2624 (item 1): the negated form against an impossible member is always
+/// true — emit the complementary "always true" hint.
+#[test]
+fn bt2624_singleton_inequality_impossible_member_always_true() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("d", InferredType::simple_union(&["#north", "#south"]));
+    let expr = msg_send(
+        var("d"),
+        MessageSelector::Binary("/=".into()),
+        vec![symbol_lit("west")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let mut checker = TypeChecker::new();
+    let _ = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
+    assert!(
+        checker
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("always true") && d.message.contains("#west")),
+        "expected an 'always true' hint, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// BT-2624 (item 1): a singleton that IS a member must not be flagged, and a
+/// `Symbol`-typed (or `Dynamic`) variable admits any singleton — no hint.
+#[test]
+fn bt2624_singleton_eq_possible_member_no_hint() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("d", InferredType::simple_union(&["#north", "#south"]));
+    // `d = #north` — #north is a member, so the test is satisfiable.
+    let member_expr = msg_send(
+        var("d"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("north")],
+    );
+    let info = TypeChecker::detect_narrowing(&member_expr).unwrap();
+    let mut checker = TypeChecker::new();
+    let _ = checker.refine_singleton_narrowing(info, &env, &hierarchy, span());
+
+    // `s :: Symbol` admits every singleton.
+    let mut sym_env = TypeEnv::new();
+    sym_env.set_local("s", InferredType::known("Symbol"));
+    let sym_expr = msg_send(
+        var("s"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("anything")],
+    );
+    let sym_info = TypeChecker::detect_narrowing(&sym_expr).unwrap();
+    let _ = checker.refine_singleton_narrowing(sym_info, &sym_env, &hierarchy, span());
+
+    assert!(
+        checker.diagnostics().is_empty(),
+        "satisfiable comparisons must not warn, got: {:?}",
+        checker.diagnostics()
+    );
 }
 
 #[test]

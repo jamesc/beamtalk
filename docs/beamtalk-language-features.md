@@ -1540,6 +1540,18 @@ Similarly, `false` in type position resolves to `False` — used for Erlang FFI 
 entry :: Tuple | false := ErlangLists keyfind: key
 ```
 
+**Singleton members.** Singleton symbol types (`#foo`, a subtype of `Symbol`) may appear in any type position — including unions — to express a closed set of atom values:
+
+```beamtalk
+// a parameter that is an Integer or the sentinel #infinity
+withTimeout: ms :: Integer | #infinity => ...
+
+// a closed enum of singletons
+restart: policy :: #temporary | #transient | #permanent => ...
+```
+
+Discriminate a singleton union with `=:=` (identity) and the branches narrow — see [Control Flow Narrowing](#control-flow-narrowing).
+
 ### Control Flow Narrowing
 
 When the type checker recognises a type-testing pattern followed by `ifTrue:` / `ifFalse:`, it narrows the variable's type inside the block scope:

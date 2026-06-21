@@ -4500,17 +4500,46 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp strip_method_modifiers(header) do
     case String.split(header, ~r/\s+/, parts: 2) do
       [word, rest] when word in ["class", "internal", "sealed"] ->
-        # `class`/`internal`/`sealed` are modifiers only when a selector follows;
-        # if the next token opens the body (`=>`) or a return type (`->`), the
-        # word itself is the (unary) selector.
-        if String.starts_with?(rest, "=>") or String.starts_with?(rest, "->") do
-          header
-        else
-          strip_method_modifiers(rest)
+        # `class`/`internal`/`sealed` are modifiers only when a selector follows.
+        cond do
+          # The next token opens the body (`=>`): the word itself is the (unary)
+          # selector — a method *named* `class`/`internal`/`sealed`.
+          String.starts_with?(rest, "=>") ->
+            header
+
+          # The next token is `->`. This is ambiguous without type context
+          # (BT-2625): `sealed -> Type =>` is a unary method named `sealed` with a
+          # return type, while `sealed -> arg =>` is a `sealed` *binary* method
+          # whose selector is `->`. Disambiguate by the token after `->`, matching
+          # the parser's grammar: a Capitalized token reads as a return Type (the
+          # modifier word is the unary selector, so keep the header), a lowercase
+          # token reads as a binary-selector argument (strip the modifier so `->`
+          # becomes the selector).
+          String.starts_with?(rest, "->") ->
+            if return_type_follows_arrow?(rest), do: header, else: strip_method_modifiers(rest)
+
+          true ->
+            strip_method_modifiers(rest)
         end
 
       _ ->
         header
+    end
+  end
+
+  # Decide whether the text starting at a `->` is a *return-type* annotation
+  # (`-> Type`) rather than a binary selector whose argument follows (`-> arg`).
+  # A return type is a Capitalized identifier (a Type name); a binary-selector
+  # parameter is a lowercase identifier. Matches the compiler's method-header
+  # grammar (BT-2625). A `->` with no following identifier is treated as a binary
+  # selector (not a return type).
+  defp return_type_follows_arrow?(rest) do
+    rest
+    |> String.replace_prefix("->", "")
+    |> String.trim_leading()
+    |> case do
+      <<first::utf8, _::binary>> -> first in ?A..?Z
+      _ -> false
     end
   end
 
