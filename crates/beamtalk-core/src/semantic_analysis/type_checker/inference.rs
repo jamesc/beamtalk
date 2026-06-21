@@ -2136,6 +2136,12 @@ impl TypeChecker {
                 members,
                 provenance,
             } => {
+                debug_assert!(
+                    members
+                        .iter()
+                        .all(|m| !matches!(m, InferredType::Union { .. })),
+                    "union members are kept flat by `union_of`, so a single subtraction pass suffices"
+                );
                 let kept: Vec<InferredType> = members
                     .iter()
                     .filter(|m| m.as_known().is_none_or(|n| n != removed))
@@ -2440,7 +2446,8 @@ impl TypeChecker {
                 // Single argument: narrow in the false branch (complement)
                 if let Some(arg) = arguments.first() {
                     if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError — BT-1859)
+                        // Explicit false type (e.g., Result isOk/isError — BT-1859;
+                        // or singleton (in)equality complement — BT-2617)
                         let ty = self.infer_block_with_narrowing(
                             arg,
                             &info.variable,
@@ -2486,7 +2493,8 @@ impl TypeChecker {
                 }
                 if let Some(false_arg) = arguments.get(1) {
                     if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError — BT-1859)
+                        // Explicit false type (e.g., Result isOk/isError — BT-1859;
+                        // or singleton (in)equality complement — BT-2617)
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
                             &info.variable,
