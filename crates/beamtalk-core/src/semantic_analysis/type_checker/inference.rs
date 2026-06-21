@@ -977,6 +977,7 @@ impl TypeChecker {
             Self::detect_narrowing(receiver)
                 .map(|info| self.refine_responds_to_narrowing(info))
                 .map(|info| Self::refine_result_narrowing(info, env, hierarchy))
+                .map(|info| Self::refine_singleton_narrowing(info, env, hierarchy))
         } else {
             None
         };
@@ -2152,6 +2153,81 @@ impl TypeChecker {
         info
     }
 
+    /// Refines a singleton (in)equality narrowing `x = #foo` / `#foo = x`
+    /// (BT-2617).
+    ///
+    /// `detect` only sees the AST, so it leaves the branch types provisional
+    /// and records the tested singleton in `singleton_eq`. Here we resolve the
+    /// variable's current type and split it: the branch where the test holds
+    /// narrows to the singleton, and the complementary branch narrows to the
+    /// variable's type with that singleton removed (`Integer | #infinity` minus
+    /// `#infinity` ⇒ `Integer`). For an inequality (`/=`, `=/=`) the two
+    /// branches are swapped.
+    pub(super) fn refine_singleton_narrowing(
+        mut info: NarrowingInfo,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> NarrowingInfo {
+        let Some(eq) = info.singleton_eq.clone() else {
+            return info;
+        };
+        let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
+        let matched = InferredType::known(eq.singleton.clone());
+        let remainder = Self::union_without(&current_ty, &eq.singleton);
+        if eq.negated {
+            // `x /= #foo`: the true branch removes the singleton; the false
+            // branch is the singleton.
+            info.true_type = remainder;
+            info.false_type = Some(matched);
+        } else {
+            // `x = #foo`: the true branch is the singleton; the false branch
+            // removes it.
+            info.true_type = matched;
+            info.false_type = Some(remainder);
+        }
+        info
+    }
+
+    /// Removes every union member equal to the singleton named `removed` from
+    /// `ty` (BT-2617). The singleton counterpart of [`non_nil_type`].
+    ///
+    /// - A union collapses to its single remaining member, or to `Never` when
+    ///   the singleton was its only member (the complementary branch is then
+    ///   unreachable).
+    /// - A non-union type that *is* the singleton yields `Never`; any other
+    ///   non-union type (including `Dynamic`) is returned unchanged, since
+    ///   there is no union to subtract from.
+    fn union_without(ty: &InferredType, removed: &EcoString) -> InferredType {
+        match ty {
+            InferredType::Union {
+                members,
+                provenance,
+            } => {
+                debug_assert!(
+                    members
+                        .iter()
+                        .all(|m| !matches!(m, InferredType::Union { .. })),
+                    "union members are kept flat by `union_of`, so a single subtraction pass suffices"
+                );
+                let kept: Vec<InferredType> = members
+                    .iter()
+                    .filter(|m| m.as_known().is_none_or(|n| n != removed))
+                    .cloned()
+                    .collect();
+                match kept.len() {
+                    0 => InferredType::Never,
+                    1 => kept.into_iter().next().unwrap(),
+                    _ => InferredType::Union {
+                        members: kept,
+                        provenance: *provenance,
+                    },
+                }
+            }
+            InferredType::Known { class_name, .. } if class_name == removed => InferredType::Never,
+            _ => ty.clone(),
+        }
+    }
+
     /// BT-2045: Infer argument types for `on:do:` with exception class propagation.
     ///
     /// When the first argument is a class reference (e.g., `Exception`, `Error`),
@@ -2437,7 +2513,8 @@ impl TypeChecker {
                 // Single argument: narrow in the false branch (complement)
                 if let Some(arg) = arguments.first() {
                     if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError — BT-1859)
+                        // Explicit false type (e.g., Result isOk/isError — BT-1859;
+                        // or singleton (in)equality complement — BT-2617)
                         let ty = self.infer_block_with_narrowing(
                             arg,
                             &info.variable,
@@ -2483,7 +2560,8 @@ impl TypeChecker {
                 }
                 if let Some(false_arg) = arguments.get(1) {
                     if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError — BT-1859)
+                        // Explicit false type (e.g., Result isOk/isError — BT-1859;
+                        // or singleton (in)equality complement — BT-2617)
                         let ty = self.infer_block_with_narrowing(
                             false_arg,
                             &info.variable,
@@ -4266,6 +4344,7 @@ mod tests {
             is_result_ok_check: true,
             is_result_error_check: false,
             responded_selector: None,
+            singleton_eq: None,
         };
         let hierarchy = ClassHierarchy::with_builtins();
         let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);
@@ -4288,6 +4367,7 @@ mod tests {
             is_result_ok_check: true,
             is_result_error_check: false,
             responded_selector: None,
+            singleton_eq: None,
         };
         let hierarchy = ClassHierarchy::with_builtins();
         let refined = TypeChecker::refine_result_narrowing(info, &env, &hierarchy);
