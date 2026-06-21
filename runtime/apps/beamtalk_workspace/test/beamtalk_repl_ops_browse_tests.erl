@@ -373,12 +373,29 @@ browse_xref() ->
         method_row('syntheticExt', 104, synthetic, extension),
         %% print* prefix path (distinct from the exact-name `printString` match):
         %% `printDetails` must reach the prefix heuristic and land in "printing".
-        method_row('printDetails', 106, indexed, class_body)
+        method_row('printDetails', 106, indexed, class_body),
+        %% BT-2614: compiler-injected synthetic class-side constructors. An actor's
+        %% codegen emits `new`/`new:`/`spawn`/`spawn:` as sourceless exported
+        %% functions; these rows are how the System Browser surfaces them (badged
+        %% synthetic, bucketed "instance creation") so its method set matches
+        %% runtime `aClass class allMethods` reflection. Listed as class-side
+        %% (`class_side => true`) so they appear under `side = class`, not instance.
+        class_method_row('new', 1, synthetic, class_body),
+        class_method_row('new:', 1, synthetic, class_body),
+        class_method_row('spawn', 1, synthetic, class_body),
+        class_method_row('spawn:', 1, synthetic, class_body)
     ].
 
 method_row(Selector, Line, SourceStatus, Provenance) ->
+    method_xref_entry(false, Selector, Line, SourceStatus, Provenance).
+
+%% BT-2614: class-side variant of `method_row/4` for synthetic constructors.
+class_method_row(Selector, Line, SourceStatus, Provenance) ->
+    method_xref_entry(true, Selector, Line, SourceStatus, Provenance).
+
+method_xref_entry(ClassSide, Selector, Line, SourceStatus, Provenance) ->
     #{
-        class_side => false,
+        class_side => ClassSide,
         selector => Selector,
         line => Line,
         sends => [],
@@ -539,6 +556,61 @@ browse_tests(#{class_name := Class}) ->
             %% print* prefix path (not the exact-name `printString` match):
             %% `printDetails` must reach the prefix heuristic and land in "printing".
             ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>))
+        end},
+        {"browse-protocols surfaces injected synthetic class-side constructors", fun() ->
+            %% BT-2614: the compiler-injected `new`/`new:`/`spawn`/`spawn:` an
+            %% actor's codegen emits as sourceless class-side functions appear in
+            %% the class-side protocol list, badged `synthetic` and bucketed under
+            %% "instance creation" — so the browser's method set matches runtime
+            %% `aClass class allMethods` reflection.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Class, <<"side">> => <<"class">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(<<"class">>, maps:get(<<"side">>, Value)),
+            Protocols = maps:get(<<"protocols">>, Value),
+            Selectors = all_selector_rows(Protocols),
+            Names = [maps:get(<<"selector">>, S) || S <- Selectors],
+            lists:foreach(
+                fun(Sel) ->
+                    ?assert(lists:member(Sel, Names)),
+                    Row = find_selector_row(Selectors, Sel),
+                    %% Badged synthetic (read-only marker) and bucketed
+                    %% "instance creation".
+                    ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, Row)),
+                    ?assertEqual(
+                        <<"instance creation">>, protocol_of(Protocols, Sel)
+                    )
+                end,
+                [<<"new">>, <<"new:">>, <<"spawn">>, <<"spawn:">>]
+            )
+        end},
+        {"browse-method-source returns null source for a synthetic class method", fun() ->
+            %% BT-2614: a synthetic class-side constructor has no editable user
+            %% source — `browse-method-source` returns `null` source (and null
+            %% doc/signature) so the browser badges it read-only with no
+            %% `[source]` jump, never surfacing an inherited body in its place.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-method-source">>,
+                    #{
+                        <<"class">> => Class,
+                        <<"side">> => <<"class">>,
+                        <<"selector">> => <<"spawn">>
+                    },
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(<<"spawn">>, maps:get(<<"selector">>, Value)),
+            ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, Value)),
+            ?assertEqual(null, maps:get(<<"source">>, Value)),
+            ?assertEqual(null, maps:get(<<"doc">>, Value)),
+            ?assertEqual(null, maps:get(<<"signature">>, Value))
         end},
         {"browse-protocols rejects a bad side", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
