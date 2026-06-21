@@ -384,3 +384,79 @@ fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
             .collect::<Vec<_>>()
     );
 }
+
+// ── BT-2624 item 4: singleton-union narrowing, integration through infer_expr ──
+
+/// BT-2624 item 4 — the previously-blocked end-to-end narrowing check for
+/// BT-2617, at the highest level currently reachable.
+///
+/// A singleton union (`Integer | #infinity`) cannot yet be *constructed* from
+/// parseable source — it is unwritable as a type annotation (the parser rejects
+/// `#foo` in type position), bare `=` does not parse as an equality operator,
+/// and an `ifTrue:ifFalse:` assignment collapses its branches rather than
+/// unioning them. So the union is seeded as a local and the guard expression is
+/// built and run through the real `infer_expr` pipeline (narrowing + union
+/// message-send), which is exactly what items 1–3 changed.
+///
+/// `(ms =:= #infinity) ifTrue: [0] ifFalse: [ms + 1]` — in the `ifFalse:` branch
+/// `ms` narrows to `Integer`, so `ms + 1` resolves cleanly. The *unnarrowed*
+/// `ms + 1` on the bare union warns (item 3: `#infinity` resolves its `Symbol`
+/// method set and does not understand `+`). The contrast proves the narrowing.
+#[test]
+fn bt2624_singleton_union_narrowing_suppresses_branch_warning() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let union = InferredType::simple_union(&["Integer", "#infinity"]);
+    let ms_plus_one = || {
+        msg_send(
+            var("ms"),
+            MessageSelector::Binary("+".into()),
+            vec![int_lit(1)],
+        )
+    };
+    let guard = msg_send(
+        var("ms"),
+        MessageSelector::Binary("=:=".into()),
+        vec![Expression::Literal(
+            Literal::Symbol("infinity".into()),
+            span(),
+        )],
+    );
+    let guarded = if_true_if_false(
+        guard,
+        block_expr(vec![int_lit(0)]),
+        block_expr(vec![ms_plus_one()]),
+    );
+
+    // Narrowed: the `+` send lives in the `ifFalse:` branch where `ms :: Integer`.
+    let mut narrowed = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("ms", union.clone());
+    let _ = narrowed.infer_expr(&guarded, &hierarchy, &mut env, false);
+    assert!(
+        narrowed
+            .diagnostics()
+            .iter()
+            .all(|d| !d.message.contains("understand")),
+        "narrowing should suppress the '+' warning in the ifFalse: branch, got: {:?}",
+        narrowed.diagnostics()
+    );
+
+    // Unnarrowed control: the same `+` send on the bare union must warn, naming
+    // the singleton that does not understand it.
+    let mut unnarrowed = TypeChecker::new();
+    let mut env2 = TypeEnv::new();
+    env2.set_local("ms", union);
+    let _ = unnarrowed.infer_expr(&ms_plus_one(), &hierarchy, &mut env2, false);
+    let plus_dnu: Vec<_> = unnarrowed
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("understand") && d.message.contains("'+'"))
+        .collect();
+    assert_eq!(
+        plus_dnu.len(),
+        1,
+        "the unnarrowed union must warn about '+', got: {:?}",
+        unnarrowed.diagnostics()
+    );
+    assert!(plus_dnu[0].message.contains("#infinity"));
+}
