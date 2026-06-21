@@ -507,6 +507,22 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(false, maps:get(<<"native">>, Value)),
             ?assertEqual(null, maps:get(<<"backing_module">>, Value))
         end},
+        {"browse-class-definition carries reflected sealed/abstract modifiers", fun() ->
+            %% BT-2605: op 4 surfaces the same sealed/abstract reflection op 1
+            %% (browse-classes) carries, so the IDE editor header can badge them
+            %% without parsing the synthesized definition skeleton. A plain fixture
+            %% class is neither sealed nor abstract.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-class-definition">>,
+                    #{<<"class">> => Class},
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(false, maps:get(<<"sealed">>, Value)),
+            ?assertEqual(false, maps:get(<<"abstract">>, Value))
+        end},
         {"browse-native-source errors for a non-native class", fun() ->
             %% BT-2578: the op only applies to native: classes (ADR 0056).
             Response = beamtalk_repl_ops_browse:handle(

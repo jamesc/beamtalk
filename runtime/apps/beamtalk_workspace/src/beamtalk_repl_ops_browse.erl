@@ -471,6 +471,14 @@ browse_class_definition(ClassName) ->
                 <<"comment">> => class_doc(ClassPid),
                 <<"native">> => meta_is_native(NativeMeta),
                 <<"backing_module">> => atom_or_null(meta_backing_module(NativeMeta)),
+                %% BT-2605: reflected class modifiers for the IDE's editor-header
+                %% modifier badges. The synthesized `definition` skeleton above
+                %% carries no leading modifier keywords, so these come from the
+                %% same runtime reflection op 1 (`browse-classes`) uses — not a
+                %% string parse. (`typed` is a compile-time annotation with no
+                %% runtime reflection today, so it is not surfaced here.)
+                <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
+                <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
                 <<"origin">> => origin_of(SourceFile),
                 <<"source_origin">> => source_origin_of(ModName, SourceFile),
                 %% The definition pane renders a *synthesized* class skeleton
