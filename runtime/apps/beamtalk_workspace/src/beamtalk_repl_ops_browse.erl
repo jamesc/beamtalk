@@ -71,8 +71,15 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 
 -ifdef(TEST).
 %% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
-%% delegate-source marker have no live-class dependency.
--export([handle_call_clause_lines/1, clause_selector/1, delegate_exported/2]).
+%% delegate-source marker have no live-class dependency. BT-2643: the
+%% source_origin (classification) / package (name) split helpers.
+-export([
+    handle_call_clause_lines/1,
+    clause_selector/1,
+    delegate_exported/2,
+    package_of/2,
+    package_of_module/1
+]).
 -endif.
 
 -doc """
@@ -177,6 +184,7 @@ class_row(Pid, TestClasses) ->
         Super = beamtalk_runtime_api:superclass(Pid),
         ModName = origin_module(Name, beamtalk_runtime_api:module_name(Pid)),
         SourceFile = source_file_of(ModName),
+        SourceOrigin = source_origin_of(ModName, SourceFile),
         {true, #{
             <<"name">> => atom_to_binary(Name, utf8),
             <<"superclass">> => atom_or_null(Super),
@@ -187,7 +195,8 @@ class_row(Pid, TestClasses) ->
             <<"internal">> => safe_bool(fun() -> beamtalk_runtime_api:is_internal(Pid) end),
             <<"source_file">> => SourceFile,
             <<"origin">> => origin_of(SourceFile),
-            <<"source_origin">> => source_origin_of(ModName, SourceFile),
+            <<"source_origin">> => SourceOrigin,
+            <<"package">> => package_of(ModName, SourceOrigin),
             <<"is_test">> => sets:is_element(Name, TestClasses),
             %% BT-2615: protocol class objects (ADR 0068) are sealed abstract
             %% subclasses of Protocol with no declared package, so they would
@@ -271,12 +280,14 @@ protocol_requirement_rows(ClassName, ClassSide, SourceFile, ModName) ->
 
 -spec requirement_row(atom(), binary() | null, atom()) -> map().
 requirement_row(Selector, SourceFile, ModName) ->
+    SourceOrigin = source_origin_of(ModName, SourceFile),
     #{
         <<"selector">> => atom_to_binary(Selector, utf8),
         <<"line">> => null,
         <<"source_status">> => <<"unindexed_runtime_fun">>,
         <<"origin">> => <<"runtime">>,
-        <<"source_origin">> => source_origin_of(ModName, SourceFile),
+        <<"source_origin">> => SourceOrigin,
+        <<"package">> => package_of(ModName, SourceOrigin),
         %% carried internally for grouping; stripped before emit
         '__protocol__' => <<"requirements">>
     }.
@@ -285,12 +296,14 @@ requirement_row(Selector, SourceFile, ModName) ->
 selector_row(ClassName, ClassSide, Selector, SourceFile, ModName) ->
     Info = beamtalk_xref:method_info(ClassName, ClassSide, Selector),
     {Line, SourceStatus, Provenance} = info_fields(Info),
+    SourceOrigin = source_origin_of(ModName, SourceFile),
     #{
         <<"selector">> => atom_to_binary(Selector, utf8),
         <<"line">> => Line,
         <<"source_status">> => atom_to_binary(SourceStatus, utf8),
         <<"origin">> => origin_for_provenance(Provenance, SourceFile),
-        <<"source_origin">> => source_origin_of(ModName, SourceFile),
+        <<"source_origin">> => SourceOrigin,
+        <<"package">> => package_of(ModName, SourceOrigin),
         %% carried internally for grouping; stripped before emit
         '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide)
     }.
@@ -358,6 +371,7 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 method_text_fields(ClassPid, ClassSide, Selector, SourceStatus),
             SourceFile = source_file_for_class(ClassName),
             ModName = beamtalk_runtime_api:module_name(ClassPid),
+            SourceOrigin = source_origin_of(ModName, SourceFile),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
                 <<"side">> => side_to_binary(ClassSide),
@@ -384,7 +398,8 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 <<"line">> => Line,
                 <<"source_status">> => atom_to_binary(SourceStatus, utf8),
                 <<"origin">> => origin_for_provenance(Provenance, SourceFile),
-                <<"source_origin">> => source_origin_of(ModName, SourceFile),
+                <<"source_origin">> => SourceOrigin,
+                <<"package">> => package_of(ModName, SourceOrigin),
                 <<"disk_differs">> => disk_differs(SourceFile, ClassName, Source)
             }}
     end.
@@ -455,6 +470,7 @@ browse_class_definition(ClassName) ->
             %% definition pane's category/origin/source_origin are accurate.
             ModName = origin_module(ClassName, beamtalk_runtime_api:module_name(ClassPid)),
             SourceFile = source_file_of(ModName),
+            SourceOrigin = source_origin_of(ModName, SourceFile),
             State = state_slots(ClassPid),
             Definition = class_definition_text(ClassName, Super, State),
             %% BT-2578: native-backed classes (ADR 0056) carry their backing
@@ -480,7 +496,8 @@ browse_class_definition(ClassName) ->
                 <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
                 <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
                 <<"origin">> => origin_of(SourceFile),
-                <<"source_origin">> => source_origin_of(ModName, SourceFile),
+                <<"source_origin">> => SourceOrigin,
+                <<"package">> => package_of(ModName, SourceOrigin),
                 %% The definition pane renders a *synthesized* class skeleton
                 %% (header + state slots), not the verbatim on-disk class source
                 %% — so a substring diff against the disk store would be unsound
@@ -806,9 +823,10 @@ optional_selector(Params) ->
 origin_of(null) -> <<"runtime">>;
 origin_of(SourceFile) when is_binary(SourceFile) -> <<"both">>.
 
-%% Class source origin: whether a class comes from the project, a dependency,
-%% or the stdlib. Used for IDE badges (BT-2552). For dependencies, the package
-%% name is included (e.g. <<"dependency:cowboy">>).
+%% Class source origin: the *classification* of where a class comes from —
+%% `project`, `dependency`, or `stdlib`. Used for IDE badges (BT-2552). This is
+%% orthogonal to the *package name* (see `package_of/2`, BT-2643): the package is
+%% carried in a separate `package` row field, never packed into this value.
 -spec source_origin_of(atom(), binary() | null) -> binary().
 source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
     case beamtalk_class_registry:is_stdlib_module(ModName) of
@@ -820,15 +838,40 @@ source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
                     <<"project">>;
                 Bin when is_binary(Bin) ->
                     case classify_source_origin(Bin) of
-                        project ->
-                            <<"project">>;
-                        dependency ->
-                            case package_of_module(ModName) of
-                                nil -> <<"dependency:unknown">>;
-                                Pkg -> iolist_to_binary([<<"dependency:">>, Pkg])
-                            end
+                        project -> <<"project">>;
+                        dependency -> <<"dependency">>
                     end
             end
+    end.
+
+%% Package name a class lives in, for ALL origins (BT-2643): `stdlib` for stdlib
+%% classes, the dependency package for dependencies, and the project's own
+%% package name for project classes. Orthogonal to `source_origin_of/2`'s
+%% classification. The package comes from the module atom (`bt@{pkg}@{class}`)
+%% when encoded there; for project classes whose module carries no package
+%% segment, fall back to the workspace's configured package name. `null` when no
+%% package can be determined (e.g. unknown dependency, no workspace metadata).
+-spec package_of(atom(), binary()) -> binary() | null.
+package_of(ModName, <<"stdlib">>) when is_atom(ModName) ->
+    <<"stdlib">>;
+package_of(ModName, <<"dependency">>) when is_atom(ModName) ->
+    case package_of_module(ModName) of
+        nil -> null;
+        Pkg -> Pkg
+    end;
+package_of(ModName, <<"project">>) when is_atom(ModName) ->
+    case package_of_module(ModName) of
+        nil -> project_package_name();
+        Pkg -> Pkg
+    end.
+
+%% The workspace's configured package name (project's own package), or `null`
+%% when no workspace metadata is available (startup, no project).
+-spec project_package_name() -> binary() | null.
+project_package_name() ->
+    case beamtalk_workspace_meta:get_package_name() of
+        Name when is_binary(Name) -> Name;
+        _ -> null
     end.
 
 %% Extract the package name from a module atom (bt@{pkg}@{class} → {pkg}).
