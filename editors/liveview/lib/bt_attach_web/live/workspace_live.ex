@@ -1746,11 +1746,35 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("select_workspace", _params, socket), do: {:noreply, socket}
 
+  # Cap on the Transcript pane depth: the client keeps the most recent N lines
+  # (via `stream_insert(:transcript, …, limit: -N)`), bounding the DOM in step
+  # with the producer's 1000-entry ring buffer (`beamtalk_transcript_stream`).
+  # A burst of `Transcript show:` output can't grow the rendered pane unbounded.
+  @transcript_scrollback_limit 1000
+
   # Transcript push, delivered directly over distribution to this LiveView pid.
+  #
+  # BT-2609: a high-output expression (e.g. `Hanoi solve: 8`) fans out one
+  # `{:transcript_output, _}` message *per line* from `beamtalk_transcript_stream`.
+  # Inserting each individually means one render + diff push per line — a render
+  # storm that floods the LiveView mailbox and stalls the socket (the apparent
+  # "REPL hang"). Instead, drain every `{:transcript_output, _}` already queued in
+  # the mailbox and `stream_insert` the whole burst in a single render pass. Each
+  # insert carries `limit: -@transcript_scrollback_limit` so the rendered DOM
+  # stays bounded in step with the producer's 1000-entry ring buffer — the pane
+  # can't grow without limit. No line is dropped on our side: every drained
+  # message is inserted; only lines that scroll past the depth cap are evicted by
+  # the client (consistent with the REPL scrollback, BT-2543).
   @impl true
   def handle_info({:transcript_output, text}, socket) do
-    line = %{id: System.unique_integer([:positive]), text: to_string(text)}
-    {:noreply, stream_insert(socket, :transcript, line)}
+    lines = drain_transcript([transcript_line(text)])
+
+    socket =
+      Enum.reduce(lines, socket, fn line, acc ->
+        stream_insert(acc, :transcript, line, limit: -@transcript_scrollback_limit)
+      end)
+
+    {:noreply, socket}
   end
 
   # Bindings-changed push (`bindings` stream): a *signal*, not the data. Since
@@ -2329,6 +2353,38 @@ defmodule BtAttachWeb.WorkspaceLive do
   # untrusted, so a missing / negative / non-integer value collapses to nil.
   defp clamp_offset(n) when is_integer(n) and n >= 0, do: n
   defp clamp_offset(_), do: nil
+
+  # ── Transcript helpers (BT-2609) ─────────────────────────────────────────────
+
+  # Selectively drain every `{:transcript_output, _}` already sitting in the
+  # mailbox (zero-timeout receive) and accumulate the rendered line maps. The
+  # caller seeds `acc` with the line that triggered the handle_info, so the
+  # whole queued burst is coalesced into one batch of stream inserts — one
+  # render pass instead of one per line. Order is preserved (acc is built in
+  # arrival order, reversed once at the end).
+  #
+  # The drain is capped at @transcript_scrollback_limit per pass: the upstream
+  # ring buffer bounds server-side *history*, not how many messages are already
+  # queued in this pid's mailbox (concurrent high-output evals, or a slow client
+  # backing up renders, can pile up more than the cap). Without a cap a single
+  # handle_info could hold the callback draining thousands of entries. Anything
+  # beyond the cap stays in the mailbox and triggers another handle_info pass
+  # naturally — no lines are lost, and the per-callback work stays bounded.
+  defp drain_transcript(acc) when length(acc) >= @transcript_scrollback_limit do
+    Enum.reverse(acc)
+  end
+
+  defp drain_transcript(acc) do
+    receive do
+      {:transcript_output, text} -> drain_transcript([transcript_line(text) | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp transcript_line(text) do
+    %{id: System.unique_integer([:positive]), text: to_string(text)}
+  end
 
   # ── REPL helpers (BT-2543) ───────────────────────────────────────────────────
 
