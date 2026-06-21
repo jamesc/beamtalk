@@ -426,6 +426,27 @@
   color: var(--t-symbol);
 }
 
+/* BT-2605: class/method modifier badges in the editor header. Pill shape mirrors
+   `.nav-side-tag`; each modifier carries a distinct colour (a theme syntax token)
+   over a faint same-hue wash so it reads against any theme. `flex: none` keeps the
+   badges from squashing; they sit left of the `.spacer`, so the breadcrumb
+   ellipsizes before they do and they never collide with the right-edge
+   image-divergence badges (BT-2603 overflow concern). */
+.editor-meta .modifier-tag {
+  flex: none;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  border-radius: 3px; padding: 0 5px; line-height: 16px;
+  white-space: nowrap;
+  /* defaults; per-modifier rules below override --mt-color */
+  --mt-color: var(--accent-2);
+  color: var(--mt-color);
+  background: color-mix(in srgb, var(--mt-color) 14%, transparent);
+}
+.editor-meta .modifier-tag.side     { --mt-color: var(--t-keyword); }   /* Class — blue */
+.editor-meta .modifier-tag.sealed   { --mt-color: var(--t-reserved); }  /* Sealed — red */
+.editor-meta .modifier-tag.abstract { --mt-color: var(--accent); }      /* Abstract — amber */
+.editor-meta .modifier-tag.native   { --mt-color: var(--t-global); }    /* Native — gold */
+
 /* ============================================================================
    Read-only documentation block (BT-2558)
    ----------------------------------------------------------------------------
