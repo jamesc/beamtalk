@@ -59,4 +59,8 @@ TestCase subclass: LoggerTest
 
   testSetLevelInvalidLevel =>
     // setLevel: with invalid symbol raises argument_error
+    // BT-2618: setLevel: is now typed to the valid level union, so passing a
+    // non-member symbol is a static type mismatch — @expect type suppresses it
+    // (we are deliberately exercising the runtime's argument validation).
+    @expect type
     self should: [Logger setLevel: #not_a_real_level] raise: #argument_error

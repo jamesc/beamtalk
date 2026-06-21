@@ -12,7 +12,7 @@
 Actor subclass: TaskWorker
   state: jobCount = 0
 
-  class supervisionPolicy -> Symbol => #transient
+  class supervisionPolicy -> #permanent | #transient | #temporary => #transient
 
   process: value =>
     value =:= 0 ifTrue: [self error: "TaskWorker: refusing zero input"]

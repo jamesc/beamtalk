@@ -113,7 +113,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// ```beamtalk
   /// Beamtalk logLevel: #debug
   /// ```
-  logLevel: level :: Symbol -> Nil =>
+  logLevel: level :: #emergency | #alert | #critical | #error | #warning | #notice | #info | #debug -> Nil =>
     (Erlang beamtalk_logging_config) logLevel: level
 
   /// Return the current log format as a symbol (#text or #json).
@@ -131,7 +131,7 @@ sealed typed Object subclass: BeamtalkInterface
   /// Beamtalk logFormat: #json
   /// Beamtalk logFormat: #text
   /// ```
-  logFormat: format :: Symbol -> Nil =>
+  logFormat: format :: #text | #json -> Nil =>
     (Erlang beamtalk_logging_config) logFormat: format
 
   /// Return the list of available debug target symbols.
