@@ -108,7 +108,7 @@ pub(super) fn selector_from_symbol(sym: &str) -> Option<MessageSelector> {
 /// parameters map positionally onto the selector's argument slots. Returns
 /// `None` when the block shape does not conform to the selector (wrong
 /// parameter count), leaving that method unindexed.
-fn block_method_source(selector_sym: &str, block: &Block) -> Option<String> {
+fn block_method_source(selector_sym: &str, block: &Block, is_class_method: bool) -> Option<String> {
     let selector = selector_from_symbol(selector_sym)?;
     // A method fun receives `self` plus one argument per selector slot, so the
     // block must declare exactly `arity + 1` parameters.
@@ -119,20 +119,25 @@ fn block_method_source(selector_sym: &str, block: &Block) -> Option<String> {
         .iter()
         .map(|bp| ParameterDefinition::new(Identifier::new(bp.name.clone(), bp.span)))
         .collect();
-    let method = MethodDefinition::new(selector, parameters, block.body.clone(), block.span);
+    let mut method = MethodDefinition::new(selector, parameters, block.body.clone(), block.span);
+    // Carry the side so `unparse_method` re-emits the `class ` prefix for a
+    // class-side method, matching a file-defined class method's stored source
+    // (BT-2594).
+    method.is_class_method = is_class_method;
     Some(crate::unparse::unparse_method(&method))
 }
 
 /// Builds a `selector => "source"` map-literal expression from the literal
-/// block entries in `pairs`. Returns `None` when no entry is an indexable
-/// literal block (nothing to record).
-fn build_source_map(pairs: &[MapPair]) -> Option<Expression> {
+/// block entries in `pairs`. `is_class_method` records whether these are
+/// class-side methods (so the synthesised source carries the `class ` prefix).
+/// Returns `None` when no entry is an indexable literal block (nothing to record).
+fn build_source_map(pairs: &[MapPair], is_class_method: bool) -> Option<Expression> {
     let mut source_pairs: Vec<MapPair> = Vec::new();
     for pair in pairs {
         if let (Expression::Literal(Literal::Symbol(sym), _), Expression::Block(block)) =
             (&pair.key, &pair.value)
         {
-            if let Some(source) = block_method_source(sym, block) {
+            if let Some(source) = block_method_source(sym, block, is_class_method) {
                 source_pairs.push(MapPair {
                     key: pair.key.clone(),
                     value: Expression::Literal(Literal::String(source.into()), pair.span),
@@ -237,10 +242,10 @@ pub(super) fn inject_method_source(
     // when there is no explicit `methodSource:` (and an indexable `methods:`
     // map); the class side likewise for `classMethodSource:` / `classMethods:`.
     let method_source = (!has_method_source)
-        .then(|| methods_map.and_then(build_source_map))
+        .then(|| methods_map.and_then(|m| build_source_map(m, false)))
         .flatten();
     let class_method_source = (!has_class_method_source)
-        .then(|| class_methods_map.and_then(build_source_map))
+        .then(|| class_methods_map.and_then(|m| build_source_map(m, true)))
         .flatten();
 
     // Nothing to inject on either side — leave the cascade untouched.
@@ -539,8 +544,10 @@ mod tests {
         let entries = injected_source_map(&augmented, "classMethodSource:");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "bump");
+        // BT-2594: a builder-defined class method's stored source carries the
+        // `class ` prefix, matching a file-defined class method's shape.
         assert!(
-            entries[0].1.contains("bump") && entries[0].1.contains("total"),
+            entries[0].1.starts_with("class bump") && entries[0].1.contains("total"),
             "unexpected source: {}",
             entries[0].1
         );

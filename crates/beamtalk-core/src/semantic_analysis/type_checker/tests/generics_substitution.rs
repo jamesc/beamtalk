@@ -202,6 +202,7 @@ fn check_return_type_handles_generic_declared_type() {
         kind: MethodKind::Primary,
         is_sealed: false,
         is_internal: false,
+        is_class_method: false,
         span: span(),
         doc_comment: None,
         expect: None,

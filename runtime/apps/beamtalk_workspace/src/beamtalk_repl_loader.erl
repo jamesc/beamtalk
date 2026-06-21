@@ -1477,11 +1477,31 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
 -spec new_method_entry(map(), binary(), binary()) -> map().
 new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
     BaseIndent = sibling_method_indent(DiskSource),
-    %% Pure-Erlang reshape: total, never fails (BT-2592) — so a brand-new method
-    %% is always recorded flushable, never downgraded to memory-only by a
-    %% transient port hiccup.
-    Reindented = beamtalk_workspace_reshape:reindent_method_source(Canonical, BaseIndent),
-    Base#{source => Reindented, flushable => true, source_file => SourceFile}.
+    %% Reshape via the compiler port: it re-lays-out the canonical body at the
+    %% target indent (re-breaking width-sensitive lines, which a pure whitespace
+    %% shift cannot — BT-2594), so the stored body is byte-identical to what
+    %% `bt fmt' produces on disk. The port is already up here (the method was just
+    %% compiled through it); a transient failure downgrades to memory-only rather
+    %% than store a column-0 body flush would append un-indented.
+    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
+        {ok, Reindented} ->
+            Base#{source => Reindented, flushable => true, source_file => SourceFile};
+        {error, ReindentReason, _Msg} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not reshape new-method body to class indentation; "
+                "recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReindentReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            %% BT-2594 deliberately re-introduces this memory-only path that
+            %% BT-2592 removed: the pure-Erlang shift was total but reshaped
+            %% width-sensitive methods wrongly; port re-layout is correct, at the
+            %% cost of a rare transient-failure downgrade.
+            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
+    end.
 
 %% Derive the base indentation for a brand-new method from the class body on
 %% disk: the leading whitespace of the first indented, non-blank, non-comment
@@ -1537,22 +1557,41 @@ strip_leading_ws(Bin) ->
 ) -> map().
 store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
     BaseIndent = beamtalk_workspace_reshape:leading_ws(PrevSource),
-    %% Pure-Erlang reshape: total, never fails (BT-2592) — a live patch can no
-    %% longer become non-flushable for transport reasons unrelated to the method.
-    Reindented = beamtalk_workspace_reshape:reindent_method_source(Canonical, BaseIndent),
-    %% The disk byte-span ends in a trailing newline unless the method is the last
-    %% line of the file with no terminator (ADR 0082). Match that trailing-newline
-    %% state on the reshaped body — regardless of whether the canonical body
-    %% carries its own — so the splice is a true drop-in and never glues the next
-    %% line or leaves a stray blank one (BT-2584).
-    DiskShaped = match_trailing_newline(Reindented, PrevSource),
-    Base#{
-        source => DiskShaped,
-        flushable => true,
-        source_file => SourceFile,
-        span => Span,
-        prev_source => PrevSource
-    }.
+    %% Reshape via the compiler port (re-layout at the span's indent — BT-2594),
+    %% so `source_ref == disk[span]' even for width-sensitive methods a pure shift
+    %% would reformat. The port is already up (the patch was just compiled through
+    %% it); a transient failure downgrades to memory-only rather than store a
+    %% column-0 body flush would splice into an indented region and corrupt it.
+    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
+        {ok, Reindented} ->
+            %% The disk byte-span ends in a trailing newline unless the method is
+            %% the last line of the file with no terminator (ADR 0082). Match that
+            %% trailing-newline state on the reshaped body — regardless of whether
+            %% the canonical body carries its own — so the splice is a true drop-in
+            %% and never glues the next line or leaves a stray blank one (BT-2584).
+            DiskShaped = match_trailing_newline(Reindented, PrevSource),
+            Base#{
+                source => DiskShaped,
+                flushable => true,
+                source_file => SourceFile,
+                span => Span,
+                prev_source => PrevSource
+            };
+        {error, ReindentReason, _Msg} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not reshape patch body to disk indentation; "
+                "recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReindentReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            %% BT-2594 deliberately re-introduces this memory-only path that
+            %% BT-2592 removed (see new_method_entry/3): port re-layout is correct
+            %% where the pure-Erlang shift reshaped width-sensitive methods wrongly.
+            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
+    end.
 
 %% Make `Source''s trailing-newline state match `Reference''s: append a single
 %% `\n' when the reference ends in one and the source does not; strip trailing

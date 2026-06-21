@@ -196,6 +196,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
             return_type: None,
             is_sealed: false,
             is_internal: false,
+            is_class_method: false,
             kind: MethodKind::Primary,
             expect: None,
             comments: CommentAttachment::default(),

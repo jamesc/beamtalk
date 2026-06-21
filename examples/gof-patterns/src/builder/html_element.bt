@@ -19,8 +19,7 @@ Value subclass: HtmlElement
     self withAttributes: (self.attributes at: key put: val)
 
   /// Return a new element with the text content replaced.
-  text: t =>
-    self withContent: t
+  text: t => self withContent: t
 
   /// Render to an HTML string.
   render =>

@@ -26,6 +26,8 @@ pub struct MethodModifiers {
     pub is_sealed: bool,
     /// Whether this method is internal (package-scoped visibility, ADR 0071).
     pub is_internal: bool,
+    /// Whether this is a class-side method (the `class ` modifier).
+    pub is_class_method: bool,
     /// The kind of method.
     pub kind: MethodKind,
 }
@@ -96,6 +98,15 @@ pub struct MethodDefinition {
     pub is_sealed: bool,
     /// Whether this method is internal (package-scoped visibility, ADR 0071).
     pub is_internal: bool,
+    /// Whether this is a class-side method (declared with the `class ` modifier).
+    ///
+    /// Carried on the method itself — rather than implied only by living in a
+    /// class's `class_methods` — so that the per-method source [`unparse_method`]
+    /// produces re-emits the `class ` prefix. That keeps the stored/compiled
+    /// `source_ref` byte-identical to the on-disk method span for class-side
+    /// methods (ADR 0082 / BT-2594). Whole-file unparse adds the prefix from its
+    /// own context, so it ignores this flag.
+    pub is_class_method: bool,
     /// The kind of method.
     pub kind: MethodKind,
     /// Optional `@expect` directive attached to this method declaration (BT-1856, BT-1918).
@@ -152,6 +163,7 @@ impl MethodDefinition {
             return_type: None,
             is_sealed: false,
             is_internal: false,
+            is_class_method: false,
             kind: MethodKind::Primary,
             expect: None,
             comments: CommentAttachment::default(),
@@ -176,6 +188,7 @@ impl MethodDefinition {
             return_type: Some(return_type),
             is_sealed: false,
             is_internal: false,
+            is_class_method: false,
             kind: MethodKind::Primary,
             expect: None,
             comments: CommentAttachment::default(),
@@ -201,6 +214,7 @@ impl MethodDefinition {
             return_type,
             is_sealed: modifiers.is_sealed,
             is_internal: modifiers.is_internal,
+            is_class_method: modifiers.is_class_method,
             kind: modifiers.kind,
             expect: None,
             comments: CommentAttachment::default(),

@@ -855,9 +855,11 @@ t_install_method_keeps_package_and_source(_Proj) ->
 
 t_install_method_preserves_comments(_Proj) ->
     Proj = live_project_dir(),
-    %% Bug 1: a method's leading `// --- … ---' section banner + multi-line `///'
-    %% doc block must survive the save AND repeated saves (idempotent — the bug
-    %% eroded one comment line per save).
+    %% A method's multi-line `///' doc block must survive the save AND repeated
+    %% saves (idempotent). A leading `// --- … ---' section banner is *dropped*:
+    %% it is inter-method file structure, not part of the method's byte span, so
+    %% the per-method stored source excludes it (BT-2594). The banner stays in the
+    %% file because flush splices only the method's span, never the lines above it.
     Path = write_bt_under(
         Proj,
         "src",
@@ -878,11 +880,13 @@ t_install_method_preserves_comments(_Proj) ->
         )
     ),
     Src1 = stored_method_source('InstallDoc', bumped),
-    ?assert(binary:match(Src1, <<"// --- Section ---">>) =/= nomatch),
+    %% The leading `//' banner is dropped from the per-method source (BT-2594)...
+    ?assertEqual(nomatch, binary:match(Src1, <<"// --- Section ---">>)),
+    %% ...while the `///' doc block is preserved.
     ?assert(binary:match(Src1, <<"/// First doc line.">>) =/= nomatch),
     ?assert(binary:match(Src1, <<"/// Second doc line.">>) =/= nomatch),
     %% Save again (feeding back the stored source). Source stays byte-stable —
-    %% no per-save erosion of the leading comment block.
+    %% no per-save erosion of the doc block.
     ?assertMatch(
         {ok, _, _, _, _},
         beamtalk_repl_loader:install_method(
@@ -990,10 +994,11 @@ t_install_method_accumulation_preserves_siblings(_Proj) ->
             State1
         )
     ),
-    %% After patching methodTwo, methodOne (and its edited doc/banner) must still
-    %% be intact — accumulation did not drop or erode the sibling method.
+    %% After patching methodTwo, methodOne (its edited `///' doc + body) must still
+    %% be intact — accumulation did not drop or erode the sibling method. The
+    %% leading `//' banner is dropped from the per-method source (BT-2594).
     One = stored_method_source('InstallAccum', methodOne),
-    ?assert(binary:match(One, <<"// --- one ---">>) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(One, <<"// --- one ---">>)),
     ?assert(binary:match(One, <<"Doc for one (edited).">>) =/= nomatch),
     ?assert(binary:match(One, <<"self.v + 10">>) =/= nomatch),
     Two = stored_method_source('InstallAccum', methodTwo),

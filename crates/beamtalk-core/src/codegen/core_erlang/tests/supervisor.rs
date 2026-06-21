@@ -290,6 +290,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
         return_type: None,
         is_sealed: false,
         is_internal: false,
+        is_class_method: false,
         span: Span::new(0, 0),
         doc_comment: None,
         expect: None,

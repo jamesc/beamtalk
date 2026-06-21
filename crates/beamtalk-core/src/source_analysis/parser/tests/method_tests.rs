@@ -1011,9 +1011,13 @@ fn parse_method_preserves_leading_section_banner() {
 }
 
 #[test]
-fn parse_method_unparse_keeps_banner_and_doc() {
-    // unparse_method is what gets STORED as the live method `__source__`. It must
-    // re-emit the banner and the doc comment, so a save preserves them.
+fn parse_method_unparse_drops_banner_keeps_doc() {
+    // unparse_method is what gets STORED as the live method `__source__`, and it
+    // must match the method's byte span — which starts at the `///` doc block and
+    // excludes a leading `//` section banner (the banner is inter-method file
+    // structure, not part of the method). So unparse_method drops the banner but
+    // keeps the doc comment; whole-file unparse preserves the banner in place
+    // (BT-2594; banners become first-class categories in BT-2601).
     let src = "// --- Execution CRUD ---\n\
                \n\
                /// Store a new workflow execution.\n\
@@ -1023,8 +1027,9 @@ fn parse_method_unparse_keeps_banner_and_doc() {
     let m = parse_method_ok(src);
     let out = unparse_method(&m);
     assert!(
-        out.contains("--- Execution CRUD ---"),
-        "unparse dropped the section banner:\n{out}"
+        !out.contains("--- Execution CRUD ---"),
+        "unparse_method should drop the leading section banner so the stored \
+         source matches the method's byte span:\n{out}"
     );
     assert!(
         out.contains("/// Store a new workflow execution."),

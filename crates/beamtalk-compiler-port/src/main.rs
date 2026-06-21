@@ -1998,21 +1998,24 @@ fn handle_resolve_method_span(request: &Map) -> Term {
 
 /// Handle a `reindent_method_source` request (BT-2584).
 ///
-/// Re-indents a canonical (column-0) method body to the given `base_indent`,
-/// producing the on-disk byte-span shape. The live-patch install hook calls
-/// this so the `ChangeEntry`'s stored `source` is a drop-in for `disk[span]` —
-/// `source_ref == disk[span]` by construction — and a later `Workspace flush`
-/// splices it verbatim with no reshaping (retiring the former
-/// `beamtalk_workspace_flush:reindent/2`).
+/// Re-lays-out a canonical (column-0) method body at the given `base_indent`,
+/// producing the on-disk byte-span shape. It re-parses the body and re-renders
+/// it with the line-width budget reduced by the indent, so width-sensitive lines
+/// re-break exactly as `bt fmt` does on disk (BT-2594), then shifts. The
+/// live-patch install hook calls this so the `ChangeEntry`'s stored `source` is a
+/// drop-in for `disk[span]` — `source_ref == disk[span]` by construction — and a
+/// later `Workspace flush` splices it verbatim with no reshaping (retiring the
+/// former `beamtalk_workspace_flush:reindent/2`).
 ///
 /// Request fields:
 /// - `source` (binary): the canonical column-0 method body (`unparse_method`)
 /// - `base_indent` (binary, optional): the leading whitespace of the on-disk
 ///   definition's first line (empty = identity)
 ///
-/// Response: `#{status => ok, source => <<...>>}`. The transform itself never
-/// fails — it is a pure string reshape. (The Erlang port wrappers still surface
-/// transport/timeout errors as `{error, port_error, _}` around this call.)
+/// Response: `#{status => ok, source => <<...>>}`. The transform always succeeds
+/// — it falls back to a plain whitespace shift when the body does not re-parse.
+/// (The Erlang port wrappers still surface transport/timeout errors as
+/// `{error, port_error, _}` around this call.)
 fn handle_reindent_method_source(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -3011,9 +3014,11 @@ mod property_tests {
 
     #[test]
     fn compile_method_preserves_source_and_compiles() {
-        // The bug shape: a `// --- … ---` banner over a `///` doc block over the
-        // header. The structured command must keep ALL of it in the returned
-        // canonical source AND emit Core Erlang for the merged class.
+        // A `// --- … ---` banner over a `///` doc block over the header. The
+        // per-method canonical `method_source` keeps the `///` doc block but drops
+        // the leading `//` banner — the banner is inter-method file structure, not
+        // part of the method's edit unit, and the byte span excludes it (BT-2594).
+        // It is preserved in the file via `merged_class_source` (whole-file unparse).
         let method_source = "// --- Execution CRUD ---\n\n/// Store a new workflow execution.\n/// Raises if the workflowId already exists.\ncreateExecution: execution :: Object -> Object =>\n  execution";
         let request = Term::from(Map::from([
             (atom("command"), atom("compile_method")),
@@ -3032,7 +3037,10 @@ mod property_tests {
             Some("createExecution:")
         );
         let ms = response_field_str(&response, "method_source").expect("method_source");
-        assert!(ms.contains("--- Execution CRUD ---"), "banner lost: {ms}");
+        assert!(
+            !ms.contains("--- Execution CRUD ---"),
+            "leading `//` banner should be dropped from per-method source: {ms}"
+        );
         assert!(
             ms.contains("/// Store a new workflow execution."),
             "first doc line lost: {ms}"

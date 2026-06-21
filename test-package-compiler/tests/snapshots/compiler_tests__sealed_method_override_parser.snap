@@ -57,6 +57,7 @@ Module {
                     return_type: None,
                     is_sealed: true,
                     is_internal: false,
+                    is_class_method: false,
                     kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
@@ -174,6 +175,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     is_internal: false,
+                    is_class_method: false,
                     kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
@@ -254,6 +256,7 @@ Module {
                     return_type: None,
                     is_sealed: false,
                     is_internal: false,
+                    is_class_method: false,
                     kind: Primary,
                     expect: None,
                     comments: CommentAttachment {
