@@ -2318,11 +2318,7 @@ impl CoreErlangGenerator {
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, plan, &BodyKind::Letrec)?;
         docs.push(body_doc);
-        let final_state_var = if final_state_version == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{final_state_version}")
-        };
+        let final_state_var = super::util::versioned_var("StateAcc", final_state_version);
 
         self.pop_scope();
 
@@ -2968,11 +2964,7 @@ impl CoreErlangGenerator {
         if let Expression::Assignment { target, value, .. } = expr {
             if let Expression::Identifier(id) = target.as_ref() {
                 let val_var = self.fresh_temp_var("Val");
-                let current_state = if self.state_version() == 0 {
-                    "StateAcc".to_string()
-                } else {
-                    format!("StateAcc{}", self.state_version())
-                };
+                let current_state = super::util::versioned_var("StateAcc", self.state_version());
 
                 // BT-790: In REPL mode, use the plain variable name as the key
                 // (no __local__ prefix) since there are no actor fields to collide with.
