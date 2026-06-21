@@ -2362,6 +2362,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   # whole queued burst is coalesced into one batch of stream inserts — one
   # render pass instead of one per line. Order is preserved (acc is built in
   # arrival order, reversed once at the end).
+  #
+  # The drain is capped at @transcript_scrollback_limit per pass: the upstream
+  # ring buffer bounds server-side *history*, not how many messages are already
+  # queued in this pid's mailbox (concurrent high-output evals, or a slow client
+  # backing up renders, can pile up more than the cap). Without a cap a single
+  # handle_info could hold the callback draining thousands of entries. Anything
+  # beyond the cap stays in the mailbox and triggers another handle_info pass
+  # naturally — no lines are lost, and the per-callback work stays bounded.
+  defp drain_transcript(acc) when length(acc) >= @transcript_scrollback_limit do
+    Enum.reverse(acc)
+  end
+
   defp drain_transcript(acc) do
     receive do
       {:transcript_output, text} -> drain_transcript([transcript_line(text) | acc])

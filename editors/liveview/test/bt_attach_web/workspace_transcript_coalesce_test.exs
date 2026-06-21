@@ -99,4 +99,36 @@ defmodule BtAttachWeb.WorkspaceTranscriptCoalesceTest do
 
     assert [{_id, _at, %{text: "charlist line"}, _limit}] = pending_inserts(socket)
   end
+
+  test "the drain is capped per pass so a single handle_info can't run unbounded" do
+    socket = transcript_socket()
+
+    # More messages than the depth cap queued at once (e.g. concurrent
+    # high-output evals, or a client that's fallen behind on renders). One
+    # handle_info must drain at most @transcript_limit of them — the remainder
+    # stay in the mailbox to be picked up by the next pass.
+    overflow = 50
+
+    for n <- 2..(@transcript_limit + overflow),
+        do: send(self(), {:transcript_output, "line #{n}"})
+
+    {:noreply, socket} =
+      WorkspaceLive.handle_info({:transcript_output, "line 1"}, socket)
+
+    assert length(pending_inserts(socket)) == @transcript_limit
+
+    # The overflow is not lost — it's still queued for the next handle_info pass.
+    remaining =
+      Stream.repeatedly(fn ->
+        receive do
+          {:transcript_output, _} -> :ok
+        after
+          0 -> :empty
+        end
+      end)
+      |> Enum.take_while(&(&1 == :ok))
+      |> length()
+
+    assert remaining == overflow
+  end
 end
