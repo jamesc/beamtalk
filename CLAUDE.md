@@ -6,21 +6,20 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 
 ## Essential Rules
 
-- **Verify Beamtalk syntax** before writing any new `.bt` or Erlang FFI code: grep for 3+ existing codebase examples of the pattern, then confirm against `docs/beamtalk-language-features.md`. Do not invent syntax or guess from Smalltalk memory.
-- **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal runtime helpers may use `{ok, Value} | {error, Reason}` if translated at public boundaries.
-- **Codegen:** All Core Erlang codegen MUST use `Document` / `docvec!` API. **NEVER use `format!()` or string concatenation to produce Core Erlang fragments — not even for "simple" atoms, arities, or map keys.** This rule has been violated repeatedly and required a dedicated cleanup effort (BT-875). Do not reintroduce violations. The **typed-leaf API** (`document::leaf` for Core Erlang, `unparse::leaf` for Beamtalk source) is the *only* sanctioned way to introduce a runtime-derived leaf — use `leaf::atom` / `leaf::var` / `leaf::string_lit` / `leaf::int_lit` / `leaf::float_lit` / `leaf::fname` / `leaf::binary_lit` / `leaf::binary_segments` / `leaf::whitespace`. The open `Document::String` / `Document::Eco` variants were removed in ADR 0089 Phase 3 and no longer exist; the internal `Document::Owned` backing variant is built only inside those leaf helpers, never at codegen call sites.
-- **Erlang logging:** Use OTP logger macros (`?LOG_ERROR`, etc.), never `io:format` or `logger:error()`. Always include `domain` metadata: `domain => [beamtalk, runtime]` for runtime modules, `[beamtalk, stdlib]` for stdlib. Prefer setting domain via `logger:set_process_metadata(#{domain => [beamtalk, runtime]})` in `init/1` so all log calls from the process inherit it.
-- **License headers:** All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`. Do **not** add license headers to `.md` files.
-- **Implicit returns:** Use `^` ONLY for early returns, never on last expression.
-- **Block returns (`^`):** `^` inside a block is a **non-local return** — it exits the *enclosing method* immediately with that value, not just the block. This is standard Smalltalk semantics, implemented via a throw/catch token in codegen.
-- **Type annotations:** Beamtalk uses `::` (double-colon) for type annotations, never single `:`. Examples: `state: x :: Integer = 0`, `param :: Type -> ReturnType =>`.
-- **DNU:** Sending an unrecognised message raises a `does_not_understand` error (`#beamtalk_error{}`). Use `respondsTo:` to check whether a method exists before calling it.
-- **Generated files:** Before editing `.app.src` or other generated artifacts, check if a build step owns them. `build_stdlib.rs` generates `beamtalk_stdlib.app.src` — edit the generator, not the output.
-- **Worktree stale builds:** After entering or creating a worktree, run `just build` before running tests. Stale BEAM artifacts from another build cause false failures.
-- **REPL output:** Before changing any REPL display value, prompt format, or output behaviour, confirm with the user — existing output is usually intentional and covered by e2e tests. Do not "fix" output that looks wrong without checking first.
-- **Test assertions:** Every expression in test files MUST have a `// =>` assertion (even `// => _`). No assertion = no execution.
-- **Cross-platform temp paths:** Never hardcode `/tmp/` in tests. Use `File tempDirectory` (BT) or `beamtalk_file:'tempDirectory'()` (Erlang) when an absolute temp path is required, then concatenate: `tmp ++ "/my_file.txt"`. For runtime EUnit tests, prefer relative temp filenames in the rebar3 test working directory when possible. See `docs/development/testing-strategy.md` for details.
-- **Surface parity:** When adding or modifying operations on any surface (CLI, REPL, MCP, LSP), update `docs/development/surface-parity.md`. Any operation not labelled `surface-specific` must produce equivalent output across all surfaces where it appears.
+- **Verify Beamtalk syntax** before writing any new `.bt` or Erlang FFI code: grep for 3+ existing examples, then confirm against `docs/beamtalk-language-features.md`. Never invent syntax or guess from Smalltalk memory.
+- **Codegen:** All Core Erlang codegen uses the `Document` / `docvec!` + typed-leaf API (`leaf::atom`, `leaf::var`, `leaf::string_lit`, `leaf::int_lit`, `leaf::fname`, `leaf::binary_lit`, …). Never use `format!()` or string concatenation for Core Erlang fragments — not even atoms, arities, or map keys. See `docs/ADR/0089-typed-document-leaves.md`.
+- **Type annotations:** `::` (double-colon), never single `:`. E.g. `state: x :: Integer = 0`, `param :: Type -> ReturnType =>`.
+- **Returns (`^`):** Use `^` only for early/non-local returns, never on the last expression. Inside a block, `^` exits the *enclosing method* immediately (standard Smalltalk semantics, via throw/catch in codegen).
+- **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal helpers may use `{ok, V} | {error, R}` if translated at public boundaries.
+- **DNU:** An unrecognised message raises `does_not_understand` (`#beamtalk_error{}`). Use `respondsTo:` to check before calling.
+- **Erlang logging:** OTP logger macros (`?LOG_ERROR`, …), never `io:format` or `logger:error()`. Set `domain` metadata in `init/1` via `logger:set_process_metadata(#{domain => [beamtalk, runtime]})` (`[beamtalk, stdlib]` for stdlib) so all calls inherit it.
+- **License headers:** All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`. Not on `.md` files.
+- **Test assertions:** Every expression in test files needs a `// =>` assertion (even `// => _`) — no assertion means no execution.
+- **Cross-platform temp paths:** Never hardcode `/tmp/`. Use `File tempDirectory` (BT) / `beamtalk_file:'tempDirectory'()` (Erlang) and concatenate, or prefer relative temp filenames in runtime EUnit tests. See `docs/development/testing-strategy.md`.
+- **Generated files:** Before editing `.app.src` or other generated artifacts, check if a build step owns them — `build_stdlib.rs` generates `beamtalk_stdlib.app.src`, so edit the generator.
+- **Worktree stale builds:** Run `just build` after entering/creating a worktree before tests — stale BEAM artifacts cause false failures.
+- **REPL output:** Confirm with the user before changing any REPL display value, prompt format, or output behaviour — it's usually intentional and covered by e2e tests.
+- **Surface parity:** When adding/modifying operations on any surface (CLI, REPL, MCP, LSP), update `docs/development/surface-parity.md`. Operations not labelled `surface-specific` must produce equivalent output across surfaces.
 
 ## CI Commands
 
@@ -47,44 +46,20 @@ You may run `just`, `cargo`, `rustc`, `rustfmt`, and `git` without asking.
 | Stateful tests with setUp/tearDown | `stdlib/test/*.bt` (BUnit) |
 | Workspace bindings, REPL commands, variable persistence | `tests/repl-protocol/cases/*.btscript` |
 
-Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Only use `stdlib/bootstrap-test/` for bootstrap-critical primitives.
+Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Use `stdlib/bootstrap-test/` only for bootstrap-critical primitives.
 
 ## Architecture
 
-- **DDD contexts:** Language Service, Compilation, Runtime, REPL
-- **Dependencies flow down only** — `beamtalk-core` never imports `beamtalk-cli` or `beamtalk-lsp`
-- **Never** panic on user input, use `unwrap()` on user input, or add deps without justification
-- **Always** return `(Result, Vec<Diagnostic>)` for user-facing operations
+- **DDD contexts:** Language Service, Compilation, Runtime, REPL.
+- **Dependencies flow down only** — `beamtalk-core` never imports `beamtalk-cli` or `beamtalk-lsp`.
+- **Never** panic/`unwrap()` on user input, or add deps without justification.
+- **Always** return `(Result, Vec<Diagnostic>)` for user-facing operations.
 
-## Versioning & Releases
+## Workflow
 
-**Single source of truth:** `VERSION` file at repo root (e.g., `0.3.0`).
-
-Version flows automatically at build time:
-- **Rust:** `build.rs` reads `VERSION` + git state → `BEAMTALK_VERSION` compile-time env var
-- **Erlang:** `.app.src` files use `{vsn, {cmd, "escript ../../../scripts/version.escript"}}`
-- **LiveView IDE (Elixir):** `editors/liveview/mix.exs` reads `VERSION` at compile time, so the `bt_attach` release/Docker tag tracks the toolchain version (BT-2514). It ships on its own release lane (BT-2512), not the core bundle.
-- **Dev builds** (not on a git tag): version becomes `0.3.0-dev+<short sha>`
-- **Release builds** (on a git tag): version is the clean `0.3.0`
-
-**Rust toolchain** is pinned in `rust-toolchain.toml`. Update there when upgrading Rust.
-
-**To release a new version:**
-1. Update `VERSION` with the new version number
-2. Update `Cargo.toml` workspace `version` to match (required by Cargo)
-3. Update `CHANGELOG.md` — add a new section following the existing format (Language, Standard Library, Runtime, Tooling, Internal subsections as needed)
-4. Update version references in docs (`README.md`, `docs/beamtalk-tooling.md`, `docs/beamtalk-language-features.md`, `docs/repl-protocol.md`, `docs/beamtalk-ddd-model.md`, `crates/beamtalk-examples/corpus.json`)
-5. Tag the release commit: `git tag v<version>`
-
-**Do not** manually edit version strings in `.app.src` files, `build_stdlib.rs`, or `editors/liveview/mix.exs` — they are derived from `VERSION` at build time.
-
-## Issue Workflow (Linear)
-
-Project prefix: `BT`. Always set labels: `agent-state`, `item-area`, `issue-type`, `item-size`. Establish blocking relationships for dependencies. Include context, acceptance criteria, files to modify, and references in issues.
-
-## Scope Control
-
-Fix inline: formatting/typos in files you're modifying, test failures from your changes. Create follow-up issues for unrelated bugs, optimization opportunities, or refactoring not required for the current task.
+- **Versioning & releases:** `VERSION` at repo root is the single source of truth; everything derives from it at build time. Don't hand-edit derived version strings. Full process: `docs/development/releasing.md`.
+- **Issues (Linear):** Project prefix `BT`. Always set labels `agent-state`, `item-area`, `issue-type`, `item-size`, and blocking relationships for dependencies. Include context, acceptance criteria, files to modify, and references.
+- **Scope control:** Fix inline — formatting/typos in files you're touching, test failures from your changes. File follow-up issues for unrelated bugs, optimizations, or refactors not required for the task.
 
 ## Key References
 
@@ -98,4 +73,5 @@ Fix inline: formatting/typos in files you're modifying, test failures from your 
 | Common tasks | `docs/development/common-tasks.md` |
 | Debugging | `docs/development/debugging.md` |
 | Surface parity | `docs/development/surface-parity.md` |
+| Releasing | `docs/development/releasing.md` |
 | ADRs | `docs/ADR/` |
