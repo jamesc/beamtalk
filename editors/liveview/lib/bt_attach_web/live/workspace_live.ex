@@ -2370,13 +2370,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   # handle_info could hold the callback draining thousands of entries. Anything
   # beyond the cap stays in the mailbox and triggers another handle_info pass
   # naturally — no lines are lost, and the per-callback work stays bounded.
-  defp drain_transcript(acc) when length(acc) >= @transcript_scrollback_limit do
+  defp drain_transcript(acc, count \\ 1)
+
+  defp drain_transcript(acc, count) when count >= @transcript_scrollback_limit do
     Enum.reverse(acc)
   end
 
-  defp drain_transcript(acc) do
+  defp drain_transcript(acc, count) do
     receive do
-      {:transcript_output, text} -> drain_transcript([transcript_line(text) | acc])
+      {:transcript_output, text} ->
+        drain_transcript([transcript_line(text) | acc], count + 1)
     after
       0 -> Enum.reverse(acc)
     end
@@ -4298,7 +4301,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           class_definition_info(socket, class)
 
         # Keep the prior backing module if the re-fetch fails transiently
-        # (workspace unreachable → `{"", nil, nil, []}`): a `nil` here would hide
+        # (workspace unreachable → `{"", nil, nil, nil}`): a `nil` here would hide
         # the "Erlang backend" badge + pane toggle on an already-open tab while
         # `@native_view` still holds the fetched source. A successful re-fetch
         # always wins (the class of a `def:` tab does not change between
