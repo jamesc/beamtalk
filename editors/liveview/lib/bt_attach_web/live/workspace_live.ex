@@ -1196,8 +1196,27 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, assign(socket, show_browser: false)}
   end
 
+  # Close *only* the Inspector pane (BT-2611), not the whole right column. The `×`
+  # lives in the Inspector sub-pane header, so it must dismiss just the Inspector
+  # and leave the Bindings pane (and the column) visible — the whole-column
+  # show/hide stays on `toggle_inspector`/`.panel-toggle`. We reset the inspector
+  # target/rows/crumbs/error back to the empty state and tear down the live
+  # subscription via `track_object(nil)` so re-inspecting an object later rebinds
+  # cleanly. Unfreeze too, so a frozen pane doesn't reopen stale on the next
+  # inspect. `show_inspector` is intentionally left untouched.
   def handle_event("close_inspector", _params, socket) do
-    {:noreply, assign(socket, show_inspector: false)}
+    socket =
+      socket
+      |> assign(
+        inspect_target: nil,
+        inspect_rows: [],
+        inspect_crumbs: [],
+        inspect_error: nil,
+        inspect_frozen: false
+      )
+      |> track_object(nil)
+
+    {:noreply, socket}
   end
 
   # Drill into an object-valued field of a *floating window* (BT-2493): the field
@@ -7052,43 +7071,42 @@ defmodule BtAttachWeb.WorkspaceLive do
                        rendered to safe HTML by `BtAttach.DocFormat` (author text
                        is escaped first), so `{...}` interpolation is safe. --%>
                     <% doc_tab = active_tab(assigns) %>
+                    <%!-- The doc block earns its vertical space only when there's an
+                       actual `///` doc / class comment to collapse/expand (BT-2604).
+                       A method/class with no comment renders nothing here — its
+                       signature already shows in the breadcrumb and the editable
+                       source below — so the source sits directly under the
+                       breadcrumb with no bare signature line or extra gap. --%>
                     <section
-                      :if={doc_tab.doc || doc_tab.signature}
-                      class={"doc-block" <> if(doc_tab.doc && @doc_expanded, do: " open", else: "")}
+                      :if={doc_tab.doc}
+                      class={"doc-block" <> if(@doc_expanded, do: " open", else: "")}
                       aria-label="Documentation"
                     >
-                      <%!-- When the tab carries a `///` doc / class comment the
-                         signature line doubles as the collapse toggle (the body is
-                         also present verbatim in the editable source below, so it
-                         stays hidden until asked for). A method with only a
-                         signature has nothing to expand, so it renders as a plain,
-                         non-interactive line. --%>
-                      <%= if doc_tab.doc do %>
-                        <button
-                          type="button"
-                          class="doc-sig doc-toggle"
-                          phx-click="toggle_doc"
-                          aria-expanded={to_string(@doc_expanded)}
-                          aria-controls={if @doc_expanded, do: "doc-body-content"}
-                          title={
-                            if @doc_expanded,
-                              do: "Collapse documentation",
-                              else: "Expand documentation"
-                          }
-                        >
-                          <span class="doc-caret" aria-hidden="true">
-                            {if @doc_expanded, do: "▾", else: "▸"}
-                          </span>
-                          <span class="doc-sig-text">
-                            {doc_tab.signature || doc_summary_label(doc_tab)}
-                          </span>
-                        </button>
-                        <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
-                          {BtAttach.DocFormat.to_html(doc_tab.doc)}
-                        </div>
-                      <% else %>
-                        <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
-                      <% end %>
+                      <%!-- The signature line doubles as the collapse toggle; the
+                         body is also present verbatim in the editable source below,
+                         so it stays hidden until asked for. --%>
+                      <button
+                        type="button"
+                        class="doc-sig doc-toggle"
+                        phx-click="toggle_doc"
+                        aria-expanded={to_string(@doc_expanded)}
+                        aria-controls={if @doc_expanded, do: "doc-body-content"}
+                        title={
+                          if @doc_expanded,
+                            do: "Collapse documentation",
+                            else: "Expand documentation"
+                        }
+                      >
+                        <span class="doc-caret" aria-hidden="true">
+                          {if @doc_expanded, do: "▾", else: "▸"}
+                        </span>
+                        <span class="doc-sig-text">
+                          {doc_tab.signature || doc_summary_label(doc_tab)}
+                        </span>
+                      </button>
+                      <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
+                        {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                      </div>
                     </section>
                     <%!-- BT-2578: on a `self delegate` method (ADR 0056), a jump
                        to its Erlang implementation. Opens the class-definition
@@ -7435,8 +7453,8 @@ defmodule BtAttachWeb.WorkspaceLive do
                       type="button"
                       class="panel-close"
                       phx-click="close_inspector"
-                      aria-label="Close the Inspector and Bindings column"
-                      title="Close the Inspector + Bindings column"
+                      aria-label="Close the Inspector (the Bindings pane stays open)"
+                      title="Close the Inspector (the Bindings pane stays open)"
                     >
                       ×
                     </button>

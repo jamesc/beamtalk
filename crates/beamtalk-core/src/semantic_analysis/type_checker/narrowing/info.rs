@@ -57,4 +57,27 @@ pub(crate) struct NarrowingInfo {
     /// protocol in the registry and narrow to that protocol type instead
     /// of `Dynamic` (BT-1833).
     pub(crate) responded_selector: Option<EcoString>,
+    /// The singleton (in)equality tested in a `x = #foo` / `#foo = x`
+    /// narrowing (BT-2617).
+    ///
+    /// When set, the narrowing was detected from an (in)equality test against
+    /// a singleton symbol literal.  `detect` cannot know the variable's current
+    /// union type, so `true_type` / `false_type` are left provisional and
+    /// `refine_singleton_narrowing` in `inference.rs` resolves the variable's
+    /// type, sets the matching branch to the singleton, and subtracts the
+    /// singleton from the union for the complementary branch.
+    pub(crate) singleton_eq: Option<SingletonEqInfo>,
+}
+
+/// Details of a singleton (in)equality narrowing (`x = #foo`, BT-2617).
+#[derive(Debug, Clone)]
+pub(crate) struct SingletonEqInfo {
+    /// The singleton type name, including the leading `#` (e.g. `#infinity`).
+    /// Matches the `InferredType::Known { class_name }` spelling produced by
+    /// `type_resolver` for `TypeAnnotation::Singleton`.
+    pub(crate) singleton: EcoString,
+    /// Whether the test was an *inequality* (`/=`, `=/=`).  When true the
+    /// true/false branches are swapped relative to an equality test: the true
+    /// branch removes the singleton and the false branch narrows to it.
+    pub(crate) negated: bool,
 }
