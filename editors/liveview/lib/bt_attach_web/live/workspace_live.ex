@@ -7385,7 +7385,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                       class="doc-toggle-inline"
                       phx-click="toggle_doc"
                       aria-expanded={to_string(@doc_expanded)}
-                      title={if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"}
+                      title={
+                        if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"
+                      }
                     >
                       <span class="doc-caret">{if @doc_expanded, do: "▾", else: "▸"}</span>
                       <span class="doc-label">{doc_summary_label(doc_tab)}</span>
