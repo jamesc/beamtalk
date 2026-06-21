@@ -399,6 +399,14 @@ browse_method_source(ClassName, ClassSide, Selector) ->
     {binary() | null, binary() | null, binary() | null}.
 method_text_fields(_ClassPid, _ClassSide, _Selector, unindexed_runtime_fun) ->
     {null, null, null};
+%% BT-2614: synthetic methods (compiler-injected — value-type auto-accessors and
+%% actor `new`/`new:`/`spawn`/`spawn:` constructors) carry no editable user
+%% source. Short-circuit to null so the browser badges them read-only with no
+%% `[source]` jump. Without this, a class-side `spawn` would walk the superclass
+%% chain and surface `Actor`'s real `spawn` body under the subclass's synthetic
+%% row — an inconsistent, misleading "source" for a generated method.
+method_text_fields(_ClassPid, _ClassSide, _Selector, synthetic) ->
+    {null, null, null};
 method_text_fields(ClassPid, ClassSide, Selector, _SourceStatus) ->
     Call =
         case ClassSide of
@@ -1172,10 +1180,20 @@ declared_protocol(_Info) ->
 -spec protocol_from_source(
     atom(), beamtalk_xref:provenance(), beamtalk_xref:source_status()
 ) -> binary().
-protocol_from_source(_Selector, _Provenance, synthetic) ->
-    %% Synthetic methods are compiler-generated field accessors (ADR 0087) —
-    %% "accessing" by construction, no name inspection needed.
-    <<"accessing">>;
+protocol_from_source(Selector, _Provenance, synthetic) ->
+    %% Synthetic methods are compiler-generated. Two kinds:
+    %%   * BT-2614: the actor class-side constructors `new`/`new:`/`spawn`/`spawn:`
+    %%     are "instance creation" — the canonical Pharo protocol for them.
+    %%   * value-type field accessors (ADR 0087) are "accessing" by construction.
+    %% The selector name disambiguates exactly (a user accessor is never named
+    %% `new`/`spawn`), so no `class_side` threading is required.
+    case Selector of
+        'new' -> <<"instance creation">>;
+        'new:' -> <<"instance creation">>;
+        'spawn' -> <<"instance creation">>;
+        'spawn:' -> <<"instance creation">>;
+        _ -> <<"accessing">>
+    end;
 protocol_from_source(_Selector, extension, _SourceStatus) ->
     %% Tier 2 — package-extension provenance (ADR 0066) is a source fact that
     %% outranks the name heuristic.
