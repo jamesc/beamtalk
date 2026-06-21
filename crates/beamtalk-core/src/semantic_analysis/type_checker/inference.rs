@@ -30,6 +30,39 @@ use super::well_known::WellKnownClass;
 use super::{DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, narrowing};
 
 impl TypeChecker {
+    /// Joins the inferred element types of a collection literal into a single
+    /// element type (BT-2620).
+    ///
+    /// Delegates to [`InferredType::union_of`], which collapses a homogeneous
+    /// literal to its single element type (`#[1, 2, 3]` → `Integer`), joins a
+    /// heterogeneous one into a union (`#[1, "a"]` → `Integer | String`),
+    /// degrades to `Dynamic` if any element is itself `Dynamic`, and — for an
+    /// empty literal (no elements) — returns `Dynamic`, so `#[]` infers
+    /// `Array(Dynamic)`.
+    fn join_element_types(elements: &[InferredType]) -> InferredType {
+        InferredType::union_of(elements)
+    }
+
+    /// Extracts the element type contributed by a list literal `tail` (cons)
+    /// (BT-2620).
+    ///
+    /// A BEAM cons tail must be a list, so only a known `List(T)` contributes
+    /// its element type `T` to the literal's element join. Any other tail
+    /// carries no usable element information and widens the element to
+    /// `Dynamic` — including an `Array` (a distinct, tuple-backed type that
+    /// would form an *improper* list in cons position) and a bare, unannotated
+    /// `List`.
+    fn tail_element_type(tail_ty: &InferredType) -> InferredType {
+        match tail_ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name == "List" && !type_args.is_empty() => type_args[0].clone(),
+            _ => InferredType::Dynamic(DynamicReason::Unknown),
+        }
+    }
+
     /// Checks types in a module using the class hierarchy for method resolution.
     ///
     /// Method bodies are processed first so that inferred return types are
@@ -704,32 +737,66 @@ impl TypeChecker {
                 }
             }
 
-            // Map literal → Dictionary
+            // Map literal → Dictionary(K, V)
+            //
+            // BT-2620: join all key types and all value types independently
+            // (same union-join convention as the sequence literals below), so a
+            // homogeneous `{ 1 -> "a", 2 -> "b" }` infers `Dictionary(Integer,
+            // String)`. An empty `{}` infers `Dictionary(Dynamic, Dynamic)`.
             Expression::MapLiteral { pairs, .. } => {
+                // Infer key/value in interleaved source order (k1, v1, k2, v2, …)
+                // so any narrowing an expression applies to the shared `env`
+                // propagates exactly as it did before BT-2620 — the keys and
+                // values share one env (no per-pair `env.child()`), so order is
+                // observable.
+                let mut key_types: Vec<InferredType> = Vec::with_capacity(pairs.len());
+                let mut value_types: Vec<InferredType> = Vec::with_capacity(pairs.len());
                 for pair in pairs {
-                    self.infer_expr(&pair.key, hierarchy, env, in_abstract_method);
-                    self.infer_expr(&pair.value, hierarchy, env, in_abstract_method);
+                    key_types.push(self.infer_expr(&pair.key, hierarchy, env, in_abstract_method));
+                    value_types.push(self.infer_expr(
+                        &pair.value,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    ));
                 }
-                InferredType::known("Dictionary")
+                let key_ty = Self::join_element_types(&key_types);
+                let value_ty = Self::join_element_types(&value_types);
+                InferredType::known_with_args("Dictionary", vec![key_ty, value_ty])
             }
 
-            // List literal → List
+            // List literal → List(E)
+            //
+            // BT-2620: infer every element type (already done in the loop) and
+            // join them into a single element type via the union-join
+            // convention. A `tail` (cons) folds its own element type in when the
+            // tail is a known `List(T)`, otherwise widens the element to
+            // `Dynamic`.
             Expression::ListLiteral { elements, tail, .. } => {
-                for elem in elements {
-                    self.infer_expr(elem, hierarchy, env, in_abstract_method);
-                }
+                let mut element_types: Vec<InferredType> = elements
+                    .iter()
+                    .map(|elem| self.infer_expr(elem, hierarchy, env, in_abstract_method))
+                    .collect();
                 if let Some(t) = tail {
-                    self.infer_expr(t, hierarchy, env, in_abstract_method);
+                    let tail_ty = self.infer_expr(t, hierarchy, env, in_abstract_method);
+                    element_types.push(Self::tail_element_type(&tail_ty));
                 }
-                InferredType::known("List")
+                let element_ty = Self::join_element_types(&element_types);
+                InferredType::known_with_args("List", vec![element_ty])
             }
 
-            // Array literal → Array
+            // Array literal → Array(E)
+            //
+            // BT-2620: join the (already inferred) element types into a single
+            // element type. `#[1, 2, 3]` infers `Array(Integer)`, `#[]` infers
+            // `Array(Dynamic)`.
             Expression::ArrayLiteral { elements, .. } => {
-                for elem in elements {
-                    self.infer_expr(elem, hierarchy, env, in_abstract_method);
-                }
-                InferredType::known("Array")
+                let element_types: Vec<InferredType> = elements
+                    .iter()
+                    .map(|elem| self.infer_expr(elem, hierarchy, env, in_abstract_method))
+                    .collect();
+                let element_ty = Self::join_element_types(&element_types);
+                InferredType::known_with_args("Array", vec![element_ty])
             }
 
             // String interpolation → String
@@ -4771,7 +4838,17 @@ mod tests {
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::known("Dictionary"));
+        // BT-2620: empty map literal carries no key/value info → Dictionary(Dynamic, Dynamic).
+        assert_eq!(
+            ty,
+            InferredType::known_with_args(
+                "Dictionary",
+                vec![
+                    InferredType::Dynamic(DynamicReason::Unknown),
+                    InferredType::Dynamic(DynamicReason::Unknown),
+                ],
+            )
+        );
     }
 
     #[test]
@@ -4784,7 +4861,11 @@ mod tests {
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::known("Array"));
+        // BT-2620: homogeneous Integer elements → Array(Integer).
+        assert_eq!(
+            ty,
+            InferredType::known_with_args("Array", vec![InferredType::known("Integer")])
+        );
     }
 
     #[test]
@@ -4798,7 +4879,102 @@ mod tests {
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-        assert_eq!(ty, InferredType::known("List"));
+        // BT-2620: homogeneous Integer elements → List(Integer).
+        assert_eq!(
+            ty,
+            InferredType::known_with_args("List", vec![InferredType::known("Integer")])
+        );
+    }
+
+    #[test]
+    fn infer_expr_array_literal_heterogeneous_joins_to_union() {
+        // BT-2620: mixed element types join into a union element type.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::ArrayLiteral {
+            elements: vec![int_lit(1), str_lit("a")],
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(
+            ty,
+            InferredType::known_with_args(
+                "Array",
+                vec![InferredType::simple_union(&["Integer", "String"])]
+            )
+        );
+    }
+
+    #[test]
+    fn infer_expr_array_literal_empty_is_dynamic_element() {
+        // BT-2620: an empty literal carries no element info → Array(Dynamic).
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        let expr = Expression::ArrayLiteral {
+            elements: vec![],
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(
+            ty,
+            InferredType::known_with_args(
+                "Array",
+                vec![InferredType::Dynamic(DynamicReason::Unknown)]
+            )
+        );
+    }
+
+    #[test]
+    fn infer_expr_list_literal_folds_typed_tail_element() {
+        // BT-2620: a `List(Integer)` tail contributes its `Integer` element to
+        // the join, so `[1 | someIntList]` stays `List(Integer)`.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local(
+            "rest",
+            InferredType::known_with_args("List", vec![InferredType::known("Integer")]),
+        );
+        let expr = Expression::ListLiteral {
+            elements: vec![int_lit(1)],
+            tail: Some(Box::new(var("rest"))),
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(
+            ty,
+            InferredType::known_with_args("List", vec![InferredType::known("Integer")])
+        );
+    }
+
+    #[test]
+    fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
+        // BT-2620: an Array is not a valid BEAM cons tail (it would form an
+        // improper list), so it contributes no element type — folding a
+        // `Dynamic` into the join collapses the element to `Dynamic`, giving
+        // `List(Dynamic)` rather than a false `List(Integer)`.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local(
+            "rest",
+            InferredType::known_with_args("Array", vec![InferredType::known("Integer")]),
+        );
+        let expr = Expression::ListLiteral {
+            elements: vec![int_lit(1)],
+            tail: Some(Box::new(var("rest"))),
+            span: span(),
+        };
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(
+            ty,
+            InferredType::known_with_args(
+                "List",
+                vec![InferredType::Dynamic(DynamicReason::Unknown)]
+            )
+        );
     }
 
     #[test]

@@ -427,7 +427,17 @@ fn test_map_literal_infers_dictionary() {
     };
 
     let ty = checker.infer_expr(&map_expr, &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::known("Dictionary"));
+    // BT-2620: empty map literal → Dictionary(Dynamic, Dynamic).
+    assert_eq!(
+        ty,
+        InferredType::known_with_args(
+            "Dictionary",
+            vec![
+                InferredType::Dynamic(DynamicReason::Unknown),
+                InferredType::Dynamic(DynamicReason::Unknown),
+            ],
+        )
+    );
 }
 
 #[test]
@@ -443,7 +453,11 @@ fn test_list_literal_infers_list() {
     };
 
     let ty = checker.infer_expr(&list_expr, &hierarchy, &mut env, false);
-    assert_eq!(ty, InferredType::known("List"));
+    // BT-2620: homogeneous Integer elements → List(Integer).
+    assert_eq!(
+        ty,
+        InferredType::known_with_args("List", vec![InferredType::known("Integer")])
+    );
 }
 
 #[test]

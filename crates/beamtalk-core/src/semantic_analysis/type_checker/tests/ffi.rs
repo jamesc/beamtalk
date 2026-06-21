@@ -102,12 +102,18 @@ fn test_ffi_call_returns_typed_result() {
     checker.set_native_type_registry(lists_registry());
     checker.check_module(&module, &hierarchy);
 
-    // Check the type map — the outer message send should have type List
+    // Check the type map — the outer message send should have type List.
+    // BT-2620: the `#[1, 2, 3]` argument now infers `List(Integer)`, and the
+    // unary `[T] -> [T]` FFI spec for `reverse` propagates the element type
+    // through, so the call infers `List(Integer)` rather than bare `List`.
     let send_type = checker.type_map().get(span());
     assert_eq!(
         send_type,
-        Some(&InferredType::known("List")),
-        "FFI call should infer List return type"
+        Some(&InferredType::known_with_args(
+            "List",
+            vec![InferredType::known("Integer")]
+        )),
+        "FFI call should infer List(Integer) return type"
     );
 }
 
@@ -289,11 +295,16 @@ fn test_ffi_variable_tracking_through_assignment() {
     checker.set_native_type_registry(lists_registry());
     checker.check_module(&module, &hierarchy);
 
+    // BT-2620: the `#[1]` argument now infers `List(Integer)`, propagated
+    // through the unary `[T] -> [T]` spec, so the call infers `List(Integer)`.
     let send_type = checker.type_map().get(span());
     assert_eq!(
         send_type,
-        Some(&InferredType::known("List")),
-        "Variable-tracked FFI call should infer List return type"
+        Some(&InferredType::known_with_args(
+            "List",
+            vec![InferredType::known("Integer")]
+        )),
+        "Variable-tracked FFI call should infer List(Integer) return type"
     );
 }
 
