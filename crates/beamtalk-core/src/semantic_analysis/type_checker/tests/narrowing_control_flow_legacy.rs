@@ -572,6 +572,46 @@ fn test_refine_singleton_eq_all_removed_is_never() {
 }
 
 #[test]
+fn test_refine_singleton_eq_dynamic_variable_keeps_false_dynamic() {
+    // An unbound variable resolves to Dynamic; `x = #foo` narrows the true
+    // branch to #foo and leaves the false branch Dynamic — there is no union to
+    // subtract from (exercises the `_ => ty.clone()` arm of `union_without`).
+    let hierarchy = ClassHierarchy::with_builtins();
+    let env = TypeEnv::new(); // `x` is absent → Dynamic
+    let expr = msg_send(
+        var("x"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("foo")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    assert_eq!(refined.true_type, InferredType::known("#foo"));
+    assert_eq!(
+        refined.false_type,
+        Some(InferredType::Dynamic(DynamicReason::Unknown))
+    );
+}
+
+#[test]
+fn test_refine_singleton_symbol_left_inequality_swaps_branches() {
+    // `#infinity /= ms` — symbol on the left, negated. Same result as
+    // `ms /= #infinity`: true branch is the remainder (Integer), false branch
+    // is the singleton. (`negated` comes from the operator, not operand order.)
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("ms", InferredType::simple_union(&["Integer", "#infinity"]));
+    let expr = msg_send(
+        symbol_lit("infinity"),
+        MessageSelector::Binary("/=".into()),
+        vec![var("ms")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    assert_eq!(refined.true_type, InferredType::known("Integer"));
+    assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
+}
+
+#[test]
 fn test_narrowing_does_not_leak_outside_block() {
     // Verify narrowing is scoped to block only:
     //   process: x :: Object =>
