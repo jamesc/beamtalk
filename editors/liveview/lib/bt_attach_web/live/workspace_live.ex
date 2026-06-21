@@ -1437,38 +1437,14 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (source != the last-compiled base). Client-supplied, so a non-binary / absent
   # source is ignored rather than crashing.
   #
-  # On a *new-method* tab the form also carries the visible `selector` input. That
-  # input is controlled (`value={@edit_selector}`) and NOT `phx-update="ignore"`,
-  # so without capturing it here the server re-render (fired by typing in the
-  # CodeMirror source) would patch it back to `""` and wipe the author's typed
-  # selector — the next ⌘S would then fail the empty-selector guard. Mirror the
-  # payload's selector into `@edit_selector` so it survives the edit-source churn.
-  def handle_event("edit_source", %{"source" => source} = params, socket)
+  # A new-method tab no longer carries a separate selector input (BT-2606): the
+  # author writes the full method (signature + body) in the CodeMirror body, and
+  # the selector is parsed from that body on save — so there is nothing extra to
+  # mirror here. The breadcrumb derives its label live from the same tracked
+  # source (`breadcrumb/1`).
+  def handle_event("edit_source", %{"source" => source}, socket)
       when is_binary(source) do
-    socket = track_edit(socket, source)
-
-    socket =
-      case active_tab(socket.assigns) do
-        %{new: true} ->
-          case Map.get(params, "selector") do
-            sel when is_binary(sel) ->
-              # Mirror into BOTH the assign (so this render keeps the value) AND
-              # the tab struct (so `sync_active/2` restores it when the user
-              # switches away and back — otherwise the tab's `selector: ""` would
-              # wipe the typed name on re-focus).
-              socket
-              |> assign(edit_selector: sel)
-              |> update_active_tab(fn tab -> %{tab | selector: sel} end)
-
-            _ ->
-              socket
-          end
-
-        _ ->
-          socket
-      end
-
-    {:noreply, socket}
+    {:noreply, track_edit(socket, source)}
   end
 
   def handle_event("edit_source", _params, socket), do: {:noreply, socket}
@@ -2753,12 +2729,27 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Validate the edit form, then drive the write-surface save. Empty class or
-  # selector is a local validation error (rendered without a round-trip); a real
-  # save threads the body value straight to the workspace install chokepoint.
+  # Validate the edit form, then drive the write-surface save. Empty class or an
+  # un-derivable selector is a local validation error (rendered without a
+  # round-trip); a real save threads the body value straight to the workspace
+  # install chokepoint.
+  #
+  # On a *new-method* tab there is no selector input anymore (BT-2606): the author
+  # writes the full method (signature + body) in the body, so the selector is
+  # parsed from the source signature here and the form's (empty) `selector` field
+  # is ignored. An existing-method tab keeps the breadcrumb selector that rode the
+  # hidden field. The derived selector still passes through the `:save` op, where
+  # the compiler re-parses it from the body and rejects any mismatch — so a parse
+  # that disagrees with the compiler fails loudly rather than installing under the
+  # wrong key.
   defp save_method_body(socket, class, selector, source, tab_id) do
     class = String.trim(class)
-    selector = String.trim(selector)
+
+    selector =
+      case tab_id && find_tab(socket, tab_id) do
+        %{new: true} -> parse_method_signature_selector(source)
+        _ -> String.trim(selector)
+      end
 
     socket =
       assign(socket,
@@ -2772,7 +2763,10 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket, save_result: nil, save_error: "Enter a class name to save a method.")
 
       selector == "" ->
-        assign(socket, save_result: nil, save_error: "Enter a selector to save a method.")
+        assign(socket,
+          save_result: nil,
+          save_error: "Could not parse a method signature from the source."
+        )
 
       true ->
         case Facade.dispatch(
@@ -4449,8 +4443,135 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # The Class › side › selector breadcrumb label parts for the active tab.
   defp breadcrumb(%{kind: :def, class: class}), do: {class, nil, "class definition"}
-  defp breadcrumb(%{new: true, class: class, side: side}), do: {class, side, "new method"}
+  # A new-method tab has no stored selector yet (BT-2606): derive it live from the
+  # body the author is typing so the breadcrumb names the method as soon as a
+  # recognizable signature appears, falling back to the `new method` placeholder
+  # until then.
+  defp breadcrumb(%{new: true, class: class, side: side, source: source}) do
+    case parse_method_signature_selector(source) do
+      "" -> {class, side, "new method"}
+      selector -> {class, side, selector}
+    end
+  end
+
   defp breadcrumb(%{class: class, side: side, selector: selector}), do: {class, side, selector}
+
+  # Parse the selector from a method's source signature (BT-2606), returning `""`
+  # when no valid signature is present yet. The author writes the full method
+  # (`selector ... => body`) in the editor body; this recovers the selector the
+  # same way the compiler's method header grammar does, so the new-method tab no
+  # longer needs a separate selector input.
+  #
+  # It is intentionally conservative: a string it can't confidently read as a
+  # header returns `""` (treated as "no signature yet"). The authoritative parse
+  # still runs server-side in the `:save` op, which rejects a selector that
+  # disagrees with the compiled body — so this client-side read only has to be
+  # right for the breadcrumb hint and the pre-flight validation, never the install
+  # key of record.
+  defp parse_method_signature_selector(source) when is_binary(source) do
+    source
+    |> strip_leading_comments()
+    |> strip_method_modifiers()
+    |> selector_from_header()
+  end
+
+  defp parse_method_signature_selector(_source), do: ""
+
+  # Drop leading blank lines and whole-line `//` / `///` comments, returning the
+  # first line that begins a real method header (mirrors the backend
+  # `skip_leading_comments/1`).
+  defp strip_leading_comments(source) do
+    trimmed = String.trim_leading(source)
+
+    if String.starts_with?(trimmed, "//") do
+      case String.split(trimmed, "\n", parts: 2) do
+        [_comment, rest] -> strip_leading_comments(rest)
+        [_comment] -> ""
+      end
+    else
+      trimmed
+    end
+  end
+
+  # Drop leading method modifiers (`class`, `internal`, `sealed`) that may precede
+  # the selector, matching the parser's `parse_method_definition` modifier loop. A
+  # modifier word is only stripped when more header text follows it — a bare
+  # `class =>` is a method *named* `class`, not the `class` modifier.
+  defp strip_method_modifiers(header) do
+    case String.split(header, ~r/\s+/, parts: 2) do
+      [word, rest] when word in ["class", "internal", "sealed"] ->
+        # `class`/`internal`/`sealed` are modifiers only when a selector follows;
+        # if the next token opens the body (`=>`) or a return type (`->`), the
+        # word itself is the (unary) selector.
+        if String.starts_with?(rest, "=>") or String.starts_with?(rest, "->") do
+          header
+        else
+          strip_method_modifiers(rest)
+        end
+
+      _ ->
+        header
+    end
+  end
+
+  # Recover the selector token(s) from the start of a method header: a keyword
+  # selector (`at:put:` from `at: i put: v => …`), a binary selector (`+`, `->`,
+  # `>>`, … from `+ other => …`), or a unary selector (`increment` from
+  # `increment => …`). Returns `""` when the head doesn't read as a header (no
+  # `=>` before the first statement break, or an empty/blank head).
+  defp selector_from_header(""), do: ""
+
+  defp selector_from_header(header) do
+    # Only the header up to the body arrow / first statement break can contribute
+    # a selector — bail when there is no `=>` before a `.` or newline.
+    head =
+      header
+      |> String.split(~r/\r?\n/, parts: 2)
+      |> List.first()
+
+    cond do
+      not String.contains?(head, "=>") ->
+        ""
+
+      true ->
+        head
+        |> String.split("=>", parts: 2)
+        |> List.first()
+        |> selector_from_signature_text()
+    end
+  end
+
+  # Extract the selector from the text *before* the `=>` arrow. Keyword selectors
+  # are the concatenation of their `keyword:` parts (parameter names, type
+  # annotations and the return type are dropped); a binary selector is its leading
+  # operator; a unary selector is its single identifier.
+  defp selector_from_signature_text(sig) do
+    sig = String.trim(sig)
+
+    keyword_parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):/, sig, capture: :all_but_first)
+
+    cond do
+      sig == "" ->
+        ""
+
+      keyword_parts != [] ->
+        keyword_parts |> Enum.map(fn [k] -> k <> ":" end) |> Enum.join()
+
+      true ->
+        case Regex.run(~r/^([A-Za-z_][A-Za-z0-9_]*)/, sig) do
+          [_, ident] ->
+            ident
+
+          nil ->
+            # Binary selector: the leading run of operator characters (e.g. `+`,
+            # `->`, `>>`, `<=`). Anything else is not a recognizable header.
+            case Regex.run(~r/^([-+*\/~<>=&|@%^?]+)/, sig) do
+              [_, op] -> op
+              nil -> ""
+            end
+        end
+    end
+  end
 
   # The method shown in the focused tab as a `%{class, side, selector}` ref (or nil
   # for a class-definition tab), so the System Browser can highlight the matching
@@ -7229,28 +7350,18 @@ defmodule BtAttachWeb.WorkspaceLive do
                         <%!-- Class + selector ride the form as hidden fields — the
                            breadcrumb above is the canonical display of "which
                            class › selector this tab edits", so the old editable
-                           inputs were redundant for an EXISTING method. The one
-                           exception is a "new method" tab: its selector doesn't
-                           exist yet (the breadcrumb can't name it), so it keeps a
-                           visible selector input for the author to fill. The
-                           save_method payload (class + selector + source) shape is
-                           identical in every case. --%>
+                           inputs are redundant: the author types the full method
+                           (signature + body) in the CodeMirror body, exactly like
+                           editing an existing method. A "new method" tab has no
+                           selector yet, so it posts an empty hidden field and the
+                           save handler derives the selector by parsing the body's
+                           signature (BT-2606). The save_method payload (class +
+                           selector + source) shape is identical in every case. --%>
                         <input type="hidden" name="class" value={@edit_class} />
                         <% tab = active_tab(assigns) %>
                         <%= cond do %>
                           <% tab.kind == :def -> %>
                             <input type="hidden" name="selector" value="▸ class definition" />
-                          <% tab.new -> %>
-                            <label class="new-method-selector">
-                              <span class="nm-label mono">selector</span>
-                              <input
-                                class="field"
-                                name="selector"
-                                value={@edit_selector}
-                                autocomplete="off"
-                                spellcheck="false"
-                              />
-                            </label>
                           <% true -> %>
                             <input type="hidden" name="selector" value={@edit_selector} />
                         <% end %>

@@ -378,17 +378,6 @@
 #method-editor-form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 #method-editor-form .cm-wrap { flex: 1; min-height: 6rem; }
 
-/* New-method tab: the one editor surface that still shows a selector input (the
-   breadcrumb can't name a selector that doesn't exist yet). */
-.new-method-selector {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  margin-bottom: .5rem;
-}
-.new-method-selector .nm-label { color: var(--faint); flex: none; }
-.new-method-selector .field { flex: 1; }
-
 /* ============================================================================
    Tabbed method editor — write-surface tab strip + breadcrumb (BT-2494)
    ----------------------------------------------------------------------------
