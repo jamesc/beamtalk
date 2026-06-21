@@ -1869,6 +1869,15 @@ impl TypeChecker {
     /// - ALL non-nil members respond → no warning, return union of return types.
     /// - SOME non-nil members respond → DNU hint naming the non-responding members.
     /// - NO non-nil members respond → existing DNU warning.
+    /// Infer the result of sending `selector` to a union receiver.
+    ///
+    /// Note: the equality / identity comparison operators (`=`, `==`, `=:=`,
+    /// `/=`, `=/=`) short-circuit to `Boolean` without per-member resolution
+    /// (see the inline note). A member class that overrides `=` to return
+    /// something other than `Boolean` would therefore still infer `Boolean`
+    /// here — an intentional tradeoff matching the non-union `Meta` path, since
+    /// these operators are part of the universal `Object`/`ProtoObject`
+    /// protocol and are not modelled as per-class hierarchy methods.
     #[allow(clippy::too_many_lines)]
     fn infer_union_message_send(
         &mut self,
@@ -2315,6 +2324,9 @@ impl TypeChecker {
                         .iter()
                         .any(|c| c == class_name)
             }
+            // `Meta`, `Never`, etc. do not admit a singleton: a class object or
+            // a divergent value can never equal a symbol literal, so a
+            // `metaVar = #foo` test is correctly flagged "can never be true".
             _ => false,
         }
     }
