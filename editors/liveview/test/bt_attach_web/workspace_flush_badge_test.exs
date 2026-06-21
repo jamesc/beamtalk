@@ -274,20 +274,21 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
         |> render_click()
 
       # A new-method tab is open: the breadcrumb reads "new method" (no selector
-      # exists yet), and — uniquely among tabs — it shows a visible selector input
-      # for the author to fill.
+      # exists yet). There is no separate selector input anymore (BT-2606) — the
+      # author writes the full method in the body.
       assert opened =~ "new method"
-      assert opened =~ "new-method-selector"
+      refute opened =~ "new-method-selector"
       assert opened =~ "Counter ▸ new"
 
-      # Authoring + saving drives the same write-surface `save` as any method: the
-      # author-supplied selector rides the form, so the save reports it by name.
+      # Authoring + saving drives the same write-surface `save` as any method. The
+      # form posts no real selector (there is no input); the save handler parses it
+      # from the body signature, so the save reports it by name (BT-2606).
       saved =
         view
         |> form("form[phx-submit='save_method']")
         |> render_submit(%{
           "class" => "Counter",
-          "selector" => "greet",
+          "selector" => "",
           "source" => ~s|greet => "hi"|,
           "tab" => "new:Counter:instance"
         })
@@ -312,8 +313,9 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
       |> render_click()
 
-      # The selector input is blank until the author fills it — saving then trips
-      # the same empty-selector guard a method save always has.
+      # The body has no recognizable method signature (just `=> "hi"`), so the
+      # selector can't be parsed from it (BT-2606) — saving trips the local
+      # validation guard.
       html =
         view
         |> form("form[phx-submit='save_method']")
@@ -324,10 +326,12 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
           "tab" => "new:Counter:instance"
         })
 
-      assert html =~ "Enter a selector"
+      assert html =~ "Could not parse a method signature"
     end
 
-    test "a new-method tab keeps the typed selector across source edits", %{conn: conn} do
+    test "a new-method tab derives a keyword selector from the body on save (BT-2606)", %{
+      conn: conn
+    } do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
@@ -336,20 +340,24 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
       |> render_click()
 
-      # Typing in the CodeMirror source fires the form's phx-change="edit_source"
-      # carrying the selector input's current value. Without capturing it the
-      # server re-render would patch the (controlled, non-ignored) selector field
-      # back to "" — so a later ⌘S would fail the empty-selector guard. Drive that
-      # event and confirm the typed selector survives.
-      html =
+      # No selector input — the author writes the whole method (keyword signature +
+      # body) in the source, and the save handler parses the selector from it,
+      # concatenating the keyword parts into `at:put:` (BT-2606).
+      saved =
         view
         |> form("form[phx-submit='save_method']")
-        |> render_change(%{"source" => ~s|greet => "hi"|, "selector" => "greet"})
+        |> render_submit(%{
+          "class" => "Counter",
+          "selector" => "",
+          "source" => "at: i put: v => self",
+          "tab" => "new:Counter:instance"
+        })
 
-      assert html =~ ~s(name="selector" value="greet")
+      assert saved =~ "Saved at:put: on Counter"
     end
 
-    test "a new-method tab's typed selector survives a tab switch", %{conn: conn} do
+    test "a new-method tab's body survives a tab switch so its derived selector persists (BT-2606)",
+         %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
@@ -360,11 +368,10 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
       |> render_click()
 
-      # Type a selector — captured on the source change into both the assign and
-      # the tab struct.
+      # Type a full method body — tracked onto the tab struct as its source.
       view
       |> form("form[phx-submit='save_method']")
-      |> render_change(%{"source" => ~s|greet => "hi"|, "selector" => "greet"})
+      |> render_change(%{"source" => ~s|greet => "hi"|})
 
       # Switch away to the increment tab, then back to the new-method tab.
       view
@@ -378,8 +385,10 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
         |> element(~s(button[phx-click="tab_select"][phx-value-id="new:Counter:instance"]))
         |> render_click()
 
-      # `sync_active` restores the selector from the tab struct, not a blank "".
-      assert html =~ ~s(name="selector" value="greet")
+      # `sync_active` restores the body source from the tab struct, so the
+      # breadcrumb re-derives the `greet` selector instead of resetting to the
+      # "new method" placeholder.
+      assert html =~ "greet"
     end
 
     test "saving a new method whose selector is already open folds into that tab", %{conn: conn} do
