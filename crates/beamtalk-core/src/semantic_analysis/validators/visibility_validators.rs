@@ -1122,6 +1122,7 @@ mod tests {
             return_type: None,
             is_sealed: false,
             is_internal,
+            is_class_method: false,
             kind: MethodKind::Primary,
             expect: None,
             comments: CommentAttachment::default(),

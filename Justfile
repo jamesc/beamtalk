@@ -553,13 +553,13 @@ fmt-erlang:
 # (e.g. :clear, :bindings) that are not valid Beamtalk syntax.
 fmt-beamtalk:
     @echo "✨ Formatting Beamtalk source files..."
-    @cargo run --bin beamtalk --quiet -- fmt stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/repl-protocol/fixtures/
+    @cargo run --bin beamtalk --quiet -- fmt stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/repl-protocol/fixtures/ examples/
     @echo "✅ Beamtalk source files formatted"
 
 # Check Beamtalk source file formatting
 fmt-check-beamtalk:
     @echo "📋 Checking Beamtalk source formatting..."
-    @cargo run --bin beamtalk --quiet -- fmt-check stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/repl-protocol/fixtures/
+    @cargo run --bin beamtalk --quiet -- fmt-check stdlib/src/ stdlib/test/ stdlib/bootstrap-test/ tests/repl-protocol/fixtures/ examples/
     @echo "✅ Beamtalk formatting check passed"
 
 # Run Dialyzer on Erlang runtime

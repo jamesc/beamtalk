@@ -581,6 +581,7 @@ fn false_or_param_resolves_to_union() {
         return_type: None,
         is_sealed: false,
         is_internal: false,
+        is_class_method: false,
         kind: MethodKind::Primary,
         expect: None,
         comments: CommentAttachment::default(),

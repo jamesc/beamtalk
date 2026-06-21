@@ -12,6 +12,7 @@
 //   > LoggingCounterTest runAll
 
 TestCase subclass: LoggingCounterTest
+
   class serial -> Boolean => true
 
   setUp =>

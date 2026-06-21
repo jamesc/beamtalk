@@ -13,6 +13,7 @@
 //   > HanoiTest runAll
 
 TestCase subclass: HanoiTest
+
   class serial -> Boolean => true
 
   setUp =>

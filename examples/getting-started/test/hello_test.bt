@@ -9,6 +9,7 @@
 //   > HelloTest runAll
 
 TestCase subclass: HelloTest
+
   class serial -> Boolean => true
 
   setUp =>

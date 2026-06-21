@@ -395,6 +395,10 @@ impl Parser {
                         method.expect = Some(expect);
                     }
                     if is_class_method {
+                        // `parse_method_definition` also records the `class ` modifier,
+                        // but set it here too so every `class_methods` entry carries the
+                        // flag regardless of how the modifier was tokenised (BT-2594).
+                        method.is_class_method = true;
                         class_methods.push(method);
                     } else {
                         methods.push(method);
@@ -1045,7 +1049,7 @@ impl Parser {
         let method_kind = MethodKind::Primary;
         let mut method_is_sealed = false;
         let mut method_is_internal = false;
-        let mut _is_class_method = false;
+        let mut method_is_class = false;
 
         // Parse optional modifiers
         while let TokenKind::Identifier(name) = self.current_kind() {
@@ -1058,7 +1062,7 @@ impl Parser {
                         break;
                     }
                     if name == "class" {
-                        _is_class_method = true;
+                        method_is_class = true;
                     } else {
                         method_is_internal = true;
                     }
@@ -1100,6 +1104,7 @@ impl Parser {
             MethodModifiers {
                 is_sealed: method_is_sealed,
                 is_internal: method_is_internal,
+                is_class_method: method_is_class,
                 kind: method_kind,
             },
             span,

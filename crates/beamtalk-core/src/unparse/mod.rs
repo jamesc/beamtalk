@@ -40,9 +40,11 @@ use crate::ast::{
     ProtocolMethodSignature, StandaloneMethodDefinition, StateDeclaration, StringSegment,
     TypeAnnotation,
 };
-use crate::codegen::core_erlang::document::{Document, break_, concat, group, line, nest, nil};
+use crate::codegen::core_erlang::document::{
+    DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil,
+};
 use crate::docvec;
-use crate::source_analysis::{Severity, lex_with_eof, parse};
+use crate::source_analysis::{Severity, lex_with_eof, parse, parse_method};
 
 // --- Public entry points ---
 
@@ -74,7 +76,23 @@ pub fn unparse_method(method: &MethodDefinition) -> String {
     // (`unparse_class` / `unparse_module`) still preserves them in place.
     // A future change will surface section dividers as first-class method
     // categories instead of free comments (BT-2601).
-    unparse_method_definition_inner(method, nil(), EmitLeadingComments::No).to_pretty_string()
+    //
+    // The `class ` prefix is emitted from `method.is_class_method` so a class-side
+    // method's stored source matches its on-disk span (which includes `class `);
+    // whole-file unparse supplies the prefix from its own context instead (BT-2594).
+    unparse_method_definition_inner(method, class_prefix(method), EmitLeadingComments::No)
+        .to_pretty_string()
+}
+
+/// The signature prefix for a stand-alone per-method render: `class ` for a
+/// class-side method, nothing otherwise. Whole-file unparse passes its own
+/// prefix and does not use this (BT-2594).
+fn class_prefix(method: &MethodDefinition) -> Document<'static> {
+    if method.is_class_method {
+        Document::Str("class ")
+    } else {
+        nil()
+    }
 }
 
 /// Unparses a [`ClassDefinition`] to source text.
@@ -83,36 +101,68 @@ pub fn unparse_class(class: &ClassDefinition) -> String {
     unparse_class_definition(class).to_pretty_string()
 }
 
-/// Re-indents a canonical (column-0) method source so its least-indented line
-/// sits at `base_indent`, preserving relative indentation (BT-2584).
+/// Re-lays-out a canonical (column-0) method source at `base_indent`, so the
+/// result is byte-identical to what `bt fmt` (`unparse_module`) produces for the
+/// same method on disk at that indentation (ADR 0082 / BT-2584 / BT-2594).
 ///
-/// [`unparse_method`] always emits a method at column 0 with 2-space relative
-/// steps. On disk, that same method is indented under its class body (typically
-/// 2 spaces). To make the stored `source_ref` a *drop-in* for the on-disk
-/// byte-span slice — `source_ref == disk[span]` by construction, so flush can
-/// splice it verbatim with no reshaping — this function shifts the canonical
-/// body to the span's base indentation. It is the single sanctioned reshape,
-/// replacing the former `beamtalk_workspace_flush:reindent/2` Erlang heuristic.
+/// [`unparse_method`] renders a method at **column 0**, where the pretty-printer
+/// makes line-break decisions against the full 80-column budget. On disk the same
+/// method is indented under its class body, so it has `base_indent` fewer columns
+/// available and a line that fit inline at column 0 must break. A pure
+/// whitespace shift (the original BT-2584 behaviour) cannot *re-break* such a
+/// line, so the stored `source_ref` diverged from the on-disk span for any
+/// width-sensitive method — flushing it would reformat the file (BT-2594).
 ///
-/// Semantics, matching the byte-span slice [`crate::source_analysis::method_span`]
-/// produces:
+/// To make `source_ref == disk[span]` hold by construction, this re-parses the
+/// canonical body and re-renders it with the line-width budget reduced by the
+/// indent, then prepends `base_indent` to every non-blank line. Reducing the
+/// budget by the indent makes every break decision identically to rendering the
+/// method *at* `base_indent` — the uniform shift the disk slice has. The `class `
+/// prefix is preserved via [`MethodDefinition::is_class_method`], so class-side
+/// methods round-trip too.
 ///
-/// - The least leading-whitespace width across **non-blank** lines (normally 0
-///   for canonical output) is stripped from every line, then `base_indent` is
-///   prepended — so relative indentation inside the body is preserved.
-/// - **Blank lines** (whitespace-only, including empty) are emitted empty: no
-///   `base_indent`, no trailing whitespace. This mirrors how the disk slice
-///   renders blank lines between a doc comment and its method, and avoids
-///   introducing trailing-whitespace drift.
-/// - A trailing newline (the span includes the body's terminating newline) is
-///   preserved: a final empty segment after the last `\n` stays empty.
+/// Blank lines are emitted empty (no indent, no trailing whitespace) and the
+/// source's trailing-newline state is preserved, matching the disk slice
+/// [`crate::source_analysis::method_span`] produces.
 ///
-/// `base_indent` is expected to be a run of spaces/tabs (the leading whitespace
-/// of the on-disk definition's first line); any other content is prepended
-/// verbatim. An empty `base_indent` makes this the identity transform for
-/// canonical input.
+/// Falls back to a pure whitespace shift ([`shift_method_indent`]) when the
+/// source does not re-parse cleanly — a malformed or partial body must still get
+/// *some* re-indent rather than be dropped.
 #[must_use]
 pub fn reindent_method_source(base_indent: &str, source: &str) -> String {
+    let (method, diags) = parse_method(lex_with_eof(source));
+    let Some(method) = method.filter(|_| !diags.iter().any(|d| d.severity == Severity::Error))
+    else {
+        return shift_method_indent(base_indent, source);
+    };
+
+    // The indent costs one column per char (spaces/tabs are single-column here);
+    // reducing the budget by it makes break decisions as if rendered at the indent.
+    let indent_cols = isize::try_from(base_indent.chars().count()).unwrap_or(DEFAULT_LINE_WIDTH);
+    let rendered =
+        unparse_method_definition_inner(&method, class_prefix(&method), EmitLeadingComments::No)
+            .to_pretty_string_width(DEFAULT_LINE_WIDTH - indent_cols);
+
+    let reindented = shift_method_indent(base_indent, &rendered);
+    // `to_pretty_string_width` never emits a trailing newline; restore the
+    // source's so callers (the install hook's trailing-newline match) see the
+    // same shape the old reshape produced.
+    if source.ends_with('\n') && !reindented.ends_with('\n') {
+        let mut out = reindented;
+        out.push('\n');
+        out
+    } else {
+        reindented
+    }
+}
+
+/// Strips the shared leading indentation from `source` and re-prepends
+/// `base_indent` to every non-blank line, preserving relative indentation. Blank
+/// lines stay empty (no indent, no trailing whitespace). This is the pure
+/// whitespace shift — used to apply an already-correct layout's indentation, and
+/// as the fallback in [`reindent_method_source`] when re-layout is not possible.
+#[must_use]
+fn shift_method_indent(base_indent: &str, source: &str) -> String {
     let min_indent = source
         .split('\n')
         .filter(|line| !is_blank_line(line))
@@ -3147,50 +3197,66 @@ mod tests {
 
     #[test]
     fn reindent_preserves_relative_indentation() {
-        // A multi-line body keeps its 2-space relative step under the new base.
+        // A multi-statement body keeps its 2-space relative step under the new
+        // base (the body stays multi-line because it is genuinely > 1 statement).
         assert_eq!(
-            reindent_method_source("  ", "foo =>\n  body\n"),
-            "  foo =>\n    body\n"
+            reindent_method_source("  ", "foo =>\n  a\n  b\n"),
+            "  foo =>\n    a\n    b\n"
         );
     }
 
     #[test]
-    fn reindent_blank_line_between_doc_and_method_stays_empty() {
-        // Trivia edge case: a blank line between a doc comment and the method.
-        // The blank line is emitted empty (no base indent, no trailing space).
-        let src = "/// doc\n\nfoo => 1\n";
+    fn reindent_rebreaks_line_too_wide_at_indent() {
+        // BT-2594: the core re-layout property. A single-expression body that
+        // fits inline at column 0 (exactly 80 cols) must break to its own line
+        // once indented, because the indent steals from the width budget — a pure
+        // whitespace shift could not do this.
+        let src =
+            "compute => self firstThing + self secondThing + self thirdThing + moreStuffHereX\n";
+        // At column 0 it fits and stays inline.
+        assert_eq!(reindent_method_source("", src), src);
+        // Indented two spaces, the same body must break to the next line.
         assert_eq!(
             reindent_method_source("  ", src),
-            "  /// doc\n\n  foo => 1\n"
+            "  compute =>\n    self firstThing + self secondThing + self thirdThing + moreStuffHereX\n"
+        );
+    }
+
+    #[test]
+    fn reindent_preserves_blank_line_between_statements() {
+        // A blank line the author left between two body statements (BT-987) is
+        // preserved by the re-layout and shifted to the new base (blank stays
+        // empty — no indent, no trailing space).
+        assert_eq!(
+            reindent_method_source("  ", "foo =>\n  a\n\n  b\n"),
+            "  foo =>\n    a\n\n    b\n"
         );
     }
 
     #[test]
     fn reindent_inline_comment_preserved() {
-        // Trivia edge case: an inline `//` trailing comment rides along verbatim
-        // (it is part of the line's non-whitespace content).
+        // A trailing `//` comment rides along with its statement.
         let src = "foo => 1  // bump\n";
         assert_eq!(reindent_method_source("  ", src), "  foo => 1  // bump\n");
     }
 
     #[test]
-    fn reindent_multi_line_signature_keeps_continuation_indent() {
-        // Trivia edge case: a multi-line signature/body. Every non-blank line is
-        // shifted by the same base; relative structure is preserved.
-        let src = "incrementBy: n =>\n  (Erlang counter)\n    incrementBy: self by: n\n";
+    fn reindent_doc_comment_and_multiline_body() {
+        // A `///` doc comment sits directly above the signature, and a
+        // multi-statement body keeps its relative indentation.
+        let src = "/// doc\nfoo =>\n  a\n  b\n";
         assert_eq!(
             reindent_method_source("  ", src),
-            "  incrementBy: n =>\n    (Erlang counter)\n      incrementBy: self by: n\n"
+            "  /// doc\n  foo =>\n    a\n    b\n"
         );
     }
 
     #[test]
     fn reindent_tab_base_indent() {
-        // Trivia edge case: tab-indented files. A tab base indent is prepended
-        // verbatim to every non-blank line.
+        // A tab base indent is prepended verbatim to every non-blank line.
         assert_eq!(
-            reindent_method_source("\t", "foo =>\n  body\n"),
-            "\tfoo =>\n\t  body\n"
+            reindent_method_source("\t", "foo =>\n  a\n  b\n"),
+            "\tfoo =>\n\t  a\n\t  b\n"
         );
     }
 
@@ -3202,10 +3268,20 @@ mod tests {
     }
 
     #[test]
-    fn reindent_is_idempotent_on_disk_shape() {
-        // Re-indenting already-disk-shaped source to the same base is a no-op:
-        // the min-indent strip removes exactly the base it re-prepends.
-        let disk = "  /// doc\n\n  foo =>\n    body\n";
+    fn reindent_is_idempotent_on_canonical_disk_shape() {
+        // Re-indenting an already-canonical, already-disk-shaped method to the
+        // same base is a no-op.
+        let disk = "  /// doc\n  foo =>\n    a\n    b\n";
         assert_eq!(reindent_method_source("  ", disk), disk);
+    }
+
+    #[test]
+    fn reindent_emits_class_prefix_for_class_side_method() {
+        // BT-2594: the `class ` modifier is recovered from the re-parsed method
+        // and re-emitted, so a class-side method's stored source keeps its prefix.
+        assert_eq!(
+            reindent_method_source("  ", "class spawn => self new\n"),
+            "  class spawn => self new\n"
+        );
     }
 }

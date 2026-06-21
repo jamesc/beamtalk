@@ -3011,9 +3011,11 @@ mod property_tests {
 
     #[test]
     fn compile_method_preserves_source_and_compiles() {
-        // The bug shape: a `// --- … ---` banner over a `///` doc block over the
-        // header. The structured command must keep ALL of it in the returned
-        // canonical source AND emit Core Erlang for the merged class.
+        // A `// --- … ---` banner over a `///` doc block over the header. The
+        // per-method canonical `method_source` keeps the `///` doc block but drops
+        // the leading `//` banner — the banner is inter-method file structure, not
+        // part of the method's edit unit, and the byte span excludes it (BT-2594).
+        // It is preserved in the file via `merged_class_source` (whole-file unparse).
         let method_source = "// --- Execution CRUD ---\n\n/// Store a new workflow execution.\n/// Raises if the workflowId already exists.\ncreateExecution: execution :: Object -> Object =>\n  execution";
         let request = Term::from(Map::from([
             (atom("command"), atom("compile_method")),
@@ -3032,7 +3034,10 @@ mod property_tests {
             Some("createExecution:")
         );
         let ms = response_field_str(&response, "method_source").expect("method_source");
-        assert!(ms.contains("--- Execution CRUD ---"), "banner lost: {ms}");
+        assert!(
+            !ms.contains("--- Execution CRUD ---"),
+            "leading `//` banner should be dropped from per-method source: {ms}"
+        );
         assert!(
             ms.contains("/// Store a new workflow execution."),
             "first doc line lost: {ms}"

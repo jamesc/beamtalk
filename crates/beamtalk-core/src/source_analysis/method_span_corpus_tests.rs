@@ -443,10 +443,12 @@ fn match_trailing_newline(s: &str, reference: &str) -> String {
 /// reconciliation: whatever the install hook stores re-indents back to the slice
 /// it replaces.
 ///
-/// This deliberately does **not** route through `parse_method`/`unparse_method`:
-/// the unparser's *formatting* fidelity (width-based line breaking, idempotence
-/// on hand-formatted source) is a separate, pre-existing concern. BT-2584 only
-/// changes how an already-canonical body is re-indented for the splice.
+/// Since BT-2594 `reindent_method_source` re-lays-out at the target indent (it
+/// re-parses and re-renders, rather than only shifting whitespace), so this holds
+/// for the whole corpus only because the corpus is `bt fmt`-clean — i.e. every
+/// method's disk shape already *is* its canonical layout at the span's indent.
+/// `corpus_methods_round_trip_byte_identical` proves the complementary direction:
+/// the full `unparse_method` → reshape pipeline reproduces the disk slice.
 #[test]
 fn corpus_reshape_round_trip_is_byte_identical() {
     use crate::unparse::reindent_method_source;
@@ -512,28 +514,28 @@ fn corpus_reshape_round_trip_is_byte_identical() {
     );
 }
 
-/// BT-2584: for every method **already in the unparser's canonical form**, the
-/// full production pipeline reproduces `disk[span]` byte-for-byte.
+/// BT-2594: the full production save/flush pipeline reproduces `disk[span]`
+/// byte-for-byte for **every** method in the corpus — no skipped subset.
 ///
-/// This isolates the invariant BT-2584 actually owns from the unparser's
-/// pre-existing formatting fidelity. The live save pipeline is: the editor's
-/// bare body is re-parsed + re-emitted (`compile_method` → `unparse_method`),
-/// then the install hook re-indents that canonical body to the span's base and
-/// matches the slice's trailing newline. Whether `unparse_method` reproduces a
-/// hand-written method verbatim is a **separate, pre-existing** property (the
-/// corpus is not all canonically formatted — ~17% of methods are reformatted by
-/// the unparser, e.g. width-driven line breaking). BT-2584 does not change that.
+/// The live save pipeline is: the editor's bare body is re-parsed + re-emitted
+/// (`compile_method` → `unparse_method`), then the install hook re-indents that
+/// canonical body to the span's base (`reindent_method_source`) and matches the
+/// slice's trailing newline. For a *no-op* save of an unchanged method, the
+/// result must equal `disk[span]` exactly — otherwise saving silently reformats
+/// the file.
 ///
-/// What BT-2584 *must* guarantee is that the reindent + trailing-newline reshape
-/// introduces **no** divergence of its own: for a method whose on-disk body is
-/// already canonical (`unparse_method(parse(column0)) == column0`), the stored
-/// `source` must equal `disk[span]` exactly — otherwise the reshape itself
-/// (indentation or newline handling) is broken. This is the subset where
-/// "unchanged save → byte-identical flush" is genuinely promised, and it must be
-/// 100%. The canonical subset is the large majority of the corpus, so this is a
-/// strong proof, not a degenerate one.
+/// This previously held only for the subset whose on-disk body already matched
+/// the unparser's *column-0* layout (~80%); the rest diverged because
+/// `unparse_method` decides line breaks at column 0 while the method lives
+/// indented on disk (BT-2594, bucket 3), and because the per-method source
+/// dropped the `class ` prefix for class-side methods (bucket 2). With
+/// `reindent_method_source` re-laying-out at the target indent and
+/// `MethodDefinition::is_class_method` carrying the prefix, the pipeline is now
+/// byte-identical for the **whole** corpus — provided the corpus is `bt fmt`-clean
+/// (enforced for stdlib and examples by `fmt-check-beamtalk`). So this asserts
+/// 100%, not a majority subset.
 #[test]
-fn corpus_canonical_methods_round_trip_byte_identical() {
+fn corpus_methods_round_trip_byte_identical() {
     use crate::source_analysis::parse_method;
     use crate::unparse::{reindent_method_source, unparse_method};
 
@@ -541,7 +543,7 @@ fn corpus_canonical_methods_round_trip_byte_identical() {
         return;
     }
     let files = corpus_files();
-    let mut canonical_checked = 0usize;
+    let mut checked = 0usize;
     let mut failures: Vec<String> = Vec::new();
 
     for path in &files {
@@ -568,18 +570,11 @@ fn corpus_canonical_methods_round_trip_byte_identical() {
             let Some(method) = parsed else {
                 continue;
             };
+            // The full production pipeline: compiler-canonical body → install-hook
+            // reshape (re-layout at the span's indent + trailing-newline match).
             let canonical = unparse_method(&method);
+            checked += 1;
 
-            // Restrict to methods whose on-disk body is already canonical — the
-            // subset where flush is promised to be byte-identical. For the rest,
-            // the unparser (not BT-2584) reshapes, which is out of scope here.
-            if match_trailing_newline(&canonical, &column0) != column0 {
-                continue;
-            }
-            canonical_checked += 1;
-
-            // The install hook's reshape of the canonical body must reproduce the
-            // disk slice exactly — this is the BT-2584 guarantee.
             let reindented = reindent_method_source(base, &canonical);
             let stored = match_trailing_newline(&reindented, disk_slice);
             if stored != disk_slice {
@@ -596,15 +591,13 @@ fn corpus_canonical_methods_round_trip_byte_identical() {
 
     assert!(
         failures.is_empty(),
-        "{} canonical method(s) did not round-trip byte-identical — the reshape \
-         (reindent + trailing-newline) is broken, not the unparser:\n{}",
+        "{} method(s) did not round-trip byte-identical through the save/flush \
+         pipeline — a no-op save would reformat them:\n{}",
         failures.len(),
         failures.join("\n\n")
     );
-    // The canonical subset must be the large majority, or the proof is degenerate.
     assert!(
-        canonical_checked > 100,
-        "expected >100 already-canonical methods to validate the reshape against, \
-         only found {canonical_checked}"
+        checked > 100,
+        "expected >100 methods to validate the pipeline against, only found {checked}"
     );
 }

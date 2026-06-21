@@ -677,6 +677,7 @@ mod tests {
                         kind: MethodKind::Primary,
                         is_sealed: false,
                         is_internal: false,
+                        is_class_method: false,
                         expect: None,
                         comments: CommentAttachment::default(),
                         doc_comment: None,

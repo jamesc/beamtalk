@@ -23,8 +23,7 @@ Value subclass: HtmlBuilder
     self withElement: (self.element attribute: key value: val)
 
   /// Set the text content of the element under construction.
-  withText: t =>
-    self withElement: (self.element text: t)
+  withText: t => self withElement: (self.element text: t)
 
   /// Finalise construction and return the built HtmlElement.
   build => self.element
