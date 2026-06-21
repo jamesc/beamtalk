@@ -89,7 +89,7 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
       assert html =~ "<code>c increment</code>"
     end
 
-    test "a method with no doc-comment shows only its signature", %{conn: conn} do
+    test "a method with no doc-comment renders no doc block at all (BT-2604)", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
@@ -99,10 +99,15 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
         |> element(~s(div[phx-value-selector="value"]))
         |> render_click()
 
-      assert html =~ ~s(class="doc-block")
-      assert html =~ "value -&gt; Integer"
-      # No `///` doc → no rendered doc body.
+      # BT-2604: with no `///` doc-comment the read-only doc block earns no space.
+      # A bare signature line would only duplicate the breadcrumb and the editable
+      # source below, so the whole block collapses away — the source sits directly
+      # under the breadcrumb.
+      refute html =~ ~s(class="doc-block")
       refute html =~ ~s(class="doc-body")
+      # No bare signature line is left behind either — the breadcrumb still names
+      # the method, so the source sits directly beneath it.
+      refute html =~ ~s(class="doc-sig")
     end
 
     test "the expanded state is sticky across tab switches", %{conn: conn} do
@@ -115,9 +120,10 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
       html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
       assert html =~ ~s(class="doc-body")
 
-      # Switching to a method with no doc collapses to a plain signature (nothing
-      # to expand) but must not reset the preference…
+      # Switching to a method with no doc renders no doc block at all (BT-2604),
+      # but must not reset the expand preference…
       html = view |> element(~s(div[phx-value-selector="value"])) |> render_click()
+      refute html =~ ~s(class="doc-block")
       refute html =~ ~s(class="doc-body")
 
       # …so returning to the doc'd method shows the body again *without* re-toggling.

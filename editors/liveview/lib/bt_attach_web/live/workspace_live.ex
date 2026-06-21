@@ -7009,43 +7009,42 @@ defmodule BtAttachWeb.WorkspaceLive do
                        rendered to safe HTML by `BtAttach.DocFormat` (author text
                        is escaped first), so `{...}` interpolation is safe. --%>
                     <% doc_tab = active_tab(assigns) %>
+                    <%!-- The doc block earns its vertical space only when there's an
+                       actual `///` doc / class comment to collapse/expand (BT-2604).
+                       A method/class with no comment renders nothing here — its
+                       signature already shows in the breadcrumb and the editable
+                       source below — so the source sits directly under the
+                       breadcrumb with no bare signature line or extra gap. --%>
                     <section
-                      :if={doc_tab.doc || doc_tab.signature}
-                      class={"doc-block" <> if(doc_tab.doc && @doc_expanded, do: " open", else: "")}
+                      :if={doc_tab.doc}
+                      class={"doc-block" <> if(@doc_expanded, do: " open", else: "")}
                       aria-label="Documentation"
                     >
-                      <%!-- When the tab carries a `///` doc / class comment the
-                         signature line doubles as the collapse toggle (the body is
-                         also present verbatim in the editable source below, so it
-                         stays hidden until asked for). A method with only a
-                         signature has nothing to expand, so it renders as a plain,
-                         non-interactive line. --%>
-                      <%= if doc_tab.doc do %>
-                        <button
-                          type="button"
-                          class="doc-sig doc-toggle"
-                          phx-click="toggle_doc"
-                          aria-expanded={to_string(@doc_expanded)}
-                          aria-controls={if @doc_expanded, do: "doc-body-content"}
-                          title={
-                            if @doc_expanded,
-                              do: "Collapse documentation",
-                              else: "Expand documentation"
-                          }
-                        >
-                          <span class="doc-caret" aria-hidden="true">
-                            {if @doc_expanded, do: "▾", else: "▸"}
-                          </span>
-                          <span class="doc-sig-text">
-                            {doc_tab.signature || doc_summary_label(doc_tab)}
-                          </span>
-                        </button>
-                        <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
-                          {BtAttach.DocFormat.to_html(doc_tab.doc)}
-                        </div>
-                      <% else %>
-                        <div :if={doc_tab.signature} class="doc-sig">{doc_tab.signature}</div>
-                      <% end %>
+                      <%!-- The signature line doubles as the collapse toggle; the
+                         body is also present verbatim in the editable source below,
+                         so it stays hidden until asked for. --%>
+                      <button
+                        type="button"
+                        class="doc-sig doc-toggle"
+                        phx-click="toggle_doc"
+                        aria-expanded={to_string(@doc_expanded)}
+                        aria-controls={if @doc_expanded, do: "doc-body-content"}
+                        title={
+                          if @doc_expanded,
+                            do: "Collapse documentation",
+                            else: "Expand documentation"
+                        }
+                      >
+                        <span class="doc-caret" aria-hidden="true">
+                          {if @doc_expanded, do: "▾", else: "▸"}
+                        </span>
+                        <span class="doc-sig-text">
+                          {doc_tab.signature || doc_summary_label(doc_tab)}
+                        </span>
+                      </button>
+                      <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
+                        {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                      </div>
                     </section>
                     <%!-- BT-2578: on a `self delegate` method (ADR 0056), a jump
                        to its Erlang implementation. Opens the class-definition

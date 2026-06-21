@@ -467,12 +467,6 @@
 }
 .doc-block .doc-caret { color: var(--muted); font-size: 10px; flex: none; }
 .doc-block .doc-sig-text { flex: 1 1 auto; min-width: 0; }
-/* The signature-only (non-collapsible) line keeps its original spacing/divider.
-   Scoped to `div.doc-sig` so it doesn't also hit the toggle button (which shares
-   the `.doc-sig` class but draws its divider only when `.open`). */
-.doc-block > div.doc-sig {
-  margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
-}
 .doc-block .doc-body .doc-h {
   color: var(--ink); font-size: 12px; font-weight: 700;
   margin: 8px 0 4px; line-height: 1.3;
