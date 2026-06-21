@@ -144,7 +144,7 @@
 .topbar {
   display: flex; align-items: center; gap: 14px;
   background: var(--panel); border: 1px solid var(--line);
-  border-radius: 9px; padding: 0 12px; height: 46px;
+  border-radius: 9px; padding: 0 12px; height: 38px;
   box-shadow: var(--shadow); flex: none;
 }
 .brand { display: flex; align-items: baseline; gap: 8px; }
@@ -729,7 +729,7 @@
    hit targets that tint on hover. */
 .split-gutter { flex: none; background: transparent; border-radius: 3px; }
 .split-gutter:hover { background: var(--accent); }
-.split-gutter-y { height: 6px; margin: calc(var(--gap) / -2) 0; cursor: row-resize; }
+.split-gutter-y { height: 8px; margin: calc(var(--gap) / -2) 0; cursor: row-resize; }
 .split-gutter-x {
   position: absolute; top: 0; bottom: 0; width: 8px; z-index: 6; cursor: col-resize;
 }

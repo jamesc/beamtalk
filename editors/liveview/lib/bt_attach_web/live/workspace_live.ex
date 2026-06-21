@@ -7416,10 +7416,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                       ⚡
                     </span>
                     <span :if={@role != :owner} class="meta-note read-only">
-                      read-only · Observer
+                      read-only
                     </span>
                     <span :if={@role == :owner and active_tab(assigns).new} class="meta-note edited">
-                      new method — ⌘S to compile
+                      new
                     </span>
                     <span
                       :if={
@@ -7427,7 +7427,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                       }
                       class="meta-note edited"
                     >
-                      edited — ⌘S to compile
+                      edited
                     </span>
                     <span
                       :if={
@@ -7461,7 +7461,6 @@ defmodule BtAttachWeb.WorkspaceLive do
                       class="native-delegate-link"
                     >
                       <span class="native-badge">Native delegate</span>
-                      <span class="native-delegate-note">Implemented in the Erlang backend.</span>
                       <button
                         type="button"
                         class="native-toggle"
@@ -7469,7 +7468,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                         phx-value-class={doc_tab.class}
                         phx-value-selector={doc_tab.selector}
                       >
-                        → Erlang implementation
+                        → Erlang source
                       </button>
                     </div>
                     <%!-- BT-2578: read-only native backing-source pane. On a

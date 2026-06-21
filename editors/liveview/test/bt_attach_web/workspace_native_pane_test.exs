@@ -156,7 +156,7 @@ defmodule BtAttachWeb.WorkspaceNativePaneTest do
 
       # The method tab offers the jump to its Erlang implementation.
       assert html =~ "Native delegate"
-      assert html =~ "→ Erlang implementation"
+      assert html =~ "→ Erlang source"
 
       # Jumping opens the class-definition tab's native pane with readLine's
       # handle_call clause resolved and highlighted.
