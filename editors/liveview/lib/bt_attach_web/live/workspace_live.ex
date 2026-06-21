@@ -6648,7 +6648,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                    `hidden`, not removed) so the `#transcript` stream container is
                    always in the DOM for `stream_insert` regardless of the active
                    tab. --%>
-              <div class={["dock", !@show_dock && "collapsed"]} style="order:2;" inert={!@show_dock}>
+              <div class={["dock", !@show_dock && "collapsed"]} style="order:3;" inert={!@show_dock}>
                 <div id="workspace-dock" class="panel">
                   <div class="panel-head">
                     <span class="dock-tabs" role="tablist">
@@ -7272,6 +7272,29 @@ defmodule BtAttachWeb.WorkspaceLive do
                 Workspace ▴
               </button>
 
+              <%!-- Draggable divider (BT-2576) between the method editor and the
+                   workspace dock. The SplitDrag hook writes `--dock-h` on this
+                   `.col` parent; the dock reads it. Hidden when the dock is
+                   collapsed. --%>
+              <div
+                :if={@show_dock}
+                id="dock-split-gutter"
+                class="split-gutter split-gutter-y"
+                phx-hook="SplitDrag"
+                phx-update="ignore"
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Resize the editor and workspace dock"
+                data-split="dock"
+                data-axis="y"
+                data-edge="end"
+                data-var="--dock-h"
+                data-min="100"
+                data-min-other="120"
+                style="order:2;"
+              >
+              </div>
+
               <%!-- TABBED METHOD EDITOR (BT-2494): the spike's write-surface.
                    A tab strip (methods + class definitions) over a breadcrumb
                    and the BT-2485 highlighted editor. The single save_method
@@ -7354,6 +7377,19 @@ defmodule BtAttachWeb.WorkspaceLive do
                     >
                       {badge.label}
                     </span>
+                    <%!-- Doc toggle inline on the breadcrumb line (BT-2604). --%>
+                    <% doc_tab = active_tab(assigns) %>
+                    <button
+                      :if={doc_tab.doc != nil}
+                      type="button"
+                      class="doc-toggle-inline"
+                      phx-click="toggle_doc"
+                      aria-expanded={to_string(@doc_expanded)}
+                      title={if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"}
+                    >
+                      <span class="doc-caret">{if @doc_expanded, do: "▾", else: "▸"}</span>
+                      <span class="doc-label">{doc_summary_label(doc_tab)}</span>
+                    </button>
                     <span class="spacer"></span>
                     <%!-- image-divergence badges carried from the browse snapshot
                        (the indicators the old read-only Method Source pane showed):
@@ -7403,53 +7439,17 @@ defmodule BtAttachWeb.WorkspaceLive do
                   </div>
 
                   <div class="panel-body">
-                    <%!-- Read-only documentation block (BT-2558): the active
-                       method's signature + rendered `///` doc-comment, or — on a
-                       class-definition tab — the class comment. Distinct from the
-                       editable source body below, and shown to every role (it
-                       rides the `:read`-capability browse ops). The doc text is
-                       rendered to safe HTML by `BtAttach.DocFormat` (author text
-                       is escaped first), so `{...}` interpolation is safe. --%>
-                    <% doc_tab = active_tab(assigns) %>
-                    <%!-- The doc block earns its vertical space only when there's an
-                       actual `///` doc / class comment to collapse/expand (BT-2604).
-                       A method/class with no comment renders nothing here — its
-                       signature already shows in the breadcrumb and the editable
-                       source below — so the source sits directly under the
-                       breadcrumb with no bare signature line or extra gap. --%>
-                    <section
-                      :if={doc_tab.doc}
-                      class={"doc-block" <> if(@doc_expanded, do: " open", else: "")}
-                      aria-label="Documentation"
+                    <%!-- Read-only documentation body (BT-2558, BT-2604): the toggle
+                       now lives on the breadcrumb line; here we only render the
+                       expanded doc body when the user has opened it. `doc_tab` is
+                       already bound in the breadcrumb section above. --%>
+                    <div
+                      :if={doc_tab.doc != nil and @doc_expanded}
+                      id="doc-body-content"
+                      class="doc-body-inline"
                     >
-                      <%!-- A short generic label is the collapse toggle — never the
-                         method signature, which already shows in the breadcrumb and
-                         as the first line of the editable source below (BT-2604).
-                         The rendered doc body is the same `///` text from that source,
-                         so it stays hidden until asked for. --%>
-                      <button
-                        type="button"
-                        class="doc-sig doc-toggle"
-                        phx-click="toggle_doc"
-                        aria-expanded={to_string(@doc_expanded)}
-                        aria-controls={if @doc_expanded, do: "doc-body-content"}
-                        title={
-                          if @doc_expanded,
-                            do: "Collapse documentation",
-                            else: "Expand documentation"
-                        }
-                      >
-                        <span class="doc-caret" aria-hidden="true">
-                          {if @doc_expanded, do: "▾", else: "▸"}
-                        </span>
-                        <span class="doc-sig-text">
-                          {doc_summary_label(doc_tab)}
-                        </span>
-                      </button>
-                      <div :if={@doc_expanded} id="doc-body-content" class="doc-body">
-                        {BtAttach.DocFormat.to_html(doc_tab.doc)}
-                      </div>
-                    </section>
+                      {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                    </div>
                     <%!-- BT-2578: on a `self delegate` method (ADR 0056), a jump
                        to its Erlang implementation. Opens the class-definition
                        tab's native pane with this selector's `handle_call` clause
@@ -7636,11 +7636,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                             <.nav_popover nav={@nav_popover} />
                           </div>
                           <span class="spacer"></span>
-                          <button class="btn primary" type="submit">
+                          <button class="btn btn-sm primary" type="submit">
                             Compile <span class="k">⌘S</span>
                           </button>
-                          <button class="btn" type="button" phx-click="flush">
-                            Save All to Disk (flush)
+                          <button class="btn btn-sm" type="button" phx-click="flush">
+                            Save All to Disk
                           </button>
                         </div>
                       </form>
