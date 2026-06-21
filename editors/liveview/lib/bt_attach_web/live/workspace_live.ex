@@ -3844,10 +3844,11 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp doc_text(_), do: nil
 
-  # Summary label for the collapsible doc block (BT-2558) when there is no method
-  # signature to show — i.e. a class-definition tab, whose doc *is* the class
-  # comment. The breadcrumb already names the class, so a short generic label reads
-  # cleanly as the collapse toggle.
+  # Label for the collapsible doc block's toggle (BT-2558, BT-2604). Deliberately a
+  # short generic label rather than the method signature: the signature already shows
+  # in the breadcrumb and as the first line of the editable source below, so repeating
+  # it on the toggle just triples it. A class-definition tab's doc *is* the class
+  # comment, hence the distinct wording.
   defp doc_summary_label(%{kind: :def}), do: "Class comment"
   defp doc_summary_label(_), do: "Documentation"
 
@@ -7421,8 +7422,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                       class={"doc-block" <> if(@doc_expanded, do: " open", else: "")}
                       aria-label="Documentation"
                     >
-                      <%!-- The signature line doubles as the collapse toggle; the
-                         body is also present verbatim in the editable source below,
+                      <%!-- A short generic label is the collapse toggle — never the
+                         method signature, which already shows in the breadcrumb and
+                         as the first line of the editable source below (BT-2604).
+                         The rendered doc body is the same `///` text from that source,
                          so it stays hidden until asked for. --%>
                       <button
                         type="button"
@@ -7440,7 +7443,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           {if @doc_expanded, do: "▾", else: "▸"}
                         </span>
                         <span class="doc-sig-text">
-                          {doc_tab.signature || doc_summary_label(doc_tab)}
+                          {doc_summary_label(doc_tab)}
                         </span>
                       </button>
                       <div :if={@doc_expanded} id="doc-body-content" class="doc-body">

@@ -58,7 +58,7 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
   end
 
   describe "method doc block (BT-2558)" do
-    test "selecting a method shows its signature and rendered doc-comment", %{conn: conn} do
+    test "selecting a method shows a doc toggle and rendered doc-comment", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
       # Select Counter (always present in the stub), then open the `increment`
@@ -72,15 +72,19 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
 
       # The doc block is present, distinct from the editable source.
       assert html =~ ~s(class="doc-block")
-      # Signature (HEEx-escaped `->`) — always visible as the collapse toggle.
-      assert html =~ "increment -&gt; Counter"
+      # The toggle carries a short generic label (BT-2604), never the method
+      # signature — that already shows in the breadcrumb and the editable source,
+      # so repeating it on the toggle would just triple it.
+      assert html =~ ~s(class="doc-sig-text")
+      assert html =~ "Documentation"
+      refute html =~ "increment -&gt; Counter"
       # Collapsed by default (BT-2558): the rendered body (which is also present
       # verbatim in the editable source) is hidden until expanded, so the docs
       # aren't shown twice and don't crowd the editor.
       refute html =~ ~s(class="doc-body")
 
       # Expanding the block reveals the rendered Markdown: prose, a heading, fenced
-      # code. The signature line doubles as the toggle (phx-click="toggle_doc").
+      # code. The generic label doubles as the toggle (phx-click="toggle_doc").
       html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
 
       assert html =~ ~s(class="doc-body")
@@ -147,7 +151,8 @@ defmodule BtAttachWeb.WorkspaceDocBlockTest do
         |> render_click()
 
       assert html =~ ~s(class="doc-block")
-      assert html =~ "increment -&gt; Counter"
+      assert html =~ "Documentation"
+      refute html =~ "increment -&gt; Counter"
       # The toggle is present and expands the body for an observer too.
       html = view |> element(~s(button[phx-click="toggle_doc"])) |> render_click()
       assert html =~ ~s(class="doc-body")

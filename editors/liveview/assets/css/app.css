@@ -465,13 +465,14 @@
    ========================================================================== */
 .doc-block {
   flex: none; overflow: auto;
-  margin-bottom: 8px; padding: 8px 10px;
+  margin-bottom: 6px; padding: 3px 10px;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
-  font-size: 12px; line-height: 1.5; color: var(--muted);
+  font-size: 12px; line-height: 1.4; color: var(--muted);
 }
-/* Cap the height only when expanded, so a long doc scrolls instead of crowding
-   the editor; collapsed, the block hugs its single summary line. */
-.doc-block.open { max-height: 40%; }
+/* Collapsed, the block is a single tight toggle row (the padding above hugs it).
+   Expanded, restore the roomier padding and cap the height so a long doc scrolls
+   instead of crowding the editor. */
+.doc-block.open { max-height: 40%; padding: 8px 10px; line-height: 1.5; }
 /* `white-space: normal` (not `pre-wrap`): this rule is inherited by the toggle's
    `.doc-caret` / `.doc-sig-text` spans, whose content carries the HEEx template's
    own indentation whitespace and newlines. `pre-wrap` would render that leading
