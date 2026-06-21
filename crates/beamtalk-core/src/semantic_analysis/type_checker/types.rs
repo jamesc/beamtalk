@@ -210,6 +210,20 @@ impl InferredType {
         }
     }
 
+    /// Creates a known generic type `class_name(type_args...)` with `Inferred`
+    /// provenance — e.g. `Array(Integer)` or `Dictionary(Integer, String)`.
+    ///
+    /// For non-generic types prefer [`known`](Self::known). Passing an empty
+    /// `type_args` is equivalent to `known`.
+    #[must_use]
+    pub fn known_with_args(class_name: impl Into<EcoString>, type_args: Vec<Self>) -> Self {
+        Self::Known {
+            class_name: class_name.into(),
+            type_args,
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
     /// Creates a [`Meta`](InferredType::Meta) metatype with `Inferred`
     /// provenance — the type of the class object `class_name class`.
     ///
