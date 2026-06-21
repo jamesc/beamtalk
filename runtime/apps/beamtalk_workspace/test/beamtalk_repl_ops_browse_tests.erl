@@ -1159,7 +1159,9 @@ stop_meta(Pid) when is_pid(Pid) ->
     exit(Pid, shutdown),
     receive
         {'DOWN', Ref, process, Pid, _} -> ok
-    after 2000 -> ok
+    after 2000 ->
+        erlang:demonitor(Ref, [flush]),
+        ok
     end.
 
 make_project_dir(Pkg) ->
