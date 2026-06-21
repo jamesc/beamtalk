@@ -1496,6 +1496,10 @@ new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
                     domain => [beamtalk, runtime]
                 }
             ),
+            %% BT-2594 deliberately re-introduces this memory-only path that
+            %% BT-2592 removed: the pure-Erlang shift was total but reshaped
+            %% width-sensitive methods wrongly; port re-layout is correct, at the
+            %% cost of a rare transient-failure downgrade.
             Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
     end.
 
@@ -1583,6 +1587,9 @@ store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSou
                     domain => [beamtalk, runtime]
                 }
             ),
+            %% BT-2594 deliberately re-introduces this memory-only path that
+            %% BT-2592 removed (see new_method_entry/3): port re-layout is correct
+            %% where the pure-Erlang shift reshaped width-sensitive methods wrongly.
             Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
     end.
 
