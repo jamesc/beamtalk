@@ -21,6 +21,7 @@ mod is_kind_of;
 mod is_nil;
 mod is_result;
 mod responds_to;
+mod singleton_eq;
 
 /// A single narrowing pattern.
 ///
@@ -40,7 +41,10 @@ pub(crate) struct NarrowingRule {
 /// receiver is a unary `class` send, which none of the other rules inspect.
 /// The unary-selector rules (`is_nil`, `is_result`) discriminate on the
 /// selector name. Keyword-selector rules (`is_kind_of`, `responds_to`)
-/// discriminate on the first keyword. So any order is correct; we list them
+/// discriminate on the first keyword. `singleton_eq` runs on a binary
+/// `=` / `=:=` / `/=` / `=/=` send with exactly one Symbol-literal operand —
+/// distinct from `class_eq` (whose operand is a `ClassReference` and whose
+/// inner receiver is a `class` send). So any order is correct; we list them
 /// grouped by shape for readability.
 pub(crate) static RULES: &[NarrowingRule] = &[
     is_nil::RULE,
@@ -49,4 +53,5 @@ pub(crate) static RULES: &[NarrowingRule] = &[
     responds_to::RULE,
     is_kind_of::RULE,
     class_eq::RULE,
+    singleton_eq::RULE,
 ];
