@@ -4085,14 +4085,15 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp class_category_bucket(%{"is_protocol" => true}), do: "Protocols"
   defp class_category_bucket(class), do: Map.get(class, "category") || "(uncategorized)"
 
-  # Narrow class rows by source origin (BT-2557). `source_origin` is "project",
-  # "stdlib", or "dependency:<pkg>" (browse-classes). "all" is the identity
-  # filter; an unknown filter also passes everything through (fail-open so the
-  # tree is never silently blanked).
+  # Narrow class rows by source origin (BT-2557). `source_origin` is the bare
+  # classification "project", "stdlib", or "dependency" (BT-2643 — the package
+  # name now lives in a separate `package` field). "all" is the identity filter;
+  # an unknown filter also passes everything through (fail-open so the tree is
+  # never silently blanked).
   defp filter_by_source(classes, "all"), do: classes
 
   defp filter_by_source(classes, "deps") do
-    Enum.filter(classes, &String.starts_with?(Map.get(&1, "source_origin", ""), "dependency:"))
+    Enum.filter(classes, &(Map.get(&1, "source_origin") == "dependency"))
   end
 
   defp filter_by_source(classes, src) when src in ~w(project stdlib) do
@@ -4137,22 +4138,37 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp runtime_only?(%{"origin" => "runtime"}), do: true
   defp runtime_only?(_), do: false
 
-  # Source origin badge helpers (BT-2552). The source_origin field is
-  # "stdlib", "project", or "dependency[:packagename]".
+  # Source origin badge helpers (BT-2552, BT-2643). Two orthogonal fields drive
+  # the badge: `source_origin` is the classification ("stdlib" | "dependency" |
+  # "project") and keys the css class + title; `package` is the package name and
+  # supplies the visible label. The dependency badge still shows the package
+  # name, now read from `package` rather than packed into `source_origin`.
   defp source_origin_class(%{"source_origin" => "stdlib"}), do: "stdlib"
-  defp source_origin_class(%{"source_origin" => <<"dependency:", _::binary>>}), do: "dependency"
+  defp source_origin_class(%{"source_origin" => "dependency"}), do: "dependency"
   defp source_origin_class(_), do: "project"
 
   defp source_origin_label(%{"source_origin" => "stdlib"}), do: "stdlib"
-  defp source_origin_label(%{"source_origin" => <<"dependency:", pkg::binary>>}), do: pkg
+
+  defp source_origin_label(%{"source_origin" => "dependency"} = row),
+    do: package_name(row)
+
   defp source_origin_label(_), do: ""
 
   defp source_origin_title(%{"source_origin" => "stdlib"}), do: "Standard library"
 
-  defp source_origin_title(%{"source_origin" => <<"dependency:", pkg::binary>>}),
-    do: "Dependency: #{pkg}"
+  defp source_origin_title(%{"source_origin" => "dependency"} = row),
+    do: "Dependency: #{package_name(row)}"
 
   defp source_origin_title(_), do: "Project"
+
+  # The package name carried on a browse row's `package` field (BT-2643). Absent /
+  # null packages degrade to "unknown" so a dependency badge never renders blank.
+  defp package_name(row) do
+    case Map.get(row, "package") do
+      pkg when is_binary(pkg) and pkg != "" -> pkg
+      _ -> "unknown"
+    end
+  end
 
   # ── tabbed method editor data model (BT-2494) ───────────────────────────────
   #

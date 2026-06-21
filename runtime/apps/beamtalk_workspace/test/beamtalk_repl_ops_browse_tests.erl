@@ -480,18 +480,28 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(null, maps:get(<<"source_file">>, Row)),
             ?assertEqual(<<"runtime">>, maps:get(<<"origin">>, Row))
         end},
-        {"browse-classes source_origin is present for all rows", fun() ->
-            %% BT-2552: source_origin field classifies project/dependency/stdlib.
+        {"browse-classes source_origin is a bare classification for all rows", fun() ->
+            %% BT-2552/BT-2643: source_origin is the bare classification
+            %% (project|dependency|stdlib) — the package name is NOT packed in.
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
             ),
             Row = find_class_row(Value, Class),
             SourceOrigin = maps:get(<<"source_origin">>, Row),
             ?assert(is_binary(SourceOrigin)),
-            ?assert(
-                lists:member(SourceOrigin, [<<"stdlib">>, <<"project">>, <<"dependency">>]) orelse
-                    binary:match(SourceOrigin, <<"dependency:">>) =/= nomatch
-            )
+            ?assert(lists:member(SourceOrigin, [<<"stdlib">>, <<"project">>, <<"dependency">>])),
+            ?assertEqual(nomatch, binary:match(SourceOrigin, <<"dependency:">>))
+        end},
+        {"browse-classes carries a separate package field on every row", fun() ->
+            %% BT-2643: package is orthogonal to source_origin and present
+            %% (binary or null) on every class row.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Class),
+            ?assert(maps:is_key(<<"package">>, Row)),
+            Package = maps:get(<<"package">>, Row),
+            ?assert(is_binary(Package) orelse Package =:= null)
         end},
         {"browse-class-definition reports native=false for a plain class", fun() ->
             %% BT-2578: a fixture class with no native facade meta is not
@@ -958,6 +968,75 @@ protocol_tests(#{proto_bin := Proto}) ->
             ?assertEqual(<<"requirements">>, protocol_of(Protocols, <<"fromString:">>))
         end}
     ].
+
+%%====================================================================
+%% source_origin (classification) / package (name) split — BT-2643
+%%====================================================================
+
+%% source_origin_of/2 returns the bare classification, never `dependency:<pkg>`.
+source_origin_stdlib_module_test() ->
+    %% A stdlib module classifies as stdlib regardless of its source file.
+    ?assertEqual(
+        <<"stdlib">>,
+        beamtalk_repl_ops_browse:source_origin_of('bt@stdlib@OrderedCollection', null)
+    ),
+    ?assertEqual(
+        <<"stdlib">>,
+        beamtalk_repl_ops_browse:source_origin_of(
+            'bt@stdlib@OrderedCollection', <<"stdlib/src/ordered_collection.bt">>
+        )
+    ).
+
+source_origin_null_source_is_project_test() ->
+    %% A non-stdlib module with no disk source (ClassBuilder / runtime class) is
+    %% classified `project` — the bare classification, no package packing.
+    ?assertEqual(
+        <<"project">>,
+        beamtalk_repl_ops_browse:source_origin_of('bt@myapp@Counter', null)
+    ).
+
+%% package_of/2 derives the package name for ALL origins, orthogonal to the
+%% classification.
+package_of_stdlib_test() ->
+    %% Stdlib classes report the package "stdlib".
+    ?assertEqual(
+        <<"stdlib">>,
+        beamtalk_repl_ops_browse:package_of('bt@stdlib@OrderedCollection', <<"stdlib">>)
+    ).
+
+package_of_project_package_module_test() ->
+    %% A project class whose module atom encodes its package reports that package.
+    ?assertEqual(
+        <<"myapp">>,
+        beamtalk_repl_ops_browse:package_of('bt@myapp@Counter', <<"project">>)
+    ).
+
+package_of_dependency_package_module_test() ->
+    %% A dependency class reports its package from the module atom.
+    ?assertEqual(
+        <<"cowboy">>,
+        beamtalk_repl_ops_browse:package_of('bt@cowboy@Listener', <<"dependency">>)
+    ).
+
+package_of_dependency_unknown_is_null_test() ->
+    %% A dependency module that carries no package segment degrades to null
+    %% (never the old "dependency:unknown" packing).
+    ?assertEqual(
+        null,
+        beamtalk_repl_ops_browse:package_of(some_native_mod, <<"dependency">>)
+    ).
+
+package_of_project_no_segment_falls_back_test() ->
+    %% A project class whose module atom has no package segment falls back to the
+    %% workspace package name — null here since no workspace_meta is running.
+    ?assertEqual(
+        null,
+        beamtalk_repl_ops_browse:package_of(plain_project_mod, <<"project">>)
+    ).
+
+package_of_module_extraction_test() ->
+    ?assertEqual(<<"http">>, beamtalk_repl_ops_browse:package_of_module('bt@http@Server')),
+    ?assertEqual(nil, beamtalk_repl_ops_browse:package_of_module(no_at_signs)).
 
 %%====================================================================
 %% Row helpers
