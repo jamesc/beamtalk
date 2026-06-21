@@ -468,6 +468,7 @@
   margin-bottom: 6px; padding: 3px 10px;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
   font-size: 12px; line-height: 1.4; color: var(--muted);
+}
 
 /* Inline doc toggle on the breadcrumb line (BT-2604): a compact button that
    shows the caret + "Class comment" / "Documentation" label without taking a
