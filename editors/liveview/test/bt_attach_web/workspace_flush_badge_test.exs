@@ -482,5 +482,21 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
         refute html =~ ~s(<span class="mono">#{unquote(modifier)}</span>)
       end
     end
+
+    test "stacked modifiers `class sealed spawn -> Self =>` derive the unary selector (real stdlib shape)",
+         %{view: view} do
+      # `class sealed spawn -> Self => …` is a real stdlib header: two stacked
+      # modifiers, a unary selector `spawn`, and a `Self` return type. The
+      # recursion strips both modifiers and the `-> Self` return type is kept as
+      # part of the `spawn` header, so the derived selector is `spawn`.
+      html = derived_breadcrumb(view, ~s|class sealed spawn -> Self => self|)
+      assert html =~ ~s(<span class="mono">spawn</span>)
+    end
+
+    test "stacked modifiers `class sealed -> arg =>` derive `->` (binary selector after modifiers)",
+         %{view: view} do
+      html = derived_breadcrumb(view, ~s|class sealed -> other => self|)
+      assert html =~ ~s(<span class="mono">-&gt;</span>)
+    end
   end
 end
