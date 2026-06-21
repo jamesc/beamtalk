@@ -1688,6 +1688,188 @@ fn union_param_type_nil_compatible_with_object_union() {
     );
 }
 
+// --- BT-2623: parameterized union members keep their type args ---
+
+/// `Array(Integer)` is assignable to declared `Array(Integer)`.
+#[test]
+fn is_assignable_to_same_type_args_ok() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(TypeChecker::is_assignable_to(
+        &"Array(Integer)".into(),
+        &"Array(Integer)".into(),
+        &hierarchy
+    ));
+}
+
+/// BT-2623: `Array(String)` must NOT be assignable to declared `Array(Integer)` —
+/// before the fix the type args were dropped and both reduced to bare `Array`.
+#[test]
+fn is_assignable_to_mismatched_type_args_rejected() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        !TypeChecker::is_assignable_to(
+            &"Array(String)".into(),
+            &"Array(Integer)".into(),
+            &hierarchy
+        ),
+        "Array(String) should not be assignable to Array(Integer)"
+    );
+}
+
+/// BT-2623: same precision for `is_type_compatible` (the argument-check path).
+#[test]
+fn is_type_compatible_mismatched_type_args_rejected() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    assert!(
+        !TypeChecker::is_type_compatible(
+            &"Array(String)".into(),
+            &"Array(Integer)".into(),
+            &hierarchy
+        ),
+        "Array(String) should not be compatible with Array(Integer)"
+    );
+    // A bare `Array` stays conservatively compatible (may be any Array(_)).
+    assert!(
+        TypeChecker::is_type_compatible(&"Array".into(), &"Array(Integer)".into(), &hierarchy),
+        "Bare Array should remain conservatively compatible"
+    );
+}
+
+/// BT-2623: a `classify_union_members`-driven check now distinguishes
+/// `Array(Integer) | Array(String)` checked against a declared `Array(Integer)`.
+/// The `Array(String)` member is incompatible, so a diagnostic must fire (and it
+/// must name the offending parameterized member, not bare `Array`).
+#[test]
+fn union_arg_parameterized_member_mismatch_warns() {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "Sink".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "take:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Sink".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: None,
+            param_types: vec![Some("Array(Integer)".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let arg = InferredType::union_of(&[
+        InferredType::known_with_args("Array", vec![InferredType::known("Integer")]),
+        InferredType::known_with_args("Array", vec![InferredType::known("String")]),
+    ]);
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &"Sink".into(),
+        "take:",
+        &[arg],
+        span(),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    assert!(
+        !checker.diagnostics().is_empty(),
+        "Array(Integer) | Array(String) vs Array(Integer): Array(String) member must be flagged, got no diagnostics"
+    );
+    // The offending member is rendered with its type arg, not bare `Array`.
+    assert!(
+        checker
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("Array(String)")
+                || d.hint
+                    .as_deref()
+                    .is_some_and(|h| h.contains("Array(String)"))),
+        "Diagnostic should name the parameterized member Array(String), got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// BT-2623: a parameterized union whose members are all compatible stays
+/// silent. `Array(Integer) | Array(Float)` against declared `Array(Number)` —
+/// Integer and Float are both subclasses of Number, so each member's type arg
+/// is compatible.
+#[test]
+fn union_arg_parameterized_members_all_match_no_warning() {
+    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    hierarchy.add_from_beam_meta(vec![ClassInfo {
+        name: "Sink".into(),
+        superclass: Some("Object".into()),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal: false,
+        package: None,
+        is_value: false,
+        is_native: false,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        methods: vec![MethodInfo {
+            selector: "take:".into(),
+            arity: 1,
+            kind: MethodKind::Primary,
+            defined_in: "Sink".into(),
+            is_sealed: false,
+            is_internal: false,
+            spawns_block: false,
+            return_type: None,
+            param_types: vec![Some("Array(Number)".into())],
+            doc: None,
+        }],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }]);
+
+    let arg = InferredType::union_of(&[
+        InferredType::known_with_args("Array", vec![InferredType::known("Integer")]),
+        InferredType::known_with_args("Array", vec![InferredType::known("Float")]),
+    ]);
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &"Sink".into(),
+        "take:",
+        &[arg],
+        span(),
+        &hierarchy,
+        false,
+        None,
+        None,
+    );
+    assert!(
+        checker.diagnostics().is_empty(),
+        "Array(Integer) | Array(Float) members are all Array(Number) — no diagnostic expected, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
 #[test]
 fn process_navigation_from_rejects_non_supervisor_or_pid() {
     // ADR 0092 (BT-2429): `ProcessNavigation from:` is typed `Supervisor | Pid`,

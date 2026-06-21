@@ -29,22 +29,37 @@ impl TypeChecker {
     /// Classify how well a union's known members match a predicate.
     ///
     /// Returns `None` if any member is Dynamic (conservative skip).
-    /// Otherwise returns the count of members that satisfy `pred` and the total.
+    /// Otherwise returns the count of members that satisfy `pred` and the total,
+    /// plus the rendered names of the members that did *not* satisfy it.
+    ///
+    /// BT-2623: the predicate receives each member's *full* type string
+    /// (via [`inferred_type_to_string`], e.g. `"Array(Integer)"`), not the bare
+    /// `as_known()` class name. Before collection literals carried element types
+    /// a union like `Array(Integer) | Array(String)` could not arise (both
+    /// branches deduplicated to bare `Array`); now it can, and dropping the type
+    /// args would let `Array(String)` silently pass a check against a declared
+    /// `Array(Integer)`. The `as_known()` guard is still used solely to skip the
+    /// whole union when any member is `Dynamic`/`Union`/`Meta`/`Never`.
+    ///
+    /// [`inferred_type_to_string`]: Self::inferred_type_to_string
     fn classify_union_members<F>(
         members: &[InferredType],
         pred: F,
-    ) -> Option<(usize, usize, Vec<&EcoString>)>
+    ) -> Option<(usize, usize, Vec<EcoString>)>
     where
         F: Fn(&EcoString) -> bool,
     {
-        let known_members: Vec<&EcoString> = members.iter().filter_map(|m| m.as_known()).collect();
-        if known_members.len() < members.len() {
-            return None; // Contains Dynamic — skip
+        // Skip the whole union if any member is non-`Known` (Dynamic/Union/Meta/
+        // Never) — we can't reason about those conservatively.
+        if members.iter().any(|m| m.as_known().is_none()) {
+            return None;
         }
-        let compatible = known_members.iter().filter(|m| pred(m)).count();
-        let incompatible: Vec<&EcoString> =
-            known_members.iter().filter(|m| !pred(m)).copied().collect();
-        Some((compatible, known_members.len(), incompatible))
+        let member_names: Vec<EcoString> =
+            members.iter().map(Self::inferred_type_to_string).collect();
+        let compatible = member_names.iter().filter(|m| pred(m)).count();
+        let incompatible: Vec<EcoString> =
+            member_names.iter().filter(|m| !pred(m)).cloned().collect();
+        Some((compatible, member_names.len(), incompatible))
     }
 
     /// Collect deduplicated missing protocol methods across union members.
@@ -619,7 +634,7 @@ impl TypeChecker {
     /// - Same type → compatible
     /// - `expected` appears in `actual`'s superclass chain → compatible (e.g., Integer for Number)
     /// - Either type is unknown to the hierarchy → compatible (conservative)
-    fn is_type_compatible(
+    pub(super) fn is_type_compatible(
         actual: &EcoString,
         expected: &EcoString,
         hierarchy: &ClassHierarchy,
@@ -688,7 +703,13 @@ impl TypeChecker {
             .map_or(expected.as_str(), |(base, _)| base);
 
         if actual_base == expected_base {
-            return true;
+            // BT-2623: when *both* sides carry type arguments and the bases match
+            // (e.g. `Array(Integer)` vs `Array(String)`), don't blindly pass on
+            // the base alone — compare the type args invariantly so a union
+            // member like `Array(String)` is rejected against a declared
+            // `Array(Integer)`. If only one side is parameterized we stay
+            // conservative (bare `Array` may be any `Array(_)`).
+            return Self::type_args_match(actual, expected, hierarchy);
         }
         // If either type isn't known to the hierarchy, don't warn (conservative)
         if !hierarchy.has_class(actual_base) || !hierarchy.has_class(expected_base) {
@@ -699,6 +720,37 @@ impl TypeChecker {
         chain
             .iter()
             .any(|ancestor| ancestor.as_str() == expected_base)
+    }
+
+    /// BT-2623: Compare the *type arguments* of two same-base generic type
+    /// strings (e.g. `"Array(Integer)"` vs `"Array(String)"`).
+    ///
+    /// Returns `true` (compatible) unless both sides are parameterized with the
+    /// same arity and at least one arg pair is incompatible. When either side is
+    /// unparameterized (bare `Array`, which may stand for any `Array(_)`) or the
+    /// arities differ, we stay conservative and return `true` so this never
+    /// introduces a false positive on its own.
+    ///
+    /// Args are compared invariantly via [`is_type_compatible`], recursing into
+    /// nested generics (so `Array(Array(Integer))` vs `Array(Array(String))`
+    /// is also caught).
+    fn type_args_match(actual: &str, expected: &str, hierarchy: &ClassHierarchy) -> bool {
+        let (_, actual_args) = Self::parse_generic_type_string(actual);
+        let (_, expected_args) = Self::parse_generic_type_string(expected);
+        if actual_args.is_empty()
+            || expected_args.is_empty()
+            || actual_args.len() != expected_args.len()
+        {
+            return true; // Unparameterized or arity mismatch — conservative.
+        }
+        actual_args.iter().zip(expected_args.iter()).all(|(a, e)| {
+            // Generic placeholders (T, E, K, V) are symbolic — treat as
+            // compatible, matching `type_args_compatible`.
+            if super::is_generic_type_param(a) || super::is_generic_type_param(e) {
+                return true;
+            }
+            Self::is_type_compatible(&a.as_str().into(), &e.as_str().into(), hierarchy)
+        })
     }
 
     /// BT-2022: Recursive structural compatibility for one type-arg slot.
@@ -1516,7 +1568,10 @@ impl TypeChecker {
         let declared_base = super::type_resolver::base_name_of_string(declared_type);
         let value_base = super::type_resolver::base_name_of_string(value_type);
         if value_base == declared_base {
-            return true;
+            // BT-2623: same base — compare type args so `Array(String)` is not
+            // silently assignable to a declared `Array(Integer)`. Conservative
+            // (returns true) when either side is unparameterized.
+            return Self::type_args_match(value_type, declared_type, hierarchy);
         }
         // Check if value_type's base is a subclass of declared_type's base
         let value_eco: EcoString = value_base.into();
@@ -1771,8 +1826,11 @@ impl TypeChecker {
                 }
                 let Some((compat, total, non_conforming)) =
                     Self::classify_union_members(members, |m| {
+                        // BT-2623: members now carry type args (e.g. `Array(Integer)`);
+                        // conformance is a property of the base class, so strip them.
+                        let base = super::type_resolver::base_name_of_string(m);
                         protocol_registry
-                            .check_conformance(m, base_protocol, hierarchy)
+                            .check_conformance(base, base_protocol, hierarchy)
                             .is_ok()
                     })
                 else {
@@ -1919,8 +1977,11 @@ impl TypeChecker {
                     // BT-1832: Check all union members against the bound protocol.
                     let Some((compat, total, non_conforming)) =
                         Self::classify_union_members(members, |m| {
+                            // BT-2623: strip type args (`Array(Integer)` → `Array`);
+                            // conformance is checked on the base class.
+                            let base = super::type_resolver::base_name_of_string(m);
                             protocol_registry
-                                .check_conformance(m, bound_protocol, hierarchy)
+                                .check_conformance(base, bound_protocol, hierarchy)
                                 .is_ok()
                         })
                     else {
