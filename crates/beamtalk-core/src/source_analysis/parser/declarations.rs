@@ -609,6 +609,10 @@ impl Parser {
     /// If the token at `offset` is `::` (`TypeAnnotation`) followed by an identifier,
     /// returns the offset past both. Otherwise returns `offset` unchanged.
     ///
+    /// Only an identifier bound is accepted — a type parameter bound is a
+    /// protocol (e.g. `T :: Printable`), so a singleton `#foo` is intentionally
+    /// not a valid bound (BT-2627).
+    ///
     /// **References:** ADR 0068 Phase 2d — type parameter bounds in lookahead
     fn skip_optional_type_param_bound(&self, offset: usize) -> usize {
         if matches!(self.peek_at(offset), Some(TokenKind::DoubleColon))
@@ -697,7 +701,16 @@ impl Parser {
     /// is the bare identifier `class` on the *same* line (BT-1952 / BT-2034).
     /// A `class` token with a leading newline begins a new statement (e.g.
     /// the class-method definition on the following line) and is not consumed.
+    ///
+    /// BT-2627: also called with a singleton `#foo` ([`TokenKind::Symbol`]) at
+    /// `o`. A singleton is a single token with no metatype surface (`#foo class`
+    /// is not a valid type), so it advances exactly one token — keeping this
+    /// lookahead in lock-step with `parse_single_type_annotation`, which returns
+    /// the `Singleton` immediately after the symbol.
     fn skip_type_name_with_metatype(&self, o: usize) -> usize {
+        if matches!(self.peek_at(o), Some(TokenKind::Symbol(_))) {
+            return o + 1;
+        }
         if matches!(self.peek_at(o + 1), Some(TokenKind::Identifier(name)) if name == "class")
             && self
                 .peek_token_at(o + 1)

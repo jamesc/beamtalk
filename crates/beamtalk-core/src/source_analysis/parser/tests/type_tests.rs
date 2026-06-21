@@ -1305,3 +1305,33 @@ fn parse_singleton_inside_generic_param() {
     assert_eq!(base.name, "List");
     assert_singleton(&parameters[0], "infinity");
 }
+
+#[test]
+fn parse_singleton_does_not_consume_class_suffix() {
+    // BT-2627 review: `#foo` is a single token with no metatype surface, so the
+    // signature lookahead must not consume a trailing `class` (which would
+    // diverge from `parse_single_type_annotation` and orphan the `class`). A
+    // valid singleton union still parses cleanly...
+    let module = parse_ok(
+        "Object subclass: D
+  m: x :: Integer | #infinity => x",
+    );
+    assert!(matches!(
+        module.classes[0].methods[0].parameters[0].type_annotation,
+        Some(TypeAnnotation::Union { .. })
+    ));
+
+    // ...and the bare singleton resolves to exactly the `Singleton`, leaving the
+    // following token untouched (here a real next statement).
+    let module2 = parse_ok(
+        "Object subclass: D
+  m: x :: #infinity => x",
+    );
+    assert_singleton(
+        module2.classes[0].methods[0].parameters[0]
+            .type_annotation
+            .as_ref()
+            .unwrap(),
+        "infinity",
+    );
+}
