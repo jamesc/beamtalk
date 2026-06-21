@@ -287,6 +287,48 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert html =~ "7"
   end
 
+  test "the Inspector × closes only the Inspector, leaving Bindings + column (BT-2611)", %{
+    conn: conn
+  } do
+    {:ok, view, _html} = live(conn, "/")
+    suffix = System.unique_integer([:positive])
+    class = "Counter#{suffix}"
+    name = "counter_#{suffix}"
+
+    class_src = """
+    Actor subclass: #{class}
+      state: count = 7
+
+      count => self.count
+    """
+
+    view |> form("#eval-form") |> render_submit(%{expr: class_src})
+    view |> form("#eval-form") |> render_submit(%{expr: "#{name} := #{class} spawn"})
+    assert eventually(fn -> render(view) =~ name end)
+
+    # Inspect the binding so the docked Inspector is populated.
+    html = view |> element("button[phx-value-name='#{name}']") |> render_click()
+    assert html =~ "Inspecting"
+
+    # The `×` in the Inspector header must close ONLY the Inspector (BT-2611): the
+    # Inspector drops back to its empty state, but the Bindings pane and the whole
+    # right column stay rendered (the column toggle still drives `show_inspector`).
+    html = view |> element("#inspector-panel button.panel-close") |> render_click()
+    refute html =~ "Inspecting"
+    # Empty-state prompt is back, and the column + Bindings pane are still present.
+    assert html =~ "then Inspect it to"
+    assert html =~ ~s(id="bindings-panel")
+    assert html =~ ~s(id="inspector-panel")
+    # The whole-column control is untouched — the column was NOT collapsed, so the
+    # cockpit grid does not carry the `inspector-hidden` collapse class.
+    refute html =~ "inspector-hidden"
+
+    # Re-inspecting the same binding repopulates the Inspector after a close.
+    html = view |> element("button[phx-value-name='#{name}']") |> render_click()
+    assert html =~ "Inspecting"
+    assert html =~ "count"
+  end
+
   test "method editor: save a method, then an eval observes the new behaviour (BT-2409)", %{
     conn: conn
   } do

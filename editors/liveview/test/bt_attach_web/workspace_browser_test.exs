@@ -956,7 +956,10 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
       "the left seam gutter should return when the browser column reopens"
     )
     # The same for the Inspector/Bindings column and its right seam gutter.
-    |> click("#inspector-panel button[phx-click='close_inspector']")
+    # The column is collapsed via the top-bar toggle (toggle_inspector); the
+    # inspector panel's own × now closes only the Inspector pane, not the column
+    # (BT-2611), so it no longer drives the column collapse class.
+    |> click("button[phx-click='toggle_inspector']")
     |> assert_has(".cockpit.inspector-hidden")
     |> assert_eventually(
       "getComputedStyle(document.getElementById('col-gutter-right')).display === 'none'",
