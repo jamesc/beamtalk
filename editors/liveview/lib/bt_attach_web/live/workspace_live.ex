@@ -466,6 +466,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:inspect_frozen, false)
       |> assign(:flash_gen, 0)
       |> assign(:refresh_pending, false)
+      # BT-2600: coalesce `ClassLoaded`/`ClassRemoved` refresh bursts. A project
+      # sync / `Workspace load:` reloading N files fires N consecutive pushes;
+      # rather than running `refresh_after_source_change` (N source re-reads ×
+      # open tabs) per push, the first push schedules one deferred
+      # `:do_source_refresh` and sets this flag, collapsing the burst into a
+      # single refresh — mirroring the `:refresh_pending` object-change coalescing.
+      |> assign(:source_refresh_pending, false)
       |> assign(:poke_result, nil)
       |> assign(:poke_error, nil)
       # Method editor (Wave 3): the write-surface edit/save/flush pane.
@@ -1791,7 +1798,14 @@ defmodule BtAttachWeb.WorkspaceLive do
         socket
       )
       when lifecycle in [:ClassLoaded, :ClassRemoved] do
-    {:noreply, refresh_after_source_change(socket)}
+    {:noreply, schedule_source_refresh(socket)}
+  end
+
+  # BT-2600: the coalesced source refresh fired by a `ClassLoaded`/`ClassRemoved`
+  # burst — re-pull the source-dependent surfaces ONCE for the whole burst, then
+  # clear the pending flag so the next burst schedules afresh.
+  def handle_info(:do_source_refresh, socket) do
+    {:noreply, refresh_after_source_change(assign(socket, source_refresh_pending: false))}
   end
 
   # Per-object change push (BT-2492, backend BT-2489): the watched actor committed
@@ -2120,16 +2134,21 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # The `{class, selector}` keys of open `:method` tabs whose class is among the
+  # The disk keys of open `:method` and `:def` tabs whose class is among the
   # just-reloaded class names — the tabs whose `unflushed` badge a revert should
-  # clear (their image body now matches the reverted disk body).
+  # clear (their image now matches the reverted disk body). Method tabs key on
+  # `{class, selector}`; a `:def` tab keys on `{class, :def}` so a revert that
+  # changed a class header (state, superclass) also clears the open def tab's badge
+  # without needing a re-open (BT-2600).
   defp reloaded_tab_keys(tabs, class_names) do
     reloaded = MapSet.new(class_names)
 
-    for %{kind: :method, class: class, selector: selector} <- tabs,
-        MapSet.member?(reloaded, class),
+    for tab <- tabs,
+        key = tab_disk_key(tab),
+        key != nil,
+        MapSet.member?(reloaded, elem(key, 0)),
         into: MapSet.new(),
-        do: {class, selector}
+        do: key
   end
 
   # Whether the file `path` git is about to revert has unflushed in-memory
@@ -2997,20 +3016,29 @@ defmodule BtAttachWeb.WorkspaceLive do
     do: MapSet.difference(was_pending, pending_method_keys(changes))
 
   @doc false
-  # Clear the `unflushed` (`disk_differs`) badge on every open `:method` tab whose
-  # `(class, selector)` is in `flushed` — the methods this flush reconciled to disk.
-  # Other tabs are returned unchanged: a still-pending conflict/skip (outside
-  # `flushed`), an untouched method, or a `:def` tab (the `:method` guard
-  # short-circuits before reading its absent `selector`). Pure; unit-tested.
+  # Clear the `unflushed` (`disk_differs`) badge on every open tab whose disk key is
+  # in `flushed`: a `:method` tab keys on `{class, selector}` (the methods a flush
+  # reconciled to disk); a `:def` tab keys on `{class, :def}` (a class header a
+  # revert reloaded — BT-2600). Other tabs are returned unchanged: a still-pending
+  # conflict/skip (outside `flushed`) or an untouched method/def. The flush path
+  # only ever passes `{class, selector}` method keys, so `:def` tabs are untouched
+  # by a flush exactly as before. Pure; unit-tested.
   def clear_disk_differs(tabs, flushed) do
     Enum.map(tabs, fn tab ->
-      if tab.kind == :method and MapSet.member?(flushed, {tab.class, tab.selector}) do
+      if MapSet.member?(flushed, tab_disk_key(tab)) do
         %{tab | disk_differs: false}
       else
         tab
       end
     end)
   end
+
+  # The disk key a tab is cleared by: `{class, selector}` for a `:method` tab,
+  # `{class, :def}` for a `:def` tab (the `:def` sentinel can't collide with a real
+  # binary selector). Any other shape yields `nil`, which is never a set member.
+  defp tab_disk_key(%{kind: :method, class: class, selector: selector}), do: {class, selector}
+  defp tab_disk_key(%{kind: :def, class: class}), do: {class, :def}
+  defp tab_disk_key(_tab), do: nil
 
   # After a flush, clear the `unflushed` badge on the `:method` tabs this flush wrote
   # to disk (BT-2545), scoped by `flushed_method_keys/3` so conflicts / skips keep
@@ -3052,6 +3080,21 @@ defmodule BtAttachWeb.WorkspaceLive do
     |> assign_changes()
     |> refresh_open_source_tabs()
     |> maybe_refresh_git()
+  end
+
+  # BT-2600: schedule a single coalesced `refresh_after_source_change` for a burst
+  # of `ClassLoaded`/`ClassRemoved` pushes. The first push arms the deferred
+  # `:do_source_refresh` and sets `:source_refresh_pending`; intervening pushes
+  # collapse into it (no-op) while the flag is set — so a project sync reloading N
+  # files refreshes the source-dependent surfaces once, not N times. Mirrors the
+  # `{:object_changed, …}` `:refresh_pending` debounce. Direct callers
+  # (e.g. the user-initiated git revert) still refresh synchronously — coalescing
+  # is only for the unsolicited push burst.
+  defp schedule_source_refresh(%{assigns: %{source_refresh_pending: true}} = socket), do: socket
+
+  defp schedule_source_refresh(socket) do
+    Process.send_after(self(), :do_source_refresh, refresh_debounce_ms())
+    assign(socket, source_refresh_pending: true)
   end
 
   # BT-2598: re-read every open *clean* editor tab from the live image so a source

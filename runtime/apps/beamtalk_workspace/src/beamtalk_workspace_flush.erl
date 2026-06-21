@@ -750,25 +750,9 @@ splice(Body, {Start, End}, Replacement) ->
 %% file ends in exactly one trailing newline before appending.
 -spec append_method(binary(), binary()) -> binary().
 append_method(Body, NewSrc) ->
-    Trimmed = strip_trailing_newlines(Body),
-    NewSrcWithNl = ensure_trailing_newline(NewSrc),
+    Trimmed = beamtalk_workspace_reshape:strip_trailing_newlines(Body),
+    NewSrcWithNl = beamtalk_workspace_reshape:ensure_trailing_newline(NewSrc),
     <<Trimmed/binary, "\n\n", NewSrcWithNl/binary>>.
-
-strip_trailing_newlines(<<>>) ->
-    <<>>;
-strip_trailing_newlines(Bin) ->
-    case binary:last(Bin) of
-        $\n -> strip_trailing_newlines(binary:part(Bin, 0, byte_size(Bin) - 1));
-        _ -> Bin
-    end.
-
-ensure_trailing_newline(<<>>) ->
-    <<"\n">>;
-ensure_trailing_newline(Bin) ->
-    case binary:last(Bin) of
-        $\n -> Bin;
-        _ -> <<Bin/binary, "\n">>
-    end.
 
 %%% ----------------------------------------------------------------------------
 %%% Phase B: rename

@@ -1477,21 +1477,11 @@ resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource
 -spec new_method_entry(map(), binary(), binary()) -> map().
 new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
     BaseIndent = sibling_method_indent(DiskSource),
-    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
-        {ok, Reindented} ->
-            Base#{source => Reindented, flushable => true, source_file => SourceFile};
-        {error, ReindentReason, _Msg} ->
-            ?LOG_WARNING(
-                "ChangeLog: could not reshape new-method body to class indentation; "
-                "recording memory-only",
-                #{
-                    source_file => SourceFile,
-                    reason => ReindentReason,
-                    domain => [beamtalk, runtime]
-                }
-            ),
-            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
-    end.
+    %% Pure-Erlang reshape: total, never fails (BT-2592) — so a brand-new method
+    %% is always recorded flushable, never downgraded to memory-only by a
+    %% transient port hiccup.
+    Reindented = beamtalk_workspace_reshape:reindent_method_source(Canonical, BaseIndent),
+    Base#{source => Reindented, flushable => true, source_file => SourceFile}.
 
 %% Derive the base indentation for a brand-new method from the class body on
 %% disk: the leading whitespace of the first indented, non-blank, non-comment
@@ -1508,7 +1498,7 @@ sibling_method_indent(DiskSource) ->
 sibling_method_indent_lines([]) ->
     default_method_indent();
 sibling_method_indent_lines([Line | Rest]) ->
-    Indent = leading_ws(Line),
+    Indent = beamtalk_workspace_reshape:leading_ws(Line),
     Content = strip_leading_ws(Line),
     case Indent =/= <<>> andalso not is_comment_or_blank(Content) of
         true -> Indent;
@@ -1546,34 +1536,23 @@ strip_leading_ws(Bin) ->
     map(), binary(), #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()
 ) -> map().
 store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
-    BaseIndent = leading_ws(PrevSource),
-    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
-        {ok, Reindented} ->
-            %% The disk byte-span ends in a trailing newline unless the method is
-            %% the last line of the file with no terminator (ADR 0082). Match that
-            %% trailing-newline state on the reshaped body — regardless of whether
-            %% the canonical body carries its own — so the splice is a true drop-in
-            %% and never glues the next line or leaves a stray blank one (BT-2584).
-            DiskShaped = match_trailing_newline(Reindented, PrevSource),
-            Base#{
-                source => DiskShaped,
-                flushable => true,
-                source_file => SourceFile,
-                span => Span,
-                prev_source => PrevSource
-            };
-        {error, ReindentReason, _Msg} ->
-            ?LOG_WARNING(
-                "ChangeLog: could not reshape patch body to disk indentation; "
-                "recording memory-only",
-                #{
-                    source_file => SourceFile,
-                    reason => ReindentReason,
-                    domain => [beamtalk, runtime]
-                }
-            ),
-            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
-    end.
+    BaseIndent = beamtalk_workspace_reshape:leading_ws(PrevSource),
+    %% Pure-Erlang reshape: total, never fails (BT-2592) — a live patch can no
+    %% longer become non-flushable for transport reasons unrelated to the method.
+    Reindented = beamtalk_workspace_reshape:reindent_method_source(Canonical, BaseIndent),
+    %% The disk byte-span ends in a trailing newline unless the method is the last
+    %% line of the file with no terminator (ADR 0082). Match that trailing-newline
+    %% state on the reshaped body — regardless of whether the canonical body
+    %% carries its own — so the splice is a true drop-in and never glues the next
+    %% line or leaves a stray blank one (BT-2584).
+    DiskShaped = match_trailing_newline(Reindented, PrevSource),
+    Base#{
+        source => DiskShaped,
+        flushable => true,
+        source_file => SourceFile,
+        span => Span,
+        prev_source => PrevSource
+    }.
 
 %% Make `Source''s trailing-newline state match `Reference''s: append a single
 %% `\n' when the reference ends in one and the source does not; strip trailing
@@ -1582,48 +1561,13 @@ store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSou
 -spec match_trailing_newline(binary(), binary()) -> binary().
 match_trailing_newline(Source, Reference) ->
     case ends_with_newline(Reference) of
-        true -> ensure_trailing_newline(Source);
-        false -> strip_trailing_newlines(Source)
+        true -> beamtalk_workspace_reshape:ensure_trailing_newline(Source);
+        false -> beamtalk_workspace_reshape:strip_trailing_newlines(Source)
     end.
 
 -spec ends_with_newline(binary()) -> boolean().
 ends_with_newline(<<>>) -> false;
 ends_with_newline(Bin) -> binary:last(Bin) =:= $\n.
-
--spec ensure_trailing_newline(binary()) -> binary().
-ensure_trailing_newline(<<>>) ->
-    <<"\n">>;
-ensure_trailing_newline(Bin) ->
-    case binary:last(Bin) of
-        $\n -> Bin;
-        _ -> <<Bin/binary, "\n">>
-    end.
-
--spec strip_trailing_newlines(binary()) -> binary().
-strip_trailing_newlines(<<>>) ->
-    <<>>;
-strip_trailing_newlines(Bin) ->
-    case binary:last(Bin) of
-        $\n -> strip_trailing_newlines(binary:part(Bin, 0, byte_size(Bin) - 1));
-        _ -> Bin
-    end.
-
-%% The leading run of spaces/tabs of the first line of `Body' — the base
-%% indentation of the on-disk method definition the span covers.
--spec leading_ws(binary()) -> binary().
-leading_ws(Body) ->
-    %% `binary:split/2' always returns a non-empty list (the whole binary when
-    %% the delimiter is absent), so the first element is the first line.
-    [First | _] = binary:split(Body, <<"\n">>),
-    leading_ws(First, 0).
-
-leading_ws(Line, N) ->
-    case Line of
-        <<_:N/binary, C, _/binary>> when C =:= $\s; C =:= $\t ->
-            leading_ws(Line, N + 1);
-        _ ->
-            binary:part(Line, 0, N)
-    end.
 
 %% A genuine span-resolution failure (`ambiguous', a port/transport error, ...)
 %% downgrades the entry to memory-only with a reason. The brand-new-method case
