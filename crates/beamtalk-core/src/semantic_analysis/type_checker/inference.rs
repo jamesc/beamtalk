@@ -63,6 +63,30 @@ impl TypeChecker {
         }
     }
 
+    /// Reports whether a list-literal cons tail is a *known, non-`List`* type —
+    /// i.e. one that would form an improper BEAM list at runtime (BT-2623).
+    ///
+    /// A cons tail (`[1 | tail]`) must evaluate to a proper list. A known type
+    /// whose base class is not `List` (most notably `Array`, which is
+    /// tuple-backed) would instead build an improper list. We surface this as a
+    /// diagnostic so the user sees a likely runtime bug rather than the silent
+    /// degradation to `List(Dynamic)` that [`tail_element_type`] performs.
+    ///
+    /// Returns `None` (no diagnostic) for `List` tails — proper by construction —
+    /// and for `Dynamic`/`Union`/`Meta`/`Never`, which are too uncertain to flag
+    /// without risking noise. When a diagnostic is warranted, returns the
+    /// offending type's user-facing display name.
+    fn improper_cons_tail_display(tail_ty: &InferredType) -> Option<EcoString> {
+        match tail_ty {
+            InferredType::Known { class_name, .. } if class_name != "List" => Some(
+                tail_ty
+                    .display_for_diagnostic()
+                    .unwrap_or_else(|| class_name.clone()),
+            ),
+            _ => None,
+        }
+    }
+
     /// Checks types in a module using the class hierarchy for method resolution.
     ///
     /// Method bodies are processed first so that inferred return types are
@@ -779,6 +803,24 @@ impl TypeChecker {
                     .collect();
                 if let Some(t) = tail {
                     let tail_ty = self.infer_expr(t, hierarchy, env, in_abstract_method);
+                    // BT-2623: A cons tail must be a proper list. A known
+                    // non-`List` tail (e.g. `Array`, tuple-backed) builds an
+                    // improper list at runtime; flag it instead of silently
+                    // widening the element type to `Dynamic`.
+                    if let Some(tail_display) = Self::improper_cons_tail_display(&tail_ty) {
+                        self.diagnostics.push(
+                            Diagnostic::warning(
+                                format!(
+                                    "Cons tail of a list literal is {tail_display}, not a List — this builds an improper list"
+                                ),
+                                t.span(),
+                            )
+                            .with_hint(format!(
+                                "A `[head | tail]` tail must be a List; {tail_display} would form an improper list at runtime"
+                            ))
+                            .with_category(DiagnosticCategory::Type),
+                        );
+                    }
                     element_types.push(Self::tail_element_type(&tail_ty));
                 }
                 let element_ty = Self::join_element_types(&element_types);
@@ -5157,6 +5199,91 @@ mod tests {
                 vec![InferredType::Dynamic(DynamicReason::Unknown)]
             )
         );
+        // BT-2623: the silent widening is now also surfaced as a diagnostic so
+        // the user sees the likely improper-list bug.
+        assert_eq!(
+            checker.diagnostics().len(),
+            1,
+            "Array cons tail should emit one improper-list diagnostic, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(
+            checker.diagnostics()[0].message.contains("improper list"),
+            "Diagnostic should mention improper list, got: {:?}",
+            checker.diagnostics()[0]
+        );
+        assert!(
+            checker.diagnostics()[0].message.contains("Array"),
+            "Diagnostic should name the offending Array tail, got: {:?}",
+            checker.diagnostics()[0]
+        );
+    }
+
+    #[test]
+    fn infer_expr_list_literal_list_tail_no_diagnostic() {
+        // BT-2623: a proper `List(T)` cons tail is valid — no diagnostic.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local(
+            "rest",
+            InferredType::known_with_args("List", vec![InferredType::known("Integer")]),
+        );
+        let expr = Expression::ListLiteral {
+            elements: vec![int_lit(1)],
+            tail: Some(Box::new(var("rest"))),
+            span: span(),
+        };
+        let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "List cons tail is proper — no diagnostic expected, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn infer_expr_list_literal_dynamic_tail_no_diagnostic() {
+        // BT-2623: a `Dynamic` tail (e.g. unannotated param) is too uncertain to
+        // flag — staying silent avoids false-positive noise.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("rest", InferredType::Dynamic(DynamicReason::Unknown));
+        let expr = Expression::ListLiteral {
+            elements: vec![int_lit(1)],
+            tail: Some(Box::new(var("rest"))),
+            span: span(),
+        };
+        let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert!(
+            checker.diagnostics().is_empty(),
+            "Dynamic cons tail should not be flagged, got: {:?}",
+            checker.diagnostics()
+        );
+    }
+
+    #[test]
+    fn infer_expr_list_literal_non_collection_tail_warns() {
+        // BT-2623: any known non-List tail (e.g. an Integer) would form an
+        // improper list, so it is flagged too — not just Array.
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut checker = TypeChecker::new();
+        let mut env = TypeEnv::new();
+        env.set_local("rest", InferredType::known("Integer"));
+        let expr = Expression::ListLiteral {
+            elements: vec![int_lit(1)],
+            tail: Some(Box::new(var("rest"))),
+            span: span(),
+        };
+        let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        assert_eq!(
+            checker.diagnostics().len(),
+            1,
+            "Integer cons tail should emit one improper-list diagnostic, got: {:?}",
+            checker.diagnostics()
+        );
+        assert!(checker.diagnostics()[0].message.contains("Integer"));
     }
 
     #[test]
