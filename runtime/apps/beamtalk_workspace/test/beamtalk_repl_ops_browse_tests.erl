@@ -373,12 +373,29 @@ browse_xref() ->
         method_row('syntheticExt', 104, synthetic, extension),
         %% print* prefix path (distinct from the exact-name `printString` match):
         %% `printDetails` must reach the prefix heuristic and land in "printing".
-        method_row('printDetails', 106, indexed, class_body)
+        method_row('printDetails', 106, indexed, class_body),
+        %% BT-2614: compiler-injected synthetic class-side constructors. An actor's
+        %% codegen emits `new`/`new:`/`spawn`/`spawn:` as sourceless exported
+        %% functions; these rows are how the System Browser surfaces them (badged
+        %% synthetic, bucketed "instance creation") so its method set matches
+        %% runtime `aClass class allMethods` reflection. Listed as class-side
+        %% (`class_side => true`) so they appear under `side = class`, not instance.
+        class_method_row('new', 1, synthetic, class_body),
+        class_method_row('new:', 1, synthetic, class_body),
+        class_method_row('spawn', 1, synthetic, class_body),
+        class_method_row('spawn:', 1, synthetic, class_body)
     ].
 
 method_row(Selector, Line, SourceStatus, Provenance) ->
+    method_xref_entry(false, Selector, Line, SourceStatus, Provenance).
+
+%% BT-2614: class-side variant of `method_row/4` for synthetic constructors.
+class_method_row(Selector, Line, SourceStatus, Provenance) ->
+    method_xref_entry(true, Selector, Line, SourceStatus, Provenance).
+
+method_xref_entry(ClassSide, Selector, Line, SourceStatus, Provenance) ->
     #{
-        class_side => false,
+        class_side => ClassSide,
         selector => Selector,
         line => Line,
         sends => [],
@@ -412,9 +429,19 @@ browse_tests(#{class_name := Class}) ->
                     <<"source_file">>,
                     <<"origin">>,
                     <<"source_origin">>,
-                    <<"is_test">>
+                    <<"is_test">>,
+                    <<"is_protocol">>
                 ]
             )
+        end},
+        {"browse-classes is_protocol is false for an ordinary class", fun() ->
+            %% BT-2615: only protocol class objects (ADR 0068) carry is_protocol
+            %% true — the browser groups those under a "Protocols" category.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Class),
+            ?assertEqual(false, maps:get(<<"is_protocol">>, Row))
         end},
         {"browse-classes is_test is false for a non-TestCase class", fun() ->
             %% BT-2557: is_test flags loaded TestCase subclasses so the browser
@@ -539,6 +566,61 @@ browse_tests(#{class_name := Class}) ->
             %% print* prefix path (not the exact-name `printString` match):
             %% `printDetails` must reach the prefix heuristic and land in "printing".
             ?assertEqual(<<"printing">>, protocol_of(Protocols, <<"printDetails">>))
+        end},
+        {"browse-protocols surfaces injected synthetic class-side constructors", fun() ->
+            %% BT-2614: the compiler-injected `new`/`new:`/`spawn`/`spawn:` an
+            %% actor's codegen emits as sourceless class-side functions appear in
+            %% the class-side protocol list, badged `synthetic` and bucketed under
+            %% "instance creation" — so the browser's method set matches runtime
+            %% `aClass class allMethods` reflection.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Class, <<"side">> => <<"class">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(<<"class">>, maps:get(<<"side">>, Value)),
+            Protocols = maps:get(<<"protocols">>, Value),
+            Selectors = all_selector_rows(Protocols),
+            Names = [maps:get(<<"selector">>, S) || S <- Selectors],
+            lists:foreach(
+                fun(Sel) ->
+                    ?assert(lists:member(Sel, Names)),
+                    Row = find_selector_row(Selectors, Sel),
+                    %% Badged synthetic (read-only marker) and bucketed
+                    %% "instance creation".
+                    ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, Row)),
+                    ?assertEqual(
+                        <<"instance creation">>, protocol_of(Protocols, Sel)
+                    )
+                end,
+                [<<"new">>, <<"new:">>, <<"spawn">>, <<"spawn:">>]
+            )
+        end},
+        {"browse-method-source returns null source for a synthetic class method", fun() ->
+            %% BT-2614: a synthetic class-side constructor has no editable user
+            %% source — `browse-method-source` returns `null` source (and null
+            %% doc/signature) so the browser badges it read-only with no
+            %% `[source]` jump, never surfacing an inherited body in its place.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-method-source">>,
+                    #{
+                        <<"class">> => Class,
+                        <<"side">> => <<"class">>,
+                        <<"selector">> => <<"spawn">>
+                    },
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(<<"spawn">>, maps:get(<<"selector">>, Value)),
+            ?assertEqual(<<"synthetic">>, maps:get(<<"source_status">>, Value)),
+            ?assertEqual(null, maps:get(<<"source">>, Value)),
+            ?assertEqual(null, maps:get(<<"doc">>, Value)),
+            ?assertEqual(null, maps:get(<<"signature">>, Value))
         end},
         {"browse-protocols rejects a bad side", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
@@ -724,6 +806,123 @@ browse_tests(#{class_name := Class}) ->
                 )
             ),
             ?assert(true)
+        end}
+    ].
+
+%%====================================================================
+%% Protocol browse tests (BT-2615)
+%%====================================================================
+%%
+%% A protocol (e.g. Printable) is reified as a sealed abstract class object
+%% (ADR 0068) dispatched by the shared `beamtalk_protocol_object` module. That
+%% dispatch module carries no package and no on-disk source, so without special
+%% handling every protocol would land in the browser's "(uncategorized)" bucket
+%% badged "project". These tests pin the BT-2615 fixes: the `is_protocol` flag
+%% (so the browser can group them under "Protocols"), origin resolution through
+%% the protocol's *defining* module (so a stdlib protocol badges stdlib), and the
+%% required-member rows (so a protocol's contract is visible instead of empty).
+
+protocol_browse_test_() ->
+    {setup, fun protocol_setup/0, fun protocol_cleanup/1, fun protocol_tests/1}.
+
+protocol_setup() ->
+    _ =
+        case whereis(beamtalk_xref) of
+            undefined ->
+                case beamtalk_xref:start_link() of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} -> ok
+                end;
+            _ ->
+                ok
+        end,
+    beamtalk_protocol_registry:init(),
+    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    ProtoName = list_to_atom("BrowseProto_" ++ Uniq),
+    %% A stub protocol class object, dispatched (as the real ones are) by the
+    %% shared beamtalk_protocol_object module — which has no package/source.
+    {Pid, Owned} = start_browse_class(ProtoName, #{
+        name => ProtoName,
+        module => beamtalk_protocol_object,
+        superclass => none,
+        is_sealed => true,
+        is_abstract => true,
+        instance_methods => #{},
+        fields => []
+    }),
+    %% Register the protocol with a stdlib-looking *defining* module so origin
+    %% resolution can tell it apart from the dispatch module.
+    DefiningModule = list_to_atom("bt@stdlib@browseproto_" ++ Uniq),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => ProtoName,
+        module => DefiningModule,
+        required_methods => [
+            #{selector => 'asString', arity => 0},
+            #{selector => 'printString', arity => 0}
+        ],
+        required_class_methods => [#{selector => 'fromString:', arity => 1}],
+        type_params => [],
+        extending => undefined
+    }),
+    #{
+        proto_name => ProtoName,
+        proto_bin => atom_to_binary(ProtoName, utf8),
+        class => {ProtoName, Pid, Owned}
+    }.
+
+protocol_cleanup(#{proto_name := Name, class := {_, Pid, Owned}}) ->
+    catch ets:delete(beamtalk_protocol_registry, Name),
+    catch beamtalk_xref:purge_class(Name),
+    case Owned of
+        true -> catch gen_server:stop(Pid);
+        false -> ok
+    end,
+    ok.
+
+protocol_tests(#{proto_bin := Proto}) ->
+    [
+        {"browse-classes flags a protocol class object is_protocol=true", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Proto),
+            ?assertNotEqual(undefined, Row),
+            ?assertEqual(true, maps:get(<<"is_protocol">>, Row))
+        end},
+        {"browse-classes badges a stdlib protocol's source_origin as stdlib", fun() ->
+            %% Origin resolves through the protocol's defining module, not the
+            %% shared beamtalk_protocol_object dispatch module (which would read
+            %% "project").
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Proto),
+            ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Row))
+        end},
+        {"browse-protocols surfaces a protocol's required instance members", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Proto, <<"side">> => <<"instance">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            Protocols = maps:get(<<"protocols">>, Value),
+            ?assertEqual(<<"requirements">>, protocol_of(Protocols, <<"asString">>)),
+            ?assertEqual(<<"requirements">>, protocol_of(Protocols, <<"printString">>))
+        end},
+        {"browse-protocols surfaces required class members on the class side", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Proto, <<"side">> => <<"class">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            Protocols = maps:get(<<"protocols">>, Value),
+            ?assertEqual(<<"requirements">>, protocol_of(Protocols, <<"fromString:">>))
         end}
     ].
 

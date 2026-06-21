@@ -1268,7 +1268,7 @@ impl CoreErlangGenerator {
         // calls, no class builder chain.
         if module.classes.is_empty() {
             let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
-            let protocol_reg_doc = Self::generate_protocol_registrations(module);
+            let protocol_reg_doc = self.generate_protocol_registrations(module);
             return Ok(docvec![
                 "'register_class'/0 = fun () ->",
                 nest(
@@ -1425,7 +1425,7 @@ impl CoreErlangGenerator {
         // protocol registry during on_load, after class registration succeeds.
         // The protocol registration is wrapped in a let/in chain that feeds
         // the class registration result through.
-        let protocol_reg_doc = Self::generate_protocol_registrations(module);
+        let protocol_reg_doc = self.generate_protocol_registrations(module);
 
         let doc = if module.protocols.is_empty() {
             docvec![
@@ -1560,7 +1560,71 @@ impl CoreErlangGenerator {
         }
         // ADR 0087 Phase 6 (BT-2304): synthetic auto-accessor rows.
         entries.extend(self.build_synthetic_accessor_xref_entries(class));
+        // BT-2614: synthetic compiler-injected class-side constructors
+        // (`new`/`new:`/`spawn`/`spawn:` on actors) so the System Browser's
+        // xref-backed protocol list matches runtime `allMethods` reflection.
+        entries.extend(self.build_synthetic_class_method_xref_entries(class));
         docvec!["[", join(entries, &Document::Str(", ")), "]"]
+    }
+
+    /// BT-2614: Builds synthetic `method_xref` rows for the compiler-injected,
+    /// sourceless **class-side** entry points of an actor class — `new`/`new:`
+    /// (the no-direct-instantiation error stubs) and `spawn`/`spawn:` (the actor
+    /// spawn functions). These are emitted as real exported functions by
+    /// `actor_codegen.rs` (`generate_actor_new_error_method`,
+    /// `generate_spawn_function`, and their `:`-arity / abstract variants) yet
+    /// carry no user source and no AST `MethodDefinition`, so they never reach
+    /// `build_method_xref_entry`. Without these rows the runtime *has* the
+    /// methods (they show up in `SomeActor class allMethods`) but the System
+    /// Browser's `defined_selectors/2` omits them (BT-2614).
+    ///
+    /// The rows mirror the synthetic auto-accessor shape (BT-2304):
+    /// `source_status => synthetic`, a `synthetic_origin` line pointing at the
+    /// class header (these methods have no slot/method declaration of their own),
+    /// empty `sends` / `references`, and `class_side => true`. The browser badges
+    /// them read-only (no openable source) and buckets them under
+    /// "instance creation".
+    ///
+    /// Gated to `CodeGenContext::Actor`: value types auto-generate their own
+    /// `new`/`new:` constructors with different semantics (a real constructor, not
+    /// an error stub), so their xref parity is deliberately out of scope here and
+    /// tracked separately. Both abstract and concrete actors inject all four
+    /// selectors (the spawn *body* differs by abstractness, the selector set does
+    /// not), so no `is_abstract` gating is needed.
+    fn build_synthetic_class_method_xref_entries(
+        &self,
+        class: &ClassDefinition,
+    ) -> Vec<Document<'static>> {
+        if self.context != CodeGenContext::Actor {
+            return Vec::new();
+        }
+
+        // Derived location: the 1-based class-header line. These injected methods
+        // have no declaration of their own, so the class header is the only
+        // meaningful origin (the browser uses it solely as a non-null marker).
+        let origin_line = self.span_to_line(class.span).unwrap_or(1);
+
+        ["new", "new:", "spawn", "spawn:"]
+            .into_iter()
+            .map(|selector| Self::build_synthetic_class_method_entry(selector, origin_line))
+            .collect()
+    }
+
+    /// Builds a single synthetic class-side `method_xref` row (BT-2614). Mirrors
+    /// `build_synthetic_accessor_entry` but is class-side (`class_side => true`)
+    /// and has no type references (a constructor / spawn stub references no slot
+    /// type). `origin_line` is the class-header line.
+    fn build_synthetic_class_method_entry(selector: &str, origin_line: u32) -> Document<'static> {
+        docvec![
+            "~{'class_side' => 'true', 'selector' => ",
+            leaf::atom(selector.to_string()),
+            ", 'line' => ",
+            leaf::int_lit(i64::from(origin_line)),
+            ", 'sends' => [], 'references' => [], 'source_status' => 'synthetic', \
+             'synthetic_origin' => ",
+            leaf::int_lit(i64::from(origin_line)),
+            "}~",
+        ]
     }
 
     /// ADR 0087 Phase 6 (BT-2304): Builds `method_xref` rows for the
@@ -1979,10 +2043,18 @@ impl CoreErlangGenerator {
     ///
     /// For each `ProtocolDefinition` in the module, emits a call to
     /// `beamtalk_protocol_registry:register_protocol/1` with a map containing
-    /// the protocol's name, required methods, type parameters, and extending clause.
+    /// the protocol's name, required methods, type parameters, extending clause,
+    /// and the defining BEAM module.
+    ///
+    /// BT-2615: the `module` key records the module the protocol was defined in
+    /// (e.g. `bt@stdlib@printable`) so the runtime — and the System Browser —
+    /// can resolve a protocol class object's origin/source badge. The protocol
+    /// class object itself is dispatched by the shared `beamtalk_protocol_object`
+    /// module, which carries no package or source, so without this the browser
+    /// cannot tell a stdlib protocol from a project one.
     ///
     /// Returns `Document::Nil` if the module has no protocol definitions.
-    fn generate_protocol_registrations(module: &Module) -> Document<'static> {
+    fn generate_protocol_registrations(&self, module: &Module) -> Document<'static> {
         if module.protocols.is_empty() {
             return Document::Nil;
         }
@@ -2058,6 +2130,8 @@ impl CoreErlangGenerator {
                 "> = call 'beamtalk_protocol_registry':'register_protocol'(",
                 "~{'name' => ",
                 leaf::atom(name),
+                ", 'module' => ",
+                leaf::atom(self.module_name.to_string()),
                 ", 'required_methods' => ",
                 methods_doc,
                 ", 'required_class_methods' => ",

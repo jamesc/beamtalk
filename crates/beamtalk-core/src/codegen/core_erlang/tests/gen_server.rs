@@ -3919,15 +3919,47 @@ fn test_method_xref_baked_into_register_class() {
         code.contains("'class' => 'Counter'"),
         "the Counter reference should be recorded. Got:\n{code}"
     );
-    // All baked rows are `indexed` in Phase 2 (synthetic emission is Phase 6).
+    // The user-authored rows are `indexed`.
     assert!(
         code.contains("'source_status' => 'indexed'"),
         "rows should be tagged indexed. Got:\n{code}"
     );
-    // The optional synthetic_origin key is omitted for indexed rows.
+    // The optional synthetic_origin key is omitted for the user-authored indexed
+    // rows. Scope the check to the `increment` row (an indexed user method) so it
+    // is not tripped by the BT-2614 synthetic actor-constructor rows below, which
+    // legitimately carry synthetic_origin.
+    let inc_pos = code
+        .find("'selector' => 'increment'")
+        .expect("increment row present");
+    let inc_row = &code[inc_pos
+        ..code[inc_pos..]
+            .find("}~")
+            .map_or(code.len(), |o| inc_pos + o)];
     assert!(
-        !code.contains("synthetic_origin"),
-        "synthetic_origin must be omitted for indexed rows. Got:\n{code}"
+        !inc_row.contains("synthetic_origin"),
+        "synthetic_origin must be omitted for the indexed increment row. Got:\n{inc_row}"
+    );
+
+    // BT-2614: the actor's compiler-injected class-side `new`/`new:`/`spawn`/`spawn:`
+    // are emitted as synthetic xref rows so the System Browser matches runtime
+    // `Counter class allMethods`. They are class-side, synthetic, and carry a
+    // synthetic_origin (the class-header line).
+    let mx_start = code.find("'methodXref' => [").expect("methodXref present");
+    let mx_tail = &code[mx_start..];
+    let mx_seg = &mx_tail[..mx_tail.find("'classState'").unwrap_or(mx_tail.len())];
+    for sel in ["new", "new:", "spawn", "spawn:"] {
+        assert!(
+            mx_seg.contains(&format!("'selector' => '{sel}'")),
+            "synthetic actor constructor `{sel}` row missing. Got:\n{mx_seg}"
+        );
+    }
+    assert!(
+        mx_seg.contains("'source_status' => 'synthetic'"),
+        "actor constructors should be tagged synthetic. Got:\n{mx_seg}"
+    );
+    assert!(
+        mx_seg.contains("'synthetic_origin' =>"),
+        "synthetic actor-constructor rows should carry synthetic_origin. Got:\n{mx_seg}"
     );
 }
 

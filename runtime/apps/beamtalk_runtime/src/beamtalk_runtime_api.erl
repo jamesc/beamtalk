@@ -71,7 +71,8 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     is_sealed/1,
     is_abstract/1,
     is_internal/1,
-    is_protocol/1
+    is_protocol/1,
+    protocol_info/1
 ]).
 
 %%% ===================================================================
@@ -288,6 +289,18 @@ is_internal(ClassPid) ->
 -spec is_protocol(atom()) -> boolean().
 is_protocol(ClassName) ->
     beamtalk_protocol_registry:is_protocol(ClassName).
+
+-doc """
+Full protocol metadata for a registered protocol, or `undefined` (ADR 0068).
+
+The map carries `required_methods` / `required_class_methods` (each a list of
+`#{selector, arity}`), `type_params`, `extending`, and `doc` — pure registry
+reflection, no user code. Used by the System Browser to surface a protocol's
+required members (BT-2615).
+""".
+-spec protocol_info(atom()) -> map() | undefined.
+protocol_info(ProtocolName) ->
+    beamtalk_protocol_registry:protocol_info(ProtocolName).
 
 %%% ====================================================================
 %%% Object Instances Delegators
