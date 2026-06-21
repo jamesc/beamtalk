@@ -786,3 +786,30 @@ fn bt2624_union_singleton_partial_nonresponder_hints_singleton() {
         "Integer responds but #infinity does not — hint should name the singleton: {dnu:?}"
     );
 }
+
+/// BT-2624 (review follow-up): `#foo class` on a union resolves through
+/// `Symbol`, so a singleton member's `Self class` return is `Symbol class`
+/// (`Meta("Symbol")`) — not a phantom `Meta("#foo")`. A union of singletons
+/// collapses to a single `Meta("Symbol")`.
+#[test]
+fn bt2624_union_singleton_class_resolves_to_symbol_metatype() {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            MessageSelector::Unary("class".into()),
+            vec![],
+        ))],
+        span(),
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
+}

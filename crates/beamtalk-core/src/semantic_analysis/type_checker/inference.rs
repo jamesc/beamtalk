@@ -1957,8 +1957,10 @@ impl TypeChecker {
                         } else if ret_ty.as_str() == "Self class" {
                             // ADR 0083: `Self class` resolves to the metatype of
                             // the concrete union member (was Dynamic pre-0083,
-                            // BT-1952).
-                            return_types.push(InferredType::meta(member_name.clone()));
+                            // BT-1952). Use `resolve_name` so a singleton member
+                            // yields `Symbol class` (`#foo class` is `Symbol` at
+                            // runtime), not a phantom `Meta("#foo")` (BT-2624).
+                            return_types.push(InferredType::meta(EcoString::from(resolve_name)));
                         } else if let Some(meta_class) = ret_ty
                             .as_str()
                             .strip_suffix(" class")
