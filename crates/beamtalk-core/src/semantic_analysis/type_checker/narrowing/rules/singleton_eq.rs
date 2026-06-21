@@ -16,7 +16,7 @@ use ecow::{EcoString, eco_format};
 use crate::ast::{Expression, Literal, MessageSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
 
-use super::super::extract::extract_variable_name;
+use super::super::extract::{extract_variable_name, unwrap_parens};
 use super::super::info::{NarrowingInfo, SingletonEqInfo};
 use super::NarrowingRule;
 
@@ -65,13 +65,9 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
 }
 
 /// Returns the symbol name of a `#foo` literal (without the leading `#`),
-/// unwrapping parentheses; `None` for any other expression.
+/// unwrapping any nesting of parentheses; `None` for any other expression.
 fn symbol_literal(expr: &Expression) -> Option<&EcoString> {
-    let inner = match expr {
-        Expression::Parenthesized { expression, .. } => expression.as_ref(),
-        other => other,
-    };
-    match inner {
+    match unwrap_parens(expr) {
         Expression::Literal(Literal::Symbol(name), _) => Some(name),
         _ => None,
     }

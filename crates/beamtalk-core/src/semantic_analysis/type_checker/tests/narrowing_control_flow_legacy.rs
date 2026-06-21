@@ -468,6 +468,22 @@ fn test_detect_narrowing_singleton_inequality_is_negated() {
 }
 
 #[test]
+fn test_detect_narrowing_singleton_eq_through_nested_parens() {
+    // `ms = ((#infinity))` — `symbol_literal` unwraps all paren levels.
+    let nested = Expression::Parenthesized {
+        expression: Box::new(Expression::Parenthesized {
+            expression: Box::new(symbol_lit("infinity")),
+            span: span(),
+        }),
+        span: span(),
+    };
+    let expr = msg_send(var("ms"), MessageSelector::Binary("=".into()), vec![nested]);
+    let info = TypeChecker::detect_narrowing(&expr).expect("should detect through nested parens");
+    assert_eq!(info.variable, EnvKey::local("ms"));
+    assert_eq!(info.singleton_eq.unwrap().singleton.as_str(), "#infinity");
+}
+
+#[test]
 fn test_detect_narrowing_two_symbol_literals_no_match() {
     // `#a = #b` has no variable to narrow.
     let expr = msg_send(
