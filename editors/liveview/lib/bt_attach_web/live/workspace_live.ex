@@ -3166,7 +3166,9 @@ defmodule BtAttachWeb.WorkspaceLive do
       tab
       | doc: comment,
         native_module: resolved_native,
-        class_modifiers: class_modifiers,
+        # `nil` modifiers signal a transient fetch failure — keep the prior list
+        # rather than clearing the badges (BT-2605 review).
+        class_modifiers: class_modifiers || tab.class_modifiers,
         class_native: is_binary(resolved_native) and resolved_native != ""
     }
   end
@@ -3815,7 +3817,10 @@ defmodule BtAttachWeb.WorkspaceLive do
          class_modifiers_from(result)}
 
       _ ->
-        {"", nil, nil, []}
+        # Failure sentinel: `nil` modifiers (distinct from `[]`, a plain class with
+        # no modifiers) so a transient fetch failure can be told apart from a real
+        # empty result and the caller can keep the prior badges (BT-2605 review).
+        {"", nil, nil, nil}
     end
   end
 
@@ -4105,7 +4110,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     disk_source: binary | nil, # methods only — on-disk body captured at open (BT-2550); nil when unknown
   #     doc: binary | nil,       # BT-2558 read-only doc block: method `///` doc / class comment
   #     signature: binary | nil, # BT-2558 method signature (nil for a class-definition tab)
-  #     class_modifiers: [:sealed | :abstract], # BT-2605 reflected class modifiers (all tab kinds)
+  #     class_modifiers: [:sealed | :abstract] | nil, # BT-2605 reflected class modifiers; nil = transient fetch failure (no badges)
   #     class_native: boolean,   # BT-2605 native: class flag, for the Native badge (all tab kinds)
   #     new: boolean             # an unsaved "new method" tab (selector input shown, not the breadcrumb)
   #   }
@@ -4248,8 +4253,10 @@ defmodule BtAttachWeb.WorkspaceLive do
           existing
           | doc: comment,
             native_module: resolved_native,
-            # BT-2605: refresh the reflected modifier badges off the same fetch.
-            class_modifiers: class_modifiers,
+            # BT-2605: refresh the reflected modifier badges off the same fetch; a
+            # `nil` result is the transient-failure sentinel, so keep the prior
+            # list rather than clearing the badges (BT-2605 review).
+            class_modifiers: class_modifiers || existing.class_modifiers,
             class_native: is_binary(resolved_native) and resolved_native != ""
         }
 
@@ -4539,6 +4546,8 @@ defmodule BtAttachWeb.WorkspaceLive do
     Enum.map(mods, &class_modifier_badge/1)
   end
 
+  # No modifier list (key absent, or `nil` from a transient fetch failure) → no
+  # class-modifier badges.
   defp class_modifier_badges(_tab), do: []
 
   # The canonical class-modifier badge labels/colors, keyed by the reflected

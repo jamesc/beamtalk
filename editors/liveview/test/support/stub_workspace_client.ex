@@ -413,6 +413,20 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   def browse_class_definition(class) do
+    if get(:fail_class_definition) do
+      # BT-2605: simulate a transient workspace failure so the editor's
+      # keep-prior-badges-on-failure fallback can be exercised. Mirrors the real
+      # `{:error, _}` the facade returns when the workspace is unreachable.
+      {:error, :unreachable}
+    else
+      browse_class_definition_ok(class)
+    end
+  end
+
+  @doc "BT-2605: force `browse_class_definition/1` to fail (transient-outage simulation)."
+  def fail_class_definition(flag) when is_boolean(flag), do: put(:fail_class_definition, flag)
+
+  defp browse_class_definition_ok(class) do
     {:value,
      %{
        "class" => class,

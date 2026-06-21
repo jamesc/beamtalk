@@ -109,6 +109,22 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
       assert html =~ "Native"
       assert html =~ "Backed by an Erlang module"
     end
+
+    test "a transient class-definition fetch failure keeps the prior badges", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Open the sealed Ledger definition — the Sealed badge shows.
+      html = render_click(view, "browser_open_definition", %{"class" => "Ledger"})
+      assert html =~ ~s(class="modifier-tag sealed")
+
+      # Re-opening re-fetches the class header; simulate the workspace going
+      # unreachable for that re-fetch. The badge must NOT vanish — a `nil` modifier
+      # result is the failure sentinel, so the editor keeps the prior reflected
+      # list rather than clearing to "no modifiers" (BT-2605 review).
+      BtAttachWeb.StubWorkspaceClient.fail_class_definition(true)
+      html = render_click(view, "browser_open_definition", %{"class" => "Ledger"})
+      assert html =~ ~s(class="modifier-tag sealed")
+    end
   end
 
   describe "method-side + class-modifier badges (BT-2605)" do
