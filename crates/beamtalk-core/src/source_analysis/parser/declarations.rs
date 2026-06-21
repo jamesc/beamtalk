@@ -542,7 +542,8 @@ impl Parser {
     /// malformed (e.g., missing closing paren or non-identifier content).
     ///
     /// Also handles bounded type parameters: `(T :: Printable, E)` — skips the
-    /// `:: Bound` portion when present (ADR 0068 Phase 2d).
+    /// `:: Bound` portion when present (ADR 0068 Phase 2d). Also handles `class`
+    /// metatype suffixes in type argument position: `List(Actor class)` (BT-2630).
     pub(super) fn skip_paren_type_params(&self, offset: usize) -> Option<usize> {
         debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::LeftParen)));
         let mut o = offset + 1; // past `(`
@@ -554,7 +555,7 @@ impl Parser {
         if !is_type_name_token(self.peek_at(o)) {
             return None;
         }
-        o += 1;
+        o = self.skip_type_name_with_metatype(o);
         // Skip optional bound: `:: Protocol`
         o = self.skip_optional_type_param_bound(o);
         // Nested generic: `Name(Type(...))`
@@ -567,7 +568,7 @@ impl Parser {
             if !is_type_name_token(self.peek_at(o)) {
                 return None;
             }
-            o += 1;
+            o = self.skip_type_name_with_metatype(o);
             if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
                 o = self.skip_paren_type_params(o)?;
             }
@@ -578,7 +579,7 @@ impl Parser {
             if !is_type_name_token(self.peek_at(o)) {
                 return None;
             }
-            o += 1;
+            o = self.skip_type_name_with_metatype(o);
             // Skip optional bound: `:: Protocol`
             o = self.skip_optional_type_param_bound(o);
             // Nested generic
@@ -591,7 +592,7 @@ impl Parser {
                 if !is_type_name_token(self.peek_at(o)) {
                     return None;
                 }
-                o += 1;
+                o = self.skip_type_name_with_metatype(o);
                 if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
                     o = self.skip_paren_type_params(o)?;
                 }
