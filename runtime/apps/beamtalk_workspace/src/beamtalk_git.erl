@@ -19,6 +19,15 @@ Runs on the workspace node (where the `.bt` working tree lives). The git
 working tree is resolved from `beamtalk_workspace_meta:get_metadata/0` →
 `project_path`.
 
+Every git command runs with cwd = the *git repository toplevel* (resolved from
+`project_path` via `git rev-parse --show-toplevel`), not the workspace project
+directory. `git status --porcelain` reports paths relative to the toplevel, and
+`git restore`/`git add` resolve pathspecs relative to cwd; pinning both the
+listing and the mutating ops to the toplevel keeps the paths the Changes pane
+surfaces identical to the pathspecs revert/stage/unstage receive. This matters
+when the project root is a *subdirectory* of the repo (BT-2608); when the
+project root *is* the repo root the two coincide.
+
 == Operations ==
 
 Read ops parse machine formats into typed Erlang maps at this seam:
@@ -60,7 +69,12 @@ never crashed.
 -export([
     parse_status/1,
     parse_log/1,
-    classify_xy/1
+    classify_xy/1,
+    %% Subprocess seams exposed for the subdirectory-project regression tests
+    %% (BT-2608): they drive a real git repo without the workspace_meta
+    %% gen_server, exercising cwd/pathspec consistency end to end.
+    run_git_in/3,
+    repo_toplevel/2
 ]).
 -endif.
 
@@ -222,17 +236,67 @@ mutate(Selector, Args, FailMsg) ->
 %%% Subprocess execution (ADR 0051 — reuses the beamtalk_exec port)
 %%% ============================================================================
 
-%% Run `git` with the given argument list in the workspace project directory,
+%% Run `git` with the given argument list at the git repository toplevel,
 %% blocking until the child exits. Returns the combined stdout (verbatim
 %% bytes — NULs and newlines preserved) plus the exit code, or a structured
 %% error when the project path is missing, `git` is absent, or the call times
 %% out. stderr is captured and folded into error messages.
+%%
+%% Every git command runs with cwd = the repository toplevel (resolved via
+%% `git rev-parse --show-toplevel` from the workspace project dir), not the
+%% project subdir. `git status --porcelain` reports paths relative to the repo
+%% toplevel, and `git restore`/`git add` resolve pathspecs relative to cwd; by
+%% pinning cwd to the toplevel for *both* the status (listing) and the mutating
+%% ops, the paths surfaced by the Changes pane match the pathspecs handed to
+%% revert/stage/unstage. When the project root *is* the repo root the two
+%% coincide; when it is a subdirectory (e.g. `examples/getting-started` inside
+%% the `beamtalk` repo) this prevents the path from being re-prefixed and
+%% matching nothing (BT-2608).
 -spec run_git(atom(), [binary()]) ->
     {ok, binary(), non_neg_integer()} | {error, #beamtalk_error{}}.
 run_git(Selector, Args) ->
     case project_dir() of
         {ok, Dir} ->
-            run_git_in(Selector, Args, Dir);
+            case repo_toplevel(Selector, Dir) of
+                {ok, Toplevel} ->
+                    run_git_in(Selector, Args, Toplevel);
+                {error, _} = Err ->
+                    Err
+            end;
+        {error, _} = Err ->
+            Err
+    end.
+
+%% Resolve the git repository toplevel for the workspace project directory.
+%%
+%% Runs `git rev-parse --show-toplevel` with cwd = the project dir. On success
+%% returns the absolute toplevel path (trailing newline stripped). On a non-zero
+%% exit (not a git repository) the structured not-a-repo error is surfaced so
+%% the caller degrades gracefully. If git emits no toplevel (empty stdout) we
+%% fall back to the project dir so behaviour is never worse than before.
+-spec repo_toplevel(atom(), binary()) -> {ok, binary()} | {error, #beamtalk_error{}}.
+repo_toplevel(Selector, Dir) ->
+    case run_git_in(Selector, [<<"rev-parse">>, <<"--show-toplevel">>], Dir) of
+        {ok, Stdout, 0} ->
+            case string:trim(Stdout) of
+                <<>> -> {ok, Dir};
+                Toplevel -> {ok, Toplevel}
+            end;
+        {ok, Stdout, Code} ->
+            %% finish/4 already maps "not a git repository" to a structured
+            %% file_not_found error; for any other non-zero exit fall through
+            %% to a generic error carrying git's own stderr.
+            case is_not_a_repo(Stdout) of
+                true ->
+                    {error, not_a_repo_error(Selector)};
+                false ->
+                    {error,
+                        exit_error(
+                            Selector,
+                            Code,
+                            with_stderr(<<"git rev-parse --show-toplevel failed">>, Stdout)
+                        )}
+            end;
         {error, _} = Err ->
             Err
     end.
@@ -333,16 +397,7 @@ finish(_Selector, 0, Stdout, _Stderr) ->
 finish(Selector, Code, Stdout, Stderr) ->
     case is_not_a_repo(Stderr) of
         true ->
-            {error,
-                beamtalk_error:with_hint(
-                    beamtalk_error:new(
-                        file_not_found,
-                        'Git',
-                        Selector,
-                        <<"the workspace project is not a git repository">>
-                    ),
-                    <<"run `git init` in the project root to enable the git panel">>
-                )};
+            {error, not_a_repo_error(Selector)};
         false ->
             %% Return the combined stdout/stderr so the non-zero path still
             %% carries git's own message; callers fold it into the error.
@@ -559,6 +614,19 @@ arg_error(Selector, Hint) ->
     beamtalk_error:with_hint(
         beamtalk_error:new(type_error, 'Git', Selector, <<"invalid git argument">>),
         Hint
+    ).
+
+%% Structured error for "the workspace project is not a git repository".
+-spec not_a_repo_error(atom()) -> #beamtalk_error{}.
+not_a_repo_error(Selector) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:new(
+            file_not_found,
+            'Git',
+            Selector,
+            <<"the workspace project is not a git repository">>
+        ),
+        <<"run `git init` in the project root to enable the git panel">>
     ).
 
 -spec exit_error(atom(), integer(), binary()) -> #beamtalk_error{}.
