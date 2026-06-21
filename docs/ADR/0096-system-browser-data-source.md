@@ -146,13 +146,27 @@ uses). Extends the `list-classes` field set with `category` and `origin`; it doe
    <<"abstract">>   => false,
    <<"internal">>   => false,
    <<"source_file">> => <<"src/Counter.bt">>, %% null for file-less (ClassBuilder)
-   <<"origin">>     => <<"both">> }           %% see "origin" below
+   <<"origin">>     => <<"both">>,            %% see "origin" below
+   <<"is_test">>    => false,                 %% TestCase subclass → "Tests" bucket
+   <<"is_protocol">> => false }               %% protocol class object → "Protocols" bucket
 ```
 
 `category` source: the class's declared category (ADR 0070 package / class-
 category metadata) read via field reflection — **not** by sending the class a
 method. When no category is declared, `null` (the browser groups these under an
 "Uncategorized" bucket, matching Pharo).
+
+`is_protocol` (BT-2615): a protocol (e.g. `Printable`, ADR 0068) is reified as a
+sealed abstract class object dispatched by the shared `beamtalk_protocol_object`
+module. That dispatch module carries no package and no on-disk source, so a
+protocol would otherwise fall into "Uncategorized" badged "project". The flag
+lets the browser group protocols under a dedicated "Protocols" bucket (mirroring
+`is_test` → "Tests"). Origin/`source_origin` for a protocol row resolve through
+the protocol's *defining* module (recorded in the registry at registration), so
+a stdlib protocol badges `stdlib` and a project one badges `project`. The
+required members of a protocol surface on the instance/class side as a
+`requirements` protocol bucket in `browse-protocols` (registry reflection, no
+user code) rather than the empty list the dispatch module would yield.
 
 ### Op 2 — `browse-protocols` → `{value, ProtocolTree}`
 

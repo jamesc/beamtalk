@@ -1996,6 +1996,37 @@ fn handle_resolve_method_span(request: &Map) -> Term {
     }
 }
 
+/// Handle a `reindent_method_source` request (BT-2584).
+///
+/// Re-indents a canonical (column-0) method body to the given `base_indent`,
+/// producing the on-disk byte-span shape. The live-patch install hook calls
+/// this so the `ChangeEntry`'s stored `source` is a drop-in for `disk[span]` —
+/// `source_ref == disk[span]` by construction — and a later `Workspace flush`
+/// splices it verbatim with no reshaping (retiring the former
+/// `beamtalk_workspace_flush:reindent/2`).
+///
+/// Request fields:
+/// - `source` (binary): the canonical column-0 method body (`unparse_method`)
+/// - `base_indent` (binary, optional): the leading whitespace of the on-disk
+///   definition's first line (empty = identity)
+///
+/// Response: `#{status => ok, source => <<...>>}`. The transform itself never
+/// fails — it is a pure string reshape. (The Erlang port wrappers still surface
+/// transport/timeout errors as `{error, port_error, _}` around this call.)
+fn handle_reindent_method_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let base_indent = map_get(request, "base_indent")
+        .and_then(term_to_string)
+        .unwrap_or_default();
+    let reindented = beamtalk_core::unparse::reindent_method_source(&base_indent, &source);
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("source"), binary(&reindented)),
+    ]))
+}
+
 /// Build a structured error response for a [`SpanResolveError`].
 ///
 /// The `reason` atom lets the Erlang hook branch without string-matching; the
@@ -2042,6 +2073,7 @@ fn handle_request(request_term: &Term) -> Term {
         "find_ffi_sites_in_source" => handle_find_ffi_sites_in_source(map),
         "find_announce_sites_in_source" => handle_find_announce_sites_in_source(map),
         "resolve_method_span" => handle_resolve_method_span(map),
+        "reindent_method_source" => handle_reindent_method_source(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }
@@ -2516,6 +2548,61 @@ Object subclass: Counter
         };
         assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
         assert_eq!(map_get(m, "reason"), Some(&atom("class_not_found")));
+    }
+
+    // --- reindent_method_source tests (BT-2584) ---
+
+    #[test]
+    fn reindent_method_source_shifts_canonical_to_base() {
+        let request = Map::from([
+            (atom("command"), atom("reindent_method_source")),
+            (atom("source"), binary("/// doc\ndecrement => self.v - 2\n")),
+            (atom("base_indent"), binary("  ")),
+        ]);
+        let response = handle_reindent_method_source(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        assert_eq!(
+            map_get(m, "source").and_then(term_to_string).as_deref(),
+            Some("  /// doc\n  decrement => self.v - 2\n"),
+        );
+    }
+
+    #[test]
+    fn reindent_method_source_empty_base_is_identity() {
+        let request = Map::from([
+            (atom("command"), atom("reindent_method_source")),
+            (atom("source"), binary("foo => 1\n")),
+            (atom("base_indent"), binary("")),
+        ]);
+        let response = handle_reindent_method_source(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "source").and_then(term_to_string).as_deref(),
+            Some("foo => 1\n"),
+        );
+    }
+
+    #[test]
+    fn reindent_method_source_missing_base_indent_defaults_empty() {
+        // `base_indent` is optional and defaults to empty (identity).
+        let request = Map::from([
+            (atom("command"), atom("reindent_method_source")),
+            (atom("source"), binary("foo => 1\n")),
+        ]);
+        let response = handle_reindent_method_source(&request);
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response, got: {response:?}");
+        };
+        assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+        assert_eq!(
+            map_get(m, "source").and_then(term_to_string).as_deref(),
+            Some("foo => 1\n"),
+        );
     }
 
     /// BT-1238: `compile_expression_trace` produces Core Erlang with trace list return.

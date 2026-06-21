@@ -558,6 +558,39 @@ defmodule BtAttach.Workspace do
     end
   end
 
+  @doc """
+  Load the project's `test/` files into the live image via the `load-tests` op
+  (BT-2557) — the test-runner pane's "Load tests" affordance.
+
+  Plain project loads default to `include_tests=false`, so a freshly-opened
+  image holds only `src/` classes and the runner catalogue is empty. This op
+  delegates to the shared `sync_project/2` with `include_tests=true`, compiling
+  and loading the `test/` `.bt` files (mutating the image), so the facade gates
+  it `:execute` (Owner-only) — the same gate `run_tests` uses.
+
+  Returns `{:ok, %{"classes" => [binary], "errors" => [map], "summary" =>
+  binary}}` on success, or `{:error, reason}` on a dispatch failure.
+  """
+  @spec load_tests() :: {:ok, map()} | {:error, term()}
+  def load_tests do
+    case dispatch_simple("load-tests", %{}) do
+      {:value, %{"classes" => _} = result} ->
+        {:ok, result}
+
+      {:value, other} ->
+        {:error, {:unexpected_reply, other}}
+
+      {:error, reason} ->
+        {:error, reason}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
   # Project a backend `TestResult` term (atom-keyed, live `tests` list) onto a
   # string-keyed wire map the LiveView can render directly.
   defp normalize_test_result(result) when is_map(result) do
@@ -849,6 +882,33 @@ defmodule BtAttach.Workspace do
   end
 
   @doc """
+  Subscribe the given `pid` (the LiveView process) to the workspace's
+  class-lifecycle push stream through the BT-2399 subscription facade (BT-2598).
+
+  Like the Transcript/bindings streams, this uses the facade's explicit-pid form
+  so the LiveView's own location-transparent pid is registered as the subscriber
+  (not the short-lived RPC proxy). The `classes` stream rides the SystemAnnouncer
+  bus and pushes the native
+  `{:beamtalk_announcement, sub_ref, :ClassLoaded | :ClassRemoved, handler, event}`
+  message whenever a class is (re)loaded or torn down — a *refresh trigger*, not
+  the data itself. A hot redefinition (an in-memory `>>` patch, an MCP
+  `save_method`, or the disk→image reload after a git revert) is itself a
+  `ClassLoaded`, so any source change reaches the subscriber. On that signal the
+  cockpit refreshes its open editor/browser windows and the browser class list,
+  rather than each action manually re-pulling — this also covers multi-session
+  and external-edit freshness. The bus prunes the subscription on dist
+  disconnect; the LiveView re-subscribes on its next (re)mount.
+  """
+  def subscribe_classes(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :subscribe, [:classes, pid])
+  end
+
+  @doc "Unsubscribe `pid` from the class-lifecycle push stream via the facade."
+  def unsubscribe_classes(pid) when is_pid(pid) do
+    rpc(:beamtalk_repl_subscriptions, :unsubscribe, [:classes, pid])
+  end
+
+  @doc """
   Subscribe the given `subscriber` (the LiveView process) to *per-object* state
   changes on the inspected actor `term` — the live-Inspector push of Cockpit
   Phase 3 (ADR 0095 §5, BT-2489).
@@ -1118,6 +1178,43 @@ defmodule BtAttach.Workspace do
         {:error, {:unexpected_reply, other}}
     end
   end
+
+  @doc """
+  Reload a `.bt` file from disk into the live image (BT-2598) — the disk→image
+  reload the cockpit runs after a content-mutating git op (a `git revert` /
+  `git restore -- <path>`), so the live image matches the reverted working tree
+  (image == disk, git-first / disk-as-source-of-truth, BT-2585).
+
+  Calls `beamtalk_repl_eval:reload_file/1`, the clean-returning reload entry: it
+  re-installs the file's classes via hot redefinition (which fires a `ClassLoaded`
+  announcement on the `classes` stream, so subscribed surfaces refresh their open
+  windows) and repopulates the workspace_meta class-source cache. `path` is the
+  project-relative `.bt` path git just restored.
+
+  Returns `{:ok, [class_name]}` (the reloaded class-name binaries) or
+  `{:error, reason_term}` (a structured `#beamtalk_error{}` for a compile failure
+  / missing file, or `{:unreachable, _}` if the workspace is gone).
+  """
+  def reload_file(path) when is_binary(path) do
+    case rpc(:beamtalk_repl_eval, :reload_file, [binary_to_list_path(path)]) do
+      {:ok, class_names} when is_list(class_names) ->
+        {:ok, Enum.map(class_names, &to_string/1)}
+
+      {:error, reason} ->
+        {:error, structure_error(reason)}
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+
+      other ->
+        {:error, {:unexpected_reply, other}}
+    end
+  end
+
+  # `reload_file/1` takes an Erlang string (charlist) path — the runtime opens it
+  # with `file:read_file/1` and resolves it against the workspace node's cwd (the
+  # project root), the same form git restored.
+  defp binary_to_list_path(path) when is_binary(path), do: String.to_charlist(path)
 
   @doc """
   Flush the workspace's pending durable changes to disk (ADR 0082 `Workspace

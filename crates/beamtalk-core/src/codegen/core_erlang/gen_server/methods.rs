@@ -1268,7 +1268,7 @@ impl CoreErlangGenerator {
         // calls, no class builder chain.
         if module.classes.is_empty() {
             let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
-            let protocol_reg_doc = Self::generate_protocol_registrations(module);
+            let protocol_reg_doc = self.generate_protocol_registrations(module);
             return Ok(docvec![
                 "'register_class'/0 = fun () ->",
                 nest(
@@ -1425,7 +1425,7 @@ impl CoreErlangGenerator {
         // protocol registry during on_load, after class registration succeeds.
         // The protocol registration is wrapped in a let/in chain that feeds
         // the class registration result through.
-        let protocol_reg_doc = Self::generate_protocol_registrations(module);
+        let protocol_reg_doc = self.generate_protocol_registrations(module);
 
         let doc = if module.protocols.is_empty() {
             docvec![
@@ -1979,10 +1979,18 @@ impl CoreErlangGenerator {
     ///
     /// For each `ProtocolDefinition` in the module, emits a call to
     /// `beamtalk_protocol_registry:register_protocol/1` with a map containing
-    /// the protocol's name, required methods, type parameters, and extending clause.
+    /// the protocol's name, required methods, type parameters, extending clause,
+    /// and the defining BEAM module.
+    ///
+    /// BT-2615: the `module` key records the module the protocol was defined in
+    /// (e.g. `bt@stdlib@printable`) so the runtime — and the System Browser —
+    /// can resolve a protocol class object's origin/source badge. The protocol
+    /// class object itself is dispatched by the shared `beamtalk_protocol_object`
+    /// module, which carries no package or source, so without this the browser
+    /// cannot tell a stdlib protocol from a project one.
     ///
     /// Returns `Document::Nil` if the module has no protocol definitions.
-    fn generate_protocol_registrations(module: &Module) -> Document<'static> {
+    fn generate_protocol_registrations(&self, module: &Module) -> Document<'static> {
         if module.protocols.is_empty() {
             return Document::Nil;
         }
@@ -2058,6 +2066,8 @@ impl CoreErlangGenerator {
                 "> = call 'beamtalk_protocol_registry':'register_protocol'(",
                 "~{'name' => ",
                 leaf::atom(name),
+                ", 'module' => ",
+                leaf::atom(self.module_name.to_string()),
                 ", 'required_methods' => ",
                 methods_doc,
                 ", 'required_class_methods' => ",

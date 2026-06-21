@@ -54,6 +54,8 @@ Extracted from beamtalk_repl_eval (BT-863).
     patch_side/1,
     classify_source_file/1,
     span_error_entry/3,
+    new_method_entry/3,
+    sibling_method_indent/1,
     %% ADR 0082 Phase 1 (BT-2285): pure validation helpers for new_class/2.
     declared_class_name/1,
     validate_new_class/3,
@@ -1448,22 +1450,186 @@ add_span_or_downgrade(Base, ClassNameBin, SelectorBin, Side, SourceFile, AbsPath
 resolve_span_entry(Base, ClassNameBin, SelectorBin, Side, SourceFile, DiskSource) ->
     case beamtalk_compiler:resolve_method_span(DiskSource, ClassNameBin, SelectorBin, Side) of
         {ok, Span, PrevSource} ->
+            store_disk_shaped_entry(Base, SourceFile, Span, PrevSource);
+        {error, selector_not_found, _Message} ->
+            %% Selector absent on disk (a brand-new method added live) is normal:
+            %% record a flushable entry with no prev span — a later flush appends
+            %% the method. The compiler's canonical body is column-0, but the
+            %% class body on disk is indented, so reshape the body to the class's
+            %% sibling-method indentation at store time (BT-2583) — mirroring
+            %% `store_disk_shaped_entry`'s reshape — so flush's `append_method`
+            %% stays a verbatim append into an indented body.
+            new_method_entry(Base, SourceFile, DiskSource);
+        {error, Reason, _Message} ->
+            %% Any other resolution failure downgrades to memory-only.
+            span_error_entry(Base, SourceFile, Reason)
+    end.
+
+%% Reshape a brand-new method (no prior on-disk span) to the target class body's
+%% indentation at store time, so flush's `append_method' stays a verbatim append
+%% (BT-2583). The compiler's canonical `unparse_method' body is column-0, but the
+%% class body on disk is indented; an un-reshaped append would write the method
+%% at column 0 into an indented class. The base indentation is derived from a
+%% sibling method already on disk (falling back to the project's 2-space step),
+%% mirroring `store_disk_shaped_entry''s store-time reshape. If the reshape FFI is
+%% unavailable, downgrade to memory-only rather than store a column-0 body that
+%% flush would append un-indented.
+-spec new_method_entry(map(), binary(), binary()) -> map().
+new_method_entry(#{source := Canonical} = Base, SourceFile, DiskSource) ->
+    BaseIndent = sibling_method_indent(DiskSource),
+    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
+        {ok, Reindented} ->
+            Base#{source => Reindented, flushable => true, source_file => SourceFile};
+        {error, ReindentReason, _Msg} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not reshape new-method body to class indentation; "
+                "recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReindentReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
+    end.
+
+%% Derive the base indentation for a brand-new method from the class body on
+%% disk: the leading whitespace of the first indented, non-blank, non-comment
+%% line (a sibling method or field definition). Falls back to the project's
+%% 2-space convention when the class body has no indented member yet (e.g. an
+%% empty class). Comment lines (`//`, `///`) and the unindented class header are
+%% skipped so the step reflects member indentation, not column 0.
+-spec sibling_method_indent(binary()) -> binary().
+sibling_method_indent(DiskSource) ->
+    Lines = binary:split(DiskSource, <<"\n">>, [global]),
+    sibling_method_indent_lines(Lines).
+
+-spec sibling_method_indent_lines([binary()]) -> binary().
+sibling_method_indent_lines([]) ->
+    default_method_indent();
+sibling_method_indent_lines([Line | Rest]) ->
+    Indent = leading_ws(Line),
+    Content = strip_leading_ws(Line),
+    case Indent =/= <<>> andalso not is_comment_or_blank(Content) of
+        true -> Indent;
+        false -> sibling_method_indent_lines(Rest)
+    end.
+
+%% The project's default member indentation: two spaces (ADR 0082 / stdlib
+%% convention). Used for a class with no indented member to copy.
+-spec default_method_indent() -> binary().
+default_method_indent() -> <<"  ">>.
+
+%% True for a line whose content (leading whitespace already stripped) is empty
+%% or a line comment — such lines do not establish member indentation.
+-spec is_comment_or_blank(binary()) -> boolean().
+is_comment_or_blank(<<>>) -> true;
+is_comment_or_blank(<<"//", _/binary>>) -> true;
+is_comment_or_blank(_) -> false.
+
+%% Drop the leading run of spaces/tabs from a line.
+-spec strip_leading_ws(binary()) -> binary().
+strip_leading_ws(<<C, Rest/binary>>) when C =:= $\s; C =:= $\t ->
+    strip_leading_ws(Rest);
+strip_leading_ws(Bin) ->
+    Bin.
+
+%% Reshape the stored `source' (the compiler's canonical column-0
+%% `unparse_method' body) to the on-disk byte-span shape so the ChangeEntry's
+%% `source_ref' is a drop-in for `disk[span]' — `source_ref == disk[span]' by
+%% construction (BT-2584). A later `Workspace flush' then splices it verbatim
+%% with no reindent. The base indentation is the leading whitespace of the disk
+%% slice (`PrevSource') the patch replaces. If the reshape FFI is unavailable,
+%% downgrade to memory-only rather than store a column-0 body that flush would
+%% splice into an indented region and corrupt the file.
+-spec store_disk_shaped_entry(
+    map(), binary(), #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()
+) -> map().
+store_disk_shaped_entry(#{source := Canonical} = Base, SourceFile, Span, PrevSource) ->
+    BaseIndent = leading_ws(PrevSource),
+    case beamtalk_compiler:reindent_method_source(Canonical, BaseIndent) of
+        {ok, Reindented} ->
+            %% The disk byte-span ends in a trailing newline unless the method is
+            %% the last line of the file with no terminator (ADR 0082). Match that
+            %% trailing-newline state on the reshaped body — regardless of whether
+            %% the canonical body carries its own — so the splice is a true drop-in
+            %% and never glues the next line or leaves a stray blank one (BT-2584).
+            DiskShaped = match_trailing_newline(Reindented, PrevSource),
             Base#{
+                source => DiskShaped,
                 flushable => true,
                 source_file => SourceFile,
                 span => Span,
                 prev_source => PrevSource
             };
-        {error, Reason, _Message} ->
-            %% Selector absent on disk (a brand-new method added live) is normal:
-            %% record a flushable entry with no prev span — a later flush appends
-            %% the method. Other resolution errors downgrade to memory-only.
-            span_error_entry(Base, SourceFile, Reason)
+        {error, ReindentReason, _Msg} ->
+            ?LOG_WARNING(
+                "ChangeLog: could not reshape patch body to disk indentation; "
+                "recording memory-only",
+                #{
+                    source_file => SourceFile,
+                    reason => ReindentReason,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            Base#{flushable => false, not_flushable_reason => <<"reindent_failed">>}
     end.
 
+%% Make `Source''s trailing-newline state match `Reference''s: append a single
+%% `\n' when the reference ends in one and the source does not; strip trailing
+%% `\n's when the reference has none (the clamped-at-EOF last-method case). Keeps
+%% the reshaped body a true drop-in for the disk slice it replaces.
+-spec match_trailing_newline(binary(), binary()) -> binary().
+match_trailing_newline(Source, Reference) ->
+    case ends_with_newline(Reference) of
+        true -> ensure_trailing_newline(Source);
+        false -> strip_trailing_newlines(Source)
+    end.
+
+-spec ends_with_newline(binary()) -> boolean().
+ends_with_newline(<<>>) -> false;
+ends_with_newline(Bin) -> binary:last(Bin) =:= $\n.
+
+-spec ensure_trailing_newline(binary()) -> binary().
+ensure_trailing_newline(<<>>) ->
+    <<"\n">>;
+ensure_trailing_newline(Bin) ->
+    case binary:last(Bin) of
+        $\n -> Bin;
+        _ -> <<Bin/binary, "\n">>
+    end.
+
+-spec strip_trailing_newlines(binary()) -> binary().
+strip_trailing_newlines(<<>>) ->
+    <<>>;
+strip_trailing_newlines(Bin) ->
+    case binary:last(Bin) of
+        $\n -> strip_trailing_newlines(binary:part(Bin, 0, byte_size(Bin) - 1));
+        _ -> Bin
+    end.
+
+%% The leading run of spaces/tabs of the first line of `Body' — the base
+%% indentation of the on-disk method definition the span covers.
+-spec leading_ws(binary()) -> binary().
+leading_ws(Body) ->
+    %% `binary:split/2' always returns a non-empty list (the whole binary when
+    %% the delimiter is absent), so the first element is the first line.
+    [First | _] = binary:split(Body, <<"\n">>),
+    leading_ws(First, 0).
+
+leading_ws(Line, N) ->
+    case Line of
+        <<_:N/binary, C, _/binary>> when C =:= $\s; C =:= $\t ->
+            leading_ws(Line, N + 1);
+        _ ->
+            binary:part(Line, 0, N)
+    end.
+
+%% A genuine span-resolution failure (`ambiguous', a port/transport error, ...)
+%% downgrades the entry to memory-only with a reason. The brand-new-method case
+%% (`selector_not_found') does NOT come here — it is reshaped and recorded
+%% flushable by `new_method_entry/3' (BT-2583).
 -spec span_error_entry(map(), binary(), atom()) -> map().
-span_error_entry(Base, SourceFile, selector_not_found) ->
-    Base#{flushable => true, source_file => SourceFile};
 span_error_entry(Base, _SourceFile, Reason) ->
     Base#{
         flushable => false,

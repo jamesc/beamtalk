@@ -376,3 +376,235 @@ fn corpus_every_method_resolves() {
         unresolved.iter().cloned().collect::<Vec<_>>().join("\n")
     );
 }
+
+/// The leading run of spaces/tabs of the first line of `body` — the base
+/// indentation of the on-disk method definition the span covers. Mirrors the
+/// install hook's `leading_ws/1` (Erlang) and the port's `leading_whitespace`.
+fn base_indent(body: &str) -> &str {
+    let first_line = body.split('\n').next().unwrap_or("");
+    let len = first_line
+        .bytes()
+        .take_while(|&b| b == b' ' || b == b'\t')
+        .count();
+    &first_line[..len]
+}
+
+/// Strip up to `n` leading whitespace bytes from every line of `s` (the lines'
+/// shared base indent), preserving relative indentation. Recovers the column-0
+/// bare-method body the live editor sends from the file-indented disk slice.
+fn dedent(s: &str, n: usize) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut first = true;
+    for line in s.split('\n') {
+        if !first {
+            out.push('\n');
+        }
+        first = false;
+        // ASCII whitespace is single-byte, so the byte count is a char boundary.
+        let strip = line
+            .bytes()
+            .take(n)
+            .take_while(|&b| b == b' ' || b == b'\t')
+            .count();
+        out.push_str(&line[strip..]);
+    }
+    out
+}
+
+/// Make `s`'s trailing-newline state match `reference`'s. Mirrors the install
+/// hook's `match_trailing_newline/2` (Erlang).
+fn match_trailing_newline(s: &str, reference: &str) -> String {
+    let trimmed = s.trim_end_matches('\n');
+    if reference.ends_with('\n') {
+        format!("{trimmed}\n")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// BT-2584: the install-hook reshape round-trips every method's disk slice
+/// byte-for-byte.
+///
+/// This is the "`source_ref == disk[span]` by construction" proof for the part
+/// BT-2584 owns: the *reshape* the install hook applies to turn a column-0
+/// canonical body into the on-disk byte-span shape, and that flush then splices
+/// verbatim. The reshape is two mutually-inverse transforms:
+///
+/// 1. [`crate::unparse::reindent_method_source`] (with the span's base indent),
+///    which strips a column-0 body's shared indent and re-prepends the base; and
+/// 2. trailing-newline matching to the disk slice (the install hook's
+///    `match_trailing_newline/2`).
+///
+/// Their composition with the inverse [`dedent`] must be the identity on every
+/// method's verbatim disk slice across the stdlib + `examples/` corpus — doc
+/// comments, multi-line bodies/signatures, blank lines between doc and method,
+/// class-side methods, binary selectors, last-method-without-trailing-newline.
+/// That is exactly the invariant that lets flush drop the old `reindent/2`
+/// reconciliation: whatever the install hook stores re-indents back to the slice
+/// it replaces.
+///
+/// This deliberately does **not** route through `parse_method`/`unparse_method`:
+/// the unparser's *formatting* fidelity (width-based line breaking, idempotence
+/// on hand-formatted source) is a separate, pre-existing concern. BT-2584 only
+/// changes how an already-canonical body is re-indented for the splice.
+#[test]
+fn corpus_reshape_round_trip_is_byte_identical() {
+    use crate::unparse::reindent_method_source;
+
+    if !corpus_present() {
+        return;
+    }
+    let files = corpus_files();
+    let mut total_methods = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+
+    for path in &files {
+        let source = read_corpus_file(path);
+        let tokens = lex_with_eof(&source);
+        let (module, _diags) = parse(tokens);
+
+        for target in enumerate_methods(&module) {
+            total_methods += 1;
+            let Ok(span) = resolve_in_module(
+                &module,
+                &source,
+                &target.class,
+                &target.selector,
+                target.side,
+            ) else {
+                // Resolution failures are reported by the round-trip test.
+                continue;
+            };
+            let disk_slice = &source[span.as_range()];
+            let base = base_indent(disk_slice);
+
+            // The column-0 "stored canonical" body the editor/compiler hands the
+            // install hook for an unchanged method: the slice dedented to its
+            // base. Re-indenting it back to the base and matching the slice's
+            // trailing newline must reproduce the slice exactly.
+            let column0 = dedent(disk_slice, base.len());
+            let reindented = reindent_method_source(base, &column0);
+            let stored = match_trailing_newline(&reindented, disk_slice);
+
+            if stored != disk_slice {
+                failures.push(format!(
+                    "{}: {}.{} ({}):\n  disk[span] = {disk_slice:?}\n  stored     = {stored:?}",
+                    path.display(),
+                    target.class,
+                    target.selector,
+                    target.side.as_str(),
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "reshape round-trip changed {} of {} method(s) — \
+         the re-indented body is not byte-identical to disk[span]:\n{}",
+        failures.len(),
+        total_methods,
+        failures.join("\n\n")
+    );
+    assert!(
+        total_methods > 100,
+        "expected the corpus to contain >100 methods, found {total_methods}"
+    );
+}
+
+/// BT-2584: for every method **already in the unparser's canonical form**, the
+/// full production pipeline reproduces `disk[span]` byte-for-byte.
+///
+/// This isolates the invariant BT-2584 actually owns from the unparser's
+/// pre-existing formatting fidelity. The live save pipeline is: the editor's
+/// bare body is re-parsed + re-emitted (`compile_method` → `unparse_method`),
+/// then the install hook re-indents that canonical body to the span's base and
+/// matches the slice's trailing newline. Whether `unparse_method` reproduces a
+/// hand-written method verbatim is a **separate, pre-existing** property (the
+/// corpus is not all canonically formatted — ~17% of methods are reformatted by
+/// the unparser, e.g. width-driven line breaking). BT-2584 does not change that.
+///
+/// What BT-2584 *must* guarantee is that the reindent + trailing-newline reshape
+/// introduces **no** divergence of its own: for a method whose on-disk body is
+/// already canonical (`unparse_method(parse(column0)) == column0`), the stored
+/// `source` must equal `disk[span]` exactly — otherwise the reshape itself
+/// (indentation or newline handling) is broken. This is the subset where
+/// "unchanged save → byte-identical flush" is genuinely promised, and it must be
+/// 100%. The canonical subset is the large majority of the corpus, so this is a
+/// strong proof, not a degenerate one.
+#[test]
+fn corpus_canonical_methods_round_trip_byte_identical() {
+    use crate::source_analysis::parse_method;
+    use crate::unparse::{reindent_method_source, unparse_method};
+
+    if !corpus_present() {
+        return;
+    }
+    let files = corpus_files();
+    let mut canonical_checked = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+
+    for path in &files {
+        let source = read_corpus_file(path);
+        let tokens = lex_with_eof(&source);
+        let (module, _diags) = parse(tokens);
+
+        for target in enumerate_methods(&module) {
+            let Ok(span) = resolve_in_module(
+                &module,
+                &source,
+                &target.class,
+                &target.selector,
+                target.side,
+            ) else {
+                continue;
+            };
+            let disk_slice = &source[span.as_range()];
+            let base = base_indent(disk_slice);
+
+            let column0 = dedent(disk_slice, base.len());
+            let method_tokens = lex_with_eof(&column0);
+            let (parsed, _diags) = parse_method(method_tokens);
+            let Some(method) = parsed else {
+                continue;
+            };
+            let canonical = unparse_method(&method);
+
+            // Restrict to methods whose on-disk body is already canonical — the
+            // subset where flush is promised to be byte-identical. For the rest,
+            // the unparser (not BT-2584) reshapes, which is out of scope here.
+            if match_trailing_newline(&canonical, &column0) != column0 {
+                continue;
+            }
+            canonical_checked += 1;
+
+            // The install hook's reshape of the canonical body must reproduce the
+            // disk slice exactly — this is the BT-2584 guarantee.
+            let reindented = reindent_method_source(base, &canonical);
+            let stored = match_trailing_newline(&reindented, disk_slice);
+            if stored != disk_slice {
+                failures.push(format!(
+                    "{}: {}.{} ({}):\n  disk[span] = {disk_slice:?}\n  stored     = {stored:?}",
+                    path.display(),
+                    target.class,
+                    target.selector,
+                    target.side.as_str(),
+                ));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} canonical method(s) did not round-trip byte-identical — the reshape \
+         (reindent + trailing-newline) is broken, not the unparser:\n{}",
+        failures.len(),
+        failures.join("\n\n")
+    );
+    // The canonical subset must be the large majority, or the proof is degenerate.
+    assert!(
+        canonical_checked > 100,
+        "expected >100 already-canonical methods to validate the reshape against, \
+         only found {canonical_checked}"
+    );
+}

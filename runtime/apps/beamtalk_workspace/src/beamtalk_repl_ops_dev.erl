@@ -488,6 +488,39 @@ handle_term(<<"list-tests">>, _Params, _Msg, _SessionPid) ->
      || T <- Discovered
     ],
     {value, #{<<"classes">> => Classes}};
+handle_term(<<"load-tests">>, _Params, _Msg, _SessionPid) ->
+    %% BT-2557: load the project's `test/` files into the live image so the
+    %% cockpit test-runner pane (and the System Browser's "Tests" group) surface
+    %% TestCase subclasses without a CLI `beamtalk test` round-trip. Plain
+    %% `load-project` defaults to include_tests=false, so opening a project never
+    %% loads test files and the runner shows an empty catalogue (the gap this op
+    %% closes). Delegates to the shared `sync_project/2` with include_tests=true,
+    %% scoped to the workspace cwd (the project root, as `Workspace sync` assumes).
+    %% Compiles + loads user test code (mutating the image), so the facade gates
+    %% it `:execute` (Owner-only), mirroring `run_tests`/`eval`.
+    %%
+    %% No `session_pid` is threaded: this op is workspace-global (like `list-tests`
+    %% / `test-all`), and the dist-attached caller passes its OWN pid as the
+    %% `dispatch/4` SessionPid placeholder — a remote pid that is not a
+    %% `beamtalk_repl_shell` gen_server. Passing it would route the load through
+    %% the session-tracking path (`load_files_sequential` → `beamtalk_repl_shell`)
+    %% against the wrong process. Omitting it selects the stateless load path
+    %% (`load_files_stateless` → `beamtalk_repl_loader`), exactly as the
+    %% `Workspace sync` primitive does.
+    case
+        beamtalk_repl_ops_load:sync_project(".", #{
+            include_tests => true
+        })
+    of
+        {ok, Result} ->
+            {value, #{
+                <<"classes">> => maps:get(classes, Result, []),
+                <<"errors">> => maps:get(errors, Result, []),
+                <<"summary">> => maps:get(summary, Result, <<>>)
+            }};
+        {error, Err} ->
+            {error, Err}
+    end;
 handle_term(<<"describe">>, _Params, _Msg, _SessionPid) ->
     Ops = describe_ops(),
     BeamtalkVsnBin =
@@ -1885,6 +1918,8 @@ base_ops() ->
         <<"test-all">> => #{<<"params">> => []},
         %% BT-2557: discover TestCase subclasses for the cockpit test-runner pane.
         <<"list-tests">> => #{<<"params">> => []},
+        %% BT-2557: load the project's test/ files so the runner/browser see them.
+        <<"load-tests">> => #{<<"params">> => []},
         <<"load-source">> => #{<<"params">> => [<<"source">>]},
         <<"load-project">> => #{
             <<"params">> => [],

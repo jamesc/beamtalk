@@ -28,6 +28,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_ffi_sites_in_source/5,
     find_announce_sites_in_source/2,
     resolve_method_span/5,
+    reindent_method_source/3,
     close/1
 ]).
 
@@ -859,6 +860,79 @@ handle_method_span_response(#{status := error, reason := Reason} = Resp) ->
     {error, Reason, Message};
 handle_method_span_response(Other) ->
     ?LOG_ERROR("Unexpected method-span response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
+
+-doc """
+Re-indent a canonical (column-0) method body to `BaseIndent' (BT-2584).
+
+Shifts the compiler's canonical `unparse_method' output (column 0, 2-space
+relative steps) so its least-indented line sits at `BaseIndent', producing the
+on-disk byte-span shape. The live-patch install hook calls this so the stored
+ChangeEntry `source' is a drop-in for `disk[span]' — flush then splices it
+verbatim with no reshaping. Pure string transform: returns `{ok, Source}' or,
+on a transport failure, `{error, port_error, Message}'.
+""".
+-spec reindent_method_source(port(), binary(), binary()) ->
+    {ok, binary()} | {error, port_error | bad_argument, binary()}.
+reindent_method_source(Port, Source, BaseIndent) when
+    is_binary(Source), is_binary(BaseIndent)
+->
+    Request = #{
+        command => reindent_method_source,
+        source => Source,
+        base_indent => BaseIndent
+    },
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_reindent_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (reindent)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during reindent query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 5000 ->
+                %% Shorter than the 30s used by the parse/search commands: this
+                %% is a pure in-memory string reshape, so a stall means a wedged
+                %% port, not a slow operation. Fail fast to limit the blast radius
+                %% on the shared compiler gen_server during a live-patch install.
+                ?LOG_ERROR("Compiler port timeout (reindent)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (reindent)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+reindent_method_source(_Port, _Source, _BaseIndent) ->
+    {error, bad_argument, <<"reindent_method_source: source and base_indent must be binary">>}.
+
+-spec handle_reindent_response(map()) -> {ok, binary()} | {error, port_error, binary()}.
+handle_reindent_response(#{status := ok, source := Source}) when is_binary(Source) ->
+    {ok, Source};
+handle_reindent_response(Other) ->
+    ?LOG_ERROR("Unexpected reindent response", #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, port_error, <<"Unexpected compiler response">>}.

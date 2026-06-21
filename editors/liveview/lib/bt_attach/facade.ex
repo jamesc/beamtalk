@@ -50,6 +50,9 @@ defmodule BtAttach.Facade do
     # (an in-memory-only save leaves the working tree untouched). Pure settings
     # read — runs no user code — so it is `:read`, safe for the Observer role.
     autoflush: :read,
+    # BT-2598: reload a `.bt` file from disk into the live image after a
+    # content-mutating git op (revert) so image == disk (BT-2585). It re-installs
+    # code via hot redefinition, so it is `:execute` — Owner-only, like `save`.
     reload: :execute,
     info: :read,
     inspect: :read,
@@ -104,6 +107,10 @@ defmodule BtAttach.Facade do
     subscribe_transcript: :read,
     subscribe_bindings: :read,
     subscribe_actors: :read,
+    # BT-2598: wired — registers the LiveView pid on the `classes` push stream so
+    # a `ClassLoaded`/`ClassRemoved` (any source change, including the disk→image
+    # reload after a git revert) pushes a refresh. A subscription runs no user
+    # code, so it is `:read`, safe for the Observer role.
     subscribe_classes: :read,
     # ADR 0095 §5 / BT-2489 (Cockpit Phase 3): the live-Inspector tracking ops.
     # `subscribe_object`/`unsubscribe_object` arm a per-actor state-change push;
@@ -120,6 +127,11 @@ defmodule BtAttach.Facade do
     # `eval`), so it is `:execute` — Owner-only, the same gate the eval form uses.
     list_tests: :read,
     run_tests: :execute,
+    # BT-2557: load the project's test/ files into the live image (compiles +
+    # loads user test code, mutating the image), so it is `:execute` — Owner-only,
+    # the same gate `run_tests`/`eval` use. Populates the test-runner catalogue
+    # and the System Browser "Tests" group from an empty (src-only) image.
+    load_tests: :execute,
     # ADR 0082 Amendment 1 (BT-2586): the cockpit git panel — the post-flush,
     # human-facing VCS surface (disk↔HEAD), distinct from the ChangeLog dirty
     # indicator (memory↔disk). Read ops (`git_status`/`git_diff`/`git_log`) are
@@ -334,6 +346,10 @@ defmodule BtAttach.Facade do
 
   defp invoke(:run_tests, _params, _ctx), do: client().run_tests(nil)
 
+  # BT-2557: load the project's test/ files into the live image so the runner
+  # catalogue + System Browser "Tests" group are populated (no args).
+  defp invoke(:load_tests, _params, _ctx), do: client().load_tests()
+
   defp invoke(:flush, _params, _ctx), do: client().flush()
 
   # BT-2590: the workspace `autoflush` boolean. Returns the flag directly (never a
@@ -363,6 +379,21 @@ defmodule BtAttach.Facade do
 
   defp invoke(:subscribe_transcript, %{pid: pid}, _ctx), do: client().subscribe_transcript(pid)
   defp invoke(:subscribe_bindings, %{pid: pid}, _ctx), do: client().subscribe_bindings(pid)
+
+  # BT-2598: the class-lifecycle push stream. Registers the LiveView pid on the
+  # `classes` stream so a `ClassLoaded`/`ClassRemoved` (including any hot
+  # redefinition — an in-memory patch or the disk→image reload after a git
+  # revert) pushes a refresh trigger to the cockpit. Read capability (a
+  # subscription registration runs no user code), like the other subscribe ops.
+  defp invoke(:subscribe_classes, %{pid: pid}, _ctx), do: client().subscribe_classes(pid)
+
+  # BT-2598: reload a `.bt` file from disk into the live image after a
+  # content-mutating git op (revert), so image == disk (BT-2585). `path` is the
+  # project-relative path git restored; a bad shape is `:invalid_params` with no
+  # dist call, matching the browse ops. `:execute` — Owner-only, like `save`.
+  defp invoke(:reload, %{path: path}, _ctx) do
+    if is_binary(path), do: client().reload_file(path), else: {:error, :invalid_params}
+  end
 
   # ADR 0095 §5 / BT-2489: per-object change tracking. `subscribe_object` watches
   # one inspected actor (`term`) for the LiveView `pid`; `pid_stats` reads its

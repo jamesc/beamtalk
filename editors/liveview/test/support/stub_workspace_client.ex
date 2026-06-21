@@ -29,6 +29,22 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               autoflush: false,
               git_status: nil,
               git_log: nil,
+              # BT-2597: seeded test-runner pane results so the async run/load
+              # path (`start_async(:test_op, …)` → `handle_async`) can be
+              # exercised without a real workspace node. `nil` = use the canned
+              # default; a test can override to drive error/partial-load paths.
+              test_classes: nil,
+              run_tests_result: nil,
+              load_tests_result: nil,
+              # BT-2598: seeded `reload_file` result (nil = derive class from path)
+              # so a test can drive the revert reload error path.
+              reload_file_result: nil,
+              # BT-2598: `{class, selector}` pairs forced to report `disk_differs`
+              # WITHOUT a ChangeLog entry — models an image that differs from disk
+              # because disk changed under it (an external edit), distinct from an
+              # unflushed in-memory edit (which `changes` carries and the revert
+              # guard blocks on). A `reload_file` for the class clears them.
+              forced_disk_differs: MapSet.new(),
               calls: []
   end
 
@@ -72,6 +88,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def unsubscribe_transcript(_pid), do: :ok
   def subscribe_bindings(_pid), do: :ok
   def unsubscribe_bindings(_pid), do: :ok
+  # BT-2598: the class-lifecycle push stream. Records the subscribe so a test can
+  # assert it is wired at mount; returns :ok (the real facade's success reply).
+  def subscribe_classes(_pid), do: record({:subscribe_classes}) && :ok
+  def unsubscribe_classes(_pid), do: :ok
   def subscribe_object_changes(_term, _pid), do: :ok
   def unsubscribe_object_changes(_term, _pid), do: :ok
 
@@ -161,6 +181,63 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def new_class(_source, path), do: {:ok, path}
   def revert(class, _selector), do: {:ok, class}
 
+  # BT-2598: reload a reverted .bt file from disk into the image. Records the call
+  # (so a test can assert the revert reloads) and returns the class name(s) the
+  # path defines — derived from the path basename, mirroring the real reload's
+  # `{:ok, [class_name]}` shape. A seeded override drives the error/refresh paths.
+  def reload_file(path) do
+    record({:reload_file, path})
+
+    # Model the disk→image reload: the image is reset to the on-disk body, so any
+    # tracked in-memory `>>` patch for this class is dropped and a subsequent
+    # `browse_method_source` serves the on-disk stub again (image == disk).
+    class = class_name_for_path(path)
+
+    update(:compiled_sources, fn sources ->
+      sources |> Enum.reject(fn {{c, _sel}, _src} -> c == class end) |> Map.new()
+    end)
+
+    update(:changes, fn changes ->
+      changes |> Enum.reject(fn {{c, _sel}, _file} -> c == class end) |> Map.new()
+    end)
+
+    update(:forced_disk_differs, fn forced ->
+      forced |> Enum.reject(fn {c, _sel} -> c == class end) |> MapSet.new()
+    end)
+
+    get(:reload_file_result) || {:ok, [class]}
+  end
+
+  @doc "Test helper: seed the simulated `reload_file` result."
+  def set_reload_file(result), do: put(:reload_file_result, result)
+
+  @doc """
+  Test helper: force `browse_method_source` to report `disk_differs: true` for
+  `{class, selector}` WITHOUT a ChangeLog entry (BT-2598) — an image that differs
+  from disk because disk changed under it. A `reload_file/1` for the class clears
+  it. Unlike `seed_change/2`, this does NOT trip the revert pending-edit guard.
+  """
+  def seed_disk_differs(class, selector) do
+    update(:forced_disk_differs, &MapSet.put(&1, {class, selector}))
+  end
+
+  @doc """
+  Test helper: seed a pending ChangeLog entry for `{class, selector}` (BT-2598) —
+  a saved-but-unflushed in-memory edit. This DOES appear in `change_history/0` and
+  trips the revert pending-edit guard.
+  """
+  def seed_change(class, selector) do
+    update(:changes, &Map.put(&1, {class, selector}, "src/#{Macro.underscore(class)}.bt"))
+  end
+
+  # `src/git_gate3.bt` -> "GitGate3": strip dir + extension, then CamelCase from the
+  # snake_case basename the LiveView derives a path from (`Macro.underscore`).
+  defp class_name_for_path(path) do
+    path
+    |> Path.basename(".bt")
+    |> Macro.camelize()
+  end
+
   # ── Git panel (BT-2586, BT-2590) ──────────────────────────────────────────
   # A clean working tree by default; a test can seed status/log via the helpers.
 
@@ -190,20 +267,79 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     %{branch: "main", upstream: nil, ahead: 0, behind: 0, files: []}
   end
 
+  # ── Test-runner pane (BT-2557, async in BT-2597) ──────────────────────────
+  # Canned catalogue + run/load results so the Tests pane's `start_async`
+  # (`:test_op`) path can be driven without a real workspace node. Each can be
+  # overridden via the `set_*` helpers to exercise error / partial-load paths.
+
+  def list_tests do
+    record({:list_tests})
+    get(:test_classes) || {:ok, default_test_classes()}
+  end
+
+  def run_tests(class) do
+    record({:run_tests, class})
+    get(:run_tests_result) || {:ok, default_run_result()}
+  end
+
+  def load_tests do
+    record({:load_tests})
+    get(:load_tests_result) || {:ok, default_load_result()}
+  end
+
+  @doc "Test helper: seed the simulated `list_tests` result."
+  def set_test_classes(result), do: put(:test_classes, result)
+
+  @doc "Test helper: seed the simulated `run_tests` result."
+  def set_run_tests(result), do: put(:run_tests_result, result)
+
+  @doc "Test helper: seed the simulated `load_tests` result."
+  def set_load_tests(result), do: put(:load_tests_result, result)
+
+  defp default_test_classes do
+    [%{"class" => "StubDemoTest", "selectors" => ["testOne", "testTwo"]}]
+  end
+
+  defp default_run_result do
+    %{
+      "total" => 2,
+      "passed" => 1,
+      "failed" => 1,
+      "skipped" => 0,
+      "duration" => 0.05,
+      "tests" => [
+        %{"name" => "testOne", "class" => "StubDemoTest", "status" => "pass", "detail" => ""},
+        %{"name" => "testTwo", "class" => "StubDemoTest", "status" => "fail", "detail" => "boom"}
+      ]
+    }
+  end
+
+  defp default_load_result do
+    %{"classes" => ["StubDemoTest"], "errors" => [], "summary" => "Reloaded 1 of 1 files"}
+  end
+
   # ── Browse ops ───────────────────────────────────────────────────────────
 
   def browse_classes do
     base = [
-      %{"name" => "Counter", "source_file" => "src/counter.bt"},
+      %{"name" => "Counter", "source_file" => "src/counter.bt", "source_origin" => "project"},
       # BT-2578: a native: class in the tree so the System Browser's "Erlang
       # backend" badge + native pane can be reached by real navigation.
-      %{"name" => "Subprocess", "source_file" => "src/subprocess.bt"}
+      %{
+        "name" => "Subprocess",
+        "source_file" => "src/subprocess.bt",
+        "source_origin" => "project"
+      }
     ]
 
     extra =
       get(:defined_classes)
       |> Enum.map(fn name ->
-        %{"name" => name, "source_file" => "src/#{Macro.underscore(name)}.bt"}
+        %{
+          "name" => name,
+          "source_file" => "src/#{Macro.underscore(name)}.bt",
+          "source_origin" => "project"
+        }
       end)
 
     {:value, base ++ extra}
@@ -250,8 +386,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
     # A saved-but-unflushed method has an image body that diverges from disk, so a
     # re-browse reports `disk_differs: true` (BT-2565). The backend's `disk_differs`
-    # is a load-time snapshot, not a live diff.
-    disk_differs = Map.has_key?(get(:changes), {class, selector})
+    # is a load-time snapshot, not a live diff. A test can also force divergence
+    # *without* a ChangeLog entry (BT-2598: an image that differs from disk because
+    # disk changed under it, e.g. an external edit) via `seed_disk_differs/2`.
+    disk_differs =
+      Map.has_key?(get(:changes), {class, selector}) or
+        MapSet.member?(get(:forced_disk_differs), {class, selector})
 
     {:value,
      %{

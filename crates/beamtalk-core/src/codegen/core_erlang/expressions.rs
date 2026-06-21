@@ -271,11 +271,7 @@ impl CoreErlangGenerator {
                             if self.in_hybrid_loop {
                                 self.current_state_var()
                             } else if self.in_loop_body {
-                                if self.state_version() == 0 {
-                                    "StateAcc".to_string()
-                                } else {
-                                    format!("StateAcc{}", self.state_version())
-                                }
+                                super::util::versioned_var("StateAcc", self.state_version())
                             } else {
                                 self.current_state_var()
                             }
