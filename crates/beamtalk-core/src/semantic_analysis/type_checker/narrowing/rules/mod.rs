@@ -21,6 +21,7 @@ mod is_kind_of;
 mod is_nil;
 mod is_result;
 mod responds_to;
+mod singleton_eq;
 
 /// A single narrowing pattern.
 ///
@@ -49,4 +50,5 @@ pub(crate) static RULES: &[NarrowingRule] = &[
     responds_to::RULE,
     is_kind_of::RULE,
     class_eq::RULE,
+    singleton_eq::RULE,
 ];

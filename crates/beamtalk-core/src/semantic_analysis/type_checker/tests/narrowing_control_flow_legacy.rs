@@ -288,9 +288,10 @@ fn test_narrowing_union_with_nil_check() {
     // A parameter typed as String|UndefinedObject (union), after nil check,
     // should narrow to String in the false block.
     //
-    // For now, union types in annotations aren't parsed to InferredType::Union
-    // (they resolve to Dynamic), so this test validates the non_nil_type logic
-    // directly.
+    // This validates the `non_nil_type` subtraction logic directly. (Declared
+    // union annotations *do* resolve to `InferredType::Union` via
+    // `type_resolver` — see BT-2016 — so the union-narrowing path is also
+    // exercised end-to-end by the `ifNil:`/`ifTrue:ifFalse:` tests elsewhere.)
     let union = InferredType::simple_union(&["String", "UndefinedObject"]);
     let narrowed = TypeChecker::non_nil_type(&union);
     assert_eq!(
@@ -418,6 +419,140 @@ fn test_detect_narrowing_no_match() {
         TypeChecker::detect_narrowing(&expr).is_none(),
         "x + 1 should not be detected as narrowing"
     );
+}
+
+// ---- Singleton (in)equality narrowing (BT-2617) ----
+
+#[test]
+fn test_detect_narrowing_singleton_eq() {
+    // `ms = #infinity` records the singleton, not negated.
+    let expr = msg_send(
+        var("ms"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("infinity")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).expect("should detect singleton =");
+    assert_eq!(info.variable, EnvKey::local("ms"));
+    let eq = info.singleton_eq.expect("singleton_eq recorded");
+    assert_eq!(eq.singleton.as_str(), "#infinity");
+    assert!(!eq.negated);
+}
+
+#[test]
+fn test_detect_narrowing_singleton_eq_symmetric() {
+    // `#infinity = ms` detects the same as `ms = #infinity`.
+    let expr = msg_send(
+        symbol_lit("infinity"),
+        MessageSelector::Binary("=".into()),
+        vec![var("ms")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).expect("should detect #foo = x");
+    assert_eq!(info.variable, EnvKey::local("ms"));
+    assert_eq!(info.singleton_eq.unwrap().singleton.as_str(), "#infinity");
+}
+
+#[test]
+fn test_detect_narrowing_singleton_inequality_is_negated() {
+    for op in ["/=", "=/="] {
+        let expr = msg_send(
+            var("ms"),
+            MessageSelector::Binary(op.into()),
+            vec![symbol_lit("infinity")],
+        );
+        let info = TypeChecker::detect_narrowing(&expr).expect("should detect singleton /=");
+        assert!(
+            info.singleton_eq.unwrap().negated,
+            "operator {op} should be treated as negated"
+        );
+    }
+}
+
+#[test]
+fn test_detect_narrowing_two_symbol_literals_no_match() {
+    // `#a = #b` has no variable to narrow.
+    let expr = msg_send(
+        symbol_lit("a"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("b")],
+    );
+    assert!(TypeChecker::detect_narrowing(&expr).is_none());
+}
+
+#[test]
+fn test_refine_singleton_eq_splits_union() {
+    // ms :: Integer | #infinity, after `ms = #infinity`:
+    //   true branch → #infinity, false branch → Integer.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("ms", InferredType::simple_union(&["Integer", "#infinity"]));
+    let expr = msg_send(
+        var("ms"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("infinity")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    assert_eq!(refined.true_type, InferredType::known("#infinity"));
+    assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
+}
+
+#[test]
+fn test_refine_singleton_inequality_swaps_branches() {
+    // `ms /= #infinity`: true branch is the remainder (Integer), false is the singleton.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("ms", InferredType::simple_union(&["Integer", "#infinity"]));
+    let expr = msg_send(
+        var("ms"),
+        MessageSelector::Binary("/=".into()),
+        vec![symbol_lit("infinity")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    assert_eq!(refined.true_type, InferredType::known("Integer"));
+    assert_eq!(refined.false_type, Some(InferredType::known("#infinity")));
+}
+
+#[test]
+fn test_refine_singleton_eq_multi_member_union_keeps_rest() {
+    // d :: #north | #south | #east, after `d = #north`:
+    //   false branch keeps #south | #east.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local(
+        "d",
+        InferredType::simple_union(&["#north", "#south", "#east"]),
+    );
+    let expr = msg_send(
+        var("d"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("north")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    assert_eq!(refined.true_type, InferredType::known("#north"));
+    assert_eq!(
+        refined.false_type,
+        Some(InferredType::simple_union(&["#south", "#east"]))
+    );
+}
+
+#[test]
+fn test_refine_singleton_eq_all_removed_is_never() {
+    // d :: #north (already narrowed), after `d = #north`:
+    //   the false branch is unreachable → Never.
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("d", InferredType::known("#north"));
+    let expr = msg_send(
+        var("d"),
+        MessageSelector::Binary("=".into()),
+        vec![symbol_lit("north")],
+    );
+    let info = TypeChecker::detect_narrowing(&expr).unwrap();
+    let refined = TypeChecker::refine_singleton_narrowing(info, &env, &hierarchy);
+    assert_eq!(refined.true_type, InferredType::known("#north"));
+    assert_eq!(refined.false_type, Some(InferredType::Never));
 }
 
 #[test]
