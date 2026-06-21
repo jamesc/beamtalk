@@ -3662,6 +3662,30 @@ fn analyse_with_known_vars_and_classes_empty_is_equivalent_to_base() {
     assert_eq!(result_base.diagnostics.len(), result_new.diagnostics.len());
 }
 
+// --- Singleton type annotations end-to-end (BT-2627) ---
+
+/// BT-2627: a `:: Integer | #infinity` annotation parses, resolves, and forms
+/// the union `InferredType` that flows to the type checker — proven by the
+/// union-send diagnostic naming both members. This is the pipeline the
+/// previously env-seeded BT-2624 tests could not reach from source.
+#[test]
+fn bt2627_singleton_union_annotation_flows_to_type_checker() {
+    let src = "Object subclass: D\n  m: x :: Integer | #infinity =>\n    x size\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "should parse: {parse_diags:?}");
+    let result = analyse(&module);
+    // `Integer` does not understand `size`; the diagnostic names the full union,
+    // which is only possible if the singleton-union annotation actually formed.
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            d.message.contains("understand") && d.message.contains("Integer | #infinity")
+        }),
+        "expected a union-send diagnostic naming `Integer | #infinity`, got: {:?}",
+        result.diagnostics
+    );
+}
+
 // --- Extension method integration with type checker (BT-1518) ---
 
 #[test]

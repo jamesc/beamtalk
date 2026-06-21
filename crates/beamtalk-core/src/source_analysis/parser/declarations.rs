@@ -45,6 +45,14 @@ fn is_comma_opt(kind: Option<&TokenKind>) -> bool {
     kind.is_some_and(is_comma)
 }
 
+/// Returns `true` if the optional token kind can begin a type name in
+/// lookahead — an identifier (`Integer`, `Self`) or a singleton symbol
+/// (`#foo`, lexed as [`TokenKind::Symbol`]). BT-2627: singleton type
+/// annotations are subtypes of `Symbol` (ADR 0068).
+fn is_type_name_token(kind: Option<&TokenKind>) -> bool {
+    matches!(kind, Some(TokenKind::Identifier(_) | TokenKind::Symbol(_)))
+}
+
 impl Parser {
     /// Reports a "use `::` not `:`" error for type annotations and advances past the `:`.
     fn type_annotation_colon_error(&mut self) {
@@ -497,7 +505,7 @@ impl Parser {
             return DoubleColonSkip::NotPresent;
         }
         let mut o = offset + 1;
-        if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+        if !is_type_name_token(self.peek_at(o)) {
             return DoubleColonSkip::Malformed(o);
         }
         // Advance past the type name, consuming a trailing `class` metatype
@@ -513,7 +521,7 @@ impl Parser {
         // Skip union types: `| Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
-            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            if !is_type_name_token(self.peek_at(o)) {
                 return DoubleColonSkip::Malformed(o);
             }
             o = self.skip_type_name_with_metatype(o);
@@ -543,7 +551,7 @@ impl Parser {
             return Some(o + 1);
         }
         // First type param
-        if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+        if !is_type_name_token(self.peek_at(o)) {
             return None;
         }
         o += 1;
@@ -556,7 +564,7 @@ impl Parser {
         // Union in type param position: `Type | Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
-            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            if !is_type_name_token(self.peek_at(o)) {
                 return None;
             }
             o += 1;
@@ -567,7 +575,7 @@ impl Parser {
         // Additional type params: `, Type`
         while is_comma_opt(self.peek_at(o)) {
             o += 1;
-            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            if !is_type_name_token(self.peek_at(o)) {
                 return None;
             }
             o += 1;
@@ -580,7 +588,7 @@ impl Parser {
             // Union
             while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
                 o += 1;
-                if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+                if !is_type_name_token(self.peek_at(o)) {
                     return None;
                 }
                 o += 1;
@@ -652,7 +660,7 @@ impl Parser {
             return true;
         }
         // Must have at least one type name
-        if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+        if !is_type_name_token(self.peek_at(o)) {
             return false;
         }
         // BT-1952 / BT-2034: advance past the first type name, consuming a
@@ -668,7 +676,7 @@ impl Parser {
         // Skip union types: `| Type`
         while matches!(self.peek_at(o), Some(TokenKind::Pipe)) {
             o += 1;
-            if !matches!(self.peek_at(o), Some(TokenKind::Identifier(_))) {
+            if !is_type_name_token(self.peek_at(o)) {
                 return false;
             }
             o = self.skip_type_name_with_metatype(o);
@@ -935,6 +943,7 @@ impl Parser {
     /// - Generic types: `Result(T, E)`, `Array(Integer)`, `Block(T, Result(R, E))`
     /// - Self type: `Self`
     /// - Self class metatype: `Self class`
+    /// - Singleton types: `#foo` (a subtype of `Symbol`, ADR 0068)
     pub(super) fn parse_single_type_annotation(&mut self) -> TypeAnnotation {
         if let TokenKind::Identifier(name) = self.current_kind() {
             let span = self.current_token().span();
@@ -1001,6 +1010,16 @@ impl Parser {
                     TypeAnnotation::Simple(ident)
                 }
             }
+        } else if let TokenKind::Symbol(name) = self.current_kind() {
+            // BT-2627: Singleton type annotation `#foo` — a subtype of `Symbol`
+            // (ADR 0068). `#name` is lexed as `TokenKind::Symbol(name)` (the `#`
+            // is consumed by the lexer), so it surfaces in type position the
+            // same way an identifier does. Composing with `parse_type_annotation`'s
+            // `|` loop yields singleton unions (`#a | #b`, `Integer | #infinity`).
+            let name = name.clone();
+            let span = self.current_token().span();
+            self.advance();
+            TypeAnnotation::singleton(name, span)
         } else {
             let span = self.current_token().span();
             self.error("Expected type name");
