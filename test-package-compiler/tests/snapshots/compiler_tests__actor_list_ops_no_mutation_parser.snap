@@ -1317,10 +1317,10 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "transform_ops.rs — generate_list_partition (no mutations → lists:partition/2)",
+                        content: "transform_ops.rs — generate_list_partition (no mutations → beamtalk_list:partition/2)",
                         span: Span {
-                            start: 1888,
-                            end: 1893,
+                            start: 1896,
+                            end: 1901,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1333,8 +1333,8 @@ Module {
                     Identifier {
                         name: "split",
                         span: Span {
-                            start: 1888,
-                            end: 1893,
+                            start: 1896,
+                            end: 1901,
                         },
                     },
                 ),
@@ -1352,8 +1352,8 @@ Module {
                                         Identifier {
                                             name: "numbers",
                                             span: Span {
-                                                start: 1903,
-                                                end: 1910,
+                                                start: 1911,
+                                                end: 1918,
                                             },
                                         },
                                     ),
@@ -1362,8 +1362,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "partition:",
                                                 span: Span {
-                                                    start: 1911,
-                                                    end: 1921,
+                                                    start: 1919,
+                                                    end: 1929,
                                                 },
                                             },
                                         ],
@@ -1375,8 +1375,8 @@ Module {
                                                     BlockParameter {
                                                         name: "n",
                                                         span: Span {
-                                                            start: 1924,
-                                                            end: 1925,
+                                                            start: 1932,
+                                                            end: 1933,
                                                         },
                                                     },
                                                 ],
@@ -1391,8 +1391,8 @@ Module {
                                                                 Identifier {
                                                                     name: "n",
                                                                     span: Span {
-                                                                        start: 1928,
-                                                                        end: 1929,
+                                                                        start: 1936,
+                                                                        end: 1937,
                                                                     },
                                                                 },
                                                             ),
@@ -1405,46 +1405,46 @@ Module {
                                                                         3,
                                                                     ),
                                                                     Span {
-                                                                        start: 1932,
-                                                                        end: 1933,
+                                                                        start: 1940,
+                                                                        end: 1941,
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 1928,
-                                                                end: 1933,
+                                                                start: 1936,
+                                                                end: 1941,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 1922,
-                                                    end: 1934,
+                                                    start: 1930,
+                                                    end: 1942,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 1903,
-                                        end: 1934,
+                                        start: 1911,
+                                        end: 1942,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 1902,
-                            end: 1935,
+                            start: 1910,
+                            end: 1943,
                         },
                     },
                 ),
                 type_annotation: None,
                 span: Span {
-                    start: 1888,
-                    end: 1935,
+                    start: 1896,
+                    end: 1943,
                 },
             },
             preceding_blank_line: true,
@@ -1453,10 +1453,10 @@ Module {
             comments: CommentAttachment {
                 leading: [
                     Comment {
-                        content: "transform_ops.rs — generate_list_group_by (no mutations → beamtalk_collection:group_by/2)",
+                        content: "transform_ops.rs — generate_list_group_by (no mutations → beamtalk_list:group_by/2)",
                         span: Span {
-                            start: 2034,
-                            end: 2041,
+                            start: 2036,
+                            end: 2043,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1469,8 +1469,8 @@ Module {
                     Identifier {
                         name: "grouped",
                         span: Span {
-                            start: 2034,
-                            end: 2041,
+                            start: 2036,
+                            end: 2043,
                         },
                     },
                 ),
@@ -1488,8 +1488,8 @@ Module {
                                         Identifier {
                                             name: "numbers",
                                             span: Span {
-                                                start: 2049,
-                                                end: 2056,
+                                                start: 2051,
+                                                end: 2058,
                                             },
                                         },
                                     ),
@@ -1498,8 +1498,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "groupBy:",
                                                 span: Span {
-                                                    start: 2057,
-                                                    end: 2065,
+                                                    start: 2059,
+                                                    end: 2067,
                                                 },
                                             },
                                         ],
@@ -1511,8 +1511,8 @@ Module {
                                                     BlockParameter {
                                                         name: "n",
                                                         span: Span {
-                                                            start: 2068,
-                                                            end: 2069,
+                                                            start: 2070,
+                                                            end: 2071,
                                                         },
                                                     },
                                                 ],
@@ -1527,8 +1527,8 @@ Module {
                                                                 Identifier {
                                                                     name: "n",
                                                                     span: Span {
-                                                                        start: 2072,
-                                                                        end: 2073,
+                                                                        start: 2074,
+                                                                        end: 2075,
                                                                     },
                                                                 },
                                                             ),
@@ -1541,46 +1541,46 @@ Module {
                                                                         2,
                                                                     ),
                                                                     Span {
-                                                                        start: 2076,
-                                                                        end: 2077,
+                                                                        start: 2078,
+                                                                        end: 2079,
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 2072,
-                                                                end: 2077,
+                                                                start: 2074,
+                                                                end: 2079,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 2066,
-                                                    end: 2078,
+                                                    start: 2068,
+                                                    end: 2080,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 2049,
-                                        end: 2078,
+                                        start: 2051,
+                                        end: 2080,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 2048,
-                            end: 2079,
+                            start: 2050,
+                            end: 2081,
                         },
                     },
                 ),
                 type_annotation: None,
                 span: Span {
-                    start: 2034,
-                    end: 2079,
+                    start: 2036,
+                    end: 2081,
                 },
             },
             preceding_blank_line: true,
@@ -1591,8 +1591,8 @@ Module {
                     Comment {
                         content: "transform_ops.rs — generate_list_inject_into (no mutations → lists:foldl/3 simple)",
                         span: Span {
-                            start: 2171,
-                            end: 2177,
+                            start: 2173,
+                            end: 2179,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1605,8 +1605,8 @@ Module {
                     Identifier {
                         name: "sumAll",
                         span: Span {
-                            start: 2171,
-                            end: 2177,
+                            start: 2173,
+                            end: 2179,
                         },
                     },
                 ),
@@ -1624,8 +1624,8 @@ Module {
                                         Identifier {
                                             name: "numbers",
                                             span: Span {
-                                                start: 2186,
-                                                end: 2193,
+                                                start: 2188,
+                                                end: 2195,
                                             },
                                         },
                                     ),
@@ -1634,15 +1634,15 @@ Module {
                                             KeywordPart {
                                                 keyword: "inject:",
                                                 span: Span {
-                                                    start: 2194,
-                                                    end: 2201,
+                                                    start: 2196,
+                                                    end: 2203,
                                                 },
                                             },
                                             KeywordPart {
                                                 keyword: "into:",
                                                 span: Span {
-                                                    start: 2204,
-                                                    end: 2209,
+                                                    start: 2206,
+                                                    end: 2211,
                                                 },
                                             },
                                         ],
@@ -1653,8 +1653,8 @@ Module {
                                                 0,
                                             ),
                                             Span {
-                                                start: 2202,
-                                                end: 2203,
+                                                start: 2204,
+                                                end: 2205,
                                             },
                                         ),
                                         Block(
@@ -1663,15 +1663,15 @@ Module {
                                                     BlockParameter {
                                                         name: "acc",
                                                         span: Span {
-                                                            start: 2212,
-                                                            end: 2215,
+                                                            start: 2214,
+                                                            end: 2217,
                                                         },
                                                     },
                                                     BlockParameter {
                                                         name: "n",
                                                         span: Span {
-                                                            start: 2217,
-                                                            end: 2218,
+                                                            start: 2219,
+                                                            end: 2220,
                                                         },
                                                     },
                                                 ],
@@ -1686,8 +1686,8 @@ Module {
                                                                 Identifier {
                                                                     name: "acc",
                                                                     span: Span {
-                                                                        start: 2221,
-                                                                        end: 2224,
+                                                                        start: 2223,
+                                                                        end: 2226,
                                                                     },
                                                                 },
                                                             ),
@@ -1699,47 +1699,47 @@ Module {
                                                                     Identifier {
                                                                         name: "n",
                                                                         span: Span {
-                                                                            start: 2227,
-                                                                            end: 2228,
+                                                                            start: 2229,
+                                                                            end: 2230,
                                                                         },
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 2221,
-                                                                end: 2228,
+                                                                start: 2223,
+                                                                end: 2230,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 2210,
-                                                    end: 2229,
+                                                    start: 2212,
+                                                    end: 2231,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 2186,
-                                        end: 2229,
+                                        start: 2188,
+                                        end: 2231,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 2185,
-                            end: 2230,
+                            start: 2187,
+                            end: 2232,
                         },
                     },
                 ),
                 type_annotation: None,
                 span: Span {
-                    start: 2171,
-                    end: 2230,
+                    start: 2173,
+                    end: 2232,
                 },
             },
             preceding_blank_line: true,
@@ -1750,8 +1750,8 @@ Module {
                     Comment {
                         content: "filter_ops.rs — generate_list_select (no mutations → lists:filter/2)",
                         span: Span {
-                            start: 2308,
-                            end: 2316,
+                            start: 2310,
+                            end: 2318,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1764,8 +1764,8 @@ Module {
                     Identifier {
                         name: "selected",
                         span: Span {
-                            start: 2308,
-                            end: 2316,
+                            start: 2310,
+                            end: 2318,
                         },
                     },
                 ),
@@ -1783,8 +1783,8 @@ Module {
                                         Identifier {
                                             name: "numbers",
                                             span: Span {
-                                                start: 2323,
-                                                end: 2330,
+                                                start: 2325,
+                                                end: 2332,
                                             },
                                         },
                                     ),
@@ -1793,8 +1793,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "select:",
                                                 span: Span {
-                                                    start: 2331,
-                                                    end: 2338,
+                                                    start: 2333,
+                                                    end: 2340,
                                                 },
                                             },
                                         ],
@@ -1806,8 +1806,8 @@ Module {
                                                     BlockParameter {
                                                         name: "n",
                                                         span: Span {
-                                                            start: 2341,
-                                                            end: 2342,
+                                                            start: 2343,
+                                                            end: 2344,
                                                         },
                                                     },
                                                 ],
@@ -1822,8 +1822,8 @@ Module {
                                                                 Identifier {
                                                                     name: "n",
                                                                     span: Span {
-                                                                        start: 2345,
-                                                                        end: 2346,
+                                                                        start: 2347,
+                                                                        end: 2348,
                                                                     },
                                                                 },
                                                             ),
@@ -1836,46 +1836,46 @@ Module {
                                                                         3,
                                                                     ),
                                                                     Span {
-                                                                        start: 2349,
-                                                                        end: 2350,
+                                                                        start: 2351,
+                                                                        end: 2352,
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 2345,
-                                                                end: 2350,
+                                                                start: 2347,
+                                                                end: 2352,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 2339,
-                                                    end: 2351,
+                                                    start: 2341,
+                                                    end: 2353,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 2323,
-                                        end: 2351,
+                                        start: 2325,
+                                        end: 2353,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 2322,
-                            end: 2352,
+                            start: 2324,
+                            end: 2354,
                         },
                     },
                 ),
                 type_annotation: None,
                 span: Span {
-                    start: 2308,
-                    end: 2352,
+                    start: 2310,
+                    end: 2354,
                 },
             },
             preceding_blank_line: true,
@@ -1886,8 +1886,8 @@ Module {
                     Comment {
                         content: "filter_ops.rs — generate_list_reject (no mutations → lists:filter/2 + complement)",
                         span: Span {
-                            start: 2443,
-                            end: 2451,
+                            start: 2445,
+                            end: 2453,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -1900,8 +1900,8 @@ Module {
                     Identifier {
                         name: "rejected",
                         span: Span {
-                            start: 2443,
-                            end: 2451,
+                            start: 2445,
+                            end: 2453,
                         },
                     },
                 ),
@@ -1919,8 +1919,8 @@ Module {
                                         Identifier {
                                             name: "numbers",
                                             span: Span {
-                                                start: 2458,
-                                                end: 2465,
+                                                start: 2460,
+                                                end: 2467,
                                             },
                                         },
                                     ),
@@ -1929,8 +1929,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "reject:",
                                                 span: Span {
-                                                    start: 2466,
-                                                    end: 2473,
+                                                    start: 2468,
+                                                    end: 2475,
                                                 },
                                             },
                                         ],
@@ -1942,8 +1942,8 @@ Module {
                                                     BlockParameter {
                                                         name: "n",
                                                         span: Span {
-                                                            start: 2476,
-                                                            end: 2477,
+                                                            start: 2478,
+                                                            end: 2479,
                                                         },
                                                     },
                                                 ],
@@ -1958,8 +1958,8 @@ Module {
                                                                 Identifier {
                                                                     name: "n",
                                                                     span: Span {
-                                                                        start: 2480,
-                                                                        end: 2481,
+                                                                        start: 2482,
+                                                                        end: 2483,
                                                                     },
                                                                 },
                                                             ),
@@ -1972,46 +1972,46 @@ Module {
                                                                         3,
                                                                     ),
                                                                     Span {
-                                                                        start: 2484,
-                                                                        end: 2485,
+                                                                        start: 2486,
+                                                                        end: 2487,
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 2480,
-                                                                end: 2485,
+                                                                start: 2482,
+                                                                end: 2487,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 2474,
-                                                    end: 2486,
+                                                    start: 2476,
+                                                    end: 2488,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 2458,
-                                        end: 2486,
+                                        start: 2460,
+                                        end: 2488,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 2457,
-                            end: 2487,
+                            start: 2459,
+                            end: 2489,
                         },
                     },
                 ),
                 type_annotation: None,
                 span: Span {
-                    start: 2443,
-                    end: 2487,
+                    start: 2445,
+                    end: 2489,
                 },
             },
             preceding_blank_line: true,
@@ -2022,8 +2022,8 @@ Module {
                     Comment {
                         content: "basic_ops.rs — generate_list_do (no mutations → lists:foreach/2)",
                         span: Span {
-                            start: 2561,
-                            end: 2569,
+                            start: 2563,
+                            end: 2571,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2036,8 +2036,8 @@ Module {
                     Identifier {
                         name: "iterated",
                         span: Span {
-                            start: 2561,
-                            end: 2569,
+                            start: 2563,
+                            end: 2571,
                         },
                     },
                 ),
@@ -2055,8 +2055,8 @@ Module {
                                         Identifier {
                                             name: "numbers",
                                             span: Span {
-                                                start: 2576,
-                                                end: 2583,
+                                                start: 2578,
+                                                end: 2585,
                                             },
                                         },
                                     ),
@@ -2065,8 +2065,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "do:",
                                                 span: Span {
-                                                    start: 2584,
-                                                    end: 2587,
+                                                    start: 2586,
+                                                    end: 2589,
                                                 },
                                             },
                                         ],
@@ -2078,8 +2078,8 @@ Module {
                                                     BlockParameter {
                                                         name: "n",
                                                         span: Span {
-                                                            start: 2590,
-                                                            end: 2591,
+                                                            start: 2592,
+                                                            end: 2593,
                                                         },
                                                     },
                                                 ],
@@ -2094,8 +2094,8 @@ Module {
                                                                 Identifier {
                                                                     name: "n",
                                                                     span: Span {
-                                                                        start: 2594,
-                                                                        end: 2595,
+                                                                        start: 2596,
+                                                                        end: 2597,
                                                                     },
                                                                 },
                                                             ),
@@ -2108,46 +2108,46 @@ Module {
                                                                         1,
                                                                     ),
                                                                     Span {
-                                                                        start: 2598,
-                                                                        end: 2599,
+                                                                        start: 2600,
+                                                                        end: 2601,
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 2594,
-                                                                end: 2599,
+                                                                start: 2596,
+                                                                end: 2601,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 2588,
-                                                    end: 2600,
+                                                    start: 2590,
+                                                    end: 2602,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 2576,
-                                        end: 2600,
+                                        start: 2578,
+                                        end: 2602,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 2575,
-                            end: 2601,
+                            start: 2577,
+                            end: 2603,
                         },
                     },
                 ),
                 type_annotation: None,
                 span: Span {
-                    start: 2561,
-                    end: 2601,
+                    start: 2563,
+                    end: 2603,
                 },
             },
             preceding_blank_line: true,
@@ -2158,8 +2158,8 @@ Module {
                     Comment {
                         content: "basic_ops.rs — generate_list_collect (no mutations → lists:map/2)",
                         span: Span {
-                            start: 2676,
-                            end: 2685,
+                            start: 2678,
+                            end: 2687,
                         },
                         kind: Line,
                         preceding_blank_line: true,
@@ -2172,8 +2172,8 @@ Module {
                     Identifier {
                         name: "collected",
                         span: Span {
-                            start: 2676,
-                            end: 2685,
+                            start: 2678,
+                            end: 2687,
                         },
                     },
                 ),
@@ -2191,8 +2191,8 @@ Module {
                                         Identifier {
                                             name: "numbers",
                                             span: Span {
-                                                start: 2691,
-                                                end: 2698,
+                                                start: 2693,
+                                                end: 2700,
                                             },
                                         },
                                     ),
@@ -2201,8 +2201,8 @@ Module {
                                             KeywordPart {
                                                 keyword: "collect:",
                                                 span: Span {
-                                                    start: 2699,
-                                                    end: 2707,
+                                                    start: 2701,
+                                                    end: 2709,
                                                 },
                                             },
                                         ],
@@ -2214,8 +2214,8 @@ Module {
                                                     BlockParameter {
                                                         name: "n",
                                                         span: Span {
-                                                            start: 2710,
-                                                            end: 2711,
+                                                            start: 2712,
+                                                            end: 2713,
                                                         },
                                                     },
                                                 ],
@@ -2230,8 +2230,8 @@ Module {
                                                                 Identifier {
                                                                     name: "n",
                                                                     span: Span {
-                                                                        start: 2714,
-                                                                        end: 2715,
+                                                                        start: 2716,
+                                                                        end: 2717,
                                                                     },
                                                                 },
                                                             ),
@@ -2243,47 +2243,47 @@ Module {
                                                                     Identifier {
                                                                         name: "n",
                                                                         span: Span {
-                                                                            start: 2718,
-                                                                            end: 2719,
+                                                                            start: 2720,
+                                                                            end: 2721,
                                                                         },
                                                                     },
                                                                 ),
                                                             ],
                                                             is_cast: false,
                                                             span: Span {
-                                                                start: 2714,
-                                                                end: 2719,
+                                                                start: 2716,
+                                                                end: 2721,
                                                             },
                                                         },
                                                         preceding_blank_line: false,
                                                     },
                                                 ],
                                                 span: Span {
-                                                    start: 2708,
-                                                    end: 2720,
+                                                    start: 2710,
+                                                    end: 2722,
                                                 },
                                             },
                                         ),
                                     ],
                                     is_cast: false,
                                     span: Span {
-                                        start: 2691,
-                                        end: 2720,
+                                        start: 2693,
+                                        end: 2722,
                                     },
                                 },
                                 preceding_blank_line: false,
                             },
                         ],
                         span: Span {
-                            start: 2690,
-                            end: 2721,
+                            start: 2692,
+                            end: 2723,
                         },
                     },
                 ),
                 type_annotation: None,
                 span: Span {
-                    start: 2676,
-                    end: 2721,
+                    start: 2678,
+                    end: 2723,
                 },
             },
             preceding_blank_line: true,
@@ -2291,7 +2291,7 @@ Module {
     ],
     span: Span {
         start: 708,
-        end: 2721,
+        end: 2723,
     },
     file_leading_comments: [],
     file_trailing_comments: [],
