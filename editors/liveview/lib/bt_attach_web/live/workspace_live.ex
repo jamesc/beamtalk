@@ -4522,8 +4522,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp selector_from_header(""), do: ""
 
   defp selector_from_header(header) do
-    # Only the header up to the body arrow / first statement break can contribute
-    # a selector — bail when there is no `=>` before a `.` or newline.
+    # Only the header up to the body arrow can contribute a selector — bail
+    # when there is no `=>` before the first newline.
     head =
       header
       |> String.split(~r/\r?\n/, parts: 2)
@@ -4548,7 +4548,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp selector_from_signature_text(sig) do
     sig = String.trim(sig)
 
-    keyword_parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):/, sig, capture: :all_but_first)
+    # `:(?!:)` so a compact type annotation (`i::Integer`) doesn't capture `i:` as
+    # a keyword part — only a real `keyword:` (single colon) counts.
+    keyword_parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):(?!:)/, sig, capture: :all_but_first)
 
     cond do
       sig == "" ->
