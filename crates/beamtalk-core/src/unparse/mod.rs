@@ -127,7 +127,13 @@ pub fn unparse_class(class: &ClassDefinition) -> String {
 ///
 /// Falls back to a pure whitespace shift ([`shift_method_indent`]) when the
 /// source does not re-parse cleanly — a malformed or partial body must still get
-/// *some* re-indent rather than be dropped.
+/// *some* re-indent rather than be dropped. This fallback also covers a body
+/// carrying a leading `@expect` directive: `parse_method` does not consume a
+/// top-level `@expect` (it is attached by the class-body parser, not
+/// `parse_method_definition`), so such a body re-parses as `None` and is shifted
+/// rather than re-laid-out. A width-sensitive `@expect` method (rare — `@expect`
+/// is mostly on narrow test methods) could therefore still diverge from disk; the
+/// corpus round-trip test would catch it if any such method existed.
 #[must_use]
 pub fn reindent_method_source(base_indent: &str, source: &str) -> String {
     let (method, diags) = parse_method(lex_with_eof(source));
@@ -138,10 +144,13 @@ pub fn reindent_method_source(base_indent: &str, source: &str) -> String {
 
     // The indent costs one column per char (spaces/tabs are single-column here);
     // reducing the budget by it makes break decisions as if rendered at the indent.
+    // `max(0)` clamps the (unreachable in practice) case of an indent wider than
+    // the line budget, where the pretty-printer would otherwise see a negative width.
     let indent_cols = isize::try_from(base_indent.chars().count()).unwrap_or(DEFAULT_LINE_WIDTH);
+    let width = (DEFAULT_LINE_WIDTH - indent_cols).max(0);
     let rendered =
         unparse_method_definition_inner(&method, class_prefix(&method), EmitLeadingComments::No)
-            .to_pretty_string_width(DEFAULT_LINE_WIDTH - indent_cols);
+            .to_pretty_string_width(width);
 
     let reindented = shift_method_indent(base_indent, &rendered);
     // `to_pretty_string_width` never emits a trailing newline; restore the

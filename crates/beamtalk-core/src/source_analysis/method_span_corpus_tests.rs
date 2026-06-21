@@ -447,6 +447,8 @@ fn match_trailing_newline(s: &str, reference: &str) -> String {
 /// re-parses and re-renders, rather than only shifting whitespace), so this holds
 /// for the whole corpus only because the corpus is `bt fmt`-clean — i.e. every
 /// method's disk shape already *is* its canonical layout at the span's indent.
+/// That cleanliness is enforced in CI by `just fmt-check-beamtalk` (Justfile:
+/// `fmt-check-beamtalk`, covering `stdlib/` and `examples/`).
 /// `corpus_methods_round_trip_byte_identical` proves the complementary direction:
 /// the full `unparse_method` → reshape pipeline reproduces the disk slice.
 #[test]

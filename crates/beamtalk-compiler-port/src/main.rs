@@ -1998,21 +1998,24 @@ fn handle_resolve_method_span(request: &Map) -> Term {
 
 /// Handle a `reindent_method_source` request (BT-2584).
 ///
-/// Re-indents a canonical (column-0) method body to the given `base_indent`,
-/// producing the on-disk byte-span shape. The live-patch install hook calls
-/// this so the `ChangeEntry`'s stored `source` is a drop-in for `disk[span]` —
-/// `source_ref == disk[span]` by construction — and a later `Workspace flush`
-/// splices it verbatim with no reshaping (retiring the former
-/// `beamtalk_workspace_flush:reindent/2`).
+/// Re-lays-out a canonical (column-0) method body at the given `base_indent`,
+/// producing the on-disk byte-span shape. It re-parses the body and re-renders
+/// it with the line-width budget reduced by the indent, so width-sensitive lines
+/// re-break exactly as `bt fmt` does on disk (BT-2594), then shifts. The
+/// live-patch install hook calls this so the `ChangeEntry`'s stored `source` is a
+/// drop-in for `disk[span]` — `source_ref == disk[span]` by construction — and a
+/// later `Workspace flush` splices it verbatim with no reshaping (retiring the
+/// former `beamtalk_workspace_flush:reindent/2`).
 ///
 /// Request fields:
 /// - `source` (binary): the canonical column-0 method body (`unparse_method`)
 /// - `base_indent` (binary, optional): the leading whitespace of the on-disk
 ///   definition's first line (empty = identity)
 ///
-/// Response: `#{status => ok, source => <<...>>}`. The transform itself never
-/// fails — it is a pure string reshape. (The Erlang port wrappers still surface
-/// transport/timeout errors as `{error, port_error, _}` around this call.)
+/// Response: `#{status => ok, source => <<...>>}`. The transform always succeeds
+/// — it falls back to a plain whitespace shift when the body does not re-parse.
+/// (The Erlang port wrappers still surface transport/timeout errors as
+/// `{error, port_error, _}` around this call.)
 fn handle_reindent_method_source(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
