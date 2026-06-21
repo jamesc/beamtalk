@@ -554,7 +554,7 @@ impl Parser {
         if !is_type_name_token(self.peek_at(o)) {
             return None;
         }
-        o += 1;
+        o = self.skip_type_name_with_metatype(o);
         // Skip optional bound: `:: Protocol`
         o = self.skip_optional_type_param_bound(o);
         // Nested generic: `Name(Type(...))`
@@ -567,7 +567,7 @@ impl Parser {
             if !is_type_name_token(self.peek_at(o)) {
                 return None;
             }
-            o += 1;
+            o = self.skip_type_name_with_metatype(o);
             if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
                 o = self.skip_paren_type_params(o)?;
             }
@@ -578,7 +578,7 @@ impl Parser {
             if !is_type_name_token(self.peek_at(o)) {
                 return None;
             }
-            o += 1;
+            o = self.skip_type_name_with_metatype(o);
             // Skip optional bound: `:: Protocol`
             o = self.skip_optional_type_param_bound(o);
             // Nested generic
@@ -591,7 +591,7 @@ impl Parser {
                 if !is_type_name_token(self.peek_at(o)) {
                     return None;
                 }
-                o += 1;
+                o = self.skip_type_name_with_metatype(o);
                 if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
                     o = self.skip_paren_type_params(o)?;
                 }

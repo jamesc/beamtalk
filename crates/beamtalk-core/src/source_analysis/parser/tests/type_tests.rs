@@ -1335,3 +1335,88 @@ fn parse_singleton_does_not_consume_class_suffix() {
         "infinity",
     );
 }
+
+// ========================================================================
+// Class metatype inside generic type arguments (BT-2630)
+// ========================================================================
+
+#[test]
+fn parse_class_metatype_inside_generic_type() {
+    // BT-2630: `List(Actor class)` must parse as a Generic whose argument is ClassOf(Actor)
+    let module = parse_ok(
+        "Object subclass: Foo
+  m: x :: List(Actor class) => x",
+    );
+    let ty = module.classes[0].methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    else {
+        panic!("expected generic, got {ty:?}");
+    };
+    assert_eq!(base.name, "List");
+    assert_eq!(parameters.len(), 1);
+    assert!(
+        matches!(&parameters[0], TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"),
+        "Expected ClassOf(Actor), got {:?}",
+        parameters[0]
+    );
+}
+
+#[test]
+fn parse_class_metatype_inside_nested_generic() {
+    // BT-2630: `Map(String, Actor class)` must parse with ClassOf(Actor) as second param
+    let module = parse_ok(
+        "Object subclass: Foo
+  m: x :: Map(String, Actor class) => x",
+    );
+    let ty = module.classes[0].methods[0].parameters[0]
+        .type_annotation
+        .as_ref()
+        .unwrap();
+    let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ty
+    else {
+        panic!("expected generic, got {ty:?}");
+    };
+    assert_eq!(base.name, "Map");
+    assert_eq!(parameters.len(), 2);
+    assert!(
+        matches!(&parameters[0], TypeAnnotation::Simple(id) if id.name == "String"),
+        "Expected Simple(String), got {:?}",
+        parameters[0]
+    );
+    assert!(
+        matches!(&parameters[1], TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"),
+        "Expected ClassOf(Actor), got {:?}",
+        parameters[1]
+    );
+}
+
+#[test]
+fn parse_class_metatype_generic_in_return_type() {
+    // BT-2630: `-> List(Actor class)` return type must be recognized
+    let module = parse_ok(
+        "Object subclass: Foo
+  getActors -> List(Actor class) => nil",
+    );
+    let method = &module.classes[0].methods[0];
+    let ret_ty = method.return_type.as_ref().unwrap();
+    let TypeAnnotation::Generic {
+        base, parameters, ..
+    } = ret_ty
+    else {
+        panic!("expected generic return type, got {ret_ty:?}");
+    };
+    assert_eq!(base.name, "List");
+    assert_eq!(parameters.len(), 1);
+    assert!(
+        matches!(&parameters[0], TypeAnnotation::ClassOf { class_name, .. } if class_name.name == "Actor"),
+        "Expected ClassOf(Actor), got {:?}",
+        parameters[0]
+    );
+}
