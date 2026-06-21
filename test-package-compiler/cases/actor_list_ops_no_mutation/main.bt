@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot tests for list operations WITHOUT outer-scope mutations, defined
+// as block-valued bindings (identifier := [...]) so the compiler generates
+// a dispatch-table entry for each, exercising the simple (no-foldl) codegen
+// paths in search_ops.rs, transform_ops.rs, filter_ops.rs, and basic_ops.rs.
+//
+// Workspace-level field initializers whose RHS has no side effects are
+// dead-eliminated by the compiler, so ws_list_ops_simple and
+// ws_list_ops_search never invoke the no-mutation codegen paths.
+// Using block-valued bindings (value IS a Block AST node) puts each
+// method in the dispatch table, forcing codegen to run.
+
+numbers := #(1, 2, 3, 4, 5)
+
+// search_ops.rs — generate_list_any_satisfy (no mutations → lists:any/2)
+checkAny   := [numbers anySatisfy: [:n | n > 3]]
+
+// search_ops.rs — generate_list_all_satisfy (no mutations → lists:all/2)
+checkAll   := [numbers allSatisfy: [:n | n > 0]]
+
+// search_ops.rs — generate_list_detect (no mutations → beamtalk_list:detect/2)
+findFirst  := [numbers detect: [:n | n > 3]]
+
+// search_ops.rs — generate_list_detect_if_none / generate_detect_if_none_simple
+findOrFall := [numbers detect: [:n | n > 10] ifNone: [0]]
+
+// transform_ops.rs — generate_list_count (no mutations → lists:filter + erlang:length)
+countEvens := [numbers count: [:n | n > 2]]
+
+// transform_ops.rs — generate_list_flat_map (no mutations → lists:flatmap/2)
+doubled    := [numbers flatMap: [:n | #(n, n)]]
+
+// transform_ops.rs — generate_list_take_while (no mutations → lists:takewhile/2)
+smallOnes  := [numbers takeWhile: [:n | n < 4]]
+
+// transform_ops.rs — generate_list_drop_while (no mutations → lists:dropwhile/2)
+bigOnes    := [numbers dropWhile: [:n | n < 3]]
+
+// transform_ops.rs — generate_list_partition (no mutations → beamtalk_list:partition/2)
+split      := [numbers partition: [:n | n > 3]]
+
+// transform_ops.rs — generate_list_group_by (no mutations → beamtalk_list:group_by/2)
+grouped    := [numbers groupBy: [:n | n > 2]]
+
+// transform_ops.rs — generate_list_inject_into (no mutations → lists:foldl/3 simple)
+sumAll     := [numbers inject: 0 into: [:acc :n | acc + n]]
+
+// filter_ops.rs — generate_list_select (no mutations → lists:filter/2)
+selected   := [numbers select: [:n | n > 3]]
+
+// filter_ops.rs — generate_list_reject (no mutations → lists:filter/2 + complement)
+rejected   := [numbers reject: [:n | n > 3]]
+
+// basic_ops.rs — generate_list_do (no mutations → lists:foreach/2)
+iterated   := [numbers do: [:n | n + 1]]
+
+// basic_ops.rs — generate_list_collect (no mutations → lists:map/2)
+collected  := [numbers collect: [:n | n + n]]
