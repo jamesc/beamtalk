@@ -6005,6 +6005,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               phx-value-class={@selected_class}
               phx-value-side={@browser_side}
               phx-value-selector={m["selector"]}
+              title={m["selector"]}
             >
               <span class="twig" style="color: var(--accent);">m</span>
               <span class="mname mono">{m["selector"]}</span>
