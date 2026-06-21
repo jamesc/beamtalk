@@ -711,6 +711,108 @@ fn bt2624_singleton_eq_possible_member_no_hint() {
     );
 }
 
+/// BT-2631: the impossible-comparison hint must also fire for a *standalone*
+/// singleton equality send (`unionVar =:= #west`), not only inside an
+/// `ifTrue:`/`ifFalse:` guard. The send still infers `Boolean`; the hint is the
+/// only added signal.
+#[test]
+fn bt2631_standalone_singleton_eq_impossible_member_emits_hint() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    // `x =:= #west` — #west is not a member of `#north | #south`.
+    let expr = msg_send(
+        var("x"),
+        MessageSelector::Binary("=:=".into()),
+        vec![symbol_lit("west")],
+    );
+    let mut checker = TypeChecker::new();
+    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    assert_eq!(
+        ty,
+        InferredType::known("Boolean"),
+        "the comparison is still typed Boolean"
+    );
+    let hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("can never be true"))
+        .collect();
+    assert_eq!(
+        hints.len(),
+        1,
+        "expected one standalone-send impossibility hint, got: {:?}",
+        checker.diagnostics()
+    );
+    assert!(
+        hints[0].message.contains("#west") && hints[0].message.contains("#north | #south"),
+        "hint should name the singleton and the type: {}",
+        hints[0].message
+    );
+}
+
+/// BT-2631: the negated standalone send (`unionVar =/= #west`) is always true.
+#[test]
+fn bt2631_standalone_singleton_inequality_impossible_member_always_true() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    let expr = msg_send(
+        var("x"),
+        MessageSelector::Binary("=/=".into()),
+        vec![symbol_lit("west")],
+    );
+    let mut checker = TypeChecker::new();
+    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    assert!(
+        checker
+            .diagnostics()
+            .iter()
+            .any(|d| d.message.contains("always true") && d.message.contains("#west")),
+        "expected a standalone-send 'always true' hint, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
+/// BT-2631: a standalone send whose singleton IS a member, or whose union
+/// admits any singleton (a `Symbol` member), must stay silent — matching the
+/// conservative guard-path behaviour.
+#[test]
+fn bt2631_standalone_singleton_eq_admitted_no_hint() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+
+    // `x =:= #north` — #north IS a member, so the test is satisfiable.
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    let member_expr = msg_send(
+        var("x"),
+        MessageSelector::Binary("=:=".into()),
+        vec![symbol_lit("north")],
+    );
+    let _ = checker.infer_expr(&member_expr, &hierarchy, &mut env, false);
+
+    // `#north | Symbol` admits every singleton (the `Symbol` member), so even a
+    // non-listed singleton like #west is satisfiable — no hint.
+    let mut sym_env = TypeEnv::new();
+    sym_env.set_local(
+        "y",
+        InferredType::union_of(&[InferredType::known("#north"), InferredType::known("Symbol")]),
+    );
+    let sym_expr = msg_send(
+        var("y"),
+        MessageSelector::Binary("=:=".into()),
+        vec![symbol_lit("west")],
+    );
+    let _ = checker.infer_expr(&sym_expr, &hierarchy, &mut sym_env, false);
+
+    assert!(
+        checker.diagnostics().is_empty(),
+        "satisfiable comparisons must not warn, got: {:?}",
+        checker.diagnostics()
+    );
+}
+
 #[test]
 fn test_narrowing_does_not_leak_outside_block() {
     // Verify narrowing is scoped to block only:

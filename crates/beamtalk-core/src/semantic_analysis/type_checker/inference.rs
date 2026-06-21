@@ -1426,6 +1426,26 @@ impl TypeChecker {
         // Union-typed receiver: check selector on ALL members, warn if any lacks it.
         // Return type is the union of member return types.
         if let InferredType::Union { ref members, .. } = receiver_ty {
+            // BT-2631: a standalone singleton (in)equality send on a union
+            // receiver (`flag := unionVar =:= #west`) is statically decidable
+            // when `#west` can never be a member of the union — but
+            // `infer_union_message_send` short-circuits equality ops to
+            // `Boolean` before any membership check. Mirror the guard-scoped
+            // hint (`refine_singleton_narrowing`) here so the warning fires
+            // regardless of whether the comparison guards an `ifTrue:`. The
+            // receiver is the union operand, so its already-resolved
+            // `receiver_ty` is the variable's current type.
+            if let MessageSelector::Binary(op) = selector {
+                if let Some(eq) = narrowing::detect_singleton_eq(receiver, op, arguments) {
+                    self.check_impossible_singleton_comparison(
+                        &receiver_ty,
+                        &eq.info.singleton,
+                        eq.info.negated,
+                        hierarchy,
+                        span,
+                    );
+                }
+            }
             return self.infer_union_message_send(members, &selector_name, span, hierarchy);
         }
 
@@ -2216,32 +2236,17 @@ impl TypeChecker {
         let current_ty = Self::resolve_narrowing_variable_type(&info.variable, env, hierarchy);
 
         // BT-2624 (item 1): when the tested singleton can never be a value of
-        // the variable's current type, the comparison is statically decidable —
-        // an equality test (`= #foo`) can never hold and an inequality test
-        // (`/= #foo`) always holds. Only flag this when certain: skip `Dynamic`
-        // (unknown) and `Never` (the branch is already unreachable), and skip
-        // when any member admits the singleton (it is the singleton itself, or
-        // `Symbol`/one of its supertypes).
-        if !matches!(current_ty, InferredType::Dynamic(_) | InferredType::Never)
-            && !Self::type_admits_singleton(&current_ty, &eq.singleton, hierarchy)
-        {
-            let ty_display = current_ty.display_for_diagnostic().unwrap_or_default();
-            let message = if eq.negated {
-                format!(
-                    "comparison is always true: `{}` is never a value of `{ty_display}`",
-                    eq.singleton
-                )
-            } else {
-                format!(
-                    "comparison can never be true: `{}` is not a value of `{ty_display}`",
-                    eq.singleton
-                )
-            };
-            self.diagnostics.push(
-                Diagnostic::hint(message, test_span)
-                    .with_category(crate::source_analysis::DiagnosticCategory::Type),
-            );
-        }
+        // the variable's current type, the comparison is statically decidable.
+        // Shared with the standalone-send path (BT-2631) so guard-scoped
+        // (`unionVar = #foo ifTrue: …`) and bare (`flag := unionVar =:= #foo`)
+        // equality tests warn identically.
+        self.check_impossible_singleton_comparison(
+            &current_ty,
+            &eq.singleton,
+            eq.negated,
+            hierarchy,
+            test_span,
+        );
 
         let matched = InferredType::known(eq.singleton.clone());
         let remainder = Self::union_without(&current_ty, &eq.singleton);
@@ -2257,6 +2262,42 @@ impl TypeChecker {
             info.false_type = Some(remainder);
         }
         info
+    }
+
+    /// BT-2624 / BT-2631: emits the "comparison can never be true" / "always
+    /// true" hint when a singleton (in)equality test (`var =:= #foo`) is
+    /// statically decidable — the singleton can never be a value of `current_ty`.
+    ///
+    /// Shared by the narrowing-guard path (`refine_singleton_narrowing`) and the
+    /// standalone-send path (`infer_union_message_send`'s equality short-circuit),
+    /// so the membership rule (`type_admits_singleton`) and the diagnostic
+    /// wording live in one place. Stays conservative: silent on `Dynamic`
+    /// (unknown) and `Never` (already-unreachable) receivers, and silent when any
+    /// member admits the singleton (it *is* the singleton, or `Symbol`/one of its
+    /// supertypes).
+    pub(super) fn check_impossible_singleton_comparison(
+        &mut self,
+        current_ty: &InferredType,
+        singleton: &EcoString,
+        negated: bool,
+        hierarchy: &ClassHierarchy,
+        test_span: Span,
+    ) {
+        if matches!(current_ty, InferredType::Dynamic(_) | InferredType::Never)
+            || Self::type_admits_singleton(current_ty, singleton, hierarchy)
+        {
+            return;
+        }
+        let ty_display = current_ty.display_for_diagnostic().unwrap_or_default();
+        let message = if negated {
+            format!("comparison is always true: `{singleton}` is never a value of `{ty_display}`")
+        } else {
+            format!("comparison can never be true: `{singleton}` is not a value of `{ty_display}`")
+        };
+        self.diagnostics.push(
+            Diagnostic::hint(message, test_span)
+                .with_category(crate::source_analysis::DiagnosticCategory::Type),
+        );
     }
 
     /// Removes every union member equal to the singleton named `removed` from
