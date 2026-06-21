@@ -1869,7 +1869,6 @@ impl TypeChecker {
     /// - ALL non-nil members respond → no warning, return union of return types.
     /// - SOME non-nil members respond → DNU hint naming the non-responding members.
     /// - NO non-nil members respond → existing DNU warning.
-    /// Infer the result of sending `selector` to a union receiver.
     ///
     /// Note: the equality / identity comparison operators (`=`, `==`, `=:=`,
     /// `/=`, `=/=`) short-circuit to `Boolean` without per-member resolution
