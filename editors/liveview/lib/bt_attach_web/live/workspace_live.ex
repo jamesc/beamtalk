@@ -2370,6 +2370,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   # handle_info could hold the callback draining thousands of entries. Anything
   # beyond the cap stays in the mailbox and triggers another handle_info pass
   # naturally — no lines are lost, and the per-callback work stays bounded.
+  #
+  # `count` mirrors `length(acc)` so the cap check stays O(1) instead of
+  # re-measuring the list each pass. Invariant: callers seed `count` to the
+  # initial accumulator length — the sole call site passes a one-element list,
+  # so the default of 1 holds. Keep this in sync if a second call site is added.
   defp drain_transcript(acc, count \\ 1)
 
   defp drain_transcript(acc, count) when count >= @transcript_scrollback_limit do
