@@ -249,11 +249,7 @@ impl CoreErlangGenerator {
         let (body_doc, final_state_version) =
             self.generate_threaded_loop_body(body, &plan, &BodyKind::Letrec)?;
         docs.push(body_doc);
-        let final_state_var = if final_state_version == 0 {
-            "StateAcc".to_string()
-        } else {
-            format!("StateAcc{final_state_version}")
-        };
+        let final_state_var = super::super::util::versioned_var("StateAcc", final_state_version);
 
         let exit_arm = if negate {
             "<'true'> when 'true' -> {'nil', StateAcc} "

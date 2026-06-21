@@ -5,22 +5,20 @@
 // dispatch directly without deadlocking via gen_server:call.
 
 TestCase subclass: ActorAliasedSelfSendTest
+  field: a = nil
+
+  setUp => self withA: AliasedSelfSendActor spawn
+
+  tearDown => self.a isNil ifFalse: [self.a stop]
 
   testAliasedFieldNames =>
-    a := AliasedSelfSendActor spawn
-    names := a aliasedFieldNames
+    names := self.a aliasedFieldNames
     self assert: names size equals: 2
     self assert: (names includes: #x)
     self assert: (names includes: #y)
 
-  testAliasedFieldAt =>
-    a := AliasedSelfSendActor spawn
-    self assert: a aliasedFieldAt equals: 0
+  testAliasedFieldAt => self assert: self.a aliasedFieldAt equals: 0
 
-  testAliasedFieldAtPut =>
-    a := AliasedSelfSendActor spawn
-    self assert: a aliasedFieldAtPut equals: 42
+  testAliasedFieldAtPut => self assert: self.a aliasedFieldAtPut equals: 42
 
-  testAliasedUserMethod =>
-    a := AliasedSelfSendActor spawn
-    self assert: a aliasedUserMethod equals: 0
+  testAliasedUserMethod => self assert: self.a aliasedUserMethod equals: 0

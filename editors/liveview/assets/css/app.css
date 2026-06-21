@@ -274,6 +274,26 @@
 }
 .seg button.on { background: var(--panel); color: var(--ink); box-shadow: 0 1px 2px rgba(60, 45, 20, .12); }
 
+/* source-origin filter dropdown (BT-2603): replaces the `.seg` segmented
+   control so the filter holds a fixed, small width and never overflows the
+   panel head on a narrow System Browser. The wrapping <form> only exists to
+   carry `phx-change`; it must not add width/height to the header row. */
+.panel-head .src-filter { display: inline-flex; flex: none; margin: 0; }
+.panel-head .src-select {
+  appearance: none; height: 22px; padding: 0 18px 0 8px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel-3);
+  color: var(--ink); font: inherit; font-size: 10.5px; font-weight: 600;
+  letter-spacing: .02em; outline: none; cursor: pointer; flex: none;
+  /* a small chevron drawn into the right padding (appearance:none removes the
+     native arrow) so the control reads as a dropdown. */
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+                    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 8px center, right 4px center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.panel-head .src-select:focus { border-color: var(--accent); }
+
 /* the instance/class side toggle pinned to the class-tree footer */
 .actionbar.sb-side { border-top: 1px solid var(--line); border-bottom: 0; }
 .actionbar.sb-side .seg { flex: 1; display: flex; }

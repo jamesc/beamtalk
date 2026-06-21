@@ -412,9 +412,19 @@ browse_tests(#{class_name := Class}) ->
                     <<"source_file">>,
                     <<"origin">>,
                     <<"source_origin">>,
-                    <<"is_test">>
+                    <<"is_test">>,
+                    <<"is_protocol">>
                 ]
             )
+        end},
+        {"browse-classes is_protocol is false for an ordinary class", fun() ->
+            %% BT-2615: only protocol class objects (ADR 0068) carry is_protocol
+            %% true — the browser groups those under a "Protocols" category.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Class),
+            ?assertEqual(false, maps:get(<<"is_protocol">>, Row))
         end},
         {"browse-classes is_test is false for a non-TestCase class", fun() ->
             %% BT-2557: is_test flags loaded TestCase subclasses so the browser
@@ -724,6 +734,123 @@ browse_tests(#{class_name := Class}) ->
                 )
             ),
             ?assert(true)
+        end}
+    ].
+
+%%====================================================================
+%% Protocol browse tests (BT-2615)
+%%====================================================================
+%%
+%% A protocol (e.g. Printable) is reified as a sealed abstract class object
+%% (ADR 0068) dispatched by the shared `beamtalk_protocol_object` module. That
+%% dispatch module carries no package and no on-disk source, so without special
+%% handling every protocol would land in the browser's "(uncategorized)" bucket
+%% badged "project". These tests pin the BT-2615 fixes: the `is_protocol` flag
+%% (so the browser can group them under "Protocols"), origin resolution through
+%% the protocol's *defining* module (so a stdlib protocol badges stdlib), and the
+%% required-member rows (so a protocol's contract is visible instead of empty).
+
+protocol_browse_test_() ->
+    {setup, fun protocol_setup/0, fun protocol_cleanup/1, fun protocol_tests/1}.
+
+protocol_setup() ->
+    _ =
+        case whereis(beamtalk_xref) of
+            undefined ->
+                case beamtalk_xref:start_link() of
+                    {ok, _} -> ok;
+                    {error, {already_started, _}} -> ok
+                end;
+            _ ->
+                ok
+        end,
+    beamtalk_protocol_registry:init(),
+    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    ProtoName = list_to_atom("BrowseProto_" ++ Uniq),
+    %% A stub protocol class object, dispatched (as the real ones are) by the
+    %% shared beamtalk_protocol_object module — which has no package/source.
+    {Pid, Owned} = start_browse_class(ProtoName, #{
+        name => ProtoName,
+        module => beamtalk_protocol_object,
+        superclass => none,
+        is_sealed => true,
+        is_abstract => true,
+        instance_methods => #{},
+        fields => []
+    }),
+    %% Register the protocol with a stdlib-looking *defining* module so origin
+    %% resolution can tell it apart from the dispatch module.
+    DefiningModule = list_to_atom("bt@stdlib@browseproto_" ++ Uniq),
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => ProtoName,
+        module => DefiningModule,
+        required_methods => [
+            #{selector => 'asString', arity => 0},
+            #{selector => 'printString', arity => 0}
+        ],
+        required_class_methods => [#{selector => 'fromString:', arity => 1}],
+        type_params => [],
+        extending => undefined
+    }),
+    #{
+        proto_name => ProtoName,
+        proto_bin => atom_to_binary(ProtoName, utf8),
+        class => {ProtoName, Pid, Owned}
+    }.
+
+protocol_cleanup(#{proto_name := Name, class := {_, Pid, Owned}}) ->
+    catch ets:delete(beamtalk_protocol_registry, Name),
+    catch beamtalk_xref:purge_class(Name),
+    case Owned of
+        true -> catch gen_server:stop(Pid);
+        false -> ok
+    end,
+    ok.
+
+protocol_tests(#{proto_bin := Proto}) ->
+    [
+        {"browse-classes flags a protocol class object is_protocol=true", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Proto),
+            ?assertNotEqual(undefined, Row),
+            ?assertEqual(true, maps:get(<<"is_protocol">>, Row))
+        end},
+        {"browse-classes badges a stdlib protocol's source_origin as stdlib", fun() ->
+            %% Origin resolves through the protocol's defining module, not the
+            %% shared beamtalk_protocol_object dispatch module (which would read
+            %% "project").
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+            ),
+            Row = find_class_row(Value, Proto),
+            ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Row))
+        end},
+        {"browse-protocols surfaces a protocol's required instance members", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Proto, <<"side">> => <<"instance">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            Protocols = maps:get(<<"protocols">>, Value),
+            ?assertEqual(<<"requirements">>, protocol_of(Protocols, <<"asString">>)),
+            ?assertEqual(<<"requirements">>, protocol_of(Protocols, <<"printString">>))
+        end},
+        {"browse-protocols surfaces required class members on the class side", fun() ->
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-protocols">>,
+                    #{<<"class">> => Proto, <<"side">> => <<"class">>},
+                    make_msg(),
+                    self()
+                )
+            ),
+            Protocols = maps:get(<<"protocols">>, Value),
+            ?assertEqual(<<"requirements">>, protocol_of(Protocols, <<"fromString:">>))
         end}
     ].
 

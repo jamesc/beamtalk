@@ -3963,6 +3963,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   defp class_category_bucket(%{"is_test" => true}), do: "Tests"
+  # BT-2615: protocol class objects (ADR 0068) declare no package, so they would
+  # otherwise land in "(uncategorized)". Group them under a dedicated "Protocols"
+  # bucket — mirroring the "Tests" treatment — so a project's protocols are one
+  # click away and don't masquerade as uncategorized classes.
+  defp class_category_bucket(%{"is_protocol" => true}), do: "Protocols"
   defp class_category_bucket(class), do: Map.get(class, "category") || "(uncategorized)"
 
   # Narrow class rows by source origin (BT-2557). `source_origin` is "project",
@@ -5710,27 +5715,35 @@ defmodule BtAttachWeb.WorkspaceLive do
           </button>
         </div>
         <%!-- BT-2557: source-origin filter — narrow the tree to project / deps /
-             stdlib so a project's own classes aren't buried under the stdlib. --%>
-        <div class="seg" role="tablist" aria-label="Class source filter">
-          <button
-            :for={
-              {src, label} <- [
-                {"all", "All"},
-                {"project", "Proj"},
-                {"deps", "Deps"},
-                {"stdlib", "Std"}
-              ]
-            }
-            type="button"
-            role="tab"
-            class={[@browser_source == src && "on"]}
-            aria-selected={to_string(@browser_source == src)}
-            phx-click="browser_source"
-            phx-value-src={src}
-          >
-            {label}
-          </button>
-        </div>
+             stdlib so a project's own classes aren't buried under the stdlib.
+             BT-2603: a compact <select> rather than a segmented control so it
+             keeps a fixed, small width and never overflows / clips off the side
+             of a narrow panel head. The posted field is `src`, so the existing
+             `handle_event("browser_source", %{"src" => src}, ...)` is unchanged;
+             `phx-change` fires on each selection and the native <select> carries
+             its own keyboard + listbox aria semantics. --%>
+        <%!-- `onsubmit="return false"`: this form only carries `phx-change`; there
+             is deliberately no submit path (selection drives the filter). The
+             guard makes a stray native submit — `form.submit()`, or a future
+             field added here — a no-op rather than an unhandled LiveView event. --%>
+        <form phx-change="browser_source" onsubmit="return false" class="src-filter">
+          <select name="src" class="src-select" aria-label="Class source filter">
+            <option
+              :for={
+                {src, label} <- [
+                  {"all", "All"},
+                  {"project", "Proj"},
+                  {"deps", "Deps"},
+                  {"stdlib", "Std"}
+                ]
+              }
+              value={src}
+              selected={@browser_source == src}
+            >
+              {label}
+            </option>
+          </select>
+        </form>
         <%!-- New Class (BT-2293): owner-only ＋ toggle. Reveals the inline create
              form below; the new class then appears right in the tree under it. --%>
         <button
