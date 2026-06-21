@@ -41,7 +41,7 @@ bigOnes    := [numbers dropWhile: [:n | n < 3]]
 // transform_ops.rs — generate_list_partition (no mutations → beamtalk_list:partition/2)
 split      := [numbers partition: [:n | n > 3]]
 
-// transform_ops.rs — generate_list_group_by (no mutations → beamtalk_collection:group_by/2)
+// transform_ops.rs — generate_list_group_by (no mutations → beamtalk_list:group_by/2)
 grouped    := [numbers groupBy: [:n | n > 2]]
 
 // transform_ops.rs — generate_list_inject_into (no mutations → lists:foldl/3 simple)
