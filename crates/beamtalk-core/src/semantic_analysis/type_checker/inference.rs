@@ -2270,13 +2270,14 @@ impl TypeChecker {
     /// true" hint when a singleton (in)equality test (`var =:= #foo`) is
     /// statically decidable — the singleton can never be a value of `current_ty`.
     ///
-    /// Shared by the narrowing-guard path (`refine_singleton_narrowing`) and the
-    /// standalone-send path (`infer_union_message_send`'s equality short-circuit),
-    /// so the membership rule (`type_admits_singleton`) and the diagnostic
-    /// wording live in one place. Stays conservative: silent on `Dynamic`
-    /// (unknown) and `Never` (already-unreachable) receivers, and silent when any
-    /// member admits the singleton (it *is* the singleton, or `Symbol`/one of its
-    /// supertypes).
+    /// Called from `infer_message_send_with_receiver_ty`, which is the single
+    /// emitter for both the guarded path (`(unionVar = #foo) ifTrue: [...]`,
+    /// where the inner `=` send is inferred through that method) and the bare
+    /// standalone path (`unionVar = #foo` outside a guard), so the membership
+    /// rule (`type_admits_singleton`) and the diagnostic wording live in one
+    /// place. Stays conservative: silent on `Dynamic` (unknown) and `Never`
+    /// (already-unreachable) receivers, and silent when any member admits the
+    /// singleton (it *is* the singleton, or `Symbol`/one of its supertypes).
     pub(super) fn check_impossible_singleton_comparison(
         &mut self,
         current_ty: &InferredType,
