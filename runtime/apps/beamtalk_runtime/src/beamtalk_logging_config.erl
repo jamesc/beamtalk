@@ -88,7 +88,12 @@ subsystem_modules(_) ->
 %%====================================================================
 
 -doc "Return the current OTP primary log level as an atom.".
--spec logLevel() -> atom().
+%% Narrow return (BT-2632): the primary log level is one of the eight standard
+%% OTP levels, or the special `all`/`none` sentinels that disable filtering.
+%% Naming this union (rather than bare `atom()`) lets BT infer a singleton-union
+%% return for the `Beamtalk logLevel` getter instead of a wide `Symbol`.
+-spec logLevel() ->
+    emergency | alert | critical | error | warning | notice | info | debug | all | none.
 logLevel() ->
     #{level := Level} = logger:get_primary_config(),
     Level.

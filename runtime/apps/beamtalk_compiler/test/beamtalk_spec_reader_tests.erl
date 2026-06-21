@@ -328,6 +328,77 @@ map_type_union_dedup_test() ->
         )
     ).
 
+%% BT-2632: a union of plain literal atoms maps to a Beamtalk singleton union
+%% (`#text | #json`) instead of collapsing to bare `Symbol`.
+map_type_singleton_union_test() ->
+    ?assertEqual(
+        <<"#text | #json">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{atom, 0, text}, {atom, 0, json}]}
+        )
+    ).
+
+%% A wider atom enumeration (e.g. the eight log levels) maps each branch to a
+%% singleton. `error` is deliberately excluded here — a bare `error` atom is
+%% classified as a Result error branch, not a plain enumeration member.
+map_type_singleton_union_many_test() ->
+    ?assertEqual(
+        <<"#emergency | #alert | #critical | #warning | #notice | #info | #debug">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {atom, 0, emergency},
+                {atom, 0, alert},
+                {atom, 0, critical},
+                {atom, 0, warning},
+                {atom, 0, notice},
+                {atom, 0, info},
+                {atom, 0, debug}
+            ]}
+        )
+    ).
+
+%% A large atom union (e.g. file:posix(), 47 error codes) exceeds the
+%% singleton-union cap and falls back to bare `Symbol` rather than producing a
+%% noisy 47-member singleton union.
+map_type_singleton_union_too_wide_falls_back_test() ->
+    Atoms = [list_to_atom("e" ++ integer_to_list(N)) || N <- lists:seq(1, 20)],
+    Branches = [{atom, 0, A} || A <- Atoms],
+    ?assertEqual(
+        <<"Symbol">>,
+        beamtalk_spec_reader:map_type({type, 0, union, Branches})
+    ).
+
+%% Duplicate atoms are deduped; a union that collapses to a single member is
+%% rejected as a singleton union and falls back to `Symbol` (BT-2647 defers the
+%% lone-atom case).
+map_type_singleton_union_dedup_to_single_test() ->
+    ?assertEqual(
+        <<"Symbol">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{atom, 0, text}, {atom, 0, text}]}
+        )
+    ).
+
+%% A mixed atom/non-atom union keeps the existing behaviour: the atom maps to
+%% `Symbol`, deduped against the other members.
+map_type_singleton_union_mixed_falls_back_test() ->
+    ?assertEqual(
+        <<"Symbol | Integer">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{atom, 0, text}, {type, 0, integer, []}]}
+        )
+    ).
+
+%% Boolean/Nil literal atoms are not treated as singletons — they keep their
+%% True/False/Nil mappings even when unioned with other atoms.
+map_type_singleton_union_excludes_boolean_test() ->
+    ?assertEqual(
+        <<"True | Symbol">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{atom, 0, true}, {atom, 0, custom}]}
+        )
+    ).
+
 %%% ---------------------------------------------------------------
 %%% Union types — ok/error Result recognition (ADR 0076 Phase 2)
 %%% ---------------------------------------------------------------
