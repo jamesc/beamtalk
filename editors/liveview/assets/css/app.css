@@ -576,15 +576,15 @@
 .dock-tabs { display: flex; gap: 2px; align-items: center; }
 .dock-tab {
   font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase;
-  color: var(--muted); cursor: pointer; padding: 0 4px; background: transparent;
+  color: var(--muted); cursor: pointer; padding: 0 4px 8px; background: transparent;
   border: 0; line-height: inherit; font-family: inherit;
 }
 .dock-tab:hover { color: var(--ink); }
-.dock-tab.on { color: var(--ink); }
-.dock-tab.on::after {
-  content: ""; display: block; height: 2px; background: var(--accent);
-  margin-top: 6px; border-radius: 2px;
-}
+/* Active underline drawn as an inset box-shadow so it does not participate in
+   layout (mirrors `.tabstrip .tab.on`). The uniform `padding-bottom` on every
+   `.dock-tab` reserves the underline gap for active and inactive tabs alike, so
+   switching the active tab never shifts a label vertically (BT-2602). */
+.dock-tab.on { color: var(--ink); box-shadow: inset 0 -2px 0 var(--accent); border-radius: 2px; }
 .tab-count {
   display: inline-block; margin-left: 5px; font-size: 9.5px; font-weight: 700;
   background: var(--accent-soft); color: var(--accent-2); border-radius: 8px; padding: 0 5px;
