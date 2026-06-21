@@ -1039,6 +1039,140 @@ package_of_module_extraction_test() ->
     ?assertEqual(nil, beamtalk_repl_ops_browse:package_of_module(no_at_signs)).
 
 %%====================================================================
+%% Package-based source_origin classification — BT-2640
+%%====================================================================
+
+%% Without a running workspace_meta the project package is unknown, so a
+%% packaged dependency-looking module degrades to the path-prefix fallback;
+%% with a null source that lands on `project` (a wrong "project" badge is less
+%% confusing than a wrong "dependency" badge).
+source_origin_no_meta_packaged_null_source_is_project_test() ->
+    ?assertEqual(
+        <<"project">>,
+        beamtalk_repl_ops_browse:source_origin_of('bt@cowboy@Listener', null)
+    ).
+
+%% No package segment + null source + no meta => project (path fallback).
+source_origin_no_segment_null_source_is_project_test() ->
+    ?assertEqual(
+        <<"project">>,
+        beamtalk_repl_ops_browse:source_origin_of(plain_mod, null)
+    ).
+
+%% Stdlib still wins first, even with a project package configured.
+source_origin_with_meta_stdlib_wins_test() ->
+    with_project_package(<<"myapp">>, fun() ->
+        ?assertEqual(
+            <<"stdlib">>,
+            beamtalk_repl_ops_browse:source_origin_of('bt@stdlib@OrderedCollection', null)
+        )
+    end).
+
+%% Package == project package => project, regardless of where the source file
+%% resolves on disk (the primary signal is the package segment, not the path).
+source_origin_with_meta_project_package_is_project_test() ->
+    with_project_package(<<"myapp">>, fun() ->
+        ?assertEqual(
+            <<"project">>,
+            beamtalk_repl_ops_browse:source_origin_of('bt@myapp@Counter', null)
+        ),
+        %% Even a source resolving under the project tree stays `project`.
+        ?assertEqual(
+            <<"project">>,
+            beamtalk_repl_ops_browse:source_origin_of(
+                'bt@myapp@Counter', <<"src/counter.bt">>
+            )
+        )
+    end).
+
+%% Package =/= project package => dependency, even when the dependency source
+%% resolves under the project tree (the BT-2640 bug: a path-only check would
+%% mislabel this `project`).
+source_origin_with_meta_dependency_package_is_dependency_test() ->
+    with_project_package(<<"myapp">>, fun() ->
+        ?assertEqual(
+            <<"dependency">>,
+            beamtalk_repl_ops_browse:source_origin_of('bt@http@Server', null)
+        ),
+        %% Dep source nested under the project root still classifies as a dep.
+        ?assertEqual(
+            <<"dependency">>,
+            beamtalk_repl_ops_browse:source_origin_of(
+                'bt@http@Server', <<"_build/deps/http/src/server.bt">>
+            )
+        )
+    end).
+
+%% Missing-metadata robustness: meta running but with no `project_path` (so no
+%% package detected) leaves the project package unknown, and a packaged module
+%% falls back to the path check. With no project root to compare against, the
+%% path check cannot prove a dependency, so it degrades to `project` rather than
+%% dumping a wrong "dependency" badge.
+source_origin_meta_without_project_path_falls_back_to_path_test() ->
+    with_started_meta(#{}, fun() ->
+        ?assertEqual(
+            <<"project">>,
+            beamtalk_repl_ops_browse:source_origin_of(
+                'bt@http@Server', <<"/elsewhere/http/server.bt">>
+            )
+        ),
+        ?assertEqual(
+            <<"project">>,
+            beamtalk_repl_ops_browse:source_origin_of('bt@http@Server', null)
+        )
+    end).
+
+%% Start workspace_meta with a project_path pointing at a temp dir whose
+%% beamtalk.toml declares package `Pkg`, run `Fun`, then tear meta down.
+with_project_package(Pkg, Fun) ->
+    Dir = make_project_dir(Pkg),
+    try
+        with_started_meta(#{project_path => Dir}, Fun)
+    after
+        _ = file:delete(filename:join(Dir, "beamtalk.toml")),
+        _ = file:del_dir(Dir)
+    end.
+
+%% Start workspace_meta with the given extra init metadata (workspace_id,
+%% created_at, repl=false are supplied), run `Fun`, then stop the server.
+with_started_meta(Extra, Fun) ->
+    %% Defensive: a stray server from another test would shadow ours.
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        Existing -> stop_meta(Existing)
+    end,
+    Base = #{
+        workspace_id => <<"bt2640-test">>,
+        created_at => erlang:system_time(second),
+        repl => false
+    },
+    {ok, Pid} = beamtalk_workspace_meta:start_link(maps:merge(Base, Extra)),
+    try
+        Fun()
+    after
+        stop_meta(Pid)
+    end.
+
+stop_meta(Pid) when is_pid(Pid) ->
+    Ref = erlang:monitor(process, Pid),
+    unlink(Pid),
+    exit(Pid, shutdown),
+    receive
+        {'DOWN', Ref, process, Pid, _} -> ok
+    after 2000 -> ok
+    end.
+
+make_project_dir(Pkg) ->
+    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    Dir = filename:join(
+        beamtalk_file:'tempDirectory'(), "bt2640_proj_" ++ Uniq
+    ),
+    ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    Toml = <<"[package]\nname = \"", Pkg/binary, "\"\n">>,
+    ok = file:write_file(filename:join(Dir, "beamtalk.toml"), Toml),
+    Dir.
+
+%%====================================================================
 %% Row helpers
 %%====================================================================
 

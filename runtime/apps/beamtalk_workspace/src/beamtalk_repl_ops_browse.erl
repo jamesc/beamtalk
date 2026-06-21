@@ -829,19 +829,47 @@ origin_of(SourceFile) when is_binary(SourceFile) -> <<"both">>.
 %% carried in a separate `package` row field, never packed into this value.
 -spec source_origin_of(atom(), binary() | null) -> binary().
 source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
+    %% Stdlib always wins first (BT-2552).
     case beamtalk_class_registry:is_stdlib_module(ModName) of
         true ->
             <<"stdlib">>;
         false ->
-            case SourceFile of
-                null ->
-                    <<"project">>;
-                Bin when is_binary(Bin) ->
-                    case classify_source_origin(Bin) of
-                        project -> <<"project">>;
-                        dependency -> <<"dependency">>
-                    end
-            end
+            classify_origin(package_of_module(ModName), project_package_name(), SourceFile)
+    end.
+
+%% Classification rule (BT-2640): the module's package segment is the *primary*
+%% signal, not the filesystem path. `bt@{pkg}@{class}` encodes the owning package;
+%% comparing it to the project's own package name correctly labels dependency
+%% classes whose sources happen to resolve under the project tree, and avoids
+%% dumping everything into `project` when `project_path` metadata is missing.
+%%
+%%   - package present, ≠ project package         -> dependency
+%%   - package present, == project package        -> project
+%%   - package present but project package unknown -> path fallback (then project)
+%%   - no package segment                          -> path fallback (null -> project)
+-spec classify_origin(binary() | nil, binary() | null, binary() | null) -> binary().
+classify_origin(Pkg, ProjectPkg, _SourceFile) when
+    is_binary(Pkg), is_binary(ProjectPkg)
+->
+    case Pkg =:= ProjectPkg of
+        true -> <<"project">>;
+        false -> <<"dependency">>
+    end;
+classify_origin(Pkg, _ProjectPkg, SourceFile) when is_binary(Pkg) ->
+    %% Package known but project package unresolvable: defer to the path check.
+    path_origin(SourceFile);
+classify_origin(nil, _ProjectPkg, SourceFile) ->
+    %% No package segment in the module atom: fall back to the path-prefix check.
+    path_origin(SourceFile).
+
+%% Secondary, path-prefix fallback used only when the package can't decide.
+-spec path_origin(binary() | null) -> binary().
+path_origin(null) ->
+    <<"project">>;
+path_origin(SourceFile) when is_binary(SourceFile) ->
+    case classify_source_origin(SourceFile) of
+        project -> <<"project">>;
+        dependency -> <<"dependency">>
     end.
 
 %% Package name a class lives in, for ALL origins (BT-2643): `stdlib` for stdlib
@@ -885,9 +913,11 @@ package_of_module(ModName) when is_atom(ModName) ->
             nil
     end.
 
-%% Determine if a source file belongs to the project or a dependency.
-%% Falls back to `project` when metadata is unavailable (startup, no workspace)
-%% — a wrong "project" badge is less confusing than a wrong "dependency" badge.
+%% Secondary fallback (BT-2640): determine if a source file belongs to the
+%% project or a dependency by filesystem path. Used only by `classify_origin/3`
+%% when the module's package segment can't decide. Falls back to `project` when
+%% metadata is unavailable (startup, no workspace) — a wrong "project" badge is
+%% less confusing than a wrong "dependency" badge.
 -spec classify_source_origin(binary()) -> project | dependency.
 classify_source_origin(SourceFile) ->
     SourceStr = binary_to_list(SourceFile),
