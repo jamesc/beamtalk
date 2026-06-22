@@ -16,6 +16,7 @@ defmodule BtAttach.DocFormat do
 
     * ATX headings — `#` .. `######`
     * fenced code blocks — ` ```lang ` … ` ``` `
+    * indented code blocks — a block-start run of lines indented ≥4 spaces / a tab
     * unordered lists — lines starting with `- ` or `* `
     * blank-line-separated paragraphs
     * inline `` `code` ``, `**bold**`, and `*italic*` / `_italic_` spans
@@ -77,6 +78,14 @@ defmodule BtAttach.DocFormat do
         {items, after_list} = take_list_items([line | rest], [])
         blocks(after_list, [list_block(items) | acc])
 
+      indented_code?(line) ->
+        # An indented code block at block-start (the fence?/heading/list clauses
+        # above already ruled those out, so a `>=4`-space / tab line here is a
+        # top-level code block — a list item's indented continuation never
+        # reaches this clause because `list_item?` claimed it first).
+        {code_lines, after_code} = take_indented_code([line | rest], [])
+        blocks(after_code, [code_block(strip_indent(code_lines)) | acc])
+
       blank?(line) ->
         # A paragraph separator on its own — nothing to emit.
         blocks(rest, acc)
@@ -111,7 +120,10 @@ defmodule BtAttach.DocFormat do
 
   defp take_list_items([], acc), do: {Enum.reverse(acc), []}
 
-  # A paragraph runs until a blank line or the start of another block kind.
+  # A paragraph runs until a blank line or the start of another block kind. An
+  # indented-code line does *not* end a paragraph mid-stream: indented code is
+  # only recognised at block-start (after a blank line / doc start), so a wrapped
+  # paragraph line that happens to be indented stays part of the paragraph.
   defp take_paragraph([line | rest], acc) do
     if blank?(line) or fence?(line) or heading_level(line) > 0 or list_item?(line) do
       {Enum.reverse(acc), [line | rest]}
@@ -121,6 +133,47 @@ defmodule BtAttach.DocFormat do
   end
 
   defp take_paragraph([], acc), do: {Enum.reverse(acc), []}
+
+  # Collect a run of indented-code lines. Blank lines *within* the block are kept
+  # (a blank line between two indented lines is part of the code), but a blank
+  # line that is the last line before a non-indented line ends the block and is
+  # not consumed — trailing blanks are trimmed so the `<pre>` has no empty tail.
+  defp take_indented_code([line | rest], acc) do
+    cond do
+      indented_code?(line) -> take_indented_code(rest, [line | acc])
+      blank?(line) and continues_indented_code?(rest) -> take_indented_code(rest, [line | acc])
+      true -> {Enum.reverse(acc), [line | rest]}
+    end
+  end
+
+  defp take_indented_code([], acc), do: {Enum.reverse(acc), []}
+
+  # Is the NEXT non-blank line still indented code? Used to decide whether a blank
+  # line is interior to the code block or ends it. We look only at the first
+  # non-blank line: if it is indented the blank is interior; otherwise (prose, or
+  # end of input) the blank ends the block. (`Enum.find_value` can't be used here
+  # — `false` is falsy, so a `false` arm would not stop the scan and a later
+  # indented block could pull an intervening blank into this one.)
+  defp continues_indented_code?(lines) do
+    case Enum.find(lines, &(not blank?(&1))) do
+      nil -> false
+      line -> indented_code?(line)
+    end
+  end
+
+  # Strip the common indent (a leading tab, else four spaces) from each code
+  # line, leaving the code's own relative indentation intact. Blank lines stay
+  # blank.
+  defp strip_indent(lines) do
+    Enum.map(lines, fn line ->
+      cond do
+        blank?(line) -> ""
+        String.starts_with?(line, "\t") -> String.slice(line, 1..-1//1)
+        String.starts_with?(line, "    ") -> String.slice(line, 4..-1//1)
+        true -> line
+      end
+    end)
+  end
 
   # ── Block renderers ──────────────────────────────────────────────────────────
 
@@ -203,6 +256,13 @@ defmodule BtAttach.DocFormat do
 
   defp list_item?(line) do
     Regex.match?(~r/^\s*[-*]\s+\S/, line)
+  end
+
+  # An indented code line: a non-blank line that starts with a tab or at least
+  # four spaces. Callers only test this at block-start, after the fence/heading/
+  # list classifiers have run, so it never claims a list marker or a fence.
+  defp indented_code?(line) do
+    not blank?(line) and (String.starts_with?(line, "\t") or String.starts_with?(line, "    "))
   end
 
   defp strip_list_marker(line) do

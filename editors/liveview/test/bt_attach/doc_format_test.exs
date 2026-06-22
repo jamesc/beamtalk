@@ -67,6 +67,67 @@ defmodule BtAttach.DocFormatTest do
     end
   end
 
+  describe "indented code blocks (BT-2650)" do
+    test "a 4-space-indented block renders as a doc-code pre" do
+      out = html("Examples\n\n    c increment\n    c value")
+      assert out =~ ~s(<p class="doc-p">Examples</p>)
+      assert out =~ ~s(<pre class="doc-code"><code>c increment\nc value</code></pre>)
+    end
+
+    test "a tab-indented block renders as a doc-code pre" do
+      out = html("Examples\n\n\tc increment")
+      assert out =~ ~s(<pre class="doc-code"><code>c increment</code></pre>)
+    end
+
+    test "the common 4-space indent is stripped but inner indentation is preserved" do
+      out = html("    line one\n        nested")
+      assert out =~ ~s(<pre class="doc-code"><code>line one\n    nested</code></pre>)
+    end
+
+    test "an indented block mixed with paragraphs splits correctly" do
+      out = html("Intro paragraph.\n\n    code here\n\nTrailing paragraph.")
+      assert out =~ ~s(<p class="doc-p">Intro paragraph.</p>)
+      assert out =~ ~s(<pre class="doc-code"><code>code here</code></pre>)
+      assert out =~ ~s(<p class="doc-p">Trailing paragraph.</p>)
+      # The trailing prose is a paragraph, not folded into the code block.
+      refute out =~ ~s(Trailing paragraph.</code>)
+    end
+
+    test "a blank line interior to an indented block is preserved" do
+      out = html("    first\n\n    second")
+      assert out =~ ~s(<pre class="doc-code"><code>first\n\nsecond</code></pre>)
+    end
+
+    test "a blank between two indented blocks separated by prose is not pulled into the first" do
+      # The blank after "first block" precedes a non-indented prose line, so it
+      # ends the first code block — it must NOT be swallowed just because a later
+      # indented block exists (the `Enum.find_value`/`false` lookahead bug).
+      out = html("    first block\n\nregular prose\n\n    second block")
+      assert out =~ ~s(<pre class="doc-code"><code>first block</code></pre>)
+      assert out =~ ~s(<pre class="doc-code"><code>second block</code></pre>)
+      assert out =~ ~s(<p class="doc-p">regular prose</p>)
+      # No spurious trailing newline pulled into the first block.
+      refute out =~ ~s(<code>first block\n</code>)
+    end
+
+    test "indented code escapes its contents" do
+      out = html("    <b>not bold</b>")
+      refute out =~ "<b>not bold</b>"
+      assert out =~ ~s(<pre class="doc-code"><code>&lt;b&gt;not bold&lt;/b&gt;</code></pre>)
+    end
+
+    test "fenced code still works alongside the indented-code path" do
+      out = html("```\nfenced code\n```")
+      assert out =~ ~s(<pre class="doc-code"><code>fenced code</code></pre>)
+    end
+
+    test "a list item's indented text is not misread as code" do
+      out = html("- item one\n- item two")
+      assert out =~ ~s(<ul class="doc-list">)
+      refute out =~ ~s(<pre class="doc-code">)
+    end
+  end
+
   describe "inline spans" do
     test "inline code, bold and italic" do
       assert html("use `foo`") =~ "use <code>foo</code>"

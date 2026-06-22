@@ -525,8 +525,45 @@
 .doc-body-inline {
   padding: 8px 12px; margin-bottom: 6px;
   background: var(--panel-2); border-radius: 6px;
-  font-size: 12px; line-height: 1.5; color: var(--muted);
+  font-size: 13px; line-height: 1.55; color: var(--ink);
   max-height: 40%; overflow: auto;
+}
+
+/* Block elements emitted by `BtAttach.DocFormat` (BT-2650). These give the
+   rendered doc-comment real document structure — readable paragraphs, weighted
+   headings, indented bulleted lists, and code in a distinct monospace panel —
+   instead of one flat muted blob. */
+.doc-body-inline .doc-p {
+  margin: 0 0 8px; color: var(--ink);
+}
+.doc-body-inline .doc-p:last-child { margin-bottom: 0; }
+.doc-body-inline .doc-h {
+  margin: 12px 0 6px; color: var(--ink);
+  font-weight: 700; font-size: 13.5px; line-height: 1.3;
+}
+.doc-body-inline .doc-h:first-child { margin-top: 0; }
+.doc-body-inline .doc-list {
+  margin: 0 0 8px; padding-left: 20px;
+  list-style: disc; color: var(--ink);
+}
+.doc-body-inline .doc-list li { margin: 2px 0; }
+.doc-body-inline .doc-code {
+  margin: 0 0 8px; padding: 8px 10px; overflow: auto;
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 5px;
+  font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12.5px; line-height: 1.45; color: var(--ink);
+  white-space: pre;
+}
+.doc-body-inline .doc-code code {
+  background: none; padding: 0; font: inherit; color: inherit;
+}
+/* Inline `code` spans: a subtle monospace pill so a literal selector / value
+   stands out from prose without the weight of a code panel. */
+.doc-body-inline code {
+  padding: 1px 4px; border-radius: 4px;
+  background: var(--code-bg); border: 1px solid var(--line-soft);
+  font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 0.92em; color: var(--ink);
 }
 
 /* ----------------------------------------------------------------------------
