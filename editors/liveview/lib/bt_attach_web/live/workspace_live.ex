@@ -7483,13 +7483,21 @@ defmodule BtAttachWeb.WorkspaceLive do
               <%!-- Draggable divider (BT-2576) between the method editor and the
                    workspace dock. The SplitDrag hook writes `--dock-h` on this
                    `.col` parent; the dock reads it. Hidden when the dock is
-                   collapsed. --%>
+                   collapsed.
+
+                   Unlike the other gutters this one is NOT `phx-update="ignore"`
+                   (BT-2638). Its `.col` parent is the center column that holds
+                   the editor + dock and re-renders on every diff/new-method tab;
+                   morphdom strips the JS-set `--dock-h` inline style off that
+                   `.col`, snapping the dock back to its 230px default. The empty
+                   gutter div has no hook-owned inner DOM to protect, so dropping
+                   `ignore` is safe and lets the hook's `updated()` callback fire
+                   after each patch to re-apply the persisted size. --%>
               <div
                 :if={@show_dock}
                 id="dock-split-gutter"
                 class="split-gutter split-gutter-y"
                 phx-hook="SplitDrag"
-                phx-update="ignore"
                 role="separator"
                 aria-orientation="horizontal"
                 aria-label="Resize the editor and workspace dock"
