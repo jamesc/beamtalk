@@ -213,6 +213,118 @@ native_delegate_exported_marker_test() ->
     ?assertNot(beamtalk_repl_ops_browse:delegate_exported([], readLine)).
 
 %%====================================================================
+%% browse-native-modules — enumeration + filter + source-path (BT-2648)
+%%====================================================================
+
+describe_ops_has_native_modules_key_test() ->
+    Ops = beamtalk_repl_ops_browse:describe_ops(),
+    ?assert(maps:is_key(<<"browse-native-modules">>, Ops)),
+    #{<<"browse-native-modules">> := Info} = Ops,
+    %% No params (enumerates every loaded package).
+    ?assertEqual([], maps:get(<<"params">>, Info)),
+    %% browse-native-source advertises the BT-2648 `module` alternative key.
+    #{<<"browse-native-source">> := NS} = Ops,
+    ?assert(lists:member(<<"module">>, maps:get(<<"params">>, NS))).
+
+%% The enumeration: under the EUnit harness the stdlib package is loaded, so
+%% `browse-native-modules` returns the stdlib's hand-written native modules.
+native_modules_enumerates_stdlib_test() ->
+    ensure_stdlib(),
+    Rows = native_modules(),
+    ?assert(is_list(Rows)),
+    ?assert(length(Rows) > 0),
+    Modules = [maps:get(<<"module">>, R) || R <- Rows],
+    %% A known stdlib backing module is present.
+    ?assert(lists:member(<<"beamtalk_array">>, Modules)).
+
+%% Filter rule: the auto-generated `bt@{pkg}@{class}` class facade modules are
+%% NEVER surfaced here (they are already in browse-classes) — only hand-written
+%% native `.erl` modules.
+native_modules_excludes_bt_facades_test() ->
+    ensure_stdlib(),
+    Rows = native_modules(),
+    BtFacades = [
+        M
+     || R <- Rows,
+        M <- [maps:get(<<"module">>, R)],
+        binary:part(M, 0, min(3, byte_size(M))) =:= <<"bt@">>
+    ],
+    ?assertEqual([], BtFacades).
+
+%% Every row carries the documented fields, origin/package classification, and a
+%% source path resolved from the module's compile info (openable when readable).
+native_modules_row_shape_test() ->
+    ensure_stdlib(),
+    Rows = native_modules(),
+    Row = find_module_row(Rows, <<"beamtalk_array">>),
+    ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Row)),
+    ?assertEqual(<<"stdlib">>, maps:get(<<"package">>, Row)),
+    %% Source path resolved from compile info → openable.
+    ?assert(is_binary(maps:get(<<"source_file">>, Row))),
+    ?assertEqual(true, maps:get(<<"openable">>, Row)).
+
+%% Rows are sorted by module name (stable tree order).
+native_modules_sorted_test() ->
+    ensure_stdlib(),
+    Rows = native_modules(),
+    Modules = [maps:get(<<"module">>, R) || R <- Rows],
+    ?assertEqual(lists:sort(Modules), Modules).
+
+%% browse-native-source keyed by `module` (BT-2648): a standalone native module
+%% (no backing class) returns its source read-only with `class = null`.
+native_source_by_module_test() ->
+    ensure_stdlib(),
+    code:ensure_loaded(beamtalk_array),
+    Value = decode_value(
+        beamtalk_repl_ops_browse:handle(
+            <<"browse-native-source">>,
+            #{<<"module">> => <<"beamtalk_array">>},
+            make_msg(),
+            self()
+        )
+    ),
+    ?assertEqual(null, maps:get(<<"class">>, Value)),
+    ?assertEqual(<<"beamtalk_array">>, maps:get(<<"backing_module">>, Value)),
+    ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Value)),
+    %% Read-only in every origin for a standalone module (no editing seam).
+    ?assertEqual(false, maps:get(<<"editable">>, Value)),
+    ?assert(is_binary(maps:get(<<"content">>, Value))).
+
+%% A `module` that names no loaded module is a structured not-found error, not an
+%% atom-table growth.
+native_source_unknown_module_errors_test() ->
+    Response = beamtalk_repl_ops_browse:handle(
+        <<"browse-native-source">>,
+        #{<<"module">> => <<"definitely_not_a_loaded_module_xyz">>},
+        make_msg(),
+        self()
+    ),
+    Decoded = assert_error_response(Response),
+    ?assertNotEqual(
+        nomatch,
+        binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)
+    ).
+
+%% Helper: enumerate via the term handler.
+native_modules() ->
+    {value, Rows} = beamtalk_repl_ops_browse:handle_term(
+        <<"browse-native-modules">>, #{}, make_msg(), self()
+    ),
+    Rows.
+
+find_module_row(Rows, Module) ->
+    case lists:search(fun(R) -> maps:get(<<"module">>, R) =:= Module end, Rows) of
+        {value, Row} -> Row;
+        false -> error({module_row_not_found, Module})
+    end.
+
+%% Ensure the stdlib package app is loaded so enumeration has a package to walk.
+ensure_stdlib() ->
+    _ = application:load(beamtalk_stdlib),
+    _ = application:ensure_all_started(beamtalk_stdlib),
+    ok.
+
+%%====================================================================
 %% Validation error paths (no live class needed)
 %%====================================================================
 

@@ -188,10 +188,13 @@ dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"browse-classes">>;
     Op =:= <<"browse-protocols">>;
     Op =:= <<"browse-method-source">>;
-    Op =:= <<"browse-class-definition">>
+    Op =:= <<"browse-class-definition">>;
+    %% BT-2578 native pane + BT-2648 native-modules enumeration.
+    Op =:= <<"browse-native-source">>;
+    Op =:= <<"browse-native-modules">>
 ->
-    %% ADR 0095 (BT-2488): System Browser browse facade — four read-only
-    %% term-ops, each returning `{value, JsonValue}`.
+    %% ADR 0095 (BT-2488): System Browser browse facade — read-only term-ops,
+    %% each returning `{value, JsonValue}`.
     beamtalk_repl_ops_browse:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, _Params, _Msg, _SessionPid) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),

@@ -642,6 +642,70 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   def browse_native_source(class, _selector),
     do: {:error, "class `#{class}` is not native-backed"}
 
+  # BT-2648: a loaded package's hand-written native Erlang modules. Returns a
+  # dependency module with readable source (openable), a stdlib module, and a
+  # `.beam`-only dependency module (not openable — the empty-state path).
+  def browse_native_modules do
+    {:value,
+     [
+       %{
+         "module" => "beamtalk_http_client",
+         "source_file" => "deps/beamtalk_http/native/beamtalk_http_client.erl",
+         "package" => "http",
+         "source_origin" => "dependency",
+         "openable" => true
+       },
+       %{
+         "module" => "beamtalk_http_stripped",
+         # `.beam`-only: no readable source → not openable (the `:null` atom is
+         # how the Erlang op delivers an absent path over distribution).
+         "source_file" => :null,
+         "package" => "http",
+         "source_origin" => "dependency",
+         "openable" => false
+       },
+       %{
+         "module" => "beamtalk_subprocess",
+         "source_file" => "apps/beamtalk_stdlib/src/beamtalk_subprocess.erl",
+         "package" => "stdlib",
+         "source_origin" => "stdlib",
+         "openable" => true
+       }
+     ]}
+  end
+
+  # BT-2648: the read-only native pane keyed by a standalone native module.
+  def browse_native_module_source("beamtalk_http_client") do
+    {:value,
+     %{
+       "class" => :null,
+       "backing_module" => "beamtalk_http_client",
+       "source_file" => "deps/beamtalk_http/native/beamtalk_http_client.erl",
+       "source_origin" => "dependency",
+       "editable" => false,
+       "content" => "handle_call({get, [Url]}, _From, State) ->\n    {reply, ok, State}.\n",
+       "clauses" => [%{"selector" => "get", "line" => 1}],
+       "selected_clause" => :null
+     }}
+  end
+
+  def browse_native_module_source("beamtalk_http_stripped") do
+    {:value,
+     %{
+       "class" => :null,
+       "backing_module" => "beamtalk_http_stripped",
+       "source_file" => :null,
+       "source_origin" => "dependency",
+       "editable" => false,
+       "content" => :null,
+       "clauses" => [],
+       "selected_clause" => :null
+     }}
+  end
+
+  def browse_native_module_source(module),
+    do: {:error, "module `#{module}` not found"}
+
   # ── Navigation ops ───────────────────────────────────────────────────────
 
   def senders_of(_selector), do: {:value, %{"sites" => []}}

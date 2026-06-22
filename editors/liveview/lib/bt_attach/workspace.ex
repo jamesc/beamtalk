@@ -286,6 +286,32 @@ defmodule BtAttach.Workspace do
   def browse_native_source(class, selector) when is_binary(class) and is_binary(selector),
     do: dispatch_browse("browse-native-source", %{"class" => class, "selector" => selector})
 
+  @doc """
+  Return the Erlang source of a standalone native `module` for the System
+  Browser's read-only native pane (BT-2648). Unlike `browse_native_source/2`
+  (which resolves a `native:` class's backing module), this keys directly on a
+  loaded native module surfaced by `browse_native_modules/0` — a dependency's
+  hand-written `.erl` with no Beamtalk class to back it. Same result shape as
+  `browse_native_source/2` (`backing_module`, `source_file`, `source_origin`,
+  `content` = `null` when not shipped, `clauses`); `class` is `null`. An unknown
+  module comes back as a structured `#beamtalk_error{}` (`{:error, reason}`).
+  """
+  @spec browse_native_module_source(String.t()) :: {:value, term()} | {:error, term()}
+  def browse_native_module_source(module) when is_binary(module),
+    do: dispatch_browse("browse-native-source", %{"module" => module})
+
+  @doc """
+  List a loaded package's hand-written native Erlang modules for the System
+  Browser's native-modules section (BT-2648, `browse-native-modules`). Each row
+  carries `module`, `source_file` (`null` when no readable `.erl` — not
+  openable), `package`, `source_origin` (`project`/`dependency`/`stdlib`), and
+  `openable`. The auto-generated `bt@{pkg}@{class}` class facades are excluded —
+  those are already in `browse_classes/0`. Returns the live `{:value, rows}` term
+  verbatim; `{:error, reason}` on a dispatch failure.
+  """
+  @spec browse_native_modules() :: {:value, term()} | {:error, term()}
+  def browse_native_modules, do: dispatch_browse("browse-native-modules", %{})
+
   # ── navigation-surface: senders/implementors + omni-search index ────────────
   #
   # BT-2495 (Cockpit Phase 3): two navigation aids ride the SAME term-returning

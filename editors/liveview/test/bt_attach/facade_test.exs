@@ -44,6 +44,14 @@ defmodule BtAttach.FacadeTest do
     def browse_class_definition(class),
       do: record({:browse_class_definition, class}) && {:value, %{"class" => class}}
 
+    # BT-2648: native-modules enumeration + a module-keyed native source view.
+    def browse_native_modules,
+      do: record({:browse_native_modules}) && {:value, [%{"module" => "beamtalk_http_client"}]}
+
+    def browse_native_module_source(module),
+      do:
+        record({:browse_native_module_source, module}) && {:value, %{"backing_module" => module}}
+
     # BT-2495: the navigation aids — senders/implementors (nav-query) + the
     # omni-search symbol index (nav-symbols).
     def senders_of(selector),
@@ -151,7 +159,8 @@ defmodule BtAttach.FacadeTest do
                      subscribe_classes
                      subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
-                     browse_class_definition browse_native_source list_tests
+                     browse_class_definition browse_native_source
+                     browse_native_modules browse_native_module_source list_tests
                      senders implementors required_methods conforming_classes symbols
                      git_status git_diff git_log
                      autoflush)a do
@@ -266,6 +275,26 @@ defmodule BtAttach.FacadeTest do
                {:value, %{"class" => "Counter"}}
 
       assert {:browse_protocols, "Counter", "instance"} in RecordingClient.calls()
+    end
+
+    # BT-2648: the native-modules enumeration + module-keyed native source view.
+    test "browse_native_modules routes with no params and returns the live term" do
+      assert Facade.dispatch(:browse_native_modules, %{}) ==
+               {:value, [%{"module" => "beamtalk_http_client"}]}
+
+      assert {:browse_native_modules} in RecordingClient.calls()
+    end
+
+    test "browse_native_module_source passes the module through" do
+      assert Facade.dispatch(:browse_native_module_source, %{module: "beamtalk_http_client"}) ==
+               {:value, %{"backing_module" => "beamtalk_http_client"}}
+
+      assert {:browse_native_module_source, "beamtalk_http_client"} in RecordingClient.calls()
+    end
+
+    test "browse_native_module_source with a non-binary module is invalid params" do
+      assert Facade.dispatch(:browse_native_module_source, %{module: 123}) ==
+               {:error, :invalid_params}
     end
 
     test "the observer role may browse (read capability) but not eval" do
