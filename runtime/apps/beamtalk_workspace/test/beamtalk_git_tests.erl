@@ -209,7 +209,11 @@ status_empty_test() ->
     ?assertEqual(nil, maps:get(branch, Status)),
     ?assertEqual([], maps:get(files, Status)).
 
-%% Ignored-file entries (`! <path>`) are surfaced with worktree => ignored.
+%% The `! <path>` clause maps ignored-file entries to worktree => ignored. This
+%% is forward-looking/defensive parser coverage: `git_status/0` invokes
+%% `git status --porcelain=v2 -b -z` *without* `--ignored`, so git never emits
+%% `!` entries in production today. The test documents the parser contract for
+%% when/if `--ignored` is added, not current `git_status/0` behaviour.
 status_ignored_file_test() ->
     Bin = nul_join([<<"# branch.head main">>, <<"! .env">>]),
     Status = beamtalk_git:parse_status(Bin),
@@ -320,6 +324,9 @@ git_stage_rejects_non_binary_path_test() ->
 
 git_unstage_rejects_non_binary_path_test() ->
     ?assertMatch({error, _}, beamtalk_git:git_unstage(42)).
+
+git_revert_file_rejects_non_binary_path_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_revert_file(42)).
 
 git_log_rejects_zero_count_test() ->
     ?assertMatch({error, _}, beamtalk_git:git_log(0)).
