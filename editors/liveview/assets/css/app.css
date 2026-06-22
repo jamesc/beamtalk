@@ -452,6 +452,27 @@
 .editor-meta .modifier-tag.abstract { --mt-color: var(--accent); }      /* Abstract — amber */
 .editor-meta .modifier-tag.native   { --mt-color: var(--t-global); }    /* Native — gold */
 
+/* BT-2642: package/origin badge in the editor header, shown for every active tab
+   (method / class-definition) incl. project. The `.row .source-origin-tag` rules
+   above are scoped to the tree, so the header badge is styled separately here —
+   crucially, the tree's `.source-origin-tag.project { display: none }` does NOT
+   reach the header, so project badges show here while staying hidden in the tree.
+   Sizing mirrors `.editor-meta .modifier-tag`; colors are distinct per origin:
+   stdlib purple (parity with the tree), dependency amber (parity), project a
+   neutral slate so it reads as "your code" rather than an external badge. Sits
+   left of the `.spacer` with the modifier badges; `flex: none` + ellipsis keep a
+   long package name from colliding with the right-edge divergence badges. */
+.editor-meta .source-origin-tag.header {
+  flex: none;
+  font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+  border-radius: 3px; padding: 0 5px; line-height: 16px;
+  white-space: nowrap;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+}
+.editor-meta .source-origin-tag.header.stdlib     { background: #e8d5f5; color: #7c3aed; }
+.editor-meta .source-origin-tag.header.dependency { background: #fef3c7; color: #b45309; }
+.editor-meta .source-origin-tag.header.project    { background: #e2e8f0; color: #475569; }
+
 /* ============================================================================
    Read-only documentation block (BT-2558)
    ----------------------------------------------------------------------------

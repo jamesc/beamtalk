@@ -322,17 +322,31 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def browse_classes do
     base = [
-      %{"name" => "Counter", "source_file" => "src/counter.bt", "source_origin" => "project"},
+      # BT-2642: project rows carry the project package name (`project_package_name/0`
+      # in the backend), so the editor header's project package badge can be reached
+      # by navigation. The class tree still hides project badges; the header shows them.
+      %{
+        "name" => "Counter",
+        "source_file" => "src/counter.bt",
+        "source_origin" => "project",
+        "package" => "exdura"
+      },
       # BT-2578: a native: class in the tree so the System Browser's "Erlang
       # backend" badge + native pane can be reached by real navigation.
       %{
         "name" => "Subprocess",
         "source_file" => "src/subprocess.bt",
-        "source_origin" => "project"
+        "source_origin" => "project",
+        "package" => "exdura"
       },
       # BT-2605: a class whose header carries leading modifiers (`sealed typed`),
       # so the editor's class/method modifier badges can be reached by navigation.
-      %{"name" => "Ledger", "source_file" => "src/ledger.bt", "source_origin" => "project"},
+      %{
+        "name" => "Ledger",
+        "source_file" => "src/ledger.bt",
+        "source_origin" => "project",
+        "package" => "exdura"
+      },
       # BT-2641: dependency classes so the class-tree's "DEP · <pkg>" badge can be
       # reached by navigation — one with a known package, one without.
       %{
@@ -345,6 +359,14 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         "name" => "Orphan",
         "source_file" => "deps/orphan.bt",
         "source_origin" => "dependency"
+      },
+      # BT-2642: a stdlib class so the editor header's STDLIB badge can be reached
+      # by navigation.
+      %{
+        "name" => "Object",
+        "source_file" => "stdlib/src/object.bt",
+        "source_origin" => "stdlib",
+        "package" => "beamtalk"
       }
     ]
 
@@ -354,7 +376,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         %{
           "name" => name,
           "source_file" => "src/#{Macro.underscore(name)}.bt",
-          "source_origin" => "project"
+          "source_origin" => "project",
+          "package" => "exdura"
         }
       end)
 
