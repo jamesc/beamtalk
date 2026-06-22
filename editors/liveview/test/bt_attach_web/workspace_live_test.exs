@@ -106,8 +106,12 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       {:ok, view, _html} = live(observer_conn(conn), "/")
 
       # Discovery (`list_tests`) is :read — opening the Tests tab lists the
-      # catalogue without an authorization refusal.
-      listed = render_hook(view, "dock_tab", %{"tab" => "tests"})
+      # catalogue without an authorization refusal. BT-2599: discovery now runs
+      # off-socket (`start_async`), so await it; this also ensures the discovery
+      # success fold settles *before* the run below, so it can't clear the
+      # run-refusal error (`tests_error`) out from under the assertion.
+      render_hook(view, "dock_tab", %{"tab" => "tests"})
+      listed = render_async(view, 30_000)
       refute listed =~ "Not authorized"
 
       # Running (`run_tests`) is :execute — the Run controls are owner-gated away,

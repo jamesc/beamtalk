@@ -420,6 +420,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       # `phx-disable-with` alone reverts as soon as the (now-immediate) event
       # handler re-renders, since the work moved off-socket to `start_async`.
       |> assign(:tests_running, false)
+      # BT-2599: a transient flag for the off-socket `:test_discover` catalogue
+      # discovery — true only while a partial-load re-discovery is in flight so
+      # `handle_async(:test_discover, …)` keeps the partial-load `tests_error`
+      # banner across a successful re-discovery (see `apply_test_classes/3`).
+      |> assign(:tests_discover_keep_error, false)
       # REPL tab (BT-2543): a classic TUI request→response scrollback with the
       # input pinned at the bottom. `:repl` is the scrollback stream (so long
       # history never bloats the assigns/diff); `:repl_seq` mints stable entry
@@ -956,10 +961,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   # catalogue); running tests is `:execute` (Owner-only, it evaluates code), so
   # the run controls are owner-gated in the template, mirroring the eval form.
 
-  # Re-discover the test catalogue (the "refresh" affordance + lazy first load).
+  # Re-discover the test catalogue (the "refresh" affordance). The discovery is a
+  # `:read` reflection op, but it is still a blocking workspace RPC — so it runs
+  # off-socket via `discover_test_classes/1` (`:test_discover` `start_async`,
+  # BT-2599) rather than stalling the LiveView process against a slow node. We
+  # reset `test_classes` to the nil sentinel so the pane shows its "discovering"
+  # state (not the misleading "No TestCase subclasses" empty-state) until the
+  # `handle_async(:test_discover, …)` fold resolves.
   @impl true
   def handle_event("tests_refresh", _params, socket) do
-    {:noreply, assign_test_classes(socket)}
+    {:noreply, socket |> assign(:test_classes, nil) |> discover_test_classes()}
   end
 
   # Run every loaded TestCase subclass (`test-all`).
@@ -2242,6 +2253,43 @@ defmodule BtAttachWeb.WorkspaceLive do
        tests_running: false,
        test_results: nil,
        tests_error: "The test run failed unexpectedly."
+     )}
+  end
+
+  # BT-2599: the off-socket test-catalogue discovery (`discover_test_classes/1` →
+  # `list_tests`, `:read`) completed. We fold the raw dispatch outcome onto the
+  # socket through the pure `apply_test_classes/3` helper — the same path the
+  # load-tests re-discovery uses — so the async and sync callers agree. The
+  # `keep_error?` flag (set by the partial-load re-discovery) rides a transient
+  # assign so a *successful* re-discovery doesn't clear a partial-load banner.
+  def handle_async(:test_discover, {:ok, result}, socket) do
+    keep_error? = socket.assigns[:tests_discover_keep_error] || false
+
+    {:noreply,
+     socket
+     |> apply_test_classes(result, keep_error?)
+     |> assign(:tests_discover_keep_error, false)}
+  end
+
+  # A newer discovery (rapid double-refresh / open-then-refresh) `cancel_async`-ed
+  # this one — a no-op, mirroring the `:git_load` / `:test_op` cancellation. The
+  # replacement task already reset `test_classes` to the nil sentinel, so the
+  # pane stays in its "discovering" state until that newer result lands.
+  def handle_async(:test_discover, {:exit, :cancelled}, socket), do: {:noreply, socket}
+
+  # The discovery task crashed/exited. Degrade to a `tests_error` rather than
+  # taking down the socket (matching the `:git_load` / `:test_op` crash handlers).
+  # Leave `test_classes` at the nil sentinel so the pane shows only the error —
+  # not the misleading "No TestCase subclasses" empty-state — and retries on the
+  # next open/refresh.
+  def handle_async(:test_discover, {:exit, reason}, socket) do
+    Logger.error("test discovery crashed: #{inspect(reason)}", domain: [:beamtalk, :liveview])
+
+    {:noreply,
+     assign(socket,
+       test_classes: nil,
+       tests_error: "Couldn't discover tests — the discovery failed unexpectedly.",
+       tests_discover_keep_error: false
      )}
   end
 
@@ -3874,25 +3922,59 @@ defmodule BtAttachWeb.WorkspaceLive do
   # the tab keeps the already-loaded list — use `tests_refresh` to re-discover.
   defp ensure_test_classes(socket) do
     if is_nil(socket.assigns.test_classes),
-      do: assign_test_classes(socket),
+      do: discover_test_classes(socket),
       else: socket
   end
 
   # Discover the live image's TestCase subclasses + selectors (`list_tests`,
-  # `:read`). A dispatch failure / RBAC denial renders a `tests_error` rather
-  # than crashing the pane, mirroring `assign_changes/1`.
-  defp assign_test_classes(socket) do
-    case Facade.dispatch(:list_tests, %{}, ctx(socket)) do
-      {:ok, classes} when is_list(classes) ->
-        assign(socket, test_classes: classes, tests_error: nil)
+  # `:read`). Although `:read` reflection is usually fast, it is still a blocking
+  # workspace RPC: against a slow/unresponsive node the ~5s timeout would stall
+  # the LiveView process (first Tests-tab open / every manual Refresh). So it
+  # runs off-socket in a `:test_discover` `start_async` task, mirroring the test
+  # run/load `:test_op` (BT-2597) and the git panel's `:git_load` (BT-2590). A
+  # rapid double-refresh / open-then-refresh `cancel_async`-es the prior probe so
+  # only the latest result wins; the result lands in
+  # `handle_async(:test_discover, …)`. The `test_classes` nil sentinel is
+  # preserved meanwhile so the pane shows its "discovering" state rather than the
+  # misleading "No TestCase subclasses" empty-state.
+  # `keep_error?` is set by the load-tests re-discovery path: a partial load has
+  # already populated `tests_error` with its compile-error summary, and a
+  # *successful* discovery must NOT clear it (it would swallow the partial-load
+  # banner). The flag rides a transient assign that `handle_async/3` consumes.
+  defp discover_test_classes(socket, keep_error? \\ false) do
+    ctx = ctx(socket)
 
-      {:error, reason} ->
-        # Leave the catalogue as the nil sentinel (not []) so the pane shows only
-        # the error — not the misleading "No TestCase subclasses" empty-state —
-        # and so re-opening the tab retries discovery (a transient failure heals).
-        assign(socket, test_classes: nil, tests_error: facade_error(reason))
-    end
+    socket
+    |> assign(:tests_discover_keep_error, keep_error?)
+    |> cancel_async(:test_discover, :cancelled)
+    |> start_async(:test_discover, fn ->
+      # Off the LiveView process — capture only `ctx`, never `socket`.
+      Facade.dispatch(:list_tests, %{}, ctx)
+    end)
   end
+
+  # Apply a completed `list_tests` dispatch to the socket. Pure (no dispatch);
+  # shared by `handle_async(:test_discover, …)` so the async path and the
+  # load-tests re-discovery agree (mirrors `apply_test_result/2` and
+  # `apply_git_status/2`). A dispatch failure / RBAC denial renders a
+  # `tests_error` rather than crashing the pane, mirroring `apply_changes/2`.
+  #
+  # On success we normally clear `tests_error` (a stale failure heals), but when
+  # `keep_error?` is true (a partial load is showing its compile-error summary)
+  # we leave `tests_error` intact so the banner survives the re-discovery.
+  defp apply_test_classes(socket, {:ok, classes}, keep_error?) when is_list(classes) do
+    socket = assign(socket, :test_classes, classes)
+    if keep_error?, do: socket, else: assign(socket, :tests_error, nil)
+  end
+
+  defp apply_test_classes(socket, {:error, reason}, _keep_error?),
+    # Leave the catalogue as the nil sentinel (not []) so the pane shows only the
+    # error — not the misleading "No TestCase subclasses" empty-state — and so
+    # re-opening the tab retries discovery (a transient failure heals).
+    do: assign(socket, test_classes: nil, tests_error: facade_error(reason))
+
+  defp apply_test_classes(socket, _other, _keep_error?),
+    do: assign(socket, test_classes: nil, tests_error: facade_error(:unexpected_test_result))
 
   # Run all tests (`class` = nil) or a single class (`run_tests`, `:execute`).
   #
@@ -3945,16 +4027,25 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   # Apply a completed `load_tests` dispatch: refresh the catalogue to show
   # whatever loaded, surfacing partial compile errors as `tests_error`. The
-  # `assign_test_classes/1` re-discovery is a lightweight `:read` reflection (not
-  # the heavy compile), so it stays synchronous here.
+  # re-discovery is kicked off via the off-socket `:test_discover` task
+  # (`discover_test_classes/2`) so the fold never blocks the LiveView process.
+  #
+  # We reset `test_classes` to the nil sentinel so the catalogue shows its
+  # "discovering" state until the off-socket re-discovery resolves with the
+  # freshly-loaded classes, and pass `keep_error?: true` so the later
+  # `handle_async(:test_discover, …)` fold doesn't clear this partial-load
+  # banner on a successful re-discovery.
   defp apply_test_load(socket, {:ok, %{"errors" => [_ | _] = errors}}),
-    do: socket |> assign_test_classes() |> assign(tests_error: load_tests_error(errors))
+    do:
+      socket
+      |> assign(test_classes: nil, tests_error: load_tests_error(errors))
+      |> discover_test_classes(true)
 
-  # `assign_test_classes/1` already clears `tests_error` on a successful
-  # re-discovery and sets it on failure — so it is the last writer, with no
-  # trailing `assign(tests_error: nil)` that would swallow a re-discovery error.
+  # A clean load simply re-discovers the catalogue off-socket; the
+  # `handle_async(:test_discover, …)` fold clears any stale `tests_error` on
+  # success (via `apply_test_classes/3`) and sets it on failure.
   defp apply_test_load(socket, {:ok, _result}),
-    do: assign_test_classes(socket)
+    do: socket |> assign(test_classes: nil) |> discover_test_classes()
 
   defp apply_test_load(socket, {:error, reason}),
     do: assign(socket, tests_error: facade_error(reason))
@@ -8385,10 +8476,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                       >
                         Load tests
                       </button>
-                      <%!-- BT-2597: also gated by `@tests_running` — a manual
-                           refresh mid-load issues a synchronous `list_tests`
-                           that would race the in-flight load's own re-discovery
-                           (`apply_test_load`) and could flash a stale catalogue. --%>
+                      <%!-- BT-2597/BT-2599: also gated by `@tests_running` — a
+                           manual refresh mid-load kicks off a `:test_discover`
+                           probe (`tests_refresh`) that would race the in-flight
+                           load's own re-discovery (`apply_test_load`) and could
+                           flash a stale catalogue. (Discovery itself is now
+                           off-socket via `start_async`, BT-2599.) --%>
                       <button
                         type="button"
                         class="btn ghost"

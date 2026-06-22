@@ -16,6 +16,11 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       `handle_async`; an error degrades to a `tests_error` rather than crashing.
     * F2 — switching to a source filter that hides the selected class clears the
       selection (and its method pane).
+    * F4 — (BT-2599) catalogue discovery (`list_tests`) runs off-socket via
+      `start_async(:test_discover, …)`: the pane shows a "discovering" state
+      (nil sentinel, not the empty-state) until it resolves, an error / crash
+      degrades to a `tests_error` rather than taking down the socket, and a
+      partial-load compile-error banner survives the off-socket re-discovery.
   """
   use BtAttachWeb.ConnCase, async: false
 
@@ -145,6 +150,128 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
       html = render_async(view)
 
       assert html =~ "unexpected_test_result"
+      assert Process.alive?(view.pid)
+    end
+  end
+
+  describe "F4: non-blocking catalogue discovery (start_async, BT-2599)" do
+    test "opening the Tests tab discovers off-socket and renders the catalogue", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # The first open seeds the nil sentinel ("Loading tests…") and kicks off the
+      # `:test_discover` async task; the catalogue lands once it resolves.
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      html = render_async(view)
+
+      assert html =~ "StubDemoTest"
+      refute html =~ "No TestCase subclasses"
+      assert Process.alive?(view.pid)
+    end
+
+    test "Refresh re-discovers off-socket without blocking the socket", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render_async(view) =~ "StubDemoTest"
+
+      # Manual refresh kicks off another `:test_discover` and returns immediately;
+      # the refreshed catalogue fills in from handle_async.
+      render_click(view, "tests_refresh")
+      html = render_async(view)
+
+      assert html =~ "StubDemoTest"
+      assert Process.alive?(view.pid)
+    end
+
+    test "shows a discovering state, not the empty state, until discovery resolves",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Immediately after opening the tab (before render_async drains the task),
+      # the pane shows the nil-sentinel "Loading tests…" — not the misleading
+      # "No TestCase subclasses" empty-state that [] would render.
+      html = render_click(view, "dock_tab", %{"tab" => "tests"})
+
+      assert html =~ "Loading tests…"
+      refute html =~ "No TestCase subclasses"
+      assert Process.alive?(view.pid)
+    end
+
+    test "a discovery error degrades to a pane error, not a LiveView crash", %{conn: conn} do
+      # The async dispatch returns an error; `apply_test_classes/3` folds it into
+      # `tests_error` and leaves `test_classes` at the nil sentinel — so the pane
+      # shows the error, not the empty-state.
+      StubWorkspaceClient.set_test_classes({:error, :workspace_unreachable})
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      html = render_async(view)
+
+      refute html =~ "StubDemoTest"
+      refute html =~ "No TestCase subclasses"
+      assert Process.alive?(view.pid)
+    end
+
+    test "an unexpected discovery reply shape degrades, not crashes", %{conn: conn} do
+      # A non-{:ok,list}/{:error,_} reply must hit the total `apply_test_classes/3`
+      # clause rather than crashing handle_async on an unmatched shape.
+      StubWorkspaceClient.set_test_classes(:bogus)
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      html = render_async(view)
+
+      assert html =~ "unexpected_test_result"
+      assert Process.alive?(view.pid)
+    end
+
+    test "a discovery crash degrades to tests_error, not a LiveView crash", %{conn: conn} do
+      # The discovery task itself raises, so `handle_async(:test_discover, {:exit, …})`
+      # runs — degrade to a pane error rather than taking down the socket.
+      StubWorkspaceClient.set_list_tests_raise(true)
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      html = render_async(view)
+
+      assert html =~ "discovery failed unexpectedly"
+      refute html =~ "No TestCase subclasses"
+      assert Process.alive?(view.pid)
+    end
+
+    test "a clean Load tests re-discovers the freshly-loaded catalogue", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render_async(view) =~ "StubDemoTest"
+
+      # Load (a `:test_op` async) then its `apply_test_load` kicks off the
+      # `:test_discover` re-discovery; render_async drains both. No error banner.
+      render_click(view, "load_tests")
+      html = render_async(view)
+
+      assert html =~ "StubDemoTest"
+      refute html =~ "failed to load"
+      assert Process.alive?(view.pid)
+    end
+
+    test "a partial Load tests keeps the compile-error banner across re-discovery",
+         %{conn: conn} do
+      # A partial load returns compile errors; `apply_test_load` surfaces them as
+      # `tests_error` and passes keep_error?: true so the *successful* off-socket
+      # re-discovery doesn't swallow the banner.
+      StubWorkspaceClient.set_load_tests(
+        {:ok, %{"errors" => [%{"path" => "test/foo.bt", "message" => "boom"}]}}
+      )
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_click(view, "dock_tab", %{"tab" => "tests"})
+      assert render_async(view) =~ "StubDemoTest"
+
+      render_click(view, "load_tests")
+      html = render_async(view)
+
+      assert html =~ "failed to load"
+      # The catalogue still re-discovers (banner sits beside the catalogue).
+      assert html =~ "StubDemoTest"
       assert Process.alive?(view.pid)
     end
   end

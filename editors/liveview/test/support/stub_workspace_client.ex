@@ -404,6 +404,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def list_tests do
     record({:list_tests})
+
+    # BT-2599: simulate a discovery crash so the `:test_discover` async task hits
+    # its `{:exit, …}` clause (degrade-to-error rather than crash the socket).
+    if get(:list_tests_raise), do: raise("simulated list_tests crash")
+
     get(:test_classes) || {:ok, default_test_classes()}
   end
 
@@ -419,6 +424,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   @doc "Test helper: seed the simulated `list_tests` result."
   def set_test_classes(result), do: put(:test_classes, result)
+
+  @doc "Test helper: make `list_tests` raise (drives the `:test_discover` `{:exit, …}` path)."
+  def set_list_tests_raise(flag), do: put(:list_tests_raise, flag)
 
   @doc "Test helper: seed the simulated `run_tests` result."
   def set_run_tests(result), do: put(:run_tests_result, result)
