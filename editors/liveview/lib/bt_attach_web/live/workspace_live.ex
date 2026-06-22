@@ -5899,6 +5899,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     }
   end
 
+  # Supervisor handles are pid-backed live refs too: chip the class + pid the same
+  # way as objects so the head renders as a drillable target (content/children is
+  # a follow-up — see `Workspace.inspect_value/1`).
+  defp target_info(label, {:beamtalk_supervisor, class, _module, pid} = term) when is_pid(pid) do
+    %{
+      label: to_string(label),
+      header: Workspace.render_term(term),
+      class_name: to_string(class),
+      pid: inspect(pid)
+    }
+  end
+
   defp target_info(label, term) do
     %{
       label: to_string(label),
@@ -5925,6 +5937,14 @@ defmodule BtAttachWeb.WorkspaceLive do
     |> Enum.sort_by(& &1.name)
   end
 
+  # Supervisor handles ({:beamtalk_supervisor, …, pid}) never reach `scalar_kind`:
+  # they are `inspectable?/1` (BT-2633), so they are routed through the drillable
+  # `ref` path (`target_info/2` has its own supervisor clause, and the
+  # "no fields to inspect" else-branch that calls `scalar_kind` only runs for
+  # NON-inspectable terms). They therefore never fall through to the `"value"`
+  # catch-all below — a dedicated clause here would be unreachable (and flagged by
+  # the type checker). This comment documents that the catch-all is unreachable
+  # for supervisors by construction.
   defp scalar_kind(term) when is_integer(term), do: "number"
   defp scalar_kind(term) when is_float(term), do: "number"
   defp scalar_kind(term) when is_binary(term), do: "string"
@@ -5939,6 +5959,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # A boolean must be matched before the integer guard (`is_boolean` ⊂ atoms, not
   # integers, but kept explicit and first for clarity).
   defp term_kind({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: "ref"
+  # Supervisor handles ({:beamtalk_supervisor, …}) are pid-backed live refs too —
+  # drillable, not opaque values — so they take the same `ref` chip as objects.
+  defp term_kind({:beamtalk_supervisor, _class, _module, pid}) when is_pid(pid), do: "ref"
   defp term_kind(term) when is_boolean(term), do: "bool"
   defp term_kind(term) when is_integer(term) or is_float(term), do: "int"
   defp term_kind(term) when is_binary(term), do: "string"

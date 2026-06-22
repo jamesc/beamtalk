@@ -37,6 +37,22 @@ defmodule BtAttach.WorkspaceInspectTest do
       refute Workspace.inspectable?([1, 2, 3])
       refute Workspace.inspectable?(%{a: 1})
     end
+
+    test "a pid-backed supervisor handle is inspectable (BT-2633)" do
+      # A supervisor handle arrives as {:beamtalk_supervisor, Class, Module, Pid}
+      # (beamtalk_supervisor.erl) — distinct from #beamtalk_object{}. A pid-backed
+      # supervisor is a live, drillable ref, so it is recognized as inspectable
+      # (content is a follow-up).
+      sup = {:beamtalk_supervisor, :AppSup, :bt@my_app@app_sup, self()}
+      assert Workspace.inspectable?(sup)
+    end
+
+    test "a pid-backed dynamic supervisor handle is inspectable (BT-2633)" do
+      # DynamicSupervisor carries the same tuple tag/shape, so it is recognized
+      # identically to a static supervisor.
+      sup = {:beamtalk_supervisor, :WorkerSup, :bt@my_app@worker_sup, self()}
+      assert Workspace.inspectable?(sup)
+    end
   end
 
   describe "inspect_value/1 — non-object short-circuit (no RPC)" do
@@ -49,6 +65,18 @@ defmodule BtAttach.WorkspaceInspectTest do
     test "a registered proxy (no pid) is rejected with :not_inspectable" do
       proxy = {:beamtalk_object, :Counter, :counter, {:registered, :counter}}
       assert {:error, :not_inspectable} = Workspace.inspect_value(proxy)
+    end
+
+    test "a pid-backed supervisor degrades gracefully to empty fields (BT-2633)" do
+      # Recognition-only: a supervisor is drillable, but its supervision-tree
+      # content is a separate follow-up. A supervisor pid is NOT an actor backed
+      # by sys:get_state/2, so it must not route through the actor inspect RPC.
+      # Instead it returns an empty field set ({:ok, %{}}) — the same shape an
+      # actor with no user-visible state yields — which renders as a drillable
+      # head with no inspectable fields. No RPC, no crash.
+      sup = {:beamtalk_supervisor, :AppSup, :bt@my_app@app_sup, self()}
+      assert {:ok, fields} = Workspace.inspect_value(sup)
+      assert fields == %{}
     end
   end
 
