@@ -7942,7 +7942,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   <div class="panel-body">
                     <div :if={@bindings_error} class="io-block err">{@bindings_error}</div>
                     <%= if @bindings == [] do %>
-                      <p class="muted-note">No bindings yet. Try <code>x := 42</code>.</p>
+                      <p class="empty">No bindings yet. Try <code>x := 42</code>.</p>
                     <% else %>
                       <%!-- Spike Bindings list (inspector.jsx `BindingsList`): each row is
                            `name := printString` with a type/kind chip. An object-valued
