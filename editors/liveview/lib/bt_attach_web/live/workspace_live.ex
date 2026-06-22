@@ -634,6 +634,21 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:changes, [])
       |> assign(:changes_error, nil)
       |> assign(:autoflush, false)
+      # BT-2619 (race): per-surface "loaded" flags gating the async mount fold so a
+      # live push that lands BEFORE the mount load resolves is not clobbered by the
+      # (staler) mount snapshot. `:source_loaded` covers the source-dependent pair
+      # (browser_classes + changes — they always refresh together via
+      # `:do_source_refresh`); `:bindings_loaded` covers the bindings pane. Both
+      # start `false` and are set `true` ONLY by a *successful* push refresh (see
+      # `:do_source_refresh` / `:BindingChanged`); `handle_async(:mount_load, …)`
+      # then applies a surface's mount read only while its flag is still `false`.
+      # Success-only gating is the crux of the edge case: an early push that ERRORED
+      # leaves the flag `false`, so the later-completing mount load's *successful*
+      # data still folds in (no lingering error flash). A remount = new process =
+      # fresh `false` flags, so reconnect/resume re-loads normally. `autoflush` has
+      # no competing push, so it always folds in (no flag).
+      |> assign(:source_loaded, false)
+      |> assign(:bindings_loaded, false)
       |> start_mount_load(pid)
       # Git panel (BT-2586): the post-flush VCS surface. Loaded lazily the first
       # time the Git tab is opened (and refreshed after flush/save), so a page
@@ -1985,8 +2000,8 @@ defmodule BtAttachWeb.WorkspaceLive do
     # carries `sessionId` (BT-2530); a nil/unknown origin falls back to a refresh so a
     # session-less event can never silently freeze the pane.
     case Map.get(event, :sessionId) do
-      ^session_id -> {:noreply, assign_bindings(socket, pid)}
-      nil -> {:noreply, assign_bindings(socket, pid)}
+      ^session_id -> {:noreply, mark_bindings_loaded(assign_bindings(socket, pid))}
+      nil -> {:noreply, mark_bindings_loaded(assign_bindings(socket, pid))}
       _other_session -> {:noreply, socket}
     end
   end
@@ -2013,7 +2028,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # burst — re-pull the source-dependent surfaces ONCE for the whole burst, then
   # clear the pending flag so the next burst schedules afresh.
   def handle_info(:do_source_refresh, socket) do
-    {:noreply, refresh_after_source_change(assign(socket, source_refresh_pending: false))}
+    socket =
+      socket
+      |> assign(source_refresh_pending: false)
+      |> refresh_after_source_change()
+      |> mark_source_loaded()
+
+    {:noreply, socket}
   end
 
   # Per-object change push (BT-2492, backend BT-2489): the watched actor committed
@@ -2143,18 +2164,33 @@ defmodule BtAttachWeb.WorkspaceLive do
   # BT-2619 (race): a `BindingChanged`/`classes` live push (or any post-mount
   # action) can land *before* this mount load resolves and populate `bindings` /
   # `browser_classes` / `changes` with fresher data. This fold is the *mount-
-  # initial* state, so blindly overwriting could clobber that fresher push with
-  # staler mount data. We avoid the cheap-to-avoid cases here — when an assign has
-  # already moved off its empty mount default we keep the fresher value rather
-  # than overwrite — and leave the fully race-safe sequencing (e.g. a generation
-  # token) to BT-2619. `autoflush` is a stable settings probe with no live push,
-  # so it always folds in.
+  # initial* state, so blindly overwriting would clobber that fresher push with
+  # staler mount data.
+  #
+  # We gate each surface on its per-surface "loaded" flag (`:source_loaded` for
+  # the browser_classes + changes pair, `:bindings_loaded` for bindings): a flag
+  # is set `true` ONLY by a *successful* push refresh (see `:do_source_refresh` /
+  # `:BindingChanged`), so we apply a surface's mount read only while its flag is
+  # still `false`, then set it `true` so a later sync refresh path stays the source
+  # of truth.
+  #
+  # Success-only gating is what handles the "early push errored, mount succeeded"
+  # edge case: a push refresh that fired before this fold and itself failed (e.g.
+  # `ClassLoaded` while the workspace was momentarily unreachable → `changes_error`
+  # set, list still empty) leaves the flag `false` — so this fold's *successful*
+  # mount data still folds in and the pane shows real data rather than getting
+  # stuck on the transient error until the next push. A genuinely-empty workspace
+  # (no push at all) keeps both flags `false`, so the empty-but-successful mount
+  # read still applies and the panes render their empty state.
+  #
+  # `autoflush` is a stable settings probe with no live push, so it always folds in.
   def handle_async(:mount_load, {:ok, result}, socket) do
     socket =
       socket
-      |> fold_mount_read(:browser_classes, result.browser_classes, &apply_browser_classes/2)
-      |> fold_mount_read(:bindings, result.bindings, &apply_bindings/2)
-      |> fold_mount_read(:changes, result.changes, &apply_changes/2)
+      |> fold_mount_read(:source_loaded, result.browser_classes, &apply_browser_classes/2)
+      |> fold_mount_read(:bindings_loaded, result.bindings, &apply_bindings/2)
+      |> fold_mount_read(:source_loaded, result.changes, &apply_changes/2)
+      |> assign(source_loaded: true, bindings_loaded: true)
       # autoflush has no competing live push — always apply the mount read.
       |> apply_autoflush(result.autoflush)
 
@@ -3800,22 +3836,36 @@ defmodule BtAttachWeb.WorkspaceLive do
     end)
   end
 
-  # BT-2619 (partial): fold one mount read into its assign only if a fresher live
-  # push hasn't already populated it. We detect "already populated" cheaply: the
-  # assign still holds its empty mount default (`[]`) AND no error has been set
-  # for it. If a `BindingChanged`/`classes` push (or a post-mount action) has
-  # already filled the pane, we keep that fresher value rather than overwrite it
-  # with potentially-staler mount data. This deliberately does NOT solve the full
-  # race (a push that arrives *between* this check and a concurrent fold, or one
-  # that legitimately produces an empty list) — that hardening is BT-2619; here we
-  # only ensure the mount-initial fold never *worsens* the race.
-  defp fold_mount_read(socket, key, read, apply_fun) do
-    error_key = :"#{key}_error"
+  # BT-2619: fold one mount read into its surface's assigns only if a *successful*
+  # live push hasn't already loaded that surface. `loaded_key` is the per-surface
+  # flag (`:source_loaded` / `:bindings_loaded`): it is `true` only when a push
+  # refresh succeeded, so a `false` flag means either no push landed yet OR a push
+  # landed but errored — in both cases the mount read (which carries real,
+  # successful data here) should win. We do NOT clear the flag here; the caller
+  # sets all flags `true` after the fold so the post-mount sync refresh path
+  # remains the source of truth.
+  defp fold_mount_read(socket, loaded_key, read, apply_fun) do
+    if socket.assigns[loaded_key], do: socket, else: apply_fun.(socket, read)
+  end
 
-    already_fresh? =
-      socket.assigns[key] != [] or not is_nil(socket.assigns[error_key])
+  # BT-2619: mark the source-dependent surfaces (browser_classes + changes) as
+  # loaded by a push — but ONLY when the push refresh actually succeeded (neither
+  # surface holds an error). An errored push leaves the flag `false` so a
+  # later-completing mount fold's successful data can still replace the transient
+  # error (no lingering error flash). Idempotent: re-marking after a later success
+  # just re-affirms `true`.
+  defp mark_source_loaded(socket) do
+    if is_nil(socket.assigns.browser_error) and is_nil(socket.assigns.changes_error),
+      do: assign(socket, :source_loaded, true),
+      else: socket
+  end
 
-    if already_fresh?, do: socket, else: apply_fun.(socket, read)
+  # BT-2619: mark the bindings surface as loaded by a push — only on a successful
+  # refresh (no `bindings_error`), mirroring `mark_source_loaded/1`.
+  defp mark_bindings_loaded(socket) do
+    if is_nil(socket.assigns.bindings_error),
+      do: assign(socket, :bindings_loaded, true),
+      else: socket
   end
 
   # ── Test-runner pane data source (BT-2557) ──────────────────────────────────

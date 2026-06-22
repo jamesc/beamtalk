@@ -54,6 +54,14 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # surfaced by `change_history` so the Changes-pane disclosure caret +
               # structured diff render can be driven without a real workspace.
               change_diffs: %{},
+              # BT-2619: a one-shot barrier for the async mount-load reads. When a
+              # test arms the gate (`arm_mount_gate/0`), the FIRST `browse_classes`
+              # call (the mount-load task's first read) blocks until the test calls
+              # `release_mount_gate/0` — letting the test deterministically deliver a
+              # live push BEFORE the async mount fold runs, the BT-2619 race. The gate
+              # disarms itself on first use, so the subsequent push-refresh reads (and
+              # the now-released mount reads) never block.
+              mount_gate: nil,
               calls: []
   end
 
@@ -117,10 +125,26 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     end
   end
 
-  def list_bindings(_pid), do: get(:bindings) || []
+  @doc """
+  Test helper (BT-2619): drop all eval-defined classes so a subsequent
+  `browse_classes` returns only the canned base rows. Lets a test make the mount
+  load's source read STALER than a fresher live push.
+  """
+  def clear_defined_classes, do: put(:defined_classes, MapSet.new())
+
+  def list_bindings(_pid) do
+    if get(:fail_bindings), do: {:error, :unreachable}, else: get(:bindings) || []
+  end
 
   @doc "Test helper (BT-2634): seed the workspace bindings the bindings pane reads."
   def put_bindings(pairs) when is_list(pairs), do: put(:bindings, pairs)
+
+  @doc """
+  Test helper (BT-2619): force `list_bindings/1` to return `{:error, :unreachable}`
+  so a test can drive the bindings push-refresh ERROR path (the "errored early push
+  must not lock out a successful mount fold" edge case).
+  """
+  def fail_bindings(flag) when is_boolean(flag), do: put(:fail_bindings, flag)
 
   # BT-2634: a supervisor's inspection content is its children / supervision tree
   # (drillable child handles), not actor instance vars. The stub keys variants off
@@ -425,7 +449,60 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   # ── Browse ops ───────────────────────────────────────────────────────────
 
+  @doc """
+  Test helper (BT-2619): arm the one-shot mount-load barrier. The next
+  `browse_classes` call (the async mount-load task's first read) will block until
+  `release_mount_gate/0` is called, so a test can deliver a live push BEFORE the
+  async mount fold runs and assert the fold does not clobber it.
+  """
+  def arm_mount_gate do
+    {:ok, gate} = Agent.start(fn -> false end)
+    put(:mount_gate, gate)
+    put(:mount_gate_consumed, false)
+    :ok
+  end
+
+  @doc "Test helper (BT-2619): release the armed mount-load barrier (see `arm_mount_gate/0`)."
+  def release_mount_gate do
+    case get(:mount_gate) do
+      nil -> :ok
+      gate -> if Process.alive?(gate), do: Agent.update(gate, fn _ -> true end), else: :ok
+    end
+  end
+
+  # Block on the armed gate (if any). Only the FIRST read to reach the gate waits;
+  # `:mount_gate_consumed` marks it spent so later reads (the push refresh, the
+  # released mount reads) pass straight through. The gate ref itself is kept until
+  # the test releases it, so `release_mount_gate/0` can find it.
+  defp await_mount_gate do
+    case get(:mount_gate) do
+      nil ->
+        :ok
+
+      gate ->
+        consumed = get(:mount_gate_consumed)
+
+        if consumed do
+          :ok
+        else
+          put(:mount_gate_consumed, true)
+          wait_for_release(gate)
+        end
+    end
+  end
+
+  defp wait_for_release(gate) do
+    if Process.alive?(gate) and Agent.get(gate, & &1) == false do
+      Process.sleep(5)
+      wait_for_release(gate)
+    else
+      :ok
+    end
+  end
+
   def browse_classes do
+    await_mount_gate()
+
     base = [
       # BT-2642: project rows carry the project package name (`project_package_name/0`
       # in the backend), so the editor header's project package badge can be reached
