@@ -63,6 +63,25 @@ export const SplitDrag = {
     this.restore()
   },
 
+  // Re-apply the size after a LiveView re-render (BT-2638). The CSS var lives as
+  // an inline `style` on the target (`this.el.parentElement`). When LiveView
+  // patches that target — most visibly the center `.col` that holds the editor
+  // and the workspace dock, re-rendered on every "open diff" / "new method tab"
+  // — morphdom reconciles the element's attributes against the server template,
+  // which never renders the var, and strips the JS-set inline value, snapping
+  // the split back to its CSS default. `updated()` fires AFTER that patch, so
+  // re-applying here puts the persisted size back. Skipped while a drag is in
+  // flight so it never fights the live pointer value. `restore()` reads this
+  // instance's own `data-split` key, so it is idempotent and never crosses over
+  // to another splitter — safe for every shared instance.
+  //
+  // NOTE: this only runs for gutters WITHOUT `phx-update="ignore"`; LiveView
+  // skips ignored elements on patch, so the dock gutter drops that attribute
+  // (its div is empty — nothing to preserve) to let this callback fire.
+  updated() {
+    if (!this.drag) this.restore()
+  },
+
   destroyed() {
     // A reconnect (network blip / deploy) can destroy the hook mid-drag. Run
     // end() first so it tears the drag down — removes the document listeners and
