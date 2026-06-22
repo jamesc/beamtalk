@@ -853,7 +853,20 @@ is_stdlib_native_module(Module) ->
 %% `source`, `null` when no readable source → not openable), package, and origin.
 -spec native_module_row(atom(), binary(), binary()) -> map().
 native_module_row(Module, PkgName, Origin) ->
-    {SourceFile, _Content} = backing_source(Module),
+    %% Path only (no `file:read_file/1`) — enumeration just needs the path +
+    %% `openable` flag; the content is read lazily by `browse-native-source` when
+    %% a module is actually opened. Mirrors `backing_source/1`'s path
+    %% normalisation without the per-module read.
+    SourceFile =
+        case backing_source_file(Module) of
+            undefined ->
+                null;
+            Path ->
+                case unicode:characters_to_binary(Path) of
+                    B when is_binary(B) -> B;
+                    _ -> list_to_binary(Path)
+                end
+        end,
     #{
         <<"module">> => atom_to_binary(Module, utf8),
         <<"source_file">> => SourceFile,
