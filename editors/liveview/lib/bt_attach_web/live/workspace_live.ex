@@ -1720,6 +1720,51 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Dismiss the Senders/Implementors popover.
   def handle_event("nav_close", _params, socket), do: {:noreply, assign(socket, nav_popover: nil)}
 
+  # ── dismissable status notices (BT-2612) ────────────────────────────────────
+  #
+  # Generic dismiss for top-level *scalar* status assigns. The key arrives from
+  # the client and is NEVER turned into an atom (`String.to_atom/1` on user input
+  # is a memory/atom-table attack vector) — instead it is mapped through a fixed
+  # whitelist to the assign we clear. Unknown keys are ignored (no-op), matching
+  # the existing "clear to nil" convention every backing handler uses.
+  def handle_event("dismiss_notice", %{"key" => key}, socket) do
+    case dismiss_key_to_assign(key) do
+      nil -> {:noreply, socket}
+      assign_key -> {:noreply, assign(socket, assign_key, nil)}
+    end
+  end
+
+  def handle_event("dismiss_notice", _params, socket), do: {:noreply, socket}
+
+  # Dismiss the error inside the live native-source pane: `@native_view` is a map
+  # whose `:error` field carries the banner. Clear only that field so the rest of
+  # the pane (content/clauses/meta) is preserved; if the pane is closed
+  # (`native_view: nil`) this is a no-op.
+  def handle_event("dismiss_native_error", _params, socket) do
+    case socket.assigns[:native_view] do
+      %{} = nv -> {:noreply, assign(socket, native_view: %{nv | error: nil})}
+      _ -> {:noreply, socket}
+    end
+  end
+
+  # Dismiss the error inside the Senders/Implementors popover without closing the
+  # whole popover (which `nav_close` does). `@nav_popover` is a map; clear only
+  # its `:error` field.
+  def handle_event("dismiss_nav_error", _params, socket) do
+    case socket.assigns[:nav_popover] do
+      %{} = nav -> {:noreply, assign(socket, nav_popover: Map.put(nav, :error, nil))}
+      _ -> {:noreply, socket}
+    end
+  end
+
+  # Dismiss a per-window inspector error. `@windows` is a list of window maps; the
+  # client sends the window `id` so we clear `:error` on the matching window only.
+  def handle_event("dismiss_window_error", %{"id" => id}, socket) do
+    {:noreply, update_window(socket, id, fn w -> %{w | error: nil} end)}
+  end
+
+  def handle_event("dismiss_window_error", _params, socket), do: {:noreply, socket}
+
   # Selection tracking (BT-2485, BT-2539): the method-editor CmEditor hook
   # reports the editor's current selection (text + offsets). We hold it in
   # `edit_selection` so a later pane can evaluate the selected expression rather
@@ -5776,6 +5821,23 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Look up a window by id, or nil.
   defp find_window(socket, id), do: Enum.find(socket.assigns.windows, &(&1.id == id))
 
+  # Whitelist mapping a client-supplied dismiss key → the scalar status assign to
+  # clear (BT-2612). This is the security boundary: only these exact strings
+  # resolve; everything else returns nil and is ignored by `dismiss_notice`.
+  # NEVER replace this with `String.to_atom/1` on the user-supplied key.
+  defp dismiss_key_to_assign("browser_error"), do: :browser_error
+  defp dismiss_key_to_assign("output"), do: :output
+  defp dismiss_key_to_assign("changes_error"), do: :changes_error
+  defp dismiss_key_to_assign("git_error"), do: :git_error
+  defp dismiss_key_to_assign("tests_error"), do: :tests_error
+  defp dismiss_key_to_assign("save_result"), do: :save_result
+  defp dismiss_key_to_assign("save_error"), do: :save_error
+  defp dismiss_key_to_assign("flush_result"), do: :flush_result
+  defp dismiss_key_to_assign("flush_error"), do: :flush_error
+  defp dismiss_key_to_assign("bindings_error"), do: :bindings_error
+  defp dismiss_key_to_assign("inspect_error"), do: :inspect_error
+  defp dismiss_key_to_assign(_unknown), do: nil
+
   # Replace the window `id` with `fun.(window)`, leaving the list order (and so the
   # DOM order) stable — z-order is carried by each window's `:z`, not list position,
   # so an update never reshuffles the windows and resets their drag positions.
@@ -6448,7 +6510,12 @@ defmodule BtAttachWeb.WorkspaceLive do
         </button>
       </form>
       <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
-        <div :if={@browser_error} class="io-block err">{@browser_error}</div>
+        <.notice
+          :if={@browser_error}
+          variant={:err}
+          message={@browser_error}
+          dismiss_attrs={%{"phx-click" => "dismiss_notice", "phx-value-key" => "browser_error"}}
+        />
         <%= cond do %>
           <% @browser_classes == [] -> %>
             <p :if={!@browser_error} class="muted-note">No classes in the image yet.</p>
@@ -6692,7 +6759,12 @@ defmodule BtAttachWeb.WorkspaceLive do
         <span class="spacer"></span>
         <button class="x" type="button" phx-click="nav_close" title="Close">×</button>
       </div>
-      <div :if={@nav[:error]} class="io-block err">{@nav.error}</div>
+      <.notice
+        :if={@nav[:error]}
+        variant={:err}
+        message={@nav.error}
+        dismiss_attrs={%{"phx-click" => "dismiss_nav_error"}}
+      />
       <div :if={!@nav[:error] and @nav.sites == []} class="nav-empty">
         No {nav_kind_label(@nav.kind)} found.
       </div>
@@ -6714,6 +6786,44 @@ defmodule BtAttachWeb.WorkspaceLive do
     </div>
     """
   end
+
+  # ── dismissable status notices (BT-2612) ────────────────────────────────────
+  #
+  # A single reusable notice component for every `io-block` status banner
+  # (err/ok/warn/plain). Each notice carries a keyboard-accessible `×` dismiss
+  # control. The dismiss is wired by the *caller* via `dismiss_attrs` — a map of
+  # `phx-*` attributes (e.g. `%{"phx-click" => "dismiss_notice", "phx-value-key"
+  # => "git_error"}`) so top-level scalar assigns route through the generic
+  # `dismiss_notice` event while nested/per-window notices route through their own
+  # targeted events. Variant maps to the `io-block` modifier class.
+  attr :variant, :atom, default: :plain, values: [:err, :ok, :warn, :plain]
+  attr :message, :string, required: true
+  # Map of phx-* attributes rendered onto the dismiss button. The caller decides
+  # which event/values clear the right backing assign.
+  attr :dismiss_attrs, :map, required: true
+  attr :rest, :global
+
+  defp notice(assigns) do
+    ~H"""
+    <div class={["io-block", notice_variant_class(@variant)]} {@rest}>
+      <span class="io-block-msg">{@message}</span>
+      <button
+        type="button"
+        class="io-block-dismiss"
+        aria-label="Dismiss notification"
+        title="Dismiss"
+        {@dismiss_attrs}
+      >
+        ×
+      </button>
+    </div>
+    """
+  end
+
+  defp notice_variant_class(:err), do: "err"
+  defp notice_variant_class(:ok), do: "ok"
+  defp notice_variant_class(:warn), do: "warn"
+  defp notice_variant_class(:plain), do: nil
 
   @impl true
   def render(assigns) do
@@ -7086,7 +7196,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                          crafted eval from an Observer is refused by the facade and
                          its "Not authorized" message must still show (the form
                          itself is owner-gated away). --%>
-                    <div :if={@output} class="io-block">{@output}</div>
+                    <.notice
+                      :if={@output}
+                      variant={:plain}
+                      message={@output}
+                      dismiss_attrs={%{"phx-click" => "dismiss_notice", "phx-value-key" => "output"}}
+                    />
                     <%!-- Print it / Do it / Inspect it confirmation (BT-2542): a
                          THIN, self-clearing status line — not the old growing
                          `.ws-result` bubble (which squeezed the editor). The full
@@ -7206,7 +7321,14 @@ defmodule BtAttachWeb.WorkspaceLive do
 
                   <%!-- CHANGES tab: the workspace ChangeLog (ADR 0082). --%>
                   <div class="dock-pane panel-body" hidden={@dock_tab != "changes"}>
-                    <div :if={@changes_error} class="io-block err">{@changes_error}</div>
+                    <.notice
+                      :if={@changes_error}
+                      variant={:err}
+                      message={@changes_error}
+                      dismiss_attrs={
+                        %{"phx-click" => "dismiss_notice", "phx-value-key" => "changes_error"}
+                      }
+                    />
                     <%= if @changes == [] do %>
                       <p class="muted-note">No pending changes. Save a method to record one.</p>
                     <% else %>
@@ -7317,7 +7439,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </span>
                       </span>
                     </div>
-                    <div :if={@git_error} class="io-block err">{@git_error}</div>
+                    <.notice
+                      :if={@git_error}
+                      variant={:err}
+                      message={@git_error}
+                      dismiss_attrs={
+                        %{"phx-click" => "dismiss_notice", "phx-value-key" => "git_error"}
+                      }
+                    />
                     <%= cond do %>
                       <% is_nil(@git_status) and is_nil(@git_error) -> %>
                         <p class="muted-note">Loading git status…</p>
@@ -7502,7 +7631,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </span>
                       </span>
                     </div>
-                    <div :if={@tests_error} class="io-block err">{@tests_error}</div>
+                    <.notice
+                      :if={@tests_error}
+                      variant={:err}
+                      message={@tests_error}
+                      dismiss_attrs={
+                        %{"phx-click" => "dismiss_notice", "phx-value-key" => "tests_error"}
+                      }
+                    />
 
                     <table
                       :if={@test_results && @test_results["tests"] != []}
@@ -7707,10 +7843,32 @@ defmodule BtAttachWeb.WorkspaceLive do
                      shows whether or not a tab is focused. A method or class save
                      posted from the empty-state form (no active tab) still surfaces
                      its "Saved …" / error banner here. --%>
-                <div :if={@save_result} class="io-block ok">{@save_result}</div>
-                <div :if={@save_error} class="io-block err">{@save_error}</div>
-                <div :if={@flush_result} class="io-block warn">{@flush_result}</div>
-                <div :if={@flush_error} class="io-block err">{@flush_error}</div>
+                <.notice
+                  :if={@save_result}
+                  variant={:ok}
+                  message={@save_result}
+                  dismiss_attrs={%{"phx-click" => "dismiss_notice", "phx-value-key" => "save_result"}}
+                />
+                <.notice
+                  :if={@save_error}
+                  variant={:err}
+                  message={@save_error}
+                  dismiss_attrs={%{"phx-click" => "dismiss_notice", "phx-value-key" => "save_error"}}
+                />
+                <.notice
+                  :if={@flush_result}
+                  variant={:warn}
+                  message={@flush_result}
+                  dismiss_attrs={
+                    %{"phx-click" => "dismiss_notice", "phx-value-key" => "flush_result"}
+                  }
+                />
+                <.notice
+                  :if={@flush_error}
+                  variant={:err}
+                  message={@flush_error}
+                  dismiss_attrs={%{"phx-click" => "dismiss_notice", "phx-value-key" => "flush_error"}}
+                />
 
                 <%= if @active_tab do %>
                   <%!-- breadcrumb: Class › side › selector for the active tab. --%>
@@ -7876,7 +8034,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </button>
                       </div>
                       <div :if={native_shown?(assigns, doc_tab.class)} class="native-body">
-                        <div :if={@native_view.error} class="io-block err">{@native_view.error}</div>
+                        <.notice
+                          :if={@native_view.error}
+                          variant={:err}
+                          message={@native_view.error}
+                          dismiss_attrs={%{"phx-click" => "dismiss_native_error"}}
+                        />
                         <%= if @native_view.content do %>
                           <div class="native-meta mono">
                             <span :if={@native_view.source_file}>{@native_view.source_file}</span>
@@ -8083,7 +8246,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <span class="count">{length(@bindings)} in session</span>
                   </div>
                   <div class="panel-body">
-                    <div :if={@bindings_error} class="io-block err">{@bindings_error}</div>
+                    <.notice
+                      :if={@bindings_error}
+                      variant={:err}
+                      message={@bindings_error}
+                      dismiss_attrs={
+                        %{"phx-click" => "dismiss_notice", "phx-value-key" => "bindings_error"}
+                      }
+                    />
                     <%= if @bindings == [] do %>
                       <p class="empty">No bindings yet. Try <code>x := 42</code>.</p>
                     <% else %>
@@ -8210,7 +8380,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                     </div>
                   <% end %>
                   <div class="panel-body">
-                    <div :if={@inspect_error} class="io-block warn">{@inspect_error}</div>
+                    <.notice
+                      :if={@inspect_error}
+                      variant={:warn}
+                      message={@inspect_error}
+                      dismiss_attrs={
+                        %{"phx-click" => "dismiss_notice", "phx-value-key" => "inspect_error"}
+                      }
+                    />
                     <%= if @inspect_target && @inspect_rows != [] do %>
                       <%!-- The FieldFlash hook (assets/js/hooks/field_flash.js) reads
                            each cell's `data-flash-key`+`data-flash-val` and, when a
@@ -8441,7 +8618,12 @@ defmodule BtAttachWeb.WorkspaceLive do
           </div>
         <% end %>
         <div class="iw-content">
-          <div :if={@win.error} class="io-block warn">{@win.error}</div>
+          <.notice
+            :if={@win.error}
+            variant={:warn}
+            message={@win.error}
+            dismiss_attrs={%{"phx-click" => "dismiss_window_error", "phx-value-id" => @win.id}}
+          />
           <%= if @win.target && @win.rows != [] do %>
             <table
               id={"inspector-window-fields-#{@win.id}"}
