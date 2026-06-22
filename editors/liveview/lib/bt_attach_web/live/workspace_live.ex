@@ -604,15 +604,37 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:windows, [])
       |> assign(:next_window_id, 1)
       |> assign(:window_z, 10)
-      |> assign_browser_classes()
       |> assign_browser_native_modules()
-      |> assign_bindings(pid)
       # BT-2636: the set of expanded Changes-pane rows (keyed by the row's
       # `{class, selector}`), driven by the leading disclosure caret. A row's
       # structured net-vs-disk diff renders beneath it only while its key is in
       # this set; collapsed by default so the table stays compact.
       |> assign(:expanded_changes, MapSet.new())
-      |> assign_changes()
+      # BT-2591: the four mount-time workspace reads (browser classes, bindings,
+      # the active ChangeLog, the autoflush flag) used to run as *synchronous*
+      # RPCs here, so a slow/unreachable workspace blocked the connected mount
+      # (~5s each worst case) before the cockpit could render. They now start in
+      # their loading/empty state so the first render is immediate, and a single
+      # off-socket `start_async(:mount_load, …)` performs all four reads; the
+      # results fold into these assigns in `handle_async(:mount_load, …)`. The
+      # empty defaults double as the graceful-degradation fallback (lists empty,
+      # autoflush false) if the load fails — no error is shown for the initial
+      # mount load (the panes simply render their empty state until it resolves).
+      #
+      # The `autoflush` flag (ADR 0082 Phase 4, BT-2590 S2) gates the post-save
+      # git refresh: a per-method save only shells out to git when autoflush is
+      # on. It is read once here — the cockpit has no toggle, so a later REPL/MCP
+      # `Workspace autoflush: true` leaves this cached copy stale (worst case: a
+      # missed git-panel refresh, a UX miss not data loss). Defaults to `false`
+      # (no extra shell-out) when the workspace is unreachable.
+      |> assign(:browser_classes, [])
+      |> assign(:browser_error, nil)
+      |> assign(:bindings, [])
+      |> assign(:bindings_error, nil)
+      |> assign(:changes, [])
+      |> assign(:changes_error, nil)
+      |> assign(:autoflush, false)
+      |> start_mount_load(pid)
       # Git panel (BT-2586): the post-flush VCS surface. Loaded lazily the first
       # time the Git tab is opened (and refreshed after flush/save), so a page
       # load never shells out to git for users who never open the tab. The
@@ -623,16 +645,6 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:git_error, nil)
       |> assign(:git_diff, nil)
       |> assign(:git_diff_path, nil)
-      # BT-2590 (S2): the workspace `autoflush` flag (ADR 0082 Phase 4). A
-      # per-method save only touches disk when autoflush is on; when off, a save
-      # patches the live image only, so the on-disk git working tree is unchanged
-      # and the post-save git refresh is skipped. Read once at mount — the cockpit
-      # has no autoflush toggle, but the flag can still change via REPL/MCP
-      # (`Workspace autoflush: true`), which leaves this cached copy stale; the
-      # worst case is a missed git-panel refresh after a save (a UX miss, not data
-      # loss). Defaults to `false` (no extra shell-out) when the workspace is
-      # unreachable.
-      |> assign_autoflush()
       |> stream(:transcript, [])
       |> stream(:repl, [])
     else
@@ -2122,6 +2134,47 @@ defmodule BtAttachWeb.WorkspaceLive do
      )}
   end
 
+  # BT-2591: the off-socket mount-time reads (`start_mount_load/2`'s `start_async`)
+  # completed. The task returned the four raw `Facade.dispatch` outcomes; we fold
+  # them into their assigns here, on the LiveView process, through the same pure
+  # `apply_*` helpers the sync refresh callers use — so the async path and any
+  # future sync caller agree.
+  #
+  # BT-2619 (race): a `BindingChanged`/`classes` live push (or any post-mount
+  # action) can land *before* this mount load resolves and populate `bindings` /
+  # `browser_classes` / `changes` with fresher data. This fold is the *mount-
+  # initial* state, so blindly overwriting could clobber that fresher push with
+  # staler mount data. We avoid the cheap-to-avoid cases here — when an assign has
+  # already moved off its empty mount default we keep the fresher value rather
+  # than overwrite — and leave the fully race-safe sequencing (e.g. a generation
+  # token) to BT-2619. `autoflush` is a stable settings probe with no live push,
+  # so it always folds in.
+  def handle_async(:mount_load, {:ok, result}, socket) do
+    socket =
+      socket
+      |> fold_mount_read(:browser_classes, result.browser_classes, &apply_browser_classes/2)
+      |> fold_mount_read(:bindings, result.bindings, &apply_bindings/2)
+      |> fold_mount_read(:changes, result.changes, &apply_changes/2)
+      # autoflush has no competing live push — always apply the mount read.
+      |> apply_autoflush(result.autoflush)
+
+    {:noreply, socket}
+  end
+
+  # The mount load crashed/exited. The assigns already hold their loading/empty
+  # defaults (lists empty, autoflush false), which *are* the graceful-degradation
+  # fallback — so we just keep them rather than crash the mount. A `:cancelled`
+  # exit (none today, but defensive — matching `:git_load`) is a no-op too.
+  def handle_async(:mount_load, {:exit, :cancelled}, socket), do: {:noreply, socket}
+
+  def handle_async(:mount_load, {:exit, reason}, socket) do
+    Logger.error("mount-time workspace load crashed: #{inspect(reason)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    {:noreply, socket}
+  end
+
   # BT-2597: the off-socket test run/load (`run_tests/2` / `load_tests/1`)
   # completed. The task tags its dispatch result `{:run, _}` or `{:load, _}` so
   # the right result-application path runs; either way the op is no longer in
@@ -3492,22 +3545,47 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Read the active ChangeLog ("Workspace changes", ADR 0082) and assign display
   # rows. A workspace that is unreachable or returns an unexpected shape renders an
   # error rather than crashing the pane.
-  defp assign_changes(socket) do
-    case Facade.dispatch(:changes, %{}, ctx(socket)) do
-      rows when is_list(rows) ->
-        # Prune expanded-diff carets for rows that have left @changes (flush /
-        # revert), so a re-saved method doesn't re-appear already-expanded.
-        live_keys = MapSet.new(rows, &{&1.class, &1.selector})
-        expanded = MapSet.intersection(socket.assigns.expanded_changes, live_keys)
-        assign(socket, changes: rows, changes_error: nil, expanded_changes: expanded)
+  #
+  # Split into the off-socket read (`read_changes/1`) + the pure on-socket fold
+  # (`apply_changes/2`) so the mount-time async load (BT-2591) and the post-action
+  # refresh callers share one fold. The sync helper keeps its old signature.
+  defp assign_changes(socket), do: apply_changes(socket, read_changes(socket))
 
-      {:error, reason} ->
-        assign(socket,
-          changes: [],
-          changes_error: Workspace.render_error(reason),
-          expanded_changes: MapSet.new()
-        )
-    end
+  # The raw `:changes` dispatch result — runs off the LiveView process in the
+  # mount-load task, so it captures only `ctx`, never `socket`.
+  defp read_changes(socket), do: Facade.dispatch(:changes, %{}, ctx(socket))
+
+  # Fold a completed `:changes` read into the socket. Pure (no dispatch); shared by
+  # `handle_async(:mount_load, …)` and the sync refresh path.
+  defp apply_changes(socket, rows) when is_list(rows) do
+    # Prune expanded-diff carets for rows that have left @changes (flush /
+    # revert), so a re-saved method doesn't re-appear already-expanded.
+    live_keys = MapSet.new(rows, &{&1.class, &1.selector})
+    expanded = MapSet.intersection(socket.assigns.expanded_changes, live_keys)
+    assign(socket, changes: rows, changes_error: nil, expanded_changes: expanded)
+  end
+
+  defp apply_changes(socket, {:error, reason}) do
+    assign(socket,
+      changes: [],
+      changes_error: Workspace.render_error(reason),
+      expanded_changes: MapSet.new()
+    )
+  end
+
+  # Defensive catch-all (BT-2591): folded from the async mount load AND the sync
+  # `assign_changes/1` refresh path (post-flush/class-load/revert). An unexpected
+  # shape degrades to an empty pane with an error rather than crashing the LiveView.
+  defp apply_changes(socket, unexpected) do
+    Logger.warning("unexpected changes result: #{inspect(unexpected)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    assign(socket,
+      changes: [],
+      changes_error: Workspace.render_error(:unexpected_response),
+      expanded_changes: MapSet.new()
+    )
   end
 
   # BT-2598: the live image changed (a class was (re)loaded or removed). Re-pull
@@ -3689,14 +3767,55 @@ defmodule BtAttachWeb.WorkspaceLive do
   # facade (so RBAC/audit apply uniformly). The client defaults a degraded read to
   # `false`, and an off-vocabulary/denied dispatch (`{:error, _}`) also falls back
   # to `false` — never crash the mount on the settings probe.
-  defp assign_autoflush(socket) do
-    flag =
-      case Facade.dispatch(:autoflush, %{}, ctx(socket)) do
-        bool when is_boolean(bool) -> bool
-        _ -> false
-      end
+  #
+  # BT-2591: the read now runs in the off-socket `:mount_load` task; this pure
+  # fold applies its result (and any future sync caller's).
+  defp apply_autoflush(socket, flag) when is_boolean(flag), do: assign(socket, :autoflush, flag)
+  defp apply_autoflush(socket, _other), do: assign(socket, :autoflush, false)
 
-    assign(socket, :autoflush, flag)
+  # ── Mount-time workspace reads (BT-2591) ─────────────────────────────────────
+
+  # BT-2591: kick the four mount-time workspace reads (browser classes, bindings,
+  # the active ChangeLog, the autoflush flag) off the connected mount. Previously
+  # each ran as a *synchronous* RPC in `bind_session`, so a slow/unreachable
+  # workspace blocked the connected mount (~5s each worst case) before the cockpit
+  # could render. We now gather all four in a single off-socket `start_async`
+  # task (mirroring the git panel's `:git_load`, BT-2590): the mount returns
+  # immediately with the loading/empty assigns already set, the panes render their
+  # empty state, and the reads' results land in `handle_async(:mount_load, …)`.
+  #
+  # The task captures only `ctx` + `pid` (never `socket`) and returns the four
+  # raw `Facade.dispatch` outcomes in a map so the fold applies them atomically.
+  defp start_mount_load(socket, pid) do
+    ctx = ctx(socket)
+
+    start_async(socket, :mount_load, fn ->
+      # Runs in a Task off the LiveView process — never touch `socket` here.
+      %{
+        browser_classes: Facade.dispatch(:browse_classes, %{}, ctx),
+        bindings: Facade.dispatch(:bindings, %{session_pid: pid}, ctx),
+        changes: Facade.dispatch(:changes, %{}, ctx),
+        autoflush: Facade.dispatch(:autoflush, %{}, ctx)
+      }
+    end)
+  end
+
+  # BT-2619 (partial): fold one mount read into its assign only if a fresher live
+  # push hasn't already populated it. We detect "already populated" cheaply: the
+  # assign still holds its empty mount default (`[]`) AND no error has been set
+  # for it. If a `BindingChanged`/`classes` push (or a post-mount action) has
+  # already filled the pane, we keep that fresher value rather than overwrite it
+  # with potentially-staler mount data. This deliberately does NOT solve the full
+  # race (a push that arrives *between* this check and a concurrent fold, or one
+  # that legitimately produces an empty list) — that hardening is BT-2619; here we
+  # only ensure the mount-initial fold never *worsens* the race.
+  defp fold_mount_read(socket, key, read, apply_fun) do
+    error_key = :"#{key}_error"
+
+    already_fresh? =
+      socket.assigns[key] != [] or not is_nil(socket.assigns[error_key])
+
+    if already_fresh?, do: socket, else: apply_fun.(socket, read)
   end
 
   # ── Test-runner pane data source (BT-2557) ──────────────────────────────────
@@ -3861,14 +3980,31 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Load every class in scope for the class tree (op 1, `browse-classes`). Sorted
   # workspace-side; the rows carry `superclass`/`category`/`origin` so the
   # Hierarchy and Category views and the runtime badge render off one fetch.
-  defp assign_browser_classes(socket) do
-    case Facade.dispatch(:browse_classes, %{}, ctx(socket)) do
-      {:value, rows} when is_list(rows) ->
-        assign(socket, browser_classes: rows, browser_error: nil)
+  #
+  # Split into the off-socket read + pure fold (BT-2591) so the mount-load async
+  # task and the post-action refresh callers share one fold.
+  defp assign_browser_classes(socket),
+    do: apply_browser_classes(socket, read_browser_classes(socket))
 
-      {:error, reason} ->
-        assign(socket, browser_classes: [], browser_error: facade_error(reason))
-    end
+  defp read_browser_classes(socket), do: Facade.dispatch(:browse_classes, %{}, ctx(socket))
+
+  defp apply_browser_classes(socket, {:value, rows}) when is_list(rows),
+    do: assign(socket, browser_classes: rows, browser_error: nil)
+
+  defp apply_browser_classes(socket, {:error, reason}),
+    do: assign(socket, browser_classes: [], browser_error: facade_error(reason))
+
+  # Defensive catch-all (BT-2591): this fold runs in `handle_async(:mount_load,
+  # …)` AND on the sync `assign_browser_classes/1` refresh path. An unexpected
+  # dispatch shape (a facade evolution, a bare atom) would otherwise crash the
+  # LiveView — on the async path *after* the empty page rendered, harder to spot
+  # than the old mount-time crash. Degrade to an empty tree with an error instead.
+  defp apply_browser_classes(socket, unexpected) do
+    Logger.warning("unexpected browse_classes result: #{inspect(unexpected)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    assign(socket, browser_classes: [], browser_error: facade_error(:unexpected_response))
   end
 
   # BT-2648: load the loaded packages' hand-written native Erlang modules for the
@@ -5391,24 +5527,40 @@ defmodule BtAttachWeb.WorkspaceLive do
   # rows. Each row keeps the live `term` so the Inspector can follow object
   # references without a string round-trip; `inspectable?` flags object-valued
   # bindings the user can drill into.
-  defp assign_bindings(socket, pid) do
-    case Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket)) do
-      {:error, reason} ->
-        assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
+  #
+  # Split into the off-socket read + pure fold (BT-2591) so the mount-load async
+  # task and the bindings-changed refresh path share one fold.
+  defp assign_bindings(socket, pid), do: apply_bindings(socket, read_bindings(socket, pid))
 
-      pairs when is_list(pairs) ->
-        rows =
-          Enum.map(pairs, fn {name, term} ->
-            %{
-              name: name,
-              value: Workspace.render_term(term),
-              inspectable: Workspace.inspectable?(term),
-              kind: term_kind(term)
-            }
-          end)
+  defp read_bindings(socket, pid),
+    do: Facade.dispatch(:bindings, %{session_pid: pid}, ctx(socket))
 
-        assign(socket, bindings: rows, bindings_error: nil)
-    end
+  defp apply_bindings(socket, {:error, reason}),
+    do: assign(socket, bindings: [], bindings_error: Workspace.render_error(reason))
+
+  defp apply_bindings(socket, pairs) when is_list(pairs) do
+    rows =
+      Enum.map(pairs, fn {name, term} ->
+        %{
+          name: name,
+          value: Workspace.render_term(term),
+          inspectable: Workspace.inspectable?(term),
+          kind: term_kind(term)
+        }
+      end)
+
+    assign(socket, bindings: rows, bindings_error: nil)
+  end
+
+  # Defensive catch-all (BT-2591): folded from the async mount load AND the sync
+  # `assign_bindings/2` refresh path. An unexpected shape degrades to an empty
+  # pane with an error rather than crashing the LiveView.
+  defp apply_bindings(socket, unexpected) do
+    Logger.warning("unexpected bindings result: #{inspect(unexpected)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    assign(socket, bindings: [], bindings_error: Workspace.render_error(:unexpected_response))
   end
 
   # Inspect a binding selected by name: resolve its live term from the current
@@ -7610,7 +7762,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                   native_module_shown={(@native_module_view && @native_module_view.module) || nil}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
-                     the method list ("more class, less method"). --%>
+                     the method list ("more class, less method"). phx-update="ignore"
+                     (BT-2591): the gutter div is empty and hook-owned, so LiveView
+                     should never patch it. The async mount load DOES strip the
+                     hook-set --browser-split var off the PARENT .browser-split (it
+                     re-renders the class tree inside it), but the SplitDrag hook's
+                     own MutationObserver — not updated() — re-applies the saved size
+                     when that happens. --%>
                 <div
                   id="browser-split-gutter"
                   class="split-gutter split-gutter-y"
@@ -8880,7 +9038,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
 
                 <%!-- Draggable divider (BT-2576): rebalances Bindings vs. the
-                     Inspector. --%>
+                     Inspector. phx-update="ignore" (BT-2591): the gutter div is
+                     empty and hook-owned, so LiveView should never patch it. The
+                     async mount load DOES strip the hook-set --right-split var off
+                     the PARENT .right-split (it re-renders the Bindings pane inside
+                     it), but the SplitDrag hook's own MutationObserver — not
+                     updated() — re-applies the saved size when that happens. --%>
                 <div
                   id="right-split-gutter"
                   class="split-gutter split-gutter-y"

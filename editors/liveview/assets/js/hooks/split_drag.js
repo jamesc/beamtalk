@@ -61,25 +61,40 @@ export const SplitDrag = {
     // Re-apply any size the user saved in a previous session. The CSS default
     // (50% / 286px / 348px) renders first; this overrides it once on mount.
     this.restore()
-  },
 
-  // Re-apply the size after a LiveView re-render (BT-2638). The CSS var lives as
-  // an inline `style` on the target (`this.el.parentElement`). When LiveView
-  // patches that target — most visibly the center `.col` that holds the editor
-  // and the workspace dock, re-rendered on every "open diff" / "new method tab"
-  // — morphdom reconciles the element's attributes against the server template,
-  // which never renders the var, and strips the JS-set inline value, snapping
-  // the split back to its CSS default. `updated()` fires AFTER that patch, so
-  // re-applying here puts the persisted size back. Skipped while a drag is in
-  // flight so it never fights the live pointer value. `restore()` reads this
-  // instance's own `data-split` key, so it is idempotent and never crosses over
-  // to another splitter — safe for every shared instance.
-  //
-  // NOTE: this only runs for gutters WITHOUT `phx-update="ignore"`; LiveView
-  // skips ignored elements on patch, so the dock gutter drops that attribute
-  // (its div is empty — nothing to preserve) to let this callback fire.
-  updated() {
-    if (!this.drag) this.restore()
+    // Re-apply the size after a LiveView re-render strips it (BT-2638, BT-2591).
+    //
+    // The size lives as an inline `style` custom property on the TARGET
+    // (`this.el.parentElement` — `.browser-split` / `.right-split` / the dock
+    // `.col`), NOT on the hook element itself. When LiveView patches anything
+    // inside that target — the center `.col` on every "open diff" / "new method
+    // tab", or the System Browser / Bindings pane on the async mount fold
+    // (`handle_async(:mount_load)`, BT-2591) — morphdom descends through the
+    // target and runs `mergeAttrs`, which removes any inline attribute the server
+    // template doesn't render. The server never renders this var, so the JS-set
+    // value is stripped and the split snaps back to its CSS default.
+    //
+    // The hook's `updated()` canNOT reliably fix this: it only fires when the
+    // hook's OWN element is reconciled AND structurally changed (LiveView guards
+    // the callback on `!fromEl.isEqualNode(toEl)`). The gutter is static markup,
+    // so a patch to a SIBLING (the class tree / Bindings list) strips the var off
+    // the parent yet leaves the gutter unchanged — `updated()` never fires.
+    // Dropping `phx-update="ignore"` makes the gutter *visited* but not *changed*,
+    // so it does not help either.
+    //
+    // Instead, observe the target's `style` attribute directly: the instant
+    // morphdom strips the var, re-apply the persisted size. `restore()` only sets
+    // the var when a value is saved and is a no-op once the value already matches,
+    // so this never loops on its own write. Skipped while a drag is in flight so
+    // it never fights the live pointer value. Reads this instance's own
+    // `data-split` key, so it is per-splitter and safe for the shared hook.
+    this.observer = new MutationObserver(() => {
+      if (!this.drag) this.restore()
+    })
+    this.observer.observe(this.target, {
+      attributes: true,
+      attributeFilter: ["style"],
+    })
   },
 
   destroyed() {
@@ -89,14 +104,19 @@ export const SplitDrag = {
     // permanently suppress the BT-2559 collapse animation until a full reload).
     // It is a guarded no-op when no drag is in flight.
     this.end()
+    if (this.observer) this.observer.disconnect()
     this.el.removeEventListener("mousedown", this.onDown)
   },
 
   // Apply the persisted size (a CSS length string, e.g. "240px") to the target's
-  // custom property. Ignored if nothing was saved or storage is unavailable.
+  // custom property. Ignored if nothing was saved or storage is unavailable, and
+  // a no-op when the var already holds the saved value — so the MutationObserver
+  // that calls this (on a stripped style) never re-fires on our own write.
   restore() {
     const saved = this.read()
-    if (saved) this.target.style.setProperty(this.varName, saved)
+    if (!saved) return
+    if (this.target.style.getPropertyValue(this.varName) === saved) return
+    this.target.style.setProperty(this.varName, saved)
   },
 
   start(e) {
