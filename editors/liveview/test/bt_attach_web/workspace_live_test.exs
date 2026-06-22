@@ -546,6 +546,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
   test "New Class rejects a duplicate class name inside the modal (BT-2645)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
+    # The duplicate check reads the browse list, which now loads asynchronously
+    # (BT-2591) — await it so `Object` is present before submitting.
+    render_async(view)
     view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
 
     # `Object` is always present in the browse list, so it is a duplicate.
