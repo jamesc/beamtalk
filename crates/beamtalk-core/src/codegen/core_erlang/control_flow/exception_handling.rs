@@ -63,6 +63,18 @@ impl CoreErlangGenerator {
         }
     }
 
+    fn emit_raw_raise(type_var: String, error_var: String, stack_var: String) -> Document<'static> {
+        docvec![
+            "primop 'raw_raise'(",
+            leaf::var(type_var),
+            ", ",
+            leaf::var(error_var),
+            ", ",
+            leaf::var(stack_var),
+            ")",
+        ]
+    }
+
     /// Generates the NLR-passthrough catch clause preamble shared by both
     /// `generate_on_do` and `generate_on_do_with_mutations`.
     ///
@@ -106,24 +118,24 @@ impl CoreErlangGenerator {
             leaf::var(nlr_val_var),
             ", ",
             leaf::var(nlr_state_var),
-            "}}> when 'true' -> primop 'raw_raise'(",
-            leaf::var(type_var.to_string()),
-            ", ",
-            leaf::var(error_var.to_string()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            ") ",
+            "}}> when 'true' -> ",
+            Self::emit_raw_raise(
+                type_var.to_string(),
+                error_var.to_string(),
+                stack_var.clone(),
+            ),
+            " ",
             "<{'throw', {'$bt_nlr', ",
             leaf::var(nlr_tok_var2),
             ", ",
             leaf::var(nlr_val_var2),
-            "}}> when 'true' -> primop 'raw_raise'(",
-            leaf::var(type_var.to_string()),
-            ", ",
-            leaf::var(error_var.to_string()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            ") ",
+            "}}> when 'true' -> ",
+            Self::emit_raw_raise(
+                type_var.to_string(),
+                error_var.to_string(),
+                stack_var.clone(),
+            ),
+            " ",
             "<",
             leaf::var(other_pair_var),
             "> when 'true' -> ",
@@ -287,13 +299,9 @@ impl CoreErlangGenerator {
             ),
             handler_apply,
             " ",
-            "<'false'> when 'true' -> primop 'raw_raise'(",
-            leaf::var(type_var),
-            ", ",
-            leaf::var(error_var),
-            ", ",
-            leaf::var(stack_var),
-            ") end ",
+            "<'false'> when 'true' -> ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
+            " end ",
             "end",
         ])
     }
@@ -429,13 +437,9 @@ impl CoreErlangGenerator {
 
         // Re-raise non-matching exceptions; close the matches_class case and the outer NLR case.
         docs.push(docvec![
-            "<'false'> when 'true' -> primop 'raw_raise'(",
-            leaf::var(type_var.clone()),
-            ", ",
-            leaf::var(error_var.clone()),
-            ", ",
-            leaf::var(stack_var),
-            ") end end",
+            "<'false'> when 'true' -> ",
+            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var),
+            " end end",
         ]);
 
         Ok(Document::Vec(docs))
@@ -523,13 +527,8 @@ impl CoreErlangGenerator {
             leaf::var(stack_var.clone()),
             "> -> do apply ",
             leaf::var(cleanup_var),
-            " () primop 'raw_raise'(",
-            leaf::var(type_var),
-            ", ",
-            leaf::var(error_var),
-            ", ",
-            leaf::var(stack_var),
-            ")",
+            " () ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
         ])
     }
 
@@ -633,13 +632,8 @@ impl CoreErlangGenerator {
         docs.push(cleanup_error_doc);
 
         docs.push(docvec![
-            " primop 'raw_raise'(",
-            leaf::var(type_var),
-            ", ",
-            leaf::var(error_var),
-            ", ",
-            leaf::var(stack_var),
-            ")",
+            " ",
+            Self::emit_raw_raise(type_var, error_var, stack_var),
         ]);
 
         Ok(Document::Vec(docs))
