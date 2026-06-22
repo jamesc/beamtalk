@@ -3573,8 +3573,9 @@ defmodule BtAttachWeb.WorkspaceLive do
     )
   end
 
-  # Defensive catch-all (BT-2591): folded from the async mount load, so an
-  # unexpected shape must degrade rather than crash the LiveView post-render.
+  # Defensive catch-all (BT-2591): folded from the async mount load AND the sync
+  # `assign_changes/1` refresh path (post-flush/class-load/revert). An unexpected
+  # shape degrades to an empty pane with an error rather than crashing the LiveView.
   defp apply_changes(socket, unexpected) do
     Logger.warning("unexpected changes result: #{inspect(unexpected)}",
       domain: [:beamtalk, :liveview]
@@ -3994,9 +3995,10 @@ defmodule BtAttachWeb.WorkspaceLive do
     do: assign(socket, browser_classes: [], browser_error: facade_error(reason))
 
   # Defensive catch-all (BT-2591): this fold runs in `handle_async(:mount_load,
-  # …)`, so an unexpected dispatch shape (a facade evolution, a bare atom) would
-  # crash the LiveView *after* the empty page rendered — harder to spot than the
-  # old mount-time crash. Degrade to an empty tree with an error instead.
+  # …)` AND on the sync `assign_browser_classes/1` refresh path. An unexpected
+  # dispatch shape (a facade evolution, a bare atom) would otherwise crash the
+  # LiveView — on the async path *after* the empty page rendered, harder to spot
+  # than the old mount-time crash. Degrade to an empty tree with an error instead.
   defp apply_browser_classes(socket, unexpected) do
     Logger.warning("unexpected browse_classes result: #{inspect(unexpected)}",
       domain: [:beamtalk, :liveview]
@@ -5550,8 +5552,9 @@ defmodule BtAttachWeb.WorkspaceLive do
     assign(socket, bindings: rows, bindings_error: nil)
   end
 
-  # Defensive catch-all (BT-2591): folded from the async mount load, so an
-  # unexpected shape must degrade rather than crash the LiveView post-render.
+  # Defensive catch-all (BT-2591): folded from the async mount load AND the sync
+  # `assign_bindings/2` refresh path. An unexpected shape degrades to an empty
+  # pane with an error rather than crashing the LiveView.
   defp apply_bindings(socket, unexpected) do
     Logger.warning("unexpected bindings result: #{inspect(unexpected)}",
       domain: [:beamtalk, :liveview]
@@ -7759,12 +7762,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                   native_module_shown={(@native_module_view && @native_module_view.module) || nil}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
-                     the method list ("more class, less method"). --%>
+                     the method list ("more class, less method"). NOT
+                     phx-update="ignore" (BT-2591): the async mount load
+                     re-renders the class tree inside .browser-split and strips the
+                     hook-set --browser-split var, so the gutter must be patched for
+                     SplitDrag.updated() to re-apply the saved size. --%>
                 <div
                   id="browser-split-gutter"
                   class="split-gutter split-gutter-y"
                   phx-hook="SplitDrag"
-                  phx-update="ignore"
                   role="separator"
                   aria-orientation="horizontal"
                   aria-label="Resize the class tree and method list"
@@ -9029,12 +9035,14 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
 
                 <%!-- Draggable divider (BT-2576): rebalances Bindings vs. the
-                     Inspector. --%>
+                     Inspector. NOT phx-update="ignore" (BT-2591): the async mount
+                     load re-renders the Bindings pane inside .right-split and
+                     strips the hook-set --right-split var, so the gutter must be
+                     patched for SplitDrag.updated() to re-apply the saved size. --%>
                 <div
                   id="right-split-gutter"
                   class="split-gutter split-gutter-y"
                   phx-hook="SplitDrag"
-                  phx-update="ignore"
                   role="separator"
                   aria-orientation="horizontal"
                   aria-label="Resize the Bindings and Inspector panels"
