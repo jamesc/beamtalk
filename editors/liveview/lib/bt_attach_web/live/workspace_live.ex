@@ -6019,9 +6019,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Map a live term to the Inspector's "no fields to inspect" type word ("X is a
   # <scalar_kind>"). Derives from the single classifier `Workspace.term_class/1`
   # (BT-2635), so this is purely a presentation mapping of its `{:scalar, kind}`
-  # output — it does not re-enumerate term shapes. A `{:ref, _}` never reaches
-  # here (refs are drillable, routed through the `ref` path, not the no-fields
-  # branch); the `:value` / ref / unmapped-scalar cases all render "value".
+  # output — it does not re-enumerate term shapes. `{:ref, _}` terms never reach
+  # here from the non-inspectable else-branch; they can reach it from
+  # `target_info/2`'s fallback, where they fall through to "value". The `:value`
+  # / unmapped-scalar cases all render "value".
   defp scalar_kind(term) do
     case Workspace.term_class(term) do
       {:scalar, :integer} -> "number"
