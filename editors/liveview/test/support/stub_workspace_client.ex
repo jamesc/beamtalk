@@ -62,6 +62,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # disarms itself on first use, so the subsequent push-refresh reads (and
               # the now-released mount reads) never block.
               mount_gate: nil,
+              mount_gate_consumed: false,
               calls: []
   end
 
@@ -456,7 +457,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   async mount fold runs and assert the fold does not clobber it.
   """
   def arm_mount_gate do
-    {:ok, gate} = Agent.start(fn -> false end)
+    # `start_link` (not `start`) so the gate is linked to the test process and dies
+    # with it — no orphaned Agent accumulating across the suite.
+    {:ok, gate} = Agent.start_link(fn -> false end)
     put(:mount_gate, gate)
     put(:mount_gate_consumed, false)
     :ok
