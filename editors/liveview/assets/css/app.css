@@ -951,6 +951,7 @@ body.col-resizing .cockpit { transition: none; }
 
 /* result / output / error blocks */
 .io-block {
+  display: flex; align-items: flex-start; gap: 8px;
   margin: 0 0 8px 0; padding: 9px 12px; border: 1px solid var(--line);
   border-radius: 7px; background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
   font-size: 12.5px; white-space: pre-wrap; overflow-wrap: break-word; color: var(--ink);
@@ -958,6 +959,15 @@ body.col-resizing .cockpit { transition: none; }
 .io-block.ok  { background: color-mix(in oklab, var(--ok) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
 .io-block.err { background: color-mix(in oklab, var(--err) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--err) 35%, var(--line)); color: var(--err); }
 .io-block.warn{ background: color-mix(in oklab, var(--accent) 12%, var(--code-bg)); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
+/* The message takes the row; the × dismiss control (BT-2612) sits top-right. */
+.io-block-msg { flex: 1 1 auto; min-width: 0; }
+.io-block-dismiss {
+  flex: 0 0 auto; margin: -2px -4px 0 0; padding: 0 4px;
+  background: none; border: none; cursor: pointer; line-height: 1;
+  font-size: 15px; color: inherit; opacity: 0.65; border-radius: 4px;
+}
+.io-block-dismiss:hover { opacity: 1; }
+.io-block-dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
 
 /* simple data tables (bindings / inspector / changelog) */
 .bt-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
