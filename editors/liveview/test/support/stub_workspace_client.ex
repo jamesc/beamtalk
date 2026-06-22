@@ -45,6 +45,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # unflushed in-memory edit (which `changes` carries and the revert
               # guard blocks on). A `reload_file` for the class clears them.
               forced_disk_differs: MapSet.new(),
+              # BT-2634: seeded workspace bindings (`{name, term}` pairs) so a
+              # LiveView test can establish a supervisor binding and drive the full
+              # Inspect → children-render → drill-through path against the stub. `[]`
+              # = no bindings (the default, matching a fresh session).
+              bindings: [],
               calls: []
   end
 
@@ -108,8 +113,87 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     end
   end
 
-  def list_bindings(_pid), do: []
+  def list_bindings(_pid), do: get(:bindings) || []
+
+  @doc "Test helper (BT-2634): seed the workspace bindings the bindings pane reads."
+  def put_bindings(pairs) when is_list(pairs), do: put(:bindings, pairs)
+
+  # BT-2634: a supervisor's inspection content is its children / supervision tree
+  # (drillable child handles), not actor instance vars. The stub keys variants off
+  # the supervisor's class so tests can exercise each path:
+  #
+  #   * `EmptySup`  → a live supervisor with no running children (empty-state path)
+  #   * `DeadSup`   → a dead/unreachable supervisor (structured error path)
+  #   * any other   → a representative tree: a worker actor (drillable, leaf), a
+  #     nested supervisor child (drillable, re-inspectable as its own supervisor),
+  #     and a foreign OTP process (rendered but NOT drillable, `handle: :null`).
+  def inspect_value({:beamtalk_supervisor, class, _module, pid} = _term) when is_pid(pid) do
+    case to_string(class) do
+      "EmptySup" ->
+        {:ok, {:supervisor_children, []}}
+
+      "DeadSup" ->
+        {:error,
+         {:beamtalk_error, :stale_handle, :Inspector, :children, "supervisor is not alive"}}
+
+      _ ->
+        {:ok, {:supervisor_children, stub_supervisor_children()}}
+    end
+  end
+
   def inspect_value(_term), do: {:ok, %{}}
+
+  # BT-2634: representative supervisor children (binary-keyed rows, mirroring
+  # `beamtalk_process_navigation:child_handles/1`). The nested supervisor child
+  # carries a live `{:beamtalk_supervisor, …}` handle so a drill re-inspects it as
+  # its own supervisor; the worker carries a `{:beamtalk_object, …}` handle; the
+  # foreign process has `handle: :null` so it renders but is not drillable.
+  defp stub_supervisor_children do
+    [
+      %{
+        "label" => "Counter",
+        "className" => "Counter",
+        "kind" => "beamtalkActor",
+        "pid" => "<0.310.0>",
+        "registeredName" => :null,
+        "childCount" => 0,
+        "isSupervisor" => false,
+        "handle" => {:beamtalk_object, :Counter, :"Elixir.Counter", stub_pid()}
+      },
+      %{
+        "label" => "WorkerPool",
+        "className" => "WorkerPool",
+        "kind" => "beamtalkSupervisor",
+        "pid" => "<0.311.0>",
+        "registeredName" => :WorkerPool,
+        "childCount" => 2,
+        "isSupervisor" => true,
+        "handle" => {:beamtalk_supervisor, :WorkerPool, :"Elixir.WorkerPool", stub_pid()}
+      },
+      %{
+        "label" => "logger_std_h",
+        "className" => :null,
+        "kind" => "otpProcess",
+        "pid" => "<0.312.0>",
+        "registeredName" => :logger_std_h,
+        "childCount" => 0,
+        "isSupervisor" => false,
+        "handle" => :null
+      }
+    ]
+  end
+
+  # A stable, alive pid for stub child handles (the test node's own pid — always
+  # alive, so `inspectable?/1`'s `is_pid/1` guard passes and a drill is exercised).
+  defp stub_pid, do: self()
+
+  @doc """
+  Stub supervisor children listing (BT-2634). Mirrors
+  `BtAttach.Workspace.supervisor_children/1`: returns the representative child rows
+  for a live supervisor pid.
+  """
+  def supervisor_children(sup_pid) when is_pid(sup_pid),
+    do: {:ok, stub_supervisor_children()}
 
   defp extract_class_name(code) do
     case Regex.run(~r/(?:Actor|Object)\s+subclass:\s+(\w+)/, code) do

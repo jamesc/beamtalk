@@ -4970,6 +4970,23 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp inspect_term(socket, label, term, crumbs) do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+        # BT-2634: a supervisor's content is its CHILDREN / supervision tree, not
+        # actor instance vars. Each child row carries a live `{:beamtalk_supervisor,
+        # …}` / `{:beamtalk_object, …}` handle, so the existing "drill" event
+        # follows it as its own reference (ADR 0095), and the crumb walk-back
+        # re-inspects the supervisor handle (re-listing its children). Live-tracking
+        # is deliberately NOT armed for a supervisor (`track_object/2`'s catch-all):
+        # no field-flash, no per-object watch, no pid-stats poll against a supervisor.
+        {:ok, {:supervisor_children, child_rows}} ->
+          socket
+          |> assign(
+            inspect_target: target_info(label, term),
+            inspect_rows: supervisor_child_rows(child_rows),
+            inspect_crumbs: crumbs,
+            inspect_error: nil
+          )
+          |> track_object(term)
+
         {:ok, fields} when is_map(fields) ->
           socket
           |> assign(
@@ -5376,6 +5393,20 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp inspect_window(socket, w, label, term, crumbs) do
     if Workspace.inspectable?(term) do
       case Facade.dispatch(:inspect, %{term: term}, ctx(socket)) do
+        # BT-2634: a supervisor renders its children / supervision tree (drillable
+        # child handles), not actor instance vars — the float-window twin of the
+        # docked supervisor case. `track_window/3` does not arm a watch for a
+        # supervisor term (its no-track catch-all), so no field-flash / pid-stats.
+        {:ok, {:supervisor_children, child_rows}} ->
+          %{
+            w
+            | target: target_info(label, term),
+              rows: supervisor_child_rows(child_rows),
+              crumbs: crumbs,
+              error: nil
+          }
+          |> track_window(socket, term)
+
         {:ok, fields} when is_map(fields) ->
           %{
             w
@@ -5936,6 +5967,57 @@ defmodule BtAttachWeb.WorkspaceLive do
     end)
     |> Enum.sort_by(& &1.name)
   end
+
+  # BT-2634: turn the runtime's supervisor-child maps (binary-keyed, from
+  # `beamtalk_process_navigation:child_handles/1`) into Inspector display rows. A
+  # child with a live `handle` (a Beamtalk actor / supervisor child) is drillable —
+  # its `term` is the live `{:beamtalk_supervisor, …}` / `{:beamtalk_object, …}`
+  # reference the "drill" event follows (ADR 0095). A foreign / restarting child
+  # has `handle => :null`: it renders (so the tree is complete) but is not
+  # drillable. The value column shows kind + pid + child count so the supervision
+  # structure is legible at a glance.
+  defp supervisor_child_rows(child_rows) when is_list(child_rows) do
+    Enum.map(child_rows, &supervisor_child_row/1)
+  end
+
+  defp supervisor_child_row(row) when is_map(row) do
+    handle = Map.get(row, "handle", :null)
+    drillable = handle != :null and handle != nil
+
+    %{
+      name: to_string(Map.get(row, "label", "child")),
+      value: supervisor_child_value(row),
+      term: if(drillable, do: handle, else: nil),
+      drillable: drillable,
+      kind: "ref"
+    }
+  end
+
+  # The value-column text for a supervisor child row: "kind · pid · N children"
+  # (child count only for supervisors), or "kind · restarting" for a child caught
+  # mid-restart (no pid).
+  defp supervisor_child_value(row) do
+    kind = to_string(Map.get(row, "kind", "process"))
+    pid = supervisor_child_pid_text(Map.get(row, "pid", :null))
+
+    base =
+      if Map.get(row, "isSupervisor", false) do
+        count = Map.get(row, "childCount", 0)
+        "#{kind} · #{pid} · #{count} #{pluralize_children(count)}"
+      else
+        "#{kind} · #{pid}"
+      end
+
+    base
+  end
+
+  defp supervisor_child_pid_text(:null), do: "restarting"
+  defp supervisor_child_pid_text(nil), do: "restarting"
+  defp supervisor_child_pid_text(pid) when is_binary(pid), do: pid
+  defp supervisor_child_pid_text(pid), do: to_string(pid)
+
+  defp pluralize_children(1), do: "child"
+  defp pluralize_children(_), do: "children"
 
   # Supervisor handles ({:beamtalk_supervisor, …, pid}) never reach `scalar_kind`:
   # they are `inspectable?/1` (BT-2633), so they are routed through the drillable
@@ -8023,6 +8105,13 @@ defmodule BtAttachWeb.WorkspaceLive do
                       <p :if={@inspect_target == nil && @inspect_error == nil} class="empty">
                         Spawn an object (<code>Counter spawn</code>), bind it, then Inspect it to
                         follow its live references.
+                      </p>
+                      <%!-- BT-2634: a live target with no rows and no error — an empty
+                           supervisor (no running children) or an actor with no
+                           user-visible state. Show a clear empty state rather than a
+                           blank body. --%>
+                      <p :if={@inspect_target != nil && @inspect_error == nil} class="empty">
+                        No inspectable content — this object has no fields or children.
                       </p>
                     <% end %>
                     <%!-- Owner-only poke bar (BT-2492, spike PokeBar): send a Beamtalk

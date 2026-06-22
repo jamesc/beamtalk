@@ -30,7 +30,7 @@ Phase 2 (BT-2428) coverage:
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% OTP supervisor callback + worker/child start functions.
--export([init/1, start_worker/1, start_actor_worker/2, start_named_worker/2]).
+-export([init/1, start_worker/1, start_actor_worker/2, start_named_worker/2, start_child_sup/1]).
 
 %%====================================================================
 %% Supervisor callback / worker start functions
@@ -57,6 +57,23 @@ start_actor_worker(ParentPid, ClassName) ->
         idle()
     end),
     {ok, Pid}.
+
+%% Start a nested (foreign OTP) supervisor with one plain worker child, so a
+%% parent supervisor can carry a supervisor child for the BT-2634 nested test.
+start_child_sup(_ParentPid) ->
+    SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    %% Signal readiness to THIS process (the supervisor's start fun), not the
+    %% outer test pid — the inner worker's child spec links to us, so we receive
+    %% its readiness here before returning {ok, SupPid}.
+    Me = self(),
+    {ok, SupPid} = supervisor:start_link(
+        ?MODULE, {SupFlags, [worker_spec(w1, start_worker, [Me])]}
+    ),
+    receive
+        {worker_ready, _} -> ok
+    after 1000 -> error(worker_not_ready)
+    end,
+    {ok, SupPid}.
 
 %% Worker that registers itself under `Name` before idling.
 start_named_worker(ParentPid, Name) ->
@@ -471,6 +488,30 @@ sys_wait_dead(Pid) ->
             sys_wait_dead(Pid)
     end.
 
+%% Wait until `Pid` presents the OTP supervisor marker (`$initial_call`) in its
+%% process dictionary — the message-free probe `beamtalk_process_navigation` uses
+%% to recognise a supervisor. The fake supervisor plants this asynchronously, so
+%% a test that lists its children must wait for the marker first.
+wait_until_supervisor(Pid) ->
+    wait_until_supervisor(Pid, 200).
+
+wait_until_supervisor(_Pid, 0) ->
+    error(supervisor_marker_not_set);
+wait_until_supervisor(Pid, N) ->
+    case erlang:process_info(Pid, dictionary) of
+        {dictionary, Dict} ->
+            case lists:keyfind('$initial_call', 1, Dict) of
+                {'$initial_call', {supervisor, _, _}} ->
+                    ok;
+                _ ->
+                    timer:sleep(5),
+                    wait_until_supervisor(Pid, N - 1)
+            end;
+        _ ->
+            timer:sleep(5),
+            wait_until_supervisor(Pid, N - 1)
+    end.
+
 %%====================================================================
 %% Tests: lazy guarded status (BT-2428)
 %%====================================================================
@@ -602,3 +643,189 @@ node_field_accessors_test() ->
         #{maxRestarts => 10, window => 60}, beamtalk_process_navigation:restartIntensityOf(Node)
     ),
     ?assertEqual(true, beamtalk_process_navigation:truncatedOf(Node)).
+
+%%====================================================================
+%% Tests: child_handles/1 — Inspector supervisor-aware inspection (BT-2634)
+%%====================================================================
+
+%% A live supervisor's direct children come back as drillable rows: a Beamtalk
+%% actor child carries a live `{beamtalk_object, Class, Module, Pid}` handle so
+%% the Inspector can follow it as its own reference (ADR 0095).
+child_handles_beamtalk_actor_child_has_live_handle_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    %% 'Integer' is a registered stdlib class, so the child resolves to a class.
+    SupPid = start_supervisor([worker_spec(a1, start_actor_worker, [Self, 'Integer'])]),
+    try
+        {ok, Rows} = beamtalk_process_navigation:child_handles(pid_to_list(SupPid)),
+        ?assertEqual(1, length(Rows)),
+        [Row] = Rows,
+        ?assertEqual(<<"beamtalkActor">>, maps:get(<<"kind">>, Row)),
+        ?assertEqual(<<"Integer">>, maps:get(<<"className">>, Row)),
+        ?assertEqual(false, maps:get(<<"isSupervisor">>, Row)),
+        %% The pid is the textual form, and a live drillable handle is minted.
+        ?assert(is_binary(maps:get(<<"pid">>, Row))),
+        Handle = maps:get(<<"handle">>, Row),
+        ?assertMatch({beamtalk_object, 'Integer', _Mod, _Pid}, Handle),
+        {beamtalk_object, _, _, HandlePid} = Handle,
+        ?assert(is_pid(HandlePid))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%% A supervisor whose child is itself a (foreign) supervisor lists that child
+%% with the supervisor kind and a non-zero child count — the row a user would
+%% drill to descend a level. With no Beamtalk class it is #otpSupervisor (handle
+%% null); the live-handle minting for a Beamtalk supervisor child is asserted by
+%% the actor-child test (same `child_handle/3` code path keyed on the kind tag).
+child_handles_nested_supervisor_child_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    OuterFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    %% `start_child_sup/1` boots its inner worker and drains that worker's
+    %% readiness itself before returning {ok, SupPid}, so the outer start blocks
+    %% until the whole nested tree is up — no extra wait needed here.
+    {ok, OuterSup} = supervisor:start_link(
+        ?MODULE,
+        {OuterFlags, [
+            #{
+                id => inner,
+                start => {?MODULE, start_child_sup, [Self]},
+                restart => temporary,
+                shutdown => infinity,
+                type => supervisor,
+                modules => [?MODULE]
+            }
+        ]}
+    ),
+    try
+        {ok, Rows} = beamtalk_process_navigation:child_handles(pid_to_list(OuterSup)),
+        [Row] = Rows,
+        ?assertEqual(<<"otpSupervisor">>, maps:get(<<"kind">>, Row)),
+        ?assertEqual(true, maps:get(<<"isSupervisor">>, Row)),
+        ?assertEqual(1, maps:get(<<"childCount">>, Row)),
+        ?assertEqual(null, maps:get(<<"handle">>, Row))
+    after
+        gen_server:stop(OuterSup)
+    end.
+
+%% A foreign OTP supervisor's children render but are not drillable: no Beamtalk
+%% class → `handle => null`, `className => null`.
+child_handles_foreign_child_not_drillable_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
+    try
+        {ok, Rows} = beamtalk_process_navigation:child_handles(pid_to_list(SupPid)),
+        ?assertEqual(1, length(Rows)),
+        [Row] = Rows,
+        ?assertEqual(<<"otpProcess">>, maps:get(<<"kind">>, Row)),
+        ?assertEqual(null, maps:get(<<"handle">>, Row)),
+        ?assertEqual(null, maps:get(<<"className">>, Row)),
+        %% The textual pid is still carried for display.
+        ?assert(is_binary(maps:get(<<"pid">>, Row)))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%% A child caught mid-restart is a first-class, non-drillable row: `kind =>
+%% restarting`, `pid => null`, `handle => null` — never a crash on the
+%% `restarting` atom (uses the fake supervisor to force the state).
+child_handles_restarting_child_row_test() ->
+    FakeSup = spawn_fake_supervisor([{child_a, restarting, worker, [some_mod]}]),
+    %% The fake supervisor plants its `$initial_call` marker asynchronously after
+    %% spawn; wait until the message-free supervisor probe (`which_children`)
+    %% recognises it, so `child_handles/1` does not read an empty dictionary.
+    ok = wait_until_supervisor(FakeSup),
+    try
+        {ok, Rows} = beamtalk_process_navigation:child_handles(pid_to_list(FakeSup)),
+        ?assertEqual(1, length(Rows)),
+        [Row] = Rows,
+        ?assertEqual(<<"restarting">>, maps:get(<<"kind">>, Row)),
+        ?assertEqual(null, maps:get(<<"pid">>, Row)),
+        ?assertEqual(null, maps:get(<<"handle">>, Row)),
+        ?assertEqual(false, maps:get(<<"isSupervisor">>, Row))
+    after
+        FakeSup ! stop
+    end.
+
+%% A DynamicSupervisor (simple_one_for_one) lists its live children uniformly:
+%% `which_children` returns running pids, so each becomes a child row exactly like
+%% a static supervisor's child (BT-2634 — treat static and dynamic alike).
+child_handles_dynamic_supervisor_children_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    Self = self(),
+    SupFlags = #{strategy => simple_one_for_one, intensity => 5, period => 5},
+    ChildSpec = #{
+        id => dyn_worker,
+        start => {?MODULE, start_worker, [Self]},
+        restart => temporary,
+        shutdown => brutal_kill,
+        type => worker,
+        modules => []
+    },
+    {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, [ChildSpec]}),
+    {ok, _C1} = supervisor:start_child(SupPid, []),
+    {ok, _C2} = supervisor:start_child(SupPid, []),
+    %% Drain readiness signals from the two started children.
+    [
+        receive
+            {worker_ready, _} -> ok
+        after 1000 -> error(worker_not_ready)
+        end
+     || _ <- [1, 2]
+    ],
+    try
+        {ok, Rows} = beamtalk_process_navigation:child_handles(pid_to_list(SupPid)),
+        ?assertEqual(2, length(Rows)),
+        lists:foreach(
+            fun(Row) ->
+                ?assertEqual(<<"otpProcess">>, maps:get(<<"kind">>, Row)),
+                ?assert(is_binary(maps:get(<<"pid">>, Row)))
+            end,
+            Rows
+        )
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%% A supervisor with no running children yields an empty children list (the
+%% clean empty-state path) — not an error.
+child_handles_no_children_is_empty_test() ->
+    application:ensure_all_started(beamtalk_runtime),
+    SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
+    {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, []}),
+    try
+        ?assertEqual({ok, []}, beamtalk_process_navigation:child_handles(pid_to_list(SupPid)))
+    after
+        gen_server:stop(SupPid)
+    end.
+
+%% A dead/unreachable supervisor degrades to a structured `stale_handle` error —
+%% never a crash (BT-2634 graceful handling).
+child_handles_dead_supervisor_is_error_test() ->
+    Dead = spawn(fun() -> ok end),
+    _ = sys_wait_dead(Dead),
+    Result = beamtalk_process_navigation:child_handles(pid_to_list(Dead)),
+    ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result).
+
+%% A malformed pid string is a structured `type_error`, guarded against the
+%% `list_to_pid/1` `badarg` (BT-2634).
+child_handles_bad_pid_is_type_error_test() ->
+    Result = beamtalk_process_navigation:child_handles("not-a-pid"),
+    ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
+
+%% A worker pid (not a supervisor) has no children — an empty list, never a
+%% crash (the `which_children` probe short-circuits a non-supervisor).
+child_handles_worker_pid_is_empty_test() ->
+    Self = self(),
+    {ok, WorkerPid} = start_worker(Self),
+    receive
+        {worker_ready, _} -> ok
+    after 1000 -> error(worker_not_ready)
+    end,
+    try
+        ?assertEqual({ok, []}, beamtalk_process_navigation:child_handles(pid_to_list(WorkerPid)))
+    after
+        WorkerPid ! stop
+    end.

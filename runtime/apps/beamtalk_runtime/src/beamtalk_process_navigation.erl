@@ -89,6 +89,7 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     %% Node / tree accessors consumed by the SupervisionNode & SupervisionTree
     %% stdlib classes (BT-2429).
     enrich/1,
+    child_handles/1,
     rootOf/1,
     childrenOf/1,
     parentOf/1,
@@ -840,6 +841,205 @@ looks_like_supervisor(Pid) when is_pid(Pid) ->
         _ ->
             false
     end.
+
+%%% ============================================================================
+%%% Inspector child handles (ADR 0095 supervisor-aware inspection, BT-2634)
+%%% ============================================================================
+
+-doc """
+Return the direct children of a supervisor as **drillable inspection rows**.
+
+`SupPidStr` is the textual pid of the supervisor (the `<0.X.Y>` form the
+Inspector op contract uses, the same as the actor `inspect` op). Resolves it to
+a live pid, lists its direct children via the guarded `which_children`, and
+classifies each (reusing the snapshot machinery) into a row map carrying a
+**live handle** so the Inspector can drill into a child as its own
+`{beamtalk_supervisor, ...}` / `{beamtalk_object, ...}` reference (ADR 0095
+reference-following) — the data the flat `asDictionaries` wire form discards.
+
+Each row is a map with binary keys (wire-shaped, like `pid-stats`):
+
+```
+#{
+  <<"label">>          => binary,    % child class name, registered name, or "process"
+  <<"className">>      => binary | null,
+  <<"kind">>           => binary,    % beamtalkSupervisor | beamtalkActor
+                                     % | otpSupervisor | otpProcess | restarting
+  <<"pid">>            => binary | null,   % textual pid; null mid-restart
+  <<"registeredName">> => binary | null,
+  <<"childCount">>     => integer,   % live children (supervisors only)
+  <<"isSupervisor">>   => boolean,
+  <<"handle">>         => {beamtalk_supervisor | beamtalk_object, atom(), module(), pid()} | null
+}
+```
+
+`handle` is `null` for a foreign OTP process, a restarting child, or a child
+whose Beamtalk class is not resolvable — such a row is shown but not drillable.
+
+Returns `{ok, [Row]}` for a live supervisor (the empty list for a supervisor
+with no running children), or `{error, Reason}` (a structured `#beamtalk_error{}`)
+for a malformed pid string or a dead/unreachable supervisor — so a dead
+supervisor degrades to a clear error, never a crash.
+""".
+-spec child_handles(string() | binary()) ->
+    {ok, [#{binary() => term()}]} | {error, #beamtalk_error{}}.
+child_handles(SupPidStr) ->
+    case parse_pid(SupPidStr) of
+        {ok, SupPid} ->
+            case erlang:is_process_alive(SupPid) of
+                true -> {ok, child_handle_rows(SupPid)};
+                false -> {error, child_handles_dead_error(SupPidStr)}
+            end;
+        error ->
+            {error, child_handles_bad_pid_error(SupPidStr)}
+    end.
+
+%% Resolve a textual `<0.X.Y>` pid (binary or string) to a live pid, or `error`
+%% for a malformed string. `list_to_pid/1` raises `badarg` on a bad string, so
+%% it is guarded.
+-spec parse_pid(string() | binary()) -> {ok, pid()} | error.
+parse_pid(PidStr) when is_binary(PidStr) ->
+    parse_pid(binary_to_list(PidStr));
+parse_pid(PidStr) when is_list(PidStr) ->
+    try
+        {ok, list_to_pid(PidStr)}
+    catch
+        _:_ -> error
+    end;
+parse_pid(_) ->
+    error.
+
+%% Build the per-child inspection rows for a live supervisor pid. A worker pid
+%% (no children) yields `[]`. Classification reuses the snapshot machinery so a
+%% child supervisor is tagged `#beamtalkSupervisor`/`#otpSupervisor`, an actor
+%% `#beamtalkActor`, and a foreign process `#otpProcess` — uniformly for static
+%% and DynamicSupervisor children (which both come back through `which_children`).
+-spec child_handle_rows(pid()) -> [#{binary() => term()}].
+child_handle_rows(SupPid) ->
+    lists:filtermap(
+        fun(ChildTuple) -> child_handle_row(ChildTuple) end, safe_which_children(SupPid)
+    ).
+
+%% One child tuple → an optional row. `restarting` and `undefined` children are
+%% handled explicitly; a running child pid is classified and given a live handle.
+-spec child_handle_row(tuple()) -> {true, #{binary() => term()}} | false.
+child_handle_row({Id, restarting, _Type, _Mods}) ->
+    Label = restarting_label(Id),
+    {true, #{
+        <<"label">> => Label,
+        <<"className">> => maybe_binary(restarting_class_name(Id)),
+        <<"kind">> => <<"restarting">>,
+        <<"pid">> => null,
+        <<"registeredName">> => null,
+        <<"childCount">> => 0,
+        <<"isSupervisor">> => false,
+        <<"handle">> => null
+    }};
+child_handle_row({_Id, undefined, _Type, _Mods}) ->
+    false;
+child_handle_row({Id, ChildPid, Type, _Mods}) when is_pid(ChildPid) ->
+    {Kind, BClass} = classify(ChildPid, Id, Type),
+    IsSup = is_supervisor_kind(Kind),
+    {Active, _Total} =
+        case IsSup of
+            true -> safe_child_counts(ChildPid);
+            false -> {0, 0}
+        end,
+    RegName = registered_name(ChildPid),
+    {true, #{
+        <<"label">> => child_label(BClass, RegName),
+        <<"className">> => maybe_binary(class_name_of(BClass)),
+        <<"kind">> => atom_to_binary(Kind, utf8),
+        <<"pid">> => list_to_binary(pid_to_list(ChildPid)),
+        <<"registeredName">> => maybe_binary(RegName),
+        <<"childCount">> => Active,
+        <<"isSupervisor">> => IsSup,
+        <<"handle">> => child_handle(Kind, BClass, ChildPid)
+    }};
+child_handle_row(_Other) ->
+    false.
+
+%% A live, drillable handle for a child whose Beamtalk class is resolvable; `null`
+%% for a foreign OTP process (no Beamtalk wrapper) so the row renders but is not
+%% drillable. The handle tag mirrors `beamtalk_supervisor:wrap_child/3`: a
+%% supervisor child becomes `{beamtalk_supervisor, ...}`, anything else
+%% `{beamtalk_object, ...}` — the exact shapes the Inspector already follows.
+-spec child_handle(atom(), beamtalk_object() | nil, pid()) -> tuple() | null.
+child_handle(_Kind, nil, _ChildPid) ->
+    null;
+child_handle(Kind, BClass, ChildPid) ->
+    ClassName = class_name_of(BClass),
+    Module = element(3, BClass),
+    case is_supervisor_kind(Kind) of
+        true -> {beamtalk_supervisor, ClassName, Module, ChildPid};
+        false -> {beamtalk_object, ClassName, Module, ChildPid}
+    end.
+
+%% Display label: the Beamtalk class name, else the registered name, else a
+%% generic "process" tag for an anonymous foreign child.
+-spec child_label(beamtalk_object() | nil, atom() | nil) -> binary().
+child_label(BClass, RegName) ->
+    case class_name_of(BClass) of
+        nil ->
+            case RegName of
+                nil -> <<"process">>;
+                Name -> atom_to_binary(Name, utf8)
+            end;
+        ClassName ->
+            atom_to_binary(ClassName, utf8)
+    end.
+
+%% The class-name atom of a Beamtalk class object `{beamtalk_object, 'C class',
+%% Module, ClassPid}`, or `nil` for a foreign child.
+-spec class_name_of(beamtalk_object() | nil) -> atom() | nil.
+class_name_of(nil) ->
+    nil;
+class_name_of(BClass) when is_tuple(BClass) ->
+    beamtalk_object_class:class_name(element(4, BClass)).
+
+%% Best-effort behaviour-class atom for a restarting child id (a class atom when
+%% the id names a Beamtalk class), or `nil`.
+-spec restarting_class_name(atom() | term()) -> atom() | nil.
+restarting_class_name(Id) when is_atom(Id) ->
+    class_name_of(class_object(Id));
+restarting_class_name(_) ->
+    nil.
+
+-spec restarting_label(atom() | term()) -> binary().
+restarting_label(Id) when is_atom(Id) ->
+    atom_to_binary(Id, utf8);
+restarting_label(_) ->
+    <<"restarting">>.
+
+-spec maybe_binary(atom() | nil) -> binary() | null.
+maybe_binary(nil) -> null;
+maybe_binary(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8).
+
+-spec child_handles_dead_error(string() | binary()) -> #beamtalk_error{}.
+child_handles_dead_error(SupPidStr) ->
+    beamtalk_error:new(
+        stale_handle,
+        'Inspector',
+        children,
+        iolist_to_binary(
+            io_lib:format("supervisor ~ts is not alive", [to_text(SupPidStr)])
+        )
+    ).
+
+-spec child_handles_bad_pid_error(string() | binary()) -> #beamtalk_error{}.
+child_handles_bad_pid_error(SupPidStr) ->
+    beamtalk_error:new(
+        type_error,
+        'Inspector',
+        children,
+        iolist_to_binary(
+            io_lib:format("not a valid pid: ~ts", [to_text(SupPidStr)])
+        )
+    ).
+
+-spec to_text(string() | binary()) -> binary().
+to_text(Str) when is_binary(Str) -> Str;
+to_text(Str) when is_list(Str) -> list_to_binary(Str).
 
 %%% ============================================================================
 %%% Node construction
