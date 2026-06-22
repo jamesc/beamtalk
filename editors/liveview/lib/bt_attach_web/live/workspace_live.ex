@@ -1696,6 +1696,50 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, run_nav_query(socket, :implementors)}
   end
 
+  # ── protocol actions (BT-2639) ──────────────────────────────────────────────
+  #
+  # The protocol equivalent of Senders/Implementors: on a class-definition tab
+  # whose class is a Protocol, query its required methods / conforming classes and
+  # open the same result popover. Both ride the `nav-query` channel (kinds
+  # `required_methods` / `conforming_classes`); a non-protocol def tab is a
+  # graceful no-op so the buttons (only rendered for protocols) never query a
+  # plain class.
+  def handle_event("required_methods", _params, socket) do
+    {:noreply, run_protocol_nav_query(socket, :required_methods)}
+  end
+
+  def handle_event("conforming_classes", _params, socket) do
+    {:noreply, run_protocol_nav_query(socket, :conforming_classes)}
+  end
+
+  # Open a conforming-class row (BT-2639): clicking a class in the Conforming
+  # classes popover opens that class's definition pane and points the System
+  # Browser tree at it, then closes the popover. Reuses the existing open-class
+  # definition path (`open_definition/2`).
+  def handle_event("nav_open_class", %{"class" => class}, socket) when is_binary(class) do
+    socket =
+      socket
+      |> open_definition(class)
+      |> assign(nav_popover: nil)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("nav_open_class", _params, socket),
+    do: {:noreply, assign(socket, nav_popover: nil)}
+
+  # Open the Implementors of a required-method selector (BT-2639): clicking a row
+  # in the Required methods popover re-runs the `nav-query` `implementors` kind for
+  # that selector (reusing the BT-2495 nav path), replacing the popover contents
+  # with the implementing classes.
+  def handle_event("nav_required_open", %{"selector" => selector}, socket)
+      when is_binary(selector) and selector != "" do
+    {:noreply, run_nav_query_for(socket, :implementors, selector)}
+  end
+
+  def handle_event("nav_required_open", _params, socket),
+    do: {:noreply, assign(socket, nav_popover: nil)}
+
   # Open a site from the Senders/Implementors popover in the method-editor tab
   # strip (its class + selector + side) and point the System Browser at that
   # class/side too, so a jump to another class navigates the tree alongside the
@@ -2297,6 +2341,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The Senders/Implementors popover heading for a nav kind (BT-2495).
   defp nav_kind_label(:senders), do: "Senders"
   defp nav_kind_label(:implementors), do: "Implementors"
+  # BT-2639: the protocol-action popover headings.
+  defp nav_kind_label(:required_methods), do: "Required methods"
+  defp nav_kind_label(:conforming_classes), do: "Conforming classes"
 
   # ── Structured unified-diff view (BT-2636) ──────────────────────────────────
 
@@ -3376,7 +3423,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     # BT-2605: the reflected modifier badges (sealed/abstract/native) are refreshed
     # from the same fetch so a recompile-into/out-of a modifier shows on push
     # refresh; a transient failure (native_module nil) keeps the prior native flag.
-    {_definition, comment, native_module, class_modifiers} =
+    {_definition, comment, native_module, class_modifiers, is_protocol} =
       class_definition_info(socket, tab.class)
 
     resolved_native = native_module || tab.native_module
@@ -3384,6 +3431,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     %{
       tab
       | doc: comment,
+        is_protocol: is_protocol,
         native_module: resolved_native,
         # `nil` modifiers signal a transient fetch failure — keep the prior list
         # rather than clearing the badges (BT-2605 review).
@@ -3845,7 +3893,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         info = method_source_info(socket, class, side, selector)
         # BT-2605: fetch the owning class once so the editor can badge the
         # class-level modifiers (sealed/abstract/native) alongside the method.
-        {_def, _comment, class_native_module, class_modifiers} =
+        {_def, _comment, class_native_module, class_modifiers, _is_protocol} =
           class_definition_info(socket, class)
 
         # BT-2642: snapshot the owning class's origin + package from the loaded
@@ -4040,14 +4088,18 @@ defmodule BtAttachWeb.WorkspaceLive do
             _ -> ""
           end
 
+        # BT-2639: `is_protocol` is a runtime-reflection boolean on the
+        # class-definition row (op 4) — NOT a header string-sniff — so the
+        # def-tab can reliably render the protocol action row.
         {definition, doc_text(Map.get(result, "comment")), native_backing_module(result),
-         class_modifiers_from(result)}
+         class_modifiers_from(result), Map.get(result, "is_protocol") == true}
 
       _ ->
         # Failure sentinel: `nil` modifiers (distinct from `[]`, a plain class with
         # no modifiers) so a transient fetch failure can be told apart from a real
         # empty result and the caller can keep the prior badges (BT-2605 review).
-        {"", nil, nil, nil}
+        # `is_protocol` defaults to `false` on failure (no protocol action row).
+        {"", nil, nil, nil, false}
     end
   end
 
@@ -4153,6 +4205,13 @@ defmodule BtAttachWeb.WorkspaceLive do
         nil -> nil
       end
 
+    run_nav_query_for(socket, kind, selector)
+  end
+
+  # Run a senders/implementors `nav-query` for an explicit selector (BT-2639
+  # reuses this for the Required-methods → Implementors jump; BT-2495's
+  # active-tab path delegates here). A nil/empty selector is a graceful no-op.
+  defp run_nav_query_for(socket, kind, selector) do
     if is_binary(selector) and selector != "" do
       case Facade.dispatch(kind, %{selector: selector}, ctx(socket)) do
         {:value, %{"sites" => sites}} when is_list(sites) ->
@@ -4173,6 +4232,49 @@ defmodule BtAttachWeb.WorkspaceLive do
             nav_popover: %{
               kind: kind,
               selector: selector,
+              sites: [],
+              error: "Navigation unavailable."
+            }
+          )
+      end
+    else
+      socket
+    end
+  end
+
+  # Query a protocol's required methods / conforming classes (`nav-query`
+  # `required_methods` / `conforming_classes`) and open the result popover
+  # (BT-2639). The protocol equivalent of `run_nav_query/2`; the active tab must
+  # be a class-definition tab for a Protocol — otherwise a graceful no-op (the
+  # buttons only render for protocols). The popover's `selector` slot carries the
+  # protocol name (the popover head shows it next to the kind label, mirroring the
+  # method-selector display for senders/implementors). `kind` is
+  # `:required_methods` | `:conforming_classes`; the facade op name matches.
+  defp run_protocol_nav_query(socket, kind) do
+    protocol =
+      case active_tab(socket.assigns) do
+        %{kind: :def, class: class, is_protocol: true} -> class
+        _ -> nil
+      end
+
+    if is_binary(protocol) and protocol != "" do
+      case Facade.dispatch(kind, %{protocol: protocol}, ctx(socket)) do
+        {:value, %{"sites" => sites}} when is_list(sites) ->
+          assign(socket, nav_popover: %{kind: kind, selector: protocol, sites: sites})
+
+        {:value, _other} ->
+          assign(socket, nav_popover: %{kind: kind, selector: protocol, sites: []})
+
+        {:error, reason} ->
+          assign(socket,
+            nav_popover: %{kind: kind, selector: protocol, sites: [], error: facade_error(reason)}
+          )
+
+        _other ->
+          assign(socket,
+            nav_popover: %{
+              kind: kind,
+              selector: protocol,
               sites: [],
               error: "Navigation unavailable."
             }
@@ -4395,6 +4497,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     disk_source: binary | nil, # methods only — on-disk body captured at open (BT-2550); nil when unknown
   #     doc: binary | nil,       # BT-2558 read-only doc block: method `///` doc / class comment
   #     signature: binary | nil, # BT-2558 method signature (nil for a class-definition tab)
+  #     is_protocol: boolean,    # BT-2639 def tabs only — gates the protocol action row
+
   #     class_modifiers: [:sealed | :abstract] | nil, # BT-2605 reflected class modifiers; nil = transient fetch failure (no badges)
   #     class_native: boolean,   # BT-2605 native: class flag, for the Native badge (all tab kinds)
   #     source_origin: "stdlib" | "dependency" | "project" | nil, # BT-2642 owning class origin, for the header package badge
@@ -4525,7 +4629,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         # definition buffer and its dirty flag are left untouched, so an
         # in-progress edit survives a tab switch. The skeleton `definition` the
         # browse also returns is intentionally discarded here.
-        {_definition, comment, native_module, class_modifiers} =
+        {_definition, comment, native_module, class_modifiers, is_protocol} =
           class_definition_info(socket, class)
 
         # Keep the prior backing module if the re-fetch fails transiently
@@ -4539,6 +4643,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         refreshed = %{
           existing
           | doc: comment,
+            is_protocol: is_protocol,
             native_module: resolved_native,
             # BT-2605: refresh the reflected modifier badges off the same fetch; a
             # `nil` result is the transient-failure sentinel, so keep the prior
@@ -4557,7 +4662,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         # the read-only doc block. Without the skeleton the editor opened empty —
         # the doc block rendered but the class definition itself was missing
         # (BT-2558 only wired the comment).
-        {definition, comment, native_module, class_modifiers} =
+        {definition, comment, native_module, class_modifiers, is_protocol} =
           class_definition_info(socket, class)
 
         # BT-2642: snapshot the class's origin + package for the header badge.
@@ -4569,6 +4674,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           class: class,
           side: nil,
           selector: nil,
+          # BT-2639: is this class a Protocol? Gates the protocol action row
+          # (Required methods / Conforming classes) on the def tab.
+          is_protocol: is_protocol,
           # BT-2642: package/origin badge for the editor header.
           source_origin: source_origin,
           package: package,
@@ -4619,7 +4727,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp add_new_method_tab(socket, id, class, side) do
     # BT-2605: the class already exists, so fetch it to badge the class-level
     # modifiers (sealed/abstract/native) on the new-method tab.
-    {_def, _comment, native_module, class_modifiers} = class_definition_info(socket, class)
+    {_def, _comment, native_module, class_modifiers, _is_protocol} =
+      class_definition_info(socket, class)
 
     # BT-2642: snapshot the class's origin + package for the header badge.
     {source_origin, package} = class_origin_package(socket, class)
@@ -6768,8 +6877,41 @@ defmodule BtAttachWeb.WorkspaceLive do
       <div :if={!@nav[:error] and @nav.sites == []} class="nav-empty">
         No {nav_kind_label(@nav.kind)} found.
       </div>
+      <%!-- Conforming classes (BT-2639): each row is a class — clicking opens its
+           definition pane (`nav_open_class`), not a method tab. --%>
       <button
         :for={site <- @nav.sites}
+        :if={@nav.kind == :conforming_classes}
+        type="button"
+        class="nav-site"
+        phx-click="nav_open_class"
+        phx-value-class={site["class"]}
+      >
+        <span class="nav-site-name mono">{site["class"]}</span>
+      </button>
+      <%!-- Required methods (BT-2639): each row is a required selector — clicking
+           opens its Implementors (`nav_required_open`, reusing the BT-2495 nav
+           path). The protocol owner column is the popover head; rows show the
+           bare selector (with a class-side tag where applicable). --%>
+      <button
+        :for={site <- @nav.sites}
+        :if={@nav.kind == :required_methods}
+        type="button"
+        class="nav-site"
+        phx-click="nav_required_open"
+        phx-value-selector={site["method"]}
+        phx-value-side={if site["class_side"] == true, do: "class", else: "instance"}
+      >
+        <span class="nav-site-name mono">
+          {site["method"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span>
+        </span>
+      </button>
+      <%!-- Senders / Implementors (BT-2495): each row is a (class, side, selector)
+           call/definition site — clicking opens that method tab + navigates the
+           browser tree (`nav_open`). --%>
+      <button
+        :for={site <- @nav.sites}
+        :if={@nav.kind in [:senders, :implementors]}
         type="button"
         class="nav-site"
         phx-click="nav_open"
@@ -8174,6 +8316,24 @@ defmodule BtAttachWeb.WorkspaceLive do
                             </button>
                             <.nav_popover nav={@nav_popover} />
                           </div>
+                          <%!-- Protocol action row (BT-2639): the protocol
+                             equivalent of Senders/Implementors — only on a
+                             class-definition tab whose class is a Protocol.
+                             Observers get the same row in the read-only branch. --%>
+                          <div
+                            :if={
+                              active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]
+                            }
+                            class="nav-actions"
+                          >
+                            <button class="btn" type="button" phx-click="required_methods">
+                              Required methods
+                            </button>
+                            <button class="btn" type="button" phx-click="conforming_classes">
+                              Conforming classes
+                            </button>
+                            <.nav_popover nav={@nav_popover} />
+                          </div>
                           <span class="spacer"></span>
                           <button class="btn btn-sm primary" type="submit">
                             Compile <span class="k">⌘S</span>
@@ -8201,6 +8361,20 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </button>
                         <button class="btn" type="button" phx-click="implementors">
                           Implementors
+                        </button>
+                        <.nav_popover nav={@nav_popover} />
+                      </div>
+                      <%!-- Observers also get the protocol action row (BT-2639);
+                         both ride the read-only `nav-query` op. --%>
+                      <div
+                        :if={active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]}
+                        class="nav-actions"
+                      >
+                        <button class="btn" type="button" phx-click="required_methods">
+                          Required methods
+                        </button>
+                        <button class="btn" type="button" phx-click="conforming_classes">
+                          Conforming classes
                         </button>
                         <.nav_popover nav={@nav_popover} />
                       </div>

@@ -152,6 +152,74 @@ handle_references_empty_class_returns_error_test() ->
     assert_error_response(Response).
 
 %%====================================================================
+%% handle/4 — protocol kinds validation (BT-2639)
+%%====================================================================
+
+handle_required_methods_missing_class_returns_error_mentioning_class_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>, #{<<"kind">> => <<"required_methods">>}, Msg, self()
+    ),
+    Decoded = assert_error_response(Response),
+    ErrBin = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrBin, <<"class">>)).
+
+handle_conforming_classes_missing_class_returns_error_mentioning_class_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>, #{<<"kind">> => <<"conforming_classes">>}, Msg, self()
+    ),
+    Decoded = assert_error_response(Response),
+    ErrBin = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrBin, <<"class">>)).
+
+handle_required_methods_empty_class_returns_error_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>,
+        #{<<"kind">> => <<"required_methods">>, <<"class">> => <<>>},
+        Msg,
+        self()
+    ),
+    assert_error_response(Response).
+
+handle_conforming_classes_empty_class_returns_error_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>,
+        #{<<"kind">> => <<"conforming_classes">>, <<"class">> => <<>>},
+        Msg,
+        self()
+    ),
+    assert_error_response(Response).
+
+%% An unknown protocol name resolves to an empty site list (not a validation
+%% error), mirroring senders/implementors degradation for unknown selectors.
+handle_required_methods_unknown_protocol_returns_empty_sites_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>,
+        #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"__no_such_protocol_nav__">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Response),
+    ?assertMatch(#{<<"status">> := [<<"done">>]}, Decoded),
+    ?assertMatch(#{<<"value">> := #{<<"sites">> := []}}, Decoded).
+
+handle_conforming_classes_unknown_protocol_returns_empty_sites_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>,
+        #{<<"kind">> => <<"conforming_classes">>, <<"class">> => <<"__no_such_protocol_nav__">>},
+        Msg,
+        self()
+    ),
+    Decoded = json:decode(Response),
+    ?assertMatch(#{<<"status">> := [<<"done">>]}, Decoded),
+    ?assertMatch(#{<<"value">> := #{<<"sites">> := []}}, Decoded).
+
+%%====================================================================
 %% handle/4 — success paths (require a live beamtalk_xref)
 %%====================================================================
 
@@ -492,6 +560,95 @@ nav_tests(_Pid) ->
             ),
             After = erlang:system_info(atom_count),
             ?assertEqual(Before, After)
+        end}
+    ].
+
+%%====================================================================
+%% handle/4 — protocol kinds success paths (BT-2639)
+%%====================================================================
+
+protocol_setup() ->
+    ok = beamtalk_protocol_registry:init(),
+    %% A protocol with one instance-side and one class-side requirement so the
+    %% class-side `class ` prefix split is exercised.
+    ok = beamtalk_protocol_registry:register_protocol(#{
+        name => 'NavTestProtocol',
+        module => nav_test_protocol_mod,
+        required_methods => [#{selector => 'printOn:', arity => 1}],
+        required_class_methods => [#{selector => 'fromString:', arity => 1}],
+        type_params => [],
+        extending => undefined
+    }),
+    ok.
+
+protocol_cleanup(_) ->
+    catch ets:delete(beamtalk_protocol_registry, 'NavTestProtocol'),
+    ok.
+
+protocol_query_test_() ->
+    {setup, fun protocol_setup/0, fun protocol_cleanup/1, fun protocol_tests/1}.
+
+protocol_tests(_) ->
+    [
+        {"required_methods returns the protocol's required selectors", fun() ->
+            Msg = make_msg(),
+            Response = beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"NavTestProtocol">>},
+                Msg,
+                self()
+            ),
+            Decoded = json:decode(Response),
+            #{<<"value">> := #{<<"sites">> := Sites}} = Decoded,
+            Methods = [maps:get(<<"method">>, R) || R <- Sites],
+            ?assert(lists:member(<<"printOn:">>, Methods)),
+            %% The class-side requirement is stripped of its `class ` prefix.
+            ?assert(lists:member(<<"fromString:">>, Methods))
+        end},
+        {"required_methods class-side requirement carries class_side=true", fun() ->
+            Msg = make_msg(),
+            Response = beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"NavTestProtocol">>},
+                Msg,
+                self()
+            ),
+            Decoded = json:decode(Response),
+            #{<<"value">> := #{<<"sites">> := Sites}} = Decoded,
+            [ClassRow] = [R || R <- Sites, maps:get(<<"method">>, R) =:= <<"fromString:">>],
+            ?assertEqual(true, maps:get(<<"class_side">>, ClassRow)),
+            %% Instance-side requirement is not class-side.
+            [InstRow] = [R || R <- Sites, maps:get(<<"method">>, R) =:= <<"printOn:">>],
+            ?assertEqual(false, maps:get(<<"class_side">>, InstRow))
+        end},
+        {"required_methods row carries the owning protocol as `class`", fun() ->
+            Msg = make_msg(),
+            Response = beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"NavTestProtocol">>},
+                Msg,
+                self()
+            ),
+            Decoded = json:decode(Response),
+            #{<<"value">> := #{<<"sites">> := [Row | _]}} = Decoded,
+            ?assertEqual(<<"NavTestProtocol">>, maps:get(<<"class">>, Row)),
+            ?assert(maps:is_key(<<"source_file">>, Row)),
+            ?assert(maps:is_key(<<"line">>, Row))
+        end},
+        {"conforming_classes returns an (possibly empty) sites list", fun() ->
+            %% No live classes are registered in this unit suite, so the result is
+            %% an empty list — the key invariant is the wire shape, not membership.
+            Msg = make_msg(),
+            Response = beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"conforming_classes">>, <<"class">> => <<"NavTestProtocol">>},
+                Msg,
+                self()
+            ),
+            Decoded = json:decode(Response),
+            ?assertMatch(#{<<"status">> := [<<"done">>]}, Decoded),
+            #{<<"value">> := #{<<"sites">> := Sites}} = Decoded,
+            ?assert(is_list(Sites))
         end}
     ].
 

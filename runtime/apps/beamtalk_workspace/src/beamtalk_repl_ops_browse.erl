@@ -495,6 +495,14 @@ browse_class_definition(ClassName) ->
                 %% runtime reflection today, so it is not surfaced here.)
                 <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
                 <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
+                %% BT-2639: a structural reflection boolean (not a header
+                %% string-sniff) so the System Browser can reliably render the
+                %% protocol-definition action row (Required methods / Conforming
+                %% classes). Mirrors the `is_protocol` field op 1
+                %% (`browse-classes`) already carries on each class row.
+                <<"is_protocol">> => safe_bool(fun() ->
+                    beamtalk_runtime_api:is_protocol(ClassName)
+                end),
                 <<"origin">> => origin_of(SourceFile),
                 <<"source_origin">> => SourceOrigin,
                 <<"package">> => package_of(ModName, SourceOrigin),

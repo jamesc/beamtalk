@@ -52,6 +52,14 @@ defmodule BtAttach.FacadeTest do
     def implementors_of(selector),
       do: record({:implementors_of, selector}) && {:value, %{"sites" => []}}
 
+    # BT-2639: the protocol-definition action row — required methods / conforming
+    # classes (nav-query protocol kinds).
+    def required_methods_of(protocol),
+      do: record({:required_methods_of, protocol}) && {:value, %{"sites" => []}}
+
+    def conforming_classes_of(protocol),
+      do: record({:conforming_classes_of, protocol}) && {:value, %{"sites" => []}}
+
     def symbol_index(scope),
       do: record({:symbol_index, scope}) && {:value, %{"classes" => []}}
 
@@ -144,7 +152,7 @@ defmodule BtAttach.FacadeTest do
                      subscribe_object unsubscribe_object pid_stats
                      browse_classes browse_protocols browse_method_source
                      browse_class_definition browse_native_source list_tests
-                     senders implementors symbols
+                     senders implementors required_methods conforming_classes symbols
                      git_status git_diff git_log
                      autoflush)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
@@ -320,6 +328,45 @@ defmodule BtAttach.FacadeTest do
                {:value, %{"sites" => []}}
 
       assert Facade.dispatch(:symbols, %{scope: "all"}, observer) == {:value, %{"classes" => []}}
+    end
+  end
+
+  describe "protocol actions (Required methods / Conforming classes, BT-2639)" do
+    test "required_methods/conforming_classes route to the client and return the live term" do
+      assert Facade.dispatch(:required_methods, %{protocol: "Printable"}) ==
+               {:value, %{"sites" => []}}
+
+      assert Facade.dispatch(:conforming_classes, %{protocol: "Printable"}) ==
+               {:value, %{"sites" => []}}
+
+      recorded = RecordingClient.calls() |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+      assert recorded == MapSet.new([:required_methods_of, :conforming_classes_of])
+    end
+
+    test "the protocol name is passed through" do
+      Facade.dispatch(:required_methods, %{protocol: "Awaitable"})
+      Facade.dispatch(:conforming_classes, %{protocol: "TimeoutToken"})
+
+      assert {:required_methods_of, "Awaitable"} in RecordingClient.calls()
+      assert {:conforming_classes_of, "TimeoutToken"} in RecordingClient.calls()
+    end
+
+    test "a non-binary protocol is invalid params, with no dist call" do
+      assert Facade.dispatch(:required_methods, %{protocol: :Printable}) ==
+               {:error, :invalid_params}
+
+      assert Facade.dispatch(:conforming_classes, %{protocol: 42}) == {:error, :invalid_params}
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may use the protocol actions (read capability)" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:required_methods, %{protocol: "Printable"}, observer) ==
+               {:value, %{"sites" => []}}
+
+      assert Facade.dispatch(:conforming_classes, %{protocol: "Printable"}, observer) ==
+               {:value, %{"sites" => []}}
     end
   end
 

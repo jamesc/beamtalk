@@ -322,6 +322,33 @@ defmodule BtAttach.Workspace do
     do: dispatch_browse("nav-query", %{"kind" => "implementors", "selector" => selector})
 
   @doc """
+  Return the **required methods** of a protocol (`nav-query`
+  `kind=required_methods`, BT-2639) — the protocol equivalent of Implementors,
+  backing the System Browser's protocol-definition action row. `protocol` is the
+  protocol name. Each `"sites"` row carries `class` (the protocol), `class_side`
+  (class-side requirements distinguished from instance-side), `method` (the
+  required selector), and `line`/`source_file` (`null` — a requirement has no
+  defining site). Backed by `beamtalk_protocol_registry`, so a non-protocol /
+  unknown name resolves to an empty list, not an error.
+  """
+  @spec required_methods_of(String.t()) :: {:value, term()} | {:error, term()}
+  def required_methods_of(protocol) when is_binary(protocol),
+    do: dispatch_browse("nav-query", %{"kind" => "required_methods", "class" => protocol})
+
+  @doc """
+  Return the **conforming classes** of a protocol (`nav-query`
+  `kind=conforming_classes`, BT-2639) — the protocol equivalent of Senders,
+  backing the System Browser's protocol-definition action row. `protocol` is the
+  protocol name. Each `"sites"` row carries `class` (a conforming class),
+  `class_side` (`false`), `method` (`null` — a class, not a selector), and
+  `source_file`. Conformance is structural (BT-1611). Like `required_methods_of/1`,
+  an unknown / non-protocol name yields an empty list rather than an error.
+  """
+  @spec conforming_classes_of(String.t()) :: {:value, term()} | {:error, term()}
+  def conforming_classes_of(protocol) when is_binary(protocol),
+    do: dispatch_browse("nav-query", %{"kind" => "conforming_classes", "class" => protocol})
+
+  @doc """
   Return the workspace symbol outline (`nav-symbols`, BT-2495) — the omni-search
   index over every loaded class **and** its locally-defined selectors. The result
   carries `"classes"` (one row per class: `name`, `source_file`, `line`, and a
