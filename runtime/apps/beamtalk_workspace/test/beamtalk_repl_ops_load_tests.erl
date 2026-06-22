@@ -407,17 +407,17 @@ get_file_mtime_missing_file_test() ->
     ?assertEqual({{0, 0, 0}, {0, 0, 0}}, Mtime).
 
 %%====================================================================
-%% find_erl_files/1 (BT-1716)
+%% find_erl_files/2 (BT-1716, BT-2653)
 %%====================================================================
 
 find_erl_files_nonexistent_dir_test() ->
     Missing = "missing_native_test_" ++ integer_to_list(erlang:unique_integer([positive])),
-    ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Missing)).
+    ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Missing, false)).
 
 find_erl_files_empty_dir_test() ->
     Dir = make_temp_dir(),
     try
-        ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Dir))
+        ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Dir, false))
     after
         rm_temp_dir(Dir)
     end.
@@ -428,7 +428,7 @@ find_erl_files_finds_erl_only_test() ->
         write_temp_file(Dir, "my_mod.erl", <<"-module(my_mod).">>),
         write_temp_file(Dir, "readme.md", <<"docs">>),
         write_temp_file(Dir, "something.bt", <<"Object subclass: X">>),
-        Found = beamtalk_repl_ops_load:find_erl_files(Dir),
+        Found = beamtalk_repl_ops_load:find_erl_files(Dir, false),
         ?assertEqual(1, length(Found)),
         ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found))
     after
@@ -442,11 +442,30 @@ find_erl_files_skips_test_dir_test() ->
         TestDir = filename:join(Dir, "test"),
         ok = file:make_dir(TestDir),
         write_temp_file(TestDir, "my_mod_tests.erl", <<"-module(my_mod_tests).">>),
-        Found = beamtalk_repl_ops_load:find_erl_files(Dir),
+        %% include_tests=false: native/test/ helpers are excluded.
+        Found = beamtalk_repl_ops_load:find_erl_files(Dir, false),
         ?assertEqual(1, length(Found)),
         ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found)),
         %% Test file should not be included.
         ?assertNot(lists:any(fun(F) -> lists:suffix("my_mod_tests.erl", F) end, Found))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% BT-2653: include_tests=true MUST include native/test/ helpers so a `.bt`
+%% test can drive them via `(Erlang <helper>) <msg>` on the test-load path.
+find_erl_files_includes_test_dir_when_flag_set_test() ->
+    Dir = make_temp_dir(),
+    try
+        write_temp_file(Dir, "my_mod.erl", <<"-module(my_mod).">>),
+        TestDir = filename:join(Dir, "test"),
+        ok = file:make_dir(TestDir),
+        write_temp_file(TestDir, "my_helper.erl", <<"-module(my_helper).">>),
+        Found = beamtalk_repl_ops_load:find_erl_files(Dir, true),
+        ?assertEqual(2, length(Found)),
+        ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found)),
+        %% Test helper IS included when the flag is set.
+        ?assert(lists:any(fun(F) -> lists:suffix("my_helper.erl", F) end, Found))
     after
         rm_temp_dir(Dir)
     end.
@@ -911,3 +930,222 @@ activate_deps_adds_hex_ebin_paths_test() ->
 activate_dep_ebin_nonexistent_test() ->
     %% Non-existent dir should be a no-op (delegated to beamtalk_module_activation).
     ?assertEqual({ok, []}, beamtalk_module_activation:activate_ebin("/nonexistent/path")).
+
+%%====================================================================
+%% render_class_header/1 (BT-2653)
+%%====================================================================
+
+render_class_header_empty_test() ->
+    %% An empty index still produces a valid, guarded header.
+    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(#{})),
+    ?assert(binary:match(Bin, <<"-ifndef(BEAMTALK_CLASSES_HRL)">>) =/= nomatch),
+    ?assert(binary:match(Bin, <<"-define(BEAMTALK_CLASSES_HRL, true)">>) =/= nomatch),
+    ?assert(binary:match(Bin, <<"-endif">>) =/= nomatch),
+    %% No class macros for an empty index.
+    ?assertEqual(nomatch, binary:match(Bin, <<"BT_CLASS_MODULE_">>)).
+
+render_class_header_defines_macros_test() ->
+    Index = #{
+        <<"HTTPResponse">> => <<"bt@http@http_response">>,
+        <<"Counter">> => <<"bt@counter">>
+    },
+    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(Index)),
+    ?assert(
+        binary:match(
+            Bin, <<"-define(BT_CLASS_MODULE_HTTPResponse, 'bt@http@http_response').">>
+        ) =/= nomatch
+    ),
+    ?assert(
+        binary:match(Bin, <<"-define(BT_CLASS_MODULE_Counter, 'bt@counter').">>) =/= nomatch
+    ).
+
+render_class_header_sorted_test() ->
+    %% Entries are sorted for deterministic output (Aaa before Zzz).
+    Index = #{<<"Zzz">> => <<"bt@zzz">>, <<"Aaa">> => <<"bt@aaa">>},
+    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(Index)),
+    {AaaPos, _} = binary:match(Bin, <<"BT_CLASS_MODULE_Aaa">>),
+    {ZzzPos, _} = binary:match(Bin, <<"BT_CLASS_MODULE_Zzz">>),
+    ?assert(AaaPos < ZzzPos).
+
+render_class_header_skips_unsafe_names_test() ->
+    %% A class name that is not a bare identifier, or a module name that would
+    %% break out of the quoted atom, must be skipped so the generated header
+    %% stays compilable. The safe entry survives; the unsafe ones are dropped
+    %% and the result still includes/compiles to a valid Erlang header.
+    Index = #{
+        <<"Good">> => <<"bt@good">>,
+        %% Class name with a space → invalid macro identifier.
+        <<"Bad Name">> => <<"bt@bad">>,
+        %% Module name with a quote → would break the quoted atom.
+        <<"Quoted">> => <<"bt@qu'ote">>
+    },
+    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(Index)),
+    ?assert(binary:match(Bin, <<"-define(BT_CLASS_MODULE_Good, 'bt@good').">>) =/= nomatch),
+    ?assertEqual(nomatch, binary:match(Bin, <<"Bad Name">>)),
+    ?assertEqual(nomatch, binary:match(Bin, <<"qu'ote">>)),
+    %% Sanity: the rendered header is parseable by erl_scan (no stray tokens).
+    {ok, _Tokens, _} = erl_scan:string(binary_to_list(Bin)).
+
+%%====================================================================
+%% regenerate_native_class_header/1 (BT-2653)
+%%====================================================================
+
+regenerate_native_class_header_writes_file_test() ->
+    %% The header is written under _build/dev/native/include/ even when no
+    %% classes are registered (empty index → guarded, macro-free header).
+    %% The first write reports `true` (content changed from nothing).
+    Dir = filename:absname(make_temp_dir()),
+    try
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        HrlPath = filename:join(
+            beamtalk_repl_ops_load:native_generated_include_dir(Dir),
+            "beamtalk_classes.hrl"
+        ),
+        ?assert(filelib:is_file(HrlPath)),
+        {ok, Content} = file:read_file(HrlPath),
+        ?assert(binary:match(Content, <<"BEAMTALK_CLASSES_HRL">>) =/= nomatch)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+regenerate_native_class_header_idempotent_test() ->
+    %% A second regeneration with the same class set must report `false` (no
+    %% change) so callers don't force a needless native rebuild. No leftover
+    %% .tmp files should remain.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        ?assertEqual(false, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        IncludeDir = beamtalk_repl_ops_load:native_generated_include_dir(Dir),
+        {ok, Entries} = file:list_dir(IncludeDir),
+        ?assertEqual(
+            [], [E || E <- Entries, lists:prefix("beamtalk_classes.hrl.tmp", E)]
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+native_generated_include_dir_layout_test() ->
+    %% Matches the CLI's BuildLayout native_include_dir/0 location so the
+    %% workspace and CLI share one generated-header directory.
+    Dir = "/projects/foo",
+    ?assertEqual(
+        "/projects/foo/_build/dev/native/include",
+        beamtalk_repl_ops_load:native_generated_include_dir(Dir)
+    ).
+
+%%====================================================================
+%% compile_native_erl_files/2 — generated-header include path (BT-2653)
+%%====================================================================
+
+compile_native_uses_generated_class_header_test() ->
+    %% Regression for the symptom-2 `spec for undefined function` cascade: a
+    %% native module that `-include("beamtalk_classes.hrl")` must compile
+    %% against the freshly generated header on the workspace path, the same way
+    %% the `beamtalk test` CLI builds it.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        %% Regenerate the header into _build/dev/native/include/.
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        %% A native module that includes the generated header. Even with an
+        %% empty class index the include must resolve (guard + no macros), so
+        %% compilation succeeds rather than failing on a missing header.
+        ErlSrc = <<
+            "-module(bt_native_test_uses_header).\n"
+            "-include(\"beamtalk_classes.hrl\").\n"
+            "-export([ok/0]).\n"
+            "ok() -> included.\n"
+        >>,
+        ErlPath = write_temp_file(NativeDir, "bt_native_test_uses_header.erl", ErlSrc),
+        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        ?assertEqual([], Errors),
+        ?assertEqual(1, Count),
+        ?assertEqual(included, bt_native_test_uses_header:ok()),
+        %% Cleanup.
+        code:purge(bt_native_test_uses_header),
+        code:delete(bt_native_test_uses_header)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%%====================================================================
+%% Test-load native path: native/test/ helper end-to-end (BT-2653)
+%%
+%% Mirrors the beamtalk-http failure: a `.bt` test drives a test-only native
+%% helper in native/test/ via `(Erlang <helper>) <msg>`. On the test-load path
+%% (sync_project with include_tests=true) the helper must be discovered,
+%% compiled, and code-pathed so the call resolves.
+%%====================================================================
+
+test_load_compiles_native_test_helper_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        %% A minimal package: beamtalk.toml + a native/test/ helper module.
+        write_temp_file(
+            Dir, "beamtalk.toml", <<"[package]\nname = \"fixture\"\n">>
+        ),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        NativeTestDir = filename:join(NativeDir, "test"),
+        ok = file:make_dir(NativeTestDir),
+        HelperSrc = <<
+            "-module(bt_native_test_helper_e2e).\n"
+            "-export([start/0]).\n"
+            "start() -> started.\n"
+        >>,
+        write_temp_file(NativeTestDir, "bt_native_test_helper_e2e.erl", HelperSrc),
+        %% Ensure the helper is not loaded before the test-load path runs.
+        code:purge(bt_native_test_helper_e2e),
+        code:delete(bt_native_test_helper_e2e),
+        ?assertEqual(false, code:is_loaded(bt_native_test_helper_e2e)),
+        %% Run the shared test-load path (include_tests=true).
+        {ok, Result} = beamtalk_repl_ops_load:sync_project(
+            Dir, #{include_tests => true}
+        ),
+        ?assertEqual([], maps:get(errors, Result, [])),
+        %% The native/test/ helper is now compiled and callable.
+        ?assertNotEqual(false, code:is_loaded(bt_native_test_helper_e2e)),
+        ?assertEqual(started, bt_native_test_helper_e2e:start()),
+        %% Cleanup.
+        code:purge(bt_native_test_helper_e2e),
+        code:delete(bt_native_test_helper_e2e)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+test_load_excludes_native_test_helper_without_flag_test() ->
+    %% Symmetry check: a plain load (include_tests=false) must NOT compile the
+    %% native/test/ helper — those stay EUnit-only, off the runtime code path.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(
+            Dir, "beamtalk.toml", <<"[package]\nname = \"fixture2\"\n">>
+        ),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        NativeTestDir = filename:join(NativeDir, "test"),
+        ok = file:make_dir(NativeTestDir),
+        HelperSrc = <<
+            "-module(bt_native_test_helper_excluded).\n"
+            "-export([start/0]).\n"
+            "start() -> started.\n"
+        >>,
+        write_temp_file(
+            NativeTestDir, "bt_native_test_helper_excluded.erl", HelperSrc
+        ),
+        code:purge(bt_native_test_helper_excluded),
+        code:delete(bt_native_test_helper_excluded),
+        {ok, _Result} = beamtalk_repl_ops_load:sync_project(
+            Dir, #{include_tests => false}
+        ),
+        %% Helper must remain unloaded under the normal load path.
+        ?assertEqual(false, code:is_loaded(bt_native_test_helper_excluded))
+    after
+        rm_temp_dir(Dir)
+    end.
