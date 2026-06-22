@@ -659,12 +659,14 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        # other stubbed class is ordinary (native: false).
        "native" => class in ["Subprocess", "Headless"],
        "backing_module" => native_backing(class),
-       # BT-2605: reflected class modifiers (sealed/abstract), mirroring the real
-       # op-4 result keys (booleans from runtime reflection, NOT parsed from the
-       # `definition` skeleton). `Ledger` is sealed, `Shape` abstract; every other
-       # stubbed class carries neither. (`browse_class_definition` answers for any
-       # class name, so `Shape` need not be in the class tree to be opened.)
+       # BT-2605/BT-2629: reflected class modifiers (sealed/typed/abstract),
+       # mirroring the real op-4 result keys (booleans from runtime reflection, NOT
+       # parsed from the `definition` skeleton). `Ledger` is sealed, `Vector` typed,
+       # `Shape` abstract; every other stubbed class carries neither.
+       # (`browse_class_definition` answers for any class name, so `Shape`/`Vector`
+       # need not be in the class tree to be opened.)
        "sealed" => class == "Ledger",
+       "typed" => class == "Vector",
        "abstract" => class == "Shape",
        # BT-2639: `is_protocol` is a runtime-reflection boolean on op 4, gating
        # the def-tab protocol action row. `Printable` stands in for a protocol

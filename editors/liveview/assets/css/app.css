@@ -460,6 +460,7 @@
 }
 .editor-meta .modifier-tag.side     { --mt-color: var(--t-keyword); }   /* Class — blue */
 .editor-meta .modifier-tag.sealed   { --mt-color: var(--t-reserved); }  /* Sealed — red */
+.editor-meta .modifier-tag.typed    { --mt-color: var(--t-symbol); }    /* Typed — teal */
 .editor-meta .modifier-tag.abstract { --mt-color: var(--accent); }      /* Abstract — amber */
 .editor-meta .modifier-tag.native   { --mt-color: var(--t-global); }    /* Native — gold */
 

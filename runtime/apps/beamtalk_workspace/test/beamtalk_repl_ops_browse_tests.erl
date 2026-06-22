@@ -643,7 +643,41 @@ browse_tests(#{class_name := Class}) ->
                 )
             ),
             ?assertEqual(false, maps:get(<<"sealed">>, Value)),
-            ?assertEqual(false, maps:get(<<"abstract">>, Value))
+            ?assertEqual(false, maps:get(<<"abstract">>, Value)),
+            %% BT-2629: a plain fixture class is not typed.
+            ?assertEqual(false, maps:get(<<"typed">>, Value))
+        end},
+        {"browse-class-definition reports typed=true for a typed-declared class", fun() ->
+            %% BT-2629: op 4 surfaces the already-emitted is_typed meta flag as a
+            %% runtime-reflected boolean (mirroring sealed/abstract), so the IDE
+            %% editor header can render the Typed badge without parsing the
+            %% synthesized definition skeleton.
+            Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+            TypedName = list_to_atom("BrowseTyped_" ++ Uniq),
+            TypedModule = list_to_atom("bt@test@browse_typed_" ++ Uniq),
+            {TypedPid, Owned} = start_browse_class(TypedName, #{
+                name => TypedName,
+                module => TypedModule,
+                superclass => none,
+                is_typed => true
+            }),
+            try
+                Value = decode_value(
+                    beamtalk_repl_ops_browse:handle(
+                        <<"browse-class-definition">>,
+                        #{<<"class">> => atom_to_binary(TypedName, utf8)},
+                        make_msg(),
+                        self()
+                    )
+                ),
+                ?assertEqual(true, maps:get(<<"typed">>, Value))
+            after
+                catch beamtalk_xref:purge_class(TypedName),
+                case Owned of
+                    true -> catch gen_server:stop(TypedPid);
+                    false -> ok
+                end
+            end
         end},
         {"browse-class-definition reports is_protocol=false for an ordinary class", fun() ->
             %% BT-2639: op 4 surfaces is_protocol (runtime reflection, not a header

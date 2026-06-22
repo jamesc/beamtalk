@@ -4475,7 +4475,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # badge. (`typed` is a compile-time annotation with no runtime reflection today;
   # see BT-2605 follow-up — it is intentionally absent until the runtime exposes it.)
   defp class_modifiers_from(result) do
-    Enum.filter([:sealed, :abstract], &(Map.get(result, Atom.to_string(&1)) == true))
+    Enum.filter([:sealed, :typed, :abstract], &(Map.get(result, Atom.to_string(&1)) == true))
   end
 
   # BT-2578: the backing Erlang module name of a native: class (ADR 0056), or
@@ -4913,7 +4913,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     signature: binary | nil, # BT-2558 method signature (nil for a class-definition tab)
   #     is_protocol: boolean,    # BT-2639 def tabs only — gates the protocol action row
 
-  #     class_modifiers: [:sealed | :abstract] | nil, # BT-2605 reflected class modifiers; nil = transient fetch failure (no badges)
+  #     class_modifiers: [:sealed | :typed | :abstract] | nil, # BT-2605 reflected class modifiers; nil = transient fetch failure (no badges)
   #     class_native: boolean,   # BT-2605 native: class flag, for the Native badge (all tab kinds)
   #     source_origin: "stdlib" | "dependency" | "project" | nil, # BT-2642 owning class origin, for the header package badge
   #     package: binary | nil,   # BT-2642 owning class package name, for the header package badge
@@ -5377,6 +5377,13 @@ defmodule BtAttachWeb.WorkspaceLive do
   # future modifier is a compile-visible addition in both places.
   defp class_modifier_badge(:sealed),
     do: %{label: "Sealed", class: "sealed", title: "Cannot be subclassed by user code"}
+
+  defp class_modifier_badge(:typed),
+    do: %{
+      label: "Typed",
+      class: "typed",
+      title: "All fields and methods require type annotations"
+    }
 
   defp class_modifier_badge(:abstract),
     do: %{

@@ -211,6 +211,7 @@ class_row(Pid, TestClasses) ->
             <<"category">> => category_of(ModName),
             <<"comment">> => first_line(class_doc(Pid)),
             <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(Pid) end),
+            <<"typed">> => safe_bool(fun() -> beamtalk_runtime_api:is_typed(Pid) end),
             <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(Pid) end),
             <<"internal">> => safe_bool(fun() -> beamtalk_runtime_api:is_internal(Pid) end),
             <<"source_file">> => SourceFile,
@@ -511,9 +512,9 @@ browse_class_definition(ClassName) ->
                 %% modifier badges. The synthesized `definition` skeleton above
                 %% carries no leading modifier keywords, so these come from the
                 %% same runtime reflection op 1 (`browse-classes`) uses — not a
-                %% string parse. (`typed` is a compile-time annotation with no
-                %% runtime reflection today, so it is not surfaced here.)
+                %% string parse.
                 <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
+                <<"typed">> => safe_bool(fun() -> beamtalk_runtime_api:is_typed(ClassPid) end),
                 <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
                 %% BT-2639: a structural reflection boolean (not a header
                 %% string-sniff) so the System Browser can reliably render the
