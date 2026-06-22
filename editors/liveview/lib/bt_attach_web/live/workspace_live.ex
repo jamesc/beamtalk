@@ -4472,8 +4472,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # stable display order. These are *runtime reflection* booleans from
   # `browse-class-definition` (op 4) — not parsed from the `definition` skeleton,
   # which carries no leading modifier keywords. A missing/false flag contributes no
-  # badge. (`typed` is a compile-time annotation with no runtime reflection today;
-  # see BT-2605 follow-up — it is intentionally absent until the runtime exposes it.)
+  # badge. (BT-2629: `typed` is now reflected too — the already-emitted is_typed
+  # meta flag is threaded through the runtime, mirroring sealed/abstract.)
   defp class_modifiers_from(result) do
     Enum.filter([:sealed, :typed, :abstract], &(Map.get(result, Atom.to_string(&1)) == true))
   end
