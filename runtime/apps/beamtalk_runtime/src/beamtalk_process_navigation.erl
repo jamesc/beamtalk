@@ -879,7 +879,10 @@ whose Beamtalk class is not resolvable — such a row is shown but not drillable
 Returns `{ok, [Row]}` for a live supervisor (the empty list for a supervisor
 with no running children), or `{error, Reason}` (a structured `#beamtalk_error{}`)
 for a malformed pid string or a dead/unreachable supervisor — so a dead
-supervisor degrades to a clear error, never a crash.
+supervisor degrades to a clear error, never a crash. (A supervisor that
+crashes mid-call, after the liveness check but before `which_children`, may
+degrade to `{ok, []}` rather than `{error, stale_handle}` — accepted
+best-effort per ADR 0092 §4; the difference is display-only.)
 """.
 -spec child_handles(string() | binary()) ->
     {ok, [#{binary() => term()}]} | {error, #beamtalk_error{}}.

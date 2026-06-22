@@ -171,9 +171,8 @@ defmodule BtAttachWeb.WorkspaceSupervisorInspectTest do
 
   # Count the drillable child rows in the rendered Inspector children table.
   defp drillable_row_count(html) do
-    html
-    |> String.split("tr class=\"drillable\"")
+    ~r/class="drillable"/
+    |> Regex.scan(html)
     |> length()
-    |> Kernel.-(1)
   end
 end

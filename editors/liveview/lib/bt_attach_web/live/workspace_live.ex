@@ -6000,15 +6000,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     kind = to_string(Map.get(row, "kind", "process"))
     pid = supervisor_child_pid_text(Map.get(row, "pid", :null))
 
-    base =
-      if Map.get(row, "isSupervisor", false) do
-        count = Map.get(row, "childCount", 0)
-        "#{kind} · #{pid} · #{count} #{pluralize_children(count)}"
-      else
-        "#{kind} · #{pid}"
-      end
-
-    base
+    if Map.get(row, "isSupervisor", false) do
+      count = Map.get(row, "childCount", 0)
+      "#{kind} · #{pid} · #{count} #{pluralize_children(count)}"
+    else
+      "#{kind} · #{pid}"
+    end
   end
 
   defp supervisor_child_pid_text(:null), do: "restarting"
