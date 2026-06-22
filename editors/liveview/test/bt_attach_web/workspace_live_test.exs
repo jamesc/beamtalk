@@ -563,10 +563,11 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
     suffix = System.unique_integer([:positive])
     class = "Greeter#{suffix}"
-    # The path is derived from the class name: `Greeter12` → its exact PascalCase
-    # basename `src/Greeter12.bt` (the stdlib convention the runtime's
-    # `newClass:at:` validation accepts as an exact match — snake_case is BT-2646).
-    path = "src/#{class}.bt"
+    # The path is derived from the class name, snake_cased to match the project
+    # convention (BT-2646): `Greeter12` → `src/greeter12.bt`. These names are a
+    # leading capital + digits, so `String.downcase/1` equals the runtime's
+    # `to_snake_case/1` here.
+    path = "src/#{String.downcase(class)}.bt"
 
     # Drive a real `newClass:at:` round-trip: modal fields (name + Object) →
     # synthesized `Object subclass: Greeter12` → derived path → `:new_class` facade
@@ -595,7 +596,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
     suffix = System.unique_integer([:positive])
     class = "Bar#{suffix}"
-    path = "src/#{class}.bt"
+    path = "src/#{String.downcase(class)}.bt"
 
     # Superclass `Actor` → synthesize `Actor subclass: Bar…`; the success path
     # must open + select the new class (`Bar…`), never the superclass (`Actor`).
