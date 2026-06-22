@@ -165,9 +165,9 @@ defmodule BtAttachWeb.WorkspaceNewClassTest do
         |> form("#new-class-form")
         |> render_submit(%{"name" => "Foo", "superclass" => "Object"})
 
-      # `Foo` → `Object subclass: Foo` → `src/Foo.bt` (PascalCase basename; the
-      # snake_case convention is deferred to BT-2646).
-      assert html =~ "Created new class — src/Foo.bt"
+      # `Foo` → `Object subclass: Foo` → `src/foo.bt` (snake_case basename per the
+      # project convention — BT-2646).
+      assert html =~ "Created new class — src/foo.bt"
       # The modal closes after a successful create.
       refute html =~ ~s(id="new-class-modal")
       # The created class is opened (a `def:Foo` tab) and selected in the tree.
@@ -185,7 +185,7 @@ defmodule BtAttachWeb.WorkspaceNewClassTest do
         |> form("#new-class-form")
         |> render_submit(%{"name" => "Bar", "superclass" => "Actor"})
 
-      assert html =~ "Created new class — src/Bar.bt"
+      assert html =~ "Created new class — src/bar.bt"
       assert html =~ "def:Bar"
       refute html =~ "def:Actor"
     end
@@ -201,8 +201,52 @@ defmodule BtAttachWeb.WorkspaceNewClassTest do
         |> form("#new-class-form")
         |> render_submit(%{"name" => "Baz", "superclass" => "  "})
 
-      assert html =~ "Created new class — src/Baz.bt"
+      assert html =~ "Created new class — src/baz.bt"
       assert html =~ "def:Baz"
+    end
+
+    test "a multi-word PascalCase name snake_cases the filename (BT-2646)", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      open_modal(view)
+
+      # `EventStore` must land at `src/event_store.bt`, not `src/EventStore.bt`:
+      # the loader snake_case-normalises the basename, so the snake_case file maps
+      # cleanly back to the PascalCase class.
+      html =
+        view
+        |> form("#new-class-form")
+        |> render_submit(%{"name" => "EventStore", "superclass" => "Object"})
+
+      assert html =~ "Created new class — src/event_store.bt"
+      assert html =~ "def:EventStore"
+    end
+  end
+
+  describe "snake_case filename derivation (BT-2646)" do
+    # The IDE's snake_case derivation MUST match the runtime's
+    # `beamtalk_repl_loader:to_snake_case/1` so the loader's snake-normalised
+    # basename validation accepts the created file. These cases pin the exact
+    # rule, including the acronym-collapsing behaviour (`HTTPServer` → `httpserver`,
+    # NOT `h_t_t_p_server`) — diverging would make the loader reject the file.
+    for {name, expected} <- [
+          {"Foo", "src/foo.bt"},
+          {"EventStore", "src/event_store.bt"},
+          {"WorkflowEngine", "src/workflow_engine.bt"},
+          {"HTTPServer", "src/httpserver.bt"},
+          {"A", "src/a.bt"},
+          {"Counter2", "src/counter2.bt"}
+        ] do
+      test "#{name} → #{expected}", %{conn: conn} do
+        {:ok, view, _html} = live(owner_conn(conn), "/")
+        open_modal(view)
+
+        html =
+          view
+          |> form("#new-class-form")
+          |> render_submit(%{"name" => unquote(name), "superclass" => "Object"})
+
+        assert html =~ "Created new class — " <> unquote(expected)
+      end
     end
   end
 end
