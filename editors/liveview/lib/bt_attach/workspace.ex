@@ -1058,18 +1058,63 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  # A supervisor handle is a live, drillable reference (so it is inspectable),
-  # but its inspection content — the supervision tree / children — is a separate
-  # follow-up (BT-2633 is recognition-only). Crucially, a supervisor pid is NOT
-  # an actor backed by `sys:get_state/2`, so routing it through the actor inspect
-  # op above would error. Degrade gracefully instead: return an empty field set,
-  # which the caller renders as a drillable head with no inspectable fields yet —
-  # the same shape an actor with no user-visible state yields ({:ok, %{}}).
+  # A supervisor's meaningful inspection content is its CHILDREN / supervision
+  # tree, not gen_server instance vars — a supervisor pid is NOT an actor backed
+  # by `sys:get_state/2`, so routing it through the actor `inspect` op above would
+  # error (BT-2634). Route it to the supervision-tree path instead: list its direct
+  # children as drillable rows (each carrying a live `{:beamtalk_supervisor, ...}` /
+  # `{:beamtalk_object, ...}` handle so the Inspector can drill into a child as its
+  # own reference, ADR 0095). Returns `{:ok, {:supervisor_children, rows}}` — a
+  # tagged result the LiveView renders as a children view, distinct from the
+  # actor instance-field table. A dead/unreachable supervisor degrades to
+  # `{:error, reason}` (rendered as a clear empty state, never a crash).
   def inspect_value({:beamtalk_supervisor, _class, _module, pid} = _term) when is_pid(pid) do
-    {:ok, %{}}
+    case supervisor_children(pid) do
+      {:ok, rows} -> {:ok, {:supervisor_children, rows}}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def inspect_value(_term), do: {:error, :not_inspectable}
+
+  @doc """
+  List a supervisor's direct children as drillable inspection rows (BT-2634, ADR
+  0095 supervisor-aware inspection).
+
+  `sup_pid` is the live remote supervisor pid (extracted from a
+  `{:beamtalk_supervisor, class, module, pid}` handle held in the LiveView).
+  Like `inspect_value/1`, the pid is formatted **on the workspace node** (where it
+  is local) so the textual `<0.X.Y>` form round-trips through the runtime helper's
+  `list_to_pid/1`, then `beamtalk_process_navigation:child_handles/1` classifies
+  each direct child and mints a **live child handle** for it — the reference the
+  Inspector drills into. Static and `DynamicSupervisor` children come back through
+  the same `which_children` path, so they render uniformly.
+
+  Each row is the runtime's binary-keyed child map (`label`, `className`, `kind`,
+  `pid`, `registeredName`, `childCount`, `isSupervisor`, `handle`). The `handle`
+  is a live `{:beamtalk_supervisor | :beamtalk_object, class, module, pid}` term
+  for a Beamtalk child, or `:null` for a foreign / restarting child (which renders
+  but is not drillable).
+
+  Returns `{:ok, rows}` (the empty list for a supervisor with no running
+  children), or `{:error, reason_term}` for a dead/unreachable supervisor (a
+  structured `#beamtalk_error{}`), so the caller renders a clear empty state.
+  """
+  @spec supervisor_children(pid()) :: {:ok, [map()]} | {:error, term()}
+  def supervisor_children(sup_pid) when is_pid(sup_pid) do
+    case rpc(:erlang, :pid_to_list, [sup_pid]) do
+      pid_chars when is_list(pid_chars) ->
+        case rpc(:beamtalk_process_navigation, :child_handles, [to_string(pid_chars)]) do
+          {:ok, rows} when is_list(rows) -> {:ok, rows}
+          {:error, reason} -> {:error, reason}
+          {:badrpc, reason} -> {:error, {:unreachable, reason}}
+          other -> {:error, {:unexpected_reply, other}}
+        end
+
+      {:badrpc, reason} ->
+        {:error, {:unreachable, reason}}
+    end
+  end
 
   # ── write-surface: method-level edit / save / flush (ADR 0082, BT-2409) ─────
 

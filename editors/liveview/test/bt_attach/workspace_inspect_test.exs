@@ -67,16 +67,18 @@ defmodule BtAttach.WorkspaceInspectTest do
       assert {:error, :not_inspectable} = Workspace.inspect_value(proxy)
     end
 
-    test "a pid-backed supervisor degrades gracefully to empty fields (BT-2633)" do
-      # Recognition-only: a supervisor is drillable, but its supervision-tree
-      # content is a separate follow-up. A supervisor pid is NOT an actor backed
-      # by sys:get_state/2, so it must not route through the actor inspect RPC.
-      # Instead it returns an empty field set ({:ok, %{}}) — the same shape an
-      # actor with no user-visible state yields — which renders as a drillable
-      # head with no inspectable fields. No RPC, no crash.
+    test "a pid-backed supervisor routes to the supervision-tree path (BT-2634)" do
+      # BT-2634: a supervisor's content is its CHILDREN / supervision tree, not
+      # actor instance vars (replacing BT-2633's empty {:ok, %{}} placeholder). A
+      # supervisor pid is NOT an actor backed by sys:get_state/2, so it must not
+      # route through the actor inspect RPC; instead it calls the supervision-tree
+      # helper (beamtalk_process_navigation:child_handles/1) over distribution.
+      # Without a live workspace node, that RPC degrades to {:error, {:unreachable,
+      # _}} — never a crash, and crucially never the actor sys:get_state path. The
+      # children-content + drill-through is exercised against the stub in the
+      # LiveView tests.
       sup = {:beamtalk_supervisor, :AppSup, :bt@my_app@app_sup, self()}
-      assert {:ok, fields} = Workspace.inspect_value(sup)
-      assert fields == %{}
+      assert {:error, {:unreachable, _reason}} = Workspace.inspect_value(sup)
     end
   end
 
