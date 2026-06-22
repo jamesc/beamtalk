@@ -586,6 +586,11 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:window_z, 10)
       |> assign_browser_classes()
       |> assign_bindings(pid)
+      # BT-2636: the set of expanded Changes-pane rows (keyed by the row's
+      # `{class, selector}`), driven by the leading disclosure caret. A row's
+      # structured net-vs-disk diff renders beneath it only while its key is in
+      # this set; collapsed by default so the table stays compact.
+      |> assign(:expanded_changes, MapSet.new())
       |> assign_changes()
       # Git panel (BT-2586): the post-flush VCS surface. Loaded lazily the first
       # time the Git tab is opened (and refreshed after flush/save), so a page
@@ -1513,6 +1518,26 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, status_error(socket, "Invalid revert request.")}
   end
 
+  # Toggle the structured diff disclosure for one Changes-pane row (BT-2636),
+  # keyed by the row's `{class, selector}` carried on the leading caret. Pure view
+  # state — no workspace round-trip; flips the key in/out of `:expanded_changes`,
+  # showing/hiding that row's `unified_diff` body.
+  def handle_event("toggle_change_diff", %{"class" => class, "selector" => selector}, socket)
+      when is_binary(class) and is_binary(selector) do
+    key = {class, selector}
+
+    expanded =
+      if MapSet.member?(socket.assigns.expanded_changes, key) do
+        MapSet.delete(socket.assigns.expanded_changes, key)
+      else
+        MapSet.put(socket.assigns.expanded_changes, key)
+      end
+
+    {:noreply, assign(socket, expanded_changes: expanded)}
+  end
+
+  def handle_event("toggle_change_diff", _params, socket), do: {:noreply, socket}
+
   # ── System Browser (BT-2491, epic BT-2482 Phase 2) ──────────────────────────
 
   # Toggle the class tree between Hierarchy (indented by superclass) and Category
@@ -2227,6 +2252,79 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The Senders/Implementors popover heading for a nav kind (BT-2495).
   defp nav_kind_label(:senders), do: "Senders"
   defp nav_kind_label(:implementors), do: "Implementors"
+
+  # ── Structured unified-diff view (BT-2636) ──────────────────────────────────
+
+  # Parse a verbatim unified-diff string into structured lines for the
+  # `unified_diff/1` component. Presentation only: the diff text seam (Changes'
+  # `present_diff/1`, git's `git_diff/1`) is unchanged — we classify it here at
+  # render time so add/remove/context/hunk/meta lines can be coloured and the
+  # marker lifted into a fixed-width gutter.
+  #
+  # Each entry is `%{kind, marker, content}`:
+  #   * `:add`     — a `+` line; marker "+", content is the line WITHOUT the `+`.
+  #   * `:remove`  — a `-` line; marker "-", content without the `-`.
+  #   * `:context` — a ` ` (space-prefixed) line; marker " ".
+  #   * `:hunk`    — an `@@ … @@` header; the whole line is the content.
+  #   * `:meta`    — file headers (`diff --git`, `index`, `--- `, `+++ `, mode
+  #                  changes, `\ No newline…`, etc.); content is the whole line.
+  #
+  # The leading marker is stripped from add/remove/context content so source
+  # indentation lines up across rows regardless of marker; the marker rides the
+  # gutter instead. All other content (including any leading whitespace beyond
+  # the marker) is preserved verbatim. A blank/binary/nil diff yields `[]`.
+  @doc false
+  def parse_diff(diff) when is_binary(diff) and diff != "" do
+    diff
+    |> String.split("\n")
+    |> Enum.map(&classify_diff_line/1)
+  end
+
+  def parse_diff(_), do: []
+
+  # `--- ` / `+++ ` file headers must be classified as :meta BEFORE the bare
+  # `+`/`-` add/remove clauses, since they start with the same character.
+  defp classify_diff_line("+++ " <> _ = line), do: %{kind: :meta, marker: "", content: line}
+  defp classify_diff_line("--- " <> _ = line), do: %{kind: :meta, marker: "", content: line}
+  defp classify_diff_line("@@" <> _ = line), do: %{kind: :hunk, marker: "", content: line}
+  defp classify_diff_line("+" <> rest), do: %{kind: :add, marker: "+", content: rest}
+  defp classify_diff_line("-" <> rest), do: %{kind: :remove, marker: "-", content: rest}
+  defp classify_diff_line(" " <> rest), do: %{kind: :context, marker: " ", content: rest}
+
+  defp classify_diff_line("diff --git" <> _ = line),
+    do: %{kind: :meta, marker: "", content: line}
+
+  defp classify_diff_line("index " <> _ = line), do: %{kind: :meta, marker: "", content: line}
+  # Everything else (mode lines, `\ No newline at end of file`, blank trailing
+  # split fragments, etc.) is neutral metadata.
+  defp classify_diff_line(line), do: %{kind: :meta, marker: "", content: line}
+
+  # Per-line CSS class for the structured diff body.
+  defp diff_line_class(:add), do: "diff-line diff-add"
+  defp diff_line_class(:remove), do: "diff-line diff-del"
+  defp diff_line_class(:hunk), do: "diff-line diff-hunk"
+  defp diff_line_class(:meta), do: "diff-line diff-meta"
+  defp diff_line_class(:context), do: "diff-line diff-ctx"
+
+  # Shared structured diff renderer (BT-2636). Takes a verbatim unified-diff
+  # string and renders it as coloured, gutter-aligned rows — reused by the
+  # Changes pane (net-vs-disk) and the Git pane (staged/worktree). The marker
+  # (`+`/`-`/space) sits in a fixed-width gutter so content left-aligns across
+  # rows. A blank/binary diff renders nothing (callers show their own empty
+  # state, e.g. git's "No textual diff" note).
+  attr :diff, :string, required: true
+
+  defp unified_diff(assigns) do
+    assigns = assign(assigns, :lines, parse_diff(assigns.diff))
+
+    ~H"""
+    <div :if={@lines != []} class="bt-diff">
+      <div :for={line <- @lines} class={diff_line_class(line.kind)}>
+        <span class="diff-gutter" aria-hidden="true">{line.marker}</span><span class="diff-content">{line.content}</span>
+      </div>
+    </div>
+    """
+  end
 
   # ── Workspace dock actions (BT-2490) ────────────────────────────────────────
 
@@ -7100,62 +7198,86 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <%= if @changes == [] do %>
                       <p class="muted-note">No pending changes. Save a method to record one.</p>
                     <% else %>
-                      <table class="bt-table">
+                      <table class="bt-table bt-changes-table">
                         <thead>
                           <tr>
+                            <%!-- BT-2636: leading disclosure column (the diff
+                                 caret), before Class. The old in-`Change`-column
+                                 `diff` summary is gone — the caret now expands a
+                                 structured, coloured diff beneath the row. --%>
+                            <th class="diff-toggle-col"></th>
                             <th>Class</th>
                             <th>Selector</th>
                             <th>Intent</th>
                             <th>Flushable</th>
                             <th>Author</th>
-                            <%!-- net-vs-disk diff column (BT-2575) --%>
-                            <th>Change</th>
                             <%!-- revert column (BT-2293): owner-only --%>
                             <th :if={@role == :owner}></th>
                           </tr>
                         </thead>
                         <tbody>
-                          <tr :for={c <- @changes}>
-                            <td class="k">{c.class}</td>
-                            <td>{c.selector}</td>
-                            <td>{c.intent}</td>
-                            <td>{if c.flushable, do: "yes", else: "no"}</td>
-                            <td>{c.author_kind}</td>
+                          <%= for c <- @changes do %>
+                            <% expanded = MapSet.member?(@expanded_changes, {c.class, c.selector}) %>
+                            <tr>
+                              <%!-- Leading disclosure caret (BT-2636): toggles
+                                   this row's structured net-vs-disk diff. Only
+                                   rendered when the entry carries a diff (the same
+                                   defensive `:if={c[:diff]}` guard the old
+                                   in-column disclosure used — a method reverted to
+                                   its on-disk body has no net change and never
+                                   reaches this pane). --%>
+                              <td class="diff-toggle-col">
+                                <button
+                                  :if={c[:diff]}
+                                  type="button"
+                                  class="diff-toggle"
+                                  phx-click="toggle_change_diff"
+                                  phx-value-class={c.class}
+                                  phx-value-selector={c.selector}
+                                  aria-expanded={to_string(expanded)}
+                                  title={if expanded, do: "Hide diff", else: "Show diff"}
+                                >
+                                  {if expanded, do: "▼", else: "›"}
+                                </button>
+                              </td>
+                              <td class="k">{c.class}</td>
+                              <td>{c.selector}</td>
+                              <td>{c.intent}</td>
+                              <td>{if c.flushable, do: "yes", else: "no"}</td>
+                              <td>{c.author_kind}</td>
+                              <%!-- Revert one pending method patch (ADR 0082
+                                   Phase 5). Owner-only (`revert` is an :execute
+                                   op). Only *instance-side* method patches are
+                                   revertable (`do_revert/2` rejects new-class and
+                                   class-side entries), so gate the button on a
+                                   positive `kind == "instance"` assertion: any
+                                   other / unanticipated kind hides the affordance
+                                   rather than offering one that always errors. --%>
+                              <td :if={@role == :owner}>
+                                <button
+                                  :if={c.kind == "instance"}
+                                  class="btn-link"
+                                  type="button"
+                                  phx-click="revert"
+                                  phx-value-class={c.class}
+                                  phx-value-selector={c.selector}
+                                  phx-disable-with="Reverting…"
+                                >
+                                  revert
+                                </button>
+                              </td>
+                            </tr>
                             <%!-- The net change vs disk (ADR 0082 Phase 5,
-                                 BT-2575): an expandable unified diff (on-disk →
-                                 in-memory). A method reverted back to its on-disk
-                                 body has no net change and never reaches this
-                                 pane (`activeEntries` drops it), so a row always
-                                 carries a real diff; the `:if` is defensive for
-                                 entries whose diff could not be computed. --%>
-                            <td>
-                              <details :if={c[:diff]} class="bt-diff-disclosure">
-                                <summary>diff</summary>
-                                <pre class="bt-diff">{c[:diff]}</pre>
-                              </details>
-                            </td>
-                            <%!-- Revert one pending method patch (ADR 0082
-                                 Phase 5). Owner-only (`revert` is an :execute
-                                 op). Only *instance-side* method patches are
-                                 revertable (`do_revert/2` rejects new-class and
-                                 class-side entries), so gate the button on a
-                                 positive `kind == "instance"` assertion: any
-                                 other / unanticipated kind hides the affordance
-                                 rather than offering one that always errors. --%>
-                            <td :if={@role == :owner}>
-                              <button
-                                :if={c.kind == "instance"}
-                                class="btn-link"
-                                type="button"
-                                phx-click="revert"
-                                phx-value-class={c.class}
-                                phx-value-selector={c.selector}
-                                phx-disable-with="Reverting…"
-                              >
-                                revert
-                              </button>
-                            </td>
-                          </tr>
+                                 BT-2575), now a structured, gutter-aligned,
+                                 coloured diff (BT-2636) rendered full-width
+                                 beneath the row while expanded. Reuses the shared
+                                 `unified_diff/1` renderer with the Git pane. --%>
+                            <tr :if={c[:diff] && expanded} class="diff-row">
+                              <td colspan={if @role == :owner, do: 7, else: 6}>
+                                <.unified_diff diff={c[:diff]} />
+                              </td>
+                            </tr>
+                          <% end %>
                         </tbody>
                       </table>
                     <% end %>
@@ -7257,15 +7379,20 @@ defmodule BtAttachWeb.WorkspaceLive do
                             </tr>
                           </tbody>
                         </table>
+                        <%!-- BT-2636: the git staged/worktree diffs reuse the
+                             shared structured `unified_diff/1` renderer (coloured,
+                             gutter-aligned) the Changes pane uses. The empty
+                             "No textual diff" state is preserved for binary /
+                             mode-only changes. --%>
                         <div :if={@git_diff} class="git-diff-view">
                           <p class="muted-note">{@git_diff_path}</p>
                           <div :if={@git_diff.staged != ""}>
                             <p class="muted-note">staged</p>
-                            <pre class="bt-diff">{@git_diff.staged}</pre>
+                            <.unified_diff diff={@git_diff.staged} />
                           </div>
                           <div :if={@git_diff.worktree != ""}>
                             <p class="muted-note">working tree</p>
-                            <pre class="bt-diff">{@git_diff.worktree}</pre>
+                            <.unified_diff diff={@git_diff.worktree} />
                           </div>
                           <p
                             :if={@git_diff.staged == "" and @git_diff.worktree == ""}

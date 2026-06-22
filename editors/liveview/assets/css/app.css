@@ -969,23 +969,62 @@ body.col-resizing .cockpit { transition: none; }
 .bt-table .k { font-weight: 600; color: var(--accent-2); font-family: var(--code-font, ui-monospace, monospace); }
 .bt-table .v { width: 100%; color: var(--ink); }
 
-/* Changes pane net-vs-disk diff disclosure (BT-2575). Collapsed by default so
-   the table stays compact; the diff text keeps its +/- prefixes in a monospace,
-   scrollable block. */
-.bt-diff-disclosure > summary { cursor: pointer; color: var(--accent-2); font-size: 12px; }
+/* Structured unified-diff view (BT-2636). Shared by the Changes pane
+   (net-vs-disk, BT-2575) and the Git pane (staged/worktree). The diff string is
+   parsed into add/remove/context/hunk/meta lines (`parse_diff/1`) and rendered
+   by the `unified_diff/1` component: each line is a flex row whose +/-/space
+   marker sits in a fixed-width gutter so source content left-aligns across rows
+   regardless of marker. Scrollable + bounded so long diffs stay compact. */
 .bt-diff {
   margin: 6px 0 2px;
-  padding: 6px 8px;
+  padding: 4px 0;
   max-height: 220px;
   overflow: auto;
   font-family: var(--code-font, ui-monospace, monospace);
   font-size: 12px;
-  line-height: 1.4;
-  white-space: pre;
+  line-height: 1.45;
   background: var(--bg-soft, rgba(127, 127, 127, 0.08));
   border: 1px solid var(--line-soft);
   border-radius: 4px;
 }
+.diff-line {
+  display: flex;
+  align-items: flex-start;
+  white-space: pre;
+  padding: 0 6px;
+}
+/* Fixed-width gutter for the +/-/space marker — keeps content aligned. */
+.diff-gutter {
+  flex: 0 0 1.4em;
+  text-align: center;
+  user-select: none;
+  opacity: 0.7;
+}
+.diff-content { white-space: pre; }
+.diff-add { background: color-mix(in oklab, var(--ok) 14%, transparent); }
+.diff-add .diff-content { color: var(--ok); }
+.diff-del { background: color-mix(in oklab, var(--err) 14%, transparent); }
+.diff-del .diff-content { color: var(--err); }
+.diff-ctx .diff-content { color: var(--ink); }
+.diff-hunk { color: var(--accent-2); opacity: 0.85; }
+.diff-hunk .diff-content { color: var(--accent-2); font-weight: 600; }
+.diff-meta { color: var(--muted); }
+.diff-meta .diff-content { color: var(--muted); }
+
+/* Changes pane row-LHS disclosure caret (BT-2636). A leading column before
+   Class; the caret (›→▼) toggles the structured diff row beneath. */
+.bt-changes-table .diff-toggle-col { width: 1.6em; padding-right: 0; text-align: center; }
+.diff-toggle {
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+.diff-toggle:hover { color: var(--ink); }
+.bt-changes-table .diff-row > td { padding-top: 0; }
 
 /* test-runner pane (BT-2557) */
 .test-pane { padding: var(--panel-pad); gap: 10px; }

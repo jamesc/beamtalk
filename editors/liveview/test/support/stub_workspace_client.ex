@@ -50,6 +50,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # Inspect → children-render → drill-through path against the stub. `[]`
               # = no bindings (the default, matching a fresh session).
               bindings: [],
+              # BT-2636: seeded net-vs-disk diff strings per `{class, selector}`,
+              # surfaced by `change_history` so the Changes-pane disclosure caret +
+              # structured diff render can be driven without a real workspace.
+              change_diffs: %{},
               calls: []
   end
 
@@ -235,6 +239,8 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   def change_history do
+    diffs = get(:change_diffs) || %{}
+
     get(:changes)
     |> Enum.map(fn {{class, selector}, _file} ->
       %{
@@ -245,10 +251,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         flushable: true,
         flushed: false,
         author_kind: "liveview",
-        diff: nil
+        # BT-2636: seeded net-vs-disk diff so a test can drive the Changes-pane
+        # disclosure caret + structured `unified_diff` render. nil by default.
+        diff: Map.get(diffs, {class, selector})
       }
     end)
     |> Enum.reverse()
+  end
+
+  @doc "Test helper: seed the net-vs-disk diff string for a `{class, selector}`."
+  def set_change_diff(class, selector, diff) when is_binary(diff) do
+    update(:change_diffs, fn diffs -> Map.put(diffs || %{}, {class, selector}, diff) end)
   end
 
   # BT-2590: the workspace `autoflush` flag, read at mount. Defaults to `false`
@@ -335,7 +348,15 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     get(:git_log) || {:ok, []}
   end
 
-  def git_diff(path), do: record({:git_diff, path}) && {:ok, %{worktree: "", staged: ""}}
+  def git_diff(path) do
+    record({:git_diff, path})
+    # BT-2636: a seeded diff drives the Git-pane structured `unified_diff` render;
+    # the default empty result keeps the existing "No textual diff" empty state.
+    get(:git_diff_result) || {:ok, %{worktree: "", staged: ""}}
+  end
+
+  @doc "Test helper: seed the `git_diff/1` result (e.g. a unified-diff string)."
+  def set_git_diff(result), do: put(:git_diff_result, result)
   def git_stage(path), do: record({:git_stage, path}) && {:ok, nil}
   def git_unstage(path), do: record({:git_unstage, path}) && {:ok, nil}
   def git_commit(message), do: record({:git_commit, message}) && {:ok, nil}
