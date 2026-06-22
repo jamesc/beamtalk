@@ -925,22 +925,32 @@ body.col-resizing .cockpit { transition: none; }
 }
 .btn-link:hover { color: var(--accent); }
 
-/* New Class form (BT-2293): the System Browser's collapsible create-a-class
-   affordance under the panel head — a compact source box + submit. The `.bt`
-   path is derived from the class name server-side, so there is no path field. */
-.new-class-form {
-  display: grid; grid-template-columns: 1fr auto; gap: .5rem; flex: none;
-  padding: .6rem 10px; border-bottom: 1px solid var(--line); align-items: start;
-  background: var(--panel-2);
+/* New Class modal (BT-2293, BT-2645): the System Browser's owner-only
+   create-a-class wizard. A centered dialog over a dimming scrim with two explicit
+   fields — class name + superclass (default `Object`); the `.bt` path and the
+   `<Superclass> subclass: <Name>` definition are synthesized server-side. */
+.modal-scrim {
+  position: fixed; inset: 0; z-index: 100; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .5);
 }
-.new-class-label { grid-column: 1 / -1; font-size: 12px; font-weight: 600; color: var(--ink); }
-.new-class-source {
-  border: 1px solid var(--line); background: var(--code-bg); border-radius: 6px;
-  padding: 6px 9px; font-size: 12.5px; color: var(--ink); outline: none;
-  grid-column: 1; resize: vertical;
+.modal-dialog {
+  width: min(420px, calc(100vw - 2rem));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .4); overflow: hidden;
 }
-.new-class-source:focus { border-color: var(--accent); }
-.new-class-form .btn { grid-column: 2; align-self: end; }
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: .6rem .9rem; border-bottom: 1px solid var(--line); background: var(--panel-2);
+}
+.modal-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.new-class-modal-form { display: grid; gap: .35rem; padding: .9rem; }
+.new-class-field-label { font-size: 12px; font-weight: 600; color: var(--ink); }
+.new-class-field-label:not(:first-child) { margin-top: .5rem; }
+.new-class-modal-form .field { width: 100%; box-sizing: border-box; }
+.new-class-modal-form .field:focus { border-color: var(--accent); }
+.new-class-error { margin: .4rem 0 0; font-size: 12px; color: var(--danger, #e5534b); }
+.modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: .8rem; }
 
 .field {
   border: 1px solid var(--line); background: var(--code-bg); border-radius: 6px;

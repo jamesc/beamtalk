@@ -159,18 +159,12 @@ defmodule BtAttachWeb.WorkspaceGitPanelTest do
 
   # Drive the new-class save path (`dispatch_new_class`) — one of the two saves
   # BT-2590 gates the git refresh behind. We push the `new_class` event directly
-  # (the form lives behind a collapsed affordance), exercising the same handler.
+  # (the modal lives behind the ＋ affordance), exercising the same handler. The
+  # modal now carries a plain class name + superclass (BT-2645); the definition is
+  # synthesized server-side.
   defp define_a_class(view) do
     class = "GitGate#{System.unique_integer([:positive])}"
-
-    src = """
-    Actor subclass: #{class}
-      state: value = 0
-
-      value => self.value
-    """
-
-    render_hook(view, "new_class", %{"source" => src})
+    render_hook(view, "new_class", %{"name" => class, "superclass" => "Actor"})
   end
 
   # Assert that `fun` stays false across the retry window (the negative of
