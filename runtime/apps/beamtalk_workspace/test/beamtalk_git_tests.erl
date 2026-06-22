@@ -239,7 +239,7 @@ status_non_integer_ahead_behind_defaults_to_zero_test() ->
 
 %% An entry whose prefix does not match any known type (`1`, `2`, `u`, `?`, `!`,
 %% `#`) is silently dropped — `fold_status` matches on multi-byte prefixes (e.g.
-%% `<<"X ">>`), so `<<"X some-unknown-entry">>` falls through to the catch-all.
+%% `<<"1 ">>`), so `<<"X some-unknown-entry">>` falls through to the catch-all.
 status_unknown_entry_is_dropped_test() ->
     Bin = nul_join([<<"# branch.head main">>, <<"X some-unknown-entry">>]),
     Status = beamtalk_git:parse_status(Bin),
