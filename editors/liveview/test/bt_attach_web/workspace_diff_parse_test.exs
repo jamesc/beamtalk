@@ -18,7 +18,6 @@ defmodule BtAttachWeb.WorkspaceDiffParseTest do
   test "empty / nil / binary diffs yield no lines" do
     assert WorkspaceLive.parse_diff("") == []
     assert WorkspaceLive.parse_diff(nil) == []
-    assert WorkspaceLive.parse_diff(nil) == []
     # A non-binary value (defensive) degrades to [].
     assert WorkspaceLive.parse_diff(123) == []
   end

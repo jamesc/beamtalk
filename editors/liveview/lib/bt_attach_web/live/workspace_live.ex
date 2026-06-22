@@ -2276,6 +2276,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   @doc false
   def parse_diff(diff) when is_binary(diff) and diff != "" do
     diff
+    # Strip the standard git/diff trailing newline so we don't emit a spurious
+    # blank meta row at the bottom; intentional blank context lines are
+    # space-prefixed and untouched.
+    |> String.trim_trailing("\n")
     |> String.split("\n")
     |> Enum.map(&classify_diff_line/1)
   end
@@ -3235,10 +3239,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp assign_changes(socket) do
     case Facade.dispatch(:changes, %{}, ctx(socket)) do
       rows when is_list(rows) ->
-        assign(socket, changes: rows, changes_error: nil)
+        # Prune expanded-diff carets for rows that have left @changes (flush /
+        # revert), so a re-saved method doesn't re-appear already-expanded.
+        live_keys = MapSet.new(rows, &{&1.class, &1.selector})
+        expanded = MapSet.intersection(socket.assigns.expanded_changes, live_keys)
+        assign(socket, changes: rows, changes_error: nil, expanded_changes: expanded)
 
       {:error, reason} ->
-        assign(socket, changes: [], changes_error: Workspace.render_error(reason))
+        assign(socket,
+          changes: [],
+          changes_error: Workspace.render_error(reason),
+          expanded_changes: MapSet.new()
+        )
     end
   end
 
