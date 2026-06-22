@@ -1008,8 +1008,15 @@ defmodule BtAttach.Workspace do
   inspectable: name-resolving proxies carry `{:registered, name}` in the identity
   slot (ADR 0079) and have no pid to `sys:get_state/2`, so they are not
   drillable here.
+
+  Supervisor handles arrive as `{:beamtalk_supervisor, class, module, pid}`
+  (`beamtalk_supervisor.erl`, distinct from `#beamtalk_object{}`). A pid-backed
+  supervisor is a live, drillable handle too, so it is inspectable — even though
+  its inspection *content* (the supervision tree) is not yet implemented and
+  currently degrades to an empty field set (see `inspect_value/1`).
   """
   def inspectable?({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: true
+  def inspectable?({:beamtalk_supervisor, _class, _module, pid}) when is_pid(pid), do: true
   def inspectable?(_term), do: false
 
   @doc """
@@ -1049,6 +1056,17 @@ defmodule BtAttach.Workspace do
       {:badrpc, reason} ->
         {:error, {:unreachable, reason}}
     end
+  end
+
+  # A supervisor handle is a live, drillable reference (so it is inspectable),
+  # but its inspection content — the supervision tree / children — is a separate
+  # follow-up (BT-2633 is recognition-only). Crucially, a supervisor pid is NOT
+  # an actor backed by `sys:get_state/2`, so routing it through the actor inspect
+  # op above would error. Degrade gracefully instead: return an empty field set,
+  # which the caller renders as a drillable head with no inspectable fields yet —
+  # the same shape an actor with no user-visible state yields ({:ok, %{}}).
+  def inspect_value({:beamtalk_supervisor, _class, _module, pid} = _term) when is_pid(pid) do
+    {:ok, %{}}
   end
 
   def inspect_value(_term), do: {:error, :not_inspectable}
