@@ -98,6 +98,18 @@ defmodule BtAttach.DocFormatTest do
       assert out =~ ~s(<pre class="doc-code"><code>first\n\nsecond</code></pre>)
     end
 
+    test "a blank between two indented blocks separated by prose is not pulled into the first" do
+      # The blank after "first block" precedes a non-indented prose line, so it
+      # ends the first code block — it must NOT be swallowed just because a later
+      # indented block exists (the `Enum.find_value`/`false` lookahead bug).
+      out = html("    first block\n\nregular prose\n\n    second block")
+      assert out =~ ~s(<pre class="doc-code"><code>first block</code></pre>)
+      assert out =~ ~s(<pre class="doc-code"><code>second block</code></pre>)
+      assert out =~ ~s(<p class="doc-p">regular prose</p>)
+      # No spurious trailing newline pulled into the first block.
+      refute out =~ ~s(<code>first block\n</code>)
+    end
+
     test "indented code escapes its contents" do
       out = html("    <b>not bold</b>")
       refute out =~ "<b>not bold</b>"

@@ -148,16 +148,17 @@ defmodule BtAttach.DocFormat do
 
   defp take_indented_code([], acc), do: {Enum.reverse(acc), []}
 
-  # Does an indented-code line appear before the next non-blank line? Used to
-  # decide whether a blank line is interior to the code block or ends it.
+  # Is the NEXT non-blank line still indented code? Used to decide whether a blank
+  # line is interior to the code block or ends it. We look only at the first
+  # non-blank line: if it is indented the blank is interior; otherwise (prose, or
+  # end of input) the blank ends the block. (`Enum.find_value` can't be used here
+  # — `false` is falsy, so a `false` arm would not stop the scan and a later
+  # indented block could pull an intervening blank into this one.)
   defp continues_indented_code?(lines) do
-    Enum.find_value(lines, false, fn line ->
-      cond do
-        blank?(line) -> nil
-        indented_code?(line) -> true
-        true -> false
-      end
-    end)
+    case Enum.find(lines, &(not blank?(&1))) do
+      nil -> false
+      line -> indented_code?(line)
+    end
   end
 
   # Strip the common indent (a leading tab, else four spaces) from each code
