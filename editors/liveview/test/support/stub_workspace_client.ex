@@ -586,6 +586,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
        # class name, so `Shape` need not be in the class tree to be opened.)
        "sealed" => class == "Ledger",
        "abstract" => class == "Shape",
+       # BT-2639: `is_protocol` is a runtime-reflection boolean on op 4, gating
+       # the def-tab protocol action row. `Printable` stands in for a protocol
+       # class object (ADR 0068); every other stubbed class is ordinary.
+       "is_protocol" => class == "Printable",
        "origin" => "both",
        "disk_differs" => false
      }}
@@ -642,6 +646,48 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def senders_of(_selector), do: {:value, %{"sites" => []}}
   def implementors_of(_selector), do: {:value, %{"sites" => []}}
+
+  # BT-2639: the protocol-definition action row. Return canned rows for the known
+  # `Printable` protocol so the UI flow (popover render + navigable rows) can be
+  # exercised, and empty otherwise. `required_methods` rows are selectors
+  # (navigable → Implementors); `conforming_classes` rows are class names
+  # (navigable → open class).
+  def required_methods_of("Printable") do
+    {:value,
+     %{
+       "sites" => [
+         %{
+           "class" => "Printable",
+           "class_side" => false,
+           "method" => "printOn:",
+           "line" => nil,
+           "source_file" => nil,
+           "source_origin" => "stdlib"
+         }
+       ]
+     }}
+  end
+
+  def required_methods_of(_protocol), do: {:value, %{"sites" => []}}
+
+  def conforming_classes_of("Printable") do
+    {:value,
+     %{
+       "sites" => [
+         %{
+           "class" => "Counter",
+           "class_side" => false,
+           "method" => nil,
+           "line" => nil,
+           "source_file" => nil,
+           "source_origin" => "project"
+         }
+       ]
+     }}
+  end
+
+  def conforming_classes_of(_protocol), do: {:value, %{"sites" => []}}
+
   def symbol_index(_scope), do: {:value, %{"classes" => []}}
 
   def complete(_pid, _code), do: {:ok, []}

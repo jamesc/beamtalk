@@ -103,6 +103,13 @@ defmodule BtAttach.Facade do
     # the Observer role, scoped exactly like the browse ops.
     senders: :read,
     implementors: :read,
+    # BT-2639: the protocol equivalents of senders/implementors — the System
+    # Browser's protocol-definition action row. Same thin `:read` facade over the
+    # `nav-query` channel (kinds `required_methods` / `conforming_classes`, backed
+    # by `beamtalk_protocol_registry`). Pure reflection, no user code, so they are
+    # safe for the Observer role, scoped exactly like `senders`/`implementors`.
+    required_methods: :read,
+    conforming_classes: :read,
     symbols: :read,
     subscribe_transcript: :read,
     subscribe_bindings: :read,
@@ -272,6 +279,22 @@ defmodule BtAttach.Facade do
   defp invoke(:implementors, %{selector: selector}, _ctx) do
     if is_binary(selector),
       do: client().implementors_of(selector),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2639: the protocol-definition action row. `protocol` is the protocol name;
+  # both route to the matching `nav-query` kind on the workspace client and return
+  # the live `{:value, _}` term verbatim. Bad params come back as `:invalid_params`
+  # with no dist call, matching the senders/implementors ops.
+  defp invoke(:required_methods, %{protocol: protocol}, _ctx) do
+    if is_binary(protocol),
+      do: client().required_methods_of(protocol),
+      else: {:error, :invalid_params}
+  end
+
+  defp invoke(:conforming_classes, %{protocol: protocol}, _ctx) do
+    if is_binary(protocol),
+      do: client().conforming_classes_of(protocol),
       else: {:error, :invalid_params}
   end
 

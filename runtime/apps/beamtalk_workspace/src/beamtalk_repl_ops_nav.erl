@@ -25,11 +25,20 @@ Why a structured op (vs. an `eval` of `SystemNavigation default sendersOf:`):
 
 Request shape:
 ```
-{"op": "nav-query", "id": "...", "kind": "<senders|implementors|references>",
+{"op": "nav-query", "id": "...",
+  "kind": "<senders|implementors|references|required_methods|conforming_classes>",
   "selector": "increment"            // for senders/implementors (Beamtalk selector)
   "class":    "Counter"              // for references            (Beamtalk class name)
+                                     //  and required_methods/conforming_classes
+                                     //  (the *protocol* name, BT-2639)
 }
 ```
+
+The protocol kinds (BT-2639) are the protocol equivalent of senders/implementors
+— `required_methods` lists a protocol's contract selectors, `conforming_classes`
+lists the classes that structurally conform to it. Both take `class` (the
+protocol name) and back the System Browser's protocol-definition action row,
+mirroring how `senders`/`implementors` back the method-editor action row.
 
 Response shape (success):
 ```
@@ -88,6 +97,12 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
         {ok, {implementors, Selector}} ->
             Pairs = beamtalk_xref:implementors_of(Selector),
             {value, implementors_value(Pairs, Selector)};
+        {ok, {required_methods, ProtocolName}} ->
+            Selectors = beamtalk_protocol_registry:required_methods(ProtocolName),
+            {value, required_methods_value(Selectors, ProtocolName)};
+        {ok, {conforming_classes, ProtocolName}} ->
+            Classes = beamtalk_protocol_registry:conforming_classes(ProtocolName),
+            {value, conforming_classes_value(Classes, ProtocolName)};
         {error, Reason} ->
             {error,
                 beamtalk_repl_errors:make(
@@ -110,7 +125,7 @@ describe_ops() ->
 %%% ====================================================================
 
 -spec validate_params(map()) ->
-    {ok, {senders | references | implementors, atom()}}
+    {ok, {senders | implementors | references | required_methods | conforming_classes, atom()}}
     | {error, binary()}.
 validate_params(Params) ->
     case maps:get(<<"kind">>, Params, undefined) of
@@ -119,16 +134,25 @@ validate_params(Params) ->
         <<"implementors">> ->
             with_selector(Params, implementors);
         <<"references">> ->
-            with_class(Params);
+            with_class(Params, references);
+        <<"required_methods">> ->
+            with_class(Params, required_methods);
+        <<"conforming_classes">> ->
+            with_class(Params, conforming_classes);
         undefined ->
-            {error,
-                <<"missing required parameter `kind` (one of senders/implementors/references)">>};
+            {error, <<
+                "missing required parameter `kind` (one of "
+                "senders/implementors/references/required_methods/conforming_classes)"
+            >>};
         Other when is_binary(Other) ->
             {error,
                 iolist_to_binary([
                     <<"unknown kind `">>,
                     Other,
-                    <<"` (expected senders/implementors/references)">>
+                    <<
+                        "` (expected senders/implementors/references/"
+                        "required_methods/conforming_classes)"
+                    >>
                 ])};
         _ ->
             {error, <<"`kind` must be a string">>}
@@ -154,20 +178,30 @@ with_selector(Params, Kind) ->
             {error, <<"`selector` (non-empty string) is required for senders/implementors">>}
     end.
 
--spec with_class(map()) -> {ok, {references, atom()}} | {error, binary()}.
-with_class(Params) ->
+-spec with_class(map(), references | required_methods | conforming_classes) ->
+    {ok, {references | required_methods | conforming_classes, atom()}} | {error, binary()}.
+with_class(Params, Kind) ->
     case maps:get(<<"class">>, Params, undefined) of
         Cls when is_binary(Cls), byte_size(Cls) > 0 ->
-            %% binary_to_existing_atom: see comment in with_selector/2.
+            %% binary_to_existing_atom: see comment in with_selector/2. For the
+            %% protocol kinds (BT-2639) an unknown protocol name likewise yields
+            %% the shared sentinel — `required_methods`/`conforming_classes`
+            %% return [] for an unregistered protocol, not a validation error.
             try
-                {ok, {references, binary_to_existing_atom(Cls, utf8)}}
+                {ok, {Kind, binary_to_existing_atom(Cls, utf8)}}
             catch
                 error:badarg ->
-                    {ok, {references, '__nav_query_unknown__'}}
+                    {ok, {Kind, '__nav_query_unknown__'}}
             end;
         _ ->
-            {error, <<"`class` (non-empty string) is required for references">>}
+            {error, with_class_error(Kind)}
     end.
+
+-spec with_class_error(references | required_methods | conforming_classes) -> binary().
+with_class_error(references) ->
+    <<"`class` (non-empty string) is required for references">>;
+with_class_error(_ProtocolKind) ->
+    <<"`class` (non-empty protocol name) is required for required_methods/conforming_classes">>.
 
 %% The site rows are already a JSON-shaped map of lists / binaries / integers /
 %% booleans / null; the `{value, _}` op_result tag encodes them with identity so
@@ -181,6 +215,61 @@ sites_value(Sites) ->
 implementors_value(Pairs, Selector) ->
     Rows = [implementor_to_row(Cls, ClassSide, Selector) || {Cls, ClassSide} <- Pairs],
     #{<<"sites">> => Rows}.
+
+%% BT-2639: required-method rows mirror the implementor row shape so the IDE
+%% reuses the same popover. The `method` is the required selector; `class` is the
+%% owning protocol. `beamtalk_protocol_registry:required_methods/1` prefixes
+%% class-side requirements with the literal `class ` (e.g. `'class fromString:'`),
+%% which we strip to recover the bare selector and set `class_side => true` — so a
+%% click navigates to the right (instance- vs class-side) Implementors.
+-spec required_methods_value([atom()], atom()) -> map().
+required_methods_value(Selectors, ProtocolName) ->
+    Rows = [required_method_to_row(Sel, ProtocolName) || Sel <- Selectors],
+    #{<<"sites">> => Rows}.
+
+-spec required_method_to_row(atom(), atom()) -> map().
+required_method_to_row(Selector, ProtocolName) ->
+    {ClassSide, BareSelector} = split_class_side_selector(Selector),
+    #{
+        <<"class">> => atom_to_binary(ProtocolName, utf8),
+        <<"class_side">> => ClassSide,
+        <<"method">> => BareSelector,
+        %% A protocol requirement has no defining source line — the row is
+        %% navigable via its selector (→ Implementors), not via goto-definition.
+        <<"line">> => null,
+        <<"source_file">> => source_file_of(ProtocolName),
+        <<"source_origin">> => source_origin_of(ProtocolName)
+    }.
+
+%% Split a required-method selector atom into `{ClassSide, BareSelectorBin}`.
+%% Class-side requirements carry the `class ` prefix (BT-1611); everything else
+%% is an instance-side selector.
+-spec split_class_side_selector(atom()) -> {boolean(), binary()}.
+split_class_side_selector(Selector) ->
+    case atom_to_binary(Selector, utf8) of
+        <<"class ", Bare/binary>> -> {true, Bare};
+        Bin -> {false, Bin}
+    end.
+
+%% BT-2639: conforming-class rows carry only a class name — clicking opens that
+%% class in the System Browser / definition pane (not a method tab), so `method`
+%% is `null` and `class_side` is `false`. The shape stays compatible with the
+%% senders/implementors popover rows so the IDE's popover renderer is reused.
+-spec conforming_classes_value([atom()], atom()) -> map().
+conforming_classes_value(Classes, _ProtocolName) ->
+    Rows = [conforming_class_to_row(Cls) || Cls <- Classes],
+    #{<<"sites">> => Rows}.
+
+-spec conforming_class_to_row(atom()) -> map().
+conforming_class_to_row(Cls) ->
+    #{
+        <<"class">> => atom_to_binary(Cls, utf8),
+        <<"class_side">> => false,
+        <<"method">> => null,
+        <<"line">> => null,
+        <<"source_file">> => source_file_of(Cls),
+        <<"source_origin">> => source_origin_of(Cls)
+    }.
 
 -spec site_to_row(beamtalk_xref:site()) -> map().
 site_to_row(Site) ->

@@ -297,6 +297,27 @@ defmodule BtAttach.WorkspaceTest do
     end
   end
 
+  describe "protocol-action wrappers (Required methods / Conforming classes, BT-2639)" do
+    # No live workspace: the protocol-action wrappers go through the same
+    # `dispatch_browse/2` path, so an unreachable node degrades to
+    # `{:error, {:unreachable, _}}` rather than crashing.
+    test "required_methods_of against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.required_methods_of("Printable")
+    end
+
+    test "conforming_classes_of against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.conforming_classes_of("Printable")
+    end
+
+    test "the protocol-action wrappers reject non-binary arguments (guard contract)" do
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :required_methods_of, [:Printable])
+      end
+
+      assert_raise FunctionClauseError, fn -> apply(Workspace, :conforming_classes_of, [42]) end
+    end
+  end
+
   describe "save/flush write-surface wrappers (New File + revert, ADR 0082 Phase 5, BT-2293)" do
     # No live workspace: the RPC targets an unconnected node, so the wrappers must
     # surface `{:badrpc, :nodedown}` as `{:error, {:unreachable, _}}` (the same

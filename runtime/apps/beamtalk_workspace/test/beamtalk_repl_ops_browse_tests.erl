@@ -533,6 +533,20 @@ browse_tests(#{class_name := Class}) ->
             ?assertEqual(false, maps:get(<<"sealed">>, Value)),
             ?assertEqual(false, maps:get(<<"abstract">>, Value))
         end},
+        {"browse-class-definition reports is_protocol=false for an ordinary class", fun() ->
+            %% BT-2639: op 4 surfaces is_protocol (runtime reflection, not a header
+            %% string-sniff) so the def tab can gate the protocol action row. A
+            %% plain fixture class is not a protocol.
+            Value = decode_value(
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-class-definition">>,
+                    #{<<"class">> => Class},
+                    make_msg(),
+                    self()
+                )
+            ),
+            ?assertEqual(false, maps:get(<<"is_protocol">>, Value))
+        end},
         {"browse-native-source errors for a non-native class", fun() ->
             %% BT-2578: the op only applies to native: classes (ADR 0056).
             Response = beamtalk_repl_ops_browse:handle(
