@@ -3244,16 +3244,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Derive the in-project `.bt` path for a new class from its name (BT-2293):
-  # `Greeter` → `src/Greeter.bt`. The runtime's `newClass:at:` validation accepts
-  # an exact (`Greeter.bt`, the stdlib convention) basename match, so the
-  # PascalCase name maps cleanly. The name is already PascalCase-validated by the
-  # caller, so this always succeeds; it returns `{:ok, path}` to keep the
-  # call-site explicit.
-  #
-  # NOTE (BT-2646): the snake_case filename convention is OUT OF SCOPE here — this
-  # keeps the PascalCase basename behaviour unchanged so BT-2646 is a clean
-  # follow-up.
+  # Derive the in-project `.bt` path for a new class from its name (BT-2293,
+  # BT-2646): `Greeter` → `src/greeter.bt`, `EventStore` → `src/event_store.bt`.
+  # The basename is snake_cased to match the project convention (every file in a
+  # package `src/` is snake_case). The runtime's `newClass:at:` validation
+  # snake_case-normalises both the declared class name and the path basename
+  # (`beamtalk_repl_loader:validate_new_class/3` via `to_snake_case/1`), so a
+  # snake_case file maps cleanly to the PascalCase class. The name is already
+  # PascalCase-validated by the caller, so this always succeeds; it returns
+  # `{:ok, path}` to keep the call-site explicit.
   #
   # The `src/` prefix is assumed — it's the canonical package source dir the
   # runtime resolves (`resolve_package_module` tries `src/` then `test/`). A
@@ -3261,7 +3260,38 @@ defmodule BtAttachWeb.WorkspaceLive do
   # creation time (not silently on flush). If per-project source dirs ever land,
   # this is the spot to read the configured dir instead of hardcoding `src/`.
   defp derive_class_path(name) do
-    {:ok, "src/" <> name <> ".bt"}
+    {:ok, "src/" <> to_snake_case(name) <> ".bt"}
+  end
+
+  # Snake-case a PascalCase class name, mirroring the runtime's
+  # `beamtalk_repl_loader:to_snake_case/1` EXACTLY so the IDE-derived filename and
+  # the loader's basename normalisation agree (BT-2646). The rule: the first
+  # character is lowercased unconditionally; thereafter an uppercase letter gets a
+  # leading `_` ONLY when the previous character was a lowercase letter. This
+  # collapses acronyms (`HTTPServer` → `httpserver`) rather than splitting every
+  # capital — diverging from the runtime here would make the loader reject or
+  # mis-locate the created file. Digits and other characters pass through verbatim
+  # and do not count as "lowercase" for the boundary test.
+  defp to_snake_case(name) do
+    name
+    |> String.to_charlist()
+    |> snake_chars(false, [])
+  end
+
+  defp snake_chars([], _prev_was_lower?, acc), do: acc |> Enum.reverse() |> List.to_string()
+
+  defp snake_chars([c | rest], prev_was_lower?, acc) when c >= ?A and c <= ?Z do
+    lowered = c + 32
+
+    if prev_was_lower? do
+      snake_chars(rest, false, [lowered, ?_ | acc])
+    else
+      snake_chars(rest, false, [lowered | acc])
+    end
+  end
+
+  defp snake_chars([c | rest], _prev_was_lower?, acc) do
+    snake_chars(rest, c >= ?a and c <= ?z, [c | acc])
   end
 
   # Revert one pending method patch (BT-2293). On success the prior body is
