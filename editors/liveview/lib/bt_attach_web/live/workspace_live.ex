@@ -522,6 +522,18 @@ defmodule BtAttachWeb.WorkspaceLive do
       # a second replaces this value, and `native_shown?/2` scopes display to the
       # active tab's class (per-tab pane state is intentionally not kept).
       |> assign(:native_view, nil)
+      # BT-2648: the System Browser's "Native modules" section — a loaded
+      # package's hand-written native Erlang modules that no `native:` class
+      # backs (the beamtalk-http case). `browser_native_modules` holds the
+      # enumerated rows; `native_modules_open` is the section's collapse state
+      # (collapsed by default so it never crowds the class tree); `native_module_view`
+      # is the read-only source pane for the *selected* native module (`nil` =
+      # none open), reusing the BT-2578 native source-view render keyed by module
+      # rather than class. Kept separate from `native_view` (the class-def native
+      # pane) so the two single-slot panes don't clobber each other.
+      |> assign(:browser_native_modules, [])
+      |> assign(:native_modules_open, false)
+      |> assign(:native_module_view, nil)
       # New Class modal (BT-2293, BT-2645): the System Browser's owner-only
       # create-a-class wizard, closed by default (it opens from the browser head's
       # ＋ button). The owner types a plain class name + picks a superclass
@@ -593,6 +605,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       |> assign(:next_window_id, 1)
       |> assign(:window_z, 10)
       |> assign_browser_classes()
+      |> assign_browser_native_modules()
       |> assign_bindings(pid)
       # BT-2636: the set of expanded Changes-pane rows (keyed by the row's
       # `{class, selector}`), driven by the leading disclosure caret. A row's
@@ -1412,6 +1425,40 @@ defmodule BtAttachWeb.WorkspaceLive do
   end
 
   def handle_event("browser_open_native", _params, socket), do: {:noreply, socket}
+
+  # BT-2648: expand/collapse the System Browser's "Native modules" section. A
+  # re-fetch on each expand keeps a dependency loaded mid-session discoverable.
+  def handle_event("toggle_native_modules", _params, socket) do
+    open = !socket.assigns.native_modules_open
+
+    socket =
+      if open, do: assign_browser_native_modules(socket), else: socket
+
+    {:noreply, assign(socket, native_modules_open: open)}
+  end
+
+  # BT-2648: open a standalone native module's `.erl` read-only, reusing the
+  # BT-2578 native source-view render keyed by module (not class). A second click
+  # on the open module collapses the pane. A module with no readable source still
+  # opens (the existing "Erlang source not available" empty state).
+  def handle_event("browser_open_native_module", %{"module" => module}, socket)
+      when is_binary(module) and module != "" do
+    if native_module_shown?(socket.assigns, module) do
+      {:noreply, assign(socket, native_module_view: nil)}
+    else
+      {:noreply, assign(socket, native_module_view: load_native_module_view(socket, module))}
+    end
+  end
+
+  def handle_event("browser_open_native_module", _params, socket), do: {:noreply, socket}
+
+  # BT-2648: dismiss the error inside the standalone native-module pane.
+  def handle_event("dismiss_native_module_error", _params, socket) do
+    case socket.assigns[:native_module_view] do
+      %{} = nv -> {:noreply, assign(socket, native_module_view: Map.put(nv, :error, nil))}
+      _ -> {:noreply, socket}
+    end
+  end
 
   # BT-2578: jump from a `self delegate` method to its Erlang implementation.
   # Opens (or focuses) the class-definition tab and expands the native pane with
@@ -3824,6 +3871,21 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # BT-2648: load the loaded packages' hand-written native Erlang modules for the
+  # System Browser's "Native modules" section. Each row carries `module`,
+  # `source_file`, `package`, `source_origin`, and `openable`. A dispatch failure
+  # / RBAC denial yields an empty section rather than crashing the browser — the
+  # class tree (the primary navigator) must still render.
+  defp assign_browser_native_modules(socket) do
+    case Facade.dispatch(:browse_native_modules, %{}, ctx(socket)) do
+      {:value, rows} when is_list(rows) ->
+        assign(socket, browser_native_modules: rows)
+
+      _ ->
+        assign(socket, browser_native_modules: [])
+    end
+  end
+
   # Load `class`/`side`'s selectors grouped by protocol (op 2, `browse-protocols`)
   # for the protocol filter row + method list. The `protocols` list each carry a
   # `name` and `selectors`; an unknown class / bad side comes back as a structured
@@ -4310,6 +4372,49 @@ defmodule BtAttachWeb.WorkspaceLive do
   # True when the native pane is currently showing `class`'s backing source.
   defp native_shown?(%{native_view: %{class: shown}}, class), do: shown == class
   defp native_shown?(_assigns, _class), do: false
+
+  # BT-2648: fetch a standalone native module's source for the read-only pane,
+  # keyed by `module` (not class). Same normalisation as `load_native_view/3`
+  # (the Erlang `null` atom arrives as `:null` over distribution); `content: nil`
+  # is the honest "source not available" empty state.
+  defp load_native_module_view(socket, module) do
+    base = %{
+      module: module,
+      backing_module: nil,
+      source_file: nil,
+      source_origin: nil,
+      editable: false,
+      content: nil,
+      clauses: [],
+      requested_selector: nil,
+      selected_clause: nil,
+      error: nil
+    }
+
+    case Facade.dispatch(:browse_native_module_source, %{module: module}, ctx(socket)) do
+      {:value, %{} = r} ->
+        %{
+          base
+          | backing_module: Map.get(r, "backing_module"),
+            source_file: binary_or_nil(Map.get(r, "source_file")),
+            source_origin: Map.get(r, "source_origin"),
+            editable: Map.get(r, "editable") == true,
+            content: nonempty_string(Map.get(r, "content")),
+            clauses: Map.get(r, "clauses", []),
+            selected_clause: map_or_nil(Map.get(r, "selected_clause"))
+        }
+
+      {:error, reason} ->
+        %{base | error: facade_error(reason)}
+
+      _ ->
+        %{base | error: "Could not load Erlang source."}
+    end
+  end
+
+  # True when the standalone native-module pane is showing `module`'s source.
+  defp native_module_shown?(%{native_module_view: %{module: shown}}, module), do: shown == module
+  defp native_module_shown?(_assigns, _module), do: false
 
   # Query senders/implementors of the active method's selector (`nav-query`) and
   # open the result popover. A tab with no selector (a class-definition tab) is a
@@ -6631,6 +6736,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :new_class_name, :string, default: ""
   attr :new_class_super, :string, default: "Object"
   attr :new_class_error, :string, default: nil
+  # BT-2648: the loaded packages' hand-written native Erlang modules (no class to
+  # back them), the section's collapse state, and the module whose source pane is
+  # currently open (highlighted in the list).
+  attr :browser_native_modules, :list, default: []
+  attr :native_modules_open, :boolean, default: false
+  attr :native_module_shown, :string, default: nil
 
   defp system_browser_classes(assigns) do
     # BT-2557: filter the rows once, up front, so both the hierarchy and category
@@ -6826,6 +6937,52 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
         <% end %>
       </div>
+      <%!-- BT-2648: "Native modules" section — a loaded package's hand-written
+           native Erlang modules that no `native:` class backs (the beamtalk-http
+           case). Collapsed by default so it never crowds the class tree; a click
+           on a module opens its `.erl` read-only in the editor column's native
+           pane. Each row carries an Erlang marker plus the same package/origin
+           badge vocabulary the class tree uses (DEP · <pkg> / STDLIB / project),
+           so a dependency's native module is visually distinguished and tagged
+           consistently with BT-2640/2641/2642. --%>
+      <div :if={@browser_native_modules != []} class="native-modules-section">
+        <button
+          type="button"
+          class="native-modules-head"
+          phx-click="toggle_native_modules"
+          aria-expanded={to_string(@native_modules_open)}
+        >
+          <span class="twig">{if @native_modules_open, do: "▾", else: "▸"}</span>
+          <span class="native-badge">Erlang</span>
+          Native modules <span class="count">{length(@browser_native_modules)}</span>
+        </button>
+        <div :if={@native_modules_open} class="tree native-modules-list">
+          <div
+            :for={mod <- @browser_native_modules}
+            class={["row", @native_module_shown == mod["module"] && "sel"]}
+            phx-click="browser_open_native_module"
+            phx-value-module={mod["module"]}
+            title={mod["module"]}
+          >
+            <span class="twig">●</span>
+            <span class="cls mono">{mod["module"]}</span>
+            <span
+              :if={mod["source_origin"] && mod["source_origin"] != "project"}
+              class={"source-origin-tag #{source_origin_class(mod)}"}
+              title={source_origin_title(mod)}
+            >
+              {source_origin_label(mod)}
+            </span>
+            <span
+              :if={mod["openable"] == false}
+              class="runtime-tag"
+              title="no source on disk (.beam-only)"
+            >
+              ⚡
+            </span>
+          </div>
+        </div>
+      </div>
       <div class="actionbar sb-side">
         <div class="seg" role="tablist" aria-label="Instance / class side">
           <button
@@ -6896,6 +7053,67 @@ defmodule BtAttachWeb.WorkspaceLive do
     do: "padding-left: #{10 + indent * 14}px"
 
   defp class_row_indent(_), do: nil
+
+  # BT-2578/BT-2648: the read-only native source-view body, shared by the
+  # class-definition tab's native pane (keyed by a `native:` class's backing
+  # module) and the standalone "Native modules" pane (keyed by a module). `view`
+  # is the fetched native_view map (`error`/`content`/`source_file`/
+  # `source_origin`/`editable`/`clauses`/`selected_clause`/`requested_selector`);
+  # `fallback_module` names the module in the "source not available" empty state;
+  # `dismiss_event` clears the in-pane error. `content == nil` degrades to the
+  # empty state, never an error.
+  attr :view, :map, required: true
+  attr :fallback_module, :string, default: nil
+  attr :dismiss_event, :string, required: true
+
+  defp native_source_body(assigns) do
+    ~H"""
+    <.notice
+      :if={@view.error}
+      variant={:err}
+      message={@view.error}
+      dismiss_attrs={%{"phx-click" => @dismiss_event}}
+    />
+    <%= if @view.content do %>
+      <div class="native-meta mono">
+        <span :if={@view.source_file}>{@view.source_file}</span>
+        <span class="native-origin">
+          {@view.source_origin}{if @view.editable, do: " · editable", else: " · read-only"}
+        </span>
+      </div>
+      <ul :if={@view.clauses != []} class="native-clauses">
+        <li
+          :for={c <- @view.clauses}
+          class={
+            "mono" <>
+              if(clause_active?(c, @view.selected_clause),
+                do: " native-clause-active",
+                else: ""
+              )
+          }
+          aria-current={clause_active?(c, @view.selected_clause) && "true"}
+        >
+          {c["selector"]}<span class="muted-note"> · line {c["line"]}</span>
+        </li>
+      </ul>
+      <%!-- A delegate the backend could not map to a `handle_call` clause (it
+           replies from `handle_info` / a helper): say so rather than silently
+           highlighting nothing. Only on a method→clause jump (requested_selector). --%>
+      <div :if={@view[:requested_selector] && is_nil(@view.selected_clause)} class="muted-note">
+        No direct <code class="mono">handle_call</code>
+        clause for <code class="mono">{@view.requested_selector}</code>
+        — this delegate completes in <code class="mono">handle_info</code>
+        or a helper.
+      </div>
+      <pre class="native-pre"><code>{@view.content}</code></pre>
+    <% else %>
+      <div :if={is_nil(@view.error)} class="muted-note">
+        Erlang source not available — the module <code class="mono">{@fallback_module}</code>
+        shipped without source.
+      </div>
+    <% end %>
+    """
+  end
 
   # The protocol + method pane (the spike's MethodList): a protocol filter row
   # ("all" + one row per protocol, BT-2491) over the method list for the current
@@ -7353,6 +7571,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                   new_class_name={@new_class_name}
                   new_class_super={@new_class_super}
                   new_class_error={@new_class_error}
+                  browser_native_modules={@browser_native_modules}
+                  native_modules_open={@native_modules_open}
+                  native_module_shown={(@native_module_view && @native_module_view.module) || nil}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
                      the method list ("more class, less method"). --%>
@@ -8189,6 +8410,39 @@ defmodule BtAttachWeb.WorkspaceLive do
                   dismiss_attrs={%{"phx-click" => "dismiss_notice", "phx-value-key" => "flush_error"}}
                 />
 
+                <%!-- BT-2648: standalone native-module source pane. Shown above
+                     the editor when a "Native modules" row is opened — a
+                     dependency's hand-written `.erl` with no Beamtalk class to
+                     edit, so it is view-only and lives outside the tab strip.
+                     Reuses the BT-2578 native pane render (`.native_source_body`)
+                     keyed by module. `content == nil` degrades to the same
+                     "Erlang source not available" empty state. --%>
+                <section
+                  :if={@native_module_view}
+                  class="native-block native-module-block"
+                  aria-label="Native module source"
+                >
+                  <div class="native-head">
+                    <span class="native-badge">Erlang module</span>
+                    <code class="native-module mono">{@native_module_view.module}</code>
+                    <span class="spacer"></span>
+                    <button
+                      type="button"
+                      class="native-toggle"
+                      phx-click="browser_open_native_module"
+                      phx-value-module={@native_module_view.module}
+                      aria-label="Close native module source"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  <.native_source_body
+                    view={@native_module_view}
+                    fallback_module={@native_module_view.module}
+                    dismiss_event="dismiss_native_module_error"
+                  />
+                </section>
+
                 <%= if @active_tab do %>
                   <%!-- breadcrumb: Class › side › selector for the active tab. --%>
                   <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
@@ -8353,59 +8607,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </button>
                       </div>
                       <div :if={native_shown?(assigns, doc_tab.class)} class="native-body">
-                        <.notice
-                          :if={@native_view.error}
-                          variant={:err}
-                          message={@native_view.error}
-                          dismiss_attrs={%{"phx-click" => "dismiss_native_error"}}
+                        <.native_source_body
+                          view={@native_view}
+                          fallback_module={doc_tab.native_module}
+                          dismiss_event="dismiss_native_error"
                         />
-                        <%= if @native_view.content do %>
-                          <div class="native-meta mono">
-                            <span :if={@native_view.source_file}>{@native_view.source_file}</span>
-                            <span class="native-origin">
-                              {@native_view.source_origin}{if @native_view.editable,
-                                do: " · editable",
-                                else: " · read-only"}
-                            </span>
-                          </div>
-                          <ul :if={@native_view.clauses != []} class="native-clauses">
-                            <li
-                              :for={c <- @native_view.clauses}
-                              class={
-                              "mono" <>
-                                if(clause_active?(c, @native_view.selected_clause),
-                                  do: " native-clause-active",
-                                  else: ""
-                                )
-                            }
-                              aria-current={clause_active?(c, @native_view.selected_clause) && "true"}
-                            >
-                              {c["selector"]}<span class="muted-note"> · line {c["line"]}</span>
-                            </li>
-                          </ul>
-                          <%!-- A delegate the backend could not map to a `handle_call`
-                             clause (it replies from `handle_info` / a helper): say so
-                             rather than silently highlighting nothing. --%>
-                          <div
-                            :if={
-                              @native_view.requested_selector &&
-                                is_nil(@native_view.selected_clause)
-                            }
-                            class="muted-note"
-                          >
-                            No direct <code class="mono">handle_call</code>
-                            clause for <code class="mono">{@native_view.requested_selector}</code>
-                            — this delegate completes in <code class="mono">handle_info</code>
-                            or a helper.
-                          </div>
-                          <pre class="native-pre"><code>{@native_view.content}</code></pre>
-                        <% else %>
-                          <div :if={is_nil(@native_view.error)} class="muted-note">
-                            Erlang source not available — the backing module
-                            <code class="mono">{doc_tab.native_module}</code>
-                            shipped without source.
-                          </div>
-                        <% end %>
                       </div>
                     </section>
                     <%= if @role == :owner do %>

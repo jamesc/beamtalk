@@ -94,6 +94,12 @@ defmodule BtAttach.Facade do
     # module's `__beamtalk_meta/0` + the backing module's on-disk `.erl` (read
     # only — no user code), so it is `:read`, safe for the Observer role.
     browse_native_source: :read,
+    # BT-2648: the native-modules enumeration + a module-keyed native source
+    # view. Same pure reflection as `browse_native_source` (loaded-module
+    # enumeration via app env + the backing module's on-disk `.erl`, read only —
+    # no user code), so both are `:read`, safe for the Observer role.
+    browse_native_modules: :read,
+    browse_native_module_source: :read,
     # BT-2495 (Cockpit Phase 3): the navigation aids — Senders/Implementors
     # popovers (`senders`/`implementors`) and the top-bar omni search (`symbols`).
     # Each is a thin `:read` facade over the navigation channel the LSP/MCP
@@ -261,6 +267,18 @@ defmodule BtAttach.Facade do
   defp invoke(:browse_native_source, %{class: class} = params, _ctx) do
     if is_binary(class),
       do: client().browse_native_source(class, Map.get(params, :selector)),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2648: enumerate a loaded package's hand-written native Erlang modules
+  # (no params) — the System Browser's native-modules section data source.
+  defp invoke(:browse_native_modules, _params, _ctx), do: client().browse_native_modules()
+
+  # BT-2648: the read-only native pane keyed by a standalone native `module`
+  # (no backing class) — the module surfaced by `browse_native_modules`.
+  defp invoke(:browse_native_module_source, %{module: module}, _ctx) do
+    if is_binary(module),
+      do: client().browse_native_module_source(module),
       else: {:error, :invalid_params}
   end
 

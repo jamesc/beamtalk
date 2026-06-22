@@ -22,6 +22,7 @@ panes against a live workspace, sourced **static-first / live-augmented**
 | `browse-method-source` | method source pane | `{value, MethodSource}` |
 | `browse-class-definition` | class-definition pane | `{value, ClassDefinition}` |
 | `browse-native-source` | read-only native pane | `{value, NativeSource}` |
+| `browse-native-modules` | native-modules section | `{value, [NativeModuleRow]}` |
 
 ## Term contract (BT-2399)
 
@@ -121,12 +122,26 @@ handle_term(<<"browse-class-definition">>, Params, _Msg, _SessionPid) ->
             arg_error(<<"browse-class-definition">>, Reason)
     end;
 handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
-    case validate_class(Params) of
-        {ok, ClassName} ->
-            browse_native_source(ClassName, optional_selector(Params));
+    %% BT-2648: the native pane can be keyed by a standalone native `module`
+    %% (a dependency's hand-written `.erl` with no `native:` class to back it,
+    %% surfaced by `browse-native-modules`) as an alternative to a `class`. The
+    %% `module` form takes precedence; the `class` form is the original BT-2578
+    %% path (resolve a native class's backing module).
+    case validate_module(Params) of
+        {ok, ModuleName} ->
+            browse_native_module_source(ModuleName, optional_selector(Params));
+        none ->
+            case validate_class(Params) of
+                {ok, ClassName} ->
+                    browse_native_source(ClassName, optional_selector(Params));
+                {error, Reason} ->
+                    arg_error(<<"browse-native-source">>, Reason)
+            end;
         {error, Reason} ->
             arg_error(<<"browse-native-source">>, Reason)
-    end.
+    end;
+handle_term(<<"browse-native-modules">>, _Params, _Msg, _SessionPid) ->
+    {value, browse_native_modules()}.
 
 -doc "Advertise the browse ops in `describe`.".
 -spec describe_ops() -> map().
@@ -139,8 +154,13 @@ describe_ops() ->
         },
         <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]},
         %% `selector` is optional: present → also resolve the matching
-        %% `handle_call` clause; absent → whole-module view (BT-2578).
-        <<"browse-native-source">> => #{<<"params">> => [<<"class">>]}
+        %% `handle_call` clause; absent → whole-module view (BT-2578). BT-2648:
+        %% `module` is an alternative key (a standalone native module with no
+        %% backing class); one of `class` / `module` is required.
+        <<"browse-native-source">> => #{<<"params">> => [<<"class">>, <<"module">>]},
+        %% BT-2648: enumerate a loaded package's hand-written native Erlang
+        %% modules (no params).
+        <<"browse-native-modules">> => #{<<"params">> => []}
     }.
 
 %%% ====================================================================
@@ -643,6 +663,208 @@ native_source_value(ClassName, ModName, Backing, Selector) ->
         <<"selected_clause">> => selected_clause(Clauses, Selector)
     }}.
 
+%% BT-2648: the read-only native pane keyed directly by a standalone native
+%% module (not a `native:` class's backing module). Reuses the exact same
+%% reader/clause machinery `native_source_value/4` uses — the only difference is
+%% the key (a module the `browse-native-modules` enumeration surfaced) and that
+%% there is no owning class, so `class` is `null` and `backing_module` is the
+%% module itself. A module with no readable on-disk source degrades to
+%% `content = null` (the "source not available" empty state), never an error.
+-spec browse_native_module_source(atom(), atom() | undefined) ->
+    beamtalk_repl_ops:op_result().
+browse_native_module_source(Module, Selector) ->
+    {SourceFile, Content} = backing_source(Module),
+    SourceOrigin = native_module_origin(Module, SourceFile),
+    Clauses = handle_call_clause_lines(Content),
+    {value, #{
+        <<"class">> => null,
+        <<"backing_module">> => atom_to_binary(Module, utf8),
+        <<"source_file">> => SourceFile,
+        <<"source_origin">> => SourceOrigin,
+        %% Read-only in every origin today: standalone native modules have no
+        %% Beamtalk-side editing seam (no class tab to recompile), so even a
+        %% project-owned native module is view-only here (R/W is BT-2578 follow-up).
+        <<"editable">> => false,
+        <<"content">> => Content,
+        <<"clauses">> => Clauses,
+        <<"selected_clause">> => selected_clause(Clauses, Selector)
+    }}.
+
+%%% ====================================================================
+%%% Op 6 — browse-native-modules (BT-2648)
+%%% ====================================================================
+
+%% Enumerate the loaded packages' *hand-written* native Erlang modules so the
+%% System Browser can navigate to a dependency's `.erl` files even when no
+%% `native:` class backs them (the reported beamtalk-http case: a dependency
+%% loaded without instantiating its classes is invisible to the class-keyed
+%% `browse-classes`).
+%%
+%% **Filter rule (ADR 0072 `native_modules`, BT-2648):** a "native module" is a
+%% module a Beamtalk package *declares* it ships, never the whole code path:
+%%
+%%   1. Walk `beamtalk_package:all/0` — every loaded OTP application that is a
+%%      Beamtalk package (has a non-empty `classes` env, ADR 0070).
+%%   2. For each package's app, take its declared native modules:
+%%        * user / dependency packages: the generated `{native_modules, [...]}`
+%%          app-env key (ADR 0072 Phase 1; the `native/*.erl` stems);
+%%        * stdlib (whose `.app.src` carries no `native_modules` key): the app's
+%%          OTP `modules` list filtered to non-`bt@` modules — i.e. the
+%%          hand-written `beamtalk_*` backing modules, not the `bt@stdlib@*`
+%%          class facades.
+%%   3. EXCLUDE the auto-generated `bt@{pkg}@{class}` class facade modules by
+%%      construction: those live in the OTP `modules` key, never in
+%%      `native_modules`, and the stdlib filter drops the `bt@` prefix — so a
+%%      class facade is never duplicated here (it is already in browse-classes).
+%%
+%% Each row carries the module name, on-disk source path (compile-info `source`,
+%% like `backing_source/1`; `null` when no readable source → not openable),
+%% package name, and origin (`project`/`dependency`/`stdlib`). Rows are sorted by
+%% module name for a stable tree.
+-spec browse_native_modules() -> [map()].
+browse_native_modules() ->
+    Packages =
+        try
+            beamtalk_package:all()
+        catch
+            _:_ -> []
+        end,
+    Rows = lists:flatmap(fun native_modules_of_package/1, Packages),
+    %% Dedup by module name (a module declared by more than one app is listed
+    %% once) then sort for a stable tree.
+    Deduped = maps:values(
+        lists:foldl(
+            fun(#{<<"module">> := M} = Row, Acc) -> maps:put(M, Row, Acc) end,
+            #{},
+            Rows
+        )
+    ),
+    lists:sort(
+        fun(A, B) -> maps:get(<<"module">>, A) =< maps:get(<<"module">>, B) end,
+        Deduped
+    ).
+
+%% The native-module rows for one package: resolve its owning app, read the
+%% declared native modules, and build a row per module tagged with the package's
+%% name + origin. A package whose app cannot be resolved contributes nothing.
+-spec native_modules_of_package(binary()) -> [map()].
+native_modules_of_package(PkgName) ->
+    case find_app_for_package(PkgName) of
+        {ok, App} ->
+            Origin = package_origin(App, PkgName),
+            [native_module_row(Mod, PkgName, Origin) || Mod <- package_native_modules(App)];
+        error ->
+            []
+    end.
+
+%% The OTP application hosting a Beamtalk package (mirrors
+%% `beamtalk_package:find_app_for_package/1`, which is not exported).
+-spec find_app_for_package(binary()) -> {ok, atom()} | error.
+find_app_for_package(PkgName) ->
+    Apps = application:loaded_applications(),
+    find_app_for_package(PkgName, Apps).
+
+-spec find_app_for_package(binary(), [{atom(), term(), term()}]) -> {ok, atom()} | error.
+find_app_for_package(_PkgName, []) ->
+    error;
+find_app_for_package(PkgName, [{App, _Desc, _Vsn} | Rest]) ->
+    case app_package_name(App) of
+        PkgName -> {ok, App};
+        _ -> find_app_for_package(PkgName, Rest)
+    end.
+
+%% The package name an app hosts (the package segment of its declared classes),
+%% or `undefined` for a non-Beamtalk app.
+-spec app_package_name(atom()) -> binary() | undefined.
+app_package_name(App) ->
+    case application:get_env(App, classes) of
+        {ok, [#{package := Pkg} | _]} when is_atom(Pkg) -> atom_to_binary(Pkg, utf8);
+        {ok, [#{package := Pkg} | _]} when is_binary(Pkg) -> Pkg;
+        _ -> undefined
+    end.
+
+%% An app's declared native modules. User / dependency packages carry the
+%% generated `{native_modules, [...]}` env key (ADR 0072); stdlib has none, so
+%% fall back to the OTP `modules` list filtered to the non-`bt@` (hand-written)
+%% modules — which excludes the `bt@stdlib@*` class facades by construction.
+-spec package_native_modules(atom()) -> [atom()].
+package_native_modules(App) ->
+    case application:get_env(App, native_modules) of
+        {ok, Mods} when is_list(Mods) ->
+            [M || M <- Mods, is_atom(M)];
+        _ ->
+            stdlib_fallback_native_modules(App)
+    end.
+
+%% Stdlib (and any package with no `native_modules` env): the OTP `modules` list
+%% minus the `bt@*` class facades — i.e. the hand-written `beamtalk_*` backing
+%% modules. A non-stdlib app with no `native_modules` key (an older build) gets
+%% nothing rather than its facade modules misreported as native.
+-spec stdlib_fallback_native_modules(atom()) -> [atom()].
+stdlib_fallback_native_modules(beamtalk_stdlib = App) ->
+    case application:get_key(App, modules) of
+        {ok, Mods} when is_list(Mods) ->
+            [M || M <- Mods, is_atom(M), not is_bt_module(M)];
+        _ ->
+            []
+    end;
+stdlib_fallback_native_modules(_App) ->
+    [].
+
+%% True for an auto-generated `bt@{pkg}@{class}` class facade module atom.
+-spec is_bt_module(atom()) -> boolean().
+is_bt_module(Module) when is_atom(Module) ->
+    case atom_to_binary(Module, utf8) of
+        <<"bt@", _/binary>> -> true;
+        _ -> false
+    end.
+
+%% Origin of a package's native modules: `stdlib` for the stdlib app, else the
+%% project/dependency split from the package name vs the workspace's own package.
+-spec package_origin(atom(), binary()) -> binary().
+package_origin(beamtalk_stdlib, _PkgName) ->
+    <<"stdlib">>;
+package_origin(_App, PkgName) ->
+    case project_package_name() of
+        ProjectPkg when is_binary(ProjectPkg), ProjectPkg =:= PkgName ->
+            <<"project">>;
+        _ ->
+            <<"dependency">>
+    end.
+
+%% Source origin for a standalone native module's pane. A native module is not a
+%% `bt@{pkg}@{class}` atom, so `source_origin_of/2`'s package-segment path can't
+%% classify it; instead, badge stdlib by app membership (the stdlib app declares
+%% it) and fall back to the on-disk path check (`classify_origin/3`) for the
+%% project/dependency split.
+-spec native_module_origin(atom(), binary() | null) -> binary().
+native_module_origin(Module, SourceFile) ->
+    case is_stdlib_native_module(Module) of
+        true -> <<"stdlib">>;
+        false -> path_origin(SourceFile)
+    end.
+
+%% True when `Module` is one of the stdlib app's hand-written native modules.
+-spec is_stdlib_native_module(atom()) -> boolean().
+is_stdlib_native_module(Module) ->
+    lists:member(Module, stdlib_fallback_native_modules(beamtalk_stdlib)).
+
+%% One native-module row: module name, on-disk source path (compile-info
+%% `source`, `null` when no readable source → not openable), package, and origin.
+-spec native_module_row(atom(), binary(), binary()) -> map().
+native_module_row(Module, PkgName, Origin) ->
+    {SourceFile, _Content} = backing_source(Module),
+    #{
+        <<"module">> => atom_to_binary(Module, utf8),
+        <<"source_file">> => SourceFile,
+        <<"package">> => PkgName,
+        <<"source_origin">> => Origin,
+        %% Openable iff a readable on-disk `.erl` was found (`.beam`-only /
+        %% release-stripped modules are listed but not openable — the existing
+        %% "Erlang source not available" path).
+        <<"openable">> => SourceFile =/= null
+    }.
+
 %% The backing module's on-disk `.erl` and its content. The source path comes
 %% from the module's own compile info (`module_info(compile)` → `source`), so a
 %% `.beam`-only release (no shipped source) degrades to `{null, null}` —
@@ -1039,6 +1261,37 @@ disk_source(ClassName) ->
 %%% ====================================================================
 %%% Validation
 %%% ====================================================================
+
+%% BT-2648: optional `module` param for `browse-native-source` — a standalone
+%% native module key (no backing class). `none` when absent (caller falls back to
+%% the `class` form); an error when present but not a loaded module. Resolved to
+%% an existing atom only (untrusted client input must not grow the atom table).
+-spec validate_module(map()) -> {ok, atom()} | none | {error, binary()}.
+validate_module(Params) ->
+    case maps:get(<<"module">>, Params, undefined) of
+        Mod when is_binary(Mod), byte_size(Mod) > 0 ->
+            resolve_module(Mod);
+        _ ->
+            none
+    end.
+
+%% Resolve a module-name binary to an atom only if it names a loaded module. An
+%% unknown module is a structured not-found error, never an atom-table growth.
+-spec resolve_module(binary()) -> {ok, atom()} | {error, binary()}.
+resolve_module(Mod) ->
+    try
+        Module = binary_to_existing_atom(Mod, utf8),
+        case code:is_loaded(Module) of
+            {file, _} -> {ok, Module};
+            false -> {error, module_not_found_message(Mod)}
+        end
+    catch
+        error:badarg -> {error, module_not_found_message(Mod)}
+    end.
+
+-spec module_not_found_message(binary()) -> binary().
+module_not_found_message(Mod) ->
+    iolist_to_binary([<<"module `">>, Mod, <<"` not found">>]).
 
 -spec validate_class(map()) -> {ok, atom()} | {error, binary()}.
 validate_class(Params) ->
