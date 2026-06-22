@@ -33,6 +33,12 @@ classify_deleted_test() ->
 classify_unknown_char_is_unmodified_test() ->
     ?assertEqual({unmodified, unmodified}, beamtalk_git:classify_xy(<<"XY">>)).
 
+classify_type_changed_worktree_test() ->
+    ?assertEqual({unmodified, type_changed}, beamtalk_git:classify_xy(<<".T">>)).
+
+classify_type_changed_index_test() ->
+    ?assertEqual({type_changed, unmodified}, beamtalk_git:classify_xy(<<"T.">>)).
+
 %%% ============================================================================
 %%% Status parsing (git status --porcelain=v2 -b -z)
 %%% ============================================================================
@@ -203,6 +209,42 @@ status_empty_test() ->
     ?assertEqual(nil, maps:get(branch, Status)),
     ?assertEqual([], maps:get(files, Status)).
 
+%% The `! <path>` clause maps ignored-file entries to worktree => ignored. This
+%% is forward-looking/defensive parser coverage: `git_status/0` invokes
+%% `git status --porcelain=v2 -b -z` *without* `--ignored`, so git never emits
+%% `!` entries in production today. The test documents the parser contract for
+%% when/if `--ignored` is added, not current `git_status/0` behaviour.
+status_ignored_file_test() ->
+    Bin = nul_join([<<"# branch.head main">>, <<"! .env">>]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(
+        [#{path => <<".env">>, index => unmodified, worktree => ignored}],
+        maps:get(files, Status)
+    ).
+
+%% A `# branch.ab` line that does not match `+A -B` degrades to {0, 0}.
+status_malformed_ahead_behind_defaults_to_zero_test() ->
+    Bin = nul_join([<<"# branch.head main">>, <<"# branch.ab malformed">>]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(0, maps:get(ahead, Status)),
+    ?assertEqual(0, maps:get(behind, Status)).
+
+%% Non-integer values in `+A -B` reach the to_int error:badarg arm and fall back
+%% to 0, not a crash.
+status_non_integer_ahead_behind_defaults_to_zero_test() ->
+    Bin = nul_join([<<"# branch.head main">>, <<"# branch.ab +xyz -abc">>]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual(0, maps:get(ahead, Status)),
+    ?assertEqual(0, maps:get(behind, Status)).
+
+%% An entry whose prefix does not match any known type (`1`, `2`, `u`, `?`, `!`,
+%% `#`) is silently dropped — `fold_status` matches on multi-byte prefixes (e.g.
+%% `<<"1 ">>`), so `<<"X some-unknown-entry">>` falls through to the catch-all.
+status_unknown_entry_is_dropped_test() ->
+    Bin = nul_join([<<"# branch.head main">>, <<"X some-unknown-entry">>]),
+    Status = beamtalk_git:parse_status(Bin),
+    ?assertEqual([], maps:get(files, Status)).
+
 %%% ============================================================================
 %%% Log parsing (git log --format=%H<FS>%h<FS>%an<FS>%aI<FS>%s<RS>)
 %%% ============================================================================
@@ -254,6 +296,14 @@ log_subject_with_field_separator_test() ->
 log_empty_test() ->
     ?assertEqual([], beamtalk_git:parse_log(<<>>)).
 
+%% A record with only 4 fields (missing subject) does not match the 5-field
+%% pattern and is silently dropped rather than crashing.
+log_too_few_fields_is_dropped_test() ->
+    FS = 16#1f,
+    RS = 16#1e,
+    Bin = <<"sha", FS, "short", FS, "Author", FS, "ts", RS>>,
+    ?assertEqual([], beamtalk_git:parse_log(Bin)).
+
 %%% ============================================================================
 %%% Argument validation
 %%% ============================================================================
@@ -267,6 +317,27 @@ git_commit_rejects_whitespace_only_message_test() ->
 
 git_commit_rejects_non_binary_message_test() ->
     ?assertMatch({error, _}, beamtalk_git:git_commit(42)).
+
+git_diff_rejects_non_binary_path_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_diff(42)).
+
+git_stage_rejects_non_binary_path_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_stage(42)).
+
+git_unstage_rejects_non_binary_path_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_unstage(42)).
+
+git_revert_file_rejects_non_binary_path_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_revert_file(42)).
+
+git_log_rejects_zero_count_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_log(0)).
+
+git_log_rejects_negative_count_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_log(-1)).
+
+git_log_rejects_non_integer_test() ->
+    ?assertMatch({error, _}, beamtalk_git:git_log(<<"3">>)).
 
 %%% ============================================================================
 %%% Subdirectory-project cwd/pathspec consistency (BT-2608)
