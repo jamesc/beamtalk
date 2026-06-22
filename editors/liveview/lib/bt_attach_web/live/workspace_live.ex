@@ -3573,6 +3573,20 @@ defmodule BtAttachWeb.WorkspaceLive do
     )
   end
 
+  # Defensive catch-all (BT-2591): folded from the async mount load, so an
+  # unexpected shape must degrade rather than crash the LiveView post-render.
+  defp apply_changes(socket, unexpected) do
+    Logger.warning("unexpected changes result: #{inspect(unexpected)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    assign(socket,
+      changes: [],
+      changes_error: Workspace.render_error(:unexpected_response),
+      expanded_changes: MapSet.new()
+    )
+  end
+
   # BT-2598: the live image changed (a class was (re)loaded or removed). Re-pull
   # every source-dependent surface so open windows reflect the new image without a
   # manual refresh: the browser class list, the active ChangeLog, all open clean
@@ -3978,6 +3992,18 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp apply_browser_classes(socket, {:error, reason}),
     do: assign(socket, browser_classes: [], browser_error: facade_error(reason))
+
+  # Defensive catch-all (BT-2591): this fold runs in `handle_async(:mount_load,
+  # …)`, so an unexpected dispatch shape (a facade evolution, a bare atom) would
+  # crash the LiveView *after* the empty page rendered — harder to spot than the
+  # old mount-time crash. Degrade to an empty tree with an error instead.
+  defp apply_browser_classes(socket, unexpected) do
+    Logger.warning("unexpected browse_classes result: #{inspect(unexpected)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    assign(socket, browser_classes: [], browser_error: facade_error(:unexpected_response))
+  end
 
   # BT-2648: load the loaded packages' hand-written native Erlang modules for the
   # System Browser's "Native modules" section. Each row carries `module`,
@@ -5522,6 +5548,16 @@ defmodule BtAttachWeb.WorkspaceLive do
       end)
 
     assign(socket, bindings: rows, bindings_error: nil)
+  end
+
+  # Defensive catch-all (BT-2591): folded from the async mount load, so an
+  # unexpected shape must degrade rather than crash the LiveView post-render.
+  defp apply_bindings(socket, unexpected) do
+    Logger.warning("unexpected bindings result: #{inspect(unexpected)}",
+      domain: [:beamtalk, :liveview]
+    )
+
+    assign(socket, bindings: [], bindings_error: Workspace.render_error(:unexpected_response))
   end
 
   # Inspect a binding selected by name: resolve its live term from the current

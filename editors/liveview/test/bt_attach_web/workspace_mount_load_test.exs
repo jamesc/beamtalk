@@ -138,10 +138,13 @@ defmodule BtAttachWeb.WorkspaceMountLoadTest do
 
   describe "BT-2619 partial race guard (BT-2591)" do
     test "a bindings push that populated the pane is not blanked by a re-fold", %{conn: conn} do
-      # Let the mount load resolve first, then a fresher BindingChanged push lands a
-      # binding. The `fold_mount_read/4` guard ensures a (hypothetical re-)fold of
-      # the mount-initial read never blanks a pane a live push has already filled —
-      # the partial protection BT-2591 adds ahead of BT-2619's full hardening.
+      # NOTE: this is the *post-load* stability scenario — `render_async` resolves
+      # the mount load before the push, so `handle_async(:mount_load, …)` has
+      # already run and this exercises "live pushes update the pane and the value
+      # sticks", not the concurrent race the guard ultimately protects against
+      # (a push landing *before* the fold). That truly-concurrent case — and the
+      # "early push errored, mount succeeded" variant — is deterministically
+      # testable only with the generation-token hardening in BT-2619; covered there.
       {:ok, view, _html} = live(owner_conn(conn), "/")
       assert render_async(view, 5_000) =~ "Counter"
 
