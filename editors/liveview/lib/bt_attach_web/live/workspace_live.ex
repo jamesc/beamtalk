@@ -3693,12 +3693,19 @@ defmodule BtAttachWeb.WorkspaceLive do
         {_def, _comment, class_native_module, class_modifiers} =
           class_definition_info(socket, class)
 
+        # BT-2642: snapshot the owning class's origin + package from the loaded
+        # tree rows so the editor header can badge the package for this tab.
+        {source_origin, package} = class_origin_package(socket, class)
+
         tab = %{
           id: id,
           kind: :method,
           class: class,
           side: side,
           selector: selector,
+          # BT-2642: package/origin badge for the editor header.
+          source_origin: source_origin,
+          package: package,
           source: info.source,
           base: info.source,
           dirty: false,
@@ -4181,6 +4188,61 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # BT-2642: editor-header package/origin badge for the active tab. The tab carries
+  # `source_origin` ("stdlib" | "dependency" | "project" | nil) and `package`,
+  # snapshotted at open from the class's browse row. The header badge reuses
+  # BT-2641's vocabulary and extends it to project (which the tree hides but the
+  # header shows): stdlib → "STDLIB", dependency → "DEP · <pkg>" (or bare "DEP"),
+  # project → the bare project package name. Returns "" when origin is unknown or
+  # a project tab carries no package, so the badge simply does not render.
+  defp header_package_label(%{source_origin: "stdlib"}), do: "STDLIB"
+
+  defp header_package_label(%{source_origin: "dependency"} = tab),
+    do: dependency_badge_label(stringify_origin(tab))
+
+  defp header_package_label(%{source_origin: "project", package: pkg})
+       when is_binary(pkg) and pkg != "",
+       do: pkg
+
+  defp header_package_label(_tab), do: ""
+
+  # The CSS modifier class keying the header badge color, per origin. Mirrors
+  # `source_origin_class/1` but reads the tab's atom-keyed `source_origin`.
+  defp header_origin_class(%{source_origin: "stdlib"}), do: "stdlib"
+  defp header_origin_class(%{source_origin: "dependency"}), do: "dependency"
+  defp header_origin_class(_tab), do: "project"
+
+  # The tooltip spelling out the origin for the header badge. Project gets a
+  # "Project: <pkg>" title (BT-2642 extends the bare "Project" the tree title used).
+  defp header_origin_title(%{source_origin: "stdlib"}), do: "Standard library"
+
+  defp header_origin_title(%{source_origin: "dependency"} = tab),
+    do: "Dependency: #{package_name(stringify_origin(tab))}"
+
+  defp header_origin_title(%{source_origin: "project", package: pkg})
+       when is_binary(pkg) and pkg != "",
+       do: "Project: #{pkg}"
+
+  defp header_origin_title(_tab), do: "Project"
+
+  # Bridge the tab's atom-keyed origin/package onto the string-keyed map the
+  # BT-2641 browse-row helpers (`dependency_badge_label/1`, `package_name/1`)
+  # expect, so the dependency badge text stays in one place.
+  defp stringify_origin(tab),
+    do: %{"source_origin" => tab[:source_origin], "package" => tab[:package]}
+
+  # Origin + package for a class, looked up from the loaded class-tree rows
+  # (BT-2643 carries both on every row). Snapshotted onto a tab at open so the
+  # editor header can badge the package even when the tree pane is collapsed.
+  # Falls back to `{nil, nil}` when the class isn't in the loaded rows (graceful:
+  # the header badge then renders nothing).
+  defp class_origin_package(socket, class) do
+    case Enum.find(socket.assigns[:browser_classes] || [], &(Map.get(&1, "name") == class)) do
+      %{} = row -> {Map.get(row, "source_origin"), Map.get(row, "package")}
+      _ -> {nil, nil}
+    end
+  end
+
   # ── tabbed method editor data model (BT-2494) ───────────────────────────────
   #
   # A tab is a plain map; the open-tab list lives in `:tabs` and the focused
@@ -4204,6 +4266,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   #     signature: binary | nil, # BT-2558 method signature (nil for a class-definition tab)
   #     class_modifiers: [:sealed | :abstract] | nil, # BT-2605 reflected class modifiers; nil = transient fetch failure (no badges)
   #     class_native: boolean,   # BT-2605 native: class flag, for the Native badge (all tab kinds)
+  #     source_origin: "stdlib" | "dependency" | "project" | nil, # BT-2642 owning class origin, for the header package badge
+  #     package: binary | nil,   # BT-2642 owning class package name, for the header package badge
   #     new: boolean             # an unsaved "new method" tab (selector input shown, not the breadcrumb)
   #   }
   #
@@ -4365,12 +4429,18 @@ defmodule BtAttachWeb.WorkspaceLive do
         {definition, comment, native_module, class_modifiers} =
           class_definition_info(socket, class)
 
+        # BT-2642: snapshot the class's origin + package for the header badge.
+        {source_origin, package} = class_origin_package(socket, class)
+
         tab = %{
           id: id,
           kind: :def,
           class: class,
           side: nil,
           selector: nil,
+          # BT-2642: package/origin badge for the editor header.
+          source_origin: source_origin,
+          package: package,
           source: definition,
           base: definition,
           dirty: false,
@@ -4420,12 +4490,18 @@ defmodule BtAttachWeb.WorkspaceLive do
     # modifiers (sealed/abstract/native) on the new-method tab.
     {_def, _comment, native_module, class_modifiers} = class_definition_info(socket, class)
 
+    # BT-2642: snapshot the class's origin + package for the header badge.
+    {source_origin, package} = class_origin_package(socket, class)
+
     tab = %{
       id: id,
       kind: :method,
       class: class,
       side: side,
       selector: "",
+      # BT-2642: package/origin badge for the editor header.
+      source_origin: source_origin,
+      package: package,
       source: "",
       base: "",
       dirty: false,
@@ -7411,6 +7487,23 @@ defmodule BtAttachWeb.WorkspaceLive do
                       aria-label={badge.title}
                     >
                       {badge.label}
+                    </span>
+                    <%!-- BT-2642: package/origin badge for the active tab, shown
+                       for every tab kind (method / class-definition) incl. project.
+                       Reuses BT-2641's vocabulary (STDLIB / DEP · <pkg>) and adds
+                       the bare project package name; colored by origin via
+                       `header_origin_class/1`. Sits with the modifier badges, left
+                       of the spacer, so the right-edge divergence badges are clear.
+                       Empty label (unknown origin / packageless project) → hidden. --%>
+                    <% pkg_tab = active_tab(assigns) %>
+                    <% pkg_label = header_package_label(pkg_tab) %>
+                    <span
+                      :if={pkg_label != ""}
+                      class={"source-origin-tag header #{header_origin_class(pkg_tab)}"}
+                      title={header_origin_title(pkg_tab)}
+                      aria-label={header_origin_title(pkg_tab)}
+                    >
+                      {pkg_label}
                     </span>
                     <%!-- Doc toggle inline on the breadcrumb line (BT-2604). --%>
                     <% doc_tab = active_tab(assigns) %>
