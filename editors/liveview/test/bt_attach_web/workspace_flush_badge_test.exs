@@ -273,12 +273,13 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
         |> element(~s(div[phx-click="new_method"][phx-value-class="Counter"]))
         |> render_click()
 
-      # A new-method tab is open: the breadcrumb reads "new method" (no selector
-      # exists yet). There is no separate selector input anymore (BT-2606) — the
-      # author writes the full method in the body.
-      assert opened =~ "new method"
+      # A new-method tab is open: the breadcrumb/tab read "(new method)" (no
+      # selector exists yet — parenthesised so it can't be read as a real `new`
+      # selector tab, BT-2613). There is no separate selector input anymore
+      # (BT-2606) — the author writes the full method in the body.
+      assert opened =~ "(new method)"
       refute opened =~ "new-method-selector"
-      assert opened =~ "Counter ▸ new"
+      assert opened =~ "Counter ▸ (new method)"
 
       # Authoring + saving drives the same write-surface `save` as any method. The
       # form posts no real selector (there is no input); the save handler parses it
@@ -300,7 +301,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
       # selector input is gone — so the author's selector survives and a second
       # ⌘S doesn't trip the empty-selector guard (the BT-review regression).
       assert saved =~ "greet"
-      refute saved =~ "Counter ▸ new"
+      refute saved =~ "Counter ▸ (new method)"
       refute saved =~ "new-method-selector"
     end
 
@@ -404,7 +405,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
 
       # Author the new method under a selector that is *already* open. On save the
       # scratch new-method tab is dropped and the existing `increment` tab focused —
-      # no duplicate, no stale "Counter ▸ new" — and the save banner still shows.
+      # no duplicate, no stale "Counter ▸ (new method)" — and the save banner still shows.
       saved =
         view
         |> form("form[phx-submit='save_method']")
@@ -416,7 +417,7 @@ defmodule BtAttachWeb.WorkspaceFlushBadgeTest do
         })
 
       assert saved =~ "Saved increment on Counter"
-      refute saved =~ "Counter ▸ new"
+      refute saved =~ "Counter ▸ (new method)"
       refute saved =~ "new-method-selector"
     end
   end
