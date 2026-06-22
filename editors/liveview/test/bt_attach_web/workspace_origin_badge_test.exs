@@ -54,7 +54,10 @@ defmodule BtAttachWeb.WorkspaceOriginBadgeTest do
 
   describe "class-tree source-origin badges (BT-2641)" do
     test "a dependency class with a known package shows a DEP · <pkg> badge", %{conn: conn} do
-      {:ok, _view, html} = live(owner_conn(conn), "/")
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      # BT-2591: the class tree loads off the mount (`start_async(:mount_load, …)`),
+      # so await the async fold before parsing the populated tree.
+      html = render_async(view, 5_000)
 
       tag =
         html
@@ -71,7 +74,8 @@ defmodule BtAttachWeb.WorkspaceOriginBadgeTest do
     end
 
     test "a dependency class with no package falls back to a plain DEP badge", %{conn: conn} do
-      {:ok, _view, html} = live(owner_conn(conn), "/")
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      html = render_async(view, 5_000)
 
       tag =
         html
@@ -85,7 +89,12 @@ defmodule BtAttachWeb.WorkspaceOriginBadgeTest do
     end
 
     test "a project class shows no source-origin badge", %{conn: conn} do
-      {:ok, _view, html} = live(owner_conn(conn), "/")
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+      html = render_async(view, 5_000)
+
+      # The row IS present in the tree (the async load has folded the classes in),
+      # but a project class carries no source-origin badge.
+      assert html =~ ~s(phx-value-class="Counter")
 
       tag =
         html
