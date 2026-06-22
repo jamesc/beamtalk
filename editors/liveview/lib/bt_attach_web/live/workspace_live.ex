@@ -6016,36 +6016,44 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp pluralize_children(1), do: "child"
   defp pluralize_children(_), do: "children"
 
-  # Supervisor handles ({:beamtalk_supervisor, …, pid}) never reach `scalar_kind`:
-  # they are `inspectable?/1` (BT-2633), so they are routed through the drillable
-  # `ref` path (`target_info/2` has its own supervisor clause, and the
-  # "no fields to inspect" else-branch that calls `scalar_kind` only runs for
-  # NON-inspectable terms). They therefore never fall through to the `"value"`
-  # catch-all below — a dedicated clause here would be unreachable (and flagged by
-  # the type checker). This comment documents that the catch-all is unreachable
-  # for supervisors by construction.
-  defp scalar_kind(term) when is_integer(term), do: "number"
-  defp scalar_kind(term) when is_float(term), do: "number"
-  defp scalar_kind(term) when is_binary(term), do: "string"
-  defp scalar_kind(term) when is_boolean(term), do: "boolean"
-  defp scalar_kind(term) when is_list(term), do: "collection"
-  defp scalar_kind(term) when is_map(term), do: "map"
-  defp scalar_kind(_term), do: "value"
+  # Map a live term to the Inspector's "no fields to inspect" type word ("X is a
+  # <scalar_kind>"). Derives from the single classifier `Workspace.term_class/1`
+  # (BT-2635), so this is purely a presentation mapping of its `{:scalar, kind}`
+  # output — it does not re-enumerate term shapes. `{:ref, _}` terms never reach
+  # here from the non-inspectable else-branch; they can reach it from
+  # `target_info/2`'s fallback, where they fall through to "value". The `:value`
+  # / unmapped-scalar cases all render "value".
+  defp scalar_kind(term) do
+    case Workspace.term_class(term) do
+      {:scalar, :integer} -> "number"
+      {:scalar, :float} -> "number"
+      {:scalar, :string} -> "string"
+      {:scalar, :boolean} -> "boolean"
+      {:scalar, :list} -> "collection"
+      {:scalar, :map} -> "map"
+      _ -> "value"
+    end
+  end
 
   # Map a live term to the spike Inspector's value-kind class (inspector.jsx
-  # `valueClass`), driving the type-chip / value colour. Object references render
-  # as `ref` (the drillable, follow-able class); scalars map to their CSS class.
-  # A boolean must be matched before the integer guard (`is_boolean` ⊂ atoms, not
-  # integers, but kept explicit and first for clarity).
-  defp term_kind({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: "ref"
-  # Supervisor handles ({:beamtalk_supervisor, …}) are pid-backed live refs too —
-  # drillable, not opaque values — so they take the same `ref` chip as objects.
-  defp term_kind({:beamtalk_supervisor, _class, _module, pid}) when is_pid(pid), do: "ref"
-  defp term_kind(term) when is_boolean(term), do: "bool"
-  defp term_kind(term) when is_integer(term) or is_float(term), do: "int"
-  defp term_kind(term) when is_binary(term), do: "string"
-  defp term_kind(term) when is_atom(term), do: "symbol"
-  defp term_kind(_term), do: "value"
+  # `valueClass`), driving the type-chip / value colour. Derives from the single
+  # classifier `Workspace.term_class/1` (BT-2635): any live ref (object,
+  # supervisor, future, pid) chips as the drillable `ref`; scalars map to their
+  # CSS class. Booleans classify as `{:scalar, :boolean}` (matched before the
+  # atom guard inside `term_class/1`), so they chip as "bool", not "symbol".
+  # Lists/maps and any unrecognised term fall through to "value", exactly as
+  # before centralisation.
+  defp term_kind(term) do
+    case Workspace.term_class(term) do
+      {:ref, _kind} -> "ref"
+      {:scalar, :boolean} -> "bool"
+      {:scalar, :integer} -> "int"
+      {:scalar, :float} -> "int"
+      {:scalar, :string} -> "string"
+      {:scalar, :atom} -> "symbol"
+      _ -> "value"
+    end
+  end
 
   # ── pid-stats chip accessors (BT-2492) ──────────────────────────────────────
   #
