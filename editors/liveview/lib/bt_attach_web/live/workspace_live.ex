@@ -3135,7 +3135,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       :ok ->
         source = superclass <> " subclass: " <> name
         {:ok, path} = derive_class_path(name)
-        dispatch_new_class(socket, name, source, path)
+        dispatch_new_class(socket, name, superclass, source, path)
 
       {:error, message} ->
         # Keep the in-flight field values so the re-rendered modal shows what the
@@ -3190,7 +3190,7 @@ defmodule BtAttachWeb.WorkspaceLive do
     end)
   end
 
-  defp dispatch_new_class(socket, name, source, path) do
+  defp dispatch_new_class(socket, name, superclass, source, path) do
     case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
       {:ok, created_path} ->
         socket
@@ -3226,6 +3226,7 @@ defmodule BtAttachWeb.WorkspaceLive do
         assign(socket,
           new_class_open: true,
           new_class_name: name,
+          new_class_super: superclass,
           new_class_error: facade_error(reason)
         )
     end
@@ -6684,7 +6685,6 @@ defmodule BtAttachWeb.WorkspaceLive do
         :if={@role == :owner and @new_class_open}
         id="new-class-modal"
         class="modal-scrim"
-        phx-click="close_new_class"
         phx-window-keydown="close_new_class"
         phx-key="escape"
       >
