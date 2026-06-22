@@ -88,7 +88,26 @@ subsystem_modules(_) ->
 %%====================================================================
 
 -doc "Return the current OTP primary log level as an atom.".
--spec logLevel() -> atom().
+%% Narrow return (BT-2632): the primary log level is one of the eight standard
+%% OTP levels, or the special `all`/`none` sentinels that disable filtering.
+%% Naming this union (rather than bare `atom()`) documents the real return set
+%% for Dialyzer and readers.
+%%
+%% NOTE: this union contains the atom `error`, which `beamtalk_spec_reader`'s
+%% ADR-0076 ok/error Result recognition (`classify_union_branches/4`) intercepts
+%% as a bare error branch. As a result the spec reader emits
+%% `Result(Dynamic, Nil) | Symbol` for `logLevel/0` rather than the singleton
+%% union it produces for `error`-free enumerations like `logFormat/0`
+%% (`text | json` -> `#text | #json`). The user-facing `Beamtalk logLevel`
+%% return type is therefore carried by the source annotation in
+%% `BeamtalkInterface.bt` (compiled into `generated_builtins.rs`), which every
+%% consumer of the getter sees; it is a subtype of the inferred
+%% `... | Symbol`, so the getter still type-checks. Tightening the
+%% direct-FFI-call inference for `ok`/`error`-bearing atom unions is deferred to
+%% BT-2647 (it touches ADR-0076 Result semantics). `map_type_singleton_union_*`
+%% tests lock in both behaviours.
+-spec logLevel() ->
+    emergency | alert | critical | error | warning | notice | info | debug | all | none.
 logLevel() ->
     #{level := Level} = logger:get_primary_config(),
     Level.

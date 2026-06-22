@@ -196,6 +196,48 @@ fn ffi_list_tuple_element_propagates_into_iteration_and_literal_at() {
     );
 }
 
+/// BT-2632: an FFI function whose `-spec` is a narrow atom-union (e.g.
+/// `-spec logFormat() -> text | json.`) is registered with a singleton-union
+/// return type (`#text | #json`). A getter declaring exactly that union must
+/// type-check cleanly — the inferred FFI body type matches the declared return,
+/// so no return-type-mismatch diagnostic is produced. This is the end-to-end
+/// path that lets `Beamtalk logFormat -> #text | #json` compile instead of
+/// failing against a bare `Symbol` inference.
+#[test]
+fn ffi_singleton_union_return_matches_declared_annotation() {
+    let mut reg = NativeTypeRegistry::new();
+    reg.register_module(
+        "logging",
+        vec![FunctionSignature {
+            name: "logFormat".to_string(),
+            arity: 0,
+            params: vec![],
+            return_type: InferredType::simple_union(&["#text", "#json"]),
+            provenance: TypeProvenance::Extracted,
+            line: None,
+        }],
+    );
+
+    let src = "typed Object subclass: Cfg\n  \
+        logFormat -> #text | #json =>\n    \
+          (Erlang logging) logFormat";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(reg);
+    checker.check_module(&module, &hierarchy);
+    let diags = checker.take_diagnostics();
+    let mismatch: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("inferred body type") || d.message.contains("Declared"))
+        .collect();
+    assert!(
+        mismatch.is_empty(),
+        "singleton-union FFI return should match declared `#text | #json`, \
+         got diagnostics: {mismatch:#?}"
+    );
+}
+
 #[test]
 fn test_ffi_call_no_registry_falls_back_to_dynamic() {
     // Without registry, FFI calls should return Dynamic (no regression)

@@ -651,6 +651,39 @@ mod tests {
     }
 
     #[test]
+    fn map_type_name_singleton_union() {
+        // BT-2632: a narrow atom-union spec is emitted by the spec reader as a
+        // singleton union string (`#text | #json`). It must parse into a union
+        // of `Known("#text")` / `Known("#json")` — the same representation the
+        // source annotation `-> #text | #json` resolves to.
+        let ty = map_type_name("#text | #json");
+        assert_eq!(ty, InferredType::simple_union(&["#text", "#json"]));
+    }
+
+    #[test]
+    fn map_type_name_single_singleton() {
+        // A lone singleton (no union) parses to a bare `Known("#text")`.
+        let ty = map_type_name("#text");
+        assert_eq!(ty, InferredType::known("#text"));
+    }
+
+    #[test]
+    fn parse_specs_line_singleton_union_return_type() {
+        // End-to-end: a spec line whose return_type is a singleton union
+        // registers a union of singleton members (not bare Symbol).
+        let mut reg = NativeTypeRegistry::new();
+        let line = "beamtalk-specs-module:beamtalk_logging_config:[#{arity => 0,name => <<\"logFormat\">>,params => [],return_type => <<\"#text | #json\">>}]";
+        parse_specs_line(line, &mut reg);
+        let sig = reg
+            .lookup("beamtalk_logging_config", "logFormat", 0)
+            .unwrap();
+        assert_eq!(
+            sig.return_type,
+            InferredType::simple_union(&["#text", "#json"])
+        );
+    }
+
+    #[test]
     fn map_type_name_union_with_dynamic() {
         // If any member is Dynamic, union_of returns Dynamic
         let ty = map_type_name("Integer | Dynamic");

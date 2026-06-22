@@ -956,11 +956,21 @@ map_union(Branches, _Line) ->
     {OkTypes, ErrTypes, OtherBranches} = classify_union_branches(Branches),
     case {OkTypes, ErrTypes} of
         {[], []} ->
-            %% No ok/error branches — standard union, map each branch
-            Mapped = dedup_types([map_type(B) || B <- Branches]),
-            case Mapped of
-                [Single] -> Single;
-                Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
+            %% No ok/error branches — standard union. A union of *only* plain
+            %% literal atoms (e.g. `text | json`, `info | debug | error`) is a
+            %% narrow enumeration: map it to a Beamtalk singleton union
+            %% (`#text | #json`) rather than collapsing every atom to `Symbol`
+            %% (BT-2632). Mixed unions still map each branch via map_type, so a
+            %% lone atom branch keeps its existing `Symbol` mapping.
+            case singleton_union_members(Branches) of
+                {ok, Members} ->
+                    iolist_to_binary(lists:join(<<" | ">>, Members));
+                not_singleton_union ->
+                    Mapped = dedup_types([map_type(B) || B <- Branches]),
+                    case Mapped of
+                        [Single] -> Single;
+                        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
+                    end
             end;
         _ ->
             %% At least one ok or error branch — emit Result(T, E)
@@ -976,6 +986,59 @@ map_union(Branches, _Line) ->
                     iolist_to_binary(lists:join(<<" | ">>, AllTypes))
             end
     end.
+
+%% Largest atom union still treated as a narrow singleton enumeration.
+%%
+%% A handful of atoms (`text | json`, the eight log levels plus `all`/`none`,
+%% i.e. ten members) is a meaningful enumeration the programmer pattern-matches
+%% on. A large union like `file:posix()` (47 error codes) is effectively "any
+%% error code" — semantically `Symbol`. The cap keeps the singleton mapping to
+%% genuinely narrow enumerations and prevents noisy 30+-member unions leaking
+%% into BT return types (e.g. the `{error, posix()}` branch of a Result).
+-define(MAX_SINGLETON_UNION_MEMBERS, 16).
+
+%% Classify a union as a narrow singleton enumeration.
+%%
+%% Returns `{ok, Members}` (a deduped, order-preserving list of `#atom`
+%% singleton binaries) when *every* branch is a plain literal atom that is not
+%% a Boolean/Nil literal (`true`/`false`/`nil` keep their `True`/`False`/`Nil`
+%% mappings), there are at least two distinct members, and no more than
+%% `?MAX_SINGLETON_UNION_MEMBERS`. Otherwise returns `not_singleton_union`,
+%% leaving the caller's standard branch-by-branch mapping in place. A
+%% single-member result (e.g. a degenerate `text | text`) is rejected so a lone
+%% atom stays `Symbol`, matching the deferred single-atom decision in BT-2647.
+-spec singleton_union_members([tuple()]) -> {ok, [binary()]} | not_singleton_union.
+singleton_union_members(Branches) ->
+    case collect_singleton_atoms(Branches, []) of
+        {ok, Atoms} ->
+            Members = dedup_types([singleton_binary(A) || A <- Atoms]),
+            case Members of
+                [_, _ | _] when length(Members) =< ?MAX_SINGLETON_UNION_MEMBERS ->
+                    {ok, Members};
+                _ ->
+                    not_singleton_union
+            end;
+        not_singleton_union ->
+            not_singleton_union
+    end.
+
+%% Collect the atom names of a union if (and only if) every branch is a plain
+%% literal atom that is not a Boolean/Nil literal. Any other branch shape
+%% aborts with `not_singleton_union`.
+-spec collect_singleton_atoms([tuple()], [atom()]) -> {ok, [atom()]} | not_singleton_union.
+collect_singleton_atoms([], Acc) ->
+    {ok, lists:reverse(Acc)};
+collect_singleton_atoms([{atom, _, A} | Rest], Acc) when
+    A =/= true, A =/= false, A =/= nil
+->
+    collect_singleton_atoms(Rest, [A | Acc]);
+collect_singleton_atoms(_, _Acc) ->
+    not_singleton_union.
+
+%% Render an atom as a Beamtalk singleton type binary, e.g. `text` -> `#text`.
+-spec singleton_binary(atom()) -> binary().
+singleton_binary(A) ->
+    <<"#", (atom_to_binary(A, utf8))/binary>>.
 
 %% Classify union branches into ok tuples, error tuples, and other branches.
 -spec classify_union_branches([tuple()]) ->
