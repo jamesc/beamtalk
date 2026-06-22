@@ -3131,12 +3131,12 @@ defmodule BtAttachWeb.WorkspaceLive do
     name = String.trim(name)
     superclass = trim_superclass(superclass)
 
-    case validate_new_class_name(socket, name) do
-      :ok ->
-        source = superclass <> " subclass: " <> name
-        {:ok, path} = derive_class_path(name)
-        dispatch_new_class(socket, name, superclass, source, path)
-
+    with :ok <- validate_new_class_name(socket, name),
+         :ok <- validate_superclass(superclass) do
+      source = superclass <> " subclass: " <> name
+      {:ok, path} = derive_class_path(name)
+      dispatch_new_class(socket, name, superclass, source, path)
+    else
       {:error, message} ->
         # Keep the in-flight field values so the re-rendered modal shows what the
         # owner typed, and route the error to the modal-local assign (never the
@@ -3158,6 +3158,18 @@ defmodule BtAttachWeb.WorkspaceLive do
       "" -> "Object"
       trimmed -> trimmed
     end
+  end
+
+  # Validate the superclass field the same way as the class name (BT-2645): a bare
+  # PascalCase identifier. The empty case is already normalised to `Object` by
+  # `trim_superclass/1`. This rejects a crafted payload (e.g. embedded newlines /
+  # syntax) locally, matching the name field rather than relying on the server
+  # parser to reject the synthesized source.
+  defp validate_superclass(superclass) do
+    if Regex.match?(~r/^[A-Z][A-Za-z0-9_]*$/, superclass),
+      do: :ok,
+      else:
+        {:error, "Superclass must be a class name starting with a capital letter, e.g. `Object`."}
   end
 
   # Validate a new class name locally (BT-2645): non-empty, PascalCase
