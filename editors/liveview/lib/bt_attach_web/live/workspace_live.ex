@@ -4515,13 +4515,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   # spike's two levels, so a cap collapsed everything onto one indent and read as
   # flat). `class_rows/1` scales the visible indent from this depth.
   # Category groups by the class annotation, each group a `{category, rows}` pair.
-  # Both return `{row, indent}` tuples so the template renders one branch.
+  # Both feed `class_rows/1` `{row, indent, context?}` tuples so the template
+  # renders one branch — Category rows are always `context? = false`; only the
+  # filtered Hierarchy view (BT-2649) emits dimmed `context? = true` ancestor rows.
 
-  # Hierarchy: a flat, ordered list of `{class_row, indent}` walking the
-  # superclass tree from roots down — see `BtAttachWeb.ClassTree.hierarchy_rows/1`
-  # for the (unit-tested) layout logic. `indent` is the true superclass depth
-  # (BT-2637: uncapped) and `class_rows/1` scales the visible left-indent from it.
-  defp hierarchy_rows(classes), do: BtAttachWeb.ClassTree.hierarchy_rows(classes)
+  # Hierarchy under an active source filter (BT-2649). Builds the tree from the
+  # *full* class set so the transitive superclass ancestors connecting each
+  # matching class to a root are kept as dimmed, non-interactive "context" rows —
+  # otherwise the filtered set flattens (every match at indent 0). Returns
+  # `{class_row, indent, context?}`; a context row's name is not in `visible_names`.
+  # For the `all` filter every class is visible, so this emits zero context rows —
+  # identical shape to `hierarchy_rows/1` plus a `false` context flag.
+  defp hierarchy_rows_with_context(all_classes, visible_names),
+    do: BtAttachWeb.ClassTree.hierarchy_rows_with_context(all_classes, visible_names)
 
   # Category: `{category, [class_row]}` groups, each group's classes sorted by
   # name, the groups themselves sorted by category. A class with no category falls
@@ -6922,14 +6928,23 @@ defmodule BtAttachWeb.WorkspaceLive do
                 <div :for={{category, rows} <- category_groups(@visible_classes)} class="cat-group">
                   <div class="cat-row">{category}</div>
                   <.class_rows
-                    rows={Enum.map(rows, &{&1, 1})}
+                    rows={Enum.map(rows, &{&1, 1, false})}
                     selected_class={@selected_class}
                     browser_side={@browser_side}
                   />
                 </div>
               <% else %>
+                <%!-- BT-2649: build the Hierarchy tree from the *full* class set so
+                     the superclass ancestors connecting filtered matches up to a
+                     root survive as dimmed, non-interactive context rows. Under
+                     `all`, every class is visible, so no context rows are emitted. --%>
                 <.class_rows
-                  rows={hierarchy_rows(@visible_classes)}
+                  rows={
+                    hierarchy_rows_with_context(
+                      @browser_classes,
+                      MapSet.new(@visible_classes, &Map.get(&1, "name"))
+                    )
+                  }
                   selected_class={@selected_class}
                   browser_side={@browser_side}
                 />
@@ -7002,41 +7017,60 @@ defmodule BtAttachWeb.WorkspaceLive do
     """
   end
 
-  # Render a list of `{class_row, indent}` tuples — shared by the Hierarchy and
-  # Category views. The selected class is highlighted; an indented row reads as a
-  # subclass. A runtime-only class is badged; the class-side selection shows a
-  # `class` pill so the side is visible in the tree.
+  # Render a list of `{class_row, indent, context?}` tuples — shared by the
+  # Hierarchy and Category views. The selected class is highlighted; an indented
+  # row reads as a subclass. A runtime-only class is badged; the class-side
+  # selection shows a `class` pill so the side is visible in the tree. A
+  # `context? = true` row (BT-2649) is a filter's connecting superclass ancestor:
+  # dimmed and non-interactive, with no selection/badges.
+  #
+  # Public (not `defp`) so the dimmed/non-interactive context rendering is
+  # unit-testable via `render_component/2` in the non-workspace lane (BT-2649).
   attr :rows, :list, required: true
   attr :selected_class, :string, default: nil
   attr :browser_side, :string, required: true
 
-  defp class_rows(assigns) do
+  def class_rows(assigns) do
     ~H"""
+    <%!-- BT-2649: a `context?` row is a superclass ancestor surfaced only to keep
+         the filtered Hierarchy spine intact. It renders dimmed (`context` class),
+         carries no `phx-click`/selection and no origin/runtime badges, and is
+         skipped as a tab stop — a clearly secondary, non-interactive marker. --%>
     <div
-      :for={{class, indent} <- @rows}
+      :for={{class, indent, context?} <- @rows}
       class={[
         "row",
         indent > 0 && "subclass",
-        @selected_class == class["name"] && "sel"
+        context? && "context",
+        not context? && @selected_class == class["name"] && "sel"
       ]}
       style={class_row_indent(indent)}
-      phx-click="browser_select_class"
-      phx-value-class={class["name"]}
+      phx-click={not context? && "browser_select_class"}
+      phx-value-class={not context? && class["name"]}
+      aria-disabled={context? && "true"}
+      tabindex={context? && "-1"}
       title={class["name"]}
     >
       <span class="twig">{if class["superclass"], do: "→", else: "●"}</span>
       <span class="cls">{class["name"]}</span>
       <span
-        :if={class["source_origin"] && class["source_origin"] != "project"}
+        :if={not context? && class["source_origin"] && class["source_origin"] != "project"}
         class={"source-origin-tag #{source_origin_class(class)}"}
         title={source_origin_title(class)}
       >
         {source_origin_label(class)}
       </span>
-      <span :if={runtime_only?(class)} class="runtime-tag" title="runtime-only (not on disk)">
+      <span
+        :if={not context? && runtime_only?(class)}
+        class="runtime-tag"
+        title="runtime-only (not on disk)"
+      >
         ⚡
       </span>
-      <span :if={@selected_class == class["name"] and @browser_side == "class"} class="pill">
+      <span
+        :if={(not context? && @selected_class == class["name"]) and @browser_side == "class"}
+        class="pill"
+      >
         class
       </span>
     </div>
