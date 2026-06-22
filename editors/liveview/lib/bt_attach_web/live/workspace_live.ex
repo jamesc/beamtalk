@@ -7762,15 +7762,18 @@ defmodule BtAttachWeb.WorkspaceLive do
                   native_module_shown={(@native_module_view && @native_module_view.module) || nil}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
-                     the method list ("more class, less method"). NOT
-                     phx-update="ignore" (BT-2591): the async mount load
-                     re-renders the class tree inside .browser-split and strips the
-                     hook-set --browser-split var, so the gutter must be patched for
-                     SplitDrag.updated() to re-apply the saved size. --%>
+                     the method list ("more class, less method"). phx-update="ignore"
+                     (BT-2591): the gutter div is empty and hook-owned, so LiveView
+                     should never patch it. The async mount load DOES strip the
+                     hook-set --browser-split var off the PARENT .browser-split (it
+                     re-renders the class tree inside it), but the SplitDrag hook's
+                     own MutationObserver — not updated() — re-applies the saved size
+                     when that happens. --%>
                 <div
                   id="browser-split-gutter"
                   class="split-gutter split-gutter-y"
                   phx-hook="SplitDrag"
+                  phx-update="ignore"
                   role="separator"
                   aria-orientation="horizontal"
                   aria-label="Resize the class tree and method list"
@@ -9035,14 +9038,17 @@ defmodule BtAttachWeb.WorkspaceLive do
                 </div>
 
                 <%!-- Draggable divider (BT-2576): rebalances Bindings vs. the
-                     Inspector. NOT phx-update="ignore" (BT-2591): the async mount
-                     load re-renders the Bindings pane inside .right-split and
-                     strips the hook-set --right-split var, so the gutter must be
-                     patched for SplitDrag.updated() to re-apply the saved size. --%>
+                     Inspector. phx-update="ignore" (BT-2591): the gutter div is
+                     empty and hook-owned, so LiveView should never patch it. The
+                     async mount load DOES strip the hook-set --right-split var off
+                     the PARENT .right-split (it re-renders the Bindings pane inside
+                     it), but the SplitDrag hook's own MutationObserver — not
+                     updated() — re-applies the saved size when that happens. --%>
                 <div
                   id="right-split-gutter"
                   class="split-gutter split-gutter-y"
                   phx-hook="SplitDrag"
+                  phx-update="ignore"
                   role="separator"
                   aria-orientation="horizontal"
                   aria-label="Resize the Bindings and Inspector panels"
