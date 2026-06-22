@@ -1000,24 +1000,87 @@ defmodule BtAttach.Workspace do
     end
   end
 
-  @doc """
-  True when `term` is a live, messageable Beamtalk object handle — the
-  reference-following case. Over distribution the `#beamtalk_object{}` record
-  arrives as a `{:beamtalk_object, class, module, pid_or_ref}` tuple (see
-  `beamtalk.hrl`). Only object terms backed by a real remote pid are
-  inspectable: name-resolving proxies carry `{:registered, name}` in the identity
-  slot (ADR 0079) and have no pid to `sys:get_state/2`, so they are not
-  drillable here.
+  @typedoc """
+  The single classification a live workspace term falls into (BT-2635).
 
-  Supervisor handles arrive as `{:beamtalk_supervisor, class, module, pid}`
-  (`beamtalk_supervisor.erl`, distinct from `#beamtalk_object{}`). A pid-backed
-  supervisor is a live, drillable handle too, so it is inspectable — even though
-  its inspection *content* (the supervision tree) is not yet implemented and
-  currently degrades to an empty field set (see `inspect_value/1`).
+    * `{:ref, ref_kind}` — a live, drillable handle (object, supervisor, future,
+      or bare pid). `ref_kind` is the concrete tag (`:object | :supervisor |
+      :future | :pid`) so a caller that must route by target keeps the
+      distinction; every ref is `inspectable?` and chips as `"ref"`.
+    * `{:scalar, scalar_kind}` — a genuine scalar / container value. `scalar_kind`
+      is `:integer | :float | :string | :boolean | :list | :map | :atom`, enough
+      to drive every existing per-type chip without re-matching the raw term.
+    * `:value` — an unrecognised term (e.g. a name-resolving proxy with no pid, a
+      tuple we do not model). NOT a live handle and NOT a known scalar.
   """
-  def inspectable?({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: true
-  def inspectable?({:beamtalk_supervisor, _class, _module, pid}) when is_pid(pid), do: true
-  def inspectable?(_term), do: false
+  @type term_class ::
+          {:ref, :object | :supervisor | :future | :pid}
+          | {:scalar, :integer | :float | :string | :boolean | :list | :map | :atom}
+          | :value
+
+  @doc """
+  THE single source of truth for inspector term classification (BT-2635).
+
+  Every "is this a live, drillable handle?" / "what kind of value is this?"
+  decision derives from this one function: `inspectable?/1` and `inspect_value/1`
+  here, and `term_kind/1` / `scalar_kind/1` in the LiveView (via
+  `Workspace.term_class/1`). Adding a new live-handle tag is therefore a
+  one-line change here — it does not silently regress to `"value"` in three
+  other places, the failure mode this issue removes.
+
+  Live handles (`{:ref, _}`), in tag order:
+
+    * `{:beamtalk_object, class, module, pid}` (`beamtalk.hrl`) — a messageable
+      actor handle. A name-resolving proxy carries `{:registered, name}` in the
+      identity slot (ADR 0079) with no pid to `sys:get_state/2`, so it is NOT a
+      ref (falls through to `:value`, preserving its non-drillable status).
+    * `{:beamtalk_supervisor, class, module, pid}` (`beamtalk_supervisor.erl`) —
+      a pid-backed supervisor; drillable into its supervision children (BT-2634).
+    * `{:beamtalk_future, pid}` (`beamtalk_repl_json.erl`, BT-840) — a tagged
+      future. Recognised as a live ref here; deep future *content* (await /
+      resolve) is a follow-up (see `inspect_value/1`).
+    * a bare `pid` (`is_pid/1`) — a raw process handle. Recognised as a live ref;
+      deep pid *content* is a follow-up (see `inspect_value/1`).
+
+  Scalars classify EXACTLY as before. Booleans are matched before the atom guard
+  (`is_boolean` ⊂ `is_atom`) so `true`/`false` are `{:scalar, :boolean}`, not
+  `{:scalar, :atom}`.
+  """
+  @spec term_class(term()) :: term_class()
+  def term_class({:beamtalk_object, _class, _module, pid}) when is_pid(pid), do: {:ref, :object}
+
+  def term_class({:beamtalk_supervisor, _class, _module, pid}) when is_pid(pid),
+    do: {:ref, :supervisor}
+
+  def term_class({:beamtalk_future, pid}) when is_pid(pid), do: {:ref, :future}
+  def term_class(pid) when is_pid(pid), do: {:ref, :pid}
+  def term_class(term) when is_integer(term), do: {:scalar, :integer}
+  def term_class(term) when is_float(term), do: {:scalar, :float}
+  def term_class(term) when is_binary(term), do: {:scalar, :string}
+  def term_class(term) when is_boolean(term), do: {:scalar, :boolean}
+  def term_class(term) when is_list(term), do: {:scalar, :list}
+  def term_class(term) when is_map(term), do: {:scalar, :map}
+  def term_class(term) when is_atom(term), do: {:scalar, :atom}
+  def term_class(_term), do: :value
+
+  @doc """
+  True when `term` is a live, drillable handle — the reference-following case.
+  Derives from `term_class/1` (BT-2635): any `{:ref, _}` is inspectable, every
+  other term is not.
+
+  Over distribution a `#beamtalk_object{}` arrives as `{:beamtalk_object, class,
+  module, pid_or_ref}` (see `beamtalk.hrl`); only pid-backed objects are
+  drillable, so a name-resolving proxy (`{:registered, name}`, ADR 0079) is not
+  inspectable. Supervisor handles (`{:beamtalk_supervisor, …, pid}`), tagged
+  futures (`{:beamtalk_future, pid}`, BT-840), and bare pids are pid-backed live
+  refs too, so they are inspectable.
+  """
+  def inspectable?(term) do
+    case term_class(term) do
+      {:ref, _kind} -> true
+      _ -> false
+    end
+  end
 
   @doc """
   Inspect a live object `term` through the read-surface `inspect` op (ADR 0085),
@@ -1036,19 +1099,42 @@ defmodule BtAttach.Workspace do
     * error   → `{:error, reason_term}` (`#beamtalk_error{}` or a structured
       reason); the caller renders it via `render_error/1`
 
-  Returns `{:error, :not_inspectable}` for any term that is not a pid-backed
-  object handle, so the caller never has to guess the term shape.
+  Returns `{:error, :not_inspectable}` for any term that is not a live handle, so
+  the caller never has to guess the term shape.
+
+  Dispatch is driven by `term_class/1` (BT-2635): the tag-recognition lives in
+  ONE place, while each concrete ref target keeps its own content behaviour —
+  objects read instance fields, supervisors list children (BT-2634), and futures
+  / bare pids return a graceful minimal result (their deep content is a
+  follow-up).
   """
-  def inspect_value({:beamtalk_object, _class, _module, pid} = _term) when is_pid(pid) do
-    # The `inspect` op identifies the actor by the *textual* pid form, the same
-    # contract the browser uses (`beamtalk_ws_handler` formats with pid_to_list,
-    # the op resolves with list_to_pid). Both sides must run on the SAME node:
-    # `pid_to_list/1` of a node-LOCAL pid yields the canonical `<0.X.Y>` text
-    # that `list_to_pid/1` round-trips on that node. Stringifying a *remote*
-    # workspace pid here on the Phoenix node would instead emit `<N.X.Y>` (N =
-    # the workspace's index in *our* dist table), and the workspace's
-    # `list_to_pid/1` would then `badarg` (or worse, resolve a different pid).
-    # So format the pid ON the workspace node, where it is local, via RPC.
+  def inspect_value(term) do
+    case term_class(term) do
+      {:ref, :object} -> inspect_object(object_pid(term))
+      {:ref, :supervisor} -> inspect_supervisor(object_pid(term))
+      {:ref, :future} -> inspect_future(future_pid(term))
+      {:ref, :pid} -> inspect_pid(term)
+      _ -> {:error, :not_inspectable}
+    end
+  end
+
+  # The pid slot of a `{:beamtalk_object | :beamtalk_supervisor, _, _, pid}` handle.
+  defp object_pid({_tag, _class, _module, pid}) when is_pid(pid), do: pid
+  # The pid of a `{:beamtalk_future, pid}` handle.
+  defp future_pid({:beamtalk_future, pid}) when is_pid(pid), do: pid
+
+  # Inspect a live actor handle through the read-surface `inspect` op (ADR 0085).
+  #
+  # The `inspect` op identifies the actor by the *textual* pid form, the same
+  # contract the browser uses (`beamtalk_ws_handler` formats with pid_to_list,
+  # the op resolves with list_to_pid). Both sides must run on the SAME node:
+  # `pid_to_list/1` of a node-LOCAL pid yields the canonical `<0.X.Y>` text
+  # that `list_to_pid/1` round-trips on that node. Stringifying a *remote*
+  # workspace pid here on the Phoenix node would instead emit `<N.X.Y>` (N =
+  # the workspace's index in *our* dist table), and the workspace's
+  # `list_to_pid/1` would then `badarg` (or worse, resolve a different pid).
+  # So format the pid ON the workspace node, where it is local, via RPC.
+  defp inspect_object(pid) when is_pid(pid) do
     case rpc(:erlang, :pid_to_list, [pid]) do
       pid_chars when is_list(pid_chars) ->
         dispatch_inspect_result(dispatch_inspect(to_string(pid_chars)))
@@ -1068,14 +1154,47 @@ defmodule BtAttach.Workspace do
   # tagged result the LiveView renders as a children view, distinct from the
   # actor instance-field table. A dead/unreachable supervisor degrades to
   # `{:error, reason}` (rendered as a clear empty state, never a crash).
-  def inspect_value({:beamtalk_supervisor, _class, _module, pid} = _term) when is_pid(pid) do
+  defp inspect_supervisor(pid) when is_pid(pid) do
     case supervisor_children(pid) do
       {:ok, rows} -> {:ok, {:supervisor_children, rows}}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  def inspect_value(_term), do: {:error, :not_inspectable}
+  # A tagged future `{:beamtalk_future, pid}` is recognised as a live ref so it
+  # no longer regresses to a non-drillable `"value"` (BT-2635), but deep future
+  # *content* (await / resolve semantics, the realised value) is intentionally
+  # OUT OF SCOPE here — this issue centralises classification, not future
+  # inspection. So degrade gracefully to a minimal process-info snapshot of the
+  # backing future process, falling back to an empty field set if it is dead /
+  # unreachable. Following up the future's value is a separate task.
+  defp inspect_future(pid) when is_pid(pid), do: inspect_process_info(pid)
+
+  # A bare pid is recognised as a live ref (BT-2635) rather than a `"value"`, but
+  # like futures its deep content (e.g. `sys:get_state`) is a follow-up: there is
+  # no actor/object contract guaranteeing a pid is a gen_server, so probing state
+  # could hang or crash. Return the same graceful minimal process-info snapshot.
+  defp inspect_pid(pid) when is_pid(pid), do: inspect_process_info(pid)
+
+  # Cheap, crash-free minimal inspection shared by the future / bare-pid paths:
+  # read a few `process_info` chips ON the workspace node (where the pid is
+  # local) and return them as a binary-keyed field map. A dead or unreachable
+  # process degrades to `{:ok, %{}}` (a clean empty state, consistent with how
+  # BT-2633 degraded supervisors before children content existed) rather than an
+  # error — the term IS a live handle, there is just nothing more to show yet.
+  defp inspect_process_info(pid) when is_pid(pid) do
+    keys = [:status, :message_queue_len, :memory, :reductions]
+
+    case rpc(:erlang, :process_info, [pid, keys]) do
+      info when is_list(info) ->
+        {:ok, Map.new(info, fn {k, v} -> {to_string(k), v} end)}
+
+      # `undefined` (dead pid) or `{:badrpc, _}` (unreachable workspace): degrade
+      # to an empty field set, never a crash.
+      _ ->
+        {:ok, %{}}
+    end
+  end
 
   @doc """
   List a supervisor's direct children as drillable inspection rows (BT-2634, ADR

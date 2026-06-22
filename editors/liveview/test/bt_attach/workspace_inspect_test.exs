@@ -13,6 +13,72 @@ defmodule BtAttach.WorkspaceInspectTest do
 
   alias BtAttach.Workspace
 
+  describe "term_class/1 — the single source of truth (BT-2635)" do
+    # One table asserting the centralized classifier for every known tag, so a
+    # future regression (a new live-handle tag silently defaulting to :value, or
+    # a scalar mis-mapped) fails here at the one place that enumerates tags.
+    test "classifies every known tag" do
+      pid = self()
+
+      cases = [
+        # {label, term, expected term_class/1}
+        {"object handle", {:beamtalk_object, :Counter, :counter, pid}, {:ref, :object}},
+        {"supervisor handle", {:beamtalk_supervisor, :AppSup, :app_sup, pid},
+         {:ref, :supervisor}},
+        {"future handle", {:beamtalk_future, pid}, {:ref, :future}},
+        {"bare pid", pid, {:ref, :pid}},
+        {"integer", 42, {:scalar, :integer}},
+        {"float", 3.14, {:scalar, :float}},
+        {"string", "hello", {:scalar, :string}},
+        {"true", true, {:scalar, :boolean}},
+        {"false", false, {:scalar, :boolean}},
+        {"list", [1, 2, 3], {:scalar, :list}},
+        {"map", %{a: 1}, {:scalar, :map}},
+        {"atom/symbol", :foo, {:scalar, :atom}},
+        # A name-resolving proxy carries no pid (ADR 0079) — NOT a ref, NOT a
+        # known scalar: it falls through to :value (non-drillable, preserved).
+        {"registered proxy", {:beamtalk_object, :Counter, :counter, {:registered, :counter}},
+         :value},
+        # An unmodelled tuple is :value, not a silent ref.
+        {"unknown tuple", {:something, :else}, :value}
+      ]
+
+      for {label, term, expected} <- cases do
+        assert Workspace.term_class(term) == expected, "term_class/1 misclassified #{label}"
+      end
+    end
+
+    test "the four derived functions all agree with term_class/1" do
+      # inspectable?/1 derives from term_class/1: every {:ref, _} is inspectable,
+      # nothing else is — futures and bare pids included (no longer "value").
+      pid = self()
+
+      refs = [
+        {:beamtalk_object, :Counter, :counter, pid},
+        {:beamtalk_supervisor, :AppSup, :app_sup, pid},
+        {:beamtalk_future, pid},
+        pid
+      ]
+
+      non_refs = [
+        42,
+        3.14,
+        "hello",
+        true,
+        [1, 2, 3],
+        %{a: 1},
+        :foo,
+        {:beamtalk_object, :Counter, :counter, {:registered, :counter}}
+      ]
+
+      for term <- refs,
+          do: assert(Workspace.inspectable?(term), "#{inspect(term)} should be a ref")
+
+      for term <- non_refs,
+          do: refute(Workspace.inspectable?(term), "#{inspect(term)} should not be a ref")
+    end
+  end
+
   describe "inspectable?/1 — the reference-following gate" do
     test "a pid-backed object handle is inspectable" do
       # Over distribution `#beamtalk_object{}` arrives as this 4-tuple (beamtalk.hrl):
@@ -79,6 +145,25 @@ defmodule BtAttach.WorkspaceInspectTest do
       # LiveView tests.
       sup = {:beamtalk_supervisor, :AppSup, :bt@my_app@app_sup, self()}
       assert {:error, {:unreachable, _reason}} = Workspace.inspect_value(sup)
+    end
+
+    test "a future degrades to a graceful minimal result, never :not_inspectable (BT-2635)" do
+      # A tagged future {:beamtalk_future, pid} is a live ref, so it must NOT be
+      # rejected as :not_inspectable. Deep future content (await/resolve) is a
+      # follow-up, so it degrades to a graceful minimal process-info snapshot —
+      # and without a live workspace node the RPC degrades to an empty field set
+      # ({:ok, %{}}), never a crash and never :not_inspectable.
+      future = {:beamtalk_future, self()}
+      assert {:ok, fields} = Workspace.inspect_value(future)
+      assert is_map(fields)
+    end
+
+    test "a bare pid degrades to a graceful minimal result, never :not_inspectable (BT-2635)" do
+      # A bare pid is a live ref too. Like futures, its deep content is a
+      # follow-up, so it degrades to a minimal snapshot ({:ok, %{}} without a
+      # live workspace) rather than :not_inspectable or a crash.
+      assert {:ok, fields} = Workspace.inspect_value(self())
+      assert is_map(fields)
     end
   end
 
