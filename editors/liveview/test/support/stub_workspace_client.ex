@@ -332,7 +332,20 @@ defmodule BtAttachWeb.StubWorkspaceClient do
       },
       # BT-2605: a class whose header carries leading modifiers (`sealed typed`),
       # so the editor's class/method modifier badges can be reached by navigation.
-      %{"name" => "Ledger", "source_file" => "src/ledger.bt", "source_origin" => "project"}
+      %{"name" => "Ledger", "source_file" => "src/ledger.bt", "source_origin" => "project"},
+      # BT-2641: dependency classes so the class-tree's "DEP · <pkg>" badge can be
+      # reached by navigation — one with a known package, one without.
+      %{
+        "name" => "HttpClient",
+        "source_file" => "deps/http/src/http_client.bt",
+        "source_origin" => "dependency",
+        "package" => "HTTP"
+      },
+      %{
+        "name" => "Orphan",
+        "source_file" => "deps/orphan.bt",
+        "source_origin" => "dependency"
+      }
     ]
 
     extra =

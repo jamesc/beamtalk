@@ -348,7 +348,12 @@
   padding: 0 4px; border-radius: 3px;
 }
 .row .source-origin-tag.stdlib { background: #e8d5f5; color: #7c3aed; }
-.row .source-origin-tag.dependency { background: #fef3c7; color: #b45309; }
+/* The dependency badge carries a "DEP · <pkg>" label (BT-2641); cap its width and
+   ellipsize so a long package name truncates instead of squeezing the row name. */
+.row .source-origin-tag.dependency {
+  background: #fef3c7; color: #b45309;
+  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .row .source-origin-tag.project { display: none; }
 .sb-classdef { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }
 .sb-protocols { border-bottom: 1px solid var(--line-soft); padding-bottom: 2px; }

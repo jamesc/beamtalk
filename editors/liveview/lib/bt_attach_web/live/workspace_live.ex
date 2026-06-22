@@ -4138,11 +4138,12 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp runtime_only?(%{"origin" => "runtime"}), do: true
   defp runtime_only?(_), do: false
 
-  # Source origin badge helpers (BT-2552, BT-2643). Two orthogonal fields drive
-  # the badge: `source_origin` is the classification ("stdlib" | "dependency" |
-  # "project") and keys the css class + title; `package` is the package name and
-  # supplies the visible label. The dependency badge still shows the package
-  # name, now read from `package` rather than packed into `source_origin`.
+  # Source origin badge helpers (BT-2552, BT-2643, BT-2641). Two orthogonal
+  # fields drive the badge: `source_origin` is the classification ("stdlib" |
+  # "dependency" | "project") and keys the css class + title; `package` is the
+  # package name and feeds the dependency badge label. The dependency badge reads
+  # as a "DEP" marker (parity with the generic "STDLIB" marker), suffixed with
+  # the package name when known ("DEP · HTTP") and bare ("DEP") otherwise.
   defp source_origin_class(%{"source_origin" => "stdlib"}), do: "stdlib"
   defp source_origin_class(%{"source_origin" => "dependency"}), do: "dependency"
   defp source_origin_class(_), do: "project"
@@ -4150,9 +4151,19 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp source_origin_label(%{"source_origin" => "stdlib"}), do: "stdlib"
 
   defp source_origin_label(%{"source_origin" => "dependency"} = row),
-    do: package_name(row)
+    do: dependency_badge_label(row)
 
   defp source_origin_label(_), do: ""
+
+  # Dependency badge text: "DEP · <pkg>" when the package is known, plain "DEP"
+  # when it is absent/unknown. This is the badge-specific label; `package_name/1`
+  # (which degrades to "unknown") still serves callers that need the raw package.
+  defp dependency_badge_label(row) do
+    case Map.get(row, "package") do
+      pkg when is_binary(pkg) and pkg != "" -> "DEP · #{pkg}"
+      _ -> "DEP"
+    end
+  end
 
   defp source_origin_title(%{"source_origin" => "stdlib"}), do: "Standard library"
 
