@@ -319,8 +319,10 @@
   flex: 1 1 auto; min-width: 0;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.row.subclass { padding-left: 24px; }
-.row.subclass2 { padding-left: 38px; }
+/* Hierarchy indent (BT-2637): the class tree's left-indent is set inline per row
+   (`padding-left`) so it scales with the true superclass depth — uncapped —
+   instead of two fixed levels. `.subclass` stays as a marker hook for indented
+   rows; the actual indent lives in the row's inline style. */
 .row .meta { margin-left: auto; color: var(--faint); font-size: 10.5px; }
 /* Method rows are also `.row`, so the same right-pinned badge column applies
    (BT-2610): the selector name grows + truncates so the trailing origin/runtime

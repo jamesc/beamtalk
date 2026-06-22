@@ -4031,42 +4031,18 @@ defmodule BtAttachWeb.WorkspaceLive do
   # ── System Browser view helpers (BT-2491) ───────────────────────────────────
 
   # The class rows in display order for the active view. Hierarchy walks
-  # roots→children indenting by superclass depth (capped at 2 like the spike);
+  # roots→children indenting by the *true* superclass depth (BT-2637: no cap — the
+  # real kernel chain is ProtoObject→Object→Value→Number→…, far deeper than the
+  # spike's two levels, so a cap collapsed everything onto one indent and read as
+  # flat). `class_rows/1` scales the visible indent from this depth.
   # Category groups by the class annotation, each group a `{category, rows}` pair.
   # Both return `{row, indent}` tuples so the template renders one branch.
 
   # Hierarchy: a flat, ordered list of `{class_row, indent}` walking the
-  # superclass tree from roots down. A class whose superclass is not itself in the
-  # browse set is treated as a root, so an external/kernel superclass doesn't hide
-  # its subclasses. Any class unreachable from a root — e.g. a member of a
-  # superclass cycle in a transiently-inconsistent live image, where every member
-  # has an in-set superclass so none is a root — is appended at indent 0 rather
-  # than silently dropped from the view (it still renders, just un-nested).
-  defp hierarchy_rows(classes) do
-    by_parent =
-      Enum.group_by(classes, fn c ->
-        super_name = Map.get(c, "superclass")
-
-        if super_name && Enum.any?(classes, &(Map.get(&1, "name") == super_name)),
-          do: super_name,
-          else: :__root
-      end)
-
-    walked = Enum.reverse(walk_hierarchy(by_parent, :__root, 0, []))
-    emitted = MapSet.new(walked, fn {class, _indent} -> Map.get(class, "name") end)
-    orphans = for c <- classes, not MapSet.member?(emitted, Map.get(c, "name")), do: {c, 0}
-    walked ++ Enum.sort_by(orphans, fn {c, _} -> Map.get(c, "name") end)
-  end
-
-  defp walk_hierarchy(by_parent, parent, indent, acc) do
-    by_parent
-    |> Map.get(parent, [])
-    |> Enum.sort_by(&Map.get(&1, "name"))
-    |> Enum.reduce(acc, fn class, acc ->
-      acc = [{class, indent} | acc]
-      walk_hierarchy(by_parent, Map.get(class, "name"), min(indent + 1, 2), acc)
-    end)
-  end
+  # superclass tree from roots down — see `BtAttachWeb.ClassTree.hierarchy_rows/1`
+  # for the (unit-tested) layout logic. `indent` is the true superclass depth
+  # (BT-2637: uncapped) and `class_rows/1` scales the visible left-indent from it.
+  defp hierarchy_rows(classes), do: BtAttachWeb.ClassTree.hierarchy_rows(classes)
 
   # Category: `{category, [class_row]}` groups, each group's classes sorted by
   # name, the groups themselves sorted by category. A class with no category falls
@@ -6422,10 +6398,10 @@ defmodule BtAttachWeb.WorkspaceLive do
       :for={{class, indent} <- @rows}
       class={[
         "row",
-        indent == 2 && "subclass2",
-        indent == 1 && "subclass",
+        indent > 0 && "subclass",
         @selected_class == class["name"] && "sel"
       ]}
+      style={class_row_indent(indent)}
       phx-click="browser_select_class"
       phx-value-class={class["name"]}
       title={class["name"]}
@@ -6448,6 +6424,17 @@ defmodule BtAttachWeb.WorkspaceLive do
     </div>
     """
   end
+
+  # Hierarchy indent → inline `padding-left` (BT-2637). Depth is uncapped, so the
+  # indent scales with the true superclass depth rather than collapsing every deep
+  # class onto the spike's single `.subclass2` level (which read as flat). Each
+  # level adds 14px on top of the row's base 10px — matching the old fixed steps
+  # (24px at depth 1, 38px at depth 2) and continuing past them. Depth 0 (roots)
+  # keeps the base padding, so no inline override is emitted.
+  defp class_row_indent(0), do: nil
+
+  defp class_row_indent(indent) when is_integer(indent) and indent > 0,
+    do: "padding-left: #{10 + indent * 14}px"
 
   # The protocol + method pane (the spike's MethodList): a protocol filter row
   # ("all" + one row per protocol, BT-2491) over the method list for the current
