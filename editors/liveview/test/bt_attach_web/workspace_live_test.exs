@@ -78,6 +78,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
       {:ok, view, html} = live(observer_conn(conn), "/")
       assert html =~ "read-only (Observer)"
       assert html =~ ~s(id="system-browser")
+      # The class tree now loads asynchronously (BT-2591) — await it before
+      # asserting the tree rows are present.
+      html = render_async(view)
       assert html =~ ~s(phx-click="browser_select_class")
 
       # A class-tree click from an Observer re-renders without a "Not authorized"
@@ -818,7 +821,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "the System Browser renders the class tree with view + side toggles (BT-2491)", %{
     conn: conn
   } do
-    {:ok, _view, html} = live(conn, "/")
+    {:ok, view, _html} = live(conn, "/")
+    # Mount-time browse-classes now loads asynchronously (BT-2591); await it so
+    # the class tree is populated before asserting on it.
+    html = render_async(view)
 
     # The left column is the spike's System Browser: a Hierarchy / Category view
     # toggle, a class tree, an instance/class side toggle, and a protocol/method
