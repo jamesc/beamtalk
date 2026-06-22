@@ -310,6 +310,15 @@
 .cat-row { color: var(--muted); font-weight: 600; font-size: 11px; letter-spacing: .03em; text-transform: uppercase; cursor: default; }
 .cat-row:hover, .row:hover { background: var(--hover); }
 .row.sel, .cat-row.sel { background: var(--sel); color: var(--sel-ink); }
+/* Context ancestor rows (BT-2649): superclass spine surfaced only to connect
+   filtered matches up to a root in the Hierarchy view. Dimmed and non-interactive
+   — no pointer cursor, no hover highlight — so they read as secondary, immutable
+   context rather than selectable classes. */
+.row.context {
+  color: var(--faint); cursor: default; opacity: 0.7;
+}
+.row.context:hover { background: transparent; }
+.row.context .cls { color: var(--faint); font-style: italic; }
 .row .twig { color: var(--faint); width: 12px; flex: none; text-align: center; }
 /* The class name takes the flexible space and truncates with an ellipsis so the
    trailing badges (BT-2610) are pushed into a consistent right-pinned column and
