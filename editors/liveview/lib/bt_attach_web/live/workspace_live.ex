@@ -522,10 +522,18 @@ defmodule BtAttachWeb.WorkspaceLive do
       # a second replaces this value, and `native_shown?/2` scopes display to the
       # active tab's class (per-tab pane state is intentionally not kept).
       |> assign(:native_view, nil)
-      # New Class form (BT-2293): the System Browser's owner-only create-a-class
-      # affordance, collapsed by default (it lives in the browser head's ＋ button)
-      # so it never crowds the class tree until wanted.
+      # New Class modal (BT-2293, BT-2645): the System Browser's owner-only
+      # create-a-class wizard, closed by default (it opens from the browser head's
+      # ＋ button). The owner types a plain class name + picks a superclass
+      # (default `Object`); the `<Superclass> subclass: <Name>` definition is
+      # synthesized server-side. `new_class_error` carries an in-modal validation
+      # / create error (kept off the method-editor's shared `save_error`);
+      # `new_class_name` / `new_class_super` retain the in-flight field values so a
+      # rejected submit re-renders the modal with what the owner typed.
       |> assign(:new_class_open, false)
+      |> assign(:new_class_error, nil)
+      |> assign(:new_class_name, "")
+      |> assign(:new_class_super, "Object")
       # Navigation aids (BT-2495, epic BT-2482 Phase 3): the top-bar omni search
       # and the method-editor Senders/Implementors popovers. Both ride thin
       # `:read` facade ops over the navigation channel (ADR 0096), so they work
@@ -1461,46 +1469,54 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, flush_changes(socket)}
   end
 
-  # Toggle the System Browser's "New Class" form open/closed (BT-2293). Collapsed
-  # by default so it doesn't occupy the class tree's space until the owner wants
-  # to create a class; the ＋ button in the browser head flips it. Opening the
-  # form clears any stale validation/create status from a prior attempt so the
-  # user gets a clean slate.
+  # Toggle the System Browser's "New Class" modal open/closed (BT-2293, BT-2645).
+  # Closed by default; the ＋ button in the browser head flips it. Opening the
+  # modal resets the field values + clears any stale in-modal validation error
+  # from a prior attempt so the owner gets a clean slate (the superclass defaults
+  # back to `Object`).
   def handle_event("toggle_new_class", _params, socket) do
     opening? = !socket.assigns.new_class_open
 
-    # Clear the whole shared status area on open (all four assigns, matching
-    # `status_error/2`) so no stale save *or* flush banner lingers behind the
-    # freshly-opened form.
     socket =
-      if opening?,
-        do:
-          assign(socket,
-            save_error: nil,
-            save_result: nil,
-            flush_error: nil,
-            flush_result: nil
-          ),
-        else: socket
+      if opening? do
+        assign(socket,
+          new_class_open: true,
+          new_class_error: nil,
+          new_class_name: "",
+          new_class_super: "Object"
+        )
+      else
+        assign(socket, new_class_open: false, new_class_error: nil)
+      end
 
-    {:noreply, assign(socket, new_class_open: opening?)}
+    {:noreply, socket}
   end
 
-  # Create a brand-new class from the New Class form's source ("New Class",
-  # ADR 0082 Phase 5 `Workspace newClass:at:`, BT-2293). The target `.bt` path is
-  # *derived from the declared class name* (`Greeter` → `src/Greeter.bt`) rather
-  # than typed — the user thinks in classes, not files. A successful create logs
-  # a durable `new-class` ChangeLog entry (written to disk later on flush) and
-  # appears in the Changes pane.
-  def handle_event("new_class", %{"source" => source}, socket)
-      when is_binary(source) do
-    {:noreply, new_class(socket, source)}
+  # Close the New Class modal (Esc / close button / scrim click), discarding the
+  # in-flight fields without creating anything (BT-2645).
+  def handle_event("close_new_class", _params, socket) do
+    {:noreply, assign(socket, new_class_open: false, new_class_error: nil)}
   end
 
-  # Malformed payload (missing key / non-binary value): surface a validation
-  # error rather than letting a crafted event crash the LiveView.
+  # Create a brand-new class from the New Class modal's name + superclass fields
+  # (ADR 0082 Phase 5 `Workspace newClass:at:`, BT-2293, BT-2645). The owner types
+  # a plain PascalCase class name and picks a superclass (default `Object`); the
+  # `<Superclass> subclass: <Name>` definition is synthesized server-side — the
+  # user never types `subclass:`. The target `.bt` path is derived from the class
+  # name (`Greeter` → `src/Greeter.bt`); the user thinks in classes, not files. A
+  # successful create logs a durable `new-class` ChangeLog entry (written to disk
+  # later on flush), appears in the Changes pane, and opens + selects the new class.
+  def handle_event("new_class", %{"name" => name} = params, socket)
+      when is_binary(name) do
+    superclass = Map.get(params, "superclass", "Object")
+    superclass = if is_binary(superclass), do: superclass, else: "Object"
+    {:noreply, new_class(socket, name, superclass)}
+  end
+
+  # Malformed payload (missing key / non-binary value): surface an in-modal
+  # validation error rather than letting a crafted event crash the LiveView.
   def handle_event("new_class", _params, socket) do
-    {:noreply, status_error(socket, "Invalid new-class form payload.")}
+    {:noreply, assign(socket, new_class_error: "Invalid new-class form payload.")}
   end
 
   # Revert one pending in-memory method patch (ADR 0082 Phase 5 `Workspace
@@ -3103,47 +3119,99 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # Create a new class from the New Class form (BT-2293). Empty source is a local
-  # validation error (no round-trip); a real create derives the target `.bt` path
-  # from the declared class name (so the user never types a file path), threads
-  # source + derived path straight to the workspace newClass chokepoint, refreshes
-  # the Changes pane so the durable `new-class` entry is visible (ChangeLog
-  # coherence), and collapses the form.
-  defp new_class(socket, source) do
-    # Trim up front so the emptiness guard and the dispatched payload see the same
-    # normalised value (whitespace around a class definition is never significant).
-    source = String.trim(source)
+  # Create a new class from the New Class modal's name + superclass (BT-2293,
+  # BT-2645). The owner supplies a plain PascalCase class name and a superclass
+  # (default `Object`); validation (PascalCase, non-empty, non-duplicate) runs
+  # locally — a rejected name surfaces an in-modal error and never round-trips.
+  # A valid name synthesizes the `<Superclass> subclass: <Name>` definition,
+  # derives the target `.bt` path from the name (so the user never types a file
+  # path), threads source + path to the workspace newClass chokepoint, refreshes
+  # the Changes pane (ChangeLog coherence), and opens + selects the new class.
+  defp new_class(socket, name, superclass) do
+    name = String.trim(name)
+    superclass = trim_superclass(superclass)
 
-    cond do
-      source == "" ->
-        status_error(socket, "Enter a class definition to create a class.")
+    case validate_new_class_name(socket, name) do
+      :ok ->
+        source = superclass <> " subclass: " <> name
+        {:ok, path} = derive_class_path(name)
+        dispatch_new_class(socket, name, source, path)
 
-      true ->
-        case derive_class_path(source) do
-          {:ok, path} ->
-            dispatch_new_class(socket, source, path)
-
-          :error ->
-            status_error(
-              socket,
-              "Couldn't find a class name — start with e.g. `Object subclass: Greeter`."
-            )
-        end
+      {:error, message} ->
+        # Keep the in-flight field values so the re-rendered modal shows what the
+        # owner typed, and route the error to the modal-local assign (never the
+        # method-editor's shared `save_error` — BT-2645).
+        assign(socket,
+          new_class_open: true,
+          new_class_name: name,
+          new_class_super: superclass,
+          new_class_error: message
+        )
     end
   end
 
-  defp dispatch_new_class(socket, source, path) do
+  # An empty / blank superclass falls back to the default `Object` — the modal's
+  # select defaults to it, but a crafted payload or cleared typeahead must not
+  # synthesize a headerless `subclass: Name`.
+  defp trim_superclass(superclass) do
+    case String.trim(superclass) do
+      "" -> "Object"
+      trimmed -> trimmed
+    end
+  end
+
+  # Validate a new class name locally (BT-2645): non-empty, PascalCase
+  # (`^[A-Z][A-Za-z0-9_]*$`), and not a duplicate of an existing class in the
+  # browse list. Returns `:ok` or `{:error, message}` for an in-modal error.
+  @new_class_name_re ~r/^[A-Z][A-Za-z0-9_]*$/
+  defp validate_new_class_name(socket, name) do
+    cond do
+      name == "" ->
+        {:error, "Enter a class name to create a class."}
+
+      not Regex.match?(@new_class_name_re, name) ->
+        {:error,
+         "Class name must be PascalCase — start with an uppercase letter, e.g. `Greeter`."}
+
+      class_name_taken?(socket, name) ->
+        {:error, "A class named #{name} already exists."}
+
+      true ->
+        :ok
+    end
+  end
+
+  # Is `name` already a class in the loaded browse list? Compared against the
+  # `"name"` field of every browse row (the same list the tree renders), so a
+  # duplicate is caught before any round-trip.
+  defp class_name_taken?(socket, name) do
+    Enum.any?(socket.assigns[:browser_classes] || [], fn row ->
+      Map.get(row, "name") == name
+    end)
+  end
+
+  defp dispatch_new_class(socket, name, source, path) do
     case Facade.dispatch(:new_class, %{source: source, path: path}, ctx(socket)) do
       {:ok, created_path} ->
         socket
+        |> assign_browser_classes()
+        |> assign_changes()
+        # Open + select the NEW class (`name`), not the superclass: the def tab
+        # focuses it and the tree highlights it (BT-2645). `open_definition`
+        # re-syncs the active-tab editor assigns (clearing `save_result`), so the
+        # success status is assigned *after* it — otherwise the "Created …" banner
+        # would be wiped by the very tab it opens.
+        |> open_definition(name)
         |> assign(
+          selected_class: name,
+          selected_protocol: nil,
           save_result: "Created new class — #{created_path}",
           save_error: nil,
           flush_result: nil,
           flush_error: nil,
-          new_class_open: false
+          new_class_open: false,
+          new_class_error: nil
         )
-        |> assign_changes()
         # BT-2586/BT-2590: a new class only writes its `.bt` file to disk when
         # autoflush is on (it is otherwise a durable in-memory ChangeLog entry,
         # written at the next flush — `maybe_autoflush(durable)` in
@@ -3153,28 +3221,34 @@ defmodule BtAttachWeb.WorkspaceLive do
         |> maybe_refresh_git_after_save()
 
       {:error, reason} ->
-        status_error(socket, facade_error(reason))
+        # Route a failed create to the in-modal error (keep fields + modal open),
+        # never the method-editor's `save_error` (BT-2645).
+        assign(socket,
+          new_class_open: true,
+          new_class_name: name,
+          new_class_error: facade_error(reason)
+        )
     end
   end
 
-  # Derive the in-project `.bt` path for a new class from its definition's
-  # declared name (BT-2293): `Object subclass: Greeter` → `src/Greeter.bt`. The
-  # runtime's `newClass:at:` validation accepts an exact (`Greeter.bt`, the stdlib
-  # convention) basename match, so the PascalCase name maps cleanly. Returns
-  # `:error` when no `… subclass: Name` header is present so the caller can surface
-  # a friendly "looks like a class definition?" message instead of a path error.
+  # Derive the in-project `.bt` path for a new class from its name (BT-2293):
+  # `Greeter` → `src/Greeter.bt`. The runtime's `newClass:at:` validation accepts
+  # an exact (`Greeter.bt`, the stdlib convention) basename match, so the
+  # PascalCase name maps cleanly. The name is already PascalCase-validated by the
+  # caller, so this always succeeds; it returns `{:ok, path}` to keep the
+  # call-site explicit.
+  #
+  # NOTE (BT-2646): the snake_case filename convention is OUT OF SCOPE here — this
+  # keeps the PascalCase basename behaviour unchanged so BT-2646 is a clean
+  # follow-up.
   #
   # The `src/` prefix is assumed — it's the canonical package source dir the
   # runtime resolves (`resolve_package_module` tries `src/` then `test/`). A
   # project with a different layout would get a `target_outside_project` error at
   # creation time (not silently on flush). If per-project source dirs ever land,
   # this is the spot to read the configured dir instead of hardcoding `src/`.
-  @new_class_name_re ~r/\bsubclass:\s*([A-Z][A-Za-z0-9_]*)/
-  defp derive_class_path(source) do
-    case Regex.run(@new_class_name_re, source) do
-      [_, name] -> {:ok, "src/" <> name <> ".bt"}
-      _ -> :error
-    end
+  defp derive_class_path(name) do
+    {:ok, "src/" <> name <> ".bt"}
   end
 
   # Revert one pending method patch (BT-2293). On success the prior body is
@@ -6504,11 +6578,16 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :browser_source, :string, default: "all"
   attr :selected_class, :string, default: nil
   attr :browser_error, :string, default: nil
-  # Owner-only "New Class" affordance (BT-2293): `role` gates the ＋ button (only
-  # the owner can `newClass:at:`); `new_class_open` is the collapsed/expanded
-  # state of the inline create form. Both default so read-only callers can omit.
+  # Owner-only "New Class" affordance (BT-2293, BT-2645): `role` gates the ＋
+  # button (only the owner can `newClass:at:`); `new_class_open` is the open/closed
+  # state of the create-a-class modal. `new_class_name` / `new_class_super` retain
+  # the in-flight field values; `new_class_error` is the in-modal validation /
+  # create error. All default so read-only callers can omit.
   attr :role, :atom, default: :observer
   attr :new_class_open, :boolean, default: false
+  attr :new_class_name, :string, default: ""
+  attr :new_class_super, :string, default: "Object"
+  attr :new_class_error, :string, default: nil
 
   defp system_browser_classes(assigns) do
     # BT-2557: filter the rows once, up front, so both the hierarchy and category
@@ -6574,8 +6653,9 @@ defmodule BtAttachWeb.WorkspaceLive do
           type="button"
           class={["panel-icon", @new_class_open && "on"]}
           phx-click="toggle_new_class"
+          aria-haspopup="dialog"
           aria-expanded={to_string(@new_class_open)}
-          aria-controls={if @new_class_open, do: "new-class-form"}
+          aria-controls={if @new_class_open, do: "new-class-modal"}
           aria-label="New class"
           title="New class"
         >
@@ -6591,33 +6671,86 @@ defmodule BtAttachWeb.WorkspaceLive do
           ×
         </button>
       </div>
-      <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): create a brand-new class from a
-           source definition (`Workspace newClass:at:`). The target `.bt` path is
-           derived from the declared class name server-side, so the owner thinks in
-           classes, not files. Collapsed by default; the new-class entry appears in
-           the Changes pane and is written to disk on the next flush. --%>
-      <form
+      <%!-- NEW CLASS modal (BT-2293, BT-2645, ADR 0082 Phase 5): create a
+           brand-new class from two explicit fields — a plain PascalCase name and a
+           superclass (default `Object`, a datalist typeahead over existing
+           classes). The `<Superclass> subclass: <Name>` definition + `.bt` path
+           are synthesized server-side, so the owner thinks in classes, not files
+           or `subclass:` syntax. Validation errors render inline inside the modal
+           (never the method editor). The new-class entry appears in the Changes
+           pane and is written to disk on the next flush; the created class opens +
+           is selected on success. --%>
+      <div
         :if={@role == :owner and @new_class_open}
-        id="new-class-form"
-        phx-submit="new_class"
-        class="new-class-form"
+        id="new-class-modal"
+        class="modal-scrim"
+        phx-click="close_new_class"
+        phx-window-keydown="close_new_class"
+        phx-key="escape"
       >
-        <label class="new-class-label" for="new-class-source">
-          New Class
-          <span class="muted-note">— saved under <code>src/</code> as <code>ClassName.bt</code></span>
-        </label>
-        <textarea
-          id="new-class-source"
-          name="source"
-          class="new-class-source mono"
-          rows="2"
-          placeholder="Object subclass: Greeter"
-          phx-mounted={Phoenix.LiveView.JS.focus()}
-        ></textarea>
-        <button class="btn" type="submit" phx-disable-with="Creating…">
-          Create
-        </button>
-      </form>
+        <div
+          class="modal-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="New class"
+          phx-click-away="close_new_class"
+        >
+          <div class="modal-head">
+            <h2 class="modal-title">New Class</h2>
+            <button
+              type="button"
+              class="panel-close"
+              phx-click="close_new_class"
+              aria-label="Close New Class dialog"
+              title="Close"
+            >
+              ×
+            </button>
+          </div>
+          <form id="new-class-form" phx-submit="new_class" class="new-class-modal-form">
+            <label class="new-class-field-label" for="new-class-name">Class name</label>
+            <input
+              type="text"
+              id="new-class-name"
+              name="name"
+              class="field"
+              value={@new_class_name}
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Greeter"
+              aria-describedby={if @new_class_error, do: "new-class-error"}
+              aria-invalid={to_string(@new_class_error != nil)}
+              phx-mounted={Phoenix.LiveView.JS.focus()}
+            />
+            <label class="new-class-field-label" for="new-class-super">Superclass</label>
+            <input
+              type="text"
+              id="new-class-super"
+              name="superclass"
+              class="field"
+              value={@new_class_super}
+              list="new-class-super-options"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Object"
+            />
+            <datalist id="new-class-super-options">
+              <option :for={row <- @browser_classes} value={Map.get(row, "name")}></option>
+            </datalist>
+            <p :if={@new_class_error} id="new-class-error" class="new-class-error" role="alert">
+              {@new_class_error}
+            </p>
+            <div class="modal-actions">
+              <button type="button" class="btn ghost" phx-click="close_new_class">
+                Cancel
+              </button>
+              <button class="btn primary" type="submit" phx-disable-with="Creating…">
+                Create
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
       <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
         <.notice
           :if={@browser_error}
@@ -7175,6 +7308,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                   browser_error={@browser_error}
                   role={@role}
                   new_class_open={@new_class_open}
+                  new_class_name={@new_class_name}
+                  new_class_super={@new_class_super}
+                  new_class_error={@new_class_error}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
                      the method list ("more class, less method"). --%>

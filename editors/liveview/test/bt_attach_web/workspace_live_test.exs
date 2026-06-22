@@ -90,11 +90,11 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     test "the New Class affordance is hidden for an Observer (BT-2293)", %{conn: conn} do
       # `new_class` is an :execute op, so the System Browser's "New Class"
       # affordance is owner-gated in the template (same as the eval form) — an
-      # Observer must see neither the ＋ toggle nor the form it reveals.
+      # Observer must see neither the ＋ toggle nor the modal it opens.
       {:ok, _view, html} = live(observer_conn(conn), "/")
       assert html =~ "read-only (Observer)"
       refute html =~ ~s(phx-click="toggle_new_class")
-      refute html =~ ~s(id="new-class-form")
+      refute html =~ ~s(id="new-class-modal")
       refute html =~ ~s(phx-submit="new_class")
     end
 
@@ -486,81 +486,128 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     assert view |> form("#eval-form") |> render_submit(%{expr: "6 * 7"}) =~ "42"
   end
 
-  test "the New Class toggle is present on the owner's connected render (BT-2293)", %{conn: conn} do
+  test "the New Class toggle opens a modal with name + superclass fields (BT-2645)", %{conn: conn} do
     {:ok, view, html} = live(conn, "/")
 
-    # The System Browser's "New Class" affordance is collapsed by default (it must
+    # The System Browser's "New Class" affordance is closed by default (it must
     # not crowd the class tree): only the ＋ toggle shows on the connected render.
     assert html =~ ~s(phx-click="toggle_new_class")
-    refute html =~ ~s(id="new-class-form")
+    refute html =~ ~s(id="new-class-modal")
 
-    # Toggling it open reveals the source-only form (no path field — the `.bt`
-    # path is derived from the declared class name server-side).
+    # Toggling it open reveals a modal with two explicit fields — a plain class
+    # name and a superclass (default `Object`); the owner never types `subclass:`.
     opened = view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
-    assert opened =~ ~s(id="new-class-form")
+    assert opened =~ ~s(id="new-class-modal")
     assert opened =~ ~s(phx-submit="new_class")
-    assert opened =~ ~s(name="source")
-    refute opened =~ ~s(name="path")
+    assert opened =~ ~s(name="name")
+    assert opened =~ ~s(name="superclass")
+    # The superclass field defaults to `Object`.
+    assert opened =~ ~s(value="Object")
+    # No bare-definition textarea in the modal anymore (the def is synthesized
+    # server-side). `name="source"` still exists elsewhere as the method editor's
+    # hidden field, so scope the check to the modal's removed source textarea.
+    refute opened =~ ~s(id="new-class-source")
   end
 
-  test "New Class validates an empty source before any create (BT-2293)", %{conn: conn} do
+  test "New Class validates an empty name inside the modal (BT-2645)", %{conn: conn} do
     {:ok, view, _html} = live(conn, "/")
     view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
 
     html =
       view
       |> form("#new-class-form")
-      |> render_submit(%{"source" => ""})
+      |> render_submit(%{"name" => "", "superclass" => "Object"})
 
-    assert html =~ "Enter a class definition"
+    assert html =~ "Enter a class name"
+    # The error stays inside the modal — never the method editor's save banner.
+    assert html =~ ~s(id="new-class-modal")
+    # No round-trip happened, so no "Created" status.
+    refute html =~ "Created new class"
   end
 
-  test "New Class rejects source with no class header (BT-2293)", %{conn: conn} do
+  test "New Class rejects a lowercase (non-PascalCase) name inside the modal (BT-2645)", %{
+    conn: conn
+  } do
     {:ok, view, _html} = live(conn, "/")
     view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
 
-    # No `… subclass: Name` header → there is no class name to derive a path from,
-    # so the LiveView surfaces a friendly hint rather than dispatching a doomed
-    # round-trip.
     html =
       view
       |> form("#new-class-form")
-      |> render_submit(%{"source" => "1 + 1"})
+      |> render_submit(%{"name" => "foo", "superclass" => "Object"})
 
-    # Match a non-apostrophe substring of "Couldn't find a class name …": the
-    # rendered HTML escapes the apostrophe (`Couldn&#39;t`), so asserting the
-    # literal contraction would spuriously fail.
-    assert html =~ "find a class name"
+    assert html =~ "PascalCase"
+    assert html =~ ~s(id="new-class-modal")
+    refute html =~ "Created new class"
   end
 
-  test "New Class creates a class end-to-end via newClass:at: (BT-2293)", %{conn: conn} do
+  test "New Class rejects a duplicate class name inside the modal (BT-2645)", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
+
+    # `Object` is always present in the browse list, so it is a duplicate.
+    html =
+      view
+      |> form("#new-class-form")
+      |> render_submit(%{"name" => "Object", "superclass" => "Object"})
+
+    assert html =~ "already exists"
+    assert html =~ ~s(id="new-class-modal")
+    refute html =~ "Created new class"
+  end
+
+  test "New Class creates a class with default Object superclass and opens it (BT-2645)", %{
+    conn: conn
+  } do
     {:ok, view, _html} = live(conn, "/")
     view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
     suffix = System.unique_integer([:positive])
     class = "Greeter#{suffix}"
-    # The path is derived from the declared class name: `Greeter12` → its exact
-    # PascalCase basename `src/Greeter12.bt` (the stdlib convention the runtime's
-    # `newClass:at:` validation accepts as an exact match).
+    # The path is derived from the class name: `Greeter12` → its exact PascalCase
+    # basename `src/Greeter12.bt` (the stdlib convention the runtime's
+    # `newClass:at:` validation accepts as an exact match — snake_case is BT-2646).
     path = "src/#{class}.bt"
 
-    # Drive a real `newClass:at:` round-trip — the success path the validation
-    # tests don't reach: form (source only) → derived path → `:new_class` facade
-    # op → workspace `beamtalk_repl_eval:new_class/2`. Phase 1 installs the class
-    # in memory and logs a durable new-class ChangeEntry; the `.bt` file is only
-    # written on flush, so this leaves no on-disk artifact. A derivation bug
-    # (wrong basename/case) would fail here, not just in validation.
+    # Drive a real `newClass:at:` round-trip: modal fields (name + Object) →
+    # synthesized `Object subclass: Greeter12` → derived path → `:new_class` facade
+    # op → workspace. The `.bt` file is only written on flush, so this leaves no
+    # on-disk artifact.
     html =
       view
       |> form("#new-class-form")
-      |> render_submit(%{"source" => "Object subclass: #{class}"})
+      |> render_submit(%{"name" => class, "superclass" => "Object"})
 
     assert html =~ "Created new class — #{path}"
     refute html =~ "beamtalk_error"
     refute html =~ "{:error"
     # ChangeLog coherence: the new-class entry is now in the Changes viewer.
     assert html =~ class
-    # The form collapses again after a successful create.
-    refute html =~ ~s(id="new-class-form")
+    # The modal closes again after a successful create.
+    refute html =~ ~s(id="new-class-modal")
+    # The created class is opened + selected: a def tab focuses it and the tree
+    # highlights it (the `def:` tab id is the open-definition signal).
+    assert html =~ "def:#{class}"
+  end
+
+  test "New Class with an explicit superclass opens the NEW class, not the superclass (BT-2645)",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/")
+    view |> element(~s(button[phx-click="toggle_new_class"])) |> render_click()
+    suffix = System.unique_integer([:positive])
+    class = "Bar#{suffix}"
+    path = "src/#{class}.bt"
+
+    # Superclass `Actor` → synthesize `Actor subclass: Bar…`; the success path
+    # must open + select the new class (`Bar…`), never the superclass (`Actor`).
+    html =
+      view
+      |> form("#new-class-form")
+      |> render_submit(%{"name" => class, "superclass" => "Actor"})
+
+    assert html =~ "Created new class — #{path}"
+    # Opens the NEW class's definition tab, not the superclass's.
+    assert html =~ "def:#{class}"
+    refute html =~ "def:Actor"
   end
 
   # ── Phase 1 JS hook foundation (BT-2485, BT-2539) ───────────────────────────
