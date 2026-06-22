@@ -1742,7 +1742,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # (`native_view: nil`) this is a no-op.
   def handle_event("dismiss_native_error", _params, socket) do
     case socket.assigns[:native_view] do
-      %{} = nv -> {:noreply, assign(socket, native_view: %{nv | error: nil})}
+      %{} = nv -> {:noreply, assign(socket, native_view: Map.put(nv, :error, nil))}
       _ -> {:noreply, socket}
     end
   end
@@ -1760,7 +1760,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Dismiss a per-window inspector error. `@windows` is a list of window maps; the
   # client sends the window `id` so we clear `:error` on the matching window only.
   def handle_event("dismiss_window_error", %{"id" => id}, socket) do
-    {:noreply, update_window(socket, id, fn w -> %{w | error: nil} end)}
+    {:noreply, update_window(socket, id, fn w -> Map.put(w, :error, nil) end)}
   end
 
   def handle_event("dismiss_window_error", _params, socket), do: {:noreply, socket}
@@ -6801,11 +6801,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Map of phx-* attributes rendered onto the dismiss button. The caller decides
   # which event/values clear the right backing assign.
   attr :dismiss_attrs, :map, required: true
-  attr :rest, :global
 
   defp notice(assigns) do
     ~H"""
-    <div class={["io-block", notice_variant_class(@variant)]} {@rest}>
+    <div class={["io-block", notice_variant_class(@variant)]}>
       <span class="io-block-msg">{@message}</span>
       <button
         type="button"
