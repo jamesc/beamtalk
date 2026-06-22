@@ -30,11 +30,13 @@ defmodule BtAttachWeb.ClassTree do
   """
   @spec hierarchy_rows([class_row()]) :: [{class_row(), non_neg_integer()}]
   def hierarchy_rows(classes) do
+    names = MapSet.new(classes, &Map.get(&1, "name"))
+
     by_parent =
       Enum.group_by(classes, fn c ->
         super_name = Map.get(c, "superclass")
 
-        if super_name && Enum.any?(classes, &(Map.get(&1, "name") == super_name)),
+        if super_name && MapSet.member?(names, super_name),
           do: super_name,
           else: :__root
       end)

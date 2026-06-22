@@ -6431,10 +6431,10 @@ defmodule BtAttachWeb.WorkspaceLive do
   # level adds 14px on top of the row's base 10px — matching the old fixed steps
   # (24px at depth 1, 38px at depth 2) and continuing past them. Depth 0 (roots)
   # keeps the base padding, so no inline override is emitted.
-  defp class_row_indent(0), do: nil
-
   defp class_row_indent(indent) when is_integer(indent) and indent > 0,
     do: "padding-left: #{10 + indent * 14}px"
+
+  defp class_row_indent(_), do: nil
 
   # The protocol + method pane (the spike's MethodList): a protocol filter row
   # ("all" + one row per protocol, BT-2491) over the method list for the current
