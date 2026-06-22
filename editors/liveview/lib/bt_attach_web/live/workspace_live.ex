@@ -4688,7 +4688,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # for the same selector. A no-op for ordinary method/def tabs (the guard only
   # matches `new: true`). When a canonical method tab for the selector is already
   # open, the scratch tab is dropped and that existing tab is focused (no duplicate,
-  # no stale "Class ▸ new" left behind). `focus_tab_keep_banner/3` refreshes the
+  # no stale "Class ▸ (new method)" left behind). `focus_tab_keep_banner/3` refreshes the
   # edit assigns so the now-hidden selector reflects the saved name.
   defp promote_new_method_tab(socket, tab_id, saved_class, selector) do
     case find_tab(socket, tab_id) do
@@ -4710,7 +4710,7 @@ defmodule BtAttachWeb.WorkspaceLive do
           existing ->
             # A canonical method tab for this selector is already open: drop the
             # redundant scratch tab and focus the existing one, rather than leaving
-            # a stale "Class ▸ new" tab alongside it. Re-base that tab on the body
+            # a stale "Class ▸ (new method)" tab alongside it. Re-base that tab on the body
             # just compiled (same post-compile treatment `compile_clean/3` gives the
             # in-place path) so the editor shows the saved source, not its browse
             # snapshot.
@@ -4763,11 +4763,11 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp breadcrumb(%{kind: :def, class: class}), do: {class, nil, "class definition"}
   # A new-method tab has no stored selector yet (BT-2606): derive it live from the
   # body the author is typing so the breadcrumb names the method as soon as a
-  # recognizable signature appears, falling back to the `new method` placeholder
-  # until then.
+  # recognizable signature appears, falling back to the `(new method)` placeholder
+  # until then (parenthesised so it can't be mistaken for a real selector — BT-2613).
   defp breadcrumb(%{new: true, class: class, side: side, source: source}) do
     case parse_method_signature_selector(source) do
-      "" -> {class, side, "new method"}
+      "" -> {class, side, "(new method)"}
       selector -> {class, side, selector}
     end
   end
@@ -6561,7 +6561,7 @@ defmodule BtAttachWeb.WorkspaceLive do
   # The class whose *definition* tab is focused (or nil) — highlights the "class
   # definition" entry when the editor is showing this class's definition.
   attr :active_def, :string, default: nil
-  # The viewer's role — the "new method" authoring entry is owner-only (Observers
+  # The viewer's role — the "Add a method…" authoring entry is owner-only (Observers
   # get a read-only browser).
   attr :role, :atom, required: true
 
@@ -6598,8 +6598,8 @@ defmodule BtAttachWeb.WorkspaceLive do
               <span class="twig" style="color: var(--accent);">▸</span>
               <span class="mname mono">class definition</span>
             </div>
-            <%!-- new method entry (owner-only): opens a blank :method tab for the
-                 selected class so a brand-new method can be authored on demand —
+            <%!-- "Add a method…" entry (owner-only): opens a blank :method tab for
+                 the selected class so a brand-new method can be authored on demand —
                  the role the starter tab used to play before the editor opened
                  empty. --%>
             <div
@@ -6609,7 +6609,7 @@ defmodule BtAttachWeb.WorkspaceLive do
               phx-value-class={@selected_class}
             >
               <span class="twig" style="color: var(--accent);">+</span>
-              <span class="mname mono">new method</span>
+              <span class="mname mono">Add a method…</span>
             </div>
           </div>
           <%!-- protocol filter row: ∗ "all" + one row per protocol --%>
@@ -7674,7 +7674,11 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <span class="tab-label mono">
                       {cond do
                         t.kind == :def -> t.class <> " ▸ def"
-                        t.new -> t.class <> " ▸ new"
+                        # Placeholder label for an unsaved new-method tab. Parens
+                        # keep it from being read as a real `new` selector tab,
+                        # which renders as plain "new" via the branch below
+                        # (BT-2613).
+                        t.new -> t.class <> " ▸ (new method)"
                         true -> t.selector
                       end}
                     </span>
