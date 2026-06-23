@@ -412,7 +412,9 @@ unresolvable FFI chains.
 untrusted, so we must not let it mint new atoms. A native module the BT side
 calls is generally already loaded (hence its atom exists); if it is not yet an
 atom the send is still indexed but carries no module attribution — the callers
-query for that module simply returns empty until the module is loaded.
+query for that module returns empty. This does NOT self-heal when the module is
+later loaded: the stored `target_module = undefined` is only corrected by
+re-indexing the calling class (recompile / reload).
 """.
 -spec target_module_atom(term()) -> module() | undefined.
 target_module_atom(Bin) when is_binary(Bin), Bin =/= <<>>, byte_size(Bin) =< ?MAX_ATOM_BYTES ->
@@ -789,6 +791,11 @@ callers_of_native_module(Module) when is_atom(Module) ->
             [];
         _ ->
             {Snapshot, Rows} = read_stable(fun() ->
+                %% O(total sends): the senders table is keyed by sent selector,
+                %% not target_module, so this read scans the whole table — unlike
+                %% senders_of/1 / references_to/1 which do keyed O(callers) lookups.
+                %% Fine for the user-triggered "Callers" button; if this ever
+                %% becomes hot a target_module-keyed index would give O(callers).
                 ets:tab2list(?SENDERS_TABLE)
             end),
             Sites = [
