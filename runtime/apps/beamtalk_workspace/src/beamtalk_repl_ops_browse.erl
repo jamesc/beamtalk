@@ -70,6 +70,12 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 
 -export([handle/4, handle_term/4, describe_ops/0, source_origin_of/2]).
 
+%% BT-2670: the editable-native-target resolver, called by the save-native-source
+%% op (`beamtalk_repl_ops_load`) to re-derive — server-side, never trusting the
+%% client — whether a native module is a project-owned, editable `.erl` and where
+%% its source lives. Authorization seam: only `<<"project">>` is writable.
+-export([native_module_editable_target/1]).
+
 -ifdef(TEST).
 %% Pure helpers exercised directly in EUnit (BT-2578): clause parsing and the
 %% delegate-source marker have no live-class dependency. BT-2643: the
@@ -682,14 +688,54 @@ browse_native_module_source(Module, Selector) ->
         <<"backing_module">> => atom_to_binary(Module, utf8),
         <<"source_file">> => SourceFile,
         <<"source_origin">> => SourceOrigin,
-        %% Read-only in every origin today: standalone native modules have no
-        %% Beamtalk-side editing seam (no class tab to recompile), so even a
-        %% project-owned native module is view-only here (R/W is BT-2578 follow-up).
-        <<"editable">> => false,
+        %% BT-2670: project-owned native modules are editable (edit → compile →
+        %% reload → write-back, gated to the Owner via the `save-native-source`
+        %% op's `:execute` capability). Deps/stdlib natives stay strictly
+        %% read-only. Require readable on-disk content too: a `.beam`-only
+        %% (release-stripped) module has nothing to edit even though its path is
+        %% known, so it must not advertise `editable`. The save op re-derives this
+        %% same predicate server-side (`native_module_editable_target/1`) — the
+        %% client flag is a UX hint, never the authority.
+        <<"editable">> =>
+            SourceOrigin =:= <<"project">> andalso SourceFile =/= null andalso Content =/= null,
         <<"content">> => Content,
         <<"clauses">> => Clauses,
         <<"selected_clause">> => selected_clause(Clauses, Selector)
     }}.
+
+-doc """
+Resolve a native module to its editable on-disk `.erl` target (BT-2670).
+
+This is the **server-side authorization seam** for `save-native-source`: it
+re-derives — independently of any client-supplied path — where the module's
+source lives and whether it is a *project-owned* native that may be written. It
+NEVER trusts a path from the request; the path is read from the module's own
+compile info (`module_info(compile)` → `source`), so a crafted request cannot
+redirect a write outside the project tree.
+
+Returns:
+  - `{ok, SourceFile}` — `SourceFile` is the absolute `.erl` path, and the module
+    is project-owned (origin `<<"project">>`) with readable on-disk source.
+  - `{error, not_editable}` — a deps/stdlib native, or no readable on-disk source
+    (`.beam`-only / release-stripped). The caller maps this to a structured
+    `#beamtalk_error{}`.
+""".
+-spec native_module_editable_target(atom()) -> {ok, string()} | {error, not_editable}.
+native_module_editable_target(Module) when is_atom(Module) ->
+    case backing_source_file(Module) of
+        undefined ->
+            {error, not_editable};
+        Path when is_list(Path) ->
+            SourceFileBin =
+                case unicode:characters_to_binary(Path) of
+                    B when is_binary(B) -> B;
+                    _ -> list_to_binary(Path)
+                end,
+            case native_module_origin(Module, SourceFileBin) of
+                <<"project">> -> {ok, Path};
+                _ -> {error, not_editable}
+            end
+    end.
 
 %%% ====================================================================
 %%% Op 6 — browse-native-modules (BT-2648)
