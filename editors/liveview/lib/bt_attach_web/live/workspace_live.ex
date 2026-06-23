@@ -511,10 +511,20 @@ defmodule BtAttachWeb.WorkspaceLive do
       # role too.
       |> assign(:browser_view, "hierarchy")
       # BT-2557: source-origin filter for the class tree (`source_origin` field on
-      # each browse row). "all" preserves the prior behaviour (everything shown);
-      # "project" / "deps" / "stdlib" narrow the tree so a project's own classes
-      # aren't buried under the stdlib.
+      # each browse row). "all" shows everything; "project" / "deps" / "stdlib"
+      # narrow the tree so a project's own classes aren't buried under the stdlib.
+      #
+      # BT-2661: the filter defaults to "project" so the tree opens scoped to the
+      # project's own classes ("show me my code"). The default can't be decided
+      # here — `browser_classes` is still empty at mount (it loads asynchronously,
+      # BT-2591) — so it is applied once the rows arrive (`apply_browser_classes/2`
+      # → `apply_default_browser_source/2`), falling back to "all" when the workspace has
+      # no project-origin classes (bare/stdlib-only) so the tree isn't empty on
+      # open. `:browser_source_chosen` flips `true` the moment the user picks a
+      # filter (or the default is applied once), so a later async refresh never
+      # resets a deliberate choice — the chosen value always wins.
       |> assign(:browser_source, "all")
+      |> assign(:browser_source_chosen, false)
       |> assign(:browser_side, "instance")
       |> assign(:selected_class, nil)
       |> assign(:selected_protocol, nil)
@@ -1661,7 +1671,9 @@ defmodule BtAttachWeb.WorkspaceLive do
   # "ghost" selection for a class no longer visible in the tree.
   def handle_event("browser_source", %{"src" => src}, socket)
       when src in ~w(all project deps stdlib) do
-    socket = assign(socket, browser_source: src)
+    # BT-2661: a deliberate pick marks the filter "chosen" so the BT-2661 initial
+    # default (applied once the async class load lands) can never override it.
+    socket = assign(socket, browser_source: src, browser_source_chosen: true)
 
     socket =
       if selected_class_visible?(socket) do
@@ -4202,8 +4214,11 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp read_browser_classes(socket), do: Facade.dispatch(:browse_classes, %{}, ctx(socket))
 
-  defp apply_browser_classes(socket, {:value, rows}) when is_list(rows),
-    do: assign(socket, browser_classes: rows, browser_error: nil)
+  defp apply_browser_classes(socket, {:value, rows}) when is_list(rows) do
+    socket
+    |> assign(browser_classes: rows, browser_error: nil)
+    |> apply_default_browser_source(rows)
+  end
 
   defp apply_browser_classes(socket, {:error, reason}),
     do: assign(socket, browser_classes: [], browser_error: facade_error(reason))
@@ -4219,6 +4234,34 @@ defmodule BtAttachWeb.WorkspaceLive do
     )
 
     assign(socket, browser_classes: [], browser_error: facade_error(:unexpected_response))
+  end
+
+  # BT-2661: apply the one-shot initial origin-filter default once the class rows
+  # arrive. The tree opens scoped to the project's own classes ("show me my code")
+  # — but only on the FIRST successful load (`:browser_source_chosen` still false)
+  # and only when there is at least one project-origin class to show; a bare /
+  # stdlib-only workspace falls back to "all" so the tree isn't empty on open. The
+  # flag flips `true` here (and in the `browser_source` handler when the user picks
+  # a filter), so a later async refresh / live push never resets a deliberate
+  # choice — the chosen value always wins over the default.
+  defp apply_default_browser_source(%{assigns: %{browser_source_chosen: true}} = socket, _rows),
+    do: socket
+
+  defp apply_default_browser_source(socket, rows) do
+    assign(socket,
+      browser_source: default_browser_source(rows),
+      browser_source_chosen: true
+    )
+  end
+
+  # "project" when the workspace has any project-origin class, else "all" (the
+  # empty-project fallback). The `source_origin` field is the bare classification
+  # (BT-2643); project rows carry "project" (the `source_origin_class/1` default
+  # bucket), so an explicit equality match is enough.
+  defp default_browser_source(rows) do
+    if Enum.any?(rows, &(Map.get(&1, "source_origin") == "project")),
+      do: "project",
+      else: "all"
   end
 
   # BT-2648: load the loaded packages' hand-written native Erlang modules for the

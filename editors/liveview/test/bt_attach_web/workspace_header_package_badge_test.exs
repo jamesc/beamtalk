@@ -76,7 +76,11 @@ defmodule BtAttachWeb.WorkspaceHeaderPackageBadgeTest do
 
     test "a dependency class shows a DEP · <pkg> badge", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 5_000)
 
+      # BT-2661: the tree defaults to the Project filter, so switch to Deps to make
+      # the dependency row interactive before opening it from the tree.
+      view |> element("form.src-filter") |> render_change(%{"src" => "deps"})
       view |> element(~s(div[phx-value-class="HttpClient"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "HttpClient"})
 
@@ -89,7 +93,10 @@ defmodule BtAttachWeb.WorkspaceHeaderPackageBadgeTest do
 
     test "a stdlib class shows a STDLIB badge", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 5_000)
 
+      # BT-2661: default is Project — switch to Stdlib to open the stdlib row.
+      view |> element("form.src-filter") |> render_change(%{"src" => "stdlib"})
       view |> element(~s(div[phx-value-class="Object"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "Object"})
 
@@ -122,7 +129,10 @@ defmodule BtAttachWeb.WorkspaceHeaderPackageBadgeTest do
 
     test "a dependency method tab shows DEP · <pkg>", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
+      render_async(view, 5_000)
 
+      # BT-2661: default is Project — switch to Deps to open the dependency row.
+      view |> element("form.src-filter") |> render_change(%{"src" => "deps"})
       view |> element(~s(div[phx-value-class="HttpClient"])) |> render_click()
 
       html =

@@ -57,7 +57,14 @@ defmodule BtAttachWeb.WorkspaceOriginBadgeTest do
       {:ok, view, _html} = live(owner_conn(conn), "/")
       # BT-2591: the class tree loads off the mount (`start_async(:mount_load, …)`),
       # so await the async fold before parsing the populated tree.
-      html = render_async(view, 5_000)
+      render_async(view, 5_000)
+
+      # BT-2661: the tree now defaults to the Project origin filter, so switch to
+      # the Deps filter to render the dependency rows this badge test asserts on.
+      html =
+        view
+        |> element("form.src-filter")
+        |> render_change(%{"src" => "deps"})
 
       tag =
         html
@@ -75,7 +82,13 @@ defmodule BtAttachWeb.WorkspaceOriginBadgeTest do
 
     test "a dependency class with no package falls back to a plain DEP badge", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
-      html = render_async(view, 5_000)
+      render_async(view, 5_000)
+
+      # BT-2661: default is now Project — switch to Deps to render the dep rows.
+      html =
+        view
+        |> element("form.src-filter")
+        |> render_change(%{"src" => "deps"})
 
       tag =
         html
