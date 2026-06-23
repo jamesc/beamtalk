@@ -1549,12 +1549,6 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("native_save", _params, socket), do: {:noreply, socket}
 
-  # BT-2670: dismiss the inline compile-error notice on a native save (it rides
-  # the shared `@save_error` assign, like the method editor's compile errors).
-  def handle_event("dismiss_native_save_error", _params, socket) do
-    {:noreply, assign(socket, save_error: nil)}
-  end
-
   # BT-2578: jump from a `self delegate` method to its Erlang implementation.
   # Opens (or focuses) the class-definition tab and expands the native pane with
   # the method's selector resolved to its matching `handle_call` clause (which the

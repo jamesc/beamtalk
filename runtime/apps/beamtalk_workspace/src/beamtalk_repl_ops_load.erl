@@ -586,8 +586,20 @@ finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileR
                     }};
                 _ ->
                     %% Defensive: the identical source just compiled cleanly
-                    %% against the temp, so a failure here is unexpected — surface
-                    %% it against the real file rather than claim success.
+                    %% against the temp, so a failure here is an environment
+                    %% transient (I/O error, a stale include regenerated mid-run,
+                    %% etc.). Disk and VM are coherent (both carry the new code),
+                    %% but module_info(compile) source may still point at the
+                    %% deleted temp — so the next save could re-derive the wrong
+                    %% target until a reload corrects it. Log prominently so an
+                    %% operator can recover (ClassName reload / workspace restart).
+                    ?LOG_WARNING(
+                        "save-native-source: wrote ~s but recompiling from the real "
+                        "path failed (module_info source may point at a deleted temp; "
+                        "a reload may be needed before the next save) — ~p",
+                        [ModuleBin, ReErrors],
+                        #{domain => [beamtalk, runtime]}
+                    ),
                     RetargetedErrors = [E#{<<"path">> => SourceFileBin} || E <- ReErrors],
                     {value, #{
                         <<"module">> => ModuleBin,
