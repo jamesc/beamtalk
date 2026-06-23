@@ -822,6 +822,15 @@
   color: var(--ink); background: var(--code-bg);
 }
 
+/* Ctrl/Cmd-click go-to-definition affordance (BT-2666): while the platform
+   modifier is held, the token under the pointer underlines + turns into a link
+   cursor, the familiar "click me to navigate" cue. The decoration is dropped on
+   modifier-release / pointer-leave, so the plain editor is unchanged. */
+.cm-editor .cm-goto-link {
+  text-decoration: underline; text-decoration-color: var(--link, #4ea1ff);
+  cursor: pointer;
+}
+
 .actionbar {
   flex: none; display: flex; align-items: center; gap: 6px; padding: 8px 0 0 0;
 }

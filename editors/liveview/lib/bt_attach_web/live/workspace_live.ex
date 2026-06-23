@@ -1929,6 +1929,37 @@ defmodule BtAttachWeb.WorkspaceLive do
   # Dismiss the Senders/Implementors popover.
   def handle_event("nav_close", _params, socket), do: {:noreply, assign(socket, nav_popover: nil)}
 
+  # ── Ctrl/Cmd-click go-to-definition (BT-2666) ───────────────────────────────
+  #
+  # The CodeMirror editors' `cm_goto.js` extension fires this when the user
+  # modifier-clicks a symbol. `token` is the bare identifier under the pointer;
+  # `code` is the editor line up to (and including) that token (the same
+  # `Receiver selector` line-prefix the `hover` op consumes). We resolve the
+  # clicked symbol to a definition target against the LIVE image, mirroring the
+  # LSP `definition_provider.rs` resolution order (class def, then selector send;
+  # locals/params are a future client-side resolve), and open it by REUSING the
+  # existing nav plumbing:
+  #
+  #   * a known CLASS name → open its `:def` definition tab (`open_definition/2`)
+  #     and point the System Browser at it, exactly as `nav_open_class` does.
+  #   * otherwise treat it as a SELECTOR send → run the BT-2495 `implementors`
+  #     `nav-query`. One implementor → open that method tab directly
+  #     (`open_method_tab/4` + `navigate_browser/3`, the `nav_open` path); several
+  #     → open the shared Senders/Implementors popover so the user picks; none →
+  #     a brief flash (the unresolved no-op), leaving the editor untouched.
+  #
+  # A class name takes priority over a same-named selector, matching the LSP
+  # (class declaration before selector). Unresolvable input (empty token, an
+  # unknown symbol with no implementors) flashes "No definition found" rather
+  # than crashing or silently doing nothing — the graceful no-op the AC asks for.
+  def handle_event("goto_definition", %{"token" => token} = params, socket)
+      when is_binary(token) do
+    code = Map.get(params, "code", "")
+    {:noreply, run_goto_definition(socket, token, code)}
+  end
+
+  def handle_event("goto_definition", _params, socket), do: {:noreply, socket}
+
   # ── dismissable status notices (BT-2612) ────────────────────────────────────
   #
   # Generic dismiss for top-level *scalar* status assigns. The key arrives from
@@ -5184,6 +5215,123 @@ defmodule BtAttachWeb.WorkspaceLive do
     else
       socket
     end
+  end
+
+  # ── go-to-definition resolution (BT-2666) ───────────────────────────────────
+  #
+  # Resolve a modifier-clicked symbol to a definition target and open it. The
+  # class-then-selector order mirrors the LSP `definition_provider.rs`: a name
+  # that is a loaded class is a class reference (→ its definition tab); anything
+  # else is treated as a message send (→ its implementor(s)).
+  defp run_goto_definition(socket, token, code) do
+    cond do
+      # An empty/blank token is a bare no-op (the JS never sends one — it only
+      # fires on an identifier — but guard it without even a flash).
+      String.trim(token) == "" ->
+        socket
+
+      known_class?(socket, token) ->
+        socket
+        |> open_definition(token)
+        |> navigate_browser(token, "instance")
+
+      true ->
+        case goto_selector(token, code) do
+          nil -> goto_not_found(socket)
+          selector -> open_implementor(socket, selector)
+        end
+    end
+  end
+
+  # A loaded class name (matches the System Browser tree the editor already
+  # holds). Class lookup is case-sensitive and exact — Beamtalk class names are
+  # capitalised identifiers, so a clicked lowercase token never matches here and
+  # falls through to the selector path.
+  defp known_class?(socket, token) do
+    socket.assigns
+    |> Map.get(:browser_classes, [])
+    |> Enum.any?(fn row -> Map.get(row, "name") == token end)
+  end
+
+  # The message selector the clicked token denotes, derived from the `code`
+  # line-prefix (the line up to and including the token):
+  #
+  #   * a KEYWORD send — the prefix ends in `…word:` (optionally with a trailing
+  #     argument the click landed before) — resolves to the maximal trailing run
+  #     of `word:` parts, so clicking any part of `dict at: k put: v` resolves the
+  #     whole `at:put:` selector.
+  #   * otherwise the bare token is a UNARY selector (e.g. `factorial`).
+  #
+  # An empty/whitespace token yields nil (no selector to resolve). The result is
+  # only ever fed to the `implementors` nav-query, whose `binary_to_existing_atom`
+  # guard turns an unknown selector into an empty result set — so a wrong guess is
+  # a graceful "no definition", never a crash.
+  defp goto_selector(token, code) when is_binary(code) do
+    case keyword_selector(code) do
+      nil -> if token == "", do: nil, else: token
+      selector -> selector
+    end
+  end
+
+  defp goto_selector(token, _code), do: if(token == "", do: nil, else: token)
+
+  # Extract the maximal trailing keyword selector (`word:word:…`) from a line
+  # prefix, or nil when it is not a keyword send. Keyword parts are
+  # `identifier:` groups separated only by their arguments; we take the run that
+  # the clicked token belongs to by collecting every `word:` from the prefix and
+  # keeping the contiguous trailing group.
+  defp keyword_selector(code) do
+    parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):/, code) |> Enum.map(&Enum.at(&1, 1))
+
+    case parts do
+      [] -> nil
+      _ -> parts |> Enum.map(&(&1 <> ":")) |> Enum.join()
+    end
+  end
+
+  # Resolve a selector to its implementor(s) via the BT-2495 `implementors`
+  # nav-query and open the result. The single-hit case opens the method tab
+  # directly (the whole point of go-to-definition — no extra click); several hits
+  # fall back to the Senders/Implementors popover so the user disambiguates; none
+  # is the graceful unresolved no-op. Mirrors `run_nav_query_for/3` but acts on
+  # the result rather than always opening a popover.
+  defp open_implementor(socket, selector) do
+    case Facade.dispatch(:implementors, %{selector: selector}, ctx(socket)) do
+      {:value, %{"sites" => [site]}} when is_map(site) ->
+        open_implementor_site(socket, site)
+
+      {:value, %{"sites" => sites}} when is_list(sites) and sites != [] ->
+        # Ambiguous — reuse the BT-2495 popover so the user picks the implementor.
+        assign(socket, nav_popover: %{kind: :implementors, selector: selector, sites: sites})
+
+      _ ->
+        goto_not_found(socket)
+    end
+  end
+
+  # Open a single implementor site (a `{class, side, selector}` row) the same way
+  # the `nav_open` popover row does: open the method tab and point the browser at
+  # it, then ensure no stale popover lingers.
+  defp open_implementor_site(socket, site) do
+    class = Map.get(site, "class")
+    selector = Map.get(site, "method")
+    side = if Map.get(site, "class_side") == true, do: "class", else: "instance"
+
+    if is_binary(class) and is_binary(selector) do
+      socket
+      |> open_method_tab(class, side, selector)
+      |> navigate_browser(class, side)
+      |> assign(nav_popover: nil)
+    else
+      goto_not_found(socket)
+    end
+  end
+
+  # The graceful unresolved no-op (BT-2666 AC): a brief flash, the editor and any
+  # open tab untouched. A transient info flash matches the cockpit's other
+  # lightweight status messages and self-dismisses.
+  defp goto_not_found(socket) do
+    put_flash(socket, :info, "No definition found.")
   end
 
   # ── System Browser view helpers (BT-2491) ───────────────────────────────────
