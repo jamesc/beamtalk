@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test: Actor subclass inheriting from a non-Actor/Object class.
+// module name "logging_counter" matches class LoggingCounter via to_module_name,
+// so current_class is resolved and has_parent_init = true, exercising the
+// parent-init merge branch in gen_server/callbacks.rs.
+
+Counter subclass: LoggingCounter
+  state: logCount = 0
+
+  increment =>
+    self.logCount := self.logCount + 1
+    super increment
+
+  getLogCount => self.logCount
