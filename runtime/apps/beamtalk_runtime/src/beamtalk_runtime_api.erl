@@ -69,6 +69,7 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 %%% ===================================================================
 -export([
     is_sealed/1,
+    is_typed/1,
     is_abstract/1,
     is_internal/1,
     is_protocol/1,
@@ -275,6 +276,10 @@ superclass(Pid) ->
 -spec is_sealed(pid()) -> boolean().
 is_sealed(ClassPid) ->
     beamtalk_object_class:is_sealed(ClassPid).
+
+-spec is_typed(pid()) -> boolean().
+is_typed(ClassPid) ->
+    beamtalk_object_class:is_typed(ClassPid).
 
 -spec is_abstract(pid()) -> boolean().
 is_abstract(ClassPid) ->

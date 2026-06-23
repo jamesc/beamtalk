@@ -42,6 +42,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     put_class_method/4,
     instance_variables/1,
     is_sealed/1,
+    is_typed/1,
     is_abstract/1,
     is_internal/1,
     is_constructible/1,
@@ -85,6 +86,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     module :: atom(),
     superclass :: class_name() | none,
     is_sealed = false :: boolean(),
+    is_typed = false :: boolean(),
     is_abstract = false :: boolean(),
     is_constructible = undefined :: boolean() | undefined,
     instance_methods = #{} :: #{selector() => method_info()},
@@ -383,6 +385,11 @@ instance_variables(ClassPid) ->
 is_sealed(ClassPid) ->
     gen_server:call(ClassPid, is_sealed).
 
+-doc "Check if a class is typed (all fields and methods require type annotations).".
+-spec is_typed(pid()) -> boolean().
+is_typed(ClassPid) ->
+    gen_server:call(ClassPid, is_typed).
+
 -doc "Check if a class is abstract (cannot be instantiated).".
 -spec is_abstract(pid()) -> boolean().
 is_abstract(ClassPid) ->
@@ -513,6 +520,7 @@ init({ClassName, ClassInfo}) ->
         module = Module,
         superclass = Superclass,
         is_sealed = maps:get(is_sealed, Meta, maps:get(is_sealed, ClassInfo, false)),
+        is_typed = maps:get(is_typed, Meta, maps:get(is_typed, ClassInfo, false)),
         is_abstract = IsAbstract,
         is_constructible = maps:get(is_constructible, ClassInfo, undefined),
         instance_methods = InstanceMethods,
@@ -951,6 +959,8 @@ handle_call(field_defaults, _From, #class_state{field_defaults = Defaults} = Sta
     {reply, Defaults, State};
 handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
     {reply, Sealed, State};
+handle_call(is_typed, _From, #class_state{is_typed = Typed} = State) ->
+    {reply, Typed, State};
 handle_call(is_internal, _From, #class_state{is_internal = Internal} = State) ->
     {reply, Internal, State};
 handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
@@ -1559,6 +1569,11 @@ apply_class_info(State, ClassInfo) ->
             is_sealed,
             Meta,
             maps:get(is_sealed, ClassInfo, State#class_state.is_sealed)
+        ),
+        is_typed = maps:get(
+            is_typed,
+            Meta,
+            maps:get(is_typed, ClassInfo, State#class_state.is_typed)
         ),
         method_source = maps:get(method_source, ClassInfo, State#class_state.method_source),
         class_method_source = maps:get(

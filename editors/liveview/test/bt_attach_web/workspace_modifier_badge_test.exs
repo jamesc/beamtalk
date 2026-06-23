@@ -5,15 +5,16 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
   @moduledoc """
   Integration test for the editor-header class/method modifier badges (BT-2605):
   the breadcrumb header surfaces a class-side method's `Class` badge plus the
-  class-level modifiers (`Sealed`, `Abstract`, `Native`) as colored pills,
-  matching the API-docs' badge labels.
+  class-level modifiers (`Sealed`, `Typed`, `Abstract`, `Native`) as colored
+  pills, matching the API-docs' badge labels.
 
   The modifiers are *reflected* booleans from `browse-class-definition` (op 4) —
   the IDE does not parse them from the synthesized `definition` skeleton (which
   carries no leading modifier keywords). Drives the LiveView against the
   fully-stubbed workspace client (`BtAttachWeb.StubWorkspaceClient`), whose
-  `browse_class_definition` reports `Ledger` as `sealed`, `Shape` as `abstract`,
-  and `Subprocess` as `native:`; `Counter` is a plain class. No `:workspace` tag,
+  `browse_class_definition` reports `Ledger` as `sealed`, `Vector` as `typed`,
+  `Shape` as `abstract`, and `Subprocess` as `native:`; `Counter` is a plain
+  class. No `:workspace` tag,
   so this runs in the bare `mix test` lane.
   """
   use BtAttachWeb.ConnCase, async: false
@@ -87,14 +88,27 @@ defmodule BtAttachWeb.WorkspaceModifierBadgeTest do
       refute html =~ ~s(class="modifier-tag sealed")
     end
 
+    test "a typed class badges Typed", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      html = render_click(view, "browser_open_definition", %{"class" => "Vector"})
+
+      assert html =~ ~s(class="modifier-tag typed")
+      assert html =~ "Typed"
+      assert html =~ "All fields and methods require type annotations"
+      refute html =~ ~s(class="modifier-tag sealed")
+      refute html =~ ~s(class="modifier-tag abstract")
+    end
+
     test "a plain class shows no class-modifier badges", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
       view |> element(~s(div[phx-value-class="Counter"])) |> render_click()
       html = render_click(view, "browser_open_definition", %{"class" => "Counter"})
 
-      # Counter is reported with neither sealed nor abstract.
+      # Counter is reported with neither sealed, typed nor abstract.
       refute html =~ ~s(class="modifier-tag sealed")
+      refute html =~ ~s(class="modifier-tag typed")
       refute html =~ ~s(class="modifier-tag abstract")
       refute html =~ ~s(class="modifier-tag native")
     end
