@@ -205,9 +205,11 @@ defmodule BtAttachWeb.WorkspaceGitRevertRefreshTest do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
       # The in-image method body diverges from disk (a `>>` recompile / external
-      # edit reloaded into the image). Seed it BEFORE opening so the tab's editable
-      # buffer is seeded with — and the editor renders — the diverged image body.
-      StubWorkspaceClient.seed_change("Counter", "increment")
+      # edit reloaded into the image). Use `seed_disk_differs/2` (not `seed_change`)
+      # so we model image≠disk WITHOUT a saved-but-unflushed ChangeLog entry — the
+      # latter would trip `path_has_pending_edits?` and block the revert, testing
+      # the wrong path.
+      StubWorkspaceClient.seed_disk_differs("Counter", "increment")
 
       StubWorkspaceClient.update_compiled_source(
         "Counter",
