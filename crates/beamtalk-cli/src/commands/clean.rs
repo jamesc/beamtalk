@@ -66,13 +66,28 @@ fn clean_with_layout(layout: &BuildLayout, scope: CleanScope, dry_run: bool) -> 
     let build_root = layout.build_root();
     let targets = clean_targets(layout, scope);
 
-    // Safety net: never operate on a path outside `_build/`. This can only
-    // fire on a programming error, but the cost of being wrong is deleting
-    // source, so we assert it explicitly.
+    // Safety net 1: never operate on a path outside `_build/`. This is a
+    // lexical (path-component) check that can only fire on a programming
+    // error, but the cost of being wrong is deleting source, so we assert it.
     for target in &targets {
         assert!(
             target.starts_with(&build_root),
             "clean target {target} escapes build root {build_root}"
+        );
+    }
+
+    // Safety net 2: `starts_with` is purely lexical, so it cannot see a
+    // symlinked `_build`. If `_build` itself is a symlink, removing a
+    // *sub-path* (the Default/Deps scopes call `remove_dir_all` on
+    // `_build/dev/`, …) would traverse the link and delete the contents of
+    // its target — outside the project. Refuse rather than follow it. (The
+    // `--all` scope is unaffected: it removes `_build` directly, and
+    // `remove_path` uses `symlink_metadata`, so it unlinks the symlink itself
+    // without traversing.)
+    if scope != CleanScope::All && is_symlink(&build_root)? {
+        miette::bail!(
+            "Refusing to clean: '{build_root}' is a symlink. \
+             Remove the symlink manually, or use `--all` to delete the link itself."
         );
     }
 
@@ -92,10 +107,24 @@ fn clean_with_layout(layout: &BuildLayout, scope: CleanScope, dry_run: bool) -> 
         return Ok(());
     }
 
+    // Attempt every target even if one fails, so a permissions error on one
+    // path does not silently leave the rest behind. Report each failure and
+    // surface the first error once everything has been attempted.
+    let mut first_error: Option<miette::Report> = None;
     for target in existing {
         debug!("Removing build artifact: {target}");
-        remove_path(target)?;
-        println!("Removed {target}");
+        match remove_path(target) {
+            Ok(()) => println!("Removed {target}"),
+            Err(e) => {
+                eprintln!("Warning: failed to remove {target}: {e}");
+                if first_error.is_none() {
+                    first_error = Some(e);
+                }
+            }
+        }
+    }
+    if let Some(err) = first_error {
+        return Err(err);
     }
 
     info!(?scope, "Cleaned build artifacts");
@@ -118,6 +147,20 @@ fn clean_targets(layout: &BuildLayout, scope: CleanScope) -> Vec<Utf8PathBuf> {
             layout.type_cache_dir(),
             layout.deps_dir(),
         ],
+    }
+}
+
+/// Whether `path` exists and is a symbolic link (without following it).
+///
+/// A missing path is not a symlink. Any other stat error is surfaced so a
+/// genuine I/O problem is not silently treated as "not a symlink".
+fn is_symlink(path: &Utf8Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => Ok(meta.file_type().is_symlink()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to stat '{path}'")),
     }
 }
 
@@ -340,6 +383,67 @@ mod tests {
 
         assert!(src.exists(), "src/ was deleted by --all");
         assert!(manifest.exists(), "beamtalk.toml was deleted by --all");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn default_clean_refuses_symlinked_build_root() {
+        // A symlinked `_build` must not be traversed by Default/Deps removals —
+        // doing so would delete the contents of the link target (outside the
+        // project). The command should refuse instead.
+        let project = TempDir::new().unwrap();
+        let external = TempDir::new().unwrap();
+
+        let project_root = Utf8PathBuf::from_path_buf(project.path().to_path_buf()).unwrap();
+        let external_root = Utf8PathBuf::from_path_buf(external.path().to_path_buf()).unwrap();
+
+        // Put a real artifact tree (and a sentinel) inside the external target.
+        let sentinel = external_root.join("dev").join("ebin").join("foo.beam");
+        touch(&sentinel);
+
+        // Make `<project>/_build` a symlink to the external directory.
+        let layout = BuildLayout::new(&project_root);
+        std::os::unix::fs::symlink(
+            external_root.as_std_path(),
+            layout.build_root().as_std_path(),
+        )
+        .unwrap();
+
+        let result = clean_with_layout(&layout, CleanScope::Default, false);
+        assert!(result.is_err(), "should refuse a symlinked build root");
+        // The external target's contents must be untouched.
+        assert!(
+            sentinel.exists(),
+            "symlink target was traversed and deleted"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn all_clean_removes_symlinked_build_root_without_traversing() {
+        // `--all` removes `_build` directly via `symlink_metadata`, so it
+        // unlinks the symlink itself and never touches the link target.
+        let project = TempDir::new().unwrap();
+        let external = TempDir::new().unwrap();
+
+        let project_root = Utf8PathBuf::from_path_buf(project.path().to_path_buf()).unwrap();
+        let external_root = Utf8PathBuf::from_path_buf(external.path().to_path_buf()).unwrap();
+
+        let sentinel = external_root.join("keep.txt");
+        touch(&sentinel);
+
+        let layout = BuildLayout::new(&project_root);
+        std::os::unix::fs::symlink(
+            external_root.as_std_path(),
+            layout.build_root().as_std_path(),
+        )
+        .unwrap();
+
+        clean_with_layout(&layout, CleanScope::All, false).unwrap();
+
+        // The symlink is gone, but its target's contents survive.
+        assert!(!layout.build_root().exists(), "symlink should be unlinked");
+        assert!(sentinel.exists(), "--all traversed the symlink target");
     }
 
     #[test]
