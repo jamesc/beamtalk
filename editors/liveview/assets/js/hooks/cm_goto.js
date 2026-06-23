@@ -59,7 +59,13 @@ const gotoLinkField = StateField.define({
 // True when the platform's go-to-definition modifier is held: Cmd on macOS,
 // Ctrl elsewhere — the same split CodeMirror and most editors use for mod-click.
 function isModifier(event) {
-  const mac = typeof navigator !== "undefined" && /Mac|iP(hone|ad|od)/.test(navigator.platform)
+  // `navigator.platform` is deprecated; prefer the UA-Client-Hints platform
+  // (Chromium 90+) and fall back to `navigator.platform` for Firefox/Safari.
+  const plat =
+    (typeof navigator !== "undefined" &&
+      (navigator.userAgentData?.platform ?? navigator.platform)) ||
+    ""
+  const mac = /^Mac/.test(plat) || /iP(hone|ad|od)/.test(plat)
   return mac ? event.metaKey : event.ctrlKey
 }
 
@@ -130,10 +136,12 @@ export function gotoDefinition(requestGoto) {
         clearLink(view)
         return false
       },
-      keyup(_event, view) {
-        // Releasing the modifier drops the link affordance immediately rather
-        // than waiting for the next pointer move.
-        clearLink(view)
+      keyup(event, view) {
+        // Drop the link affordance only when the MODIFIER itself is released —
+        // not on every keyup. Holding Ctrl/Cmd and pressing another key (e.g.
+        // Ctrl+S) fires a keyup with the modifier still down (`isModifier`
+        // true), and the underline must survive that.
+        if (!isModifier(event)) clearLink(view)
         return false
       },
     }),

@@ -99,19 +99,39 @@ defmodule BtAttachWeb.WorkspaceGotoDefinitionTest do
       refute html =~ ~s(phx-click="nav_open")
     end
 
-    test "a keyword selector resolves the full selector from the line prefix", %{conn: conn} do
+    test "a keyword send resolves the full selector from the line prefix", %{conn: conn} do
       StubWorkspaceClient.set_implementors("at:put:", [site("Dictionary", "at:put:")])
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      # Clicking the `at` part of `dict at: k put: v` resolves the whole `at:put:`.
+      # Clicking an argument of `dict at: k put: v` (here `v`) sends the prefix
+      # through that token, which spans both keyword colons — so the server
+      # recovers the whole `at:put:` selector. (Clicking the `at` part itself
+      # sends only `dict at`, with no second colon yet — see the next test.)
       html =
         render_hook(view, "goto_definition", %{
-          "token" => "at",
-          "code" => "dict at: k put:"
+          "token" => "v",
+          "code" => "dict at: k put: v"
         })
 
       assert html =~ "at:put:"
+    end
+
+    test "clicking the first keyword part falls back to the unary token", %{conn: conn} do
+      # The clicked-token prefix is only `dict at` (TOKEN excludes `:`), so no
+      # keyword colon is in range and the bare token `at` is resolved as a unary
+      # selector — the documented best-effort limit of the line-prefix heuristic.
+      StubWorkspaceClient.set_implementors("at", [site("OrderedCollection", "at")])
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      html =
+        render_hook(view, "goto_definition", %{
+          "token" => "at",
+          "code" => "dict at"
+        })
+
+      assert html =~ "OrderedCollection"
     end
 
     test "a selector with several implementors opens the Implementors popover", %{conn: conn} do

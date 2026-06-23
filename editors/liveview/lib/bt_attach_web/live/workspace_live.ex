@@ -5275,13 +5275,16 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp goto_selector(token, _code), do: if(token == "", do: nil, else: token)
 
-  # Extract the maximal trailing keyword selector (`word:word:…`) from a line
-  # prefix, or nil when it is not a keyword send. Keyword parts are
-  # `identifier:` groups separated only by their arguments; we take the run that
-  # the clicked token belongs to by collecting every `word:` from the prefix and
-  # keeping the contiguous trailing group.
+  # Extract the trailing keyword selector (`word:word:…`) from a line prefix, or
+  # nil when it is not a keyword send. The clicked keyword belongs to the send
+  # that ends the prefix, so we first trim to the trailing segment — everything
+  # after the last statement/grouping breaker (`.`, `;`, brackets, `^`, `|`) —
+  # then join that segment's contiguous `word:` parts. This keeps unrelated sends
+  # earlier on the line out of the selector (e.g. `coll at: i. obj foo: x bar: y`
+  # clicked near `y` resolves to `foo:bar:`, not `at:foo:bar:`).
   defp keyword_selector(code) do
-    parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):/, code) |> Enum.map(&Enum.at(&1, 1))
+    segment = code |> String.split(~r/[.;()\[\]{}^|]/) |> List.last()
+    parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):/, segment) |> Enum.map(&Enum.at(&1, 1))
 
     case parts do
       [] -> nil
