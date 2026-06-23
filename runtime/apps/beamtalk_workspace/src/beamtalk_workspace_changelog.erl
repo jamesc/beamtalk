@@ -438,8 +438,9 @@ match_selector(SelectorBin) -> SelectorBin.
 %%   - `{ok, Body, Entry}'  — modify: re-install the recovered prior body.
 %%   - `{remove, Entry}'    — add: remove the just-added method (BT-2663).
 %%   - `{error, no_prev_source}' — modify whose prior body is genuinely
-%%     unrecoverable (the file exists but the span no longer resolves for a
-%%     reason other than "selector absent"); never silently delete it.
+%%     unrecoverable: the file can't be read, the span no longer resolves, or
+%%     the selector is absent but the entry recorded a `prev_source_ref' (so it
+%%     was definitively a modify, not an add); never silently delete it.
 %%
 %% Invariant + limit: the on-disk body returned for a modify is the true
 %% pre-patch body only while the entry is unflushed AND the file has not been
@@ -461,10 +462,32 @@ recover_prev_from_disk(
                     %% Selector present on disk → a modify; re-install the body.
                     {ok, PrevBody, Entry};
                 {error, selector_not_found, _} ->
-                    %% The file exists but the selector is absent → a brand-new
-                    %% method added live; its pre-patch state is "absent", so
-                    %% revert removes it (BT-2663).
-                    {remove, Entry};
+                    %% The file exists but the selector is absent. Disambiguate
+                    %% add-vs-modify by whether the entry recorded a prior body:
+                    case Entry#entry.prev_source_ref of
+                        undefined ->
+                            %% No recorded prior body AND absent on disk → a
+                            %% brand-new method added live; its pre-patch state
+                            %% is "absent", so revert removes it (BT-2663).
+                            %%
+                            %% Residual ambiguity (accepted, unavoidable): a
+                            %% pre-BT-2553 *modify* entry also carries no
+                            %% prev_source_ref, so if its method was externally
+                            %% removed from the file (git restore / editor
+                            %% revert) AFTER the live patch, we cannot tell it
+                            %% apart from an add and will treat revert as a
+                            %% removal. Normal-flow entries record prev_source_ref
+                            %% (BT-2553) and never reach this branch.
+                            {remove, Entry};
+                        _Ref ->
+                            %% The entry DID record a prev_source_ref — it is
+                            %% definitively a *modify*; we only reached the disk
+                            %% probe because the body file was unreadable
+                            %% (rotation/cleanup/fs issue). The selector being
+                            %% absent on disk now does NOT make it an add — never
+                            %% silently delete a method the user only modified.
+                            {error, no_prev_source}
+                    end;
                 _ ->
                     %% Any other resolution failure (ambiguous / parse error /
                     %% file advanced) leaves the prior body genuinely
