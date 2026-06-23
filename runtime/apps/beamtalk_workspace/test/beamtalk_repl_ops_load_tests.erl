@@ -1515,6 +1515,58 @@ save_native_source_clean_compile_test() ->
         teardown_project_native(Dir, Mod)
     end.
 
+save_native_source_second_save_targets_real_file_test() ->
+    %% Regression: after the first save, the validation compile must NOT leave the
+    %% module's compile-info `source` pointing at the (deleted) temp `.erl`.
+    %% Otherwise the SECOND save re-derives the editable target as the temp path
+    %% and writes there, leaving the real `.erl` stale. Two consecutive saves must
+    %% both land on the real file.
+    Mod = bt_native_save_twice_mod,
+    Src = <<
+        "-module(bt_native_save_twice_mod).\n"
+        "-export([go/0]).\n"
+        "go() -> v1.\n"
+    >>,
+    {Dir, ErlPath, _} = setup_project_native(Mod, Src),
+    try
+        Save = fun(NewSrc) ->
+            Params = #{
+                <<"module">> => <<"bt_native_save_twice_mod">>,
+                <<"source">> => NewSrc
+            },
+            beamtalk_repl_ops_load:handle_term(
+                <<"save-native-source">>, Params, undefined, self()
+            )
+        end,
+        Src2 = <<
+            "-module(bt_native_save_twice_mod).\n"
+            "-export([go/0]).\n"
+            "go() -> v2.\n"
+        >>,
+        ?assertMatch({value, #{<<"ok">> := true}}, Save(Src2)),
+        ?assertEqual(v2, bt_native_save_twice_mod:go()),
+        ?assertEqual({ok, Src2}, file:read_file(ErlPath)),
+        %% After the first save, the editable target must still be the REAL file
+        %% (not a deleted temp) — this is the property the bug violated.
+        ?assertEqual(
+            {ok, ErlPath},
+            beamtalk_repl_ops_browse:native_module_editable_target(Mod)
+        ),
+        %% The second save must also write the real file and reload the module.
+        Src3 = <<
+            "-module(bt_native_save_twice_mod).\n"
+            "-export([go/0]).\n"
+            "go() -> v3.\n"
+        >>,
+        ?assertMatch({value, #{<<"ok">> := true}}, Save(Src3)),
+        ?assertEqual(v3, bt_native_save_twice_mod:go()),
+        ?assertEqual({ok, Src3}, file:read_file(ErlPath)),
+        %% No orphaned validation-temp file left behind.
+        ?assertEqual(false, filelib:is_regular(ErlPath ++ ".bt_native_save_tmp.erl"))
+    after
+        teardown_project_native(Dir, Mod)
+    end.
+
 save_native_source_compile_error_leaves_disk_untouched_test() ->
     Mod = bt_native_save_err_mod,
     Src = <<

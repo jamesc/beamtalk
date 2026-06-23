@@ -532,7 +532,9 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
             _ = file:delete(TempPath),
             case Errors of
                 [] ->
-                    finish_native_write(Module, ModuleBin, ErlPath, SourceFileBin, Source);
+                    finish_native_write(
+                        Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileRoot
+                    );
                 _ ->
                     %% Re-point the temp path's errors at the real file so the IDE
                     %% renders them against the module the author is editing.
@@ -550,26 +552,49 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
 
 -doc """
 The clean-compile tail: atomically write the edited source to the real `.erl`,
-refresh the loaded module's compile-mtime so the incremental native build does
-not see it as stale, and return the success result.
+then recompile + reload the module FROM that real path so its compile-info
+`source` points at the real file (and the compile-mtime is stamped fresh), and
+return the success result.
+
+Recompiling from the real path is essential: the validation compile above loaded
+the binary from the temp `.erl` (now deleted), which would otherwise leave the
+module's `module_info(compile)` `source` pointing at a deleted temp file. A later
+save re-derives the editable target from that compile-info source
+(`native_module_editable_target/1`), so a stale temp path there would make the
+next save write to the wrong (deleted) file and leave the real `.erl` stale.
 """.
--spec finish_native_write(atom(), binary(), string(), binary(), binary()) -> {value, map()}.
-finish_native_write(Module, ModuleBin, ErlPath, SourceFileBin, Source) ->
+-spec finish_native_write(atom(), binary(), string(), binary(), binary(), string()) ->
+    {value, map()}.
+finish_native_write(Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileRoot) ->
     case atomic_write_file(ErlPath, Source) of
         ok ->
-            %% BT-2653: stamp the loaded module's compile-mtime to the freshly
-            %% written file so `is_native_erl_stale/2` treats image == disk.
-            set_native_compile_mtime(Module, get_file_mtime(ErlPath)),
-            ?LOG_INFO(
-                "save-native-source: wrote + reloaded native module ~s",
-                [ModuleBin],
-                #{domain => [beamtalk, runtime]}
-            ),
-            {value, #{
-                <<"module">> => ModuleBin,
-                <<"source_file">> => SourceFileBin,
-                <<"ok">> => true
-            }};
+            %% Recompile + reload from the REAL `.erl` (not the validation temp)
+            %% so compile-info `source` = ErlPath and the BT-2653 compile-mtime is
+            %% stamped against the real file (image == disk).
+            {ReErrors, _Count} = compile_native_erl_files([ErlPath], CompileRoot),
+            case ReErrors of
+                [] ->
+                    ?LOG_INFO(
+                        "save-native-source: wrote + reloaded native module ~s",
+                        [ModuleBin],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    {value, #{
+                        <<"module">> => ModuleBin,
+                        <<"source_file">> => SourceFileBin,
+                        <<"ok">> => true
+                    }};
+                _ ->
+                    %% Defensive: the identical source just compiled cleanly
+                    %% against the temp, so a failure here is unexpected — surface
+                    %% it against the real file rather than claim success.
+                    RetargetedErrors = [E#{<<"path">> => SourceFileBin} || E <- ReErrors],
+                    {value, #{
+                        <<"module">> => ModuleBin,
+                        <<"source_file">> => SourceFileBin,
+                        <<"errors">> => RetargetedErrors
+                    }}
+            end;
         {error, WriteReason} ->
             %% The module is already compiled + loaded (the live VM has the new
             %% code), but the on-disk write failed — surface it so the IDE does

@@ -884,12 +884,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
      %{
        "class" => :null,
        "backing_module" => "beamtalk_project_native",
-       "source_file" =>
-         "/home/agent/source/proj/native/beamtalk_project_native.erl",
+       "source_file" => "/home/agent/source/proj/native/beamtalk_project_native.erl",
        "source_origin" => "project",
        "editable" => true,
-       "content" =>
-         "-module(beamtalk_project_native).\n-export([go/0]).\n\ngo() -> ok.\n",
+       "content" => "-module(beamtalk_project_native).\n-export([go/0]).\n\ngo() -> ok.\n",
        "clauses" => [],
        "selected_clause" => :null
      }}

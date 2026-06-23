@@ -397,8 +397,7 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
 
       # Model the workspace rejecting the write (server-side ownership guard).
       BtAttachWeb.StubWorkspaceClient.set_native_save(
-        {:error,
-         "Native module 'beamtalk_project_native' is not an editable project source."}
+        {:error, "Native module 'beamtalk_project_native' is not an editable project source."}
       )
 
       render_click(view, "browser_mode", %{"mode" => "native"})
