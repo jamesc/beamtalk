@@ -188,6 +188,12 @@ defmodule BtAttachWeb.WorkspaceOriginFilterTest do
       # `apply_browser_classes`) must NOT snap the filter back to the Project
       # default — the chosen Stdlib filter is preserved.
       send(view.pid, :do_source_refresh)
+      # Drain the async :do_source_refresh deterministically before asserting:
+      # :sys.get_state is a synchronous call to the view process (FIFO after the
+      # send), so the re-render + diff push have completed by the time render/1
+      # reads the proxy. Without it the negative ("filter not reset") assertion
+      # could pass vacuously on the pre-refresh HTML under unlucky scheduling.
+      :sys.get_state(view.pid)
       html = render(view)
       assert interactive_classes(html) == Enum.sort(@stdlib)
     end
