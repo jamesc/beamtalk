@@ -355,8 +355,11 @@ the stamp is build-local and the lockfile is committed.
   and directed, never silent. Provenance checks across all scopes (project + every
   dep) complete *before* any `code:load_file/1` calls begin, so a "source
   unavailable" failure always leaves the code server in its pre-attach state —
-  no partial loads to roll back. Test: an old-toolchain fixture (no meta keys)
-  recompiles on attach.
+  no partial loads to roll back. Concurrent attaches fall under the same
+  last-write-wins accepted race as §1: two sessions that both recompile a stale
+  dep still produce a valid stamp, and OTP's code server serializes
+  `code:load_file/1`, so no lock is needed. Test: an old-toolchain fixture (no
+  meta keys) recompiles on attach.
 
 ## Migration Path
 
