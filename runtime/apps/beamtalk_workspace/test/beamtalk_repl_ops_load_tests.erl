@@ -1062,11 +1062,11 @@ compile_native_uses_generated_class_header_test() ->
         {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
         ?assertEqual([], Errors),
         ?assertEqual(1, Count),
-        ?assertEqual(included, bt_native_test_uses_header:ok()),
-        %% Cleanup.
-        code:purge(bt_native_test_uses_header),
-        code:delete(bt_native_test_uses_header)
+        ?assertEqual(included, bt_native_test_uses_header:ok())
     after
+        %% Cleanup in `after` so a failed assertion can't leave the module loaded.
+        code:purge(bt_native_test_uses_header),
+        code:delete(bt_native_test_uses_header),
         rm_temp_dir(Dir)
     end.
 
@@ -1109,11 +1109,11 @@ test_load_compiles_native_test_helper_test() ->
         ?assertEqual([], maps:get(errors, Result, [])),
         %% The native/test/ helper is now compiled and callable.
         ?assertNotEqual(false, code:is_loaded(bt_native_test_helper_e2e)),
-        ?assertEqual(started, bt_native_test_helper_e2e:start()),
-        %% Cleanup.
-        code:purge(bt_native_test_helper_e2e),
-        code:delete(bt_native_test_helper_e2e)
+        ?assertEqual(started, bt_native_test_helper_e2e:start())
     after
+        %% Cleanup in `after` so a failed assertion can't leave the module loaded.
+        code:purge(bt_native_test_helper_e2e),
+        code:delete(bt_native_test_helper_e2e),
         rm_temp_dir(Dir)
     end.
 
