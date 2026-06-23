@@ -537,18 +537,16 @@ defmodule BtAttachWeb.WorkspaceLive do
       # a second replaces this value, and `native_shown?/2` scopes display to the
       # active tab's class (per-tab pane state is intentionally not kept).
       |> assign(:native_view, nil)
-      # BT-2648: the System Browser's "Native modules" section — a loaded
+      # BT-2648/BT-2667: the System Browser's "Native modules" section — a loaded
       # package's hand-written native Erlang modules that no `native:` class
       # backs (the beamtalk-http case). `browser_native_modules` holds the
       # enumerated rows; `native_modules_open` is the section's collapse state
-      # (collapsed by default so it never crowds the class tree); `native_module_view`
-      # is the read-only source pane for the *selected* native module (`nil` =
-      # none open), reusing the BT-2578 native source-view render keyed by module
-      # rather than class. Kept separate from `native_view` (the class-def native
-      # pane) so the two single-slot panes don't clobber each other.
+      # (collapsed by default so it never crowds the class tree). Opening a module
+      # now creates a first-class read-only `:native` editor TAB (see
+      # `open_native_module_tab/2`) rather than a single-slot overlay assign, so
+      # several can be open at once alongside class/method tabs.
       |> assign(:browser_native_modules, [])
       |> assign(:native_modules_open, false)
-      |> assign(:native_module_view, nil)
       # New Class modal (BT-2293, BT-2645): the System Browser's owner-only
       # create-a-class wizard, closed by default (it opens from the browser head's
       # ＋ button). The owner types a plain class name + picks a superclass
@@ -1485,27 +1483,32 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, assign(socket, native_modules_open: open)}
   end
 
-  # BT-2648: open a standalone native module's `.erl` read-only, reusing the
-  # BT-2578 native source-view render keyed by module (not class). A second click
-  # on the open module collapses the pane. A module with no readable source still
-  # opens (the existing "Erlang source not available" empty state).
+  # BT-2667: open a standalone native module's `.erl` as a first-class read-only
+  # editor TAB (a `:native` tab kind) rather than the old single-slot overlay
+  # assign. The module source now coexists with class/method tabs, switches and
+  # closes like any tab, and scrolls inside the editor pane. A module already open
+  # is re-focused (keyed by `native:<module>`) rather than duplicated. A module
+  # with no readable source still opens — the tab body shows the honest "Erlang
+  # source not available" empty state (BT-2648/BT-2668).
   def handle_event("browser_open_native_module", %{"module" => module}, socket)
       when is_binary(module) and module != "" do
-    if native_module_shown?(socket.assigns, module) do
-      {:noreply, assign(socket, native_module_view: nil)}
-    else
-      {:noreply, assign(socket, native_module_view: load_native_module_view(socket, module))}
-    end
+    {:noreply, open_native_module_tab(socket, module)}
   end
 
   def handle_event("browser_open_native_module", _params, socket), do: {:noreply, socket}
 
-  # BT-2648: dismiss the error inside the standalone native-module pane.
+  # BT-2667: dismiss the error inside an open native-module tab. The error lives on
+  # the tab's cached `native_view`, so clear it there (a no-op if the active tab is
+  # not a native tab or carries no error).
   def handle_event("dismiss_native_module_error", _params, socket) do
-    case socket.assigns[:native_module_view] do
-      %{} = nv -> {:noreply, assign(socket, native_module_view: Map.put(nv, :error, nil))}
-      _ -> {:noreply, socket}
-    end
+    {:noreply,
+     update_active_tab(socket, fn
+       %{kind: :native, native_view: %{} = nv} = tab ->
+         %{tab | native_view: Map.put(nv, :error, nil)}
+
+       tab ->
+         tab
+     end)}
   end
 
   # BT-2578: jump from a `self delegate` method to its Erlang implementation.
@@ -4730,7 +4733,9 @@ defmodule BtAttachWeb.WorkspaceLive do
             # (a raw `:null` is truthy and `is_nil(:null)` is false) — otherwise
             # the "no matching handle_call clause" explanation never renders and a
             # stripped-source path would interpolate as ":null" (BT-2578).
-            source_file: binary_or_nil(Map.get(r, "source_file")),
+            # BT-2668: clean the path to project-relative — never the absolute host
+            # path.
+            source_file: clean_native_path(Map.get(r, "source_file")),
             source_origin: Map.get(r, "source_origin"),
             editable: Map.get(r, "editable") == true,
             content: nonempty_string(Map.get(r, "content")),
@@ -4759,9 +4764,6 @@ defmodule BtAttachWeb.WorkspaceLive do
   defp map_or_nil(m) when is_map(m), do: m
   defp map_or_nil(_), do: nil
 
-  defp binary_or_nil(b) when is_binary(b), do: b
-  defp binary_or_nil(_), do: nil
-
   # True when the native pane is currently showing `class`'s backing source.
   defp native_shown?(%{native_view: %{class: shown}}, class), do: shown == class
   defp native_shown?(_assigns, _class), do: false
@@ -4789,7 +4791,9 @@ defmodule BtAttachWeb.WorkspaceLive do
         %{
           base
           | backing_module: Map.get(r, "backing_module"),
-            source_file: binary_or_nil(Map.get(r, "source_file")),
+            # BT-2668: clean the path to project-relative — never the absolute host
+            # path (the workspace may be remote / another user's machine).
+            source_file: clean_native_path(Map.get(r, "source_file")),
             source_origin: Map.get(r, "source_origin"),
             editable: Map.get(r, "editable") == true,
             content: nonempty_string(Map.get(r, "content")),
@@ -4805,9 +4809,97 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
-  # True when the standalone native-module pane is showing `module`'s source.
-  defp native_module_shown?(%{native_module_view: %{module: shown}}, module), do: shown == module
-  defp native_module_shown?(_assigns, _module), do: false
+  # BT-2667: open (or re-focus) a standalone native module's `.erl` as a read-only
+  # `:native` editor tab. The tab is keyed by `native:<module>` so re-opening the
+  # same module focuses the existing tab rather than stacking a duplicate, and a
+  # native tab coexists with class/method tabs in the strip. The source is fetched
+  # once at open and cached on the tab's `native_view`; a `:beam`-only module still
+  # opens (its body shows the "source not available" empty state).
+  defp open_native_module_tab(socket, module) do
+    id = "native:" <> module
+
+    case find_tab(socket, id) do
+      %{} -> activate_tab(socket, id)
+      nil -> add_native_module_tab(socket, id, module)
+    end
+  end
+
+  defp add_native_module_tab(socket, id, module) do
+    view = load_native_module_view(socket, module)
+
+    tab = %{
+      id: id,
+      kind: :native,
+      class: module,
+      side: nil,
+      selector: nil,
+      # The fetched read-only Erlang source view (content/clauses/error/clean
+      # source_file). A native tab is never editable, so the write-surface assigns
+      # stay blank and the editor render takes the read-only :native branch.
+      native_view: view,
+      source: "",
+      base: "",
+      dirty: false,
+      disk_differs: false,
+      runtime_only: false,
+      disk_source: nil,
+      doc: nil,
+      signature: nil,
+      is_protocol: false,
+      # No Beamtalk-class modifier/origin badges on a raw `.erl` tab; the source
+      # origin shows in the native pane header instead. Keys present so the shared
+      # tab helpers' dot-access never crashes.
+      native_module: nil,
+      native_delegate: false,
+      class_modifiers: nil,
+      class_native: false,
+      source_origin: nil,
+      package: nil,
+      new: false
+    }
+
+    socket
+    |> assign(:tabs, socket.assigns.tabs ++ [tab])
+    |> assign(:active_tab, id)
+    |> sync_active(tab)
+  end
+
+  # BT-2667: the module name of the focused `:native` tab (or nil) — drives the
+  # "sel" highlight on the System Browser's Native modules list so it tracks the
+  # native tab the editor is showing, mirroring how the class tree tracks the
+  # active class/def tab.
+  defp active_native_module(assigns) do
+    case active_tab(assigns) do
+      %{kind: :native, class: module} -> module
+      _ -> nil
+    end
+  end
+
+  # BT-2668: turn an absolute on-disk `.erl` path into a clean, project-relative
+  # one for display — never leak the host filesystem layout (the workspace may be
+  # remote / another user's machine). Strips the build/project prefix up to a
+  # recognisable source root (`apps/`, `deps/`, `src/`, `native/`, `lib/`) so a
+  # path like `/home/james/src/proj/deps/http/native/x.erl` shows as
+  # `deps/http/native/x.erl`. A path that is already relative is returned as-is; an
+  # absolute path with no recognisable root falls back to its basename so only the
+  # file name (not the directory tree) is shown. `nil`/`:null`/empty → nil (the
+  # honest "no path" state — the viewer then omits the path line).
+  @native_path_roots ~w(apps deps src native lib)
+  def clean_native_path(path) when is_binary(path) and path != "" do
+    if String.starts_with?(path, "/") do
+      segments = String.split(path, "/", trim: true)
+
+      case Enum.find_index(segments, &(&1 in @native_path_roots)) do
+        nil -> List.last(segments)
+        idx -> segments |> Enum.drop(idx) |> Enum.join("/")
+      end
+    else
+      # Already relative (no leading "/"): trust it as the project-relative form.
+      path
+    end
+  end
+
+  def clean_native_path(_), do: nil
 
   # Query senders/implementors of the active method's selector (`nav-query`) and
   # open the result popover. A tab with no selector (a class-definition tab) is a
@@ -5239,6 +5331,10 @@ defmodule BtAttachWeb.WorkspaceLive do
     # strip is empty (nothing focused to take a class from). The button is hidden
     # in that state, so this guard is just belt-and-braces against a stale click.
     case active_tab(socket.assigns) do
+      # A native (.erl) tab's `class` is a module name, not a Beamtalk class —
+      # there is no class definition to open, so "+ def" is a no-op (the button is
+      # also hidden for native tabs; this guards a stale click).
+      %{kind: :native} -> socket
       %{class: class} -> open_definition(socket, class)
       nil -> socket
     end
@@ -8032,7 +8128,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                   new_class_error={@new_class_error}
                   browser_native_modules={@browser_native_modules}
                   native_modules_open={@native_modules_open}
-                  native_module_shown={(@native_module_view && @native_module_view.module) || nil}
+                  native_module_shown={active_native_module(assigns)}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
                      the method list ("more class, less method"). phx-update="ignore"
@@ -8817,6 +8913,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                     <span class="tab-label mono">
                       {cond do
                         t.kind == :def -> t.class <> " ▸ def"
+                        # BT-2667: a read-only native module tab — labelled by the
+                        # module name with an `.erl` suffix so it reads as native
+                        # source, not a Beamtalk class/method.
+                        t.kind == :native -> t.class <> ".erl"
                         # Placeholder label for an unsaved new-method tab. Parens
                         # keep it from being read as a real `new` selector tab,
                         # which renders as plain "new" via the branch below
@@ -8835,7 +8935,10 @@ defmodule BtAttachWeb.WorkspaceLive do
                        nothing is open: it takes its class from the active tab, so
                        there is no class to open a definition for. --%>
                   <button
-                    :if={@role == :owner and @active_tab}
+                    :if={
+                      @role == :owner and not is_nil(@active_tab) and
+                        not match?(%{kind: :native}, active_tab(assigns))
+                    }
                     type="button"
                     class="tab tab-add"
                     title="Open class definition"
@@ -8877,97 +8980,94 @@ defmodule BtAttachWeb.WorkspaceLive do
                   dismiss_attrs={%{"phx-click" => "dismiss_notice", "phx-value-key" => "flush_error"}}
                 />
 
-                <%!-- BT-2648: standalone native-module source pane. Shown above
-                     the editor when a "Native modules" row is opened — a
-                     dependency's hand-written `.erl` with no Beamtalk class to
-                     edit, so it is view-only and lives outside the tab strip.
-                     Reuses the BT-2578 native pane render (`.native_source_body`)
-                     keyed by module. `content == nil` degrades to the same
-                     "Erlang source not available" empty state. --%>
-                <section
-                  :if={@native_module_view}
-                  class="native-block native-module-block"
-                  aria-label="Native module source"
-                >
-                  <div class="native-head">
-                    <span class="native-badge">Erlang module</span>
-                    <code class="native-module mono">{@native_module_view.module}</code>
-                    <span class="spacer"></span>
-                    <button
-                      type="button"
-                      class="native-toggle"
-                      phx-click="browser_open_native_module"
-                      phx-value-module={@native_module_view.module}
-                      aria-label="Close native module source"
-                    >
-                      Close
-                    </button>
-                  </div>
-                  <.native_source_body
-                    view={@native_module_view}
-                    fallback_module={@native_module_view.module}
-                    dismiss_event="dismiss_native_module_error"
-                  />
-                </section>
-
-                <%= if @active_tab do %>
-                  <%!-- breadcrumb: Class › side › selector for the active tab. --%>
-                  <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
-                  <div class="editor-meta">
-                    <span class="crumb">
-                      <b>{bc_class}</b>
-                      <span :if={bc_side} class="sep">›</span>
-                      <span :if={bc_side} class="mono">{bc_side}</span>
-                      <span class="sep">›</span>
-                      <span class="mono">{bc_sel}</span>
-                    </span>
-                    <%!-- BT-2605: class/method modifier badges (Class / Sealed /
+                <%= cond do %>
+                  <% match?(%{kind: :native}, active_tab(assigns)) -> %>
+                    <%!-- BT-2667: a standalone native module opened as a read-only
+                         editor TAB (not the retired single-slot overlay). It scrolls
+                         inside the editor pane (BT-2658) and shows a clean,
+                         project-relative source path (BT-2668) — never the absolute
+                         host path. Read-only for every role; editing is a later
+                         issue (BT-2670). --%>
+                    <% nt = active_tab(assigns) %>
+                    <div class="editor-meta">
+                      <span class="crumb">
+                        <span class="native-badge">Erlang module</span>
+                        <b class="mono">{nt.class}</b>
+                        <span :if={nt.native_view.source_file} class="sep">›</span>
+                        <span :if={nt.native_view.source_file} class="mono native-path">
+                          {nt.native_view.source_file}
+                        </span>
+                      </span>
+                      <span class="spacer"></span>
+                      <span class="runtime-tag" title="read-only native (.erl) source">
+                        read-only
+                      </span>
+                    </div>
+                    <div class="panel-body native-tab-body">
+                      <.native_source_body
+                        view={nt.native_view}
+                        fallback_module={nt.class}
+                        dismiss_event="dismiss_native_module_error"
+                      />
+                    </div>
+                  <% match?(%{}, active_tab(assigns)) -> %>
+                    <%!-- breadcrumb: Class › side › selector for the active tab. --%>
+                    <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>
+                    <div class="editor-meta">
+                      <span class="crumb">
+                        <b>{bc_class}</b>
+                        <span :if={bc_side} class="sep">›</span>
+                        <span :if={bc_side} class="mono">{bc_side}</span>
+                        <span class="sep">›</span>
+                        <span class="mono">{bc_sel}</span>
+                      </span>
+                      <%!-- BT-2605: class/method modifier badges (Class / Sealed /
                        Abstract / Native) derived from the active tab's side +
                        reflected class modifiers. Sit next to the breadcrumb, left
                        of the spacer, so the image-divergence badges keep the right
                        edge. Empty list → nothing rendered. --%>
-                    <span
-                      :for={badge <- modifier_badges(active_tab(assigns))}
-                      class={"modifier-tag #{badge.class}"}
-                      title={badge.title}
-                      aria-label={badge.title}
-                    >
-                      {badge.label}
-                    </span>
-                    <%!-- BT-2642: package/origin badge for the active tab, shown
+                      <span
+                        :for={badge <- modifier_badges(active_tab(assigns))}
+                        class={"modifier-tag #{badge.class}"}
+                        title={badge.title}
+                        aria-label={badge.title}
+                      >
+                        {badge.label}
+                      </span>
+                      <%!-- BT-2642: package/origin badge for the active tab, shown
                        for every tab kind (method / class-definition) incl. project.
                        Reuses BT-2641's vocabulary (STDLIB / DEP · <pkg>) and adds
                        the bare project package name; colored by origin via
                        `header_origin_class/1`. Sits with the modifier badges, left
                        of the spacer, so the right-edge divergence badges are clear.
                        Empty label (unknown origin / packageless project) → hidden. --%>
-                    <% pkg_tab = active_tab(assigns) %>
-                    <% pkg_label = header_package_label(pkg_tab) %>
-                    <span
-                      :if={pkg_label != ""}
-                      class={"source-origin-tag header #{header_origin_class(pkg_tab)}"}
-                      title={header_origin_title(pkg_tab)}
-                      aria-label={header_origin_title(pkg_tab)}
-                    >
-                      {pkg_label}
-                    </span>
-                    <%!-- Doc toggle inline on the breadcrumb line (BT-2604). --%>
-                    <% doc_tab = active_tab(assigns) %>
-                    <button
-                      :if={doc_tab.doc != nil}
-                      type="button"
-                      class="doc-toggle-inline"
-                      phx-click="toggle_doc"
-                      aria-expanded={to_string(@doc_expanded)}
-                      title={
-                        if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"
-                      }
-                    >
-                      <span class="doc-caret">{if @doc_expanded, do: "▾", else: "▸"}</span>
-                      <span class="doc-label">{doc_summary_label(doc_tab)}</span>
-                    </button>
-                    <span class="spacer"></span>
-                    <%!-- image-divergence badges carried from the browse snapshot
+                      <% pkg_tab = active_tab(assigns) %>
+                      <% pkg_label = header_package_label(pkg_tab) %>
+                      <span
+                        :if={pkg_label != ""}
+                        class={"source-origin-tag header #{header_origin_class(pkg_tab)}"}
+                        title={header_origin_title(pkg_tab)}
+                        aria-label={header_origin_title(pkg_tab)}
+                      >
+                        {pkg_label}
+                      </span>
+                      <%!-- Doc toggle inline on the breadcrumb line (BT-2604). --%>
+                      <% doc_tab = active_tab(assigns) %>
+                      <button
+                        :if={doc_tab.doc != nil}
+                        type="button"
+                        class="doc-toggle-inline"
+                        phx-click="toggle_doc"
+                        aria-expanded={to_string(@doc_expanded)}
+                        title={
+                          if @doc_expanded, do: "Collapse documentation", else: "Expand documentation"
+                        }
+                      >
+                        <span class="doc-caret">{if @doc_expanded, do: "▾", else: "▸"}</span>
+                        <span class="doc-label">{doc_summary_label(doc_tab)}</span>
+                      </button>
+                      <span class="spacer"></span>
+                      <%!-- image-divergence badges carried from the browse snapshot
                        (the indicators the old read-only Method Source pane showed):
                        an unflushed live `>>` patch, or a sourceless runtime
                        method. A runtime-only method (no on-disk body) is
@@ -8975,77 +9075,80 @@ defmodule BtAttachWeb.WorkspaceLive do
                        no disk counterpart for the image to "differ" from, so the
                        'image differs from disk' tooltip would be misleading — the
                        ⚡ runtime badge below is the honest signal there. --%>
-                    <span
-                      :if={active_tab(assigns).disk_differs and not active_tab(assigns).runtime_only}
-                      class="runtime-tag"
-                      title="unflushed live patch (image differs from disk)"
-                    >
-                      unflushed
-                    </span>
-                    <span
-                      :if={active_tab(assigns).runtime_only}
-                      class="runtime-tag"
-                      title="runtime-only (no source on disk)"
-                    >
-                      ⚡
-                    </span>
-                    <span :if={@role != :owner} class="meta-note read-only">
-                      read-only
-                    </span>
-                    <span :if={@role == :owner and active_tab(assigns).new} class="meta-note edited">
-                      new
-                    </span>
-                    <span
-                      :if={
-                        @role == :owner and not active_tab(assigns).new and active_tab(assigns).dirty
-                      }
-                      class="meta-note edited"
-                    >
-                      edited
-                    </span>
-                    <span
-                      :if={
-                        @role == :owner and not active_tab(assigns).new and
-                          not active_tab(assigns).dirty
-                      }
-                      class="meta-note"
-                    >
-                      in image
-                    </span>
-                  </div>
+                      <span
+                        :if={
+                          active_tab(assigns).disk_differs and not active_tab(assigns).runtime_only
+                        }
+                        class="runtime-tag"
+                        title="unflushed live patch (image differs from disk)"
+                      >
+                        unflushed
+                      </span>
+                      <span
+                        :if={active_tab(assigns).runtime_only}
+                        class="runtime-tag"
+                        title="runtime-only (no source on disk)"
+                      >
+                        ⚡
+                      </span>
+                      <span :if={@role != :owner} class="meta-note read-only">
+                        read-only
+                      </span>
+                      <span :if={@role == :owner and active_tab(assigns).new} class="meta-note edited">
+                        new
+                      </span>
+                      <span
+                        :if={
+                          @role == :owner and not active_tab(assigns).new and
+                            active_tab(assigns).dirty
+                        }
+                        class="meta-note edited"
+                      >
+                        edited
+                      </span>
+                      <span
+                        :if={
+                          @role == :owner and not active_tab(assigns).new and
+                            not active_tab(assigns).dirty
+                        }
+                        class="meta-note"
+                      >
+                        in image
+                      </span>
+                    </div>
 
-                  <div class="panel-body">
-                    <%!-- Read-only documentation body (BT-2558, BT-2604): the toggle
+                    <div class="panel-body">
+                      <%!-- Read-only documentation body (BT-2558, BT-2604): the toggle
                        now lives on the breadcrumb line; here we only render the
                        expanded doc body when the user has opened it. `doc_tab` is
                        already bound in the breadcrumb section above. --%>
-                    <div
-                      :if={doc_tab.doc != nil and @doc_expanded}
-                      id="doc-body-content"
-                      class="doc-body-inline"
-                    >
-                      {BtAttach.DocFormat.to_html(doc_tab.doc)}
-                    </div>
-                    <%!-- BT-2578: on a `self delegate` method (ADR 0056), a jump
+                      <div
+                        :if={doc_tab.doc != nil and @doc_expanded}
+                        id="doc-body-content"
+                        class="doc-body-inline"
+                      >
+                        {BtAttach.DocFormat.to_html(doc_tab.doc)}
+                      </div>
+                      <%!-- BT-2578: on a `self delegate` method (ADR 0056), a jump
                        to its Erlang implementation. Opens the class-definition
                        tab's native pane with this selector's `handle_call` clause
                        highlighted. Every role sees it (the op is `:read`). --%>
-                    <div
-                      :if={doc_tab.kind == :method and doc_tab.native_delegate}
-                      class="native-delegate-link"
-                    >
-                      <span class="native-badge">Native delegate</span>
-                      <button
-                        type="button"
-                        class="native-toggle"
-                        phx-click="browser_jump_native"
-                        phx-value-class={doc_tab.class}
-                        phx-value-selector={doc_tab.selector}
+                      <div
+                        :if={doc_tab.kind == :method and doc_tab.native_delegate}
+                        class="native-delegate-link"
                       >
-                        → Erlang source
-                      </button>
-                    </div>
-                    <%!-- BT-2578: read-only native backing-source pane. On a
+                        <span class="native-badge">Native delegate</span>
+                        <button
+                          type="button"
+                          class="native-toggle"
+                          phx-click="browser_jump_native"
+                          phx-value-class={doc_tab.class}
+                          phx-value-selector={doc_tab.selector}
+                        >
+                          → Erlang source
+                        </button>
+                      </div>
+                      <%!-- BT-2578: read-only native backing-source pane. On a
                        class-definition tab for a native: class (ADR 0056) it
                        badges the backing gen_server module and, on toggle, shows
                        that module's `.erl` read-only — the real logic lives in
@@ -9053,53 +9156,53 @@ defmodule BtAttachWeb.WorkspaceLive do
                        methods. The `browse-native-source` op is `:read`, so every
                        role sees it. `content == nil` degrades to a clear empty
                        state, not an error. --%>
-                    <section
-                      :if={doc_tab.kind == :def and doc_tab.native_module}
-                      class="native-block"
-                      aria-label="Native implementation"
-                    >
-                      <div class="native-head">
-                        <span class="native-badge">Erlang backend</span>
-                        <code class="native-module mono">{doc_tab.native_module}</code>
-                        <button
-                          type="button"
-                          class="native-toggle"
-                          phx-click="browser_open_native"
-                          phx-value-class={doc_tab.class}
-                          aria-expanded={to_string(native_shown?(assigns, doc_tab.class))}
-                        >
-                          {if native_shown?(assigns, doc_tab.class),
-                            do: "Hide Erlang source",
-                            else: "View Erlang source"}
-                        </button>
-                      </div>
-                      <div :if={native_shown?(assigns, doc_tab.class)} class="native-body">
-                        <.native_source_body
-                          view={@native_view}
-                          fallback_module={doc_tab.native_module}
-                          dismiss_event="dismiss_native_error"
-                        />
-                      </div>
-                    </section>
-                    <%= if @role == :owner do %>
-                      <%!-- ⌘S submits this editor form via the KeyboardShortcuts
+                      <section
+                        :if={doc_tab.kind == :def and doc_tab.native_module}
+                        class="native-block"
+                        aria-label="Native implementation"
+                      >
+                        <div class="native-head">
+                          <span class="native-badge">Erlang backend</span>
+                          <code class="native-module mono">{doc_tab.native_module}</code>
+                          <button
+                            type="button"
+                            class="native-toggle"
+                            phx-click="browser_open_native"
+                            phx-value-class={doc_tab.class}
+                            aria-expanded={to_string(native_shown?(assigns, doc_tab.class))}
+                          >
+                            {if native_shown?(assigns, doc_tab.class),
+                              do: "Hide Erlang source",
+                              else: "View Erlang source"}
+                          </button>
+                        </div>
+                        <div :if={native_shown?(assigns, doc_tab.class)} class="native-body">
+                          <.native_source_body
+                            view={@native_view}
+                            fallback_module={doc_tab.native_module}
+                            dismiss_event="dismiss_native_error"
+                          />
+                        </div>
+                      </section>
+                      <%= if @role == :owner do %>
+                        <%!-- ⌘S submits this editor form via the KeyboardShortcuts
                          hook (BT-2485): the chord request-submits the form so
                          the class/selector/source/tab ride the normal phx-submit,
                          exactly as clicking "Compile" would. `phx-change` reports
                          live edits so the active tab's dirty dot tracks them. --%>
-                      <form
-                        id="method-editor-form"
-                        phx-submit="save_method"
-                        phx-change="edit_source"
-                        phx-hook="KeyboardShortcuts"
-                        data-scope="window"
-                        data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
-                      >
-                        <%!-- the active tab id rides every compile so the handler
+                        <form
+                          id="method-editor-form"
+                          phx-submit="save_method"
+                          phx-change="edit_source"
+                          phx-hook="KeyboardShortcuts"
+                          data-scope="window"
+                          data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                        >
+                          <%!-- the active tab id rides every compile so the handler
                            knows which tab to clean and whether it's a class
                            definition. --%>
-                        <input type="hidden" name="tab" value={@active_tab} />
-                        <%!-- Class + selector ride the form as hidden fields — the
+                          <input type="hidden" name="tab" value={@active_tab} />
+                          <%!-- Class + selector ride the form as hidden fields — the
                            breadcrumb above is the canonical display of "which
                            class › selector this tab edits", so the old editable
                            inputs are redundant: the author types the full method
@@ -9109,15 +9212,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                            save handler derives the selector by parsing the body's
                            signature (BT-2606). The save_method payload (class +
                            selector + source) shape is identical in every case. --%>
-                        <input type="hidden" name="class" value={@edit_class} />
-                        <% tab = active_tab(assigns) %>
-                        <%= cond do %>
-                          <% tab.kind == :def -> %>
-                            <input type="hidden" name="selector" value="▸ class definition" />
-                          <% true -> %>
-                            <input type="hidden" name="selector" value={@edit_selector} />
-                        <% end %>
-                        <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
+                          <input type="hidden" name="class" value={@edit_class} />
+                          <% tab = active_tab(assigns) %>
+                          <%= cond do %>
+                            <% tab.kind == :def -> %>
+                              <input type="hidden" name="selector" value="▸ class definition" />
+                            <% true -> %>
+                              <input type="hidden" name="selector" value={@edit_selector} />
+                          <% end %>
+                          <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
                            tab id (`@active_tab`) so switching tabs remounts the
                            CmEditor hook and the editor picks up the new tab's
                            source. BT-2655: the key also carries `@editor_rev`, bumped
@@ -9132,136 +9235,136 @@ defmodule BtAttachWeb.WorkspaceLive do
                            phx-change="edit_source" dirty-dot tracking with the
                            300 ms debounce. Selection reports ride select_source
                            via data-select-event, kept in `:edit_selection`. --%>
-                        <div
-                          id={"method-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
-                          class="cm-wrap field"
-                          phx-hook="CmEditor"
-                          data-select-event="select_source"
-                          data-tab-id={@active_tab}
-                          data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
-                        >
-                          <textarea
-                            id={"method-editor-source-" <> @active_tab <> "-" <> to_string(@editor_rev)}
-                            class="cm-field"
-                            name="source"
-                            spellcheck="false"
-                            autocomplete="off"
-                            phx-debounce="300"
-                            phx-update="ignore"
-                            hidden
-                          ><%= @edit_source %></textarea>
                           <div
-                            class="cm-host"
-                            id={"method-editor-cm-" <> @active_tab <> "-" <> to_string(@editor_rev)}
-                            phx-update="ignore"
+                            id={"method-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                            class="cm-wrap field"
+                            phx-hook="CmEditor"
+                            data-select-event="select_source"
+                            data-tab-id={@active_tab}
+                            data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
                           >
+                            <textarea
+                              id={"method-editor-source-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                              class="cm-field"
+                              name="source"
+                              spellcheck="false"
+                              autocomplete="off"
+                              phx-debounce="300"
+                              phx-update="ignore"
+                              hidden
+                            ><%= @edit_source %></textarea>
+                            <div
+                              class="cm-host"
+                              id={"method-editor-cm-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                              phx-update="ignore"
+                            >
+                            </div>
                           </div>
-                        </div>
-                        <%!-- Single action row (BT-2495): Senders / Implementors on
+                          <%!-- Single action row (BT-2495): Senders / Implementors on
                            the left, Compile / Save All pushed to the right. The nav
                            buttons are type="button" (they fire phx-click, never
                            submit) and only show on a method tab. Observers get the
                            same nav row in the read-only branch below. --%>
-                        <div class="editor-actions">
-                          <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                            <button class="btn" type="button" phx-click="senders">
-                              Senders
-                            </button>
-                            <button class="btn" type="button" phx-click="implementors">
-                              Implementors
-                            </button>
-                            <.nav_popover nav={@nav_popover} />
-                          </div>
-                          <%!-- Protocol action row (BT-2639): the protocol
+                          <div class="editor-actions">
+                            <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                              <button class="btn" type="button" phx-click="senders">
+                                Senders
+                              </button>
+                              <button class="btn" type="button" phx-click="implementors">
+                                Implementors
+                              </button>
+                              <.nav_popover nav={@nav_popover} />
+                            </div>
+                            <%!-- Protocol action row (BT-2639): the protocol
                              equivalent of Senders/Implementors — only on a
                              class-definition tab whose class is a Protocol.
                              Observers get the same row in the read-only branch. --%>
-                          <div
-                            :if={
-                              active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]
-                            }
-                            class="nav-actions"
-                          >
-                            <button class="btn" type="button" phx-click="required_methods">
-                              Required methods
+                            <div
+                              :if={
+                                active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]
+                              }
+                              class="nav-actions"
+                            >
+                              <button class="btn" type="button" phx-click="required_methods">
+                                Required methods
+                              </button>
+                              <button class="btn" type="button" phx-click="conforming_classes">
+                                Conforming classes
+                              </button>
+                              <.nav_popover nav={@nav_popover} />
+                            </div>
+                            <span class="spacer"></span>
+                            <button class="btn btn-sm primary" type="submit">
+                              Compile <span class="k">⌘S</span>
                             </button>
-                            <button class="btn" type="button" phx-click="conforming_classes">
-                              Conforming classes
+                            <button class="btn btn-sm" type="button" phx-click="flush">
+                              Save All to Disk
                             </button>
-                            <.nav_popover nav={@nav_popover} />
                           </div>
-                          <span class="spacer"></span>
-                          <button class="btn btn-sm primary" type="submit">
-                            Compile <span class="k">⌘S</span>
-                          </button>
-                          <button class="btn btn-sm" type="button" phx-click="flush">
-                            Save All to Disk
-                          </button>
-                        </div>
-                      </form>
-                      <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
+                        </form>
+                        <%!-- NEW CLASS (BT-2293, ADR 0082 Phase 5): the create-a-class
                          affordance now lives in the System Browser head (class-
                          oriented, collapsed by default), not here under the method
                          editor — see `system_browser_classes`. --%>
-                    <% else %>
-                      <p class="muted-note">
-                        Your role is read-only — evaluation and editing are disabled. You can
-                        still browse bindings, follow references in the Inspector, and watch
-                        the live Transcript.
-                      </p>
-                      <%!-- Observers still get Senders / Implementors navigation
+                      <% else %>
+                        <p class="muted-note">
+                          Your role is read-only — evaluation and editing are disabled. You can
+                          still browse bindings, follow references in the Inspector, and watch
+                          the live Transcript.
+                        </p>
+                        <%!-- Observers still get Senders / Implementors navigation
                          (BT-2495); both ride the read-only `nav-query` op. --%>
-                      <div :if={active_tab(assigns).kind == :method} class="nav-actions">
-                        <button class="btn" type="button" phx-click="senders">
-                          Senders
-                        </button>
-                        <button class="btn" type="button" phx-click="implementors">
-                          Implementors
-                        </button>
-                        <.nav_popover nav={@nav_popover} />
-                      </div>
-                      <%!-- Observers also get the protocol action row (BT-2639);
+                        <div :if={active_tab(assigns).kind == :method} class="nav-actions">
+                          <button class="btn" type="button" phx-click="senders">
+                            Senders
+                          </button>
+                          <button class="btn" type="button" phx-click="implementors">
+                            Implementors
+                          </button>
+                          <.nav_popover nav={@nav_popover} />
+                        </div>
+                        <%!-- Observers also get the protocol action row (BT-2639);
                          both ride the read-only `nav-query` op. --%>
-                      <div
-                        :if={active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]}
-                        class="nav-actions"
-                      >
-                        <button class="btn" type="button" phx-click="required_methods">
-                          Required methods
-                        </button>
-                        <button class="btn" type="button" phx-click="conforming_classes">
-                          Conforming classes
-                        </button>
-                        <.nav_popover nav={@nav_popover} />
-                      </div>
-                    <% end %>
-                  </div>
-                <% else %>
-                  <%!-- Empty state: the cockpit opens with no tab and lands here
+                        <div
+                          :if={active_tab(assigns).kind == :def and active_tab(assigns)[:is_protocol]}
+                          class="nav-actions"
+                        >
+                          <button class="btn" type="button" phx-click="required_methods">
+                            Required methods
+                          </button>
+                          <button class="btn" type="button" phx-click="conforming_classes">
+                            Conforming classes
+                          </button>
+                          <.nav_popover nav={@nav_popover} />
+                        </div>
+                      <% end %>
+                    </div>
+                  <% true -> %>
+                    <%!-- Empty state: the cockpit opens with no tab and lands here
                      after the last tab is closed. No CodeMirror placeholder
                      (which read as fake content); a plain hint instead. The
                      `save_method` form is still rendered (hidden, no editor) so
                      the BT-2409 e2e save flow — which posts class/selector/source
                      directly — keeps working without a focused tab; the handler
                      tolerates an absent `tab` and validates an empty class. --%>
-                  <div class="panel-body">
-                    <div class="empty">
-                      Nothing open. Pick a method, or open a <span class="mono">▸ class definition</span>, from the System
-                      Browser to start editing.
+                    <div class="panel-body">
+                      <div class="empty">
+                        Nothing open. Pick a method, or open a <span class="mono">▸ class definition</span>, from the System
+                        Browser to start editing.
+                      </div>
+                      <form
+                        :if={@role == :owner}
+                        id="method-editor-form"
+                        phx-submit="save_method"
+                        phx-change="edit_source"
+                        hidden
+                      >
+                        <input type="hidden" name="tab" value="" />
+                        <input type="hidden" name="class" value="" />
+                        <input type="hidden" name="selector" value="" />
+                        <input type="hidden" name="source" value="" />
+                      </form>
                     </div>
-                    <form
-                      :if={@role == :owner}
-                      id="method-editor-form"
-                      phx-submit="save_method"
-                      phx-change="edit_source"
-                      hidden
-                    >
-                      <input type="hidden" name="tab" value="" />
-                      <input type="hidden" name="class" value="" />
-                      <input type="hidden" name="selector" value="" />
-                      <input type="hidden" name="source" value="" />
-                    </form>
-                  </div>
                 <% end %>
               </div>
             </div>

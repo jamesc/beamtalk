@@ -586,7 +586,12 @@
    module's `.erl` read-only. Mirrors `.doc-block`'s framed, muted treatment so
    the read-only Erlang sits visually apart from the editable Beamtalk source. */
 .native-block {
-  flex: none; overflow: auto;
+  /* BT-2658: bounded + scrollable so a long backing `.erl` scrolls within the
+     pane instead of growing unbounded and pushing the editor column off-screen.
+     `flex: 1 1 auto; min-height: 0` lets it take the available column height (with
+     a `max-height` cap when the editor is tall); the inner `.native-pre` owns the
+     actual scroll region. */
+  flex: 1 1 auto; min-height: 0; max-height: 60vh; overflow: auto;
   margin-bottom: 8px; padding: 8px 10px;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px;
   font-size: 12px; line-height: 1.5; color: var(--muted);
@@ -628,9 +633,20 @@
 }
 .native-delegate-link .native-delegate-note { flex: 1 1 auto; min-width: 0; }
 .native-pre {
-  margin: 0; padding: 8px 10px; overflow-x: auto;
+  /* BT-2658: scroll both axes so a long `.erl` file is reachable inside the pane
+     (was `overflow-x: auto` only — vertical content was clipped/unreachable). The
+     `max-height` bounds it within the inline class-def pane; in a full native
+     editor TAB the surrounding `.native-tab-body` (a `.panel-body`) owns the
+     vertical scroll, so the pre can grow to content height there. */
+  margin: 0; padding: 8px 10px; overflow: auto; max-height: 50vh;
   background: var(--code-bg); border-radius: 4px;
 }
+/* BT-2667: the read-only native module editor tab body. It is a `.panel-body`
+   (flex: 1; min-height: 0; overflow: auto), so the source scrolls vertically
+   within the editor pane for long modules; the inner `.native-pre` drops its own
+   `max-height` here so the tab uses the full pane height before scrolling. */
+.native-tab-body .native-pre { max-height: none; }
+.editor-meta .crumb .native-path { color: var(--muted); }
 .native-pre code {
   font-family: var(--code-font, monospace); font-size: 11.5px;
   white-space: pre; color: var(--ink);
