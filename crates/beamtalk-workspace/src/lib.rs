@@ -140,6 +140,27 @@ pub fn read_cookie_file(workspace_id: &str) -> Result<Option<String>> {
     }
 }
 
+/// Parse the REPL port from `beamtalk repl` stdout.
+///
+/// Expects a line like: `Connected to REPL backend on port 12345.`
+pub fn parse_repl_port(stdout: &str) -> Option<u16> {
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("Connected to REPL backend on port ")
+            .and_then(|rest| rest.trim_end_matches('.').trim().parse().ok())
+    })
+}
+
+/// Parse the workspace ID from `beamtalk repl` stdout.
+///
+/// Expects a line like: `  Workspace: abc123def456 (new)`
+pub fn parse_repl_workspace_id(stdout: &str) -> Option<String> {
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("  Workspace: ")
+            .and_then(|rest| rest.split_whitespace().next())
+            .map(std::string::ToString::to_string)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +304,54 @@ mod tests {
         assert_eq!(result, None, "Empty cookie file should return None");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_parse_repl_port_typical() {
+        let stdout = "Welcome to beamtalk REPL\n  Workspace: abc123def456 (new)\nConnected to REPL backend on port 9876.\n";
+        assert_eq!(parse_repl_port(stdout), Some(9876));
+    }
+
+    #[test]
+    fn test_parse_repl_port_missing() {
+        assert_eq!(parse_repl_port("some other output\n"), None);
+        assert_eq!(parse_repl_port(""), None);
+    }
+
+    #[test]
+    fn test_parse_repl_port_malformed() {
+        assert_eq!(
+            parse_repl_port("Connected to REPL backend on port notanumber.\n"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_parse_repl_workspace_id_typical() {
+        let stdout = "  Workspace: abc123def456 (new)\nConnected to REPL backend on port 9876.\n";
+        assert_eq!(
+            parse_repl_workspace_id(stdout),
+            Some("abc123def456".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_repl_workspace_id_missing() {
+        assert_eq!(parse_repl_workspace_id("no workspace line\n"), None);
+        assert_eq!(parse_repl_workspace_id(""), None);
+    }
+
+    #[test]
+    fn test_parse_repl_workspace_id_bare() {
+        assert_eq!(
+            parse_repl_workspace_id("  Workspace: deadbeef1234\n"),
+            Some("deadbeef1234".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_repl_workspace_id_empty_prefix() {
+        assert_eq!(parse_repl_workspace_id("  Workspace: \n"), None);
+        assert_eq!(parse_repl_workspace_id("  Workspace: "), None);
     }
 }

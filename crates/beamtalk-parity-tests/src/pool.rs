@@ -6,11 +6,6 @@
 //! The harness starts at most one workspace per process. The same workspace is
 //! reused by every REPL and MCP case in a run — this is the key contributor
 //! to keeping the parity suite's wall-clock under the e2e suite's ~50s.
-//!
-//! Borrowed from `crates/beamtalk-mcp/src/client.rs::tests` (the only other
-//! place in the repo that auto-starts a workspace from a test binary). The
-//! logic is copied rather than re-exported because the MCP test fixture is
-//! not a public API.
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -108,12 +103,12 @@ fn start_workspace() -> Result<SharedRepl, String> {
     let _ = std::fs::remove_file(&stderr_path);
     drop(child);
 
-    let port = parse_port_line(&combined).ok_or_else(|| {
+    let port = beamtalk_workspace::parse_repl_port(&combined).ok_or_else(|| {
         format!(
             "`beamtalk repl` did not report a port within 45s.\nstdout:\n{combined}\nstderr:\n{stderr_text}"
         )
     })?;
-    let workspace_id = parse_workspace_id(&combined).ok_or_else(|| {
+    let workspace_id = beamtalk_workspace::parse_repl_workspace_id(&combined).ok_or_else(|| {
         format!(
             "`beamtalk repl` did not report a workspace id.\nstdout:\n{combined}\nstderr:\n{stderr_text}"
         )
@@ -159,21 +154,6 @@ pub fn beamtalk_binary(name: &str) -> Result<PathBuf, String> {
     ))
 }
 
-fn parse_port_line(stdout: &str) -> Option<u16> {
-    stdout.lines().find_map(|line| {
-        line.strip_prefix("Connected to REPL backend on port ")
-            .and_then(|rest| rest.trim_end_matches('.').trim().parse().ok())
-    })
-}
-
-fn parse_workspace_id(stdout: &str) -> Option<String> {
-    stdout.lines().find_map(|line| {
-        line.strip_prefix("  Workspace: ")
-            .and_then(|rest| rest.split_whitespace().next())
-            .map(str::to_string)
-    })
-}
-
 fn wait_for_tcp_ready(port: u16, timeout: Duration) -> Result<(), String> {
     let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
@@ -191,21 +171,4 @@ fn wait_for_tcp_ready(port: u16, timeout: Duration) -> Result<(), String> {
         "TCP port {port} did not accept connections within {}s",
         timeout.as_secs()
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_port_line_extracts_number() {
-        let s = "  starting...\nConnected to REPL backend on port 12345.\nready";
-        assert_eq!(parse_port_line(s), Some(12345));
-    }
-
-    #[test]
-    fn parse_workspace_id_extracts_first_token() {
-        let s = "  Workspace: deadbeef1234 (new)\n";
-        assert_eq!(parse_workspace_id(s).as_deref(), Some("deadbeef1234"));
-    }
 }
