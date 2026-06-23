@@ -43,7 +43,11 @@ module loading to beamtalk_repl_loader (BT-863).
 %% `Behaviour compile:source:' / `tryCompile:source:'. Called via erlang:apply
 %% from beamtalk_behaviour_intrinsics so beamtalk_runtime keeps no compile-time
 %% dependency on beamtalk_workspace.
--export([compile_method/4, compile_method/6]).
+-export([compile_method/4, compile_method/6, compile_method/7]).
+
+%% ADR 0082 revert completeness (BT-2663/BT-2665) — remove a live method (the
+%% *add* revert case) and remove a live class (new-class revert, BT-2664).
+-export([remove_method/3, remove_class/1]).
 
 %% BT-2531 — workspace binding-mutation announcement with an explicit session id.
 %% Called from `beamtalk_repl_shell` for the clear / pending put/remove paths,
@@ -530,6 +534,27 @@ a ChangeLog entry tagged with `Intent' and the author metadata. Returns
 ) ->
     {ok, binary()} | {error, term()}.
 compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
+    compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind, instance).
+
+-doc """
+Install a live method patch on a chosen side (BT-2665).
+
+`Side` is `instance` (the `compile:source:` / IDE-save default) or `class` (a
+class-side / static method). Backs class-side revert re-installs, which must
+recompile the class with the prior class-side body. Otherwise equivalent to
+`compile_method/6`.
+""".
+-spec compile_method(
+    binary(),
+    atom() | binary(),
+    binary(),
+    durable | ephemeral,
+    binary(),
+    human | agent,
+    instance | class
+) ->
+    {ok, binary()} | {error, term()}.
+compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind, Side) ->
     SelectorBin = beamtalk_repl_protocol:to_binary(Selector),
     %% Obey project mode: a built-in (stdlib) class is compiled in stdlib mode and
     %% its bodies may use `@intrinsic'/`@primitive', which the workspace's
@@ -539,14 +564,57 @@ compile_method(ClassNameBin, Selector, Source, Intent, Author, AuthorKind) ->
         {ok, _Module} ->
             {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
         none ->
-            do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind)
+            do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind, Side)
     end.
 
+-doc """
+Remove a live method from a class (BT-2663/BT-2665 *add* revert case).
+
+`Side` (`instance | class`) selects which side's method to drop. Recompiles the
+class without the method and hot-reloads it; the live image is unchanged on error.
+Returns `{ok, ClassNameBin}` or `{error, Reason}`. Refuses stdlib classes (their
+methods are read-only in the workspace).
+""".
+-spec remove_method(binary(), atom() | binary(), instance | class) ->
+    {ok, binary()} | {error, term()}.
+remove_method(ClassNameBin, Selector, Side) ->
+    SelectorBin = beamtalk_repl_protocol:to_binary(Selector),
+    case stdlib_class_module(ClassNameBin) of
+        {ok, _Module} ->
+            {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
+        none ->
+            beamtalk_repl_loader:remove_method(ClassNameBin, SelectorBin, Side)
+    end.
+
+-doc """
+Remove a live class from the system (BT-2664 new-class revert case).
+
+Delegates to `beamtalk_runtime_api:remove_class_from_system/1`, which unregisters
+the class, purges its module, and cleans up runtime state. Returns
+`{ok, Module} | {error, #beamtalk_error{}}`.
+""".
+-spec remove_class(binary()) -> {ok, module()} | {error, #beamtalk_error{}}.
+remove_class(ClassNameBin) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
+        {ok, ClassName} ->
+            beamtalk_runtime_api:remove_class_from_system(ClassName);
+        {error, _} ->
+            {error, remove_class_unknown_error(ClassNameBin)}
+    end.
+
+-spec remove_class_unknown_error(binary()) -> #beamtalk_error{}.
+remove_class_unknown_error(ClassNameBin) ->
+    Err0 = beamtalk_error:new(class_not_found, 'WorkspaceInterface'),
+    beamtalk_error:with_message(
+        Err0,
+        <<"Cannot remove class '", ClassNameBin/binary, "': no such class is loaded">>
+    ).
+
 -spec do_compile_method(
-    binary(), binary(), binary(), durable | ephemeral, binary(), human | agent
+    binary(), binary(), binary(), durable | ephemeral, binary(), human | agent, instance | class
 ) ->
     {ok, binary()} | {error, term()}.
-do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind) ->
+do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind, Side) ->
     %% `compile:source:` / MCP `save_method` pass the method BODY only (no
     %% `selector => ' header); the IDE save passes a full method definition.
     %% `normalize_method_source/2' synthesises the header for the bare-body case
@@ -558,9 +626,18 @@ do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind)
     %% on-disk source attribution (flushable + revertable).
     MethodSource = normalize_method_source(SelectorBin, Source),
     State = beamtalk_repl_state:new(undefined, 0),
+    IsClassMethod = (Side =:= class),
     case
         beamtalk_repl_loader:install_method(
-            ClassNameBin, SelectorBin, MethodSource, Intent, Author, AuthorKind, [], State
+            ClassNameBin,
+            SelectorBin,
+            MethodSource,
+            Intent,
+            Author,
+            AuthorKind,
+            [],
+            State,
+            IsClassMethod
         )
     of
         {ok, _Result, _Output, _W, _S} -> {ok, ClassNameBin};
@@ -689,6 +766,13 @@ skip_leading_comments(Source) ->
 %% the leading token *and* an arrow so a bare body that merely happens to begin
 %% with the selector name (e.g. `increment + 1') is not mistaken for a header.
 -spec has_method_header(binary(), binary()) -> boolean().
+has_method_header(<<"class ", Rest/binary>>, Head) ->
+    %% A class-side method definition leads with the `class ' modifier (e.g.
+    %% `class make => ...'). Skip it and test the header on the rest — this keeps
+    %% a complete class-side definition (such as a recovered prior body from a
+    %% class-side revert, BT-2665) intact instead of re-wrapping it under a
+    %% synthesised instance-side header.
+    has_method_header(trim_leading_ws(Rest), Head);
 has_method_header(Trimmed, Head) ->
     HeadSize = byte_size(Head),
     case Trimmed of
@@ -701,6 +785,12 @@ has_method_header(Trimmed, Head) ->
         _ ->
             false
     end.
+
+%% Drop leading spaces/tabs, returning a binary (string:trim/2 returns chardata,
+%% which the binary-match clauses above cannot pattern-match against).
+-spec trim_leading_ws(binary()) -> binary().
+trim_leading_ws(<<C, Rest/binary>>) when C =:= $\s; C =:= $\t -> trim_leading_ws(Rest);
+trim_leading_ws(Bin) -> Bin.
 
 -spec header_after_token(binary()) -> boolean().
 header_after_token(<<>>) ->

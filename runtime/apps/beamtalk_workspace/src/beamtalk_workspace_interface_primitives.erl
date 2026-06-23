@@ -402,16 +402,11 @@ extract_revert_target_from_map(M) ->
             SelectorAtom =/= undefined
         ->
             {ok, atom_to_binary(ClassAtom, utf8), SelectorAtom};
-        {_ClassAtom, nil} ->
-            {error,
-                revert_kind_error(
-                    <<
-                        "revert: this entry has no selector (it is a new-class creation). "
-                        "Reverting a new-class is destructive and is not supported in this "
-                        "phase — use `Workspace changes clear` to discard the pending entry "
-                        "instead"
-                    >>
-                )};
+        {ClassAtom, nil} when is_atom(ClassAtom), ClassAtom =/= nil, ClassAtom =/= undefined ->
+            %% A new-class entry carries `selector = nil` (it has no selector). Map
+            %% it to the `'new-class'` placeholder so `do_revert`/`find_revert_target`
+            %% resolve the class's new-class entry and remove the class (BT-2664).
+            {ok, atom_to_binary(ClassAtom, utf8), 'new-class'};
         _ ->
             {error,
                 revert_type_error(
@@ -426,31 +421,18 @@ extract_revert_target_from_map(M) ->
 do_revert(ClassNameBin, SelectorAtom) ->
     case beamtalk_workspace_changelog:find_revert_target(ClassNameBin, SelectorAtom) of
         {ok, PrevBody, Entry} ->
-            case beamtalk_workspace_changelog:entry_kind(Entry) of
-                class ->
-                    beamtalk_error:raise(
-                        revert_kind_error(
-                            <<
-                                "revert: this entry is a class-side patch. "
-                                "Class-side reverts are not yet supported — "
-                                "the underlying compile:source: path synthesises an "
-                                "instance-side expression. Track follow-up work for the "
-                                "class-side install entry, or use `Workspace changes "
-                                "clear` to discard the pending entry"
-                            >>
-                        )
-                    );
-                %% Only instance-side method patches are re-installable. Match
-                %% `instance` explicitly (not a `_` wildcard): `'new-class'`
-                %% entries already can't reach here (find_revert_target/2 matches
-                %% on the binary selector, and they store `selector = undefined`),
-                %% and any *future* kind should fail loudly — an unmatched kind
-                %% raises a `case_clause` that the `revert_method/2` catch-all
-                %% turns into a logged, structured error, rather than silently
-                %% attempting a method re-install on a non-method entry.
-                instance ->
-                    install_revert_patch(ClassNameBin, SelectorAtom, PrevBody)
-            end;
+            %% A *modify* revert: re-install the recorded prior body on the entry's
+            %% side. Instance and class side are both supported (BT-2665) — the
+            %% side comes from the entry's `kind`. A `'new-class'`/`unknown` kind
+            %% cannot reach this branch: new-class yields `{remove, _}`, and any
+            %% future kind fails loudly via the side mapping below.
+            Side = revert_side(beamtalk_workspace_changelog:entry_kind(Entry)),
+            install_revert_patch(ClassNameBin, SelectorAtom, PrevBody, Side);
+        {remove, Entry} ->
+            %% An *add* revert: the pre-patch state was "absent", so undo the add
+            %% by removing the method (BT-2663/BT-2665) or the new class
+            %% (BT-2664). The kind tells us which.
+            revert_removal(ClassNameBin, SelectorAtom, Entry);
         {error, no_entry} ->
             beamtalk_error:raise(
                 revert_state_error(
@@ -475,15 +457,78 @@ do_revert(ClassNameBin, SelectorAtom) ->
             )
     end.
 
--spec install_revert_patch(binary(), atom(), binary()) -> term().
-install_revert_patch(ClassNameBin, SelectorAtom, PrevBody) ->
+%% Map a method ChangeEntry kind to the revert install/remove side. `instance`
+%% and `class` map straight through; any other kind (a future kind, or an
+%% unexpected `'new-class'` reaching the modify path) raises a loud structured
+%% error rather than silently picking a side.
+-spec revert_side(beamtalk_workspace_changelog:kind()) -> instance | class.
+revert_side(instance) ->
+    instance;
+revert_side(class) ->
+    class;
+revert_side(Other) ->
+    beamtalk_error:raise(
+        revert_kind_error(
+            iolist_to_binary([
+                <<"revert: cannot revert a ">>,
+                atom_to_binary(Other, utf8),
+                <<" entry as a method patch — use `Workspace changes clear` to discard it">>
+            ])
+        )
+    ).
+
+%% Perform an *add* revert by removing what was added. A `new-class` entry removes
+%% the class (BT-2664); a method entry removes that method on its side
+%% (BT-2663/BT-2665). The original add entry stays in the audit log; the removal
+%% itself does not emit a ChangeEntry (it is the inverse of the add, not a new
+%% patch — symmetrical with how a modify-revert's re-install is the only entry).
+-spec revert_removal(binary(), atom(), beamtalk_workspace_changelog:entry()) -> term().
+revert_removal(ClassNameBin, SelectorAtom, Entry) ->
+    case beamtalk_workspace_changelog:entry_kind(Entry) of
+        'new-class' ->
+            remove_reverted_class(ClassNameBin);
+        Kind when Kind =:= instance; Kind =:= class ->
+            remove_reverted_method(ClassNameBin, SelectorAtom, revert_side(Kind));
+        Other ->
+            revert_side(Other)
+    end.
+
+-spec remove_reverted_class(binary()) -> term().
+remove_reverted_class(ClassNameBin) ->
+    case beamtalk_repl_eval:remove_class(ClassNameBin) of
+        {ok, _Module} ->
+            nil;
+        {error, Reason} ->
+            beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, undefined))
+    end.
+
+-spec remove_reverted_method(binary(), atom(), instance | class) -> term().
+remove_reverted_method(ClassNameBin, SelectorAtom, Side) ->
+    case beamtalk_repl_eval:remove_method(ClassNameBin, SelectorAtom, Side) of
+        {ok, _ClassName} ->
+            class_object_for(ClassNameBin);
+        {error, Reason} ->
+            beamtalk_error:raise(ensure_revert_error(Reason, ClassNameBin, SelectorAtom))
+    end.
+
+%% Wrap a removal failure as a structured revert error. An already-structured
+%% `#beamtalk_error{}` (e.g. from `remove_class/1`) passes through; a raw reason
+%% becomes a `revert_install_error` so the caller always sees a clean error.
+-spec ensure_revert_error(term(), binary(), atom() | undefined) -> #beamtalk_error{}.
+ensure_revert_error(#beamtalk_error{} = Err, _ClassNameBin, _SelectorAtom) ->
+    Err;
+ensure_revert_error(Reason, ClassNameBin, SelectorAtom) ->
+    revert_install_error(ClassNameBin, SelectorAtom, Reason).
+
+-spec install_revert_patch(binary(), atom(), binary(), instance | class) -> term().
+install_revert_patch(ClassNameBin, SelectorAtom, PrevBody, Side) ->
     %% Reverts are durable, human-authored patches that re-install the prior
-    %% source. The install chokepoint emits the new ChangeEntry; the original
-    %% entry is left in place for audit (ADR 0082, "Undo": revert is itself a
-    %% patch, not a log mutation).
+    %% source on the original side. The install chokepoint emits the new
+    %% ChangeEntry; the original entry is left in place for audit (ADR 0082,
+    %% "Undo": revert is itself a patch, not a log mutation).
     case
         beamtalk_repl_eval:compile_method(
-            ClassNameBin, SelectorAtom, PrevBody, durable, <<"repl/revert">>, human
+            ClassNameBin, SelectorAtom, PrevBody, durable, <<"repl/revert">>, human, Side
         )
     of
         {ok, _ClassName} ->
@@ -534,18 +579,23 @@ revert_state_error(Message) ->
     Err1 = beamtalk_error:with_selector(Err0, 'revert:'),
     beamtalk_error:with_message(Err1, Message).
 
--spec revert_install_error(binary(), atom(), term()) -> #beamtalk_error{}.
+-spec revert_install_error(binary(), atom() | undefined, term()) -> #beamtalk_error{}.
 revert_install_error(ClassNameBin, SelectorAtom, Reason) ->
     Err0 = beamtalk_error:new(revert_install_failed, 'ChangeLog'),
     Err1 = beamtalk_error:with_selector(Err0, 'revert:'),
     Msg = iolist_to_binary([
-        <<"revert: could not re-install prior body for ">>,
+        <<"revert: could not undo change for ">>,
         ClassNameBin,
-        <<">>">>,
-        atom_to_binary(SelectorAtom, utf8)
+        revert_target_suffix(SelectorAtom)
     ]),
     Err2 = beamtalk_error:with_message(Err1, Msg),
     beamtalk_error:with_details(Err2, #{reason => Reason}).
+
+%% `>>selector` suffix for a method target, or empty for a class-level target
+%% (new-class revert, where there is no selector).
+-spec revert_target_suffix(atom() | undefined) -> binary().
+revert_target_suffix(undefined) -> <<>>;
+revert_target_suffix(SelectorAtom) -> <<">>", (atom_to_binary(SelectorAtom, utf8))/binary>>.
 
 -doc """
 Discard every pending ChangeLog entry without writing to disk

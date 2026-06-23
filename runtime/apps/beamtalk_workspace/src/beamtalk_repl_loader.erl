@@ -20,6 +20,8 @@ Extracted from beamtalk_repl_eval (BT-863).
     load_class_module/3,
     reload_method_definition/4,
     install_method/8,
+    install_method/9,
+    remove_method/3,
     activate_module/2,
     activate_module/3,
     register_classes/2,
@@ -671,6 +673,46 @@ patched class stays flushable + revertable.
 install_method(
     ClassNameBin, SelectorBin, MethodSource, Intent, Author, AuthorKind, Warnings, State
 ) ->
+    %% Default to instance-side for existing callers (`compile:source:` / MCP
+    %% `save_method` / IDE save). The side-aware `install_method/9` backs
+    %% class-side revert re-installs (BT-2665).
+    install_method(
+        ClassNameBin, SelectorBin, MethodSource, Intent, Author, AuthorKind, Warnings, State, false
+    ).
+
+-doc """
+Install a single method into a class, threading the patch side (BT-2665).
+
+`IsClassMethod` selects the side: `false` installs an instance method (the
+`compile:source:` / IDE-save default), `true` installs a class-side (static)
+method. Backs class-side revert re-installs, which must recompile the class with
+the prior class-side body — the instance-side default would synthesise the method
+on the wrong side. Otherwise identical to `install_method/8`.
+""".
+-spec install_method(
+    binary(),
+    binary(),
+    binary(),
+    durable | ephemeral,
+    binary(),
+    human | agent,
+    [binary()],
+    beamtalk_repl_state:state(),
+    boolean()
+) ->
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+install_method(
+    ClassNameBin,
+    SelectorBin,
+    MethodSource,
+    Intent,
+    Author,
+    AuthorKind,
+    Warnings,
+    State,
+    IsClassMethod
+) ->
     case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
         undefined ->
             ErrorMsg =
@@ -687,7 +729,8 @@ install_method(
                 Author,
                 AuthorKind,
                 Warnings,
-                State
+                State,
+                IsClassMethod
             )
     end.
 
@@ -700,7 +743,8 @@ install_method(
     binary(),
     human | agent,
     [binary()],
-    beamtalk_repl_state:state()
+    beamtalk_repl_state:state(),
+    boolean()
 ) ->
     {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
@@ -713,7 +757,8 @@ install_method_with_source(
     Author,
     AuthorKind,
     Warnings,
-    State
+    State,
+    IsClassMethod
 ) ->
     ClassSourceBin = unicode:characters_to_binary(ClassSource),
     MethodSourceBin = unicode:characters_to_binary(MethodSource),
@@ -722,12 +767,12 @@ install_method_with_source(
     ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
     Options = #{
         class_name => ClassNameBin,
-        %% Instance-side only: this chokepoint (`compile:source:` / MCP
-        %% `save_method` / IDE save) installs instance methods. Class-side
-        %% `Class class >> sel` patches reach the workspace through the REPL
-        %% `>>` path (`reload_method_definition`), which carries the side in its
-        %% `MethodInfo`. Enabling class-side here is tracked in BT-2563.
-        is_class_method => false,
+        %% Side comes from the caller: `false` for the instance-side
+        %% `compile:source:` / MCP `save_method` / IDE-save chokepoint; `true`
+        %% for a class-side revert re-install (BT-2665). The REPL `Class class >>
+        %% sel` path still flows through `reload_method_definition`, which carries
+        %% the side in its `MethodInfo`.
+        is_class_method => IsClassMethod,
         workspace_mode => true,
         module_name => ModuleNameOverride,
         source_path => source_path_binary(SourcePath),
@@ -777,6 +822,80 @@ install_method_with_source(
         {error, Reason} ->
             {error, Reason, <<>>, Warnings, State}
     end.
+
+-doc """
+Remove a live method from a class by recompiling the class without it (BT-2663,
+BT-2665). Backs the *add* revert case: when a freshly-added method (instance or
+class side) is reverted, its pre-patch state was "absent", so the revert deletes
+the method rather than re-installing a prior body.
+
+`Side` (`instance | class`) selects which side's method to drop. The method's
+span is resolved against the class's CURRENT in-memory merged source, spliced out,
+and the remaining class source is recompiled + hot-reloaded. Returns
+`{ok, ClassNameBin}` on success or `{error, Reason}` if the class source is
+unavailable, the selector cannot be located, or the recompile/reload fails (the
+live image is unchanged in the error cases). The removal does NOT itself emit a
+ChangeEntry — the caller curtails the original add entry separately.
+""".
+-spec remove_method(binary(), atom() | binary(), instance | class) ->
+    {ok, binary()} | {error, term()}.
+remove_method(ClassNameBin, Selector, Side) ->
+    SelectorBin = method_selector_binary(Selector),
+    case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
+        undefined ->
+            {error,
+                {compile_error,
+                    <<"Class source not available for ", ClassNameBin/binary,
+                        " (cannot remove method)">>}};
+        ClassSource ->
+            ClassSourceBin = unicode:characters_to_binary(ClassSource),
+            case
+                beamtalk_compiler:resolve_method_span(
+                    ClassSourceBin, ClassNameBin, SelectorBin, Side
+                )
+            of
+                {ok, Span, _Body} ->
+                    NewSourceBin = splice_out_span(ClassSourceBin, Span),
+                    reload_class_without_method(ClassNameBin, NewSourceBin);
+                {error, Reason, _Msg} ->
+                    {error, {method_not_found, Reason}}
+            end
+    end.
+
+%% Recompile the (method-removed) class source and hot-reload it, preserving the
+%% class's package-qualified module name and on-disk source path so it stays a
+%% project class. Updates the workspace_meta class-source cache so subsequent
+%% patches resolve against the new (shorter) source.
+-spec reload_class_without_method(binary(), binary()) -> {ok, binary()} | {error, term()}.
+reload_class_without_method(ClassNameBin, NewSourceBin) ->
+    {ModuleNameOverride, SourcePath} = patch_module_target(ClassNameBin),
+    LoadPath = source_path_or_empty(SourcePath),
+    NewSourceStr = unicode:characters_to_list(NewSourceBin),
+    case reload_compile_and_load(NewSourceStr, LoadPath, ModuleNameOverride, undefined) of
+        {ok, ClassNames} ->
+            lists:foreach(
+                fun(#{name := Name}) ->
+                    beamtalk_workspace_meta:set_class_source(
+                        normalize_class_source_key(Name), NewSourceStr
+                    )
+                end,
+                ClassNames
+            ),
+            {ok, ClassNameBin};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+
+%% Cut the bytes `[start, end)' out of `Source', joining the surrounding text.
+-spec splice_out_span(binary(), #{start := non_neg_integer(), 'end' := non_neg_integer()}) ->
+    binary().
+splice_out_span(Source, #{start := Start, 'end' := End}) ->
+    <<Before:Start/binary, _Removed:(End - Start)/binary, After/binary>> = Source,
+    <<Before/binary, After/binary>>.
+
+-spec method_selector_binary(atom() | binary()) -> binary().
+method_selector_binary(Sel) when is_binary(Sel) -> Sel;
+method_selector_binary(Sel) when is_atom(Sel) -> atom_to_binary(Sel, utf8).
 
 %% Resolve a class's package-qualified module name + on-disk source path for a
 %% patch, by reusing the class's CURRENT loaded module (which already carries the
