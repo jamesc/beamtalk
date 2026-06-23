@@ -1039,9 +1039,9 @@ body.col-resizing .cockpit { transition: none; }
 /* result / output / error blocks */
 .io-block {
   display: flex; align-items: flex-start; gap: 8px;
-  margin: 0 0 8px 0; padding: 9px 12px; border: 1px solid var(--line);
-  border-radius: 7px; background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
-  font-size: 12.5px; white-space: pre-wrap; overflow-wrap: break-word; color: var(--ink);
+  margin: 0 0 6px 0; padding: 4px 10px; border: 1px solid var(--line);
+  border-radius: 6px; background: var(--code-bg); font-family: var(--code-font, ui-monospace, monospace);
+  font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: break-word; color: var(--ink);
 }
 .io-block.ok  { background: color-mix(in oklab, var(--ok) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--ok) 35%, var(--line)); }
 .io-block.err { background: color-mix(in oklab, var(--err) 10%, var(--code-bg)); border-color: color-mix(in oklab, var(--err) 35%, var(--line)); color: var(--err); }
