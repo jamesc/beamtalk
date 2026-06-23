@@ -34,6 +34,10 @@ respectively.
     render_class_header/1,
     regenerate_native_class_header/1,
     native_generated_include_dir/1,
+    build_source_class_module_index/1,
+    source_module_name/3,
+    extract_all_bt_classes/1,
+    read_package_name/1,
     extract_bt_class_info/1,
     sort_bt_files_by_deps/1,
     structured_file_errors/2,
@@ -615,13 +619,32 @@ names to compiled BEAM module atoms via `?BT_CLASS_MODULE_<Class>` macros. The
 same so it never compiles against a stale header — the root cause of the
 `spec for undefined function …` cascade on the LiveView test-load path.
 
-The index is read from the live class registry
-(`beamtalk_repl_compiler:build_class_module_index/0`). On the test-load path
-(`load-tests`) the project's `src/` classes are already registered (the project
-was opened first), so the index is complete; the registry is also the canonical
-source of the *actual* runtime module atoms a native `?BT_CLASS_MODULE_*` call
-must resolve to. (A cold load whose own classes are not yet registered would
-produce a partial header — tracked separately for full source-AST parity.)
+The index is the union of two sources (BT-2671):
+
+  1. The project's own `src/**/*.bt` classes, derived by scanning source for
+     `Super subclass: Class` declarations and computing the package-qualified
+     module atom (`bt@<pkg>@<relative@path>`) exactly as the CLI does in
+     `build.rs` (`build_class_module_index` + `compute_relative_module`). This
+     guarantees a *cold* load — where the project's classes are not yet
+     registered — still emits a `-define(BT_CLASS_MODULE_<Class>, …)` for every
+     class defined in the package being loaded, so a native module that uses
+     `?BT_CLASS_MODULE_Foo` for a same-package class `Foo` compiles instead of
+     failing on a missing macro (a relocated symptom-2 cascade).
+
+  2. The live class registry
+     (`beamtalk_repl_compiler:build_class_module_index/0`), which is the
+     canonical source of the *actual* runtime module atoms a native
+     `?BT_CLASS_MODULE_*` call must resolve to.
+
+The live registry takes precedence on conflict: on the warm/test-load path the
+registry holds the authoritative module atom (including its exact casing), so it
+overrides the source-derived guess; the source index only fills in classes the
+registry does not yet know about (the cold-load gap). The module atom each
+source builds for the same class is identical by construction — both lowercase
+the file-stem/path segments via the same snake-case rule
+(`beamtalk_repl_loader:to_snake_case/1` mirrors the Rust
+`core_erlang:to_module_name/1`) — so the union never produces a casing-divergent
+duplicate.
 
 Returns `true` if the header content changed (so callers can force a native
 rebuild), `false` if it was already up to date. The write is atomic
@@ -633,7 +656,12 @@ header. The header is written to `_build/dev/native/include/beamtalk_classes.hrl
 """.
 -spec regenerate_native_class_header(string()) -> boolean().
 regenerate_native_class_header(ProjectRoot) ->
-    Index = beamtalk_repl_compiler:build_class_module_index(),
+    %% BT-2671: Union the source-AST-derived index (complete on a cold load)
+    %% with the live registry (canonical module atoms on the warm path). The
+    %% registry wins on conflict via the second arg to maps:merge/2.
+    SourceIndex = build_source_class_module_index(ProjectRoot),
+    RegistryIndex = beamtalk_repl_compiler:build_class_module_index(),
+    Index = maps:merge(SourceIndex, RegistryIndex),
     IncludeDir = native_generated_include_dir(ProjectRoot),
     HrlPath = filename:join(IncludeDir, "beamtalk_classes.hrl"),
     Content = iolist_to_binary(render_class_header(Index)),
@@ -694,6 +722,144 @@ header_content_matches(HrlPath, Content) ->
     case file:read_file(HrlPath) of
         {ok, Existing} -> Existing =:= Content;
         {error, _} -> false
+    end.
+
+-doc """
+Build a class→module index from the project's `src/**/*.bt` source (BT-2671).
+
+This is the source-AST-derived index that gives the cold-load path full parity
+with the CLI: on a clean load the project's own classes are not yet registered,
+so the live registry alone (`build_class_module_index/0`) would omit them and a
+native module referencing `?BT_CLASS_MODULE_Foo` for a same-package class would
+fail to compile. By scanning source we always include every class defined in the
+package being loaded.
+
+For each `src/*.bt` file, every `Super subclass: Class` declaration maps to the
+package-qualified module atom `bt@<pkg>@<relative@path>`, mirroring the CLI's
+`build.rs` (`build_class_module_index` + `compute_relative_module`). The package
+name is read from `beamtalk.toml`; subdirectory segments under `src/` become `@`
+segments, each snake-cased via `beamtalk_repl_loader:to_snake_case/1` — the same
+transform the Rust `core_erlang:to_module_name/1` applies, so the module atom is
+byte-identical to the one the CLI build produces (casing parity).
+
+Returns an empty map (no entries, never a crash) when the package name cannot be
+determined or `src/` is absent — the caller then falls back to the live registry
+alone, exactly the previous behaviour.
+""".
+-spec build_source_class_module_index(string()) -> #{binary() => binary()}.
+build_source_class_module_index(ProjectRoot) ->
+    case read_package_name(ProjectRoot) of
+        undefined ->
+            #{};
+        PackageName ->
+            SrcDir = filename:join(ProjectRoot, "src"),
+            BtFiles = find_bt_files(SrcDir),
+            lists:foldl(
+                fun(Path, Acc) ->
+                    ModuleName = source_module_name(Path, SrcDir, PackageName),
+                    Classes = extract_all_bt_classes(Path),
+                    lists:foldl(
+                        fun(ClassName, InnerAcc) ->
+                            InnerAcc#{ClassName => ModuleName}
+                        end,
+                        Acc,
+                        Classes
+                    )
+                end,
+                #{},
+                BtFiles
+            )
+    end.
+
+-doc """
+Compute the package-qualified module atom binary for a `src/` .bt file.
+
+Mirrors the CLI's `compute_relative_module` (build.rs): the file's path relative
+to `src/` becomes `@`-joined snake-cased segments, prefixed with `bt@<pkg>@`.
+E.g. `src/util/http_response.bt` in package `web` → `bt@web@util@http_response`.
+""".
+-spec source_module_name(string(), string(), binary()) -> binary().
+source_module_name(Path, SrcDir, PackageName) ->
+    AbsPath = filename:absname(Path),
+    AbsSrc = filename:absname(SrcDir),
+    SrcParts = filename:split(AbsSrc),
+    PathParts = filename:split(AbsPath),
+    RelSegments =
+        case lists:prefix(SrcParts, PathParts) of
+            true ->
+                Rel = lists:nthtail(length(SrcParts), PathParts),
+                drop_ext_segments(Rel);
+            false ->
+                %% Defensive: fall back to the bare stem if the file is somehow
+                %% not under src/ (find_bt_files only returns files under it).
+                [filename:basename(Path, ".bt")]
+        end,
+    SnakeSegments = [beamtalk_repl_loader:to_snake_case(S) || S <- RelSegments],
+    iolist_to_binary(["bt@", PackageName, "@", lists:join("@", SnakeSegments)]).
+
+%% Strip the `.bt` extension from the final path segment.
+-spec drop_ext_segments([string()]) -> [string()].
+drop_ext_segments([]) ->
+    [];
+drop_ext_segments(Segments) ->
+    Last = lists:last(Segments),
+    lists:droplast(Segments) ++ [filename:rootname(Last, ".bt")].
+
+-doc """
+Extract all declared class names from a .bt source file (BT-2671).
+
+Unlike `extract_bt_class_info/1` (which returns only the first declaration),
+this returns every `Super subclass: Class` class name in the file, so a source
+file declaring multiple classes contributes all of them to the cold-load index.
+Returns binaries; an unreadable file yields an empty list.
+""".
+-spec extract_all_bt_classes(string()) -> [binary()].
+extract_all_bt_classes(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} ->
+            case
+                re:run(
+                    Bin,
+                    <<"\\w+\\s+subclass:\\s+(\\w+)">>,
+                    [{capture, [1], binary}, global]
+                )
+            of
+                {match, Matches} -> [C || [C] <- Matches];
+                nomatch -> []
+            end;
+        {error, _} ->
+            []
+    end.
+
+-doc """
+Read the `[package] name` field from `<ProjectRoot>/beamtalk.toml`.
+
+Returns the package name binary, or `undefined` if the manifest is missing or
+has no package name (TOML uses double-quoted strings; the name must be a bare
+`[a-z][a-z0-9_]*` identifier, matching `beamtalk_workspace_meta`'s detection).
+""".
+-spec read_package_name(string()) -> binary() | undefined.
+read_package_name(ProjectRoot) ->
+    ManifestPath = filename:join(ProjectRoot, "beamtalk.toml"),
+    case file:read_file(ManifestPath) of
+        {ok, Content} ->
+            case re:run(Content, <<"\\[package\\]">>, [{capture, none}]) of
+                match ->
+                    case
+                        re:run(
+                            Content,
+                            <<"name\\s*=\\s*\"([a-z][a-z0-9_]*)\"">>,
+                            [{capture, [1], binary}]
+                        )
+                    of
+                        {match, [Name]} -> Name;
+                        nomatch -> undefined
+                    end;
+                nomatch ->
+                    undefined
+            end;
+        {error, _} ->
+            undefined
     end.
 
 -doc """
