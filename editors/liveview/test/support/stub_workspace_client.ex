@@ -74,6 +74,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # stdlib-only workspace for the empty-project → "all" fallback). `nil`
               # uses the canned `base ++ defined_classes` rows.
               browse_classes_override: nil,
+              # BT-2666: seeded `implementors_of/1` rows per selector so the
+              # go-to-definition flow (single/multiple/none) can be driven. `%{}`
+              # = no implementors (every selector resolves to an empty list).
+              implementors: %{},
               calls: []
   end
 
@@ -923,7 +927,24 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # ── Navigation ops ───────────────────────────────────────────────────────
 
   def senders_of(_selector), do: {:value, %{"sites" => []}}
-  def implementors_of(_selector), do: {:value, %{"sites" => []}}
+
+  # BT-2495 / BT-2666: implementor sites for a selector. Empty by default; a test
+  # can seed per-selector rows via `set_implementors/2` so the go-to-definition
+  # flow (single → open method tab, several → popover, none → no-op flash) can be
+  # exercised without a real workspace node.
+  def implementors_of(selector) do
+    rows = Map.get(get(:implementors) || %{}, selector, [])
+    {:value, %{"sites" => rows}}
+  end
+
+  @doc """
+  Test helper (BT-2666): seed the `implementors_of/1` rows for a selector. Each
+  row is a `{class, side, selector}` site map in the `nav-query` shape (`"class"`,
+  `"class_side"`, `"method"`, …).
+  """
+  def set_implementors(selector, rows) when is_binary(selector) and is_list(rows) do
+    update(:implementors, fn map -> Map.put(map || %{}, selector, rows) end)
+  end
 
   # BT-2639: the protocol-definition action row. Return canned rows for the known
   # `Printable` protocol so the UI flow (popover render + navigable rows) can be

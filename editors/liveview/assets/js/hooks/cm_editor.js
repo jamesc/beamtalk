@@ -52,6 +52,7 @@ import { inlineResultsField, addInlineResult } from "./inline_results"
 import { backendCompletion, completionQuery } from "./cm_autocomplete"
 import { backendHover, hoverQuery } from "./cm_hover"
 import { backendLint, lintQuery } from "./cm_lint"
+import { gotoDefinition, gotoQuery } from "./cm_goto"
 
 export const CmEditor = {
   mounted() {
@@ -140,6 +141,16 @@ export const CmEditor = {
     if (!readOnly && this.el.dataset.lintMode !== "erlang") {
       const lintMode = this.el.dataset.lintMode || null
       extensions.push(backendLint(lintQuery(this.pushEvent.bind(this), lintMode)))
+    }
+    // Ctrl/Cmd-click go-to-definition (BT-2666): modifier-click a class name or a
+    // selector send to open its definition / implementor(s). Skipped for native
+    // (.erl) buffers — the server resolves against the Beamtalk live image, so a
+    // class/selector lookup there would just no-op — and for read-only panes
+    // (docs / native viewers), keeping those panes unaffected per the AC. The
+    // resolution is server-side (the `goto_definition` event), so it works the
+    // same in the Workspace editor and the method-editor tabs.
+    if (!readOnly && this.el.dataset.lintMode !== "erlang") {
+      extensions.push(gotoDefinition(gotoQuery(this.pushEvent.bind(this))))
     }
     // Backend autocomplete is likewise Beamtalk-aware, so it is skipped above for
     // native buffers via the `autocomplete && !readOnly` gate only when the host
