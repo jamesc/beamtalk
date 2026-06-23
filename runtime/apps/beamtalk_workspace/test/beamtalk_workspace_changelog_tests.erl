@@ -49,6 +49,16 @@ changelog_test_() ->
         fun find_revert_target_picks_most_recent_entry/1,
         fun find_revert_target_skips_flushed_entries/1,
         fun find_revert_target_rejects_new_class/1,
+        %% Revert completeness (BT-2663/BT-2664/BT-2665). The compiler-dependent
+        %% add-method-removal case (a method present in memory but absent from the
+        %% on-disk source) is covered end-to-end in the eval/primitives suites,
+        %% which set up the full compiler port; here we cover the
+        %% no-compiler-needed outcomes (dynamic method, new class, missing file,
+        %% class-side modify).
+        fun find_revert_target_error_for_sourceless_class/1,
+        fun find_revert_target_remove_for_new_class/1,
+        fun find_revert_target_error_when_modify_file_missing/1,
+        fun find_revert_target_modify_returns_ok_for_class_side/1,
         %% Additional coverage (BT runtime coverage push)
         fun find_revert_target_accepts_binary_selector/1,
         fun find_revert_target_no_prev_source_when_ref_absent/1,
@@ -488,6 +498,104 @@ find_revert_target_rejects_new_class(_Ctx) ->
     NoEntry = beamtalk_workspace_changelog:find_revert_target(<<"NewThing">>, anything),
     [
         ?_assertEqual({error, no_entry}, NoEntry)
+    ].
+
+%% BT-2663 AC (safety): a patch on a dynamic / source-less class (no source_file,
+%% no prev_source) cannot be told apart from a modify — there is no disk body to
+%% probe for the selector — so revert refuses loudly rather than risk deleting a
+%% method that existed before. Positive add-removal needs `selector_not_found`
+%% against a readable source file (the new-method-on-a-project-class case).
+find_revert_target_error_for_sourceless_class(_Ctx) ->
+    Input = #{
+        class => <<"Dyn">>,
+        selector => <<"greet">>,
+        kind => instance,
+        source => <<"^ 'hi'">>,
+        intent => durable,
+        flushable => false,
+        author => <<"sess-1">>,
+        author_kind => human
+        %% No source_file, no prev_source.
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(Input),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Dyn">>, greet),
+    [
+        ?_assertEqual({error, no_prev_source}, Result)
+    ].
+
+%% BT-2664: a new-class entry resolves via the `new-class` placeholder selector
+%% to a {remove, Entry} outcome so the caller removes the just-created class.
+find_revert_target_remove_for_new_class(_Ctx) ->
+    NewClassInput = #{
+        class => <<"NewThing">>,
+        kind => 'new-class',
+        source => <<"class NewThing\nend\n">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/new_thing.bt">>
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
+    ByPlaceholder =
+        beamtalk_workspace_changelog:find_revert_target(<<"NewThing">>, 'new-class'),
+    ByBinary =
+        beamtalk_workspace_changelog:find_revert_target(<<"NewThing">>, <<"new-class">>),
+    [
+        ?_assertMatch({remove, _Entry}, ByPlaceholder),
+        ?_assertMatch({remove, _Entry}, ByBinary)
+    ].
+
+%% BT-2663 AC: a *modify* (no prev_source recorded) whose source file is GONE is
+%% genuinely unrecoverable — it must surface a loud error, never a silent delete.
+find_revert_target_error_when_modify_file_missing(#{tmp_home := TmpHome}) ->
+    MissingFile = filename:join(TmpHome, "does_not_exist.bt"),
+    Input = #{
+        class => <<"Counter">>,
+        selector => <<"inc">>,
+        kind => instance,
+        source => <<"^ 1">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => list_to_binary(MissingFile),
+        span => #{start => 0, 'end' => 3}
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(Input),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, inc),
+    [
+        ?_assertEqual({error, no_prev_source}, Result)
+    ].
+
+%% BT-2665: a class-side *modify* with a recorded prior body returns it for
+%% re-install — the entry's kind (`class`) carries the side to the caller.
+find_revert_target_modify_returns_ok_for_class_side(_Ctx) ->
+    Input = #{
+        class => <<"Counter">>,
+        selector => <<"create">>,
+        kind => class,
+        source => <<"^ self new">>,
+        prev_source => <<"^ self basicNew">>,
+        intent => durable,
+        flushable => true,
+        author => <<"sess-1">>,
+        author_kind => human,
+        source_file => <<"/proj/src/counter.bt">>,
+        span => #{start => 0, 'end' => 10}
+    },
+    {ok, _} = beamtalk_workspace_changelog:append(Input),
+    Result = beamtalk_workspace_changelog:find_revert_target(<<"Counter">>, create),
+    [
+        ?_assertMatch({ok, <<"^ self basicNew">>, _Entry}, Result),
+        ?_assertMatch(
+            {ok, _, _},
+            Result
+        ),
+        ?_assertEqual(
+            class,
+            beamtalk_workspace_changelog:entry_kind(element(3, Result))
+        )
     ].
 
 %% revert_selector_binary/1 accepts a binary selector (not just an atom).

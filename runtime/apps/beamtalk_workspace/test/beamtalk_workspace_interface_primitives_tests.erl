@@ -805,9 +805,12 @@ revert_rejects_non_changeentry_test() ->
         beamtalk_workspace_interface_primitives:changeLogRevert(42)
     ).
 
-revert_rejects_new_class_entry_test() ->
-    %% A ChangeEntry shaped as a new-class entry (selector = nil) must be
-    %% rejected with a structured error rather than attempting a revert.
+revert_new_class_entry_with_no_loaded_class_raises_test() ->
+    %% A new-class ChangeEntry (selector = nil) now routes to the new-class revert
+    %% path (BT-2664), which removes the class. When no such class is loaded the
+    %% removal fails loudly with a structured error rather than silently
+    %% succeeding — the entry extraction maps `nil` to the `'new-class'`
+    %% placeholder and `do_revert` reaches `remove_class/1`.
     NewClassEntry = #{
         '$beamtalk_class' => 'ChangeEntry',
         className => 'NewThing',

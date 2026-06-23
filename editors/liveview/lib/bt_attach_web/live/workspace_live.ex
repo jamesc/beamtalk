@@ -8384,22 +8384,28 @@ defmodule BtAttachWeb.WorkspaceLive do
                               <td>{c.intent}</td>
                               <td>{if c.flushable, do: "yes", else: "no"}</td>
                               <td>{c.author_kind}</td>
-                              <%!-- Revert one pending method patch (ADR 0082
-                                   Phase 5). Owner-only (`revert` is an :execute
-                                   op). Only *instance-side* method patches are
-                                   revertable (`do_revert/2` rejects new-class and
-                                   class-side entries), so gate the button on a
-                                   positive `kind == "instance"` assertion: any
-                                   other / unanticipated kind hides the affordance
-                                   rather than offering one that always errors. --%>
+                              <%!-- Revert one pending change (ADR 0082 Phase 5,
+                                   completeness BT-2663/BT-2664/BT-2665). Owner-only
+                                   (`revert` is an :execute op). Instance-side and
+                                   class-side method patches are revertable (a modify
+                                   re-installs the prior body; an add removes the
+                                   method), and a new-class entry is revertable (it
+                                   removes the just-created class). Gate the button on
+                                   a positive kind assertion so an unanticipated future
+                                   kind hides the affordance rather than offering one
+                                   that errors. New-class rows carry no selector, so
+                                   send the `new-class` placeholder the workspace maps
+                                   back to the class's new-class entry. --%>
                               <td :if={@role == :owner}>
                                 <button
-                                  :if={c.kind == "instance"}
+                                  :if={c.kind in ["instance", "class", "new-class"]}
                                   class="btn-link"
                                   type="button"
                                   phx-click="revert"
                                   phx-value-class={c.class}
-                                  phx-value-selector={c.selector}
+                                  phx-value-selector={
+                                    if(c.kind == "new-class", do: "new-class", else: c.selector)
+                                  }
                                   phx-disable-with="Reverting…"
                                 >
                                   revert

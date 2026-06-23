@@ -353,34 +353,48 @@ clear() ->
 
 -doc """
 Find the most recent active ChangeEntry for `(Class, Selector)` and return its
-recorded prior source body (ADR 0082 Phase 4, BT-2290).
+recorded prior source body (ADR 0082 Phase 4, BT-2290; add/new-class/class-side
+extensions BT-2663/BT-2664/BT-2665).
 
-Used by `Workspace changes revert: aMethod` to look up the pre-patch body that
-must be re-installed. Returns:
+Used by `Workspace changes revert: aMethod` to look up the pre-patch state that
+must be restored. Returns:
 
-  - `{ok, PrevBody, Entry}` when an active entry for the target exists *and* has
-    a `prev_source_ref` whose body can be read from `sources/` — the typical
-    method-revert path.
+  - `{ok, PrevBody, Entry}` when an active entry for the target exists *and* its
+    prior body can be recovered (from a recorded `prev_source_ref`, or from the
+    current on-disk body) — the typical method-*modify* revert path. The entry's
+    `kind` (`instance`/`class`) tells the caller which side to re-install on.
+  - `{remove, Entry}` when the most recent active entry is an *addition*: a
+    brand-new method whose selector did not exist before the patch (no recorded
+    prior body AND the selector is absent from the on-disk source / the class has
+    no on-disk source), or a `new-class` entry. The pre-patch state was "this did
+    not exist", so revert is a removal rather than a body re-install.
   - `{error, no_entry}` when no active entry targets `(Class, Selector)`
     (nothing to revert: either never patched, or already reverted/flushed).
-  - `{error, no_prev_source}` when the most recent entry's `prev_source_ref`
-    is missing or unreadable (e.g. an entry from before the source-body
-    persistence — should not happen in normal flow but defensive).
+  - `{error, no_prev_source}` when the most recent entry is a *modify* whose
+    prior body is genuinely unrecoverable (the recorded body is missing AND the
+    on-disk source exists but the span can no longer be resolved — e.g. the file
+    advanced under us). We must not silently delete a method that existed before,
+    so this stays a loud error rather than a removal.
 
 `Class` is the unsuffixed display name as a binary; `Selector` is an atom or a
 binary (an atom is converted to a binary so the comparison matches the entry's
-recorded selector). A new-class entry has `selector = undefined` and therefore
-never matches a regular selector lookup — the rejection of new-class reverts
-lives at the FFI boundary (`changeLogRevert/1`) rather than here.
+recorded selector). A `new-class` entry has `selector = undefined`; pass the
+new-class selector placeholder atom `'new-class'` (or the binary `<<"new-class">>`)
+to reach it — `find_revert_target(Class, 'new-class')` resolves the class's
+new-class entry and yields a `{remove, Entry}` outcome.
 """.
 -spec find_revert_target(binary(), atom() | binary()) ->
-    {ok, binary(), entry()} | {error, no_entry | no_prev_source}.
+    {ok, binary(), entry()} | {remove, entry()} | {error, no_entry | no_prev_source}.
 find_revert_target(Class, Selector) when is_binary(Class) ->
     SelectorBin = revert_selector_binary(Selector),
+    %% A `new-class` entry records `selector = undefined`; callers reach it with
+    %% the `new-class` placeholder selector, which we map back to `undefined` so
+    %% the candidate filter matches the stored value.
+    MatchSelector = match_selector(SelectorBin),
     Candidates = lists:filter(
         fun(E) ->
             E#entry.class =:= Class andalso
-                E#entry.selector =:= SelectorBin andalso
+                E#entry.selector =:= MatchSelector andalso
                 (not E#entry.prior_epoch) andalso
                 (not E#entry.orphan) andalso
                 (not E#entry.flushed)
@@ -390,12 +404,16 @@ find_revert_target(Class, Selector) when is_binary(Class) ->
     case lists:reverse(lists:keysort(#entry.seq, Candidates)) of
         [] ->
             {error, no_entry};
+        [#entry{kind = 'new-class'} = Entry | _] ->
+            %% Reverting a new-class creation removes the class (BT-2664).
+            {remove, Entry};
         [#entry{prev_source_ref = undefined} = Entry | _] ->
-            %% No recorded prior body. Fall back to the method's CURRENT on-disk
-            %% body when the entry knows its source file — an unflushed patch's
-            %% disk body IS its pre-patch body, so revert can still reconstruct it
-            %% rather than failing outright (resilience for entries recorded
-            %% before source attribution was preserved).
+            %% No recorded prior body. Either the method existed on disk before
+            %% the patch (a modify, whose unflushed disk body IS its pre-patch
+            %% body — resilience for entries predating source attribution), or it
+            %% is a brand-new method (an *add*, whose pre-patch state is "absent"
+            %% → revert = removal, BT-2663). recover_prev_from_disk/1 tells them
+            %% apart.
             recover_prev_from_disk(Entry);
         [Entry | _] ->
             case read_prev_source_body(Entry) of
@@ -404,21 +422,33 @@ find_revert_target(Class, Selector) when is_binary(Class) ->
             end
     end.
 
-%% Reconstruct a method's pre-patch body from its on-disk source file when no
-%% `prev_source' was recorded. Returns `{ok, Body, Entry}' on success, else
-%% `{error, no_prev_source}'. A brand-new method (absent on disk) has no prior
-%% body to recover, so `resolve_method_span' reports `selector_not_found' and we
-%% surface the original error.
+%% Map a revert selector binary to the value stored on the matching entry: the
+%% `new-class` placeholder resolves to `undefined` (a new-class entry stores no
+%% selector); any other selector matches verbatim.
+-spec match_selector(binary()) -> binary() | undefined.
+match_selector(<<"new-class">>) -> undefined;
+match_selector(SelectorBin) -> SelectorBin.
+
+%% Reconstruct a method's pre-patch state from its on-disk source file when no
+%% `prev_source' was recorded. Distinguishes a *modify* (the selector exists on
+%% disk → return its current body as the body to re-install) from an *add* (the
+%% selector is absent on disk, or the class has no on-disk source → revert is a
+%% removal). Returns:
 %%
-%% Invariant + limit: this returns the method's CURRENT on-disk body, which is
-%% the true pre-patch body only while the entry is unflushed AND the file has
-%% not been edited externally (VSCode/git) since the patch. The normal-flow
-%% entries that *do* record `prev_source' (BT-2553 follow-up) don't reach here;
-%% this is a best-effort fallback for entries that predate source attribution,
-%% so reverting to the live disk body is the most faithful reconstruction
-%% available — a later flush still runs its own byte-span/prev_source conflict
-%% check before writing.
--spec recover_prev_from_disk(entry()) -> {ok, binary(), entry()} | {error, no_prev_source}.
+%%   - `{ok, Body, Entry}'  — modify: re-install the recovered prior body.
+%%   - `{remove, Entry}'    — add: remove the just-added method (BT-2663).
+%%   - `{error, no_prev_source}' — modify whose prior body is genuinely
+%%     unrecoverable (the file exists but the span no longer resolves for a
+%%     reason other than "selector absent"); never silently delete it.
+%%
+%% Invariant + limit: the on-disk body returned for a modify is the true
+%% pre-patch body only while the entry is unflushed AND the file has not been
+%% edited externally (VSCode/git) since the patch. The normal-flow entries that
+%% *do* record `prev_source' (BT-2553 follow-up) don't reach here; this is a
+%% best-effort fallback. A later flush still runs its own byte-span/prev_source
+%% conflict check before writing.
+-spec recover_prev_from_disk(entry()) ->
+    {ok, binary(), entry()} | {remove, entry()} | {error, no_prev_source}.
 recover_prev_from_disk(
     #entry{source_file = File, class = Class, selector = Selector, kind = Kind} = Entry
 ) when
@@ -427,13 +457,35 @@ recover_prev_from_disk(
     case file:read_file(File) of
         {ok, DiskSource} ->
             case beamtalk_compiler:resolve_method_span(DiskSource, Class, Selector, Kind) of
-                {ok, _Span, PrevBody} -> {ok, PrevBody, Entry};
-                _ -> {error, no_prev_source}
+                {ok, _Span, PrevBody} ->
+                    %% Selector present on disk → a modify; re-install the body.
+                    {ok, PrevBody, Entry};
+                {error, selector_not_found, _} ->
+                    %% The file exists but the selector is absent → a brand-new
+                    %% method added live; its pre-patch state is "absent", so
+                    %% revert removes it (BT-2663).
+                    {remove, Entry};
+                _ ->
+                    %% Any other resolution failure (ambiguous / parse error /
+                    %% file advanced) leaves the prior body genuinely
+                    %% unrecoverable — refuse loudly rather than delete.
+                    {error, no_prev_source}
             end;
         {error, _} ->
+            %% The recorded source file can no longer be read (deleted, moved,
+            %% permissions). A modify whose prior body cannot be recovered must
+            %% NOT be silently deleted — surface a loud error (BT-2663 AC).
             {error, no_prev_source}
     end;
 recover_prev_from_disk(_Entry) ->
+    %% No on-disk source attribution (dynamic / source-less class), or any other
+    %% shape we cannot resolve against disk. We cannot positively distinguish an
+    %% *add* from a *modify* here — there is no `prev_source` and no file to probe
+    %% for the selector — so refuse loudly rather than risk deleting a method that
+    %% existed before the patch (BT-2663 AC: "never a silent delete"). Positive
+    %% add evidence only comes from `selector_not_found` against a readable source
+    %% file (handled above), which is the new-method-on-a-project-class case the
+    %% LiveView add-revert flow produces.
     {error, no_prev_source}.
 
 %% Normalise the selector argument: callers may pass an atom or a binary.
