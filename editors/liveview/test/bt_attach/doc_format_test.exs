@@ -160,4 +160,34 @@ defmodule BtAttach.DocFormatTest do
       assert html("Tom & Jerry") =~ "Tom &amp; Jerry"
     end
   end
+
+  describe "fidelity guard (BT-2651 / BT-2652)" do
+    # The in-repo doc pipeline is byte-faithful end to end (verified: valid UTF-8,
+    # single `\n`). These lock that in so a future change can't reintroduce
+    # mojibake or double-spaced code blocks. The HTTPClient corruption reported in
+    # the IDE was a stale beamtalk-http build (see BT-2651/BT-2652, related
+    # BT-2653), not an in-repo bug — so there is nothing to "repair" here, only to
+    # guard against regression.
+    test "non-ASCII characters render intact (no mojibake)" do
+      out = html("HTTPClient — an é client 🚀")
+      assert out =~ "—"
+      assert out =~ "é"
+      assert out =~ "🚀"
+      # `â` is the tell-tale of UTF-8 bytes mis-decoded as latin1.
+      refute out =~ "â"
+    end
+
+    test "non-ASCII inside a code block renders intact" do
+      out = html("```\nresp ok  // ⇒ true\n```")
+      assert out =~ "⇒"
+      refute out =~ "â"
+    end
+
+    test "a single-newline multi-line code block stays single-spaced" do
+      out = html("```\nresp := client get\nresp ok\n```")
+      assert out =~ ~s(<pre class="doc-code"><code>resp := client get\nresp ok</code></pre>)
+      # No blank line inserted between consecutive code lines.
+      refute out =~ "resp := client get\n\nresp ok"
+    end
+  end
 end
