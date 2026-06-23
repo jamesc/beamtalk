@@ -5234,6 +5234,9 @@ defmodule BtAttachWeb.WorkspaceLive do
         socket
         |> open_definition(token)
         |> navigate_browser(token, "instance")
+        # Clear any open Implementors popover so it doesn't linger behind the
+        # newly-opened class tab (parity with nav_open_class/open_implementor_site).
+        |> assign(nav_popover: nil)
 
       true ->
         case goto_selector(token, code) do

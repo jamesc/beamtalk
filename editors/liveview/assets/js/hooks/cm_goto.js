@@ -65,7 +65,10 @@ function isModifier(event) {
     (typeof navigator !== "undefined" &&
       (navigator.userAgentData?.platform ?? navigator.platform)) ||
     ""
-  const mac = /^Mac/.test(plat) || /iP(hone|ad|od)/.test(plat)
+  // Case-insensitive: `navigator.platform` reports "MacIntel" but UA-CH reports
+  // "macOS" (lowercase m), so an anchored case-sensitive test would miss Chrome
+  // /Edge on macOS and silently break Cmd-click there.
+  const mac = /mac/i.test(plat) || /iP(hone|ad|od)/.test(plat)
   return mac ? event.metaKey : event.ctrlKey
 }
 
