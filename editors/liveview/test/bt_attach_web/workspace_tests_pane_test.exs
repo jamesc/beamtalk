@@ -307,15 +307,18 @@ defmodule BtAttachWeb.WorkspaceTestsPaneTest do
   describe "F3: source filter renders as a compact dropdown (BT-2603)" do
     test "renders a <select name=src> instead of a segmented control", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
-      html = render(view)
+      # BT-2591: await the async class load — that fold is also when the BT-2661
+      # initial default (Project) is applied to the filter.
+      html = render_async(view, 5_000)
 
       # The source-origin filter is a <select> (so it can't overflow the panel
       # head) carrying the `src` field the handler reads. All four options are
-      # present and reachable, and the current selection ("all") is marked.
+      # present and reachable, and the current selection (Project, BT-2661's
+      # initial default for a workspace with project classes) is marked.
       assert html =~ ~s(<select name="src")
       assert html =~ ~s(aria-label="Class source filter")
-      assert html =~ ~s(<option value="all" selected="selected">)
-      assert html =~ ~s(<option value="project">)
+      assert html =~ ~s(<option value="project" selected="selected">)
+      assert html =~ ~s(<option value="all">)
       assert html =~ ~s(<option value="deps">)
       assert html =~ ~s(<option value="stdlib">)
       assert html =~ "All"

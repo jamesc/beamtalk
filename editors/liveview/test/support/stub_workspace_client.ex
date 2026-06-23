@@ -69,6 +69,11 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # the now-released mount reads) never block.
               mount_gate: nil,
               mount_gate_consumed: false,
+              # BT-2661: optional full override for `browse_classes` so a test can
+              # drive the origin-filter default against a custom set (e.g. a
+              # stdlib-only workspace for the empty-project → "all" fallback). `nil`
+              # uses the canned `base ++ defined_classes` rows.
+              browse_classes_override: nil,
               calls: []
   end
 
@@ -531,9 +536,26 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     end
   end
 
+  @doc """
+  Test helper (BT-2661): override the full `browse_classes` result so a test can
+  drive the origin-filter default against a custom class set — e.g. a bare /
+  stdlib-only workspace (no project-origin classes) for the empty-project → "all"
+  fallback. `nil` (the default) uses the canned `base ++ defined_classes` set.
+  Pass a plain list of row maps; it is wrapped in the `{:value, _}` reply shape.
+  """
+  def set_browse_classes(rows) when is_list(rows) or is_nil(rows),
+    do: put(:browse_classes_override, rows)
+
   def browse_classes do
     await_mount_gate()
 
+    case get(:browse_classes_override) do
+      nil -> {:value, default_browse_classes()}
+      rows -> {:value, rows}
+    end
+  end
+
+  defp default_browse_classes do
     base = [
       # BT-2642: project rows carry the project package name (`project_package_name/0`
       # in the backend), so the editor header's project package badge can be reached
@@ -594,7 +616,7 @@ defmodule BtAttachWeb.StubWorkspaceClient do
         }
       end)
 
-    {:value, base ++ extra}
+    base ++ extra
   end
 
   def browse_protocols(class, side) do
