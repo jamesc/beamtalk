@@ -314,9 +314,10 @@ the primary gate, meta as the consumer-side validation.
 ## Implementation
 
 Affected components: CLI build (`build.rs`, `build_layout.rs`, `build_cache.rs`),
-dependency resolution (`deps/mod.rs`, `deps/lockfile.rs`), codegen
-(`gen_server/methods.rs`), workspace load
-(`beamtalk_repl_ops_load.erl`).
+dependency resolution (`deps/mod.rs`), codegen (`gen_server/methods.rs`),
+workspace load (`beamtalk_repl_ops_load.erl`). The lockfile (`deps/lockfile.rs`)
+is **not** touched — provenance lives in a side stamp, not `beamtalk.lock`, since
+the stamp is build-local and the lockfile is committed.
 
 - **Phase 1 — Project stamp.** Add `BuildLayout::stamp_path()`; write the stamp
   *last* (temp+rename) after a successful build; read it at the start of
@@ -348,6 +349,9 @@ No user action required. The first build after this ships finds no stamp,
 performs one full rebuild, and writes the stamp; subsequent same-version builds
 are incremental as before. Pre-existing `_build/` directories without a stamp are
 treated as stale exactly once. `beamtalk clean` remains the manual escape hatch.
+
+**Follow-up.** When this ships, drop the "run `just build` first in a worktree"
+caveat from `CLAUDE.md` — the provenance miss now handles it automatically.
 
 **Toolchain downgrade / schema skew.** Mixing toolchains in one `_build/` is
 always safe in both directions. If a newer toolchain writes `schema: 2` and an
