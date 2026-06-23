@@ -1372,6 +1372,7 @@ parity_teardown(Proj) ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     _ = application:stop(beamtalk_compiler),
+    _ = application:stop(beamtalk_runtime),
     rm_temp_dir(Proj),
     ok.
 

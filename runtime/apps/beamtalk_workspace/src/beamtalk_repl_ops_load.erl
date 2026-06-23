@@ -817,11 +817,17 @@ Returns binaries; an unreadable file yields an empty list.
 extract_all_bt_classes(Path) ->
     case file:read_file(Path) of
         {ok, Bin} ->
+            %% Anchor to the start of a line (`multiline`) so only real top-level
+            %% `Super subclass: Class` declarations match — a `subclass:` token
+            %% embedded mid-line inside a string literal or comment (e.g. help
+            %% text) is ignored. Without this, `global` would collect such
+            %% false positives and a later file could overwrite the correct
+            %% class→module mapping in the cold-load index.
             case
                 re:run(
                     Bin,
-                    <<"\\w+\\s+subclass:\\s+(\\w+)">>,
-                    [{capture, [1], binary}, global]
+                    <<"^\\w+\\s+subclass:\\s+(\\w+)">>,
+                    [{capture, [1], binary}, global, multiline]
                 )
             of
                 {match, Matches} -> [C || [C] <- Matches];
@@ -843,20 +849,20 @@ read_package_name(ProjectRoot) ->
     ManifestPath = filename:join(ProjectRoot, "beamtalk.toml"),
     case file:read_file(ManifestPath) of
         {ok, Content} ->
-            case re:run(Content, <<"\\[package\\]">>, [{capture, none}]) of
-                match ->
-                    case
-                        re:run(
-                            Content,
-                            <<"name\\s*=\\s*\"([a-z][a-z0-9_]*)\"">>,
-                            [{capture, [1], binary}]
-                        )
-                    of
-                        {match, [Name]} -> Name;
-                        nomatch -> undefined
-                    end;
-                nomatch ->
-                    undefined
+            %% Anchor the name lookup to the [package] section: match
+            %% `name = "..."` only within the run of non-`[` text following the
+            %% [package] header (i.e. before the next `[section]`), so a `name`
+            %% key in an earlier section (e.g. `[tool.foo]`) can't be picked up
+            %% by mistake.
+            case
+                re:run(
+                    Content,
+                    <<"\\[package\\][^\\[]*name\\s*=\\s*\"([a-z][a-z0-9_]*)\"">>,
+                    [{capture, [1], binary}]
+                )
+            of
+                {match, [Name]} -> Name;
+                nomatch -> undefined
             end;
         {error, _} ->
             undefined
