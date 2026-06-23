@@ -250,11 +250,13 @@ tooling.
   output). Version is the orthogonal axis content hashing misses.
 - **Tension — compiler-dev rebuild cost vs. consumer correctness.** Including the
   `-dev+<sha>` suffix means *this repo's* developers get a full rebuild on every
-  commit that changes the compiler. Reasonable people disagree on whether dev
-  builds should key on the sha. We side with correctness: the cost is bounded
-  (the shared OTP type-spec cache, BT-2470, survives `_build` wipes and absorbs
-  the worst of it), and the per-file mtime layer still short-circuits within a
-  commit. End users on released binaries never see this churn.
+  commit that changes the compiler. We accept this deliberately: in practice the
+  stale-artifact failures are *frequent* and silent, while a recompile is loud,
+  fast, and self-healing — so trading occasional rebuilds for never serving stale
+  bytes is plainly worth it. The cost is also bounded: the shared OTP type-spec
+  cache (BT-2470) survives `_build` wipes and absorbs the worst of it, and the
+  per-file mtime layer still short-circuits within a commit. End users on released
+  binaries never see this churn at all.
 
 ## Alternatives Considered
 
