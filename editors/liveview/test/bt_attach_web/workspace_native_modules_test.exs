@@ -286,6 +286,131 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
     end
   end
 
+  # BT-2670: a *project-owned* native (`.erl`) module is editable in the IDE —
+  # edit → compile → reload → write-back via `native_save`. Deps/stdlib natives
+  # stay strictly read-only, as does every non-Owner role. Compile errors surface
+  # inline (structured, like Beamtalk compile errors); a clean compile shows a
+  # confirmation and clears the tab's dirty state.
+  describe "editable project native (BT-2670)" do
+    test "a project-owned native opens editable for the owner", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+
+      html =
+        render_click(view, "browser_open_native_module", %{"module" => "beamtalk_project_native"})
+
+      assert html =~ "beamtalk_project_native.erl"
+      # The editable tab renders the write-surface form (CodeMirror + Compile),
+      # NOT the read-only `<pre>` viewer, and is badged "editable".
+      assert html =~ ~s(id="native-editor-form")
+      assert html =~ "Compile &amp; Reload"
+      assert html =~ "editable"
+      refute html =~ ~s(class="native-pre")
+    end
+
+    test "a deps/stdlib native stays read-only even for the owner", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+
+      # A dependency native (`editable: false` from the op).
+      html =
+        render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
+
+      refute html =~ ~s(id="native-editor-form")
+      assert html =~ ~s(class="native-pre")
+      assert html =~ "read-only"
+    end
+
+    test "a project native is read-only for an observer (editing is Owner-gated)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(observer_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+
+      html =
+        render_click(view, "browser_open_native_module", %{"module" => "beamtalk_project_native"})
+
+      # Even though the op reports `editable: true`, the Observer never gets the
+      # write-surface form — editing is Owner-gated in the IDE.
+      refute html =~ ~s(id="native-editor-form")
+      assert html =~ ~s(class="native-pre")
+    end
+
+    test "saving a project native compiles + reloads and confirms", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+      render_click(view, "browser_open_native_module", %{"module" => "beamtalk_project_native"})
+
+      new_source = "-module(beamtalk_project_native).\n-export([go/0]).\n\ngo() -> updated.\n"
+      html = render_submit(view, "native_save", %{"source" => new_source})
+
+      # Success banner; no error.
+      assert html =~ "Saved beamtalk_project_native.erl"
+      refute html =~ ~s(class="notice err)
+
+      # The save op was dispatched with the edited source.
+      assert Enum.any?(
+               BtAttachWeb.StubWorkspaceClient.calls(),
+               &match?({:save_native_source, "beamtalk_project_native", ^new_source}, &1)
+             )
+    end
+
+    test "a compile error surfaces inline structured diagnostics, not a crash", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Force the next save to report a structured compile error (the load-path
+      # error-map shape).
+      BtAttachWeb.StubWorkspaceClient.set_native_save(
+        {:value,
+         %{
+           "module" => "beamtalk_project_native",
+           "source_file" => "native/beamtalk_project_native.erl",
+           "errors" => [
+             %{
+               "path" => "native/beamtalk_project_native.erl",
+               "kind" => "compile_error",
+               "message" => "syntax error before: '.'",
+               "line" => 4
+             }
+           ]
+         }}
+      )
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+      render_click(view, "browser_open_native_module", %{"module" => "beamtalk_project_native"})
+
+      html = render_submit(view, "native_save", %{"source" => "go() ->\n"})
+
+      # The structured error renders inline (line + message), not a "Saved" banner.
+      assert html =~ "syntax error before"
+      assert html =~ "line 4"
+      refute html =~ "Saved beamtalk_project_native.erl"
+      # The editable form is still present (no crash, the tab survives).
+      assert html =~ ~s(id="native-editor-form")
+    end
+
+    test "a server-side read-only rejection surfaces the error, not a save", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Model the workspace rejecting the write (server-side ownership guard).
+      BtAttachWeb.StubWorkspaceClient.set_native_save(
+        {:error,
+         "Native module 'beamtalk_project_native' is not an editable project source."}
+      )
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+      render_click(view, "browser_open_native_module", %{"module" => "beamtalk_project_native"})
+
+      html = render_submit(view, "native_save", %{"source" => "go() -> ok.\n"})
+
+      assert html =~ "not an editable project source"
+      refute html =~ "Saved beamtalk_project_native.erl"
+    end
+  end
+
   # BT-2668: the path-cleaning that keeps the absolute host path off-screen. Unit
   # test of the relativiser directly (it runs on whatever path the runtime op
   # returns), independent of the rendered viewer above.

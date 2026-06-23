@@ -1537,6 +1537,24 @@ defmodule BtAttachWeb.WorkspaceLive do
      end)}
   end
 
+  # BT-2670: save a project-owned native (`.erl`) module from its editable tab —
+  # compile the edited buffer, hot-reload the module, and write the source to
+  # disk. The active tab must be an editable `:native` tab; the source rides the
+  # form's hidden `source` field (the CodeMirror-mirrored textarea, exactly like
+  # the method editor). A crafted save against a non-native / read-only tab is a
+  # graceful no-op. The ⌘S chord submits this form, same as the method editor.
+  def handle_event("native_save", %{"source" => source}, socket) when is_binary(source) do
+    {:noreply, save_native_source(socket, source)}
+  end
+
+  def handle_event("native_save", _params, socket), do: {:noreply, socket}
+
+  # BT-2670: dismiss the inline compile-error notice on a native save (it rides
+  # the shared `@save_error` assign, like the method editor's compile errors).
+  def handle_event("dismiss_native_save_error", _params, socket) do
+    {:noreply, assign(socket, save_error: nil)}
+  end
+
   # BT-2578: jump from a `self delegate` method to its Erlang implementation.
   # Opens (or focuses) the class-definition tab and expands the native pane with
   # the method's selector resolved to its matching `handle_call` clause (which the
@@ -3412,6 +3430,81 @@ defmodule BtAttachWeb.WorkspaceLive do
     end
   end
 
+  # BT-2670: save (edit → compile → reload → write-back) the active native tab's
+  # `.erl`. The save is only honoured for an editable `:native` tab — a crafted
+  # event against a read-only / non-native tab is a graceful no-op. The op may
+  # return a clean success, structured compile errors (rendered inline via the
+  # shared `@save_error` notice), or an authorization/dispatch error.
+  defp save_native_source(socket, source) do
+    case active_tab(socket.assigns) do
+      %{kind: :native, native_view: %{editable: true}, class: module} = tab ->
+        socket = assign(socket, edit_source: source)
+
+        case Facade.dispatch(
+               :save_native_source,
+               %{module: module, source: source},
+               ctx(socket)
+             ) do
+          {:value, %{"ok" => true}} ->
+            # Compiled, reloaded, and written to disk. Clear the dirty dot,
+            # re-base the tab on the saved source, and refresh the cached
+            # native_view content so a later read shows the new source.
+            socket
+            |> assign(
+              save_result: "Saved #{module}.erl",
+              save_error: nil,
+              flush_result: nil,
+              flush_error: nil
+            )
+            |> compile_clean(tab.id, source)
+            |> update_native_view_content(tab.id, source)
+
+          {:value, %{"errors" => [_ | _] = errors}} ->
+            assign(socket, save_result: nil, save_error: native_compile_error(errors))
+
+          {:error, reason} ->
+            assign(socket, save_result: nil, save_error: facade_error(reason))
+
+          _other ->
+            assign(socket, save_result: nil, save_error: "Could not save native source.")
+        end
+
+      _ ->
+        socket
+    end
+  end
+
+  # BT-2670: refresh the editable native tab's cached `native_view.content` to the
+  # just-saved source so a re-render (or a Callers query) reflects what is now on
+  # disk and in the image, without a round-trip back to `browse-native-source`.
+  defp update_native_view_content(socket, tab_id, source) do
+    update_active_tab_by_id(socket, tab_id, fn
+      %{kind: :native, native_view: %{} = nv} = tab ->
+        %{tab | native_view: Map.put(nv, :content, source)}
+
+      tab ->
+        tab
+    end)
+  end
+
+  # BT-2670: flatten the structured native compile-error maps (the same shape the
+  # load path produces — `path`/`kind`/`message`/optional `line`) into a single
+  # inline message, mirroring how a `.bt` compile error reads. The first error's
+  # message + line leads; a count tail signals there are more.
+  defp native_compile_error(errors) do
+    count = length(errors)
+    first = List.first(errors)
+    msg = Map.get(first, "message", "Erlang compilation failed")
+
+    located =
+      case Map.get(first, "line") do
+        line when is_integer(line) -> "line #{line}: #{msg}"
+        _ -> msg
+      end
+
+    if count > 1, do: "#{located} (+#{count - 1} more)", else: located
+  end
+
   # Create a new class from the New Class modal's name + superclass (BT-2293,
   # BT-2645). The owner supplies a plain PascalCase class name and a superclass
   # (default `Object`); validation (PascalCase, non-empty, non-duplicate) runs
@@ -4883,6 +4976,12 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   defp add_native_module_tab(socket, id, module) do
     view = load_native_module_view(socket, module)
+    # BT-2670: a project-owned native (`view.editable == true`) opens as an
+    # EDITABLE tab — seed the write-surface `source`/`base` from the fetched
+    # `.erl` content so the CodeMirror editor shows it and dirty-tracking works
+    # (mirroring a method/class tab). Deps/stdlib natives keep `source: ""` and
+    # the read-only render branch.
+    initial_source = if view.editable, do: view.content || "", else: ""
 
     tab = %{
       id: id,
@@ -4890,12 +4989,13 @@ defmodule BtAttachWeb.WorkspaceLive do
       class: module,
       side: nil,
       selector: nil,
-      # The fetched read-only Erlang source view (content/clauses/error/clean
-      # source_file). A native tab is never editable, so the write-surface assigns
-      # stay blank and the editor render takes the read-only :native branch.
+      # The fetched native Erlang source view (content/clauses/error/clean
+      # source_file/editable). For a project-owned native the tab is editable
+      # (compile + reload + write-back via `native_save`); deps/stdlib stay
+      # read-only and the editor render takes the read-only :native branch.
       native_view: view,
-      source: "",
-      base: "",
+      source: initial_source,
+      base: initial_source,
       dirty: false,
       disk_differs: false,
       runtime_only: false,
@@ -9157,13 +9257,16 @@ defmodule BtAttachWeb.WorkspaceLive do
 
                 <%= cond do %>
                   <% match?(%{kind: :native}, active_tab(assigns)) -> %>
-                    <%!-- BT-2667: a standalone native module opened as a read-only
-                         editor TAB (not the retired single-slot overlay). It scrolls
-                         inside the editor pane (BT-2658) and shows a clean,
-                         project-relative source path (BT-2668) — never the absolute
-                         host path. Read-only for every role; editing is a later
-                         issue (BT-2670). --%>
+                    <%!-- BT-2667: a standalone native module opened as an editor TAB
+                         (not the retired single-slot overlay). It scrolls inside the
+                         editor pane (BT-2658) and shows a clean, project-relative
+                         source path (BT-2668) — never the absolute host path.
+                         BT-2670: a *project-owned* native (`view.editable == true`)
+                         is editable for the Owner — edit → compile → reload →
+                         write-back via `native_save`. Deps/stdlib natives, and every
+                         non-Owner role, stay strictly read-only. --%>
                     <% nt = active_tab(assigns) %>
+                    <% nt_editable = nt.native_view.editable and @role == :owner %>
                     <div class="editor-meta">
                       <span class="crumb">
                         <span class="native-badge">Erlang module</span>
@@ -9185,17 +9288,82 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </button>
                         <.nav_popover nav={@nav_popover} />
                       </div>
-                      <span class="runtime-tag" title="read-only native (.erl) source">
+                      <span
+                        :if={nt_editable}
+                        class="meta-note editable"
+                        title="project-owned native (.erl) source — editable"
+                      >
+                        editable
+                      </span>
+                      <span
+                        :if={not nt_editable}
+                        class="runtime-tag"
+                        title="read-only native (.erl) source"
+                      >
                         read-only
                       </span>
                     </div>
-                    <div class="panel-body native-tab-body">
-                      <.native_source_body
-                        view={nt.native_view}
-                        fallback_module={nt.class}
-                        dismiss_event="dismiss_native_module_error"
-                      />
-                    </div>
+                    <%= if nt_editable do %>
+                      <%!-- BT-2670: editable native (.erl) buffer. The CodeMirror
+                           editor (Erlang mode) is re-keyed on `@active_tab` +
+                           `@editor_rev` so switching/refreshing the tab remounts the
+                           hook with the right source. ⌘S submits this form (same
+                           chord as the method editor); the hidden `source` textarea
+                           is the posted field, mirrored by the hook. On a clean
+                           compile the dirty dot clears and the success banner shows;
+                           a compile error renders inline via the shared @save_error
+                           notice (rendered above). --%>
+                      <div class="panel-body native-tab-body">
+                        <form
+                          id="native-editor-form"
+                          phx-submit="native_save"
+                          phx-change="edit_source"
+                          phx-hook="KeyboardShortcuts"
+                          data-scope="window"
+                          data-shortcuts={Jason.encode!(%{"mod+s" => "submit"})}
+                        >
+                          <div
+                            id={"native-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                            class="cm-wrap field"
+                            phx-hook="CmEditor"
+                            data-select-event="select_source"
+                            data-tab-id={@active_tab}
+                            data-lint-mode="erlang"
+                          >
+                            <textarea
+                              id={"native-editor-source-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                              class="cm-field"
+                              name="source"
+                              spellcheck="false"
+                              autocomplete="off"
+                              phx-debounce="300"
+                              phx-update="ignore"
+                              hidden
+                            ><%= @edit_source %></textarea>
+                            <div
+                              class="cm-host"
+                              id={"native-editor-cm-" <> @active_tab <> "-" <> to_string(@editor_rev)}
+                              phx-update="ignore"
+                            >
+                            </div>
+                          </div>
+                          <div class="editor-actions">
+                            <span class="spacer"></span>
+                            <button class="btn btn-sm primary" type="submit">
+                              Compile &amp; Reload <span class="k">⌘S</span>
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    <% else %>
+                      <div class="panel-body native-tab-body">
+                        <.native_source_body
+                          view={nt.native_view}
+                          fallback_module={nt.class}
+                          dismiss_event="dismiss_native_module_error"
+                        />
+                      </div>
+                    <% end %>
                   <% match?(%{}, active_tab(assigns)) -> %>
                     <%!-- breadcrumb: Class › side › selector for the active tab. --%>
                     <% {bc_class, bc_side, bc_sel} = breadcrumb(active_tab(assigns)) %>

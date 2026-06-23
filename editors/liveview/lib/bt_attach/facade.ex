@@ -100,6 +100,14 @@ defmodule BtAttach.Facade do
     # no user code), so both are `:read`, safe for the Observer role.
     browse_native_modules: :read,
     browse_native_module_source: :read,
+    # BT-2670: edit → compile → reload → write-back for a project-owned native
+    # (`.erl`) module. It compiles the edited buffer, hot-loads the module, and
+    # writes the source to disk — mutating both the live image and the working
+    # tree, exactly the power `save`/`new_class` carry — so it is `:execute`,
+    # Owner-only. The workspace re-derives project ownership server-side and
+    # rejects any deps/stdlib/outside-project target, so the gate is defence in
+    # depth, not the sole guard.
+    save_native_source: :execute,
     # BT-2495 (Cockpit Phase 3): the navigation aids — Senders/Implementors
     # popovers (`senders`/`implementors`) and the top-bar omni search (`symbols`).
     # Each is a thin `:read` facade over the navigation channel the LSP/MCP
@@ -285,6 +293,17 @@ defmodule BtAttach.Facade do
   defp invoke(:browse_native_module_source, %{module: module}, _ctx) do
     if is_binary(module),
       do: client().browse_native_module_source(module),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2670: save a project-owned native (`.erl`) module — compile the edited
+  # buffer, hot-reload the module, and write the source to disk. `module` is the
+  # native module name, `source` the edited Erlang. The workspace re-derives
+  # project ownership server-side and rejects deps/stdlib/outside-project targets;
+  # bad params are `:invalid_params` with no dist call, matching the other ops.
+  defp invoke(:save_native_source, %{module: module, source: source}, _ctx) do
+    if is_binary(module) and is_binary(source),
+      do: client().save_native_source(module, source),
       else: {:error, :invalid_params}
   end
 

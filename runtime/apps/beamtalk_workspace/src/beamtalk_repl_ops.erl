@@ -141,7 +141,9 @@ dispatch(Op, Params, Msg, SessionPid) when
 dispatch(Op, Params, Msg, SessionPid) when
     Op =:= <<"load-source">>;
     Op =:= <<"load-project">>;
-    Op =:= <<"unload">>
+    Op =:= <<"unload">>;
+    %% BT-2670: edit → compile → reload → write-back for a project-owned native.
+    Op =:= <<"save-native-source">>
 ->
     beamtalk_repl_ops_load:handle_term(Op, Params, Msg, SessionPid);
 dispatch(Op, Params, Msg, SessionPid) when

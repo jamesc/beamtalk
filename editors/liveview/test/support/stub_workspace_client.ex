@@ -815,6 +815,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
          "source_origin" => "stdlib",
          "openable" => true
        }
+       # NOTE: `beamtalk_project_native` (the BT-2670 editable project native) is
+       # intentionally NOT listed here — adding a project-origin module would flip
+       # the Native browser's default origin filter away from its All fallback,
+       # which two BT-2656/BT-2661 list tests assert. The editable native is opened
+       # directly by module via `browser_open_native_module` in the BT-2670 tests,
+       # which only reads `browse_native_module_source/1`, not this enumeration.
      ]}
   end
 
@@ -869,8 +875,52 @@ defmodule BtAttachWeb.StubWorkspaceClient do
      }}
   end
 
+  # BT-2670: a project-owned native module — `editable: true` so the LiveView opens
+  # it as an editable tab (the Owner can compile + reload + write-back via
+  # `save_native_source/2`). Mirrors the real op: a project-origin module with
+  # readable on-disk content advertises `editable`.
+  def browse_native_module_source("beamtalk_project_native") do
+    {:value,
+     %{
+       "class" => :null,
+       "backing_module" => "beamtalk_project_native",
+       "source_file" =>
+         "/home/agent/source/proj/native/beamtalk_project_native.erl",
+       "source_origin" => "project",
+       "editable" => true,
+       "content" =>
+         "-module(beamtalk_project_native).\n-export([go/0]).\n\ngo() -> ok.\n",
+       "clauses" => [],
+       "selected_clause" => :null
+     }}
+  end
+
   def browse_native_module_source(module),
     do: {:error, "module `#{module}` not found"}
+
+  # BT-2670: save (edit → compile → reload → write-back) a project-owned native.
+  # Records the call for assertions and, by default, reports a clean compile. A
+  # test can force a structured compile error via `set_native_save/1` or model a
+  # server-side read-only rejection via the `:error` form. The workspace re-derives
+  # project ownership server-side; the stub mirrors the success/error wire shapes.
+  def save_native_source(module, source) do
+    record({:save_native_source, module, source})
+
+    case get(:native_save_result) do
+      nil ->
+        {:value, %{"module" => module, "source_file" => "native/#{module}.erl", "ok" => true}}
+
+      result ->
+        result
+    end
+  end
+
+  @doc """
+  Test helper (BT-2670): force the next `save_native_source/2` result — a compile
+  error (`{:value, %{"errors" => [...]}}`) or a server-side rejection
+  (`{:error, reason}`). `nil` (the default) reports a clean compile.
+  """
+  def set_native_save(result), do: put(:native_save_result, result)
 
   # ── Navigation ops ───────────────────────────────────────────────────────
 

@@ -1420,3 +1420,167 @@ parity_assert(Proj) ->
 %% Last `@'-delimited segment of a `bt@…@class' module-name binary.
 last_module_segment(ModuleBin) ->
     lists:last(binary:split(ModuleBin, <<"@">>, [global])).
+
+%%====================================================================
+%% save-native-source (BT-2670)
+%%
+%% Edit -> compile -> reload -> write-back for a *project-owned* native `.erl`.
+%% These set up a real on-disk project (beamtalk.toml + native/<mod>.erl),
+%% compile + load the module so its `module_info(compile)` source resolves (the
+%% server-side ownership re-derivation reads it), then drive the op via the
+%% protocol-shaped `handle_term/4` entry point. With no workspace-meta singleton
+%% set, a freshly-compiled temp native classifies as `project` (the path-origin
+%% fallback) — exactly the editable case. Each test purges its module and removes
+%% its temp dir in an `after` block so reuse never pollutes a later run.
+%%====================================================================
+
+%% Create a temp project: <Dir>/beamtalk.toml + <Dir>/native/<Mod>.erl, compile
+%% the module from that path (so its compile-info `source` is the project path)
+%% and load it. Returns {AbsErlPath, Module}.
+setup_project_native(ModName, Src) ->
+    Dir = make_temp_dir(),
+    AbsDir = filename:absname(Dir),
+    ok = file:write_file(
+        filename:join(AbsDir, "beamtalk.toml"), <<"[package]\nname = \"proj\"\n">>
+    ),
+    NativeDir = filename:join(AbsDir, "native"),
+    ok = file:make_dir(NativeDir),
+    FileName = atom_to_list(ModName) ++ ".erl",
+    ErlPath = filename:join(NativeDir, FileName),
+    ok = file:write_file(ErlPath, Src),
+    {ok, ModName, Bin} = compile:file(ErlPath, [debug_info, binary, return_errors]),
+    {module, ModName} = code:load_binary(ModName, ErlPath, Bin),
+    {Dir, ErlPath, ModName}.
+
+teardown_project_native(Dir, ModName) ->
+    code:purge(ModName),
+    code:delete(ModName),
+    rm_temp_dir(Dir).
+
+native_module_editable_target_project_test() ->
+    Mod = bt_native_save_editable_mod,
+    Src = <<
+        "-module(bt_native_save_editable_mod).\n"
+        "-export([go/0]).\n"
+        "go() -> ok.\n"
+    >>,
+    {Dir, ErlPath, _} = setup_project_native(Mod, Src),
+    try
+        %% A project-owned, loaded native with readable source is editable.
+        ?assertEqual(
+            {ok, ErlPath},
+            beamtalk_repl_ops_browse:native_module_editable_target(Mod)
+        )
+    after
+        teardown_project_native(Dir, Mod)
+    end.
+
+native_module_editable_target_unknown_test() ->
+    %% A module that is not even loaded has no compile-info source → not editable.
+    ?assertEqual(
+        {error, not_editable},
+        beamtalk_repl_ops_browse:native_module_editable_target(
+            bt_native_save_definitely_not_loaded_xyz
+        )
+    ).
+
+save_native_source_clean_compile_test() ->
+    Mod = bt_native_save_clean_mod,
+    Src = <<
+        "-module(bt_native_save_clean_mod).\n"
+        "-export([go/0]).\n"
+        "go() -> v1.\n"
+    >>,
+    {Dir, ErlPath, _} = setup_project_native(Mod, Src),
+    try
+        ?assertEqual(v1, bt_native_save_clean_mod:go()),
+        NewSrc = <<
+            "-module(bt_native_save_clean_mod).\n"
+            "-export([go/0]).\n"
+            "go() -> v2.\n"
+        >>,
+        Params = #{
+            <<"module">> => <<"bt_native_save_clean_mod">>,
+            <<"source">> => NewSrc
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-native-source">>, Params, undefined, self()
+        ),
+        ?assertMatch({value, #{<<"ok">> := true}}, Result),
+        %% The module was reloaded into the live VM (new code runs).
+        ?assertEqual(v2, bt_native_save_clean_mod:go()),
+        %% The source was written to disk.
+        ?assertEqual({ok, NewSrc}, file:read_file(ErlPath))
+    after
+        teardown_project_native(Dir, Mod)
+    end.
+
+save_native_source_compile_error_leaves_disk_untouched_test() ->
+    Mod = bt_native_save_err_mod,
+    Src = <<
+        "-module(bt_native_save_err_mod).\n"
+        "-export([go/0]).\n"
+        "go() -> ok.\n"
+    >>,
+    {Dir, ErlPath, _} = setup_project_native(Mod, Src),
+    try
+        %% A syntactically broken edit.
+        BadSrc = <<
+            "-module(bt_native_save_err_mod).\n"
+            "-export([go/0]).\n"
+            "go( -> ok.\n"
+        >>,
+        Params = #{
+            <<"module">> => <<"bt_native_save_err_mod">>,
+            <<"source">> => BadSrc
+        },
+        Result = beamtalk_repl_ops_load:handle_term(
+            <<"save-native-source">>, Params, undefined, self()
+        ),
+        %% Structured compile errors, not a crash.
+        ?assertMatch({value, #{<<"errors">> := [_ | _]}}, Result),
+        {value, #{<<"errors">> := [ErrMap | _]}} = Result,
+        ?assertEqual(<<"compile_error">>, maps:get(<<"kind">>, ErrMap)),
+        %% The error is retargeted at the real `.erl` path (not the temp file).
+        ?assertEqual(list_to_binary(ErlPath), maps:get(<<"path">>, ErrMap)),
+        %% Fail-safe: the on-disk source is untouched and the live module still
+        %% runs the original code.
+        ?assertEqual({ok, Src}, file:read_file(ErlPath)),
+        ?assertEqual(ok, bt_native_save_err_mod:go())
+    after
+        teardown_project_native(Dir, Mod)
+    end.
+
+save_native_source_rejects_unknown_module_test() ->
+    %% A module the workspace never loaded is rejected read-only (no atom / no
+    %% project source), as a structured #beamtalk_error{}, never a disk write.
+    Params = #{
+        <<"module">> => <<"bt_native_save_unknown_module_qwerty">>,
+        <<"source">> => <<"-module(x).\n">>
+    },
+    Result = beamtalk_repl_ops_load:handle_term(
+        <<"save-native-source">>, Params, undefined, self()
+    ),
+    ?assertMatch({error, _}, Result).
+
+save_native_source_requires_module_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-native-source">>,
+            #{<<"module">> => <<>>, <<"source">> => <<"x">>},
+            undefined,
+            self()
+        )
+    ).
+
+save_native_source_requires_source_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:handle_term(
+            <<"save-native-source">>,
+            #{<<"module">> => <<"bt_native_save_clean_mod">>, <<"source">> => <<>>},
+            undefined,
+            self()
+        )
+    ).

@@ -312,6 +312,28 @@ defmodule BtAttach.Workspace do
   @spec browse_native_modules() :: {:value, term()} | {:error, term()}
   def browse_native_modules, do: dispatch_browse("browse-native-modules", %{})
 
+  @doc """
+  Save (edit → compile → reload → write-back) a project-owned native (`.erl`)
+  module (BT-2670, `save-native-source`). `module` is the native module name,
+  `source` the edited Erlang source. The workspace re-derives project ownership
+  server-side (never trusting the client) and rejects any deps/stdlib /
+  outside-project target with a structured `#beamtalk_error{}`.
+
+  On success the op compiles the edited buffer, hot-loads the module into the live
+  VM, and writes the source to disk. Returns the live op term verbatim:
+
+    * clean compile → `{:value, %{"module" => _, "source_file" => _, "ok" => true}}`
+    * compile error → `{:value, %{"module" => _, "source_file" => _, "errors" => [_]}}`
+      (the same structured error-map shape the load path uses, rendered inline)
+    * a non-editable / bad-param target → `{:error, reason}`
+
+  Goes through `dispatch_browse/2` (the curated op dispatcher), so a dead
+  workspace degrades to `{:error, {:unreachable, _}}` like every other Attach op.
+  """
+  @spec save_native_source(String.t(), String.t()) :: {:value, term()} | {:error, term()}
+  def save_native_source(module, source) when is_binary(module) and is_binary(source),
+    do: dispatch_browse("save-native-source", %{"module" => module, "source" => source})
+
   # ── navigation-surface: senders/implementors + omni-search index ────────────
   #
   # BT-2495 (Cockpit Phase 3): two navigation aids ride the SAME term-returning

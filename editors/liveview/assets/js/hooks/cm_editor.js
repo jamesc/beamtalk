@@ -132,10 +132,18 @@ export const CmEditor = {
     // script grammar false-positives); the Workspace editor + the :def tab leave
     // it unset → "expression" on the server. Re-read per mount, so a tab switch
     // (which re-keys this element) picks up the new tab's mode.
-    if (!readOnly) {
+    // BT-2670: a native (.erl) buffer uses lint-mode "erlang" — the backend's
+    // parse-only diagnostics analyse Beamtalk, not Erlang, so live-linting an
+    // Erlang buffer would just emit false squiggles. Skip the backend lint there;
+    // the authoritative diagnostics come from the `Compile & Reload` (save) round
+    // trip, which runs the real `erlc` and surfaces structured errors inline.
+    if (!readOnly && this.el.dataset.lintMode !== "erlang") {
       const lintMode = this.el.dataset.lintMode || null
       extensions.push(backendLint(lintQuery(this.pushEvent.bind(this), lintMode)))
     }
+    // Backend autocomplete is likewise Beamtalk-aware, so it is skipped above for
+    // native buffers via the `autocomplete && !readOnly` gate only when the host
+    // sets it; native editors do not request completion.
 
     this.view = new EditorView({
       state: EditorState.create({ doc: this.field.value, extensions }),

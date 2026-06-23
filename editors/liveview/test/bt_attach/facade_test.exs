@@ -156,6 +156,9 @@ defmodule BtAttach.FacadeTest do
       assert Facade.capability(:run_tests) == :execute
       # BT-2557: loading test files compiles + loads user code → :execute.
       assert Facade.capability(:load_tests) == :execute
+      # BT-2670: saving a project native compiles + reloads + writes to disk →
+      # :execute (Owner-only, like save/new_class).
+      assert Facade.capability(:save_native_source) == :execute
 
       for read <- ~w(info inspect bindings actors processes sessions complete hover
                      diagnostics

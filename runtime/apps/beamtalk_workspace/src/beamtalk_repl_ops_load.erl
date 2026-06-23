@@ -388,9 +388,231 @@ handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
                 {error, Err} ->
                     {error, Err}
             end
-    end.
+    end;
+handle_term(<<"save-native-source">>, Params, _Msg, _SessionPid) ->
+    %% BT-2670: edit → compile → reload → write-back for a *project-owned* native
+    %% (`.erl`) module. The write target is re-derived server-side from the
+    %% module's own compile info (never a client path), and only a project-origin
+    %% native is writable — deps/stdlib are rejected read-only.
+    ModuleBin = maps:get(<<"module">>, Params, <<>>),
+    Source = maps:get(<<"source">>, Params, <<>>),
+    save_native_source(ModuleBin, Source).
 
 %%% Internal helpers
+
+-doc """
+Save (edit → compile → reload → write-back) a project-owned native `.erl` module
+(BT-2670).
+
+The flow, in order, is fail-safe — the on-disk `.erl` is only overwritten after a
+clean compile + load, so a compile error leaves the source untouched:
+
+  1. **Authorize** server-side via `native_module_editable_target/1`: resolve the
+     module to its on-disk `.erl` path from its *own* compile info and confirm it
+     is a project-owned native. A deps/stdlib native, an unknown module, or a
+     `.beam`-only module is rejected with a structured `#beamtalk_error{}` — the
+     client's `editable` flag is never trusted.
+  2. **Compile** the edited buffer to a temp `.erl` alongside the real one (so the
+     erlc include path — `native/include` + the generated header — resolves) via
+     `compile_native_erl_files/2`. On error, return the structured
+     `format_erl_compile_errors/2` maps for inline display; the real `.erl` is
+     left untouched.
+  3. **Reload** is done by `compile_native_erl_files/2` itself (`code:load_binary`
+     + mtime stamp), so the live VM runs the new code.
+  4. **Write-back**: overwrite the real `.erl` with the edited source, atomically
+     (temp file + rename), and refresh its compile-mtime so the incremental
+     native build does not see it as stale (BT-2653 freshness).
+
+Returns `{value, Map}` — `Map` carries `module`, `source_file`, and either
+`ok => true` (clean) or `errors => [ErrMap]` (compile errors, same shape as the
+load path). A bad request (missing/blank module or source) returns
+`{error, #beamtalk_error{}}`.
+""".
+-spec save_native_source(binary(), binary()) ->
+    {value, map()} | {error, #beamtalk_error{}}.
+save_native_source(<<>>, _Source) ->
+    {error,
+        beamtalk_repl_errors:make(
+            invalid_argument,
+            'WorkspaceInterface',
+            <<"save-native-source requires a module name">>,
+            <<"Pass the native module to save.">>
+        )};
+save_native_source(_ModuleBin, <<>>) ->
+    {error,
+        beamtalk_repl_errors:make(
+            empty_expression,
+            'WorkspaceInterface',
+            <<"save-native-source requires non-empty source">>,
+            <<"Enter Erlang source to compile and save.">>
+        )};
+save_native_source(ModuleBin, Source) when is_binary(ModuleBin), is_binary(Source) ->
+    %% A module the workspace never loaded has no atom; `to_existing_atom` keeps
+    %% the atom table bounded and turns an unknown module into a clean
+    %% "not editable" rejection rather than an atom-table leak.
+    case beamtalk_repl_errors:safe_to_existing_atom(ModuleBin) of
+        {error, badarg} ->
+            {error, native_not_editable_error(ModuleBin)};
+        {ok, Module} ->
+            case beamtalk_repl_ops_browse:native_module_editable_target(Module) of
+                {error, not_editable} ->
+                    {error, native_not_editable_error(ModuleBin)};
+                {ok, ErlPath} ->
+                    compile_and_write_native(Module, ModuleBin, ErlPath, Source)
+            end
+    end.
+
+-doc """
+Structured rejection for a non-editable native (deps/stdlib/unknown/.beam-only).
+The same message whatever the reason — never leak whether a path exists.
+""".
+-spec native_not_editable_error(binary()) -> #beamtalk_error{}.
+native_not_editable_error(ModuleBin) ->
+    beamtalk_repl_errors:make(
+        permission_denied,
+        'WorkspaceInterface',
+        iolist_to_binary([
+            <<"Native module '">>,
+            ModuleBin,
+            <<"' is not an editable project source.">>
+        ]),
+        <<
+            "Only project-owned native (.erl) modules can be edited; "
+            "dependency and stdlib modules are read-only."
+        >>
+    ).
+
+-doc """
+Compile the edited buffer (fail-safe: against a temp `.erl`, real source
+untouched on error), reload on success, then write the source to disk and refresh
+the compile-mtime. The project root for the erlc include path is derived from the
+`.erl` path (it lives under `<ProjectRoot>/native/...`).
+""".
+-spec compile_and_write_native(atom(), binary(), string(), binary()) -> {value, map()}.
+compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
+    SourceFileBin = list_to_binary(ErlPath),
+    ProjectRoot = find_project_root(ErlPath),
+    %% BT-2653: refresh the generated beamtalk_classes.hrl before compiling so a
+    %% module that `-include("beamtalk_classes.hrl")` resolves against a fresh
+    %% header (the same invariant the incremental native build relies on). A
+    %% missing project root (no beamtalk.toml — should not happen for a resolved
+    %% project native) degrades to compiling without the regen step.
+    _ =
+        case ProjectRoot of
+            undefined -> ok;
+            Root -> regenerate_native_class_header(Root)
+        end,
+    %% Compile the EDITED buffer against a temp `.erl` in the same directory (so
+    %% relative includes resolve identically) — never the real file — so a compile
+    %% error leaves the on-disk source untouched.
+    TempPath = ErlPath ++ ".bt_native_save_tmp.erl",
+    CompileRoot =
+        case ProjectRoot of
+            undefined -> filename:dirname(filename:dirname(ErlPath));
+            Root2 -> Root2
+        end,
+    case file:write_file(TempPath, Source) of
+        {error, WriteReason} ->
+            _ = file:delete(TempPath),
+            {value, #{
+                <<"module">> => ModuleBin,
+                <<"source_file">> => SourceFileBin,
+                <<"errors">> => [
+                    #{
+                        <<"path">> => SourceFileBin,
+                        <<"kind">> => <<"write_error">>,
+                        <<"message">> => iolist_to_binary(
+                            io_lib:format("Could not stage source for compile: ~p", [WriteReason])
+                        )
+                    }
+                ]
+            }};
+        ok ->
+            {Errors, _Count} = compile_native_erl_files([TempPath], CompileRoot),
+            _ = file:delete(TempPath),
+            case Errors of
+                [] ->
+                    finish_native_write(Module, ModuleBin, ErlPath, SourceFileBin, Source);
+                _ ->
+                    %% Re-point the temp path's errors at the real file so the IDE
+                    %% renders them against the module the author is editing.
+                    RetargetedErrors = [
+                        E#{<<"path">> => SourceFileBin}
+                     || E <- Errors
+                    ],
+                    {value, #{
+                        <<"module">> => ModuleBin,
+                        <<"source_file">> => SourceFileBin,
+                        <<"errors">> => RetargetedErrors
+                    }}
+            end
+    end.
+
+-doc """
+The clean-compile tail: atomically write the edited source to the real `.erl`,
+refresh the loaded module's compile-mtime so the incremental native build does
+not see it as stale, and return the success result.
+""".
+-spec finish_native_write(atom(), binary(), string(), binary(), binary()) -> {value, map()}.
+finish_native_write(Module, ModuleBin, ErlPath, SourceFileBin, Source) ->
+    case atomic_write_file(ErlPath, Source) of
+        ok ->
+            %% BT-2653: stamp the loaded module's compile-mtime to the freshly
+            %% written file so `is_native_erl_stale/2` treats image == disk.
+            set_native_compile_mtime(Module, get_file_mtime(ErlPath)),
+            ?LOG_INFO(
+                "save-native-source: wrote + reloaded native module ~s",
+                [ModuleBin],
+                #{domain => [beamtalk, runtime]}
+            ),
+            {value, #{
+                <<"module">> => ModuleBin,
+                <<"source_file">> => SourceFileBin,
+                <<"ok">> => true
+            }};
+        {error, WriteReason} ->
+            %% The module is already compiled + loaded (the live VM has the new
+            %% code), but the on-disk write failed — surface it so the IDE does
+            %% not show a false "saved" with a stale file behind it.
+            {value, #{
+                <<"module">> => ModuleBin,
+                <<"source_file">> => SourceFileBin,
+                <<"errors">> => [
+                    #{
+                        <<"path">> => SourceFileBin,
+                        <<"kind">> => <<"write_error">>,
+                        <<"message">> => iolist_to_binary(
+                            io_lib:format(
+                                "Compiled and reloaded, but writing the source to disk failed: ~p",
+                                [WriteReason]
+                            )
+                        )
+                    }
+                ]
+            }}
+    end.
+
+-doc """
+Atomic file write: write to a temp file in the same directory, then rename over
+the target (rename is atomic on POSIX), so a concurrent reader never sees a
+half-written `.erl`. On any failure the temp file is cleaned up.
+""".
+-spec atomic_write_file(string(), binary()) -> ok | {error, term()}.
+atomic_write_file(Path, Content) ->
+    TempPath = Path ++ ".bt_native_write_tmp",
+    case file:write_file(TempPath, Content) of
+        ok ->
+            case file:rename(TempPath, Path) of
+                ok ->
+                    ok;
+                {error, RenameReason} ->
+                    _ = file:delete(TempPath),
+                    {error, RenameReason}
+            end;
+        {error, WriteReason} ->
+            _ = file:delete(TempPath),
+            {error, WriteReason}
+    end.
 
 -doc """
 Format a dependency activation error as a structured error map.
