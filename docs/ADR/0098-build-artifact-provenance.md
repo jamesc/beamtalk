@@ -143,11 +143,15 @@ upgrade. For *compiler developers* (this repo) it changes per commit, so an
 artifact built by an older commit — exactly the beamtalk-http failure mode — is
 detected and rebuilt. That cost is accepted (see Steelman).
 
-The OTP signal is the **full `otp_release`** string (e.g. `27-15.0.1`), not just
-the major. This matches the BT-2470 shared type-spec cache, which already keys on
-the full version because minor OTP/ERTS releases can shift the primitive type
-specs baked into compiled output. Keying both caches on the same granularity
-keeps them from disagreeing about whether an upgrade is material.
+The OTP signal is the **compound version** built by `discover_otp_beam_files()`
+(`beam_compiler.rs`) — the OTP release joined with the ERTS version, e.g.
+`27-15.0.1` — not just the major. (Note: `erlang:system_info(otp_release)` alone
+returns only `"27"`; Phase 3/4 must reuse the compound from `beam_compiler.rs`
+rather than re-deriving from `otp_release` directly.) This matches the BT-2470
+shared type-spec cache, which already keys on the same compound because minor
+OTP/ERTS releases can shift the primitive type specs baked into compiled output.
+Keying both caches on the same granularity keeps them from disagreeing about
+whether an upgrade is material.
 
 ### 3. Self-describing modules
 
@@ -195,7 +199,7 @@ exists to catch (it is what bit beamtalk-http), so it must fail toward rebuild.
 $ beamtalk build
 warning: dependency 'beamtalk-http' was compiled by beamtalk 0.3.2 (OTP 26);
          current toolchain is 0.4.0 (OTP 27) — recompiling.
-   Compiling beamtalk-http v0.3.2
+   Compiling beamtalk-http v1.2.0
     Finished dev build in 4.1s
 ```
 
@@ -309,7 +313,7 @@ the primary gate, meta as the consumer-side validation.
 - `beamtalk clean` needs no change — it already removes the stamp with the
   profile/dep directories.
 - OTP detection and `BEAMTALK_VERSION` already exist; this only *records* them.
-- Adds accessors to `BuildLayout` and two keys to the meta map.
+- Adds accessors to `BuildLayout`.
 
 ## Implementation
 
@@ -340,8 +344,12 @@ the stamp is build-local and the lockfile is committed.
   rebuild in `beamtalk_repl_ops_load.erl` into a provenance check over the
   project + dep stamps (and loaded `__beamtalk_meta`); recompile stale scopes on
   attach rather than serving them. Treat a **missing** provenance key (old
-  toolchain) as a miss. Test: an old-toolchain fixture (no meta keys) recompiles
-  on attach.
+  toolchain) as a miss. If a stale dep cannot be recompiled on attach (source
+  unavailable), fail the attach with the same directed message as Phase 2
+  (*"dependency built by beamtalk X; run `beamtalk clean --deps` and rebuild"*)
+  rather than silently serving the stale scope — the failure mode is always loud
+  and directed, never silent. Test: an old-toolchain fixture (no meta keys)
+  recompiles on attach.
 
 ## Migration Path
 
