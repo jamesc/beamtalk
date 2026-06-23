@@ -29,8 +29,11 @@ respectively.
 -ifdef(TEST).
 -export([
     find_bt_files/1,
-    find_erl_files/1,
+    find_erl_files/2,
     compile_native_erl_files/2,
+    render_class_header/1,
+    regenerate_native_class_header/1,
+    native_generated_include_dir/1,
     extract_bt_class_info/1,
     sort_bt_files_by_deps/1,
     structured_file_errors/2,
@@ -124,7 +127,12 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
         end,
     AllBtFiles = SrcFiles ++ TestFiles,
     NativeDir = filename:join(AbsPath, "native"),
-    AllErlFiles = find_erl_files(NativeDir),
+    %% BT-2653: On the test-load path (include_tests=true), also discover
+    %% native/test/ helper modules (e.g. a test server that a `.bt` test drives
+    %% via `(Erlang <helper>) <msg>`). Under normal load-project they stay
+    %% skipped — they are EUnit helpers, not runtime modules — mirroring how the
+    %% `beamtalk test` CLI compiles native/test/ into _build/dev/native/ebin/.
+    AllErlFiles = find_erl_files(NativeDir, IncludeTests),
     AllFiles = AllErlFiles ++ AllBtFiles,
     PreviousMtimes =
         case beamtalk_workspace_meta:get_file_mtimes() of
@@ -207,9 +215,31 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
         DeletedErl
     ),
     DeletedCount = DeletedBtCount + length(DeletedErl),
-    ErlPreLoadMtimes = snapshot_file_mtimes(ChangedErl),
+    %% BT-2653: Before compiling any native .erl, regenerate the
+    %% beamtalk_classes.hrl header from the live class→module index so native
+    %% modules that `-include("beamtalk_classes.hrl")` build against the current
+    %% class set. A stale header (or a stale .beam compiled against one) causes a
+    %% `spec for undefined function …` cascade that fails the test-load even when
+    %% the package's `beamtalk test` CLI is green. The CLI regenerates this header
+    %% on every build (build.rs generate_class_header/2); the workspace
+    %% incremental path must do the same to stay in sync.
+    HeaderChanged = regenerate_native_class_header(AbsPath),
+    %% BT-2653: decide which native .erl to (re)compile. The mtime check only
+    %% catches .erl edits; it misses the case where the *header* changed (a class
+    %% added/moved/renamed) while the .erl is byte-identical — the already-loaded
+    %% .beam would stay compiled against the old macro values (stale cascade,
+    %% symptom 2). So when the header content changed, recompile every native
+    %% file, not just the mtime-changed ones. On the test-load path we also force
+    %% a full native rebuild unconditionally so the runner always loads native
+    %% modules fresh, exactly as the `beamtalk test` CLI does from a clean build.
+    NativeToCompile =
+        case IncludeTests orelse HeaderChanged of
+            true -> AllErlFiles;
+            false -> ChangedErl
+        end,
+    ErlPreLoadMtimes = snapshot_file_mtimes(NativeToCompile),
     {NativeErrors, _NativeCompiledCount} =
-        compile_native_erl_files(ChangedErl, AbsPath),
+        compile_native_erl_files(NativeToCompile, AbsPath),
     %% Only record mtimes for .erl files that compiled successfully (no error entry).
     ErlErrorPaths = sets:from_list([
         binary_to_list(maps:get(<<"path">>, E))
@@ -384,20 +414,32 @@ find_bt_files(Dir) ->
     end.
 
 -doc """
-Find all .erl files in a directory, recursively but skipping test/.
+Find all .erl files in a directory recursively.
+
+When `IncludeTests` is false (normal load-project), native/test/ is skipped —
+those are EUnit helpers, not runtime modules that should be loaded into the VM.
+
+When `IncludeTests` is true (the test-load path: `load-tests`/`list-tests`),
+native/test/ helper modules ARE included so a `.bt` test can drive them via
+`(Erlang <helper>) <msg>` — mirroring how the `beamtalk test` CLI compiles
+native/test/ into _build/dev/native/ebin/ (BT-2653).
+
 Returns an empty list if the directory does not exist.
 """.
--spec find_erl_files(string()) -> [string()].
-find_erl_files(Dir) ->
+-spec find_erl_files(string(), boolean()) -> [string()].
+find_erl_files(Dir, IncludeTests) ->
     case filelib:is_dir(Dir) of
         false ->
             [];
         true ->
-            %% Recursively find all .erl files but skip native/test/ — those are
-            %% EUnit tests, not runtime modules that should be loaded into the VM.
             AllErl = filelib:fold_files(Dir, ".*\\.erl$", true, fun(F, Acc) -> [F | Acc] end, []),
-            TestPrefix = filename:join(Dir, "test") ++ "/",
-            [F || F <- AllErl, not lists:prefix(TestPrefix, F)]
+            case IncludeTests of
+                true ->
+                    AllErl;
+                false ->
+                    TestPrefix = filename:join(Dir, "test") ++ "/",
+                    [F || F <- AllErl, not lists:prefix(TestPrefix, F)]
+            end
     end.
 
 -doc """
@@ -411,11 +453,29 @@ compile_native_erl_files([], _ProjectRoot) ->
 compile_native_erl_files(ErlFiles, ProjectRoot) ->
     NativeDir = filename:join(ProjectRoot, "native"),
     IncludeDir = filename:join(NativeDir, "include"),
+    %% BT-2653: Native modules may `-include("beamtalk_classes.hrl")`, the
+    %% generated class→module header. The CLI writes it to
+    %% _build/dev/native/include/ and adds that dir to the erlc include path;
+    %% the workspace path must do the same (regenerate_native_class_header/1
+    %% refreshes it before compilation) so includes resolve against a fresh
+    %% header rather than failing or picking up a stale copy.
+    %%
+    %% The generated dir is listed FIRST so it takes precedence: erlc searches
+    %% `-I` dirs in order, and the freshly generated header must win over any
+    %% hand-written copy that might sit in the project's native/include/.
+    GeneratedIncludeDir = native_generated_include_dir(ProjectRoot),
     BaseOpts = [debug_info, return_errors, return_warnings, binary],
-    IncludeOpts =
+    %% Prepend native/include first, then the generated dir, so the final list
+    %% is [generated, native/include | BaseOpts] — generated searched first.
+    IncludeOpts0 =
         case filelib:is_dir(IncludeDir) of
             true -> [{i, IncludeDir} | BaseOpts];
             false -> BaseOpts
+        end,
+    IncludeOpts =
+        case filelib:is_dir(GeneratedIncludeDir) of
+            true -> [{i, GeneratedIncludeDir} | IncludeOpts0];
+            false -> IncludeOpts0
         end,
     lists:foldl(
         fun(ErlPath, {ErrsAcc, CountAcc}) ->
@@ -535,6 +595,187 @@ log_erl_warnings(ErlPath, Warnings) ->
         end,
         Warnings
     ).
+
+-doc """
+The directory holding generated native headers (e.g. beamtalk_classes.hrl):
+`<ProjectRoot>/_build/dev/native/include`. Mirrors the CLI's BuildLayout
+`native_include_dir/0` so the workspace and CLI builds share one location.
+""".
+-spec native_generated_include_dir(string()) -> string().
+native_generated_include_dir(ProjectRoot) ->
+    filename:join([ProjectRoot, "_build", "dev", "native", "include"]).
+
+-doc """
+Regenerate the `beamtalk_classes.hrl` header from the live class→module index.
+
+BT-2653: Native `.erl` modules `-include("beamtalk_classes.hrl")` to map class
+names to compiled BEAM module atoms via `?BT_CLASS_MODULE_<Class>` macros. The
+`beamtalk test` CLI regenerates this header on every build (build.rs
+`generate_class_header/2`); the workspace incremental native build must do the
+same so it never compiles against a stale header — the root cause of the
+`spec for undefined function …` cascade on the LiveView test-load path.
+
+The index is read from the live class registry
+(`beamtalk_repl_compiler:build_class_module_index/0`). On the test-load path
+(`load-tests`) the project's `src/` classes are already registered (the project
+was opened first), so the index is complete; the registry is also the canonical
+source of the *actual* runtime module atoms a native `?BT_CLASS_MODULE_*` call
+must resolve to. (A cold load whose own classes are not yet registered would
+produce a partial header — tracked separately for full source-AST parity.)
+
+Returns `true` if the header content changed (so callers can force a native
+rebuild), `false` if it was already up to date. The write is atomic
+(temp file + rename) so a concurrent native compile never reads a half-written
+header. The header is written to `_build/dev/native/include/beamtalk_classes.hrl`
+— the same location the CLI uses, and the dir added to the erlc include path by
+`compile_native_erl_files/2`. Best-effort: a write failure is logged and returns
+`false` rather than aborting the load.
+""".
+-spec regenerate_native_class_header(string()) -> boolean().
+regenerate_native_class_header(ProjectRoot) ->
+    Index = beamtalk_repl_compiler:build_class_module_index(),
+    IncludeDir = native_generated_include_dir(ProjectRoot),
+    HrlPath = filename:join(IncludeDir, "beamtalk_classes.hrl"),
+    Content = iolist_to_binary(render_class_header(Index)),
+    case header_content_matches(HrlPath, Content) of
+        true ->
+            %% Already up to date — no rewrite, no forced rebuild.
+            false;
+        false ->
+            write_native_class_header(IncludeDir, HrlPath, Content, maps:size(Index))
+    end.
+
+-spec write_native_class_header(string(), string(), binary(), non_neg_integer()) -> boolean().
+write_native_class_header(IncludeDir, HrlPath, Content, ClassCount) ->
+    case filelib:ensure_dir(HrlPath) of
+        ok ->
+            %% Atomic publish: write to a unique temp file in the same dir, then
+            %% rename over the target so a racing compile never sees a partial
+            %% header (file:write_file/2 is not atomic).
+            TmpPath = HrlPath ++ ".tmp." ++ integer_to_list(erlang:unique_integer([positive])),
+            case file:write_file(TmpPath, Content) of
+                ok ->
+                    case file:rename(TmpPath, HrlPath) of
+                        ok ->
+                            ?LOG_INFO(
+                                "test-load: regenerated ~s (~B classes)",
+                                [HrlPath, ClassCount],
+                                #{domain => [beamtalk, runtime]}
+                            ),
+                            true;
+                        {error, RenameReason} ->
+                            _ = file:delete(TmpPath),
+                            ?LOG_WARNING(
+                                "test-load: failed to publish ~s: ~p",
+                                [HrlPath, RenameReason],
+                                #{domain => [beamtalk, runtime]}
+                            ),
+                            false
+                    end;
+                {error, WriteReason} ->
+                    ?LOG_WARNING(
+                        "test-load: failed to write ~s: ~p",
+                        [TmpPath, WriteReason],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    false
+            end;
+        {error, DirReason} ->
+            ?LOG_WARNING(
+                "test-load: failed to create ~s: ~p",
+                [IncludeDir, DirReason],
+                #{domain => [beamtalk, runtime]}
+            ),
+            false
+    end.
+
+-spec header_content_matches(string(), binary()) -> boolean().
+header_content_matches(HrlPath, Content) ->
+    case file:read_file(HrlPath) of
+        {ok, Existing} -> Existing =:= Content;
+        {error, _} -> false
+    end.
+
+-doc """
+Render the `beamtalk_classes.hrl` contents from a class→module index.
+
+Mirrors the CLI's `generate_class_header/2` (build.rs): one
+`-define(BT_CLASS_MODULE_<Class>, '<module>').` per class, wrapped in an include
+guard, with entries sorted for deterministic output.
+
+Entries whose class or module name is not a safe Erlang identifier/atom segment
+are skipped (and logged): injecting an arbitrary name raw into a `-define` macro
+identifier or a quoted atom could otherwise emit a `.hrl` that fails to compile
+and would break every native module that includes it. Generated class names
+(identifiers) and module atoms (`bt@pkg@mod`) always pass; this only guards
+against pathological inputs.
+""".
+-spec render_class_header(#{binary() => binary()}) -> iolist().
+render_class_header(Index) ->
+    Entries = lists:sort(maps:to_list(Index)),
+    Defines = lists:filtermap(
+        fun({ClassName, ModuleName}) ->
+            case safe_macro_class_name(ClassName) andalso safe_module_atom(ModuleName) of
+                true ->
+                    {true, [
+                        "-define(BT_CLASS_MODULE_",
+                        ClassName,
+                        ", '",
+                        ModuleName,
+                        "').\n"
+                    ]};
+                false ->
+                    ?LOG_WARNING(
+                        "test-load: skipping unsafe class header entry ~p => ~p",
+                        [ClassName, ModuleName],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    false
+            end
+        end,
+        Entries
+    ),
+    [
+        "%% Copyright 2026 James Casey\n",
+        "%% SPDX-License-Identifier: Apache-2.0\n\n",
+        "%% Generated by the Beamtalk workspace test-load - do not edit.\n",
+        "%% BT-1730/BT-2653: Maps Beamtalk class names to compiled BEAM module atoms.\n\n",
+        "-ifndef(BEAMTALK_CLASSES_HRL).\n",
+        "-define(BEAMTALK_CLASSES_HRL, true).\n\n",
+        Defines,
+        "\n-endif. %% BEAMTALK_CLASSES_HRL\n"
+    ].
+
+%% A class name is safe to splice into a `BT_CLASS_MODULE_<Class>` macro
+%% identifier when it is a non-empty run of [A-Za-z0-9_] (Erlang macro-name
+%% grammar). Generated Beamtalk class names are identifiers, so this rejects
+%% only pathological inputs.
+-spec safe_macro_class_name(binary()) -> boolean().
+safe_macro_class_name(<<>>) ->
+    false;
+safe_macro_class_name(Name) when is_binary(Name) ->
+    lists:all(
+        fun(C) ->
+            (C >= $a andalso C =< $z) orelse
+                (C >= $A andalso C =< $Z) orelse
+                (C >= $0 andalso C =< $9) orelse
+                C =:= $_
+        end,
+        binary_to_list(Name)
+    );
+safe_macro_class_name(_) ->
+    false.
+
+%% A module name is safe to splice into a single-quoted atom when it contains
+%% neither a single quote nor a backslash (which would break out of the quoted
+%% atom). Generated module atoms are `bt@pkg@mod`, which always pass.
+-spec safe_module_atom(binary()) -> boolean().
+safe_module_atom(<<>>) ->
+    false;
+safe_module_atom(Name) when is_binary(Name) ->
+    binary:match(Name, [<<"'">>, <<"\\">>]) =:= nomatch;
+safe_module_atom(_) ->
+    false.
 
 -doc """
 Extract the declared class name and superclass from a .bt source file.
