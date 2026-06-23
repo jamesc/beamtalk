@@ -146,6 +146,9 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has("#workspace-editor-overlay .cm-content")
+    # BT-2661: the browser now defaults to the Project origin filter, which hides
+    # stdlib classes like Object. Switch to "All" so Object is in the tree.
+    |> select("Class source filter", option: "All")
     # Open a blank "new method" tab on an always-present class (Object): a :method
     # tab (data-lint-mode="method"), so the method-editor CmEditor lints in METHOD
     # mode — the buffer is a bare method body, parsed with `parse_method` rather
@@ -898,6 +901,10 @@ defmodule BtAttachWeb.WorkspaceBrowserTest do
     conn
     |> visit("/")
     |> assert_has(".att-label", text: "attached")
+    # BT-2661: the browser defaults to the Project origin filter, whose hierarchy
+    # view leads with greyed (non-interactive) ancestor rows. Switch to "All" so
+    # the first `.row` is a selectable class regardless of project content.
+    |> select("Class source filter", option: "All")
     # The tree lists the live image's classes (the e2e workspace loads the project).
     |> assert_has("#system-browser-tree .row")
     # Select the first class in the tree (the tree holds only class rows until one
