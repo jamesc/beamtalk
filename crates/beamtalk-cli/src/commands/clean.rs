@@ -91,7 +91,14 @@ fn clean_with_layout(layout: &BuildLayout, scope: CleanScope, dry_run: bool) -> 
         );
     }
 
-    let existing: Vec<&Utf8PathBuf> = targets.iter().filter(|t| t.exists()).collect();
+    // Use `symlink_metadata` (not `exists`, which resolves symlinks) so a
+    // *dangling* `_build` symlink — whose target was wiped externally — still
+    // counts as present and gets unlinked by `--all`, instead of being silently
+    // skipped as "Nothing to clean" and breaking the next build.
+    let existing: Vec<&Utf8PathBuf> = targets
+        .iter()
+        .filter(|t| std::fs::symlink_metadata(t.as_std_path()).is_ok())
+        .collect();
 
     if existing.is_empty() {
         println!("Nothing to clean (no build artifacts found under {build_root}).");
