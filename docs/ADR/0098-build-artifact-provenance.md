@@ -99,11 +99,15 @@ A new `BuildLayout::stamp_path()` / `dep_stamp_path(name)` owns these locations
 The stamp is written **last**, after every artifact in the scope has landed, via
 the same temp-write-then-rename discipline BT-2653 already uses for the generated
 header — so a crash mid-build never leaves a stamp claiming freshness for
-incomplete output. The stamp lives under `_build/` (gitignored) and is therefore
-**build-local**: it never travels with source, so a fresh clone or new worktree
-starts with no stamp → a provenance miss → a clean rebuild. This is precisely
-what makes the `CLAUDE.md` "run `just build` first in a worktree" caveat
-unnecessary.
+incomplete output. Concurrent builders are an **accepted race**: two processes
+that both read a missing/stale stamp each rebuild and each write at the end;
+last-write-wins still yields a *valid* stamp, so the only cost is duplicate work
+— not worth a lock file at this project's scale.
+
+The stamp lives under `_build/` (gitignored) and is therefore **build-local**: it
+never travels with source, so a fresh clone or new worktree starts with no stamp
+→ a provenance miss → a clean rebuild. Once this ships, the `CLAUDE.md` "run
+`just build` first in a worktree" caveat can be retired.
 
 Single-file builds (which use `<root>/build` rather than `_build/dev/` and carry
 no dependencies) are **out of scope** for v1: they are throwaway, rebuilt per
@@ -227,8 +231,7 @@ proportional to project scale. **Rejected:** full content-addressed storage
   toolchain change). Provenance is human-readable in the stamp and in
   `__beamtalk_meta`, aiding debugging of "which version produced this?".
 - **Operator / CI** — deterministic rebuilds on toolchain upgrade, robust across
-  fresh checkouts, worktrees, and clock skew where mtimes lie. The `CLAUDE.md`
-  "run `just build` first in a worktree" caveat becomes unnecessary.
+  fresh checkouts, worktrees, and clock skew where mtimes lie.
 
 ### Discoverability
 
@@ -327,8 +330,11 @@ dependency resolution (`deps/mod.rs`, `deps/lockfile.rs`), codegen
   mismatch fixture reproducing the beamtalk-http stale-doc case and showing it
   self-heals.
 - **Phase 3 — Self-describing modules.** Add `beamtalk_version` / `otp_release`
-  to `build_meta_map_doc()` via the typed Document API (no `format!`). Update
-  `__beamtalk_meta` consumers that snapshot the map shape.
+  to `build_meta_map_doc()` via the typed Document API (no `format!`). Audit the
+  `__beamtalk_meta` readers whose snapshots / map-shape assertions may need
+  updating: `beamtalk_object_class` (`read_meta/1`, `meta_to_methods/2`),
+  `beamtalk_behaviour_intrinsics` (`meta_for_module/1`), `beamtalk_repl_ops_dev`,
+  `beamtalk_repl_ops_browse`, and `beamtalk_compiler_server`.
 - **Phase 4 — Workspace attach.** Generalize the BT-2653 header-content force-
   rebuild in `beamtalk_repl_ops_load.erl` into a provenance check over the
   project + dep stamps (and loaded `__beamtalk_meta`); recompile stale scopes on
@@ -342,6 +348,13 @@ No user action required. The first build after this ships finds no stamp,
 performs one full rebuild, and writes the stamp; subsequent same-version builds
 are incremental as before. Pre-existing `_build/` directories without a stamp are
 treated as stale exactly once. `beamtalk clean` remains the manual escape hatch.
+
+**Toolchain downgrade / schema skew.** Mixing toolchains in one `_build/` is
+always safe in both directions. If a newer toolchain writes `schema: 2` and an
+older binary then reads it, the older binary sees an unrecognized schema and
+treats it as a miss (rebuild); the reverse (newer reads an older schema, or a
+downgraded `beamtalk_version`) is the same version-mismatch miss. The failure
+mode is always an extra rebuild, never silent reuse of foreign-toolchain bytes.
 
 ## References
 - Related issues: BT-2673 (this ADR), BT-2653 (stale native build — partial
