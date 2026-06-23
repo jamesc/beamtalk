@@ -652,24 +652,18 @@
   white-space: pre; color: var(--ink);
 }
 
-/* BT-2648: the System Browser's "Native modules" section — a collapsible list of
-   a loaded package's hand-written native Erlang modules below the class tree.
-   Sits between the class tree and the instance/class action bar; the header
-   toggle mirrors the tree's caret + Erlang badge so it reads as a sibling group
-   to the class tree, not a class. */
-.native-modules-section {
-  flex: none; border-top: 1px solid var(--line);
-}
-.native-modules-head {
-  display: flex; align-items: center; gap: 6px; width: 100%;
-  padding: 6px 10px; cursor: pointer;
-  background: none; border: 0; color: var(--muted);
-  font-size: 11.5px; text-align: left;
-}
-.native-modules-head:hover { color: var(--ink); }
-.native-modules-head .count { margin-left: auto; color: var(--muted); }
+/* BT-2656: the separate "Native" browser — a loaded package's hand-written native
+   Erlang modules in their own scrollable, filterable left-column body, switched in
+   via the panel-head `Classes | Native` toggle (replacing the retired in-tree
+   collapsible section). The module list reuses the `.tree` row chrome; the
+   `.native-count` footer mirrors the class tree's actionbar with an Erlang badge +
+   count. */
 .native-modules-list { padding: 2px 0 6px; }
 .native-module-block { margin-top: 0; }
+.actionbar.sb-side.native-count {
+  gap: 6px; color: var(--muted); font-size: 11.5px;
+}
+.actionbar.sb-side.native-count .count { margin-left: auto; color: var(--muted); }
 
 /* ============================================================================
    Workspace dock — tabbed Workspace / Transcript / Changes (BT-2490)

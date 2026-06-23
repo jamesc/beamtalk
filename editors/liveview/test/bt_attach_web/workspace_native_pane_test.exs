@@ -119,6 +119,31 @@ defmodule BtAttachWeb.WorkspaceNativePaneTest do
       refute html =~ ~s(class="native-pre")
     end
 
+    test "BT-2659: the native class def links to its backing module's full source tab",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      html = render_click(view, "browser_open_definition", %{"class" => "Subprocess"})
+
+      # The class-def tab carries a direct "Open native source →" affordance that
+      # targets the backing Erlang module (distinct from the inline BT-2578 pane).
+      assert html =~ "Open native source →"
+      assert html =~ ~s(phx-click="browser_open_native_module")
+      assert html =~ ~s(phx-value-module="beamtalk_subprocess")
+
+      # Clicking it opens the backing module's full `.erl` as a read-only editor tab
+      # (reusing open_native_module_tab/2), alongside the still-open class def tab.
+      html =
+        render_click(view, "browser_open_native_module", %{"module" => "beamtalk_subprocess"})
+
+      assert html =~ "beamtalk_subprocess.erl"
+      assert html =~ ~s(class="native-pre")
+      assert html =~ "handle_call({spawn"
+      assert html =~ "read-only"
+      # The class def tab is still present (the link adds a tab; it doesn't replace).
+      assert html =~ "Subprocess ▸ def"
+    end
+
     test "a backing module without shipped source shows a clear empty state", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 

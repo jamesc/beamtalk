@@ -537,16 +537,26 @@ defmodule BtAttachWeb.WorkspaceLive do
       # a second replaces this value, and `native_shown?/2` scopes display to the
       # active tab's class (per-tab pane state is intentionally not kept).
       |> assign(:native_view, nil)
-      # BT-2648/BT-2667: the System Browser's "Native modules" section — a loaded
-      # package's hand-written native Erlang modules that no `native:` class
-      # backs (the beamtalk-http case). `browser_native_modules` holds the
-      # enumerated rows; `native_modules_open` is the section's collapse state
-      # (collapsed by default so it never crowds the class tree). Opening a module
-      # now creates a first-class read-only `:native` editor TAB (see
-      # `open_native_module_tab/2`) rather than a single-slot overlay assign, so
-      # several can be open at once alongside class/method tabs.
+      # BT-2656: the left browser column is a two-mode panel — a `Classes | Native`
+      # toggle at the top switches the whole body between the class tree
+      # (`:classes`, the default) and the separate Native browser (`:native`), a
+      # loaded package's hand-written native Erlang modules that no `native:` class
+      # backs (the beamtalk-http case). Native modules used to live as a collapsed
+      # in-tree section that crowded the class tree and couldn't scroll (BT-2660);
+      # they now have their own scrollable, filterable surface. `browser_native_modules`
+      # holds the enumerated rows. Opening a module creates a first-class read-only
+      # `:native` editor TAB (see `open_native_module_tab/2`), so several can be open
+      # at once alongside class/method tabs.
+      |> assign(:browser_mode, :classes)
       |> assign(:browser_native_modules, [])
-      |> assign(:native_modules_open, false)
+      # BT-2656/BT-2661: the Native browser's own source-origin filter, mirroring the
+      # class tree's `browser_source`. Defaults to "project" once the rows arrive
+      # (`apply_default_native_source/1`), falling back to "all" when there are no
+      # project-origin native modules so the list isn't empty on open. `:native_source_chosen`
+      # flips `true` the moment the user picks a filter (or the default is applied
+      # once), so a later refresh never resets a deliberate choice.
+      |> assign(:native_source, "all")
+      |> assign(:native_source_chosen, false)
       # New Class modal (BT-2293, BT-2645): the System Browser's owner-only
       # create-a-class wizard, closed by default (it opens from the browser head's
       # ＋ button). The owner types a plain class name + picks a superclass
@@ -1472,16 +1482,32 @@ defmodule BtAttachWeb.WorkspaceLive do
 
   def handle_event("browser_open_native", _params, socket), do: {:noreply, socket}
 
-  # BT-2648: expand/collapse the System Browser's "Native modules" section. A
-  # re-fetch on each expand keeps a dependency loaded mid-session discoverable.
-  def handle_event("toggle_native_modules", _params, socket) do
-    open = !socket.assigns.native_modules_open
-
-    socket =
-      if open, do: assign_browser_native_modules(socket), else: socket
-
-    {:noreply, assign(socket, native_modules_open: open)}
+  # BT-2656: switch the left browser column between the class tree (`classes`) and
+  # the separate Native browser (`native`) via the panel-head `Classes | Native`
+  # toggle. Switching into Native mode re-fetches the module list so a dependency
+  # loaded mid-session is discoverable; an unknown mode is ignored rather than
+  # blanking the panel.
+  def handle_event("browser_mode", %{"mode" => "native"}, socket) do
+    {:noreply, assign(assign_browser_native_modules(socket), browser_mode: :native)}
   end
+
+  def handle_event("browser_mode", %{"mode" => "classes"}, socket) do
+    {:noreply, assign(socket, browser_mode: :classes)}
+  end
+
+  def handle_event("browser_mode", _params, socket), do: {:noreply, socket}
+
+  # BT-2656/BT-2661: narrow the Native browser by source origin (project / deps /
+  # stdlib / all), mirroring the class tree's `browser_source`. Pure view state over
+  # the already-loaded rows — no workspace round-trip; an unknown value is ignored.
+  # A deliberate pick marks the filter "chosen" so the BT-2661 Project default
+  # (applied once the modules load) can never override it.
+  def handle_event("native_source", %{"src" => src}, socket)
+      when src in ~w(all project deps stdlib) do
+    {:noreply, assign(socket, native_source: src, native_source_chosen: true)}
+  end
+
+  def handle_event("native_source", _params, socket), do: {:noreply, socket}
 
   # BT-2667: open a standalone native module's `.erl` as a first-class read-only
   # editor TAB (a `:native` tab kind) rather than the old single-slot overlay
@@ -4267,19 +4293,37 @@ defmodule BtAttachWeb.WorkspaceLive do
       else: "all"
   end
 
-  # BT-2648: load the loaded packages' hand-written native Erlang modules for the
-  # System Browser's "Native modules" section. Each row carries `module`,
-  # `source_file`, `package`, `source_origin`, and `openable`. A dispatch failure
-  # / RBAC denial yields an empty section rather than crashing the browser — the
-  # class tree (the primary navigator) must still render.
+  # BT-2648/BT-2656: load the loaded packages' hand-written native Erlang modules
+  # for the separate Native browser. Each row carries `module`, `source_file`,
+  # `package`, `source_origin`, and `openable`. A dispatch failure / RBAC denial
+  # yields an empty list rather than crashing the browser — the class tree (the
+  # primary navigator) must still render.
   defp assign_browser_native_modules(socket) do
-    case Facade.dispatch(:browse_native_modules, %{}, ctx(socket)) do
-      {:value, rows} when is_list(rows) ->
-        assign(socket, browser_native_modules: rows)
+    rows =
+      case Facade.dispatch(:browse_native_modules, %{}, ctx(socket)) do
+        {:value, rows} when is_list(rows) -> rows
+        _ -> []
+      end
 
-      _ ->
-        assign(socket, browser_native_modules: [])
-    end
+    socket
+    |> assign(browser_native_modules: rows)
+    |> apply_default_native_source(rows)
+  end
+
+  # BT-2656/BT-2661: apply the one-shot Project-origin default to the Native browser
+  # once the module rows arrive, mirroring `apply_default_browser_source/2` for the
+  # class tree. Only on the FIRST load (`:native_source_chosen` still false) and only
+  # when there is at least one project-origin native module to show; otherwise it
+  # falls back to "all" so the list isn't empty on open. A deliberate pick flips the
+  # flag in the `native_source` handler so a later refresh never resets it.
+  defp apply_default_native_source(%{assigns: %{native_source_chosen: true}} = socket, _rows),
+    do: socket
+
+  defp apply_default_native_source(socket, rows) do
+    assign(socket,
+      native_source: default_browser_source(rows),
+      native_source_chosen: true
+    )
   end
 
   # Load `class`/`side`'s selectors grouped by protocol (op 2, `browse-protocols`)
@@ -7263,28 +7307,54 @@ defmodule BtAttachWeb.WorkspaceLive do
   attr :new_class_name, :string, default: ""
   attr :new_class_super, :string, default: "Object"
   attr :new_class_error, :string, default: nil
-  # BT-2648: the loaded packages' hand-written native Erlang modules (no class to
-  # back them), the section's collapse state, and the module whose source pane is
-  # currently open (highlighted in the list).
+  # BT-2656: the two-mode panel state. `browser_mode` (:classes | :native) selects
+  # whether the body shows the class tree or the separate Native browser;
+  # `browser_native_modules` are the loaded packages' hand-written native Erlang
+  # modules (no class to back them); `native_source` is the Native browser's own
+  # source-origin filter; `native_module_shown` highlights an open module in the list.
+  attr :browser_mode, :atom, default: :classes
   attr :browser_native_modules, :list, default: []
-  attr :native_modules_open, :boolean, default: false
+  attr :native_source, :string, default: "all"
   attr :native_module_shown, :string, default: nil
 
   defp system_browser_classes(assigns) do
     # BT-2557: filter the rows once, up front, so both the hierarchy and category
     # views (and the empty-state check) render the same source-scoped set.
+    # BT-2656: the Native browser gets its own origin-scoped set (`visible_modules`).
     assigns =
-      assign(
-        assigns,
+      assigns
+      |> assign(
         :visible_classes,
         filter_by_source(assigns.browser_classes, assigns.browser_source)
+      )
+      |> assign(
+        :visible_modules,
+        filter_by_source(assigns.browser_native_modules, assigns.native_source)
       )
 
     ~H"""
     <div id="system-browser" class="panel">
       <div class="panel-head">
         System Browser <span class="spacer"></span>
-        <div class="seg" role="tablist" aria-label="Class tree view">
+        <%!-- BT-2656: Classes | Native panel-mode toggle. Native (Erlang) modules
+             are a distinct namespace from Beamtalk classes, so they live in their
+             own scrollable, filterable browser rather than a collapsed in-tree
+             section. Selecting "Native" replaces the class tree body with the
+             native-module list (its own origin filter + count). --%>
+        <div class="seg" role="tablist" aria-label="Browser mode">
+          <button
+            :for={{mode, label} <- [{"classes", "Classes"}, {"native", "Native"}]}
+            type="button"
+            role="tab"
+            class={[to_string(@browser_mode) == mode && "on"]}
+            aria-selected={to_string(to_string(@browser_mode) == mode)}
+            phx-click="browser_mode"
+            phx-value-mode={mode}
+          >
+            {label}
+          </button>
+        </div>
+        <div :if={@browser_mode == :classes} class="seg" role="tablist" aria-label="Class tree view">
           <button
             :for={{view, label} <- [{"hierarchy", "Hier"}, {"category", "Cats"}]}
             type="button"
@@ -7309,7 +7379,12 @@ defmodule BtAttachWeb.WorkspaceLive do
              is deliberately no submit path (selection drives the filter). The
              guard makes a stray native submit — `form.submit()`, or a future
              field added here — a no-op rather than an unhandled LiveView event. --%>
-        <form phx-change="browser_source" onsubmit="return false" class="src-filter">
+        <form
+          :if={@browser_mode == :classes}
+          phx-change="browser_source"
+          onsubmit="return false"
+          class="src-filter"
+        >
           <select name="src" class="src-select" aria-label="Class source filter">
             <option
               :for={
@@ -7327,10 +7402,36 @@ defmodule BtAttachWeb.WorkspaceLive do
             </option>
           </select>
         </form>
+        <%!-- BT-2656/BT-2661: the Native browser's own source-origin filter, mirroring
+             the class tree's. Posts the `src` field to `native_source`; defaults to
+             Project (with an All fallback when no native module is project-origin). --%>
+        <form
+          :if={@browser_mode == :native}
+          phx-change="native_source"
+          onsubmit="return false"
+          class="src-filter"
+        >
+          <select name="src" class="src-select" aria-label="Native source filter">
+            <option
+              :for={
+                {src, label} <- [
+                  {"all", "All"},
+                  {"project", "Proj"},
+                  {"deps", "Deps"},
+                  {"stdlib", "Std"}
+                ]
+              }
+              value={src}
+              selected={@native_source == src}
+            >
+              {label}
+            </option>
+          </select>
+        </form>
         <%!-- New Class (BT-2293): owner-only ＋ toggle. Reveals the inline create
              form below; the new class then appears right in the tree under it. --%>
         <button
-          :if={@role == :owner}
+          :if={@role == :owner and @browser_mode == :classes}
           type="button"
           class={["panel-icon", @new_class_open && "on"]}
           phx-click="toggle_new_class"
@@ -7431,7 +7532,13 @@ defmodule BtAttachWeb.WorkspaceLive do
           </form>
         </div>
       </div>
-      <div class="panel-body" id="system-browser-tree" phx-hook="ScrollToSelected">
+      <%!-- BT-2656: the class tree body — shown only in `:classes` mode. --%>
+      <div
+        :if={@browser_mode == :classes}
+        class="panel-body"
+        id="system-browser-tree"
+        phx-hook="ScrollToSelected"
+      >
         <.notice
           :if={@browser_error}
           variant={:err}
@@ -7473,53 +7580,51 @@ defmodule BtAttachWeb.WorkspaceLive do
             </div>
         <% end %>
       </div>
-      <%!-- BT-2648: "Native modules" section — a loaded package's hand-written
-           native Erlang modules that no `native:` class backs (the beamtalk-http
-           case). Collapsed by default so it never crowds the class tree; a click
-           on a module opens its `.erl` read-only in the editor column's native
-           pane. Each row carries an Erlang marker plus the same package/origin
-           badge vocabulary the class tree uses (DEP · <pkg> / STDLIB / project),
-           so a dependency's native module is visually distinguished and tagged
-           consistently with BT-2640/2641/2642. --%>
-      <div :if={@browser_native_modules != []} class="native-modules-section">
-        <button
-          type="button"
-          class="native-modules-head"
-          phx-click="toggle_native_modules"
-          aria-expanded={to_string(@native_modules_open)}
-        >
-          <span class="twig">{if @native_modules_open, do: "▾", else: "▸"}</span>
-          <span class="native-badge">Erlang</span>
-          Native modules <span class="count">{length(@browser_native_modules)}</span>
-        </button>
-        <div :if={@native_modules_open} class="tree native-modules-list">
-          <div
-            :for={mod <- @browser_native_modules}
-            class={["row", @native_module_shown == mod["module"] && "sel"]}
-            phx-click="browser_open_native_module"
-            phx-value-module={mod["module"]}
-            title={mod["module"]}
-          >
-            <span class="twig">●</span>
-            <span class="cls mono">{mod["module"]}</span>
-            <span
-              :if={mod["source_origin"] && mod["source_origin"] != "project"}
-              class={"source-origin-tag #{source_origin_class(mod)}"}
-              title={source_origin_title(mod)}
-            >
-              {source_origin_label(mod)}
-            </span>
-            <span
-              :if={mod["openable"] == false}
-              class="runtime-tag"
-              title="no source on disk (.beam-only)"
-            >
-              ⚡
-            </span>
-          </div>
-        </div>
+      <%!-- BT-2656: the separate Native browser body — shown only in `:native` mode.
+           A loaded package's hand-written native Erlang modules (no `native:` class
+           backs them — the beamtalk-http case) get their own scrollable, filterable
+           list (fixing BT-2660's overflow by construction). A click on a module
+           opens its `.erl` read-only as an editor tab (`browser_open_native_module`
+           → `open_native_module_tab/2`). Each row carries the same package/origin
+           badge vocabulary the class tree uses (DEP · <pkg> / STDLIB / project). --%>
+      <div :if={@browser_mode == :native} class="panel-body" id="native-browser">
+        <%= cond do %>
+          <% @browser_native_modules == [] -> %>
+            <p class="muted-note">No native modules in the workspace.</p>
+          <% @visible_modules == [] -> %>
+            <p class="muted-note">No native modules match this source filter.</p>
+          <% true -> %>
+            <div class="tree native-modules-list">
+              <div
+                :for={mod <- @visible_modules}
+                class={["row", @native_module_shown == mod["module"] && "sel"]}
+                phx-click="browser_open_native_module"
+                phx-value-module={mod["module"]}
+                title={mod["module"]}
+              >
+                <span class="twig">●</span>
+                <span class="cls mono">{mod["module"]}</span>
+                <span
+                  :if={mod["source_origin"] && mod["source_origin"] != "project"}
+                  class={"source-origin-tag #{source_origin_class(mod)}"}
+                  title={source_origin_title(mod)}
+                >
+                  {source_origin_label(mod)}
+                </span>
+                <span
+                  :if={mod["openable"] == false}
+                  class="runtime-tag"
+                  title="no source on disk (.beam-only)"
+                >
+                  ⚡
+                </span>
+              </div>
+            </div>
+        <% end %>
       </div>
-      <div class="actionbar sb-side">
+      <%!-- BT-2656: the instance/class side toggle drives the class tree's method
+           list, so it is only meaningful in `:classes` mode. --%>
+      <div :if={@browser_mode == :classes} class="actionbar sb-side">
         <div class="seg" role="tablist" aria-label="Instance / class side">
           <button
             :for={side <- ~w(instance class)}
@@ -7533,6 +7638,13 @@ defmodule BtAttachWeb.WorkspaceLive do
             {side}
           </button>
         </div>
+      </div>
+      <%!-- BT-2656: a count footer for the Native browser, mirroring the class
+           tree's badge vocabulary. --%>
+      <div :if={@browser_mode == :native} class="actionbar sb-side native-count">
+        <span class="native-badge">Erlang</span>
+        <span>Native modules</span>
+        <span class="count">{length(@visible_modules)}</span>
       </div>
     </div>
     """
@@ -8126,8 +8238,9 @@ defmodule BtAttachWeb.WorkspaceLive do
                   new_class_name={@new_class_name}
                   new_class_super={@new_class_super}
                   new_class_error={@new_class_error}
+                  browser_mode={@browser_mode}
                   browser_native_modules={@browser_native_modules}
-                  native_modules_open={@native_modules_open}
+                  native_source={@native_source}
                   native_module_shown={active_native_module(assigns)}
                 />
                 <%!-- Draggable divider (BT-2576): rebalances the class tree vs.
@@ -9180,6 +9293,21 @@ defmodule BtAttachWeb.WorkspaceLive do
                             {if native_shown?(assigns, doc_tab.class),
                               do: "Hide Erlang source",
                               else: "View Erlang source"}
+                          </button>
+                          <%!-- BT-2659: direct navigation from a native: class to its
+                           backing Erlang module's full source. Unlike the inline
+                           "View Erlang source" pane above (BT-2578), this opens the
+                           module's complete `.erl` as its own read-only editor tab
+                           (reusing `open_native_module_tab/2`), so the whole module —
+                           not just the matched clauses — is reachable in one click. --%>
+                          <button
+                            type="button"
+                            class="native-toggle"
+                            phx-click="browser_open_native_module"
+                            phx-value-module={doc_tab.native_module}
+                            title={"Open #{doc_tab.native_module}.erl in a source tab"}
+                          >
+                            Open native source →
                           </button>
                         </div>
                         <div :if={native_shown?(assigns, doc_tab.class)} class="native-body">

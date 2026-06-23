@@ -852,6 +852,23 @@ defmodule BtAttachWeb.StubWorkspaceClient do
      }}
   end
 
+  # BT-2659: the backing module of the stubbed native: class `Subprocess`. Lets the
+  # "Open native source →" link on the native class-definition tab open the full
+  # module `.erl` as a read-only tab (distinct from the inline BT-2578 pane).
+  def browse_native_module_source("beamtalk_subprocess") do
+    {:value,
+     %{
+       "class" => :null,
+       "backing_module" => "beamtalk_subprocess",
+       "source_file" => "apps/beamtalk_stdlib/src/beamtalk_subprocess.erl",
+       "source_origin" => "stdlib",
+       "editable" => false,
+       "content" => "handle_call({spawn, [Cmd]}, _From, State) ->\n    {reply, ok, State}.\n",
+       "clauses" => [%{"selector" => "spawn:", "line" => 1}],
+       "selected_clause" => :null
+     }}
+  end
+
   def browse_native_module_source(module),
     do: {:error, "module `#{module}` not found"}
 
