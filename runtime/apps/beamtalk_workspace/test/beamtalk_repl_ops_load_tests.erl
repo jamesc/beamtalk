@@ -1371,8 +1371,13 @@ parity_teardown(Proj) ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
+    %% NB: only stop beamtalk_compiler here. Do NOT stop beamtalk_runtime — it is
+    %% a shared OTP application other tests in this EUnit node rely on being up
+    %% (e.g. beamtalk_repl_server_tests' ranch listener, beamtalk_workspace_sup_tests).
+    %% `parity_setup` uses ensure_all_started, so when it was already running we
+    %% must leave it running; stopping it here triggers a `noproc`/`already_started`
+    %% cascade in sibling tests.
     _ = application:stop(beamtalk_compiler),
-    _ = application:stop(beamtalk_runtime),
     rm_temp_dir(Proj),
     ok.
 
