@@ -87,28 +87,47 @@ After a successful build, write a JSON stamp into the build scope:
 {
   "schema": 1,
   "beamtalk_version": "0.4.0-dev+a1b2c3d",  // BEAMTALK_VERSION, verbatim
-  "otp_major": 27,                          // from otp_release
-  "otp_release": "27-15.0.1",               // informational
+  "otp_release": "27-15.0.1",               // full otp_release + ERTS, keyed
   "built_at": "2026-06-23T10:04:11Z"        // informational only
 }
 ```
 
 A new `BuildLayout::stamp_path()` / `dep_stamp_path(name)` owns these locations
 (consistent with the rest of the layout API). `built_at` is diagnostic and
-**never** an invalidation input — only `beamtalk_version` and `otp_major` are.
+**never** an invalidation input — only `beamtalk_version` and the OTP version are.
+
+The stamp is written **last**, after every artifact in the scope has landed, via
+the same temp-write-then-rename discipline BT-2653 already uses for the generated
+header — so a crash mid-build never leaves a stamp claiming freshness for
+incomplete output. The stamp lives under `_build/` (gitignored) and is therefore
+**build-local**: it never travels with source, so a fresh clone or new worktree
+starts with no stamp → a provenance miss → a clean rebuild. This is precisely
+what makes the `CLAUDE.md` "run `just build` first in a worktree" caveat
+unnecessary.
+
+Single-file builds (which use `<root>/build` rather than `_build/dev/` and carry
+no dependencies) are **out of scope** for v1: they are throwaway, rebuilt per
+invocation, and never serve a workspace.
 
 ### 2. Invalidation rule
 
 Artifacts in a scope are reused **only if** the stamp's `beamtalk_version`
-**and** `otp_major` equal the current toolchain's. On any mismatch — or a
-missing/corrupt stamp — the scope is treated as fully stale and rebuilt (the
-equivalent of `--force` for that scope), bypassing mtime entirely.
+**and** OTP version equal the current toolchain's. On any mismatch — or a
+missing, corrupt, or unrecognized-`schema` stamp — the scope is treated as fully
+stale and rebuilt (the equivalent of `--force` for that scope), bypassing mtime
+entirely.
 
 ```
 read stamp
-  ├─ missing / corrupt / version ≠ current → rebuild all (provenance miss)
+  ├─ missing / corrupt / unknown schema / version ≠ current → rebuild all (provenance miss)
   └─ version == current → fall through to existing mtime fast paths
 ```
+
+A **project-scope** miss additionally discards the Pass-1 metadata cache
+(`.beamtalk-pass1-cache.json`): its `ClassInfo` / class-index entries are
+compiler-*derived* from the source AST and are just as version-sensitive as the
+`.beam` output, so reusing them across a toolchain change would carry stale
+metadata even after the bytecode is rebuilt.
 
 This makes provenance a coarse gate in front of the fine-grained mtime logic:
 within one toolchain version, builds are exactly as incremental as today; across
@@ -120,21 +139,33 @@ upgrade. For *compiler developers* (this repo) it changes per commit, so an
 artifact built by an older commit — exactly the beamtalk-http failure mode — is
 detected and rebuilt. That cost is accepted (see Steelman).
 
+The OTP signal is the **full `otp_release`** string (e.g. `27-15.0.1`), not just
+the major. This matches the BT-2470 shared type-spec cache, which already keys on
+the full version because minor OTP/ERTS releases can shift the primitive type
+specs baked into compiled output. Keying both caches on the same granularity
+keeps them from disagreeing about whether an upgrade is material.
+
 ### 3. Self-describing modules
 
-Add `beamtalk_version` and `otp_major` to the `__beamtalk_meta/0` map so a
+Add `beamtalk_version` and `otp_release` to the `__beamtalk_meta/0` map so a
 **loaded** module is self-describing without a side file:
 
 ```erlang
 #{ class => 'Counter', superclass => 'Actor', kind => actor,
    beamtalk_version => <<"0.4.0-dev+a1b2c3d">>,   % NEW
-   otp_major => 27,                                % NEW
+   otp_release => <<"27-15.0.1">>,                 % NEW
    fields => [...], method_info => [...] }
 ```
 
 The side stamp is the **primary gate** (O(1) per scope, readable before loading
 anything). The meta keys are the **consumer-side check** the IDE/REPL uses to
 validate already-loaded modules against the running toolchain.
+
+A module compiled by an *older* toolchain has **no** provenance keys at all, so a
+missing `beamtalk_version`/`otp_release` in the meta map is itself treated as a
+provenance miss (stale → recompile), never as an error or a pass. This is
+essential: the absent-key case *is* the older-toolchain failure mode this ADR
+exists to catch (it is what bit beamtalk-http), so it must fail toward rebuild.
 
 ### 4. Provenance at each layer
 
@@ -283,21 +314,25 @@ dependency resolution (`deps/mod.rs`, `deps/lockfile.rs`), codegen
 (`beamtalk_repl_ops_load.erl`).
 
 - **Phase 1 — Project stamp.** Add `BuildLayout::stamp_path()`; write the stamp
-  after a successful build; read it at the start of `execute_build_passes` and
-  set `force`/`force_pass2` on mismatch. Tests: version-mismatch → rebuild;
-  matching version → no needless rebuild.
+  *last* (temp+rename) after a successful build; read it at the start of
+  `execute_build_passes` and set `force`/`force_pass2` on mismatch. A miss also
+  discards `.beamtalk-pass1-cache.json` (its `ClassInfo` is compiler-derived).
+  Tests: version-mismatch → rebuild (incl. Pass-1 cache dropped); matching
+  version → no needless rebuild.
 - **Phase 2 — Dependency provenance.** Add `dep_stamp_path(name)`; write per-dep
   stamps on dep compile; teach `deps_are_fresh` to mark a dep stale on version
   mismatch (or fail with a `clean --deps` directive). Test: a dep-version-
   mismatch fixture reproducing the beamtalk-http stale-doc case and showing it
   self-heals.
-- **Phase 3 — Self-describing modules.** Add `beamtalk_version` / `otp_major` to
-  `build_meta_map_doc()` via the typed Document API (no `format!`). Update
+- **Phase 3 — Self-describing modules.** Add `beamtalk_version` / `otp_release`
+  to `build_meta_map_doc()` via the typed Document API (no `format!`). Update
   `__beamtalk_meta` consumers that snapshot the map shape.
 - **Phase 4 — Workspace attach.** Generalize the BT-2653 header-content force-
   rebuild in `beamtalk_repl_ops_load.erl` into a provenance check over the
   project + dep stamps (and loaded `__beamtalk_meta`); recompile stale scopes on
-  attach rather than serving them.
+  attach rather than serving them. Treat a **missing** provenance key (old
+  toolchain) as a miss. Test: an old-toolchain fixture (no meta keys) recompiles
+  on attach.
 
 ## Migration Path
 
