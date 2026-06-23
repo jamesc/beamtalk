@@ -68,6 +68,10 @@ defmodule BtAttach.FacadeTest do
     def conforming_classes_of(protocol),
       do: record({:conforming_classes_of, protocol}) && {:value, %{"sites" => []}}
 
+    # BT-2669: native-module callers (reverse FFI nav-query kind).
+    def callers_of_native_module(module),
+      do: record({:callers_of_native_module, module}) && {:value, %{"sites" => []}}
+
     def symbol_index(scope),
       do: record({:symbol_index, scope}) && {:value, %{"classes" => []}}
 
@@ -161,7 +165,8 @@ defmodule BtAttach.FacadeTest do
                      browse_classes browse_protocols browse_method_source
                      browse_class_definition browse_native_source
                      browse_native_modules browse_native_module_source list_tests
-                     senders implementors required_methods conforming_classes symbols
+                     senders implementors required_methods conforming_classes
+                     callers_of_native_module symbols
                      git_status git_diff git_log
                      autoflush)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
@@ -395,6 +400,29 @@ defmodule BtAttach.FacadeTest do
                {:value, %{"sites" => []}}
 
       assert Facade.dispatch(:conforming_classes, %{protocol: "Printable"}, observer) ==
+               {:value, %{"sites" => []}}
+    end
+  end
+
+  describe "native-module callers (reverse FFI nav, BT-2669)" do
+    test "callers_of_native_module routes to the client and returns the live term" do
+      assert Facade.dispatch(:callers_of_native_module, %{module: "lists"}) ==
+               {:value, %{"sites" => []}}
+
+      assert {:callers_of_native_module, "lists"} in RecordingClient.calls()
+    end
+
+    test "a non-binary module is invalid params, with no dist call" do
+      assert Facade.dispatch(:callers_of_native_module, %{module: :lists}) ==
+               {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
+    test "the observer role may use the native-module callers view (read capability)" do
+      observer = %{role: :observer}
+
+      assert Facade.dispatch(:callers_of_native_module, %{module: "lists"}, observer) ==
                {:value, %{"sites" => []}}
     end
   end

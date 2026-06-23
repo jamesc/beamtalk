@@ -219,6 +219,73 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
     end
   end
 
+  # BT-2669: the native-module "Callers" affordance — the reverse of "go to
+  # native source". From a native module tab, list the Beamtalk class>>method
+  # sites that call into it via `(Erlang <module>) …`, reusing the
+  # Senders/Implementors popover; clicking a caller opens that Beamtalk method.
+  describe "native-module Callers (BT-2669)" do
+    test "the Callers button lists the calling Beamtalk methods and opens one", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+
+      # Open the stub's `beamtalk_subprocess` module (the stub returns one caller,
+      # Subprocess>>spawn:, for it).
+      html =
+        render_click(view, "browser_open_native_module", %{"module" => "beamtalk_subprocess"})
+
+      assert html =~ "beamtalk_subprocess.erl"
+      # The native tab carries the Callers affordance.
+      assert html =~ ~s(phx-click="native_callers")
+
+      # Click Callers: the shared nav popover opens with the "Callers" heading,
+      # the module name, and the calling site row.
+      html = render_click(view, "native_callers", %{})
+      assert html =~ ~s(class="nav-popover")
+      assert html =~ "Callers"
+      assert html =~ "beamtalk_subprocess"
+      assert html =~ "Subprocess"
+      assert html =~ "spawn:"
+
+      # Clicking the caller row opens that Beamtalk method tab (reusing nav_open).
+      html =
+        render_click(view, "nav_open", %{
+          "class" => "Subprocess",
+          "side" => "instance",
+          "selector" => "spawn:"
+        })
+
+      assert html =~ "spawn:"
+      # The popover closed after navigating.
+      refute html =~ ~s(class="nav-popover")
+    end
+
+    test "a native module with no Beamtalk callers shows the empty state", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+
+      # `beamtalk_http_client` has no canned callers in the stub.
+      render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
+
+      html = render_click(view, "native_callers", %{})
+      assert html =~ ~s(class="nav-popover")
+      assert html =~ "Callers"
+      assert html =~ "No Callers found."
+    end
+
+    test "an observer can use the Callers view (the op is :read)", %{conn: conn} do
+      {:ok, view, _html} = live(observer_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+      render_click(view, "browser_open_native_module", %{"module" => "beamtalk_subprocess"})
+
+      html = render_click(view, "native_callers", %{})
+      assert html =~ "Callers"
+      assert html =~ "Subprocess"
+    end
+  end
+
   # BT-2668: the path-cleaning that keeps the absolute host path off-screen. Unit
   # test of the relativiser directly (it runs on whatever path the runtime op
   # returns), independent of the rendered viewer above.

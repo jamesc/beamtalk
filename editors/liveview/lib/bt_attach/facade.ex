@@ -116,6 +116,12 @@ defmodule BtAttach.Facade do
     # safe for the Observer role, scoped exactly like `senders`/`implementors`.
     required_methods: :read,
     conforming_classes: :read,
+    # BT-2669: the reverse of "go to native source" — the Beamtalk callers of a
+    # native module, backing the "Callers" affordance on the native-module
+    # viewer. Same thin `:read` facade over the `nav-query` channel (kind
+    # `callers_of_native_module`, backed by the `beamtalk_xref` reverse FFI
+    # index). Pure xref, no user code, safe for the Observer role.
+    callers_of_native_module: :read,
     symbols: :read,
     subscribe_transcript: :read,
     subscribe_bindings: :read,
@@ -313,6 +319,16 @@ defmodule BtAttach.Facade do
   defp invoke(:conforming_classes, %{protocol: protocol}, _ctx) do
     if is_binary(protocol),
       do: client().conforming_classes_of(protocol),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-2669: the native-module "Callers" view. `module` is the native (Erlang)
+  # module name; routes to the `callers_of_native_module` nav-query kind and
+  # returns the live `{:value, _}` term verbatim. Bad params come back as
+  # `:invalid_params` with no dist call, matching the senders/implementors ops.
+  defp invoke(:callers_of_native_module, %{module: module}, _ctx) do
+    if is_binary(module),
+      do: client().callers_of_native_module(module),
       else: {:error, :invalid_params}
   end
 

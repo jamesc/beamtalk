@@ -73,6 +73,12 @@ pub struct SendHit {
     pub line: u32,
     /// The syntactic kind of receiver the message was sent to.
     pub receiver: ReceiverKind,
+    /// For [`ReceiverKind::ErlangFfi`] sends, the resolved native (Erlang)
+    /// module name the call targets — the `M` in `(Erlang M) fun: …` or the
+    /// module-name send `Erlang M`. `None` for every non-FFI send and for an
+    /// FFI chain whose module receiver is not a static `Erlang <module>` form.
+    /// Backs the reverse "callers of a native module" index (BT-2669).
+    pub target_module: Option<String>,
 }
 
 /// Find every message send within `method_source`.
@@ -152,6 +158,69 @@ fn is_erlang_ffi_receiver(receiver: &Expression) -> bool {
     }
 }
 
+/// Resolve the native (Erlang) module name a send is routed to, given the send's
+/// receiver expression.
+///
+/// The module name is the unary selector applied directly to the `Erlang` class
+/// reference: in `(Erlang lists) reverse: x`, the `reverse:` send's receiver is
+/// the `Erlang lists` chain, whose own (innermost) send is `lists` onto the
+/// `Erlang` class reference — so the module is `lists`. For the bare module-name
+/// send `Erlang lists`, the receiver IS the `Erlang` class reference, so this is
+/// only called from `push_send` once the *enclosing* send is detected; the
+/// module-name send itself resolves its module via [`module_of_ffi_send`].
+///
+/// Returns `None` when the FFI chain does not bottom out at a static
+/// `Erlang <module>` (e.g. `(Erlang someExpr) …` where the module is computed),
+/// which is rare but must not crash the walk.
+fn erlang_ffi_module(receiver: &Expression) -> Option<String> {
+    match receiver {
+        // `(Erlang lists) …` parses the inner part as a MessageSend `lists`
+        // onto the `Erlang` class reference. The selector of the send whose
+        // own receiver is the bare `Erlang` class reference is the module name.
+        Expression::MessageSend {
+            receiver: inner,
+            selector,
+            ..
+        } => {
+            if is_erlang_class_reference(inner) {
+                Some(selector.name().trim_end_matches(':').to_string())
+            } else {
+                erlang_ffi_module(inner)
+            }
+        }
+        Expression::Parenthesized { expression, .. } => erlang_ffi_module(expression),
+        _ => None,
+    }
+}
+
+/// Whether `expr` is the bare `Erlang` class reference (no package qualifier).
+fn is_erlang_class_reference(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::ClassReference { name, package, .. }
+            if package.is_none() && name.name == "Erlang"
+    )
+}
+
+/// Resolve the native module targeted by an FFI send, given the send's own
+/// `receiver` and `selector`.
+///
+/// Two shapes carry FFI module information:
+/// - The module-name send itself (`Erlang lists`): the receiver is the bare
+///   `Erlang` class reference and the selector (`lists`) is the module name.
+/// - A function send (`(Erlang lists) reverse:`): the module is recovered from
+///   the receiver chain via [`erlang_ffi_module`].
+fn module_of_ffi_send(
+    receiver: &Expression,
+    selector: &crate::ast::MessageSelector,
+) -> Option<String> {
+    if is_erlang_class_reference(receiver) {
+        Some(selector.name().trim_end_matches(':').to_string())
+    } else {
+        erlang_ffi_module(receiver)
+    }
+}
+
 /// Classify the shared receiver of a cascade.
 ///
 /// The parser folds the cascade's first message into the cascade `receiver`
@@ -164,6 +233,22 @@ fn cascade_receiver_kind(receiver: &Expression) -> ReceiverKind {
             receiver: inner, ..
         } => receiver_kind(inner),
         other => receiver_kind(other),
+    }
+}
+
+/// Resolve the native module shared by an FFI cascade's messages.
+///
+/// The cascade `receiver` is the folded-in first message (a `MessageSend`); its
+/// own receiver is the shared cascade receiver, from which the FFI module is
+/// recovered the same way as for a non-cascade send.
+fn cascade_shared_ffi_module(receiver: &Expression) -> Option<String> {
+    match receiver {
+        Expression::MessageSend {
+            receiver: inner,
+            selector,
+            ..
+        } => module_of_ffi_send(inner, selector),
+        other => erlang_ffi_module(other),
     }
 }
 
@@ -202,6 +287,7 @@ fn push_send(
     selector: &crate::ast::MessageSelector,
     span: Span,
     receiver: ReceiverKind,
+    target_module: Option<String>,
     source: &str,
     hits: &mut Vec<SendHit>,
 ) {
@@ -209,7 +295,39 @@ fn push_send(
         selector: selector.name().to_string(),
         line: selector_line(selector, span, source),
         receiver,
+        target_module,
     });
+}
+
+/// Collect the sends of a cascade (`recv msg1; msg2; …`) into `hits`.
+///
+/// The parser folds the first cascade message into `receiver` as a full
+/// [`Expression::MessageSend`], so the shared cascade receiver is that send's
+/// receiver. Recursing into `receiver` collects the first message; the remaining
+/// `messages` reuse the same shared receiver kind. An FFI cascade's module is
+/// resolved once from the shared receiver and reused for every message.
+fn collect_cascade_sends(
+    receiver: &Expression,
+    messages: &[crate::ast::CascadeMessage],
+    source: &str,
+    hits: &mut Vec<SendHit>,
+) {
+    let kind = cascade_receiver_kind(receiver);
+    let module = if kind == ReceiverKind::ErlangFfi {
+        cascade_shared_ffi_module(receiver)
+    } else {
+        None
+    };
+    let error_rooted = receiver_rooted_in_error(receiver);
+    collect_sends(receiver, source, hits);
+    for msg in messages {
+        if !error_rooted {
+            push_send(&msg.selector, msg.span, kind, module.clone(), source, hits);
+        }
+        for arg in &msg.arguments {
+            collect_sends(arg, source, hits);
+        }
+    }
 }
 
 /// Recursively collect every message send into `hits`.
@@ -223,7 +341,13 @@ fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
             ..
         } => {
             if !receiver_rooted_in_error(receiver) {
-                push_send(selector, *span, receiver_kind(receiver), source, hits);
+                let kind = receiver_kind(receiver);
+                let module = if kind == ReceiverKind::ErlangFfi {
+                    module_of_ffi_send(receiver, selector)
+                } else {
+                    None
+                };
+                push_send(selector, *span, kind, module, source, hits);
             }
             collect_sends(receiver, source, hits);
             for arg in arguments {
@@ -232,23 +356,7 @@ fn collect_sends(expr: &Expression, source: &str, hits: &mut Vec<SendHit>) {
         }
         Expression::Cascade {
             receiver, messages, ..
-        } => {
-            // The parser folds the first cascade message into `receiver` as a
-            // full `MessageSend`, so the shared cascade receiver is that send's
-            // receiver. Recursing into `receiver` collects the first message;
-            // the remaining `messages` reuse the same shared receiver kind.
-            let kind = cascade_receiver_kind(receiver);
-            let error_rooted = receiver_rooted_in_error(receiver);
-            collect_sends(receiver, source, hits);
-            for msg in messages {
-                if !error_rooted {
-                    push_send(&msg.selector, msg.span, kind, source, hits);
-                }
-                for arg in &msg.arguments {
-                    collect_sends(arg, source, hits);
-                }
-            }
-        }
+        } => collect_cascade_sends(receiver, messages, source, hits),
         Expression::Assignment { target, value, .. } => {
             collect_sends(target, source, hits);
             collect_sends(value, source, hits);
@@ -526,6 +634,8 @@ mod tests {
             .find(|h| h.selector == "beamtalk_interface")
             .unwrap();
         assert_eq!(hit.receiver, ReceiverKind::ErlangFfi);
+        // The module-name send carries the target module too (its own selector).
+        assert_eq!(hit.target_module.as_deref(), Some("beamtalk_interface"));
     }
 
     #[test]
@@ -536,11 +646,24 @@ mod tests {
             find_all_sends_in_source("run: src => (Erlang beamtalk_interface) allSendsIn: src");
         let chained = hits.iter().find(|h| h.selector == "allSendsIn:").unwrap();
         assert_eq!(chained.receiver, ReceiverKind::ErlangFfi);
+        // The function send resolves the target module from its receiver chain.
+        assert_eq!(chained.target_module.as_deref(), Some("beamtalk_interface"));
         let module = hits
             .iter()
             .find(|h| h.selector == "beamtalk_interface")
             .unwrap();
         assert_eq!(module.receiver, ReceiverKind::ErlangFfi);
+        assert_eq!(module.target_module.as_deref(), Some("beamtalk_interface"));
+    }
+
+    #[test]
+    fn erlang_ffi_keyword_call_resolves_module() {
+        // `(Erlang lists) reverse: xs` — the keyword function send's module is
+        // `lists`, recovered from the parenthesised receiver chain.
+        let hits = find_all_sends_in_source("rev: xs => (Erlang lists) reverse: xs");
+        let call = hits.iter().find(|h| h.selector == "reverse:").unwrap();
+        assert_eq!(call.receiver, ReceiverKind::ErlangFfi);
+        assert_eq!(call.target_module.as_deref(), Some("lists"));
     }
 
     #[test]
@@ -549,6 +672,8 @@ mod tests {
         let hits = find_all_sends_in_source("make => Integer new");
         let hit = hits.iter().find(|h| h.selector == "new").unwrap();
         assert_eq!(hit.receiver, ReceiverKind::Other);
+        // Non-FFI sends never carry a target module.
+        assert_eq!(hit.target_module, None);
     }
 
     #[test]

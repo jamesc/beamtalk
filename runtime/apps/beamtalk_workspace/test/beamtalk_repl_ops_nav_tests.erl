@@ -49,7 +49,32 @@ describe_ops_nav_query_optional_includes_selector_and_class_test() ->
     #{<<"nav-query">> := Info} = beamtalk_repl_ops_nav:describe_ops(),
     Optional = maps:get(<<"optional">>, Info),
     ?assert(lists:member(<<"selector">>, Optional)),
-    ?assert(lists:member(<<"class">>, Optional)).
+    ?assert(lists:member(<<"class">>, Optional)),
+    %% BT-2669: callers_of_native_module takes a `module` param.
+    ?assert(lists:member(<<"module">>, Optional)).
+
+%%====================================================================
+%% handle/4 — callers_of_native_module validation (BT-2669)
+%%====================================================================
+
+handle_callers_missing_module_returns_error_mentioning_module_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>, #{<<"kind">> => <<"callers_of_native_module">>}, Msg, self()
+    ),
+    Decoded = assert_error_response(Response),
+    ErrBin = maps:get(<<"error">>, Decoded),
+    ?assertNotEqual(nomatch, binary:match(ErrBin, <<"module">>)).
+
+handle_callers_empty_module_returns_error_test() ->
+    Msg = make_msg(),
+    Response = beamtalk_repl_ops_nav:handle(
+        <<"nav-query">>,
+        #{<<"kind">> => <<"callers_of_native_module">>, <<"module">> => <<>>},
+        Msg,
+        self()
+    ),
+    assert_error_response(Response).
 
 %%====================================================================
 %% handle/4 — validation error paths (no xref dependency)
@@ -520,6 +545,93 @@ nav_tests(_Pid) ->
             After = erlang:system_info(atom_count),
             ?assertEqual(Before, After)
         end},
+        {"callers_of_native_module returns the calling sites", fun() ->
+            ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
+            Msg = make_msg(),
+            Response = beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"callers_of_native_module">>, <<"module">> => <<"lists">>},
+                Msg,
+                self()
+            ),
+            Decoded = json:decode(Response),
+            ?assertMatch(#{<<"status">> := [<<"done">>]}, Decoded),
+            #{<<"value">> := #{<<"sites">> := [Row | _] = Sites}} = Decoded,
+            ?assertNotEqual([], Sites),
+            ?assertEqual(<<"NavFfiCaller">>, maps:get(<<"class">>, Row)),
+            ?assertEqual(<<"reverseList:">>, maps:get(<<"method">>, Row)),
+            ?assert(maps:is_key(<<"class_side">>, Row)),
+            ?assert(maps:is_key(<<"line">>, Row)),
+            ?assert(maps:is_key(<<"source_file">>, Row))
+        end},
+        {"callers_of_native_module is empty for a module with no callers", fun() ->
+            ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
+            Msg = make_msg(),
+            Response = beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{<<"kind">> => <<"callers_of_native_module">>, <<"module">> => <<"maps">>},
+                Msg,
+                self()
+            ),
+            Decoded = json:decode(Response),
+            ?assertMatch(#{<<"value">> := #{<<"sites">> := []}}, Decoded)
+        end},
+        {"callers_of_native_module unknown module returns empty sites list", fun() ->
+            ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
+            Msg = make_msg(),
+            %% A never-loaded module name has no existing atom → sentinel → [].
+            Response = beamtalk_repl_ops_nav:handle(
+                <<"nav-query">>,
+                #{
+                    <<"kind">> => <<"callers_of_native_module">>,
+                    <<"module">> => <<"__no_such_native_mod_nav__">>
+                },
+                Msg,
+                self()
+            ),
+            Decoded = json:decode(Response),
+            ?assertMatch(#{<<"value">> := #{<<"sites">> := []}}, Decoded)
+        end},
+        {"atom table stable under flood of unknown native modules", fun() ->
+            ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
+            Msg = make_msg(),
+            _ = code:ensure_loaded(beamtalk_repl_ops_nav),
+            _ = code:ensure_loaded(json),
+            _ =
+                json:decode(
+                    beamtalk_repl_ops_nav:handle(
+                        <<"nav-query">>,
+                        #{
+                            <<"kind">> => <<"callers_of_native_module">>,
+                            <<"module">> => <<"warmup_native_mod">>
+                        },
+                        Msg,
+                        self()
+                    )
+                ),
+            Before = erlang:system_info(atom_count),
+            lists:foreach(
+                fun(N) ->
+                    Bin = iolist_to_binary([
+                        <<"__nav_query_flood_mod_">>,
+                        integer_to_binary(N),
+                        <<"_">>,
+                        integer_to_binary(erlang:unique_integer([positive]))
+                    ]),
+                    Response = beamtalk_repl_ops_nav:handle(
+                        <<"nav-query">>,
+                        #{<<"kind">> => <<"callers_of_native_module">>, <<"module">> => Bin},
+                        Msg,
+                        self()
+                    ),
+                    Decoded = json:decode(Response),
+                    ?assertMatch(#{<<"value">> := #{<<"sites">> := []}}, Decoded)
+                end,
+                lists:seq(1, 100)
+            ),
+            After = erlang:system_info(atom_count),
+            ?assertEqual(Before, After)
+        end},
         {"atom table stable under flood of unknown classes", fun() ->
             %% Same invariant for the `references` kind, which routes through
             %% with_class/1 → binary_to_existing_atom/2.
@@ -670,6 +782,28 @@ nav_test_xref() ->
             references => [
                 #{class => 'Integer', line => 7}
             ],
+            source_status => indexed,
+            provenance => class_body
+        }
+    ].
+
+%% Minimal xref payload with an Erlang-FFI send into the `lists` module
+%% (BT-2669). Mirrors what codegen emits for `(Erlang lists) reverse: xs`.
+nav_ffi_xref() ->
+    [
+        #{
+            class_side => false,
+            selector => 'reverseList:',
+            line => 12,
+            sends => [
+                #{
+                    selector => 'reverse:',
+                    line => 13,
+                    recv_kind => erlang_ffi,
+                    target_module => 'lists'
+                }
+            ],
+            references => [],
             source_status => indexed,
             provenance => class_body
         }

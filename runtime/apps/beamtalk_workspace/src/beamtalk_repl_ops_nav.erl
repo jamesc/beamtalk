@@ -26,13 +26,22 @@ Why a structured op (vs. an `eval` of `SystemNavigation default sendersOf:`):
 Request shape:
 ```
 {"op": "nav-query", "id": "...",
-  "kind": "<senders|implementors|references|required_methods|conforming_classes>",
+  "kind": "<senders|implementors|references|required_methods|conforming_classes|
+            callers_of_native_module>",
   "selector": "increment"            // for senders/implementors (Beamtalk selector)
   "class":    "Counter"              // for references            (Beamtalk class name)
                                      //  and required_methods/conforming_classes
                                      //  (the *protocol* name, BT-2639)
+  "module":   "lists"                // for callers_of_native_module (BT-2669)
+                                     //  (the native Erlang module name)
 }
 ```
+
+The `callers_of_native_module` kind is the reverse of "go to native source": given
+a native (Erlang) module, it returns the Beamtalk `class>>method` sites that call
+into it via `(Erlang <module>) …`, in the same site-row shape as senders so the IDE
+reuses the senders/implementors popover (BT-2495). Empty when the module has no
+Beamtalk callers.
 
 The protocol kinds (BT-2639) are the protocol equivalent of senders/implementors
 — `required_methods` lists a protocol's contract selectors, `conforming_classes`
@@ -103,6 +112,9 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
         {ok, {conforming_classes, ProtocolName}} ->
             Classes = beamtalk_protocol_registry:conforming_classes(ProtocolName),
             {value, conforming_classes_value(Classes, ProtocolName)};
+        {ok, {callers_of_native_module, Module}} ->
+            Rows = beamtalk_xref:callers_of_native_module(Module),
+            {value, native_callers_value(Rows)};
         {error, Reason} ->
             {error,
                 beamtalk_repl_errors:make(
@@ -116,7 +128,7 @@ describe_ops() ->
     #{
         <<"nav-query">> => #{
             <<"params">> => [<<"kind">>],
-            <<"optional">> => [<<"selector">>, <<"class">>]
+            <<"optional">> => [<<"selector">>, <<"class">>, <<"module">>]
         }
     }.
 
@@ -125,7 +137,9 @@ describe_ops() ->
 %%% ====================================================================
 
 -spec validate_params(map()) ->
-    {ok, {senders | implementors | references | required_methods | conforming_classes, atom()}}
+    {ok,
+        {senders | implementors | references | required_methods | conforming_classes |
+            callers_of_native_module, atom()}}
     | {error, binary()}.
 validate_params(Params) ->
     case maps:get(<<"kind">>, Params, undefined) of
@@ -139,10 +153,12 @@ validate_params(Params) ->
             with_class(Params, required_methods);
         <<"conforming_classes">> ->
             with_class(Params, conforming_classes);
+        <<"callers_of_native_module">> ->
+            with_module(Params);
         undefined ->
             {error, <<
-                "missing required parameter `kind` (one of "
-                "senders/implementors/references/required_methods/conforming_classes)"
+                "missing required parameter `kind` (one of senders/implementors/"
+                "references/required_methods/conforming_classes/callers_of_native_module)"
             >>};
         Other when is_binary(Other) ->
             {error,
@@ -151,7 +167,7 @@ validate_params(Params) ->
                     Other,
                     <<
                         "` (expected senders/implementors/references/"
-                        "required_methods/conforming_classes)"
+                        "required_methods/conforming_classes/callers_of_native_module)"
                     >>
                 ])};
         _ ->
@@ -203,6 +219,24 @@ with_class_error(references) ->
 with_class_error(_ProtocolKind) ->
     <<"`class` (non-empty protocol name) is required for required_methods/conforming_classes">>.
 
+-spec with_module(map()) -> {ok, {callers_of_native_module, atom()}} | {error, binary()}.
+with_module(Params) ->
+    case maps:get(<<"module">>, Params, undefined) of
+        Mod when is_binary(Mod), byte_size(Mod) > 0 ->
+            %% binary_to_existing_atom: see comment in with_selector/2. A native
+            %% module name that is not yet an atom (the module is not loaded)
+            %% yields the shared sentinel — `callers_of_native_module` returns []
+            %% for it, not a validation error.
+            try
+                {ok, {callers_of_native_module, binary_to_existing_atom(Mod, utf8)}}
+            catch
+                error:badarg ->
+                    {ok, {callers_of_native_module, '__nav_query_unknown__'}}
+            end;
+        _ ->
+            {error, <<"`module` (non-empty native module name) is required for callers_of_native_module">>}
+    end.
+
 %% The site rows are already a JSON-shaped map of lists / binaries / integers /
 %% booleans / null; the `{value, _}` op_result tag encodes them with identity so
 %% term_to_json never sees them (BT-2402).
@@ -210,6 +244,33 @@ with_class_error(_ProtocolKind) ->
 sites_value(Sites) ->
     Rows = [site_to_row(S) || S <- Sites],
     #{<<"sites">> => Rows}.
+
+%% BT-2669: native-caller rows reuse the senders/implementors site-row shape so
+%% the IDE's existing popover/list renderer (BT-2495) handles them unchanged —
+%% clicking a row opens the calling `class>>method`. The `native_caller_row()`
+%% already carries `owner`/`class_side`/`method`/`line`; we just attach the
+%% source file + origin the renderer needs to open the method.
+-spec native_callers_value([beamtalk_xref:native_caller_row()]) -> map().
+native_callers_value(Rows) ->
+    SiteRows = [native_caller_to_row(R) || R <- Rows],
+    #{<<"sites">> => SiteRows}.
+
+-spec native_caller_to_row(beamtalk_xref:native_caller_row()) -> map().
+native_caller_to_row(Row) ->
+    #{
+        owner := Owner,
+        class_side := ClassSide,
+        method := Method,
+        line := Line
+    } = Row,
+    #{
+        <<"class">> => atom_to_binary(Owner, utf8),
+        <<"class_side">> => ClassSide,
+        <<"method">> => atom_to_binary(Method, utf8),
+        <<"line">> => Line,
+        <<"source_file">> => source_file_of(Owner),
+        <<"source_origin">> => source_origin_of(Owner)
+    }.
 
 -spec implementors_value([{atom(), boolean()}], atom()) -> map().
 implementors_value(Pairs, Selector) ->

@@ -58,6 +58,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     defined_selectors_bt/0,
     all_sends_bt/0,
     all_sent_selectors_bt/0,
+    callers_of_native_module/1,
     method_info/3
 ]).
 
@@ -101,7 +102,12 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
 -type send_entry() :: #{
     selector := selector(),
     line := pos_integer(),
-    recv_kind => recv_kind()
+    recv_kind => recv_kind(),
+    %% For `erlang_ffi` sends, the native (Erlang) module the call targets
+    %% (the `M` in `(Erlang M) fun: …`). `undefined` for non-FFI sends and for
+    %% FFI chains whose module receiver is not a static `Erlang <module>` form.
+    %% Backs the reverse "callers of a native module" query (BT-2669).
+    target_module => module() | undefined
 }.
 
 -type reference_entry() :: #{
@@ -134,12 +140,28 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     method := selector(),
     line := pos_integer(),
     recv_kind => recv_kind(),
+    %% For `erlang_ffi` send sites, the native module targeted (BT-2669).
+    %% Absent / `undefined` for non-FFI sites.
+    target_module => module() | undefined,
     gen := gen()
 }.
 
 %% A site reduced to the fields `SystemNavigation` consumes — the internal
 %% `gen` / `recv_kind` bookkeeping is dropped at the BT boundary (BT-2299).
 -type bt_row() :: #{
+    owner := class_name(),
+    class_side := class_side(),
+    method := selector(),
+    line := pos_integer()
+}.
+
+%% A Beamtalk call site into a native module, reduced to the fields the
+%% "Callers" view consumes (BT-2669): the calling class, whether the call is in
+%% a class-side method, and the calling method selector. One row per distinct
+%% `{owner, class_side, method}` — a method that calls the module many times
+%% contributes a single row. `line` is the first FFI call site within the
+%% method (best-effort goto anchor).
+-type native_caller_row() :: #{
     owner := class_name(),
     class_side := class_side(),
     method := selector(),
@@ -191,6 +213,7 @@ See also: docs/ADR/0087-maintained-xref-index-for-system-navigation.md
     method_info/0,
     site/0,
     bt_row/0,
+    native_caller_row/0,
     impl_row/0,
     selector_row/0,
     send_row/0,
@@ -365,7 +388,8 @@ send_hit_to_entry(#{selector := SelBin, line := Line} = Hit) when
             {true, #{
                 selector => Selector,
                 line => Line,
-                recv_kind => recv_to_recv_kind(maps:get(recv, Hit, other))
+                recv_kind => recv_to_recv_kind(maps:get(recv, Hit, other)),
+                target_module => target_module_atom(maps:get(target_module, Hit, <<>>))
             }}
     catch
         error:badarg -> false
@@ -378,6 +402,27 @@ recv_to_recv_kind(self) -> self_recv;
 recv_to_recv_kind(super) -> super_recv;
 recv_to_recv_kind(erlang_ffi) -> erlang_ffi;
 recv_to_recv_kind(_) -> other.
+
+-doc """
+Intern the FFI `target_module` binary the compiler reports onto a module atom
+for the reverse callers index (BT-2669), or `undefined` for non-FFI sends and
+unresolvable FFI chains.
+
+`binary_to_existing_atom` (never `binary_to_atom`): the compiler source is
+untrusted, so we must not let it mint new atoms. A native module the BT side
+calls is generally already loaded (hence its atom exists); if it is not yet an
+atom the send is still indexed but carries no module attribution — the callers
+query for that module simply returns empty until the module is loaded.
+""".
+-spec target_module_atom(term()) -> module() | undefined.
+target_module_atom(Bin) when is_binary(Bin), Bin =/= <<>>, byte_size(Bin) =< ?MAX_ATOM_BYTES ->
+    try
+        binary_to_existing_atom(Bin, utf8)
+    catch
+        error:badarg -> undefined
+    end;
+target_module_atom(_) ->
+    undefined.
 
 %%====================================================================
 %% API — read path
@@ -720,6 +765,71 @@ all_sent_selectors_bt() ->
                 ])
         end,
     #{indexed => Selectors, fallback_classes => FallbackClasses}.
+
+-doc """
+Return the Beamtalk methods that call into native (Erlang) module `Module` via
+the `(Erlang <module>) …` FFI bridge — the reverse of "go to native source"
+(BT-2669). Backs the "Callers" affordance on the IDE's native-module viewer.
+
+Unlike the BT-facing `_bt` reads, this is a direct ETS read (like
+`senders_of/1`): the senders table already records every `erlang_ffi` send with
+its `target_module`, so the callers of a module are exactly the live FFI send
+sites whose `target_module` matches. Rows are filtered to each owner's current
+generation (stale-row drop, BT-2300) and de-duplicated to one
+`native_caller_row()` per `{owner, class_side, method}` — a method that calls
+the module many times yields a single row anchored at its first FFI call line.
+
+Returns `[]` for a module with no Beamtalk callers (the quiet/empty state) and
+for the sentinel atom an unresolved module name decodes to.
+""".
+-spec callers_of_native_module(module()) -> [native_caller_row()].
+callers_of_native_module(Module) when is_atom(Module) ->
+    case ets:whereis(?SENDERS_TABLE) of
+        undefined ->
+            [];
+        _ ->
+            {Snapshot, Rows} = read_stable(fun() ->
+                ets:tab2list(?SENDERS_TABLE)
+            end),
+            Sites = [
+                Site
+             || {_Sent, Site} <- Rows,
+                maps:get(recv_kind, Site, other) =:= erlang_ffi,
+                maps:get(target_module, Site, undefined) =:= Module,
+                is_live_gen(maps:get(owner, Site), Site, Snapshot)
+            ],
+            dedup_caller_rows(Sites)
+    end.
+
+%% Collapse FFI send sites to one `native_caller_row()` per calling method,
+%% keeping the earliest call line as the goto anchor. Sorted for a stable,
+%% reproducible order in the UI / tests.
+-spec dedup_caller_rows([site()]) -> [native_caller_row()].
+dedup_caller_rows(Sites) ->
+    Folded = lists:foldl(
+        fun(Site, Acc) ->
+            #{owner := Owner, class_side := ClassSide, method := Method, line := Line} = Site,
+            Key = {Owner, ClassSide, Method},
+            case Acc of
+                #{Key := ExistingLine} when ExistingLine =< Line ->
+                    Acc;
+                _ ->
+                    Acc#{Key => Line}
+            end
+        end,
+        #{},
+        Sites
+    ),
+    Rows = [
+        #{owner => Owner, class_side => ClassSide, method => Method, line => Line}
+     || {{Owner, ClassSide, Method}, Line} <- maps:to_list(Folded)
+    ],
+    lists:sort(
+        fun(#{owner := O1, method := M1}, #{owner := O2, method := M2}) ->
+            {O1, M1} =< {O2, M2}
+        end,
+        Rows
+    ).
 
 -doc """
 Return the `method_info()` record for a method, or `undefined` if the
@@ -1242,6 +1352,7 @@ insert_one_method(Class, Entry, Gen) ->
                 method => Selector,
                 line => maps:get(line, Send, Line),
                 recv_kind => maps:get(recv_kind, Send, other),
+                target_module => maps:get(target_module, Send, undefined),
                 gen => Gen
             },
             true = ets:insert(?SENDERS_TABLE, {SendSelector, Site})
