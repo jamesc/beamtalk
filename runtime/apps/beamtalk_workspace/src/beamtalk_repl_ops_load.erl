@@ -565,7 +565,7 @@ next save write to the wrong (deleted) file and leave the real `.erl` stale.
 """.
 -spec finish_native_write(atom(), binary(), string(), binary(), binary(), string()) ->
     {value, map()}.
-finish_native_write(Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileRoot) ->
+finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileRoot) ->
     case atomic_write_file(ErlPath, Source) of
         ok ->
             %% Recompile + reload from the REAL `.erl` (not the validation temp)
