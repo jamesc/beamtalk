@@ -87,7 +87,7 @@ After a successful build, write a JSON stamp into the build scope:
 {
   "schema": 1,
   "beamtalk_version": "0.4.0-dev+a1b2c3d",  // BEAMTALK_VERSION, verbatim
-  "otp_release": "27-15.0.1",               // full otp_release + ERTS, keyed
+  "otp_release": "27-15.0.1",               // compound OTP+ERTS version, keyed
   "built_at": "2026-06-23T10:04:11Z"        // informational only
 }
 ```
@@ -335,7 +335,11 @@ the stamp is build-local and the lockfile is committed.
   mismatch fixture reproducing the beamtalk-http stale-doc case and showing it
   self-heals.
 - **Phase 3 — Self-describing modules.** Add `beamtalk_version` / `otp_release`
-  to `build_meta_map_doc()` via the typed Document API (no `format!`). Audit the
+  to `build_meta_map_doc()` via the typed Document API (no `format!`). Both values
+  must be baked in as **compile-time literals** passed down from `beam_compiler.rs`
+  (the same compound as the stamp), never emitted as a runtime
+  `erlang:system_info/1` call in the generated module — otherwise the baked OTP
+  value would be `"27"`, not `"27-15.0.1"`, silently breaking the key. Audit the
   `__beamtalk_meta` readers whose snapshots / map-shape assertions may need
   updating: `beamtalk_object_class` (`read_meta/1`, `meta_to_methods/2`),
   `beamtalk_behaviour_intrinsics` (`meta_for_module/1`), `beamtalk_repl_ops_dev`,
@@ -348,7 +352,10 @@ the stamp is build-local and the lockfile is committed.
   unavailable), fail the attach with the same directed message as Phase 2
   (*"dependency built by beamtalk X; run `beamtalk clean --deps` and rebuild"*)
   rather than silently serving the stale scope — the failure mode is always loud
-  and directed, never silent. Test: an old-toolchain fixture (no meta keys)
+  and directed, never silent. Provenance checks across all scopes (project + every
+  dep) complete *before* any `code:load_file/1` calls begin, so a "source
+  unavailable" failure always leaves the code server in its pre-attach state —
+  no partial loads to roll back. Test: an old-toolchain fixture (no meta keys)
   recompiles on attach.
 
 ## Migration Path
