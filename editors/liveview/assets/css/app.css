@@ -426,19 +426,30 @@
   flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 12px;
   border-bottom: 1px solid var(--line); background: var(--panel);
   font-size: 11px; color: var(--muted);
+  /* BT-2662: one shared line-height so every direct child resolves to the same
+     16px line box. `align-items: center` centers boxes of equal height, and
+     because the boxes now match, each item's text centers on the same line.
+     The prior misalignment came from items (crumb text, the bare-text
+     runtime/meta-note badges) inheriting `normal` line-height (~1.5) while the
+     pill badges used an explicit 16px — equal-centered boxes of unequal height
+     still read off. The badge pills already declare line-height: 16px. */
+  line-height: 16px;
 }
 .editor-meta .crumb {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
   display: flex; align-items: center; gap: 5px;
+  line-height: 16px;
 }
 .editor-meta .crumb b { color: var(--ink); font-weight: 600; }
 .editor-meta .crumb .mono { color: var(--accent-2); font-family: var(--code-font, monospace); }
 .editor-meta .crumb .sep { color: var(--faint); }
 .editor-meta > .spacer { flex: 1; }
-.editor-meta .meta-note { flex: none; white-space: nowrap; color: var(--faint); }
+/* BT-2662: bare-text items (notes + runtime/unflushed badges) share the row's
+   16px line box so they center on the same line as the crumb and pill badges. */
+.editor-meta .meta-note { flex: none; white-space: nowrap; color: var(--faint); line-height: 16px; }
 .editor-meta .meta-note.edited, .editor-meta .meta-note.read-only { color: var(--accent-2); }
 .editor-meta .runtime-tag {
-  flex: none; font-size: 11px; font-weight: 700;
+  flex: none; font-size: 11px; font-weight: 700; line-height: 16px;
   color: var(--t-symbol);
 }
 
