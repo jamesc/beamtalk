@@ -76,21 +76,14 @@ pub fn discover_port(workspace_id: Option<&str>) -> Option<u16> {
 ///
 /// Expects a line like: `Connected to REPL backend on port 12345.`
 pub fn parse_repl_port(stdout: &str) -> Option<u16> {
-    stdout.lines().find_map(|line| {
-        line.strip_prefix("Connected to REPL backend on port ")
-            .and_then(|rest| rest.trim_end_matches('.').trim().parse().ok())
-    })
+    beamtalk_workspace::parse_repl_port(stdout)
 }
 
 /// Parse the workspace ID from `beamtalk repl` stdout.
 ///
 /// Expects a line like: `  Workspace: abc123def456 (new)`
 pub fn parse_workspace_id(stdout: &str) -> Option<String> {
-    stdout.lines().find_map(|line| {
-        line.strip_prefix("  Workspace: ")
-            .and_then(|rest| rest.split_whitespace().next())
-            .map(std::string::ToString::to_string)
-    })
+    beamtalk_workspace::parse_repl_workspace_id(stdout)
 }
 
 /// Find any running workspace and return its port, cookie, and workspace ID.
@@ -272,57 +265,6 @@ mod tests {
         let dir = beamtalk_workspace::workspace_dir("abc123def456");
         assert!(dir.is_ok());
         assert!(dir.unwrap().ends_with("abc123def456"));
-    }
-
-    #[test]
-    fn test_parse_repl_port_typical() {
-        // Mirrors real `beamtalk repl` output order: the Workspace line is
-        // printed before the port line (repl/mod.rs). Parsing is order-agnostic,
-        // but the fixture matches reality so it can't mislead a maintainer.
-        let stdout = "Welcome to beamtalk REPL\n  Workspace: abc123def456 (new)\nConnected to REPL backend on port 9876.\n";
-        assert_eq!(parse_repl_port(stdout), Some(9876));
-    }
-
-    #[test]
-    fn test_parse_repl_port_missing() {
-        assert_eq!(parse_repl_port("some other output\n"), None);
-        assert_eq!(parse_repl_port(""), None);
-    }
-
-    #[test]
-    fn test_parse_repl_port_malformed() {
-        assert_eq!(
-            parse_repl_port("Connected to REPL backend on port notanumber.\n"),
-            None
-        );
-    }
-
-    #[test]
-    fn test_parse_workspace_id_typical() {
-        // Real output order: Workspace line precedes the port line (repl/mod.rs).
-        let stdout = "  Workspace: abc123def456 (new)\nConnected to REPL backend on port 9876.\n";
-        assert_eq!(parse_workspace_id(stdout), Some("abc123def456".to_string()));
-    }
-
-    #[test]
-    fn test_parse_workspace_id_missing() {
-        assert_eq!(parse_workspace_id("no workspace line\n"), None);
-        assert_eq!(parse_workspace_id(""), None);
-    }
-
-    #[test]
-    fn test_parse_workspace_id_bare() {
-        assert_eq!(
-            parse_workspace_id("  Workspace: deadbeef1234\n"),
-            Some("deadbeef1234".to_string())
-        );
-    }
-
-    #[test]
-    fn test_parse_workspace_id_empty_prefix() {
-        // "  Workspace: " present but no ID — must return None, not Some("")
-        assert_eq!(parse_workspace_id("  Workspace: \n"), None);
-        assert_eq!(parse_workspace_id("  Workspace: "), None);
     }
 
     #[test]
