@@ -1,7 +1,7 @@
 # ADR 0098: Build Artifact Provenance and Version-Based Staleness Invalidation
 
 ## Status
-Proposed (2026-06-23)
+Accepted (2026-06-23)
 
 ## Context
 
@@ -356,10 +356,12 @@ the stamp is build-local and the lockfile is committed.
   dep) complete *before* any `code:load_file/1` calls begin, so a "source
   unavailable" failure always leaves the code server in its pre-attach state —
   no partial loads to roll back. Concurrent attaches fall under the same
-  last-write-wins accepted race as §1: two sessions that both recompile a stale
-  dep still produce a valid stamp, and OTP's code server serializes
-  `code:load_file/1`, so no lock is needed. Test: an old-toolchain fixture (no
-  meta keys) recompiles on attach.
+  last-write-wins accepted race as §1: both sessions compile from identical
+  source to identical output, so last-write-wins on the `.beam` files still
+  yields a valid module; OTP's code server additionally serializes each
+  `code:load_file/1` call, so the load step is safe regardless of order. No lock
+  is needed at either step. Test: an old-toolchain fixture (no meta keys)
+  recompiles on attach.
 
 ## Migration Path
 
