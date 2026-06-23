@@ -819,12 +819,17 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   end
 
   # BT-2648: the read-only native pane keyed by a standalone native module.
+  # BT-2668: the real `browse_native_module_source` op returns the ABSOLUTE on-disk
+  # path (e.g. `/home/.../_build/.../*.erl`), so the stub mirrors that — the
+  # LiveView relativises it to `deps/beamtalk_http/native/beamtalk_http_client.erl`
+  # for display (never the `/home/...` host path) via `clean_native_path/1`.
   def browse_native_module_source("beamtalk_http_client") do
     {:value,
      %{
        "class" => :null,
        "backing_module" => "beamtalk_http_client",
-       "source_file" => "deps/beamtalk_http/native/beamtalk_http_client.erl",
+       "source_file" =>
+         "/home/agent/source/proj/_build/default/deps/beamtalk_http/native/beamtalk_http_client.erl",
        "source_origin" => "dependency",
        "editable" => false,
        "content" => "handle_call({get, [Url]}, _From, State) ->\n    {reply, ok, State}.\n",

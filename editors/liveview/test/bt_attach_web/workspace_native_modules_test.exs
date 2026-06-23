@@ -85,7 +85,7 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
       assert html =~ "stdlib"
     end
 
-    test "clicking a native module opens its .erl read-only in the native pane",
+    test "clicking a native module opens its .erl read-only as an editor tab (BT-2667)",
          %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
@@ -94,17 +94,61 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
       html =
         render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
 
-      # The standalone module pane renders the source read-only.
+      # BT-2667: the module opens as a first-class editor TAB (in the tab strip),
+      # not the retired single-slot overlay. The tab is labelled `<module>.erl`.
+      assert html =~ ~s(role="tab")
+      assert html =~ "beamtalk_http_client.erl"
+      # The tab body renders the source read-only.
       assert html =~ "Erlang module"
-      assert html =~ "beamtalk_http_client"
       assert html =~ ~s(class="native-pre")
       assert html =~ "handle_call({get"
       assert html =~ "read-only"
+      # BT-2668: the displayed path is the clean, project-relative form — never the
+      # absolute `/home/...` host path the op returned.
+      assert html =~ "deps/beamtalk_http/native/beamtalk_http_client.erl"
+      refute html =~ "/home/agent"
 
-      # Clicking the open module again collapses the pane.
+      # BT-2667: re-clicking the same module FOCUSES the existing tab rather than
+      # closing it (the old overlay toggled off) or stacking a duplicate — only one
+      # `.erl` tab exists.
       html =
         render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
 
+      assert html =~ ~s(class="native-pre")
+      # Exactly one tab in the strip for this module (re-open focused, didn't stack
+      # a duplicate): the tab id appears twice — the tab button + its close × —
+      # and a duplicated tab would double that to four.
+      assert count_occurrences(html, ~s(phx-value-id="native:beamtalk_http_client")) == 2
+
+      # Closing the tab removes it; the editor returns to its empty state.
+      html = render_click(view, "tab_close", %{"id" => "native:beamtalk_http_client"})
+      refute html =~ ~s(class="native-pre")
+      refute html =~ "beamtalk_http_client.erl"
+    end
+
+    test "a native module tab coexists with a class tab; it does not replace the class (BT-2667)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Open a Beamtalk class definition tab first.
+      html = render_click(view, "browser_open_definition", %{"class" => "Counter"})
+      assert html =~ "Counter ▸ def"
+
+      # Open a native module — it must NOT overlay/replace the class tab.
+      render_click(view, "toggle_native_modules", %{})
+
+      html =
+        render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
+
+      # Both tabs are present in the strip; the native tab is now focused.
+      assert html =~ "Counter ▸ def"
+      assert html =~ "beamtalk_http_client.erl"
+      assert html =~ ~s(class="native-pre")
+
+      # Switching back to the class tab restores the class editor (the native tab
+      # did not clobber it).
+      html = render_click(view, "tab_select", %{"id" => "def:Counter"})
+      assert html =~ "Counter ▸ def"
       refute html =~ ~s(class="native-pre")
     end
 
@@ -134,5 +178,42 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
       assert html =~ ~s(class="native-pre")
       assert html =~ "handle_call({get"
     end
+  end
+
+  # BT-2668: the path-cleaning that keeps the absolute host path off-screen. Unit
+  # test of the relativiser directly (it runs on whatever path the runtime op
+  # returns), independent of the rendered viewer above.
+  describe "clean_native_path/1 (BT-2668)" do
+    alias BtAttachWeb.WorkspaceLive
+
+    test "relativises an absolute build path to a recognisable source root" do
+      assert WorkspaceLive.clean_native_path(
+               "/home/james/source/proj/_build/default/deps/http/native/x.erl"
+             ) == "deps/http/native/x.erl"
+
+      assert WorkspaceLive.clean_native_path("/opt/app/apps/beamtalk_stdlib/src/y.erl") ==
+               "apps/beamtalk_stdlib/src/y.erl"
+    end
+
+    test "leaves an already-relative path untouched" do
+      assert WorkspaceLive.clean_native_path("deps/http/native/x.erl") ==
+               "deps/http/native/x.erl"
+    end
+
+    test "falls back to the basename for an absolute path with no known source root" do
+      assert WorkspaceLive.clean_native_path("/home/james/scratch/foo.erl") == "foo.erl"
+    end
+
+    test "returns nil for the absent-path sentinels (no path leak)" do
+      assert WorkspaceLive.clean_native_path(:null) == nil
+      assert WorkspaceLive.clean_native_path(nil) == nil
+      assert WorkspaceLive.clean_native_path("") == nil
+    end
+  end
+
+  # Count non-overlapping occurrences of `needle` in `haystack` — proves a tab is
+  # focused, not duplicated, when its module is re-opened.
+  defp count_occurrences(haystack, needle) do
+    haystack |> String.split(needle) |> length() |> Kernel.-(1)
   end
 end
