@@ -2434,6 +2434,18 @@ defmodule BtAttachWeb.WorkspaceLive do
         # `unflushed` badge before the re-read (which would otherwise preserve the
         # already-set divergence, mirroring `clear_disk_differs/2` after a flush).
         |> assign(:tabs, clear_disk_differs(socket.assigns.tabs, reloaded))
+        # BT-2655: re-read the reverted `:def` tabs' *editable* definition buffer so
+        # the visible editor shows the reverted header without a close/reopen.
+        # `refresh_after_source_change/1` below re-reads `:method` tab bodies on its
+        # own (and now bumps `editor_rev` to remount the editor — see
+        # `resync_active_tab/2`), but it deliberately leaves a `:def` tab's editable
+        # definition buffer untouched (a generic push must not clobber a concurrent
+        # edit). A revert is the safe exception: it is blocked for this path under
+        # pending edits (`path_has_pending_edits?/2`, BT-2598 d2), so overwriting the
+        # editable buffer for exactly the reloaded `:def` set is both safe and
+        # expected. Method tabs are intentionally left to the refresh below to avoid
+        # a redundant second `browse_method_source` round-trip per tab.
+        |> reload_reverted_def_buffers(reloaded)
         |> refresh_after_source_change()
         |> assign_git()
         # A clean revert whose reload failed surfaces its note in the shared
@@ -2482,6 +2494,49 @@ defmodule BtAttachWeb.WorkspaceLive do
         MapSet.member?(reloaded, elem(key, 0)),
         into: MapSet.new(),
         do: key
+  end
+
+  # BT-2655: re-read the editable *definition* buffer of every open clean `:def` tab
+  # whose disk key is in `reloaded` (the reverted class' def tabs), so the visible
+  # editor reflects the reverted class header without a close/reopen. This is the
+  # one piece the generic push refresh (`refresh_source_tab/2`) intentionally skips:
+  # it re-reads only the `:def` doc block, never the editable definition body, so a
+  # concurrent edit during another session's flush is not clobbered. A revert is the
+  # safe exception — blocked under pending edits for the reverted path
+  # (`path_has_pending_edits?/2`, BT-2598 d2), so no in-progress edit can be lost.
+  # A dirty tab is left untouched all the same (defence in depth); method tabs and
+  # tabs outside `reloaded` pass through and are handled by the refresh that follows.
+  defp reload_reverted_def_buffers(socket, reloaded) do
+    tabs =
+      Enum.map(socket.assigns.tabs, fn tab ->
+        if match?(%{kind: :def, dirty: false}, tab) and
+             MapSet.member?(reloaded, tab_disk_key(tab)) do
+          reread_reverted_def_buffer(socket, tab)
+        else
+          tab
+        end
+      end)
+
+    socket
+    |> assign(:tabs, tabs)
+    |> resync_active_tab(tabs)
+  end
+
+  # Re-read one reverted `:def` tab's editable definition skeleton (header + state)
+  # from the now-reverted live image. Only overwrite the editable buffer when the
+  # re-fetch actually returned a skeleton — `class_definition_info/2` yields `""` on
+  # a transient fetch failure, and blanking a tab the user is looking at would be
+  # worse than leaving the prior (about-to-be-correct) body until the next refresh.
+  defp reread_reverted_def_buffer(socket, tab) do
+    case class_definition_info(socket, tab.class) do
+      {"", _comment, _native_module, _class_modifiers, _is_protocol} ->
+        tab
+
+      {definition, _comment, _native_module, _class_modifiers, _is_protocol} ->
+        # Only the editable definition buffer is touched here; the doc block + badges
+        # are refreshed by `refresh_source_tab/2` in the follow-up push refresh.
+        %{tab | source: definition, base: definition, dirty: false, disk_differs: false}
+    end
   end
 
   # Whether the file `path` git is about to revert has unflushed in-memory
@@ -3773,8 +3828,26 @@ defmodule BtAttachWeb.WorkspaceLive do
   # entry. A dirty active tab is untouched above, so this never disturbs an edit.
   defp resync_active_tab(socket, tabs) do
     case Enum.find(tabs, &(&1.id == socket.assigns[:active_tab])) do
-      %{dirty: false} = active -> sync_active(socket, active)
-      _ -> socket
+      %{dirty: false} = active ->
+        # BT-2655: if the re-read changed the active tab's *body* (a git revert, a
+        # push reconcile), bump `editor_rev` so the `phx-update="ignore"` CodeMirror
+        # host is re-keyed and remounts with the new source. A no-op re-read (same
+        # body) leaves the rev — and thus the live editor instance — untouched, so a
+        # routine refresh of an unchanged tab never disturbs the editor.
+        socket
+        |> maybe_bump_editor_rev(active.source)
+        |> sync_active(active)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp maybe_bump_editor_rev(socket, new_source) do
+    if new_source == socket.assigns[:edit_source] do
+      socket
+    else
+      assign(socket, :editor_rev, socket.assigns.editor_rev + 1)
     end
   end
 
@@ -5020,6 +5093,15 @@ defmodule BtAttachWeb.WorkspaceLive do
     socket
     |> assign(:tabs, [])
     |> assign(:active_tab, nil)
+    # BT-2655: a monotonically-bumped revision folded into the method-editor
+    # overlay's element id. The CmEditor (CodeMirror) host is `phx-update="ignore"`
+    # and seeds its doc from the hidden textarea only on mount, so the only way to
+    # push a NEW body into the focused tab's editor is to re-key the element so
+    # LiveView replaces it and the hook remounts. Switching tabs already re-keys on
+    # `@active_tab`; an *in-place* body re-read of the already-active tab (a git
+    # revert, a flush/push reconcile) keeps the same `@active_tab`, so we bump this
+    # to force the remount and surface the reverted source without a close/reopen.
+    |> assign(:editor_rev, 0)
   end
 
   defp find_tab(socket, id), do: Enum.find(socket.assigns.tabs, &(&1.id == id))
@@ -8995,7 +9077,12 @@ defmodule BtAttachWeb.WorkspaceLive do
                         <%!-- CodeMirror 6 editor (BT-2539). Re-keyed on the active
                            tab id (`@active_tab`) so switching tabs remounts the
                            CmEditor hook and the editor picks up the new tab's
-                           source. The hidden <textarea name="source"> stays the
+                           source. BT-2655: the key also carries `@editor_rev`, bumped
+                           when the active tab's body is re-read in place (a git
+                           revert / push reconcile) so the editor remounts and shows
+                           the new source even though `@active_tab` is unchanged — the
+                           `phx-update="ignore"` host otherwise never re-seeds.
+                           The hidden <textarea name="source"> stays the
                            posted form field (so save_method reads it) and is
                            phx-update="ignore" (hook-owned): the hook mirrors the
                            doc into it and fires `input`, driving the
@@ -9003,7 +9090,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                            300 ms debounce. Selection reports ride select_source
                            via data-select-event, kept in `:edit_selection`. --%>
                         <div
-                          id={"method-editor-overlay-" <> @active_tab}
+                          id={"method-editor-overlay-" <> @active_tab <> "-" <> to_string(@editor_rev)}
                           class="cm-wrap field"
                           phx-hook="CmEditor"
                           data-select-event="select_source"
@@ -9011,7 +9098,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           data-lint-mode={if active_tab(assigns).kind == :method, do: "method"}
                         >
                           <textarea
-                            id={"method-editor-source-" <> @active_tab}
+                            id={"method-editor-source-" <> @active_tab <> "-" <> to_string(@editor_rev)}
                             class="cm-field"
                             name="source"
                             spellcheck="false"
@@ -9022,7 +9109,7 @@ defmodule BtAttachWeb.WorkspaceLive do
                           ><%= @edit_source %></textarea>
                           <div
                             class="cm-host"
-                            id={"method-editor-cm-" <> @active_tab}
+                            id={"method-editor-cm-" <> @active_tab <> "-" <> to_string(@editor_rev)}
                             phx-update="ignore"
                           >
                           </div>
