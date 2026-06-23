@@ -60,36 +60,75 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
     })
   end
 
-  describe "Native modules section (BT-2648)" do
-    test "the section header renders with the module count", %{conn: conn} do
+  describe "Native browser (BT-2656)" do
+    test "the panel defaults to Classes mode; native module rows are not in the tree", %{
+      conn: conn
+    } do
       {:ok, _view, html} = live(owner_conn(conn), "/")
 
-      # The collapsible section is present (the stub returns three native modules),
-      # collapsed by default — the module rows are not yet in the DOM.
-      assert html =~ "Native modules"
-      assert html =~ ~s(phx-click="toggle_native_modules")
+      # BT-2656: the `Classes | Native` mode toggle replaces the retired collapsible
+      # in-tree section. On open the panel is in Classes mode, so no native rows show.
+      assert html =~ ~s(aria-label="Browser mode")
+      assert html =~ ~s(phx-value-mode="native")
       refute html =~ ~s(phx-value-module="beamtalk_http_client")
+      # The retired in-tree section / toggle is gone.
+      refute html =~ "toggle_native_modules"
     end
 
-    test "expanding lists native modules with package/origin badges", %{conn: conn} do
+    test "switching to Native mode lists modules with package/origin badges", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      html = render_click(view, "toggle_native_modules", %{})
+      html = render_click(view, "browser_mode", %{"mode" => "native"})
 
       # A dependency's native module (no class to back it) is listed and tagged
       # DEP · <pkg> — discoverable WITHOUT a native: class (the acceptance case).
       assert html =~ ~s(phx-value-module="beamtalk_http_client")
       assert html =~ "DEP · http"
-      # The stdlib native module is tagged STDLIB.
+      # The Native browser footer carries the count badge.
+      assert html =~ ~s(aria-label="Native source filter")
+
+      # Switching back to Classes mode restores the class tree and hides native rows.
+      html = render_click(view, "browser_mode", %{"mode" => "classes"})
+      refute html =~ ~s(phx-value-module="beamtalk_http_client")
+      assert html =~ ~s(aria-label="Class source filter")
+    end
+
+    test "the native origin filter defaults to All when no module is project-origin", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # BT-2661: the Native browser defaults its origin filter to Project, falling
+      # back to All when (as in the stub) no native module is project-origin. With
+      # the All default, both the dependency and stdlib modules are visible.
+      html = render_click(view, "browser_mode", %{"mode" => "native"})
+      assert html =~ ~s(<option value="all" selected)
+      assert html =~ ~s(phx-value-module="beamtalk_http_client")
       assert html =~ ~s(phx-value-module="beamtalk_subprocess")
-      assert html =~ "stdlib"
+    end
+
+    test "the native origin filter narrows the list (deps vs stdlib)", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      render_click(view, "browser_mode", %{"mode" => "native"})
+
+      # Narrow to stdlib: only the stdlib module survives; the dependency module is
+      # filtered out.
+      html = render_click(view, "native_source", %{"src" => "stdlib"})
+      assert html =~ ~s(phx-value-module="beamtalk_subprocess")
+      refute html =~ ~s(phx-value-module="beamtalk_http_client")
+
+      # Narrow to deps: only the dependency modules survive.
+      html = render_click(view, "native_source", %{"src" => "deps"})
+      assert html =~ ~s(phx-value-module="beamtalk_http_client")
+      refute html =~ ~s(phx-value-module="beamtalk_subprocess")
     end
 
     test "clicking a native module opens its .erl read-only as an editor tab (BT-2667)",
          %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_click(view, "toggle_native_modules", %{})
+      render_click(view, "browser_mode", %{"mode" => "native"})
 
       html =
         render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
@@ -135,7 +174,7 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
       assert html =~ "Counter ▸ def"
 
       # Open a native module — it must NOT overlay/replace the class tab.
-      render_click(view, "toggle_native_modules", %{})
+      render_click(view, "browser_mode", %{"mode" => "native"})
 
       html =
         render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
@@ -155,7 +194,7 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
     test "a module with no shipped source shows the graceful empty state", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      render_click(view, "toggle_native_modules", %{})
+      render_click(view, "browser_mode", %{"mode" => "native"})
 
       html =
         render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_stripped"})
@@ -169,7 +208,7 @@ defmodule BtAttachWeb.WorkspaceNativeModulesTest do
     test "an observer can browse native modules (the op is :read)", %{conn: conn} do
       {:ok, view, _html} = live(observer_conn(conn), "/")
 
-      render_click(view, "toggle_native_modules", %{})
+      render_click(view, "browser_mode", %{"mode" => "native"})
 
       html =
         render_click(view, "browser_open_native_module", %{"module" => "beamtalk_http_client"})
