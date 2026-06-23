@@ -38,18 +38,34 @@ impl BuildLayout {
         }
     }
 
+    // ── Roots ────────────────────────────────────────────────────────
+
+    /// `_build/` — the top-level build-output root for this project.
+    ///
+    /// Everything `clean` may remove lives under this directory. Nothing
+    /// outside it (source, `native/` source, `beamtalk.toml`, …) is ever a
+    /// build artifact.
+    pub fn build_root(&self) -> Utf8PathBuf {
+        self.project_root.join("_build")
+    }
+
+    /// `_build/dev/` — the build output for the `dev` profile.
+    pub fn profile_dir(&self) -> Utf8PathBuf {
+        self.build_root().join("dev")
+    }
+
     // ── Package output ───────────────────────────────────────────────
 
     /// `_build/dev/ebin/` — compiled Beamtalk `.beam` files.
     pub fn ebin_dir(&self) -> Utf8PathBuf {
-        self.project_root.join("_build").join("dev").join("ebin")
+        self.profile_dir().join("ebin")
     }
 
     // ── Native Erlang ────────────────────────────────────────────────
 
     /// `_build/dev/native/` — base directory for native Erlang builds.
     pub fn native_dir(&self) -> Utf8PathBuf {
-        self.project_root.join("_build").join("dev").join("native")
+        self.profile_dir().join("native")
     }
 
     /// `_build/dev/native/ebin/` — compiled native `.erl` → `.beam` files.
@@ -71,14 +87,14 @@ impl BuildLayout {
 
     /// `_build/type_cache/` — cached Erlang FFI type specs.
     pub fn type_cache_dir(&self) -> Utf8PathBuf {
-        self.project_root.join("_build").join("type_cache")
+        self.build_root().join("type_cache")
     }
 
     // ── Dependencies ─────────────────────────────────────────────────
 
     /// `_build/deps/` — top-level dependency directory.
     pub fn deps_dir(&self) -> Utf8PathBuf {
-        self.project_root.join("_build").join("deps")
+        self.build_root().join("deps")
     }
 
     /// `_build/deps/<name>/` — checkout directory for a single dependency.
@@ -95,6 +111,18 @@ impl BuildLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_build_root() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(layout.build_root(), "/home/user/my_app/_build");
+    }
+
+    #[test]
+    fn test_profile_dir() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(layout.profile_dir(), "/home/user/my_app/_build/dev");
+    }
 
     #[test]
     fn test_ebin_dir() {

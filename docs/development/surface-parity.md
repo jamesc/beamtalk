@@ -195,6 +195,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `build-stdlib` | -- | -- | `surface-specific: internal stdlib build step` |
 | `run` | -- | -- | `surface-specific: script/service runner` |
 | `new` | -- | -- | `surface-specific: project scaffolding` |
+| `clean` | -- | -- | `surface-specific: removes build artifacts (offline, no workspace)`. Removes generated output only — never source. Default removes the project's `_build/<profile>/` output (compiled BEAM, generated `beamtalk_classes.hrl`, native `ebin`/`include`) and the type cache; `--deps` also clears dependency artifacts (`_build/deps/`); `--all` removes the whole `_build/`; `--dry-run` lists without deleting. All paths resolve through `BuildLayout` (BT-2672), so `src/`, `native/` source, and `beamtalk.toml` are never touched. |
 | `repl` | -- | -- | `surface-specific: starts the REPL client` |
 | `check` | -- | `textDocument/publishDiagnostics` | Offline syntax/type check; LSP provides diagnostics on save |
 | `fmt` | -- | `textDocument/formatting` | Format source files; LSP provides document formatting |

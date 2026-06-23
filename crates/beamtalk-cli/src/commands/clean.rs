@@ -1,0 +1,354 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! `beamtalk clean` — remove generated build artifacts.
+//!
+//! **DDD Context:** Build System
+//!
+//! Removes generated build output, never source. Every path is resolved
+//! through [`BuildLayout`] so that `clean` always agrees with `build` about
+//! what counts as an artifact, and so that nothing outside `_build/` can ever
+//! be deleted (no hardcoded `_build` strings, no `src/`, `native/` source, or
+//! `beamtalk.toml`).
+//!
+//! Scopes:
+//! - default: the project's `_build/<profile>/` output plus the type cache.
+//! - `--deps`: additionally the fetched/compiled dependency artifacts
+//!   (`_build/deps/`).
+//! - `--all`: the entire `_build/` directory, including any shared caches.
+//! - `--dry-run`: list what would be removed without deleting anything.
+
+use camino::{Utf8Path, Utf8PathBuf};
+use miette::{Context, IntoDiagnostic, Result};
+use tracing::{debug, info};
+
+use super::build_layout::BuildLayout;
+
+/// What `clean` is allowed to remove.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanScope {
+    /// The project's build output for the active profile, plus the type cache.
+    /// Never touches dependency caches.
+    Default,
+    /// `Default` plus fetched/compiled dependency artifacts (`_build/deps/`).
+    Deps,
+    /// The entire `_build/` directory, including any shared caches.
+    All,
+}
+
+impl CleanScope {
+    /// Derive the scope from the `--deps` / `--all` flags. `--all` wins.
+    #[must_use]
+    pub fn from_flags(deps: bool, all: bool) -> Self {
+        if all {
+            Self::All
+        } else if deps {
+            Self::Deps
+        } else {
+            Self::Default
+        }
+    }
+}
+
+/// Run `beamtalk clean` from the current working directory.
+pub fn run(deps: bool, all: bool, dry_run: bool) -> Result<()> {
+    let project_root = find_project_root()?;
+    let layout = BuildLayout::new(&project_root);
+    let scope = CleanScope::from_flags(deps, all);
+    clean_with_layout(&layout, scope, dry_run)
+}
+
+/// Resolve the artifact paths for `scope` and remove (or, when `dry_run`,
+/// list) every one that exists.
+///
+/// All returned paths are guaranteed to live under `layout.build_root()`.
+fn clean_with_layout(layout: &BuildLayout, scope: CleanScope, dry_run: bool) -> Result<()> {
+    let build_root = layout.build_root();
+    let targets = clean_targets(layout, scope);
+
+    // Safety net: never operate on a path outside `_build/`. This can only
+    // fire on a programming error, but the cost of being wrong is deleting
+    // source, so we assert it explicitly.
+    for target in &targets {
+        assert!(
+            target.starts_with(&build_root),
+            "clean target {target} escapes build root {build_root}"
+        );
+    }
+
+    let existing: Vec<&Utf8PathBuf> = targets.iter().filter(|t| t.exists()).collect();
+
+    if existing.is_empty() {
+        println!("Nothing to clean (no build artifacts found under {build_root}).");
+        return Ok(());
+    }
+
+    if dry_run {
+        println!("Would remove the following build artifacts:");
+        for target in existing {
+            println!("  {target}");
+        }
+        println!("(dry run — nothing was deleted)");
+        return Ok(());
+    }
+
+    for target in existing {
+        debug!("Removing build artifact: {target}");
+        remove_path(target)?;
+        println!("Removed {target}");
+    }
+
+    info!(?scope, "Cleaned build artifacts");
+    Ok(())
+}
+
+/// The set of artifact paths to remove for a given scope, most-specific first.
+///
+/// Paths are de-duplicated and never overlap: when a broader path (e.g. the
+/// whole profile directory or the whole build root) covers a narrower one, the
+/// narrower one is omitted so it is not "removed" twice.
+fn clean_targets(layout: &BuildLayout, scope: CleanScope) -> Vec<Utf8PathBuf> {
+    match scope {
+        // `--all` removes the entire build root in one shot, which subsumes
+        // the profile output, the type cache, deps, and any shared caches.
+        CleanScope::All => vec![layout.build_root()],
+        CleanScope::Default => vec![layout.profile_dir(), layout.type_cache_dir()],
+        CleanScope::Deps => vec![
+            layout.profile_dir(),
+            layout.type_cache_dir(),
+            layout.deps_dir(),
+        ],
+    }
+}
+
+/// Remove a file or directory tree at `path`.
+fn remove_path(path: &Utf8Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to stat '{path}'"))?;
+
+    if metadata.is_dir() {
+        std::fs::remove_dir_all(path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to remove directory '{path}'"))
+    } else {
+        std::fs::remove_file(path)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to remove file '{path}'"))
+    }
+}
+
+/// Find the project root by requiring a `beamtalk.toml` in the current
+/// directory.
+fn find_project_root() -> Result<Utf8PathBuf> {
+    let cwd = std::env::current_dir()
+        .into_diagnostic()
+        .wrap_err("Failed to determine current directory")?;
+
+    let project_root = Utf8PathBuf::from_path_buf(cwd).map_err(|p| {
+        miette::miette!("Current directory path is not valid UTF-8: {}", p.display())
+    })?;
+
+    let manifest_path = project_root.join("beamtalk.toml");
+    if !manifest_path.exists() {
+        miette::bail!(
+            "No beamtalk.toml found in current directory.\n  \
+             Run this command from a Beamtalk project root, or create one with `beamtalk new`."
+        );
+    }
+
+    Ok(project_root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    /// Create a `BuildLayout` rooted at a fresh temp dir.
+    fn layout_in(temp: &TempDir) -> BuildLayout {
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        BuildLayout::new(root)
+    }
+
+    /// Create a file (and any parent dirs) so we can observe deletion.
+    fn touch(path: &Utf8Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, b"artifact").unwrap();
+    }
+
+    #[test]
+    fn scope_from_flags_precedence() {
+        assert_eq!(CleanScope::from_flags(false, false), CleanScope::Default);
+        assert_eq!(CleanScope::from_flags(true, false), CleanScope::Deps);
+        assert_eq!(CleanScope::from_flags(false, true), CleanScope::All);
+        // --all wins over --deps
+        assert_eq!(CleanScope::from_flags(true, true), CleanScope::All);
+    }
+
+    #[test]
+    fn default_targets_cover_profile_and_type_cache_only() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let targets = clean_targets(&layout, CleanScope::Default);
+        assert_eq!(targets, vec![layout.profile_dir(), layout.type_cache_dir()]);
+        // Default must never include the deps dir.
+        assert!(!targets.contains(&layout.deps_dir()));
+    }
+
+    #[test]
+    fn deps_targets_add_deps_dir() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let targets = clean_targets(&layout, CleanScope::Deps);
+        assert!(targets.contains(&layout.deps_dir()));
+        assert!(targets.contains(&layout.profile_dir()));
+    }
+
+    #[test]
+    fn all_targets_remove_whole_build_root() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let targets = clean_targets(&layout, CleanScope::All);
+        assert_eq!(targets, vec![layout.build_root()]);
+    }
+
+    #[test]
+    fn all_targets_stay_within_build_root() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        for scope in [CleanScope::Default, CleanScope::Deps, CleanScope::All] {
+            for target in clean_targets(&layout, scope) {
+                assert!(
+                    target.starts_with(layout.build_root()),
+                    "{target} escapes build root for {scope:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dry_run_lists_but_does_not_delete() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let beam = layout.ebin_dir().join("foo.beam");
+        touch(&beam);
+
+        clean_with_layout(&layout, CleanScope::Default, true).unwrap();
+
+        // Dry run must leave everything in place.
+        assert!(beam.exists(), "dry run deleted {beam}");
+        assert!(layout.profile_dir().exists());
+    }
+
+    #[test]
+    fn default_clean_removes_profile_and_type_cache() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let beam = layout.ebin_dir().join("foo.beam");
+        let hrl = layout.native_include_dir().join("beamtalk_classes.hrl");
+        let cached = layout.type_cache_dir().join("spec.json");
+        touch(&beam);
+        touch(&hrl);
+        touch(&cached);
+
+        clean_with_layout(&layout, CleanScope::Default, false).unwrap();
+
+        assert!(!layout.profile_dir().exists(), "profile dir should be gone");
+        assert!(
+            !layout.type_cache_dir().exists(),
+            "type cache should be gone"
+        );
+    }
+
+    #[test]
+    fn default_clean_preserves_deps() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        touch(&layout.ebin_dir().join("foo.beam"));
+        let dep_beam = layout.dep_ebin_dir("utils").join("utils.beam");
+        touch(&dep_beam);
+
+        clean_with_layout(&layout, CleanScope::Default, false).unwrap();
+
+        // Default scope must not touch dependency caches.
+        assert!(dep_beam.exists(), "default clean removed deps");
+    }
+
+    #[test]
+    fn deps_clean_removes_deps() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        let dep_beam = layout.dep_ebin_dir("utils").join("utils.beam");
+        touch(&dep_beam);
+
+        clean_with_layout(&layout, CleanScope::Deps, false).unwrap();
+
+        assert!(!layout.deps_dir().exists(), "deps dir should be gone");
+    }
+
+    #[test]
+    fn deps_clean_preserves_source() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+
+        // Source / config that must never be deleted.
+        let src = root.join("src").join("Main.bt");
+        let native_src = root.join("native").join("foo.erl");
+        let manifest = root.join("beamtalk.toml");
+        touch(&src);
+        touch(&native_src);
+        touch(&manifest);
+        touch(&layout.dep_ebin_dir("utils").join("utils.beam"));
+
+        clean_with_layout(&layout, CleanScope::Deps, false).unwrap();
+
+        assert!(src.exists(), "src/ was deleted");
+        assert!(native_src.exists(), "native/ source was deleted");
+        assert!(manifest.exists(), "beamtalk.toml was deleted");
+    }
+
+    #[test]
+    fn all_clean_removes_entire_build_root() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        touch(&layout.ebin_dir().join("foo.beam"));
+        touch(&layout.dep_ebin_dir("utils").join("utils.beam"));
+        touch(&layout.type_cache_dir().join("spec.json"));
+
+        clean_with_layout(&layout, CleanScope::All, false).unwrap();
+
+        assert!(!layout.build_root().exists(), "build root should be gone");
+    }
+
+    #[test]
+    fn all_clean_preserves_source() {
+        let temp = TempDir::new().unwrap();
+        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&root);
+        let src = root.join("src").join("Main.bt");
+        let manifest = root.join("beamtalk.toml");
+        touch(&src);
+        touch(&manifest);
+        touch(&layout.ebin_dir().join("foo.beam"));
+
+        clean_with_layout(&layout, CleanScope::All, false).unwrap();
+
+        assert!(src.exists(), "src/ was deleted by --all");
+        assert!(manifest.exists(), "beamtalk.toml was deleted by --all");
+    }
+
+    #[test]
+    fn clean_is_idempotent_when_nothing_exists() {
+        let temp = TempDir::new().unwrap();
+        let layout = layout_in(&temp);
+        // No _build at all — should succeed as a no-op.
+        clean_with_layout(&layout, CleanScope::Default, false).unwrap();
+        clean_with_layout(&layout, CleanScope::All, true).unwrap();
+        assert!(!layout.build_root().exists());
+    }
+}
