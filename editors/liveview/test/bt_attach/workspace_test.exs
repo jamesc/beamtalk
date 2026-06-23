@@ -318,6 +318,21 @@ defmodule BtAttach.WorkspaceTest do
     end
   end
 
+  describe "native-module callers wrapper (reverse FFI nav, BT-2669)" do
+    # No live workspace: the wrapper goes through the same `dispatch_browse/2`
+    # path, so an unreachable node degrades to `{:error, {:unreachable, _}}`
+    # rather than crashing.
+    test "callers_of_native_module against an unreachable workspace returns an unreachable error" do
+      assert {:error, {:unreachable, _}} = Workspace.callers_of_native_module("lists")
+    end
+
+    test "the callers wrapper rejects non-binary arguments (guard contract)" do
+      assert_raise FunctionClauseError, fn ->
+        apply(Workspace, :callers_of_native_module, [:lists])
+      end
+    end
+  end
+
   describe "save/flush write-surface wrappers (New File + revert, ADR 0082 Phase 5, BT-2293)" do
     # No live workspace: the RPC targets an unconnected node, so the wrappers must
     # surface `{:badrpc, :nodedown}` as `{:error, {:unreachable, _}}` (the same

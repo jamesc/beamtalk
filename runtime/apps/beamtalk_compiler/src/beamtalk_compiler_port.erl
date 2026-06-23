@@ -1061,8 +1061,10 @@ handle_senders_response(Other) ->
 -doc """
 Handle ETF response from a find_all_sends_in_source request (BT-2206).
 Returns `{ok, [Send]}' on success (each `Send' a
-`#{selector := binary(), line := pos_integer(), recv := atom()}' map, passed
-through unchanged), `{error, [Diagnostic]}' on failure.
+`#{selector := binary(), line := pos_integer(), recv := atom(),
+target_module := binary()}' map, passed through unchanged — `target_module' is
+the native module an `erlang_ffi' send targets (BT-2669), `<<>>' otherwise),
+`{error, [Diagnostic]}' on failure.
 """.
 -spec handle_all_sends_response(map()) -> {ok, [map()]} | {error, [map()]}.
 handle_all_sends_response(#{status := ok, sends := Sends}) when is_list(Sends) ->

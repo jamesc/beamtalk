@@ -649,6 +649,203 @@ put_method_on_fresh_class_is_visible_test_() ->
     end}.
 
 %%====================================================================
+%% callers_of_native_module/1 (BT-2669)
+%%====================================================================
+
+callers_of_native_module_basic_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% Two classes call into `lists`; one also calls into `maps`.
+                AlphaRows = [
+                    #{
+                        class_side => false,
+                        selector => 'reverseIt',
+                        line => 10,
+                        sends => [
+                            #{
+                                selector => 'reverse:',
+                                line => 11,
+                                recv_kind => erlang_ffi,
+                                target_module => 'lists'
+                            }
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    },
+                    #{
+                        class_side => true,
+                        selector => 'sortIt',
+                        line => 20,
+                        sends => [
+                            #{
+                                selector => 'sort:',
+                                line => 21,
+                                recv_kind => erlang_ffi,
+                                target_module => 'lists'
+                            }
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                BetaRows = [
+                    #{
+                        class_side => false,
+                        selector => 'mergeMaps',
+                        line => 5,
+                        sends => [
+                            #{
+                                selector => 'merge:',
+                                line => 6,
+                                recv_kind => erlang_ffi,
+                                target_module => 'maps'
+                            },
+                            %% A non-FFI send to a same-named selector must NOT
+                            %% appear as a native caller.
+                            #{selector => 'reverse:', line => 7, recv_kind => self_recv}
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class('NativeCallerAlpha', AlphaRows),
+                ok = beamtalk_xref:register_class('NativeCallerBeta', BetaRows),
+
+                ListsCallers = beamtalk_xref:callers_of_native_module('lists'),
+                %% Both Alpha methods call `lists`; Beta's self-recv `reverse:`
+                %% is excluded.
+                ?assertEqual(2, length(ListsCallers)),
+                ?assert(
+                    lists:member(
+                        #{
+                            owner => 'NativeCallerAlpha',
+                            class_side => false,
+                            method => 'reverseIt',
+                            line => 11
+                        },
+                        ListsCallers
+                    )
+                ),
+                ?assert(
+                    lists:member(
+                        #{
+                            owner => 'NativeCallerAlpha',
+                            class_side => true,
+                            method => 'sortIt',
+                            line => 21
+                        },
+                        ListsCallers
+                    )
+                ),
+                ?assertNot(
+                    lists:any(
+                        fun(R) -> maps:get(owner, R) =:= 'NativeCallerBeta' end,
+                        ListsCallers
+                    )
+                ),
+
+                MapsCallers = beamtalk_xref:callers_of_native_module('maps'),
+                ?assertEqual(
+                    [
+                        #{
+                            owner => 'NativeCallerBeta',
+                            class_side => false,
+                            method => 'mergeMaps',
+                            line => 6
+                        }
+                    ],
+                    MapsCallers
+                ),
+
+                %% A module with no Beamtalk callers yields the empty state.
+                ?assertEqual([], beamtalk_xref:callers_of_native_module('no_such_native_mod'))
+            end)
+        ]
+    end}.
+
+callers_of_native_module_dedup_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% Multiple FFI calls into the same module from one method collapse
+                %% to a single caller row anchored at the first (lowest) line.
+                Rows = [
+                    #{
+                        class_side => false,
+                        selector => 'multiCall',
+                        line => 30,
+                        sends => [
+                            #{
+                                selector => 'foldl:',
+                                line => 33,
+                                recv_kind => erlang_ffi,
+                                target_module => 'lists'
+                            },
+                            #{
+                                selector => 'map:',
+                                line => 31,
+                                recv_kind => erlang_ffi,
+                                target_module => 'lists'
+                            }
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class('NativeCallerMulti', Rows),
+                ?assertEqual(
+                    [
+                        #{
+                            owner => 'NativeCallerMulti',
+                            class_side => false,
+                            method => 'multiCall',
+                            line => 31
+                        }
+                    ],
+                    beamtalk_xref:callers_of_native_module('lists')
+                )
+            end)
+        ]
+    end}.
+
+callers_of_native_module_purge_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                %% Purging a calling class removes it from the callers index
+                %% (stale-row drop honoured by the live-gen filter).
+                Rows = [
+                    #{
+                        class_side => false,
+                        selector => 'callsLists',
+                        line => 1,
+                        sends => [
+                            #{
+                                selector => 'flatten:',
+                                line => 2,
+                                recv_kind => erlang_ffi,
+                                target_module => 'lists'
+                            }
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ],
+                ok = beamtalk_xref:register_class('NativeCallerPurge', Rows),
+                ?assertEqual(1, length(beamtalk_xref:callers_of_native_module('lists'))),
+                ok = beamtalk_xref:purge_class('NativeCallerPurge'),
+                ?assertEqual([], beamtalk_xref:callers_of_native_module('lists'))
+            end)
+        ]
+    end}.
+
+%%====================================================================
 %% Concurrent reader during write
 %%====================================================================
 

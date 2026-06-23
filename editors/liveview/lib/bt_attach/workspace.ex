@@ -375,6 +375,25 @@ defmodule BtAttach.Workspace do
     do: dispatch_browse("nav-query", %{"kind" => "conforming_classes", "class" => protocol})
 
   @doc """
+  Return the Beamtalk methods that **call** native (Erlang) module `module`
+  (`nav-query` `kind=callers_of_native_module`, BT-2669) — the reverse of
+  "go to native source", backing the "Callers" affordance on the native-module
+  viewer. `module` is the native module name (e.g. `"lists"`). Each `"sites"`
+  row carries `class`, `class_side`, `method`, `line`, and `source_file`,
+  reusing the senders/implementors row shape so the IDE's popover renders them
+  unchanged. Backed by the `beamtalk_xref` reverse FFI index, so a module with
+  no Beamtalk callers (or an unknown/unloaded module) resolves to an empty site
+  list, not an error.
+  """
+  @spec callers_of_native_module(String.t()) :: {:value, term()} | {:error, term()}
+  def callers_of_native_module(module) when is_binary(module),
+    do:
+      dispatch_browse("nav-query", %{
+        "kind" => "callers_of_native_module",
+        "module" => module
+      })
+
+  @doc """
   Return the workspace symbol outline (`nav-symbols`, BT-2495) — the omni-search
   index over every loaded class **and** its locally-defined selectors. The result
   carries `"classes"` (one row per class: `name`, `source_file`, `line`, and a

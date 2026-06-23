@@ -1686,8 +1686,13 @@ fn handle_find_senders_in_source(request: &Map) -> Term {
 /// - `source` (binary): the method source text as returned by `CompiledMethod source`
 ///
 /// Response: `#{status => ok, sends => [#{selector => <binary>, line => <int>,
-/// recv => self|super|erlang_ffi|other}, ...]}`. Returns an empty list when the
-/// source has no sends or cannot be parsed.
+/// recv => self|super|erlang_ffi|other, target_module => <binary>}, ...]}`.
+/// `target_module` is the native (Erlang) module an `erlang_ffi` send targets
+/// (BT-2669); it is the empty binary (`<<>>`) for non-FFI sends and for FFI
+/// chains whose module receiver is not a static `Erlang <module>` form. It is
+/// returned as a binary (not an atom) so the response decodes safely with
+/// `[safe]`; the caller interns it only when indexing. Returns an empty list
+/// when the source has no sends or cannot be parsed.
 fn handle_find_all_sends_in_source(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -1707,6 +1712,7 @@ fn handle_find_all_sends_in_source(request: &Map) -> Term {
                 }
                 beamtalk_core::queries::all_sends_query::ReceiverKind::Other => atom("other"),
             };
+            let target_module = hit.target_module.as_deref().unwrap_or("");
             Term::from(Map::from([
                 (atom("selector"), binary(&hit.selector)),
                 (
@@ -1714,6 +1720,7 @@ fn handle_find_all_sends_in_source(request: &Map) -> Term {
                     int_term(i32::try_from(hit.line).unwrap_or(i32::MAX)),
                 ),
                 (atom("recv"), recv),
+                (atom("target_module"), binary(target_module)),
             ]))
         })
         .collect();

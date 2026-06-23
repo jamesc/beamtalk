@@ -1838,6 +1838,17 @@ defmodule BtAttachWeb.WorkspaceLive do
     {:noreply, run_nav_query(socket, :implementors)}
   end
 
+  # ── native-module callers popover (BT-2669) ─────────────────────────────────
+  #
+  # The native-module viewer's Callers button: query the navigation channel for
+  # the Beamtalk methods that call into the focused `:native` tab's module via
+  # `(Erlang <module>) …` (the reverse of "go to native source") and open the
+  # same result popover the Senders/Implementors buttons use. A non-native tab is
+  # a graceful no-op so the button (only rendered on native tabs) never queries.
+  def handle_event("native_callers", _params, socket) do
+    {:noreply, run_native_callers_query(socket)}
+  end
+
   # ── protocol actions (BT-2639) ──────────────────────────────────────────────
   #
   # The protocol equivalent of Senders/Implementors: on a class-definition tab
@@ -2640,6 +2651,8 @@ defmodule BtAttachWeb.WorkspaceLive do
   # BT-2639: the protocol-action popover headings.
   defp nav_kind_label(:required_methods), do: "Required methods"
   defp nav_kind_label(:conforming_classes), do: "Conforming classes"
+  # BT-2669: the native-module callers popover heading.
+  defp nav_kind_label(:callers_of_native_module), do: "Callers"
 
   # ── Structured unified-diff view (BT-2636) ──────────────────────────────────
 
@@ -5026,6 +5039,49 @@ defmodule BtAttachWeb.WorkspaceLive do
             nav_popover: %{
               kind: kind,
               selector: protocol,
+              sites: [],
+              error: "Navigation unavailable."
+            }
+          )
+      end
+    else
+      socket
+    end
+  end
+
+  # Query the Beamtalk callers of the focused native tab's module (`nav-query`
+  # `callers_of_native_module`, BT-2669) and open the result popover. The active
+  # tab must be a `:native` tab — otherwise a graceful no-op (the Callers button
+  # only renders on native tabs). The popover's `selector` slot carries the
+  # module name (shown next to the "Callers" head, mirroring the selector display
+  # for senders/implementors); each row opens the calling method via `nav_open`.
+  defp run_native_callers_query(socket) do
+    module =
+      case active_tab(socket.assigns) do
+        %{kind: :native, class: class} -> class
+        _ -> nil
+      end
+
+    if is_binary(module) and module != "" do
+      kind = :callers_of_native_module
+
+      case Facade.dispatch(kind, %{module: module}, ctx(socket)) do
+        {:value, %{"sites" => sites}} when is_list(sites) ->
+          assign(socket, nav_popover: %{kind: kind, selector: module, sites: sites})
+
+        {:value, _other} ->
+          assign(socket, nav_popover: %{kind: kind, selector: module, sites: []})
+
+        {:error, reason} ->
+          assign(socket,
+            nav_popover: %{kind: kind, selector: module, sites: [], error: facade_error(reason)}
+          )
+
+        _other ->
+          assign(socket,
+            nav_popover: %{
+              kind: kind,
+              selector: module,
               sites: [],
               error: "Navigation unavailable."
             }
@@ -7966,12 +8022,12 @@ defmodule BtAttachWeb.WorkspaceLive do
           {site["method"]}<span :if={site["class_side"] == true} class="nav-side-tag">class</span>
         </span>
       </button>
-      <%!-- Senders / Implementors (BT-2495): each row is a (class, side, selector)
-           call/definition site — clicking opens that method tab + navigates the
-           browser tree (`nav_open`). --%>
+      <%!-- Senders / Implementors (BT-2495) and native-module Callers (BT-2669):
+           each row is a (class, side, selector) call/definition site — clicking
+           opens that method tab + navigates the browser tree (`nav_open`). --%>
       <button
         :for={site <- @nav.sites}
-        :if={@nav.kind in [:senders, :implementors]}
+        :if={@nav.kind in [:senders, :implementors, :callers_of_native_module]}
         type="button"
         class="nav-site"
         phx-click="nav_open"
@@ -9118,6 +9174,17 @@ defmodule BtAttachWeb.WorkspaceLive do
                         </span>
                       </span>
                       <span class="spacer"></span>
+                      <%!-- BT-2669: the reverse of "go to native source" — list the
+                           Beamtalk class>>method sites that call into this native
+                           module via `(Erlang <module>) …`. Reuses the
+                           Senders/Implementors popover (BT-2495); each row opens the
+                           calling method. --%>
+                      <div class="nav-actions">
+                        <button class="btn" type="button" phx-click="native_callers">
+                          Callers
+                        </button>
+                        <.nav_popover nav={@nav_popover} />
+                      </div>
                       <span class="runtime-tag" title="read-only native (.erl) source">
                         read-only
                       </span>

@@ -918,6 +918,29 @@ defmodule BtAttachWeb.StubWorkspaceClient do
 
   def conforming_classes_of(_protocol), do: {:value, %{"sites" => []}}
 
+  # BT-2669: the native-module "Callers" view (reverse of "go to native
+  # source"). Return canned caller rows for the known `beamtalk_subprocess`
+  # module so the UI flow (Callers popover render + navigable rows that open the
+  # calling Beamtalk method) can be exercised, and empty otherwise. Rows reuse
+  # the senders/implementors site-row shape.
+  def callers_of_native_module("beamtalk_subprocess") do
+    {:value,
+     %{
+       "sites" => [
+         %{
+           "class" => "Subprocess",
+           "class_side" => false,
+           "method" => "spawn:",
+           "line" => 12,
+           "source_file" => nil,
+           "source_origin" => "stdlib"
+         }
+       ]
+     }}
+  end
+
+  def callers_of_native_module(_module), do: {:value, %{"sites" => []}}
+
   def symbol_index(_scope), do: {:value, %{"classes" => []}}
 
   def complete(_pid, _code), do: {:ok, []}
