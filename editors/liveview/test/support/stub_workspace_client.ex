@@ -23,6 +23,12 @@ defmodule BtAttachWeb.StubWorkspaceClient do
               # current *image* body, which after a `>>` compile is the compiled
               # body — so the stub serves this over the hardcoded on-disk body.
               compiled_sources: %{},
+              # BT-2655: an in-image class-definition skeleton override per class,
+              # recorded so a test can make the image's `browse_class_definition`
+              # body diverge from the hardcoded on-disk skeleton (modelling a `>>`
+              # header recompile / external edit). `reload_file/1` drops the override
+              # for the reverted class so the served body falls back to disk.
+              compiled_definitions: %{},
               # BT-2590: the simulated `autoflush` flag (default off) and seeded
               # git panel results, so a test can exercise the post-save refresh
               # gate and the async git load without a real workspace node.
@@ -319,6 +325,10 @@ defmodule BtAttachWeb.StubWorkspaceClient do
       sources |> Enum.reject(fn {{c, _sel}, _src} -> c == class end) |> Map.new()
     end)
 
+    # BT-2655: drop any in-image class-definition override for the reverted class so
+    # `browse_class_definition` serves the on-disk skeleton again (image == disk).
+    update(:compiled_definitions, fn defs -> Map.delete(defs, class) end)
+
     update(:changes, fn changes ->
       changes |> Enum.reject(fn {{c, _sel}, _file} -> c == class end) |> Map.new()
     end)
@@ -350,6 +360,16 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   """
   def seed_change(class, selector) do
     update(:changes, &Map.put(&1, {class, selector}, "src/#{Macro.underscore(class)}.bt"))
+  end
+
+  @doc """
+  Test helper (BT-2655): override the in-image method body served by
+  `browse_method_source/3` for `{class, selector}` (modelling a `>>` recompile /
+  external edit reloaded into the image). `reload_file/1` drops it for the class so
+  a revert's reload serves the on-disk stub body again (image == disk).
+  """
+  def update_compiled_source(class, selector, source) when is_binary(source) do
+    update(:compiled_sources, &Map.put(&1, {class, selector}, source))
   end
 
   # `src/git_gate3.bt` -> "GitGate3": strip dir + extension, then CamelCase from the
@@ -655,11 +675,23 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   @doc "BT-2605: force `browse_class_definition/1` to fail (transient-outage simulation)."
   def fail_class_definition(flag) when is_boolean(flag), do: put(:fail_class_definition, flag)
 
+  @doc """
+  Test helper (BT-2655): seed an in-image class-definition skeleton override for
+  `class` so `browse_class_definition/1` serves it over the hardcoded on-disk
+  skeleton (modelling a header recompile / external edit). `reload_file/1` drops
+  it, so a revert's reload makes the served body fall back to the on-disk skeleton.
+  """
+  def seed_class_definition(class, definition) when is_binary(definition) do
+    update(:compiled_definitions, &Map.put(&1, class, definition))
+  end
+
   defp browse_class_definition_ok(class) do
+    definition = Map.get(get(:compiled_definitions), class, "Object subclass: #{class}")
+
     {:value,
      %{
        "class" => class,
-       "definition" => "Object subclass: #{class}",
+       "definition" => definition,
        "comment" => "The #{class} class.\n\n## Overview\nA stubbed class comment.",
        # BT-2578: `Subprocess` / `Headless` stand in for native: classes (ADR
        # 0056) so the System Browser's "Erlang backend" badge + native pane can be

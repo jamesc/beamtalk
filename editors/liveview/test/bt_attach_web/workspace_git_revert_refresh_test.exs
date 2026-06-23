@@ -200,6 +200,80 @@ defmodule BtAttachWeb.WorkspaceGitRevertRefreshTest do
     end
   end
 
+  describe "BT-2655: revert updates the open editor BODY in place (no reopen)" do
+    test "an open method tab's editor body reflects the reverted source", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # The in-image method body diverges from disk (a `>>` recompile / external
+      # edit reloaded into the image). Seed it BEFORE opening so the tab's editable
+      # buffer is seeded with — and the editor renders — the diverged image body.
+      StubWorkspaceClient.seed_change("Counter", "increment")
+
+      StubWorkspaceClient.update_compiled_source(
+        "Counter",
+        "increment",
+        "increment => self.value := self.value + 99"
+      )
+
+      html = open_increment_tab(view)
+      assert html =~ "self.value := self.value + 99"
+
+      # Revert the file. The reload resets the image to disk (drops the override),
+      # and the revert re-reads the OPEN tab body in place + re-keys the editor — so
+      # the editor shows the reverted on-disk source WITHOUT a close/reopen.
+      render_hook(view, "git_revert", %{"path" => "src/counter.bt"})
+
+      assert eventually(fn -> render(view) =~ "self.value := self.value + 1" end)
+      refute render(view) =~ "self.value := self.value + 99"
+    end
+
+    test "an open class-definition tab's editor body reflects the reverted header", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # The in-image class skeleton diverges from the on-disk skeleton (a header
+      # recompile: a renamed superclass / changed state). Seed it BEFORE opening so
+      # the def tab's editable buffer is seeded with the diverged image body.
+      StubWorkspaceClient.seed_class_definition(
+        "Counter",
+        "Object subclass: Counter\n  state: total :: Integer = 0"
+      )
+
+      html = render_hook(view, "browser_open_definition", %{"class" => "Counter"})
+      assert html =~ "state: total :: Integer = 0"
+
+      # Revert the file. `reload_file` drops the in-image definition override (image
+      # == disk), and the revert re-reads the open :def tab's editable definition
+      # buffer in place — so the editor shows the reverted on-disk skeleton WITHOUT a
+      # close/reopen. (The generic push refresh deliberately leaves the :def buffer
+      # untouched; a revert is the safe exception — BT-2655.)
+      render_hook(view, "git_revert", %{"path" => "src/counter.bt"})
+
+      assert eventually(fn -> render(view) =~ "Object subclass: Counter" end)
+      refute render(view) =~ "state: total :: Integer = 0"
+    end
+
+    test "an unrelated open tab is NOT disturbed by a revert of a different file", %{conn: conn} do
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Open Counter#increment and keep it focused.
+      html = open_increment_tab(view)
+      assert html =~ "self.value := self.value + 1"
+
+      # Revert a DIFFERENT file (subprocess.bt). The Counter tab must be untouched —
+      # its body still renders the unchanged Counter source.
+      render_hook(view, "git_revert", %{"path" => "src/subprocess.bt"})
+
+      assert eventually(fn ->
+               Enum.any?(
+                 StubWorkspaceClient.calls(),
+                 &match?({:reload_file, "src/subprocess.bt"}, &1)
+               )
+             end)
+
+      assert render(view) =~ "self.value := self.value + 1"
+    end
+  end
+
   describe "AC5: class-change push refreshes open windows + browser" do
     test "a ClassLoaded push re-reads an open clean method tab", %{conn: conn} do
       {:ok, view, _html} = live(owner_conn(conn), "/")
