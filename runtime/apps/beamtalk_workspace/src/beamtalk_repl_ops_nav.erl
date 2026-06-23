@@ -137,9 +137,15 @@ describe_ops() ->
 %%% ====================================================================
 
 -spec validate_params(map()) ->
-    {ok,
-        {senders | implementors | references | required_methods | conforming_classes |
-            callers_of_native_module, atom()}}
+    {ok, {
+        senders
+        | implementors
+        | references
+        | required_methods
+        | conforming_classes
+        | callers_of_native_module,
+        atom()
+    }}
     | {error, binary()}.
 validate_params(Params) ->
     case maps:get(<<"kind">>, Params, undefined) of
@@ -234,7 +240,8 @@ with_module(Params) ->
                     {ok, {callers_of_native_module, '__nav_query_unknown__'}}
             end;
         _ ->
-            {error, <<"`module` (non-empty native module name) is required for callers_of_native_module">>}
+            {error,
+                <<"`module` (non-empty native module name) is required for callers_of_native_module">>}
     end.
 
 %% The site rows are already a JSON-shaped map of lists / binaries / integers /
