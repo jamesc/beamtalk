@@ -10,6 +10,7 @@ pub mod build;
 pub(crate) mod build_cache;
 pub mod build_layout;
 pub mod build_stdlib;
+pub mod clean;
 pub mod deps;
 pub mod doc;
 pub(crate) mod doc_tests;

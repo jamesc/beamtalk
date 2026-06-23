@@ -99,6 +99,26 @@ enum Command {
         app: bool,
     },
 
+    /// Remove generated build artifacts (never source)
+    ///
+    /// By default removes the project's `_build/<profile>/` output (compiled
+    /// BEAM, generated `beamtalk_classes.hrl`, native `ebin`/`include`) and the
+    /// type cache. Paths are resolved through the build layout, so source,
+    /// `native/` source, and `beamtalk.toml` are never touched.
+    Clean {
+        /// Also remove fetched/compiled dependency artifacts (`_build/deps/`)
+        #[arg(long)]
+        deps: bool,
+
+        /// Remove everything, including shared caches (the whole `_build/`)
+        #[arg(long)]
+        all: bool,
+
+        /// List what would be removed without deleting anything
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Start an interactive REPL
     Repl {
         /// Port for the REPL backend (default: 0 = OS-assigned, or `BEAMTALK_REPL_PORT` env var)
@@ -452,6 +472,7 @@ fn run() -> Result<()> {
             selector,
         } => commands::run::run(&class_or_dot, selector.as_deref()),
         Command::New { name, app } => commands::new::new_project(&name, app),
+        Command::Clean { deps, all, dry_run } => commands::clean::run(deps, all, dry_run),
         Command::Repl {
             port,
             node,
