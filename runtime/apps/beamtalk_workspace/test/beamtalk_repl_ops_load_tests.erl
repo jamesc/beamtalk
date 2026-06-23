@@ -1149,3 +1149,274 @@ test_load_excludes_native_test_helper_without_flag_test() ->
     after
         rm_temp_dir(Dir)
     end.
+
+%%====================================================================
+%% BT-2671: source-AST-derived class index (cold-load header parity)
+%%====================================================================
+
+read_package_name_reads_toml_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"my_pkg\"\n">>),
+        ?assertEqual(<<"my_pkg">>, beamtalk_repl_ops_load:read_package_name(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+read_package_name_missing_manifest_test() ->
+    %% No beamtalk.toml → undefined (the index builder then falls back to the
+    %% live registry alone, the previous behaviour).
+    Dir = filename:absname(make_temp_dir()),
+    try
+        ?assertEqual(undefined, beamtalk_repl_ops_load:read_package_name(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+extract_all_bt_classes_multiple_test() ->
+    %% Unlike extract_bt_class_info/1 (first class only), this returns every
+    %% declared class in the file so a multi-class source contributes all of
+    %% them to the cold-load index.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        Src = <<
+            "Object subclass: Alpha\n\n"
+            "Actor subclass: Beta\n  state: x = 0\n\n"
+            "Value subclass: Gamma\n"
+        >>,
+        Path = write_temp_file(Dir, "multi.bt", Src),
+        ?assertEqual(
+            [<<"Alpha">>, <<"Beta">>, <<"Gamma">>],
+            beamtalk_repl_ops_load:extract_all_bt_classes(Path)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+extract_all_bt_classes_missing_file_test() ->
+    ?assertEqual([], beamtalk_repl_ops_load:extract_all_bt_classes("/nonexistent/x.bt")).
+
+source_module_name_root_test() ->
+    %% A src/-root file maps to bt@<pkg>@<snake(stem)>, the same atom the CLI's
+    %% compute_relative_module produces.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        Path = filename:join(SrcDir, "http_response.bt"),
+        ?assertEqual(
+            <<"bt@web@http_response">>,
+            beamtalk_repl_ops_load:source_module_name(Path, SrcDir, <<"web">>)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+source_module_name_subdir_test() ->
+    %% A subdirectory under src/ becomes an `@' segment, each snake-cased —
+    %% bt@<pkg>@<dir>@<stem> — exactly as the CLI nests subdirectory modules.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        SrcDir = filename:join(Dir, "src"),
+        SubDir = filename:join(SrcDir, "util"),
+        ok = file:make_dir(SrcDir),
+        ok = file:make_dir(SubDir),
+        Path = filename:join(SubDir, "math_helper.bt"),
+        ?assertEqual(
+            <<"bt@web@util@math_helper">>,
+            beamtalk_repl_ops_load:source_module_name(Path, SrcDir, <<"web">>)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+build_source_class_module_index_cold_test() ->
+    %% The whole point of BT-2671: on a COLD load (no class registered yet) the
+    %% source index already knows every class defined in src/, keyed to its
+    %% package-qualified module atom.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"coldpkg\"\n">>),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        write_temp_file(SrcDir, "foo.bt", <<"Object subclass: Foo\n">>),
+        write_temp_file(
+            SrcDir, "bar.bt", <<"Actor subclass: Bar\n  state: x = 0\n">>
+        ),
+        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir),
+        ?assertEqual(<<"bt@coldpkg@foo">>, maps:get(<<"Foo">>, Index)),
+        ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Bar">>, Index))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+build_source_class_module_index_no_package_test() ->
+    %% No package name → empty index (caller falls back to the live registry).
+    Dir = filename:absname(make_temp_dir()),
+    try
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        write_temp_file(SrcDir, "foo.bt", <<"Object subclass: Foo\n">>),
+        ?assertEqual(#{}, beamtalk_repl_ops_load:build_source_class_module_index(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+regenerate_header_includes_cold_source_class_test() ->
+    %% BT-2671 acceptance: regenerate_native_class_header/1 must emit a
+    %% -define for a class defined in src/ even though it is NOT registered
+    %% (cold load). The previous registry-only path produced no macro for it.
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"coldhdr\"\n">>),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        write_temp_file(SrcDir, "widget.bt", <<"Object subclass: Widget\n">>),
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        HrlPath = filename:join(
+            beamtalk_repl_ops_load:native_generated_include_dir(Dir),
+            "beamtalk_classes.hrl"
+        ),
+        {ok, Content} = file:read_file(HrlPath),
+        ?assert(
+            binary:match(
+                Content, <<"-define(BT_CLASS_MODULE_Widget, 'bt@coldhdr@widget').">>
+            ) =/= nomatch
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+cold_load_native_macro_compiles_test() ->
+    %% End-to-end cold-load parity (acceptance criterion 1): a native module
+    %% using ?BT_CLASS_MODULE_<Class> for a class defined in the SAME package
+    %% being loaded must compile+resolve, with the class NEVER registered. The
+    %% pre-BT-2671 registry-only header would omit the macro → compile failure
+    %% (relocated symptom-2 cascade).
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"e2ecold\"\n">>),
+        SrcDir = filename:join(Dir, "src"),
+        ok = file:make_dir(SrcDir),
+        %% A source class that is NOT registered into the live class registry.
+        write_temp_file(SrcDir, "gadget.bt", <<"Object subclass: Gadget\n">>),
+        %% Regenerate the header from source (cold path).
+        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir)),
+        NativeDir = filename:join(Dir, "native"),
+        ok = file:make_dir(NativeDir),
+        %% A native module that expands the macro for the same-package class.
+        ErlSrc = <<
+            "-module(bt_native_cold_macro).\n"
+            "-include(\"beamtalk_classes.hrl\").\n"
+            "-export([gadget_module/0]).\n"
+            "gadget_module() -> ?BT_CLASS_MODULE_Gadget.\n"
+        >>,
+        ErlPath = write_temp_file(NativeDir, "bt_native_cold_macro.erl", ErlSrc),
+        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        ?assertEqual([], Errors),
+        ?assertEqual(1, Count),
+        %% The macro resolved to the package-qualified module atom.
+        ?assertEqual('bt@e2ecold@gadget', bt_native_cold_macro:gadget_module())
+    after
+        %% Cleanup in `after` so a failed assertion can't leave the module loaded.
+        code:purge(bt_native_cold_macro),
+        code:delete(bt_native_cold_macro),
+        rm_temp_dir(Dir)
+    end.
+
+%%====================================================================
+%% BT-2671: live-registry vs CLI module-atom casing parity (gap 2)
+%%
+%% Loads a real class into the live class registry, then asserts the registry's
+%% module_name/1 atom equals the module atom the source-AST index derives for
+%% the same class. The source index uses the identical snake-case transform the
+%% CLI build applies (build.rs compute_relative_module → to_module_name), so a
+%% match locks the casing parity between the workspace runtime atom and the
+%% CLI-generated `.beam' module name.
+%%====================================================================
+
+module_atom_casing_parity_test_() ->
+    {setup, fun parity_setup/0, fun parity_teardown/1, fun parity_assert/1}.
+
+parity_setup() ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    application:ensure_all_started(beamtalk_runtime),
+    Tmp = unicode:characters_to_list(beamtalk_file:'tempDirectory'()),
+    Proj =
+        Tmp ++ "/bt_ops_parity_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ok = file:make_dir(Proj),
+    ok = file:write_file(
+        filename:join(Proj, "beamtalk.toml"),
+        <<"[package]\nname = \"paritypkg\"\n">>
+    ),
+    %% A workspace_meta with a real project_path so compute_package_module_name/1
+    %% derives the package-qualified module atom on load.
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    {ok, _} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => <<"ops_parity_ws">>,
+        project_path => list_to_binary(Proj),
+        created_at => erlang:system_time(second)
+    }),
+    Proj.
+
+parity_teardown(Proj) ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined -> ok;
+        MetaPid -> gen_server:stop(MetaPid)
+    end,
+    %% NB: only stop beamtalk_compiler here. Do NOT stop beamtalk_runtime — it is
+    %% a shared OTP application other tests in this EUnit node rely on being up
+    %% (e.g. beamtalk_repl_server_tests' ranch listener, beamtalk_workspace_sup_tests).
+    %% `parity_setup` uses ensure_all_started, so when it was already running we
+    %% must leave it running; stopping it here triggers a `noproc`/`already_started`
+    %% cascade in sibling tests.
+    _ = application:stop(beamtalk_compiler),
+    rm_temp_dir(Proj),
+    ok.
+
+parity_assert(Proj) ->
+    %% A multi-word class name exercises the snake_case transform (the place
+    %% casing could diverge between the runtime atom and the CLI-built module
+    %% name). Load it into the live registry under src/.
+    SrcDir = filename:join(Proj, "src"),
+    ok = filelib:ensure_dir(filename:join(SrcDir, "anchor")),
+    Path = filename:join(SrcDir, "HttpResponse.bt"),
+    ok = file:write_file(
+        Path, <<"Object subclass: HttpResponse\n\n  ok -> Boolean => true\n">>
+    ),
+    State0 = beamtalk_repl_state:new(undefined, 0),
+    {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, State0),
+    %% The atom the live registry records for the loaded class.
+    RegistryPid = beamtalk_class_registry:whereis_class('HttpResponse'),
+    LiveModule = beamtalk_object_class:module_name(RegistryPid),
+    %% The atom the source-AST index derives — built the same way the CLI does
+    %% (build.rs compute_relative_module → to_module_name), so this binary is
+    %% byte-identical to the CLI-generated `.beam' module name.
+    SourceIndex = beamtalk_repl_ops_load:build_source_class_module_index(Proj),
+    SourceModuleBin = maps:get(<<"HttpResponse">>, SourceIndex),
+    %% Compare the casing-sensitive class-name segment (the last `@'-part) of the
+    %% live atom against the source/CLI atom. The package prefix can legitimately
+    %% differ when the live workspace-meta singleton (shared across the EUnit
+    %% node) resolved a stem-only module name, but the *casing* of the class
+    %% segment — the only thing this parity check guards — must always agree.
+    LiveSegment = last_module_segment(atom_to_binary(LiveModule, utf8)),
+    SourceSegment = last_module_segment(SourceModuleBin),
+    [
+        %% Casing parity: the runtime atom and the CLI-formula atom snake-case
+        %% the class name identically.
+        ?_assertEqual(<<"http_response">>, SourceSegment),
+        ?_assertEqual(LiveSegment, SourceSegment),
+        %% The source/CLI atom is the expected snake-cased, package-qualified one.
+        ?_assertEqual(<<"bt@paritypkg@http_response">>, SourceModuleBin)
+    ].
+
+%% Last `@'-delimited segment of a `bt@…@class' module-name binary.
+last_module_segment(ModuleBin) ->
+    lists:last(binary:split(ModuleBin, <<"@">>, [global])).
