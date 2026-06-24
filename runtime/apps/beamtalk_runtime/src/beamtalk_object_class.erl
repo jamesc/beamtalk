@@ -334,7 +334,7 @@ has_method(ClassPid, Selector) ->
                                     ?LOG_DEBUG(
                                         "has_method check failed for ~p:~p: ~p:~p",
                                         [ModuleName, Selector, Kind, Reason],
-                                        #{stacktrace => ST, domain => [beamtalk, runtime]}
+                                        #{stacktrace => ST, ?BT_LOG_DOMAIN}
                                     ),
                                     false
                             end;
@@ -504,7 +504,7 @@ init({ClassName, ClassInfo}) ->
                         event => register_class_undef,
                         class => ClassName,
                         reason => "beamtalk_compiler_server:register_class/2 not available",
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     }),
                     ok
             end;
@@ -585,7 +585,7 @@ register_xref(ClassName, MethodXref) ->
                 event => xref_not_running,
                 class => ClassName,
                 reason => "beamtalk_xref not registered; skipping index population",
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             ok;
         _Pid ->
@@ -927,7 +927,7 @@ handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = S
                             ?LOG_DEBUG(
                                 "Failed to read __beamtalk_meta from ~p: ~p:~p",
                                 [NewModule, Kind, Reason],
-                                #{stacktrace => ST, domain => [beamtalk, runtime]}
+                                #{stacktrace => ST, ?BT_LOG_DOMAIN}
                             ),
                             ok
                     end;
@@ -1307,7 +1307,7 @@ has_class_new_in_chain(ClassName, Module, Depth) ->
                                     ?LOG_DEBUG(
                                         "has_class_new_in_chain failed for ~p: ~p:~p",
                                         [SuperName, Kind, Reason],
-                                        #{stacktrace => ST, domain => [beamtalk, runtime]}
+                                        #{stacktrace => ST, ?BT_LOG_DOMAIN}
                                     ),
                                     false
                             end
