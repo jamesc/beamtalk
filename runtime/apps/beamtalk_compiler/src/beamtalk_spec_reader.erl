@@ -989,7 +989,7 @@ map_union(Branches, _Line) ->
 %% Whether a union of plain literal atoms contains an atom other than `ok`/`error`.
 %% Only called when `singleton_union_members/1` has already confirmed every branch
 %% is a plain literal atom, so the match on `{atom, _, A}` is total.
--spec has_non_result_atom([tuple()]) -> boolean().
+-spec has_non_result_atom([{atom, term(), atom()}]) -> boolean().
 has_non_result_atom(Branches) ->
     lists:any(
         fun({atom, _, A}) -> A =/= ok andalso A =/= error end,
