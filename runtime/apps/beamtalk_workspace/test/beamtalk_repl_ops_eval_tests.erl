@@ -125,10 +125,8 @@ handle_websocket_encodes_eval_result_to_json_test_() ->
                 ?assert(is_binary(Result)),
                 Decoded = json:decode(Result),
                 ?assert(is_map(Decoded)),
-                ?assert(
-                    maps:is_key(<<"value">>, Decoded) orelse maps:is_key(<<"error">>, Decoded)
-                ),
-                ?assertEqual(3, maps:get(<<"value">>, Decoded, undefined))
+                ?assert(maps:is_key(<<"value">>, Decoded)),
+                ?assertEqual(3, maps:get(<<"value">>, Decoded))
             end)
         ]
     end}.
