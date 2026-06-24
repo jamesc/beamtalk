@@ -393,7 +393,7 @@ execute_callback(Callback, Value) ->
                     class => Class,
                     reason => Reason,
                     stacktrace => Stacktrace,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 })
         end
     end).

@@ -730,7 +730,7 @@ write_mcp_signal_file() ->
                             ?LOG_INFO(#{
                                 msg => "MCP debug signal file written",
                                 path => Path,
-                                domain => [beamtalk, runtime]
+                                ?BT_LOG_DOMAIN
                             }),
                             ok;
                         {error, Reason} ->
@@ -738,7 +738,7 @@ write_mcp_signal_file() ->
                                 msg => "Failed to write MCP debug signal file",
                                 path => Path,
                                 reason => Reason,
-                                domain => [beamtalk, runtime]
+                                ?BT_LOG_DOMAIN
                             }),
                             {error, Reason}
                     end;
@@ -747,7 +747,7 @@ write_mcp_signal_file() ->
                         msg => "Failed to create directory for MCP debug signal file",
                         path => Path,
                         reason => DirReason,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     }),
                     {error, DirReason}
             end;
@@ -765,7 +765,7 @@ remove_mcp_signal_file() ->
                     ?LOG_INFO(#{
                         msg => "MCP debug signal file removed",
                         path => Path,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     }),
                     ok;
                 {error, enoent} ->
@@ -775,7 +775,7 @@ remove_mcp_signal_file() ->
                         msg => "Failed to remove MCP debug signal file",
                         path => Path,
                         reason => Reason,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     }),
                     ok
             end;
