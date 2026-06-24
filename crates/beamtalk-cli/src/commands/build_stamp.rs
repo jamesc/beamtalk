@@ -21,6 +21,7 @@
 use camino::Utf8Path;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
@@ -36,6 +37,19 @@ const STAMP_SCHEMA: u32 = 1;
 /// artifacts.
 pub(crate) fn current_beamtalk_version() -> &'static str {
     env!("BEAMTALK_VERSION")
+}
+
+/// The running toolchain's compound OTP version (`<release>-<erts>`), probed
+/// once per process.
+///
+/// A single `beamtalk` invocation stamps many scopes (the project plus every
+/// dependency), so memoizing the `erl` probe avoids re-spawning it for each.
+/// `None` if OTP could not be probed; callers then compare provenance on
+/// `beamtalk_version` alone.
+pub(crate) fn current_otp_version() -> Option<&'static str> {
+    static OTP: OnceLock<Option<String>> = OnceLock::new();
+    OTP.get_or_init(crate::beam_compiler::discover_otp_version)
+        .as_deref()
 }
 
 /// On-disk provenance stamp written into a build scope after a successful build.
