@@ -30,12 +30,23 @@ make_msg(Op) ->
     {protocol_msg, Op, <<"id-1">>, undefined, #{}, false}.
 
 setup() ->
+    application:ensure_all_started(compiler),
     application:ensure_all_started(beamtalk_runtime),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end,
+    %% Allow the runtime to register its bootstrap classes before compiling.
+    timer:sleep(300),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(<<"test-eval-ops">>),
     SessionPid.
 
 teardown(SessionPid) ->
-    catch beamtalk_repl_shell:stop(SessionPid).
+    catch beamtalk_repl_shell:stop(SessionPid),
+    %% Restore baseline "compiler not running" state so subsequent test modules
+    %% that test no-compiler error paths see the expected initial state.
+    _ = application:stop(beamtalk_compiler),
+    ok.
 
 %%====================================================================
 %% handle_term/4 — empty code (no session required)
