@@ -64,83 +64,71 @@ handle_term_empty_code_returns_empty_expression_error_test() ->
 %%====================================================================
 
 handle_term_non_empty_eval_success_test_() ->
-    {setup,
-        fun() -> setup(<<"test-eval-ops-success">>) end,
-        fun teardown/1,
-        fun(SessionPid) ->
-            [
-                ?_test(begin
-                    Msg = make_msg(<<"eval">>),
-                    Result = beamtalk_repl_ops_eval:handle_term(
-                        <<"eval">>, #{<<"code">> => <<"1 + 2">>}, Msg, SessionPid
-                    ),
-                    ?assertMatch({ok, 3, _, _}, Result)
-                end)
-            ]
-        end}.
+    {setup, fun() -> setup(<<"test-eval-ops-success">>) end, fun teardown/1, fun(SessionPid) ->
+        [
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                Result = beamtalk_repl_ops_eval:handle_term(
+                    <<"eval">>, #{<<"code">> => <<"1 + 2">>}, Msg, SessionPid
+                ),
+                ?assertMatch({ok, 3, _, _}, Result)
+            end)
+        ]
+    end}.
 
 handle_term_eval_error_wraps_in_beamtalk_error_test_() ->
-    {setup,
-        fun() -> setup(<<"test-eval-ops-error">>) end,
-        fun teardown/1,
-        fun(SessionPid) ->
-            [
-                ?_test(begin
-                    Msg = make_msg(<<"eval">>),
-                    %% Unary message not understood by Integer → does_not_understand.
-                    Result = beamtalk_repl_ops_eval:handle_term(
-                        <<"eval">>, #{<<"code">> => <<"1 unknownMsg">>}, Msg, SessionPid
-                    ),
-                    ?assertMatch({error, #beamtalk_error{}, _, _}, Result)
-                end)
-            ]
-        end}.
+    {setup, fun() -> setup(<<"test-eval-ops-error">>) end, fun teardown/1, fun(SessionPid) ->
+        [
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                %% Unary message not understood by Integer → does_not_understand.
+                Result = beamtalk_repl_ops_eval:handle_term(
+                    <<"eval">>, #{<<"code">> => <<"1 unknownMsg">>}, Msg, SessionPid
+                ),
+                ?assertMatch({error, #beamtalk_error{}, _, _}, Result)
+            end)
+        ]
+    end}.
 
 %%====================================================================
 %% handle_term/4 — trace mode
 %%====================================================================
 
 handle_term_trace_mode_returns_trace_shape_test_() ->
-    {setup,
-        fun() -> setup(<<"test-eval-ops-trace">>) end,
-        fun teardown/1,
-        fun(SessionPid) ->
-            [
-                ?_test(begin
-                    Msg = make_msg(<<"eval">>),
-                    Result = beamtalk_repl_ops_eval:handle_term(
-                        <<"eval">>,
-                        #{<<"code">> => <<"1 + 2">>, <<"trace">> => true},
-                        Msg,
-                        SessionPid
-                    ),
-                    ?assertMatch({trace, _, _, _}, Result)
-                end)
-            ]
-        end}.
+    {setup, fun() -> setup(<<"test-eval-ops-trace">>) end, fun teardown/1, fun(SessionPid) ->
+        [
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                Result = beamtalk_repl_ops_eval:handle_term(
+                    <<"eval">>,
+                    #{<<"code">> => <<"1 + 2">>, <<"trace">> => true},
+                    Msg,
+                    SessionPid
+                ),
+                ?assertMatch({trace, _, _, _}, Result)
+            end)
+        ]
+    end}.
 
 %%====================================================================
 %% handle/4 — WebSocket edge wrapper
 %%====================================================================
 
 handle_websocket_encodes_eval_result_to_json_test_() ->
-    {setup,
-        fun() -> setup(<<"test-eval-ops-ws">>) end,
-        fun teardown/1,
-        fun(SessionPid) ->
-            [
-                ?_test(begin
-                    Msg = make_msg(<<"eval">>),
-                    Result = beamtalk_repl_ops_eval:handle(
-                        <<"eval">>, #{<<"code">> => <<"1 + 2">>}, Msg, SessionPid
-                    ),
-                    ?assert(is_binary(Result)),
-                    Decoded = json:decode(Result),
-                    ?assert(is_map(Decoded)),
-                    ?assert(
-                        maps:is_key(<<"value">>, Decoded) orelse maps:is_key(<<"error">>, Decoded)
-                    ),
-                    ?assertEqual(3, maps:get(<<"value">>, Decoded, undefined))
-                end)
-            ]
-        end}.
+    {setup, fun() -> setup(<<"test-eval-ops-ws">>) end, fun teardown/1, fun(SessionPid) ->
+        [
+            ?_test(begin
+                Msg = make_msg(<<"eval">>),
+                Result = beamtalk_repl_ops_eval:handle(
+                    <<"eval">>, #{<<"code">> => <<"1 + 2">>}, Msg, SessionPid
+                ),
+                ?assert(is_binary(Result)),
+                Decoded = json:decode(Result),
+                ?assert(is_map(Decoded)),
+                ?assert(
+                    maps:is_key(<<"value">>, Decoded) orelse maps:is_key(<<"error">>, Decoded)
+                ),
+                ?assertEqual(3, maps:get(<<"value">>, Decoded, undefined))
+            end)
+        ]
+    end}.
