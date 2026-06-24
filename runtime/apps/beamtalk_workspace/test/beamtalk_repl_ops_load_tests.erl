@@ -1636,3 +1636,163 @@ save_native_source_requires_source_test() ->
             self()
         )
     ).
+
+%%====================================================================
+%% ADR 0098 Phase 4 — build-artifact provenance on workspace attach
+%%====================================================================
+
+%% A schema this reader doesn't understand → stale (rebuild), never an error.
+provenance_unknown_schema_is_stale_test() ->
+    Stamp = #{
+        <<"schema">> => 999,
+        <<"beamtalk_version">> => <<"9.9.9">>,
+        <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+    },
+    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+
+%% A stamp built for a different OTP release → stale even if the version matches.
+provenance_otp_mismatch_is_stale_test() ->
+    Stamp = #{
+        <<"schema">> => 1,
+        <<"beamtalk_version">> => stamp_version(),
+        <<"otp_release">> => <<"1-0.0">>
+    },
+    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+
+%% A stamp with no OTP key → stale (the older-toolchain case).
+provenance_missing_otp_key_is_stale_test() ->
+    Stamp = #{<<"schema">> => 1, <<"beamtalk_version">> => stamp_version()},
+    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+
+%% A stamp matching the running toolchain → fresh.
+provenance_matching_stamp_is_fresh_test() ->
+    Stamp = #{
+        <<"schema">> => 1,
+        <<"beamtalk_version">> => stamp_version(),
+        <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+    },
+    ?assertEqual(fresh, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+
+%% Version mismatch → stale. Only assert when the compiler port can report a
+%% version; otherwise the version axis is not testable and the OTP axis covers
+%% staleness (the compiler server is not started in this EUnit context).
+provenance_version_mismatch_is_stale_test() ->
+    case safe_version() of
+        undefined ->
+            ok;
+        _ ->
+            Stamp = #{
+                <<"schema">> => 1,
+                <<"beamtalk_version">> => <<"0.0.0-not-current">>,
+                <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+            },
+            ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp))
+    end.
+
+provenance_read_stamp_round_trip_test() ->
+    Dir = make_temp_dir(),
+    try
+        StampPath = filename:join(Dir, ".beamtalk-stamp.json"),
+        ok = file:write_file(StampPath, <<"{\"schema\":1,\"beamtalk_version\":\"x\"}">>),
+        ?assertMatch(
+            {ok, #{<<"schema">> := 1}}, beamtalk_repl_ops_load:read_provenance_stamp(StampPath)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+provenance_read_corrupt_stamp_is_error_test() ->
+    Dir = make_temp_dir(),
+    try
+        StampPath = filename:join(Dir, ".beamtalk-stamp.json"),
+        ok = file:write_file(StampPath, <<"{ not json">>),
+        ?assertMatch({error, _}, beamtalk_repl_ops_load:read_provenance_stamp(StampPath))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+provenance_read_missing_stamp_is_error_test() ->
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_ops_load:read_provenance_stamp("does/not/exist/.beamtalk-stamp.json")
+    ).
+
+%% A project with no stamp at all is stale → forces a recompile on attach.
+provenance_missing_stamp_forces_recompile_test() ->
+    Dir = make_temp_dir(),
+    try
+        ?assertEqual(true, beamtalk_repl_ops_load:project_provenance_stale(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% A project whose on-disk stamp matches the running toolchain is fresh; once the
+%% stamp's OTP is tampered (an older-toolchain artifact), the next attach is
+%% stale → recompile. (The full compile+self-heal cycle is exercised end-to-end
+%% by the repl-protocol `sync_project` case, which needs the compiler port.)
+provenance_stale_stamp_flips_attach_decision_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        ProfileDir = filename:join([Dir, "_build", "dev"]),
+        ok = filelib:ensure_dir(filename:join(ProfileDir, ".keep")),
+        StampPath = filename:join(ProfileDir, ".beamtalk-stamp.json"),
+
+        Fresh = #{
+            <<"schema">> => 1,
+            <<"beamtalk_version">> => stamp_version(),
+            <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+        },
+        ok = file:write_file(StampPath, iolist_to_binary(json:encode(Fresh))),
+        ?assertEqual(false, beamtalk_repl_ops_load:project_provenance_stale(Dir)),
+
+        Tampered = Fresh#{<<"otp_release">> => <<"1-0.0">>},
+        ok = file:write_file(StampPath, iolist_to_binary(json:encode(Tampered))),
+        ?assertEqual(true, beamtalk_repl_ops_load:project_provenance_stale(Dir))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% write_project_provenance_stamp/1 lands a stamp the freshness check accepts —
+%% the self-heal that makes subsequent attaches incremental. Only meaningful when
+%% the compiler port can report a version (else the stamp write is skipped).
+provenance_written_stamp_is_fresh_test() ->
+    case safe_version() of
+        undefined ->
+            ok;
+        _ ->
+            Dir = filename:absname(make_temp_dir()),
+            try
+                ok = beamtalk_repl_ops_load:write_project_provenance_stamp(Dir),
+                StampPath = filename:join([Dir, "_build", "dev", ".beamtalk-stamp.json"]),
+                ?assert(filelib:is_file(StampPath)),
+                ?assertEqual(false, beamtalk_repl_ops_load:project_provenance_stale(Dir))
+            after
+                rm_temp_dir(Dir)
+            end
+    end.
+
+%% The running OTP version is the compound `<release>-<erts>` key.
+provenance_current_otp_release_is_compound_test() ->
+    Otp = beamtalk_repl_ops_load:current_otp_release(),
+    ?assert(is_binary(Otp)),
+    ?assertMatch([_Rel, _Erts], binary:split(Otp, <<"-">>)).
+
+%% The compiler port's version, or `undefined` if the server isn't running
+%% (the compiler app is not started in this EUnit context). Crash-safe.
+safe_version() ->
+    try beamtalk_compiler_server:version() of
+        {ok, V} when is_binary(V) -> V;
+        _ -> undefined
+    catch
+        _:_ -> undefined
+    end.
+
+%% A binary version for stamps that should pass the version axis: the real
+%% running version when the port is up (so it matches), or a placeholder when
+%% it's down (the version axis is skipped, so the value is irrelevant). Always a
+%% binary, so `json:encode/1` never sees the `undefined` atom.
+stamp_version() ->
+    case safe_version() of
+        V when is_binary(V) -> V;
+        undefined -> <<"0.0.0-test-placeholder">>
+    end.

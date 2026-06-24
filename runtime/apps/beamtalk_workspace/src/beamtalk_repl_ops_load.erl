@@ -46,7 +46,13 @@ respectively.
     classify_files_by_change/2,
     get_file_mtime/1,
     extract_native_refs/1,
-    filter_mtimes_under_project/2
+    filter_mtimes_under_project/2,
+    project_provenance_stale/1,
+    provenance_status/1,
+    stamp_matches_current/1,
+    read_provenance_stamp/1,
+    current_otp_release/0,
+    write_project_provenance_stamp/1
 ]).
 -endif.
 
@@ -100,7 +106,17 @@ sync_project(Path, Options) ->
 
 -doc "Core sync logic, called after validating beamtalk.toml exists.".
 -spec do_sync_project(string(), boolean(), boolean(), pid() | undefined) -> {ok, map()}.
-do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
+do_sync_project(AbsPath, IncludeTests, Force0, SessionPid) ->
+    %% ADR 0098 Phase 4: provenance gate. If the project's `_build/dev` artifacts
+    %% were produced by a different toolchain than the one now running the
+    %% workspace (a beamtalk_version / OTP mismatch, or no stamp at all), force a
+    %% full recompile rather than serving stale modules — generalizing BT-2653's
+    %% header-content force-rebuild into a provenance check. A stale dependency
+    %% can't self-heal here (the workspace recompiles project sources, not deps),
+    %% so it is surfaced as a directed warning instead.
+    ProvenanceStale = project_provenance_stale(AbsPath),
+    _ = warn_stale_dep_provenance(AbsPath),
+    Force = Force0 orelse ProvenanceStale,
     %% Activate pre-compiled dependency modules before loading project files,
     %% so that project classes can reference dependency classes (e.g. HTTPClient).
     DepErrors = beamtalk_workspace_bootstrap:activate_dependency_modules(AbsPath),
@@ -291,6 +307,15 @@ do_sync_project(AbsPath, IncludeTests, Force, SessionPid) ->
     ChangedCount = length(ChangedBt) + length(ChangedErl),
     UnchangedCount = length(UnchangedBt) + length(UnchangedErl),
     DepErrorMsgs = [format_dep_error(Mod, Reason) || {Mod, Reason} <- DepErrors],
+    %% ADR 0098 Phase 4: once a provenance-forced recompile lands cleanly, refresh
+    %% the project stamp so subsequent attaches (and CLI builds) see current
+    %% provenance and stay incremental — the self-heal sticks instead of forcing a
+    %% full recompile on every attach. Only when we forced AND nothing errored, so
+    %% the stamp never claims freshness for incomplete output.
+    case ProvenanceStale andalso Errors =:= [] of
+        true -> write_project_provenance_stamp(AbsPath);
+        false -> ok
+    end,
     {ok, #{
         classes => ClassNames,
         errors => Errors,
@@ -1912,3 +1937,189 @@ build_incremental_summary(ChangedCount, TotalFiles, UnchangedCount, DeletedCount
                 [" (", integer_to_list(U), " unchanged, ", integer_to_list(D), " deleted)"]
         end,
     iolist_to_binary(BaseParts ++ DetailParts).
+
+%%% ============================================================================
+%%% ADR 0098 Phase 4 — build-artifact provenance on workspace attach
+%%% ============================================================================
+%%%
+%%% Validate that the project's on-disk `_build` artifacts were produced by the
+%%% same toolchain now running the workspace. mtime cannot detect a toolchain
+%%% change — the build stamp (`beamtalk_version` + compound OTP version, ADR 0098
+%%% Phase 1) is the authoritative signal. A miss forces a full recompile so the
+%%% workspace never serves stale modules (the BT-2653 cascade generalized).
+
+%% Provenance-stamp schema understood by this reader. A newer stamp (or anything
+%% unrecognised) is treated as a miss, never an error.
+-define(PROVENANCE_SCHEMA, 1).
+
+-doc """
+Returns `true` when the project's `_build/dev` artifacts were produced by a
+different toolchain than the one now running (a `beamtalk_version` / OTP
+mismatch, or no/corrupt stamp), meaning every project file must be recompiled
+rather than served stale.
+""".
+-spec project_provenance_stale(string()) -> boolean().
+project_provenance_stale(AbsPath) ->
+    StampPath = filename:join([AbsPath, "_build", "dev", ".beamtalk-stamp.json"]),
+    case provenance_status(StampPath) of
+        fresh ->
+            false;
+        {stale, Reason} ->
+            ?LOG_INFO(
+                "workspace provenance miss (~s) — recompiling project at ~s",
+                [Reason, AbsPath],
+                #{domain => [beamtalk, runtime]}
+            ),
+            true
+    end.
+
+-doc "Read and validate a provenance stamp against the running toolchain.".
+-spec provenance_status(string()) -> fresh | {stale, binary()}.
+provenance_status(StampPath) ->
+    case read_provenance_stamp(StampPath) of
+        {ok, Stamp} -> stamp_matches_current(Stamp);
+        {error, Reason} -> {stale, Reason}
+    end.
+
+-spec read_provenance_stamp(string()) -> {ok, map()} | {error, binary()}.
+read_provenance_stamp(StampPath) ->
+    case file:read_file(StampPath) of
+        {ok, Bin} ->
+            try json:decode(Bin) of
+                Map when is_map(Map) -> {ok, Map};
+                _ -> {error, <<"corrupt provenance stamp">>}
+            catch
+                _:_ -> {error, <<"corrupt provenance stamp">>}
+            end;
+        {error, _} ->
+            {error, <<"no provenance stamp">>}
+    end.
+
+%% Compare a decoded stamp's invalidation fields against the running toolchain.
+%% Only `beamtalk_version` and the compound OTP version are compared (`built_at`
+%% is informational). A missing key compares unequal → stale, which is exactly
+%% the older-toolchain case this check exists to catch.
+-spec stamp_matches_current(map()) -> fresh | {stale, binary()}.
+stamp_matches_current(Stamp) ->
+    case maps:get(<<"schema">>, Stamp, undefined) of
+        ?PROVENANCE_SCHEMA -> check_version(Stamp);
+        _ -> {stale, <<"unrecognised provenance schema">>}
+    end.
+
+-spec check_version(map()) -> fresh | {stale, binary()}.
+check_version(Stamp) ->
+    StampVsn = maps:get(<<"beamtalk_version">>, Stamp, undefined),
+    case current_beamtalk_version() of
+        {ok, CurVsn} when StampVsn =/= CurVsn ->
+            {stale, <<"built by a different beamtalk version">>};
+        %% Version matches, or the compiler version is unavailable: fall through
+        %% to the OTP axis (an unavailable version never forces on its own).
+        _ ->
+            check_otp(Stamp)
+    end.
+
+-spec check_otp(map()) -> fresh | {stale, binary()}.
+check_otp(Stamp) ->
+    StampOtp = maps:get(<<"otp_release">>, Stamp, undefined),
+    case current_otp_release() of
+        StampOtp -> fresh;
+        _ -> {stale, <<"built for a different OTP release">>}
+    end.
+
+%% The running toolchain's full beamtalk version, via the compiler port — the
+%% same `BEAMTALK_VERSION` the on-disk stamp records. `error` if the port is
+%% unavailable, in which case provenance is compared on the OTP axis alone.
+-spec current_beamtalk_version() -> {ok, binary()} | error.
+current_beamtalk_version() ->
+    try beamtalk_compiler_server:version() of
+        {ok, V} when is_binary(V) -> {ok, V};
+        _ -> error
+    catch
+        _:_ -> error
+    end.
+
+%% The running BEAM's compound OTP version (`<release>-<erts>`), identical to the
+%% key the build stamp records (`27-15.0.1`), not the bare release (`27`).
+-spec current_otp_release() -> binary().
+current_otp_release() ->
+    Rel = list_to_binary(erlang:system_info(otp_release)),
+    Erts = list_to_binary(erlang:system_info(version)),
+    <<Rel/binary, "-", Erts/binary>>.
+
+-doc """
+Write the project provenance stamp after a provenance-forced recompile, via
+temp-write+rename so a crash never leaves a stamp claiming freshness for
+incomplete output. Best-effort; skipped when the running beamtalk version is
+unknown (we won't stamp a version we can't read).
+""".
+-spec write_project_provenance_stamp(string()) -> ok.
+write_project_provenance_stamp(AbsPath) ->
+    case current_beamtalk_version() of
+        {ok, Vsn} ->
+            ProfileDir = filename:join([AbsPath, "_build", "dev"]),
+            StampPath = filename:join(ProfileDir, ".beamtalk-stamp.json"),
+            BuiltAt = list_to_binary(
+                calendar:system_time_to_rfc3339(erlang:system_time(second), [{offset, "Z"}])
+            ),
+            Stamp = #{
+                <<"schema">> => ?PROVENANCE_SCHEMA,
+                <<"beamtalk_version">> => Vsn,
+                <<"otp_release">> => current_otp_release(),
+                <<"built_at">> => BuiltAt
+            },
+            write_stamp_atomic(ProfileDir, StampPath, iolist_to_binary(json:encode(Stamp)));
+        error ->
+            ok
+    end.
+
+-spec write_stamp_atomic(string(), string(), binary()) -> ok.
+write_stamp_atomic(ProfileDir, StampPath, Json) ->
+    %% ensure_dir needs a trailing path component to create ProfileDir itself.
+    _ = filelib:ensure_dir(filename:join(ProfileDir, ".keep")),
+    Tmp = StampPath ++ "." ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp",
+    case file:write_file(Tmp, Json) of
+        ok ->
+            case file:rename(Tmp, StampPath) of
+                ok -> ok;
+                {error, _} -> _ = file:delete(Tmp), ok
+            end;
+        {error, _} ->
+            ok
+    end.
+
+-doc """
+Warn (with directed remediation) about any dependency whose compiled artifacts
+were produced by a different toolchain. The workspace recompiles project sources,
+not dependencies, so a stale dep cannot self-heal on attach — `beamtalk build`
+(ADR 0098 Phase 2) rebuilds it. Loud and directed, never a silent stale serve.
+""".
+-spec warn_stale_dep_provenance(string()) -> ok.
+warn_stale_dep_provenance(AbsPath) ->
+    DepsDir = filename:join([AbsPath, "_build", "deps"]),
+    case file:list_dir(DepsDir) of
+        {ok, Names} ->
+            lists:foreach(fun(Name) -> warn_if_dep_stale(DepsDir, Name) end, Names);
+        {error, _} ->
+            ok
+    end.
+
+-spec warn_if_dep_stale(string(), string()) -> ok.
+warn_if_dep_stale(DepsDir, Name) ->
+    DepDir = filename:join(DepsDir, Name),
+    case filelib:is_dir(DepDir) of
+        true ->
+            StampPath = filename:join(DepDir, ".beamtalk-stamp.json"),
+            case provenance_status(StampPath) of
+                fresh ->
+                    ok;
+                {stale, Reason} ->
+                    ?LOG_WARNING(
+                        "dependency '~s' provenance miss (~s) — run "
+                        "`beamtalk clean --deps` and rebuild",
+                        [Name, Reason],
+                        #{domain => [beamtalk, runtime]}
+                    )
+            end;
+        false ->
+            ok
+    end.
