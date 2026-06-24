@@ -865,17 +865,29 @@ fn bt2647_singleton_resolves_inherited_symbol_method() {
 /// produces a DNU diagnostic — previously the send fell through silently to
 /// Dynamic. Instance-selector DNUs are emitted at Hint severity (matching every
 /// other known-class instance send, via `emit_unknown_selector_warning`).
+///
+/// BT-2679: the message names the singleton the user wrote (`#infinity`), not
+/// the `Symbol` it resolves selectors against. Resolution still routes through
+/// `Symbol` — the positive path is covered by
+/// `bt2647_singleton_resolves_inherited_symbol_method`.
 #[test]
 fn bt2647_singleton_genuine_nonresponder_hints() {
     let (_ty, diags) = infer_singleton_send(MessageSelector::Unary("frobnicate".into()), vec![]);
     let dnu: Vec<_> = diags.iter().filter(|d| d.contains("understand")).collect();
     assert_eq!(dnu.len(), 1, "expected one DNU diagnostic, got: {diags:?}");
-    // The `"Symbol"` substring is the load-bearing invariant: it proves the
-    // singleton routed through Symbol's protocol on the *negative* path (the
-    // positive path is covered by `bt2647_singleton_resolves_inherited_symbol_method`).
+    // `check_instance_selector` still resolves the selector (and any "did you
+    // mean" suggestion) against `Symbol` — that routing is unchanged and proven
+    // by `bt2647_singleton_resolves_inherited_symbol_method` (positive path) and
+    // `bt2679_singleton_binary_send_bypasses_symbol_redirect` (the bypass pin).
+    // BT-2679 changed only the *display* name: the message must name `#infinity`,
+    // never the `Symbol` it resolved through.
     assert!(
-        dnu[0].starts_with("Hint:") && dnu[0].contains("Symbol"),
-        "singleton DNU should hint and resolve via Symbol: {dnu:?}"
+        dnu[0].starts_with("Hint:") && dnu[0].contains("#infinity"),
+        "singleton DNU should hint and name the singleton receiver: {dnu:?}"
+    );
+    assert!(
+        !dnu[0].contains("Symbol"),
+        "singleton DNU should name `#infinity`, not the `Symbol` it resolves via: {dnu:?}"
     );
 }
 
@@ -885,4 +897,46 @@ fn bt2647_singleton_genuine_nonresponder_hints() {
 fn bt2647_singleton_class_resolves_to_symbol_metatype() {
     let (ty, _diags) = infer_singleton_send(MessageSelector::Unary("class".into()), vec![]);
     assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
+}
+
+/// BT-2679: the `resolve_class` redirect deliberately excludes binary sends
+/// (`!matches!(selector, MessageSelector::Binary(_))`), so a singleton receiver
+/// in an (in)equality send is NOT routed through `Symbol`. This is load-bearing:
+/// `Symbol` understands `=:=`/`=`, so routing through it would short-circuit the
+/// result to `Boolean` and swallow the BT-2631 statically-decidable-comparison
+/// hint. Co-located with the BT-2647 redirect it guards (previously covered only
+/// indirectly by `bt2631_standalone_singleton_eq_union_on_right_emits_hint`).
+#[test]
+fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
+    // `#infinity =:= x` where `x :: Integer | String` can never be true — the
+    // union admits no singleton.
+    let expr = msg_send(
+        symbol_lit("infinity"),
+        MessageSelector::Binary("=:=".into()),
+        vec![var("x")],
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::simple_union(&["Integer", "String"]));
+    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    // Had the singleton routed through `Symbol`, `=:=` would resolve to Boolean.
+    assert!(
+        !matches!(&ty, InferredType::Known { class_name, .. } if class_name == "Boolean"),
+        "binary send on a singleton must bypass the Symbol redirect, got: {ty:?}"
+    );
+
+    // The BT-2631 impossible-comparison hint must still fire.
+    let hints: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("can never be true") && d.message.contains("#infinity"))
+        .collect();
+    assert_eq!(
+        hints.len(),
+        1,
+        "expected the BT-2631 hint to fire, got: {:?}",
+        checker.diagnostics()
+    );
 }
