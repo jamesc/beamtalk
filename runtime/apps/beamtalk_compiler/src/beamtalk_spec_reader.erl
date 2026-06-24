@@ -949,16 +949,21 @@ extract_beamtalk_class([_ | Rest]) ->
     extract_beamtalk_class(Rest).
 
 -doc """
-Classify union branches and emit Result(T, E) for ok/error patterns.
+Map a union type to a Beamtalk type string.
 
-Recognizes these patterns in union types (ADR 0076 Phase 2):
-  - {ok, T} | {error, E}  → Result(T, E)
-  - ok | {error, E}       → Result(Nil, E)    (bare ok atom)
-  - {ok, T} alone         → Result(T, Dynamic) (no error branch)
-  - {error, E} alone      → Result(Dynamic, E) (no ok branch)
-  - 3+ branch union with ok/error → Result(T, E) | Other
-
-Non-ok/error unions fall through to standard type mapping.
+Dispatch order (BT-2647):
+  1. Narrow pure-atom enum first — a union of only plain literal atoms with at
+     least one atom beyond `ok`/`error` becomes a singleton union (`#a | #b`),
+     even if it contains a bare `ok`/`error` (e.g. `emergency | error | info`).
+  2. Otherwise `map_union_result/1` applies ADR-0076 ok/error Result recognition,
+     falling back to standard branch-by-branch mapping:
+       - {ok, T} | {error, E}  → Result(T, E)
+       - ok | {error, E}       → Result(Nil, E)    (bare ok atom)
+       - {ok, T} alone         → Result(T, Dynamic) (no error branch)
+       - {error, E} alone      → Result(Dynamic, E) (no ok branch)
+       - 3+ branch union with ok/error → Result(T, E) | Other
+       - bare `ok | error` (subset of {ok, error}) → Result(Nil, Nil)
+       - non-ok/error unions → each branch mapped via map_type
 """.
 -spec map_union([tuple()], term()) -> binary().
 map_union(Branches, _Line) ->
