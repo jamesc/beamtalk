@@ -1,0 +1,19 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Test: Actor subclass with an initialize method.
+// module name "initializing_counter" matches class InitializingCounter via to_module_name,
+// so current_class is resolved and has_initialize = true, exercising
+// init_initialize_guarded_doc and generate_handle_continue in gen_server/callbacks.rs.
+
+Actor subclass: InitializingCounter
+  state: value = 0
+  state: initialized = false
+
+  initialize =>
+    self.value := 100
+    self.initialized := true
+
+  getValue => self.value
+
+  isInitialized => self.initialized

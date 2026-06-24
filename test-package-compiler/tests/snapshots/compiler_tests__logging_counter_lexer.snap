@@ -1,0 +1,30 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Counter"), span: Span { start: 350, end: 357 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Test: Actor subclass inheriting from a non-Actor/Object class."), Whitespace("\n"), LineComment("// module name \"logging_counter\" matches class LoggingCounter via to_module_name,"), Whitespace("\n"), LineComment("// so current_class is resolved and has_parent_init = true, exercising the"), Whitespace("\n"), LineComment("// parent-init merge branch in gen_server/callbacks.rs."), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 358, end: 367 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("LoggingCounter"), span: Span { start: 368, end: 382 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("state:"), span: Span { start: 385, end: 391 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("logCount"), span: Span { start: 392, end: 400 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 401, end: 402 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 403, end: 404 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("increment"), span: Span { start: 408, end: 417 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 418, end: 420 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 425, end: 429 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 429, end: 430 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("logCount"), span: Span { start: 430, end: 438 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 439, end: 441 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 442, end: 446 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 446, end: 447 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("logCount"), span: Span { start: 447, end: 455 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 456, end: 457 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 458, end: 459 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("super"), span: Span { start: 464, end: 469 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("increment"), span: Span { start: 470, end: 479 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("getLogCount"), span: Span { start: 483, end: 494 }, leading_trivia: [Whitespace("\n\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 495, end: 497 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 498, end: 502 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 502, end: 503 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("logCount"), span: Span { start: 503, end: 511 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 512, end: 512 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }

@@ -1,0 +1,397 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "InitializingCounter",
+                span: Span {
+                    start: 388,
+                    end: 407,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Actor",
+                    span: Span {
+                        start: 372,
+                        end: 377,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Actor,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "value",
+                        span: Span {
+                            start: 417,
+                            end: 422,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 425,
+                                end: 426,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 410,
+                        end: 426,
+                    },
+                },
+                StateDeclaration {
+                    name: Identifier {
+                        name: "initialized",
+                        span: Span {
+                            start: 436,
+                            end: 447,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Identifier(
+                            Identifier {
+                                name: "false",
+                                span: Span {
+                                    start: 450,
+                                    end: 455,
+                                },
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 429,
+                        end: 455,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "initialize",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 477,
+                                                end: 481,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "value",
+                                        span: Span {
+                                            start: 482,
+                                            end: 487,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 477,
+                                        end: 487,
+                                    },
+                                },
+                                value: Literal(
+                                    Integer(
+                                        100,
+                                    ),
+                                    Span {
+                                        start: 491,
+                                        end: 494,
+                                    },
+                                ),
+                                type_annotation: None,
+                                span: Span {
+                                    start: 477,
+                                    end: 494,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 499,
+                                                end: 503,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "initialized",
+                                        span: Span {
+                                            start: 504,
+                                            end: 515,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 499,
+                                        end: 515,
+                                    },
+                                },
+                                value: Identifier(
+                                    Identifier {
+                                        name: "true",
+                                        span: Span {
+                                            start: 519,
+                                            end: 523,
+                                        },
+                                    },
+                                ),
+                                type_annotation: None,
+                                span: Span {
+                                    start: 499,
+                                    end: 523,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 459,
+                        end: 523,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "getValue",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 539,
+                                            end: 543,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "value",
+                                    span: Span {
+                                        start: 544,
+                                        end: 549,
+                                    },
+                                },
+                                span: Span {
+                                    start: 539,
+                                    end: 549,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 527,
+                        end: 549,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "isInitialized",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 570,
+                                            end: 574,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "initialized",
+                                    span: Span {
+                                        start: 575,
+                                        end: 586,
+                                    },
+                                },
+                                span: Span {
+                                    start: 570,
+                                    end: 586,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 553,
+                        end: 586,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 372,
+                            end: 377,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 372,
+                            end: 377,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Test: Actor subclass with an initialize method.",
+                        span: Span {
+                            start: 372,
+                            end: 377,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "module name \"initializing_counter\" matches class InitializingCounter via to_module_name,",
+                        span: Span {
+                            start: 372,
+                            end: 377,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "so current_class is resolved and has_initialize = true, exercising",
+                        span: Span {
+                            start: 372,
+                            end: 377,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "init_initialize_guarded_doc and generate_handle_continue in gen_server/callbacks.rs.",
+                        span: Span {
+                            start: 372,
+                            end: 377,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+            },
+            doc_comment: None,
+            backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 372,
+                end: 586,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    expressions: [],
+    span: Span {
+        start: 372,
+        end: 586,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}

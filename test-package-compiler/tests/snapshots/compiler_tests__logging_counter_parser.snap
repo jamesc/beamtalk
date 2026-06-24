@@ -1,0 +1,326 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+AST:
+Module {
+    classes: [
+        ClassDefinition {
+            name: Identifier {
+                name: "LoggingCounter",
+                span: Span {
+                    start: 368,
+                    end: 382,
+                },
+            },
+            superclass: Some(
+                Identifier {
+                    name: "Counter",
+                    span: Span {
+                        start: 350,
+                        end: 357,
+                    },
+                },
+            ),
+            superclass_package: None,
+            class_kind: Object,
+            is_abstract: false,
+            is_sealed: false,
+            is_typed: false,
+            is_internal: false,
+            supervisor_kind: None,
+            state: [
+                StateDeclaration {
+                    name: Identifier {
+                        name: "logCount",
+                        span: Span {
+                            start: 392,
+                            end: 400,
+                        },
+                    },
+                    type_annotation: None,
+                    default_value: Some(
+                        Literal(
+                            Integer(
+                                0,
+                            ),
+                            Span {
+                                start: 403,
+                                end: 404,
+                            },
+                        ),
+                    ),
+                    declared_keyword: State,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 385,
+                        end: 404,
+                    },
+                },
+            ],
+            methods: [
+                MethodDefinition {
+                    selector: Unary(
+                        "increment",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: Assignment {
+                                target: FieldAccess {
+                                    receiver: Identifier(
+                                        Identifier {
+                                            name: "self",
+                                            span: Span {
+                                                start: 425,
+                                                end: 429,
+                                            },
+                                        },
+                                    ),
+                                    field: Identifier {
+                                        name: "logCount",
+                                        span: Span {
+                                            start: 430,
+                                            end: 438,
+                                        },
+                                    },
+                                    span: Span {
+                                        start: 425,
+                                        end: 438,
+                                    },
+                                },
+                                value: MessageSend {
+                                    receiver: FieldAccess {
+                                        receiver: Identifier(
+                                            Identifier {
+                                                name: "self",
+                                                span: Span {
+                                                    start: 442,
+                                                    end: 446,
+                                                },
+                                            },
+                                        ),
+                                        field: Identifier {
+                                            name: "logCount",
+                                            span: Span {
+                                                start: 447,
+                                                end: 455,
+                                            },
+                                        },
+                                        span: Span {
+                                            start: 442,
+                                            end: 455,
+                                        },
+                                    },
+                                    selector: Binary(
+                                        "+",
+                                    ),
+                                    arguments: [
+                                        Literal(
+                                            Integer(
+                                                1,
+                                            ),
+                                            Span {
+                                                start: 458,
+                                                end: 459,
+                                            },
+                                        ),
+                                    ],
+                                    is_cast: false,
+                                    span: Span {
+                                        start: 442,
+                                        end: 459,
+                                    },
+                                },
+                                type_annotation: None,
+                                span: Span {
+                                    start: 425,
+                                    end: 459,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: MessageSend {
+                                receiver: Super(
+                                    Span {
+                                        start: 464,
+                                        end: 469,
+                                    },
+                                ),
+                                selector: Unary(
+                                    "increment",
+                                ),
+                                arguments: [],
+                                is_cast: false,
+                                span: Span {
+                                    start: 464,
+                                    end: 479,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 408,
+                        end: 479,
+                    },
+                },
+                MethodDefinition {
+                    selector: Unary(
+                        "getLogCount",
+                    ),
+                    parameters: [],
+                    body: [
+                        ExpressionStatement {
+                            comments: CommentAttachment {
+                                leading: [],
+                                trailing: None,
+                            },
+                            expression: FieldAccess {
+                                receiver: Identifier(
+                                    Identifier {
+                                        name: "self",
+                                        span: Span {
+                                            start: 498,
+                                            end: 502,
+                                        },
+                                    },
+                                ),
+                                field: Identifier {
+                                    name: "logCount",
+                                    span: Span {
+                                        start: 503,
+                                        end: 511,
+                                    },
+                                },
+                                span: Span {
+                                    start: 498,
+                                    end: 511,
+                                },
+                            },
+                            preceding_blank_line: false,
+                        },
+                    ],
+                    return_type: None,
+                    is_sealed: false,
+                    is_internal: false,
+                    is_class_method: false,
+                    kind: Primary,
+                    expect: None,
+                    comments: CommentAttachment {
+                        leading: [],
+                        trailing: None,
+                    },
+                    doc_comment: None,
+                    span: Span {
+                        start: 483,
+                        end: 511,
+                    },
+                },
+            ],
+            class_methods: [],
+            class_variables: [],
+            comments: CommentAttachment {
+                leading: [
+                    Comment {
+                        content: "Copyright 2026 James Casey",
+                        span: Span {
+                            start: 350,
+                            end: 357,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "SPDX-License-Identifier: Apache-2.0",
+                        span: Span {
+                            start: 350,
+                            end: 357,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "Test: Actor subclass inheriting from a non-Actor/Object class.",
+                        span: Span {
+                            start: 350,
+                            end: 357,
+                        },
+                        kind: Line,
+                        preceding_blank_line: true,
+                    },
+                    Comment {
+                        content: "module name \"logging_counter\" matches class LoggingCounter via to_module_name,",
+                        span: Span {
+                            start: 350,
+                            end: 357,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "so current_class is resolved and has_parent_init = true, exercising the",
+                        span: Span {
+                            start: 350,
+                            end: 357,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                    Comment {
+                        content: "parent-init merge branch in gen_server/callbacks.rs.",
+                        span: Span {
+                            start: 350,
+                            end: 357,
+                        },
+                        kind: Line,
+                        preceding_blank_line: false,
+                    },
+                ],
+                trailing: None,
+            },
+            doc_comment: None,
+            backing_module: None,
+            type_params: [],
+            superclass_type_args: [],
+            span: Span {
+                start: 350,
+                end: 511,
+            },
+        },
+    ],
+    method_definitions: [],
+    protocols: [],
+    expressions: [],
+    span: Span {
+        start: 350,
+        end: 511,
+    },
+    file_leading_comments: [],
+    file_trailing_comments: [],
+}
