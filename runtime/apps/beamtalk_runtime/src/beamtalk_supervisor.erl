@@ -111,7 +111,7 @@ startLink(Self) ->
     case Module:start_link() of
         {ok, Pid} ->
             ?LOG_INFO("Supervisor started", #{
-                supervisor => ClassName, module => Module, pid => Pid, domain => [beamtalk, runtime]
+                supervisor => ClassName, module => Module, pid => Pid, ?BT_LOG_DOMAIN
             }),
             %% BT-1542 + BT-1994 (ADR 0080 Phase 0a, option 2): use the
             %% beamtalk_supervisor_new tag to signal to the post-dispatch
@@ -128,7 +128,7 @@ startLink(Self) ->
                 supervisor => ClassName,
                 module => Module,
                 reason => Reason,
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             Error = beamtalk_error:new(
                 supervisor_start_failed,
@@ -171,7 +171,7 @@ static_init(Module, ClassName) ->
         max_restarts => MaxR,
         restart_window => MaxT,
         children => ChildIds,
-        domain => [beamtalk, runtime]
+        ?BT_LOG_DOMAIN
     }),
     {ok, {SupFlags, Specs}}.
 
@@ -197,7 +197,7 @@ dynamic_init(Module, ClassName) ->
         strategy => simple_one_for_one,
         max_restarts => MaxR,
         restart_window => MaxT,
-        domain => [beamtalk, runtime]
+        ?BT_LOG_DOMAIN
     }),
     {ok, {SupFlags, Specs}}.
 
@@ -362,7 +362,7 @@ terminate_child_stale_handle(SupClass) ->
     ?LOG_WARNING("Supervisor stale handle", #{
         supervisor => SupClass,
         selector => 'terminateChild:',
-        domain => [beamtalk, runtime]
+        ?BT_LOG_DOMAIN
     }),
     {error,
         beamtalk_error:new(
@@ -382,14 +382,14 @@ terminate_child_stale_handle(SupClass) ->
 handle_terminate_child_result(SupClass, LogCtx, ok) ->
     ?LOG_INFO(
         "Supervisor child terminated",
-        (LogCtx)#{supervisor => SupClass, domain => [beamtalk, runtime]}
+        (LogCtx)#{supervisor => SupClass, ?BT_LOG_DOMAIN}
     ),
     {ok, nil};
 handle_terminate_child_result(SupClass, LogCtx, {error, not_found}) ->
     %% ADR 0080 Phase 1: idempotent — "child already gone" is success.
     ?LOG_DEBUG(
         "Supervisor child already terminated",
-        (LogCtx)#{supervisor => SupClass, domain => [beamtalk, runtime]}
+        (LogCtx)#{supervisor => SupClass, ?BT_LOG_DOMAIN}
     ),
     {ok, nil};
 handle_terminate_child_result(SupClass, _LogCtx, {error, Reason}) ->
@@ -435,7 +435,7 @@ startChild(Self) ->
                     child => ChildClass,
                     module => ChildModule,
                     child_pid => ChildPid,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }),
                 announce_child_added(SupClass, ChildClass, ChildPid),
                 {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
@@ -444,7 +444,7 @@ startChild(Self) ->
                     supervisor => SupClass,
                     child => ChildClass,
                     reason => Reason,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }),
                 announce_child_crashed(SupClass, ChildClass, Reason),
                 Error = beamtalk_error:new(
@@ -492,7 +492,7 @@ startChild(Self, Args) ->
                     child => ChildClass,
                     module => ChildModule,
                     child_pid => ChildPid,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }),
                 announce_child_added(SupClass, ChildClass, ChildPid),
                 {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
@@ -501,7 +501,7 @@ startChild(Self, Args) ->
                     supervisor => SupClass,
                     child => ChildClass,
                     reason => Reason,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }),
                 announce_child_crashed(SupClass, ChildClass, Reason),
                 Error = beamtalk_error:new(
@@ -550,7 +550,7 @@ stop(Self) ->
     ClassName = element(2, Self),
     with_live_supervisor(ClassName, stop, fun() ->
         ?LOG_INFO("Supervisor stopping", #{
-            supervisor => ClassName, pid => Pid, domain => [beamtalk, runtime]
+            supervisor => ClassName, pid => Pid, ?BT_LOG_DOMAIN
         }),
         gen_server:stop(Pid),
         {ok, nil}
@@ -1068,7 +1068,7 @@ stale_handle_error(ClassName, Selector) ->
     ?LOG_WARNING("Supervisor stale handle", #{
         supervisor => ClassName,
         selector => Selector,
-        domain => [beamtalk, runtime]
+        ?BT_LOG_DOMAIN
     }),
     Error = beamtalk_error:new(
         stale_handle,
