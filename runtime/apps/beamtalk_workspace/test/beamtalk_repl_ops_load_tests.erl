@@ -1755,6 +1755,58 @@ provenance_stale_stamp_flips_attach_decision_test() ->
         rm_temp_dir(Dir)
     end.
 
+%% ADR 0098 §4: a dependency whose stamp was produced by a different toolchain
+%% FAILS the attach (the workspace can't recompile deps) rather than loading the
+%% stale dep .beam. The check runs before any module load, so this returns an
+%% error without needing the compiler port.
+provenance_stale_dep_fails_attach_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"depfail\"\n">>),
+        ok = file:make_dir(filename:join(Dir, "src")),
+        %% A dep with a mismatched-OTP stamp (definitively foreign toolchain).
+        DepDir = filename:join([Dir, "_build", "deps", "utils"]),
+        ok = filelib:ensure_dir(filename:join(DepDir, ".keep")),
+        DepStamp = filename:join(DepDir, ".beamtalk-stamp.json"),
+        Stamp = #{
+            <<"schema">> => 1,
+            <<"beamtalk_version">> => stamp_version(),
+            <<"otp_release">> => <<"1-0.0">>
+        },
+        ok = file:write_file(DepStamp, iolist_to_binary(json:encode(Stamp))),
+        ?assertMatch({error, _}, beamtalk_repl_ops_load:sync_project(Dir, #{}))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% A stale dep stamp is collected; an unstamped dep (a pre-stamp build) is not —
+%% only a definitively foreign-toolchain dep blocks the attach.
+provenance_collect_stale_deps_test() ->
+    Dir = filename:absname(make_temp_dir()),
+    try
+        %% Dep A: mismatched-OTP stamp → stale.
+        StaleDep = filename:join([Dir, "_build", "deps", "stale_dep"]),
+        ok = filelib:ensure_dir(filename:join(StaleDep, ".keep")),
+        ok = file:write_file(
+            filename:join(StaleDep, ".beamtalk-stamp.json"),
+            iolist_to_binary(
+                json:encode(#{
+                    <<"schema">> => 1,
+                    <<"beamtalk_version">> => stamp_version(),
+                    <<"otp_release">> => <<"1-0.0">>
+                })
+            )
+        ),
+        %% Dep B: no stamp (pre-stamp build) → not flagged.
+        FreshDep = filename:join([Dir, "_build", "deps", "unstamped_dep", "ebin"]),
+        ok = filelib:ensure_dir(filename:join(FreshDep, ".keep")),
+
+        Stale = beamtalk_repl_ops_load:collect_stale_dep_provenance(Dir),
+        ?assertMatch([{"stale_dep", _}], Stale)
+    after
+        rm_temp_dir(Dir)
+    end.
+
 %% A stamp present but missing the beamtalk_version key is foreign/corrupt →
 %% stale (fail toward rebuild), even if OTP matches and the port is down.
 provenance_missing_version_key_is_stale_test() ->

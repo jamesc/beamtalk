@@ -48,6 +48,7 @@ respectively.
     extract_native_refs/1,
     filter_mtimes_under_project/2,
     project_provenance_stale/1,
+    collect_stale_dep_provenance/1,
     stamp_matches_current/1,
     read_provenance_stamp/1,
     current_otp_release/0
@@ -103,18 +104,31 @@ sync_project(Path, Options) ->
     end.
 
 -doc "Core sync logic, called after validating beamtalk.toml exists.".
--spec do_sync_project(string(), boolean(), boolean(), pid() | undefined) -> {ok, map()}.
+-spec do_sync_project(string(), boolean(), boolean(), pid() | undefined) ->
+    {ok, map()} | {error, #beamtalk_error{}}.
 do_sync_project(AbsPath, IncludeTests, Force0, SessionPid) ->
-    %% ADR 0098 Phase 4: provenance gate. If the project's `_build/dev` artifacts
-    %% were produced by a different toolchain than the one now running the
-    %% workspace (a beamtalk_version / OTP mismatch, or no stamp at all), force a
-    %% full recompile rather than serving stale modules — generalizing BT-2653's
-    %% header-content force-rebuild into a provenance check. A stale dependency
-    %% can't self-heal here (the workspace recompiles project sources, not deps),
-    %% so it is surfaced as a directed warning instead.
+    %% ADR 0098 Phase 4: provenance gate, evaluated BEFORE any module is loaded so
+    %% a failure leaves the code server in its pre-attach state (no partial loads
+    %% to roll back, per ADR §4).
+    %%
+    %% Project scope: a stamp produced by a different toolchain forces a full
+    %% in-memory recompile from source (generalizing BT-2653's header-content
+    %% force-rebuild). Dependency scope: the workspace recompiles project sources
+    %% only, so a stale dep cannot self-heal here — per ADR §4 we FAIL the attach
+    %% with a directed message rather than activating stale dep `.beam`, which
+    %% would re-open the beamtalk-http mojibake/stale-doc failure mode.
     ProvenanceStale = project_provenance_stale(AbsPath),
-    _ = warn_stale_dep_provenance(AbsPath),
-    Force = Force0 orelse ProvenanceStale,
+    case collect_stale_dep_provenance(AbsPath) of
+        [] ->
+            do_sync_project_clean(
+                AbsPath, IncludeTests, Force0 orelse ProvenanceStale, SessionPid
+            );
+        StaleDeps ->
+            fail_stale_dep_attach(StaleDeps)
+    end.
+
+-spec do_sync_project_clean(string(), boolean(), boolean(), pid() | undefined) -> {ok, map()}.
+do_sync_project_clean(AbsPath, IncludeTests, Force, SessionPid) ->
     %% Activate pre-compiled dependency modules before loading project files,
     %% so that project classes can reference dependency classes (e.g. HTTPClient).
     DepErrors = beamtalk_workspace_bootstrap:activate_dependency_modules(AbsPath),
@@ -2051,41 +2065,68 @@ current_otp_release() ->
     <<Rel/binary, "-", Erts/binary>>.
 
 -doc """
-Warn (with directed remediation) about any dependency whose compiled artifacts
-carry a stamp produced by a different toolchain. The workspace recompiles project
-sources, not dependencies, so a stale dep cannot self-heal on attach —
-`beamtalk build` (ADR 0098 Phase 2) rebuilds it. Loud and directed, never a
-silent stale serve. A dep with no stamp is skipped (a pre-stamp build that the
-next `beamtalk build` will stamp), to avoid warning on every attach.
+Collect every dependency whose compiled artifacts carry a stamp produced by a
+different toolchain (a `beamtalk_version` / OTP mismatch or unrecognised schema).
+The workspace recompiles project sources, not dependencies, so these cannot
+self-heal on attach — ADR 0098 §4 fails the attach (see `fail_stale_dep_attach`)
+rather than activating the stale `.beam`. A dep with no stamp is skipped (a
+pre-stamp build the next `beamtalk build` will stamp), so the gate fires only on
+a *definitively* foreign-toolchain dependency.
 """.
--spec warn_stale_dep_provenance(string()) -> ok.
-warn_stale_dep_provenance(AbsPath) ->
+-spec collect_stale_dep_provenance(string()) -> [{string(), binary()}].
+collect_stale_dep_provenance(AbsPath) ->
     DepsDir = filename:join([AbsPath, "_build", "deps"]),
     case file:list_dir(DepsDir) of
         {ok, Names} ->
-            lists:foreach(fun(Name) -> warn_if_dep_stale(DepsDir, Name) end, Names);
+            lists:filtermap(fun(Name) -> stale_dep_entry(DepsDir, Name) end, Names);
         {error, _} ->
-            ok
+            []
     end.
 
--spec warn_if_dep_stale(string(), string()) -> ok.
-warn_if_dep_stale(DepsDir, Name) ->
+-spec stale_dep_entry(string(), string()) -> {true, {string(), binary()}} | false.
+stale_dep_entry(DepsDir, Name) ->
     DepDir = filename:join(DepsDir, Name),
     StampPath = filename:join(DepDir, ".beamtalk-stamp.json"),
     case filelib:is_dir(DepDir) andalso read_provenance_stamp(StampPath) of
         {ok, Stamp} ->
             case stamp_matches_current(Stamp) of
-                fresh ->
-                    ok;
-                {stale, Reason} ->
-                    ?LOG_WARNING(
-                        "dependency '~s' provenance miss (~s) — run "
-                        "`beamtalk clean --deps` and rebuild",
-                        [Name, Reason],
-                        #{domain => [beamtalk, runtime]}
-                    )
+                fresh -> false;
+                {stale, Reason} -> {true, {Name, Reason}}
             end;
         _ ->
-            %% Not a directory, or no/unreadable stamp — nothing actionable.
-            ok
+            %% Not a directory, or no/unreadable stamp — nothing definitive.
+            false
     end.
+
+-doc """
+Fail a workspace attach because one or more dependencies were compiled by a
+different toolchain (ADR 0098 §4). Logs each at error level and returns a
+structured, directed error. Called before any `code:load_file/1`, so the code
+server is untouched — nothing to roll back.
+""".
+-spec fail_stale_dep_attach([{string(), binary()}]) -> {error, #beamtalk_error{}}.
+fail_stale_dep_attach(StaleDeps) ->
+    lists:foreach(
+        fun({Name, Reason}) ->
+            ?LOG_ERROR(
+                "dependency '~s' provenance miss (~s) — run "
+                "`beamtalk clean --deps` and rebuild",
+                [Name, Reason],
+                #{domain => [beamtalk, runtime]}
+            )
+        end,
+        StaleDeps
+    ),
+    Names = lists:join(", ", [Name || {Name, _Reason} <- StaleDeps]),
+    {error,
+        beamtalk_repl_errors:make(
+            stale_dependency,
+            'WorkspaceInterface',
+            iolist_to_binary([
+                "Dependency artifact(s) [",
+                Names,
+                "] were built by a different toolchain and cannot be recompiled "
+                "from the workspace"
+            ]),
+            <<"Run `beamtalk clean --deps` and `beamtalk build`, then re-attach">>
+        )}.

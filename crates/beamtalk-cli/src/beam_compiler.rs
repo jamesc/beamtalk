@@ -1788,7 +1788,12 @@ pub struct OtpDiscovery {
 /// Returns `None` if `erl` cannot be invoked or did not report a version; the
 /// caller then compares provenance on `beamtalk_version` alone.
 pub fn discover_otp_version() -> Option<String> {
-    let probe = "io:format(\"~s-~s\", [erlang:system_info(otp_release), erlang:system_info(version)]), halt().";
+    // Prefix the value with a sentinel (mirroring `discover_otp_beam_files`) and
+    // scan for it, rather than trusting the whole of stdout: some OTP/platform
+    // combinations emit ERTS startup lines before `io:format`, and a value
+    // polluted by that noise would never match a recorded stamp — turning every
+    // build into a full rebuild.
+    let probe = "io:format(\"otp-version:~s-~s~n\", [erlang:system_info(otp_release), erlang:system_info(version)]), halt().";
     let output = Command::new("erl")
         .arg("-noshell")
         .arg("-noinput")
@@ -1803,13 +1808,13 @@ pub fn discover_otp_version() -> Option<String> {
         return None;
     }
 
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    // A bare "-" means both probes returned empty; treat as unknown.
-    if version.is_empty() || version == "-" {
-        None
-    } else {
-        Some(version)
-    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("otp-version:"))
+        // A bare "-" means both probes returned empty; treat as unknown.
+        .filter(|version| !version.is_empty() && *version != "-")
+        .map(str::to_string)
 }
 
 /// Discovers `.beam` files on the OTP code path and the OTP version.
