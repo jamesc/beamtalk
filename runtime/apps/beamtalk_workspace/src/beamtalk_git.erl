@@ -252,12 +252,17 @@ mutate(Selector, Args, FailMsg) ->
 %% coincide; when it is a subdirectory (e.g. `examples/getting-started` inside
 %% the `beamtalk` repo) this prevents the path from being re-prefixed and
 %% matching nothing (BT-2608).
+%%
+%% The toplevel is static for a given project path, so it is resolved once and
+%% cached in beamtalk_workspace_meta (keyed by project path), removing the
+%% per-op `rev-parse` spawn on the hot read path (BT-2621). The cache
+%% self-invalidates when the project path changes (the keyed lookup misses).
 -spec run_git(atom(), [binary()]) ->
     {ok, binary(), non_neg_integer()} | {error, #beamtalk_error{}}.
 run_git(Selector, Args) ->
     case project_dir() of
         {ok, Dir} ->
-            case repo_toplevel(Selector, Dir) of
+            case cached_repo_toplevel(Selector, Dir) of
                 {ok, Toplevel} ->
                     run_git_in(Selector, Args, Toplevel);
                 {error, _} = Err ->
@@ -265,6 +270,27 @@ run_git(Selector, Args) ->
             end;
         {error, _} = Err ->
             Err
+    end.
+
+%% Resolve the repo toplevel for the project dir, consulting the per-project-path
+%% cache in beamtalk_workspace_meta first (BT-2621). On a cache miss the toplevel
+%% is resolved via `git rev-parse --show-toplevel` (one subprocess) and the
+%% successful result is cached for subsequent ops. Error results (not a git
+%% repository, git absent) are deliberately left uncached so they are re-detected
+%% cheaply and a later `git init` is picked up without a stale negative entry.
+-spec cached_repo_toplevel(atom(), binary()) -> {ok, binary()} | {error, #beamtalk_error{}}.
+cached_repo_toplevel(Selector, Dir) ->
+    case beamtalk_workspace_meta:get_git_toplevel(Dir) of
+        {ok, Toplevel} ->
+            {ok, Toplevel};
+        miss ->
+            case repo_toplevel(Selector, Dir) of
+                {ok, Toplevel} = Ok ->
+                    beamtalk_workspace_meta:set_git_toplevel(Dir, Toplevel),
+                    Ok;
+                {error, _} = Err ->
+                    Err
+            end
     end.
 
 %% Resolve the git repository toplevel for the workspace project directory.

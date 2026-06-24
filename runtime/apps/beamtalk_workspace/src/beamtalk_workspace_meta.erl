@@ -31,6 +31,9 @@ and can be queried by other components (e.g., idle monitor).
 -export([get_package_name/0]).
 %% ADR 0082 Phase 4 (BT-2290): workspace-scoped boolean settings (autoflush).
 -export([get_setting/2, set_setting/2]).
+%% BT-2621: per-project-path cache of the git repository toplevel, so beamtalk_git
+%% resolves `git rev-parse --show-toplevel` at most once per project path.
+-export([get_git_toplevel/1, set_git_toplevel/2]).
 % Alias for get_metadata/0
 -export([get/0]).
 
@@ -47,6 +50,11 @@ and can be queried by other components (e.g., idle monitor).
 -define(WORKSPACE_META_TABLE, beamtalk_workspace_registry).
 % Debounce disk writes to every 2 seconds
 -define(PERSIST_DELAY_MS, 2000).
+%% BT-2621: ETS row key for the cached git repo toplevel. Stored as a separate
+%% small row (`{?GIT_TOPLEVEL_KEY, ProjectPath, Toplevel}`) rather than inside
+%% the mirrored #state{} so the git hot path reads only this tuple, not a copy
+%% of the whole state (which carries class sources and loaded modules).
+-define(GIT_TOPLEVEL_KEY, git_toplevel).
 
 -record(state, {
     workspace_id :: binary(),
@@ -336,6 +344,45 @@ set_setting(Key, Value) when is_atom(Key) ->
             ok
     end.
 
+-doc """
+Read the cached git repository toplevel for `ProjectPath` (BT-2621).
+
+Returns `{ok, Toplevel}` only when a toplevel was previously cached for *exactly*
+this project path; otherwise `miss` (never resolved, the project path changed
+since caching, or the server is not running). Reads straight from ETS so the git
+hot path (`git_status` on every panel refresh) pays no gen_server round-trip.
+""".
+-spec get_git_toplevel(binary()) -> {ok, binary()} | miss.
+get_git_toplevel(ProjectPath) when is_binary(ProjectPath) ->
+    case ets:whereis(?WORKSPACE_META_TABLE) of
+        undefined ->
+            miss;
+        _ ->
+            case ets:lookup(?WORKSPACE_META_TABLE, ?GIT_TOPLEVEL_KEY) of
+                [{?GIT_TOPLEVEL_KEY, ProjectPath, Toplevel}] ->
+                    {ok, Toplevel};
+                _ ->
+                    miss
+            end
+    end.
+
+-doc """
+Cache the resolved git repository toplevel for `ProjectPath` (BT-2621).
+
+Stores a single `{ProjectPath, Toplevel}` entry; a later lookup for a different
+project path misses and forces re-resolution, so the cache self-invalidates when
+the workspace switches projects. Best-effort (a cast): a no-op when the server
+is not running.
+""".
+-spec set_git_toplevel(binary(), binary()) -> ok.
+set_git_toplevel(ProjectPath, Toplevel) when is_binary(ProjectPath), is_binary(Toplevel) ->
+    try
+        gen_server:cast(?MODULE, {set_git_toplevel, ProjectPath, Toplevel})
+    catch
+        exit:{noproc, _} ->
+            ok
+    end.
+
 %%% gen_server callbacks
 
 init(InitialMetadata) ->
@@ -508,6 +555,16 @@ handle_cast({remove_file_mtime, FilePath}, State) ->
     State2 = State#state{file_mtimes = maps:remove(FilePath, Mtimes)},
     store_state_in_ets(State2),
     {noreply, State2};
+handle_cast({set_git_toplevel, ProjectPath, Toplevel}, State) ->
+    %% BT-2621: cache the resolved toplevel in its own ETS row (single entry,
+    %% overwritten on project switch). Derived state — not persisted to disk, and
+    %% it dies with the table when the server stops, so it is never restored stale
+    %% across restarts (or across machines, where the path would not exist).
+    case ets:whereis(?WORKSPACE_META_TABLE) of
+        undefined -> ok;
+        _ -> ets:insert(?WORKSPACE_META_TABLE, {?GIT_TOPLEVEL_KEY, ProjectPath, Toplevel})
+    end,
+    {noreply, State};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
