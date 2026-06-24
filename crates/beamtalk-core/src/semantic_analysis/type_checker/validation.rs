@@ -460,6 +460,20 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
     ) {
+        // BT-2647: a singleton type (`#text`) is a subtype of `Symbol` but is not
+        // itself a class in the hierarchy. Resolve its selectors through
+        // `Symbol`'s protocol so DNU validation still applies — narrowing a getter
+        // from `Symbol` to a singleton (e.g. `#text | #json`, then a single
+        // member) would otherwise silently drop the selector checking it had.
+        // Mirrors the singleton-union inference handling from BT-2624. The
+        // "Symbol does not understand …" message matches the pre-narrowing text.
+        let symbol: EcoString;
+        let class_name: &EcoString = if class_name.starts_with('#') && !class_name.contains('|') {
+            symbol = EcoString::from("Symbol");
+            &symbol
+        } else {
+            class_name
+        };
         if !hierarchy.has_class(class_name) {
             // BT-1833: If the type is a protocol (from respondsTo: narrowing),
             // validate the selector against the protocol's required methods.

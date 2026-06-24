@@ -1325,12 +1325,40 @@ impl TypeChecker {
                 return elem_ty;
             }
 
+            // Validation routes ALL singleton receivers (including binary sends)
+            // through `Symbol` — that is fine: `Symbol` understands `=:=`/`=`, so
+            // no spurious DNU, and the BT-2631 impossible-comparison hint fires
+            // via the Dynamic fall-through below, not via validation. Only the
+            // *inference* redirect (`resolve_class`) excludes binary sends.
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
+            // BT-2647: a non-union singleton receiver (`#text`) is a subtype of
+            // `Symbol` but not itself in the hierarchy, so method lookup and
+            // argument/return-type inference would otherwise fall through to
+            // Dynamic — losing the inference it had when typed `Symbol`. Resolve
+            // its protocol through `Symbol`, mirroring the singleton-union member
+            // handling from BT-2624. `class_name` (`#text`) is still used for
+            // `Self` returns and user-facing messages.
+            //
+            // `!contains('|')` keeps this symmetric with `check_instance_selector`
+            // (a `Known` is never a union today, but a future `Known { "#a | #b" }`
+            // must not silently route here while validation leaves it untouched).
+            // Binary sends are excluded: an equality op on a singleton receiver
+            // (`#west =:= unionVar`) must fall through to the BT-2631
+            // statically-decidable-comparison hint below rather than
+            // short-circuiting on `Symbol`'s `=:=`.
+            let resolve_class: EcoString = if class_name.starts_with('#')
+                && !class_name.contains('|')
+                && !matches!(selector, MessageSelector::Binary(_))
+            {
+                EcoString::from("Symbol")
+            } else {
+                class_name.clone()
+            };
             // Skip argument type check for binary messages — check_binary_operand_types
             // already provides more specific warnings for arithmetic/comparison/concat.
             if !matches!(selector, MessageSelector::Binary(_)) {
                 self.check_argument_types(
-                    class_name,
+                    &resolve_class,
                     &selector_name,
                     &arg_types,
                     span,
@@ -1342,7 +1370,7 @@ impl TypeChecker {
             }
 
             // Infer return type from method info
-            if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
+            if let Some(method) = hierarchy.find_method(&resolve_class, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
                     // `Self` resolves to the static receiver class (with type args)
                     if ret_ty.as_str() == "Self" {
@@ -1365,7 +1393,10 @@ impl TypeChecker {
                     // `find_class_method`. Pre-0083 this returned `Dynamic`
                     // (BT-1952).
                     if ret_ty.as_str() == "Self class" {
-                        return InferredType::meta(class_name.clone());
+                        // BT-2647: for a singleton receiver, `resolve_class` is
+                        // `Symbol` so `#text class` is `Symbol class` (`#text` is a
+                        // Symbol at runtime), not a phantom `Meta("#text")`.
+                        return InferredType::meta(resolve_class.clone());
                     }
                     // ADR 0083: `X class` — the method returns the metatype of a
                     // specific named class (BT-2034 annotation `X class`).
@@ -1384,7 +1415,7 @@ impl TypeChecker {
                     // if the method is inherited (ADR 0068 Phase 1b, BT-1577)
                     let subst = Self::build_inherited_substitution_map(
                         hierarchy,
-                        class_name,
+                        &resolve_class,
                         type_args,
                         &method.defined_in,
                     );
