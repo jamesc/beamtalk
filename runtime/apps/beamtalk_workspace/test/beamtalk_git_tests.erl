@@ -458,6 +458,69 @@ repo_toplevel_outside_repo_errors_test() ->
     end.
 
 %%% ============================================================================
+%%% Repo toplevel caching through beamtalk_workspace_meta (BT-2621)
+%%%
+%%% These route real git ops through run_git/2 (which reads project_path from the
+%%% workspace_meta gen_server) to prove the toplevel is resolved once and cached,
+%%% with no behavioural regression vs BT-2608 (subdir status still correct).
+%%% ============================================================================
+
+%% A git op populates the per-project-path toplevel cache and subsequent ops
+%% reuse it, while status still reports the modified subdir file under its
+%% repo-root-relative path.
+git_status_populates_toplevel_cache_test() ->
+    with_subdir_repo(fun(Top, ProjectDir, RelFile) ->
+        stop_meta_if_running(),
+        {ok, Pid} = beamtalk_workspace_meta:start_link(#{
+            workspace_id => <<"git_cache_test">>,
+            project_path => ProjectDir,
+            created_at => erlang:system_time(second),
+            repl => false
+        }),
+        try
+            %% Cold cache: nothing stored for this project path yet.
+            ?assertEqual(miss, beamtalk_workspace_meta:get_git_toplevel(ProjectDir)),
+
+            %% First status resolves + caches the toplevel and still lists the
+            %% modified file under its repo-root-relative path (BT-2608 contract).
+            {ok, Status1} = beamtalk_git:git_status(),
+            Paths1 = [maps:get(path, F) || F <- maps:get(files, Status1)],
+            ?assert(lists:member(RelFile, Paths1)),
+
+            %% Barrier: a synchronous call flushes the set_git_toplevel cast that
+            %% run_git/2 emitted (sent before this call from the same process).
+            {ok, _} = beamtalk_workspace_meta:get_metadata(),
+
+            %% The cache now holds the resolved repo toplevel.
+            ?assertEqual(
+                {ok, canonical(Top)},
+                cache_canonical(beamtalk_workspace_meta:get_git_toplevel(ProjectDir))
+            ),
+
+            %% A second status reuses the cache and behaves identically.
+            {ok, Status2} = beamtalk_git:git_status(),
+            Paths2 = [maps:get(path, F) || F <- maps:get(files, Status2)],
+            ?assert(lists:member(RelFile, Paths2))
+        after
+            gen_server:stop(Pid)
+        end
+    end).
+
+stop_meta_if_running() ->
+    case whereis(beamtalk_workspace_meta) of
+        undefined ->
+            ok;
+        Pid ->
+            gen_server:stop(Pid),
+            timer:sleep(10)
+    end.
+
+%% Canonicalise the toplevel inside an {ok, _} cache result so it compares equal
+%% to canonical(Top) across symlinked temp dirs (macOS /tmp → /private/tmp).
+cache_canonical({ok, Top}) -> {ok, canonical(Top)};
+cache_canonical(Other) -> Other.
+
+%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 

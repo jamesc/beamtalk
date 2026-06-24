@@ -875,6 +875,77 @@ settings_int_and_binary_survive_restart_test() ->
         _ = file:delete(MetaFile)
     end.
 
+%%% BT-2621: git repo toplevel cache (set/get, project-path invalidation)
+
+git_toplevel_cache_roundtrips_test() ->
+    stop_if_running(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+
+    %% Never-set ⇒ miss.
+    ?assertEqual(miss, beamtalk_workspace_meta:get_git_toplevel(<<"/bt_test/proj">>)),
+
+    %% After caching, the exact project path resolves to the stored toplevel.
+    ok = beamtalk_workspace_meta:set_git_toplevel(<<"/bt_test/proj">>, <<"/bt_test/repo">>),
+    timer:sleep(50),
+    ?assertEqual(
+        {ok, <<"/bt_test/repo">>},
+        beamtalk_workspace_meta:get_git_toplevel(<<"/bt_test/proj">>)
+    ),
+
+    %% A different project path misses — the cache self-invalidates on project
+    %% switch rather than returning a stale toplevel.
+    ?assertEqual(miss, beamtalk_workspace_meta:get_git_toplevel(<<"/bt_test/other">>)),
+
+    %% Re-caching under a new project path overwrites the single entry.
+    ok = beamtalk_workspace_meta:set_git_toplevel(<<"/bt_test/other">>, <<"/bt_test/other_repo">>),
+    timer:sleep(50),
+    ?assertEqual(
+        {ok, <<"/bt_test/other_repo">>},
+        beamtalk_workspace_meta:get_git_toplevel(<<"/bt_test/other">>)
+    ),
+    ?assertEqual(miss, beamtalk_workspace_meta:get_git_toplevel(<<"/bt_test/proj">>)),
+
+    gen_server:stop(Pid).
+
+git_toplevel_cache_not_persisted_test() ->
+    %% The toplevel cache is derived state living only in ETS — it must never be
+    %% written to metadata.json, so it cannot be restored stale across restarts
+    %% (or across machines, where the cached path would not exist).
+    stop_if_running(),
+    WsId = <<"gittop_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/gittop">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid} = beamtalk_workspace_meta:start_link(Init),
+        %% Distinctive token unlikely to occur elsewhere in the metadata blob.
+        ok = beamtalk_workspace_meta:set_git_toplevel(
+            <<"/bt_test/gittop">>, <<"/bt_test/repo_toplevel_token">>
+        ),
+        %% terminate/2 persists synchronously on stop.
+        gen_server:stop(Pid),
+        timer:sleep(50),
+        ?assert(filelib:is_file(MetaFile)),
+        {ok, Bin} = file:read_file(MetaFile),
+        ?assertEqual(nomatch, binary:match(Bin, <<"repo_toplevel_token">>))
+    after
+        _ = file:delete(MetaFile)
+    end.
+
+git_toplevel_cache_miss_when_not_started_test() ->
+    stop_if_running(),
+    %% No server: lookup gracefully misses rather than crashing.
+    ?assertEqual(miss, beamtalk_workspace_meta:get_git_toplevel(<<"/x">>)).
+
+set_git_toplevel_when_not_started_test() ->
+    stop_if_running(),
+    %% No server: the cast helper returns ok without spawning a server.
+    ?assertEqual(ok, beamtalk_workspace_meta:set_git_toplevel(<<"/x">>, <<"/y">>)).
+
 %%% Class source persistence round-trip (covers class_sources restore branch)
 
 class_source_survives_restart_test() ->
