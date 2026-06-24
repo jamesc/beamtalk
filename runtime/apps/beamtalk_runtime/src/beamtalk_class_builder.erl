@@ -143,7 +143,7 @@ do_register(ClassName, ClassInfo) ->
     case beamtalk_object_class:start(ClassName, ClassInfo) of
         {ok, Pid} ->
             ?LOG_DEBUG("Registered class via ClassBuilder", #{
-                class => ClassName, module => ?MODULE, domain => [beamtalk, runtime]
+                class => ClassName, module => ?MODULE, ?BT_LOG_DOMAIN
             }),
             notify_class_loaded(ClassName),
             {ok, Pid};
@@ -158,7 +158,7 @@ do_register(ClassName, ClassInfo) ->
                         class => ClassName,
                         reason => Reason,
                         module => ?MODULE,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     }),
                     Error0 = beamtalk_error:new(internal_error, 'ClassBuilder'),
                     Error1 = beamtalk_error:with_selector(Error0, register),
@@ -634,7 +634,7 @@ selector_arity(Selector) when is_atom(Selector) ->
             count_colons(Chars);
         false ->
             %% Unary or binary operator. Binary selectors consist only of
-            %% operator characters (+, -, *, /, <, >, =, ~, %, &, ?, \, ,).
+            %% operator characters (+, -, *, /, <, >, =, ~, %, &, ?, \\, ,).
             %% A malformed selector with an interior colon (e.g. 'at:put')
             %% falls here too and is treated as unary (arity 0).
             case Chars =/= [] andalso lists:all(fun is_binary_selector_char/1, Chars) of
@@ -749,7 +749,7 @@ notify_class_loaded(ClassName) ->
                     ?LOG_WARNING("Class load callback not implemented", #{
                         callback => Mod,
                         class => ClassName,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     });
                 Kind:Reason:Stacktrace ->
                     %% Unexpected failure in callback — log but don't fail class load
@@ -759,7 +759,7 @@ notify_class_loaded(ClassName) ->
                         kind => Kind,
                         reason => Reason,
                         stacktrace => Stacktrace,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     })
             end;
         undefined ->
