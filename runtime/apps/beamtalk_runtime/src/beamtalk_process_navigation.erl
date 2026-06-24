@@ -261,7 +261,7 @@ status(Pid) when is_pid(Pid) ->
                 pid => Pid,
                 error_class => Class,
                 reason => Reason,
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             nil
     end;
@@ -300,7 +300,7 @@ guarded_state(Pid, Timeout) when is_pid(Pid) ->
                 pid => Pid,
                 error_class => Class,
                 reason => Reason,
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             unavailable
     end;
@@ -381,17 +381,17 @@ search `parentOf/1` does when only the parent's identity is needed.
 parentPidOf(Node) ->
     maps:get(parent_pid, Node, nil).
 
--doc "Return a node's configured supervisor `strategy` (supervisors only; else `nil`).".
+-doc "Return a node's configured supervisor `strategy` (supervisors only; else `nil`)."
 -spec strategyOf(node_map()) -> atom() | nil.
 strategyOf(Node) ->
     maps:get(strategy, Node, nil).
 
--doc "Return a node's configured `restartIntensity` budget (supervisors only; else `nil`).".
+-doc "Return a node's configured `restartIntensity` budget (supervisors only; else `nil`)."
 -spec restartIntensityOf(node_map()) -> map() | nil.
 restartIntensityOf(Node) ->
     maps:get(restartIntensity, Node, nil).
 
--doc "Return whether a node's children were truncated by the child cap.".
+-doc "Return whether a node's children were truncated by the child cap."
 -spec truncatedOf(node_map()) -> boolean().
 truncatedOf(Node) ->
     maps:get(truncated, Node, false).
@@ -613,7 +613,7 @@ safe_children_pids(SupRef, Filter) ->
                 supervisor => SupRef,
                 error_class => Class,
                 reason => Reason,
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             []
     end.
@@ -1224,7 +1224,7 @@ safe_which_children(Pid) ->
                         pid => Pid,
                         error_class => Class,
                         reason => Reason,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     }),
                     []
             end
