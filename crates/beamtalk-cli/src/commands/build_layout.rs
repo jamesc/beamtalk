@@ -61,6 +61,13 @@ impl BuildLayout {
         self.profile_dir().join("ebin")
     }
 
+    /// `_build/dev/.beamtalk-stamp.json` — the project's build provenance stamp
+    /// (ADR 0098). Records the toolchain that produced this scope so stale
+    /// artifacts from a different toolchain are rebuilt rather than reused.
+    pub fn stamp_path(&self) -> Utf8PathBuf {
+        self.profile_dir().join(".beamtalk-stamp.json")
+    }
+
     // ── Native Erlang ────────────────────────────────────────────────
 
     /// `_build/dev/native/` — base directory for native Erlang builds.
@@ -128,6 +135,15 @@ mod tests {
     fn test_ebin_dir() {
         let layout = BuildLayout::new("/home/user/my_app");
         assert_eq!(layout.ebin_dir(), "/home/user/my_app/_build/dev/ebin");
+    }
+
+    #[test]
+    fn test_stamp_path() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(
+            layout.stamp_path(),
+            "/home/user/my_app/_build/dev/.beamtalk-stamp.json"
+        );
     }
 
     #[test]

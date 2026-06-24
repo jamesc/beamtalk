@@ -1765,6 +1765,42 @@ pub struct OtpDiscovery {
     pub beam_files: Vec<Utf8PathBuf>,
 }
 
+/// Probes the running OTP installation for its compound version key
+/// (`<otp_release>-<erts>`, e.g. `27-15.0.1`) without enumerating any `.beam`
+/// files.
+///
+/// This is the **same** key [`discover_otp_beam_files`] reports and the same one
+/// that keys the shared type-spec cache (BT-2470). ADR 0098 provenance stamps
+/// must use this compound — not bare `erlang:system_info(otp_release)`, which
+/// returns only `"27"` — so a minor OTP/ERTS bump still invalidates artifacts.
+///
+/// Returns `None` if `erl` cannot be invoked or did not report a version; the
+/// caller then compares provenance on `beamtalk_version` alone.
+pub fn discover_otp_version() -> Option<String> {
+    let probe = "io:format(\"~s-~s\", [erlang:system_info(otp_release), erlang:system_info(version)]), halt().";
+    let output = Command::new("erl")
+        .arg("-noshell")
+        .arg("-noinput")
+        .arg("-boot")
+        .arg("no_dot_erlang")
+        .arg("-eval")
+        .arg(probe)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    // A bare "-" means both probes returned empty; treat as unknown.
+    if version.is_empty() || version == "-" {
+        None
+    } else {
+        Some(version)
+    }
+}
+
 /// Discovers `.beam` files on the OTP code path and the OTP version.
 ///
 /// Returns absolute paths to all `.beam` files in common OTP library ebin

@@ -175,6 +175,23 @@ fn save_cache(
     );
 }
 
+/// Discard the Pass 1 metadata cache from `build_dir` (ADR 0098).
+///
+/// Called on a project-scope provenance miss. A forced rebuild already ignores
+/// and overwrites the cache, but the cached `ClassInfo` / class-index entries
+/// are compiler-*derived* from the source AST and just as version-sensitive as
+/// the `.beam` output, so we remove the stale file outright rather than trust
+/// that the rebuild reaches every entry. Best-effort: a removal failure is
+/// logged, never fatal.
+pub(crate) fn discard_pass1_cache(build_dir: &Utf8Path) {
+    let cache_path = build_dir.join(CACHE_FILENAME);
+    match fs::remove_file(&cache_path) {
+        Ok(()) => debug!("Discarded Pass 1 cache at {cache_path} (provenance miss)"),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => warn!(error = %e, "Failed to discard Pass 1 cache at {cache_path}"),
+    }
+}
+
 /// Perform an incremental Pass 1 scan.
 ///
 /// Loads the existing cache (if any), determines which files are stale,
@@ -627,6 +644,22 @@ mod tests {
             load_cache(&build_dir, None),
             CacheLoadResult::Miss
         ));
+    }
+
+    #[test]
+    fn test_discard_pass1_cache_removes_file() {
+        let temp = TempDir::new().unwrap();
+        let build_dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Write a cache, then discard it.
+        save_cache(&build_dir, None, HashMap::new());
+        assert!(build_dir.join(CACHE_FILENAME).exists());
+
+        discard_pass1_cache(&build_dir);
+        assert!(!build_dir.join(CACHE_FILENAME).exists());
+
+        // Discarding a missing cache is a no-op, not an error.
+        discard_pass1_cache(&build_dir);
     }
 
     #[test]

@@ -204,6 +204,11 @@ struct BuildPassesResult {
     native_result: Option<Rebar3Result>,
     /// BT-2014: Diagnostic summary aggregated from all compiled files.
     diagnostic_summary: beamtalk_core::source_analysis::DiagnosticSummary,
+    /// ADR 0098: the current toolchain's compound OTP version (`<release>-<erts>`),
+    /// probed once at the start of the build and threaded through to the
+    /// provenance stamp written in post-processing. `None` for single-file builds
+    /// (no stamp) or when OTP could not be probed.
+    otp_version: Option<String>,
 }
 
 /// Build beamtalk source files.
@@ -675,6 +680,16 @@ fn execute_build_passes(
     dep_ctx: &DependencyContext,
     force: bool,
 ) -> Result<BuildPassesResult> {
+    // ADR 0098 Phase 1: probe the current toolchain's OTP version once (package
+    // builds only), gate the build on provenance, and thread the version through
+    // to the stamp written in post-processing.
+    let otp_version = if env.pkg_manifest().is_some() {
+        crate::beam_compiler::discover_otp_version()
+    } else {
+        None
+    };
+    let force = force || provenance_requires_rebuild(env, otp_version.as_deref());
+
     let index = build_class_index(env, dep_ctx, options, force)?;
     let force = if index.force_pass2 { true } else { force };
 
@@ -770,7 +785,30 @@ fn execute_build_passes(
         hierarchy: compile_ctx.hierarchy,
         native_result,
         diagnostic_summary,
+        otp_version,
     })
+}
+
+/// ADR 0098 Phase 1: project provenance gate.
+///
+/// Returns `true` when the project's build scope was produced by a different
+/// toolchain (a `beamtalk_version` or OTP-version mismatch) or the stamp is
+/// missing/corrupt/unknown-schema — meaning every module must be recompiled
+/// regardless of mtime. On a miss the version-sensitive Pass 1 metadata cache is
+/// discarded too (its `ClassInfo` is compiler-derived). No-op (returns `false`)
+/// for single-file builds, which have no `_build/dev/` scope or stamp.
+fn provenance_requires_rebuild(env: &BuildEnvironment, current_otp: Option<&str>) -> bool {
+    if env.pkg_manifest().is_none() {
+        return false;
+    }
+    match super::build_stamp::read_stamp_status(&env.layout.stamp_path(), current_otp) {
+        super::build_stamp::StampStatus::Fresh => false,
+        super::build_stamp::StampStatus::Stale(reason) => {
+            info!("Build provenance miss ({reason}) — forcing full rebuild");
+            super::build_cache::discard_pass1_cache(&env.build_dir);
+            true
+        }
+    }
 }
 
 /// Phase 9: Clean stale artifacts and generate OTP application outputs
@@ -822,6 +860,12 @@ fn post_process_package_artifacts(
             source_files: &env.source_files,
         },
     )?;
+
+    // ADR 0098 Phase 1: write the provenance stamp LAST, after every artifact in
+    // the scope has landed, so a crash mid-build never leaves a stamp claiming
+    // freshness for incomplete output. Best-effort (a write failure just means
+    // the next build sees no stamp and rebuilds).
+    super::build_stamp::write_stamp(&env.layout.stamp_path(), passes.otp_version.as_deref());
 
     Ok(())
 }
