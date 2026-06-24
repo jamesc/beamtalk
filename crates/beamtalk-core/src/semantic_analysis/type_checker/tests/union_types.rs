@@ -861,16 +861,21 @@ fn bt2647_singleton_resolves_inherited_symbol_method() {
     );
 }
 
-/// BT-2647: a selector `Symbol` does not understand on a non-union singleton is a
-/// definite DNU — a Warning, not the silently-Dynamic non-result it was before.
+/// BT-2647: a selector `Symbol` does not understand on a non-union singleton now
+/// produces a DNU diagnostic — previously the send fell through silently to
+/// Dynamic. Instance-selector DNUs are emitted at Hint severity (matching every
+/// other known-class instance send, via `emit_unknown_selector_warning`).
 #[test]
-fn bt2647_singleton_genuine_nonresponder_warns() {
+fn bt2647_singleton_genuine_nonresponder_hints() {
     let (_ty, diags) = infer_singleton_send(MessageSelector::Unary("frobnicate".into()), vec![]);
     let dnu: Vec<_> = diags.iter().filter(|d| d.contains("understand")).collect();
     assert_eq!(dnu.len(), 1, "expected one DNU diagnostic, got: {diags:?}");
+    // The `"Symbol"` substring is the load-bearing invariant: it proves the
+    // singleton routed through Symbol's protocol on the *negative* path (the
+    // positive path is covered by `bt2647_singleton_resolves_inherited_symbol_method`).
     assert!(
-        dnu[0].starts_with("Warning:") && dnu[0].contains("Symbol"),
-        "singleton DNU should warn and resolve via Symbol: {dnu:?}"
+        dnu[0].starts_with("Hint:") && dnu[0].contains("Symbol"),
+        "singleton DNU should hint and resolve via Symbol: {dnu:?}"
     );
 }
 

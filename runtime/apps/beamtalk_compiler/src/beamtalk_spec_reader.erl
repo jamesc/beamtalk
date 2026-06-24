@@ -999,21 +999,16 @@ map_union_result(Branches) ->
     {OkTypes, ErrTypes, OtherBranches} = classify_union_branches(Branches),
     case {OkTypes, ErrTypes} of
         {[], []} ->
-            %% No ok/error branches — standard union. A union of *only* plain
-            %% literal atoms (e.g. `text | json`, `info | debug | error`) is a
-            %% narrow enumeration: map it to a Beamtalk singleton union
-            %% (`#text | #json`) rather than collapsing every atom to `Symbol`
-            %% (BT-2632). Mixed unions still map each branch via map_type, so a
-            %% lone atom branch keeps its existing `Symbol` mapping.
-            case singleton_union_members(Branches) of
-                {ok, Members} ->
-                    iolist_to_binary(lists:join(<<" | ">>, Members));
-                not_singleton_union ->
-                    Mapped = dedup_types([map_type(B) || B <- Branches]),
-                    case Mapped of
-                        [Single] -> Single;
-                        Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
-                    end
+            %% No ok/error branches — standard union. `map_union/1` already tried
+            %% the narrow pure-atom singleton enumeration first (BT-2632/BT-2647)
+            %% and only delegates here when the union is *not* such an enum, so a
+            %% re-check would always be `not_singleton_union`. Map each branch via
+            %% map_type: a lone atom keeps its `Symbol` mapping; mixed unions map
+            %% each member.
+            Mapped = dedup_types([map_type(B) || B <- Branches]),
+            case Mapped of
+                [Single] -> Single;
+                Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
             end;
         _ ->
             %% At least one ok or error branch — emit Result(T, E)

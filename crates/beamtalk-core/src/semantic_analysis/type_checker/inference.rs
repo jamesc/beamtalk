@@ -1333,7 +1333,18 @@ impl TypeChecker {
             // its protocol through `Symbol`, mirroring the singleton-union member
             // handling from BT-2624. `class_name` (`#text`) is still used for
             // `Self` returns and user-facing messages.
-            let resolve_class: EcoString = if class_name.starts_with('#') {
+            //
+            // `!contains('|')` keeps this symmetric with `check_instance_selector`
+            // (a `Known` is never a union today, but a future `Known { "#a | #b" }`
+            // must not silently route here while validation leaves it untouched).
+            // Binary sends are excluded: an equality op on a singleton receiver
+            // (`#west =:= unionVar`) must fall through to the BT-2631
+            // statically-decidable-comparison hint below rather than
+            // short-circuiting on `Symbol`'s `=:=`.
+            let resolve_class: EcoString = if class_name.starts_with('#')
+                && !class_name.contains('|')
+                && !matches!(selector, MessageSelector::Binary(_))
+            {
                 EcoString::from("Symbol")
             } else {
                 class_name.clone()
