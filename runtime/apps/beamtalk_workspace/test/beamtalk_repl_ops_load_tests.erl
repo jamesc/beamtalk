@@ -1717,19 +1717,22 @@ provenance_read_missing_stamp_is_error_test() ->
         beamtalk_repl_ops_load:read_provenance_stamp("does/not/exist/.beamtalk-stamp.json")
     ).
 
-%% A project with no stamp at all is stale → forces a recompile on attach.
-provenance_missing_stamp_forces_recompile_test() ->
+%% A project with no stamp is NOT forced: the workspace recompiles project
+%% sources from scratch on attach anyway, so there is nothing on-disk to
+%% invalidate — and it must never fabricate a stamp the CLI's Phase-1 gate would
+%% trust (the workspace compiles in-memory and never writes _build/dev/ebin).
+provenance_missing_stamp_does_not_force_test() ->
     Dir = make_temp_dir(),
     try
-        ?assertEqual(true, beamtalk_repl_ops_load:project_provenance_stale(Dir))
+        ?assertEqual(false, beamtalk_repl_ops_load:project_provenance_stale(Dir))
     after
         rm_temp_dir(Dir)
     end.
 
 %% A project whose on-disk stamp matches the running toolchain is fresh; once the
 %% stamp's OTP is tampered (an older-toolchain artifact), the next attach is
-%% stale → recompile. (The full compile+self-heal cycle is exercised end-to-end
-%% by the repl-protocol `sync_project` case, which needs the compiler port.)
+%% stale → recompile. (The full compile cycle is exercised end-to-end by the
+%% repl-protocol `sync_project` case, which needs the compiler port.)
 provenance_stale_stamp_flips_attach_decision_test() ->
     Dir = filename:absname(make_temp_dir()),
     try
@@ -1752,24 +1755,14 @@ provenance_stale_stamp_flips_attach_decision_test() ->
         rm_temp_dir(Dir)
     end.
 
-%% write_project_provenance_stamp/1 lands a stamp the freshness check accepts —
-%% the self-heal that makes subsequent attaches incremental. Only meaningful when
-%% the compiler port can report a version (else the stamp write is skipped).
-provenance_written_stamp_is_fresh_test() ->
-    case safe_version() of
-        undefined ->
-            ok;
-        _ ->
-            Dir = filename:absname(make_temp_dir()),
-            try
-                ok = beamtalk_repl_ops_load:write_project_provenance_stamp(Dir),
-                StampPath = filename:join([Dir, "_build", "dev", ".beamtalk-stamp.json"]),
-                ?assert(filelib:is_file(StampPath)),
-                ?assertEqual(false, beamtalk_repl_ops_load:project_provenance_stale(Dir))
-            after
-                rm_temp_dir(Dir)
-            end
-    end.
+%% A stamp present but missing the beamtalk_version key is foreign/corrupt →
+%% stale (fail toward rebuild), even if OTP matches and the port is down.
+provenance_missing_version_key_is_stale_test() ->
+    Stamp = #{
+        <<"schema">> => 1,
+        <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+    },
+    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
 
 %% The running OTP version is the compound `<release>-<erts>` key.
 provenance_current_otp_release_is_compound_test() ->
