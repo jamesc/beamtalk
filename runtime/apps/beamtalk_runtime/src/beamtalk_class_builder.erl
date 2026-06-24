@@ -634,7 +634,7 @@ selector_arity(Selector) when is_atom(Selector) ->
             count_colons(Chars);
         false ->
             %% Unary or binary operator. Binary selectors consist only of
-            %% operator characters (+, -, *, /, <, >, =, ~, %, &, ?, \\, ,).
+            %% operator characters (+, -, *, /, <, >, =, ~, %, &, ?, \, ,).
             %% A malformed selector with an interior colon (e.g. 'at:put')
             %% falls here too and is treated as unary (arity 0).
             case Chars =/= [] andalso lists:all(fun is_binary_selector_char/1, Chars) of
