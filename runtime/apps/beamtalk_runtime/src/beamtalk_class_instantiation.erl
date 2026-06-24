@@ -257,7 +257,7 @@ collect_ancestor_defaults(Name, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     ?LOG_WARNING(
         "collect_ancestor_defaults: max hierarchy depth ~p exceeded at ~p — possible cycle",
         [?MAX_HIERARCHY_DEPTH, Name],
-        #{domain => [beamtalk, runtime]}
+        #{?BT_LOG_DOMAIN}
     ),
     Acc;
 collect_ancestor_defaults(Name, Acc, Depth) ->
@@ -296,7 +296,7 @@ ancestor_compiled_defaults(Module) ->
             ?LOG_DEBUG(
                 "ancestor ~p:new/0 failed while collecting field defaults: ~p:~p",
                 [Module, Kind, Reason],
-                #{stacktrace => ST, domain => [beamtalk, runtime]}
+                #{stacktrace => ST, ?BT_LOG_DOMAIN}
             ),
             #{}
     end.
@@ -338,7 +338,7 @@ ancestor_builder_defaults(Name) ->
                         "ancestor_builder_defaults: class ~p process exited (~p) "
                         "while collecting field defaults — treating as no defaults",
                         [Name, Reason],
-                        #{domain => [beamtalk, runtime]}
+                        #{?BT_LOG_DOMAIN}
                     ),
                     #{}
             end;

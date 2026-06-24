@@ -119,7 +119,7 @@ lookup(Selector, Args, Self, State, CurrentClass) ->
         {ok, Fun} ->
             %% Found extension method - invoke it
             ?LOG_DEBUG("Found extension method", #{
-                selector => Selector, class => CurrentClass, domain => [beamtalk, runtime]
+                selector => Selector, class => CurrentClass, ?BT_LOG_DOMAIN
             }),
             invoke_extension(Fun, Args, Self, State);
         not_found ->
@@ -176,7 +176,7 @@ super(Selector, Args, Self, State, CurrentClass) ->
                             ?LOG_DEBUG("Found extension method via super", #{
                                 selector => Selector,
                                 class => SuperclassName,
-                                domain => [beamtalk, runtime]
+                                ?BT_LOG_DOMAIN
                             }),
                             invoke_extension(Fun, Args, Self, State);
                         not_found ->
@@ -266,7 +266,7 @@ lookup_in_class_chain_slow(Selector, _Args, _Self, _State, ClassName, _ClassPid,
         max_depth => ?MAX_HIERARCHY_DEPTH,
         class => ClassName,
         selector => Selector,
-        domain => [beamtalk, runtime]
+        ?BT_LOG_DOMAIN
     }),
     {error,
         beamtalk_error:new(
@@ -289,7 +289,7 @@ lookup_in_class_chain_slow(Selector, Args, Self, State, ClassName, ClassPid, Dep
                     ?LOG_DEBUG("Method not found in hierarchy", #{
                         selector => Selector,
                         root => ClassName,
-                        domain => [beamtalk, runtime]
+                        ?BT_LOG_DOMAIN
                     }),
                     %% BT-753: Derive class from Self when State is empty (class objects).
                     ErrorClass = class_name_from(Self, State, ClassName),
@@ -399,7 +399,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
                                     ?LOG_DEBUG("Erlang error in beamtalk_object_ops:dispatch", #{
                                         selector => Selector,
                                         reason => beamtalk_error:format_reason(Type, Reason),
-                                        domain => [beamtalk, runtime]
+                                        ?BT_LOG_DOMAIN
                                     }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(
                                         Type, Reason, Stack
@@ -424,7 +424,7 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
                                         module => ModuleName,
                                         selector => Selector,
                                         reason => beamtalk_error:format_reason(Type, Reason),
-                                        domain => [beamtalk, runtime]
+                                        ?BT_LOG_DOMAIN
                                     }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(
                                         Type, Reason, Stack
@@ -501,7 +501,7 @@ invoke_extension(Fun, Args, Self, State) ->
             ?LOG_ERROR("Extension method threw error", #{
                 reason => Reason,
                 stacktrace => Stacktrace,
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             erlang:raise(error, Reason, Stacktrace)
     end.
