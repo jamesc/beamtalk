@@ -875,6 +875,12 @@ fn bt2647_singleton_genuine_nonresponder_hints() {
     let (_ty, diags) = infer_singleton_send(MessageSelector::Unary("frobnicate".into()), vec![]);
     let dnu: Vec<_> = diags.iter().filter(|d| d.contains("understand")).collect();
     assert_eq!(dnu.len(), 1, "expected one DNU diagnostic, got: {diags:?}");
+    // `check_instance_selector` still resolves the selector (and any "did you
+    // mean" suggestion) against `Symbol` — that routing is unchanged and proven
+    // by `bt2647_singleton_resolves_inherited_symbol_method` (positive path) and
+    // `bt2679_singleton_binary_send_bypasses_symbol_redirect` (the bypass pin).
+    // BT-2679 changed only the *display* name: the message must name `#infinity`,
+    // never the `Symbol` it resolved through.
     assert!(
         dnu[0].starts_with("Hint:") && dnu[0].contains("#infinity"),
         "singleton DNU should hint and name the singleton receiver: {dnu:?}"
