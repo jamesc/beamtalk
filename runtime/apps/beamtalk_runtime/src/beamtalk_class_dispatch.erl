@@ -599,7 +599,7 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
                     class => ClassName,
                     selector => Selector,
                     stacktrace => ST,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }
             ),
             {error, undef_in_body};
@@ -612,7 +612,7 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
                     selector => Selector,
                     reason => beamtalk_error:format_reason(ErrClass, Error),
                     stacktrace => ErrST,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }
             ),
             {error, {raised, ErrClass, Error, ErrST}}
@@ -643,7 +643,7 @@ apply_compiled_class_method(
                     selector => Selector,
                     reason => beamtalk_error:format_reason(ErrClass, Error),
                     stacktrace => ErrST,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }
             ),
             {error, {raised, ErrClass, Error, ErrST}}
@@ -668,7 +668,7 @@ classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST) 
                     class => ClassName,
                     selector => Selector,
                     stacktrace => ST,
-                    domain => [beamtalk, runtime]
+                    ?BT_LOG_DOMAIN
                 }
             ),
             {error, undef_in_body}
@@ -739,7 +739,7 @@ find_class_method_in_ancestors(_Selector, AncestorName, Depth) when Depth > ?MAX
     ?LOG_WARNING(
         "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p — possible cycle",
         [?MAX_HIERARCHY_DEPTH, AncestorName],
-        #{domain => [beamtalk, runtime]}
+        #{?BT_LOG_DOMAIN}
     ),
     not_found;
 find_class_method_in_ancestors(Selector, AncestorName, Depth) ->
