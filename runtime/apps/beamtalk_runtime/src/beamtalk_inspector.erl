@@ -1008,7 +1008,7 @@ eval_value(Self, Source) ->
             ?LOG_DEBUG("inspector value evaluate failed", #{
                 error_class => Class,
                 reason => Reason,
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             {error, eval_failed_error(Reason)}
     end.

@@ -86,7 +86,7 @@ enable() ->
                 "Traces and stats will be empty. This usually means the Beamtalk "
                 "installation is incomplete — try reinstalling or updating.",
                 [],
-                #{domain => [beamtalk, runtime]}
+                #{?BT_LOG_DOMAIN}
             ),
             nil
     end.
