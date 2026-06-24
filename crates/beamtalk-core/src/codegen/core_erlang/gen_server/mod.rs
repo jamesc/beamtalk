@@ -31,3 +31,4 @@ mod spawn;
 mod state;
 
 pub(in crate::codegen::core_erlang) use methods::BodyExprKind;
+pub(in crate::codegen::core_erlang) use methods::MetaProvenance;

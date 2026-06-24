@@ -654,7 +654,13 @@ pub fn write_core_erlang_with_source(
     // Generate Core Erlang
     let core_erlang = beamtalk_core::erlang::generate_module(
         module,
-        beamtalk_core::erlang::CodegenOptions::new(module_name).with_source_opt(source_text),
+        beamtalk_core::erlang::CodegenOptions::new(module_name)
+            .with_source_opt(source_text)
+            // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
+            .with_provenance(
+                env!("BEAMTALK_VERSION"),
+                crate::commands::build_stamp::current_otp_version(),
+            ),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -757,7 +763,12 @@ pub fn write_core_erlang_with_bindings(
             .with_class_module_index(hierarchy.class_module_index.clone())
             .with_class_superclass_index(hierarchy.class_superclass_index.clone())
             .with_source_path_opt(source_path)
-            .with_class_hierarchy(hierarchy.pre_loaded_classes.clone()),
+            .with_class_hierarchy(hierarchy.pre_loaded_classes.clone())
+            // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
+            .with_provenance(
+                env!("BEAMTALK_VERSION"),
+                crate::commands::build_stamp::current_otp_version(),
+            ),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;

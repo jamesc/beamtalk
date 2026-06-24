@@ -20,6 +20,24 @@ use crate::ast::{
 use crate::docvec;
 use crate::unparse::unparse_method_display_signature;
 
+/// ADR 0098 Phase 3: producing-toolchain identity baked into a module's
+/// `__beamtalk_meta/0` map so a *loaded* module is self-describing — consumers
+/// (workspace attach, tooling) can detect staleness without re-reading the
+/// on-disk stamp.
+///
+/// Both values are compile-time literals supplied by the CLI
+/// (`beam_compiler.rs`), never a runtime `erlang:system_info/1` call in the
+/// generated module: the latter would bake the bare OTP release (`"27"`) rather
+/// than the compound key the stamp uses (`"27-15.0.1"`). `None` (REPL, tests, or
+/// an older toolchain) omits the key entirely.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct MetaProvenance<'a> {
+    /// The producing `BEAMTALK_VERSION`, verbatim.
+    pub beamtalk_version: Option<&'a str>,
+    /// The producing compound OTP version (`<release>-<erts>`).
+    pub otp_release: Option<&'a str>,
+}
+
 /// Collects the class names referenced by a type annotation into `out`
 /// (ADR 0087 Phase 6, BT-2304).
 ///
@@ -1385,6 +1403,7 @@ impl CoreErlangGenerator {
                 true,
                 synthesize_supervision_spec,
                 package_name.as_deref(),
+                self.meta_provenance(),
             );
             let class_doc = Self::build_builder_state_doc(
                 i,
@@ -3188,6 +3207,7 @@ impl CoreErlangGenerator {
                 false,
                 synthesize_supervision_spec,
                 package_name.as_deref(),
+                self.meta_provenance(),
             ),
             "\n\n",
         ])
@@ -3213,6 +3233,7 @@ impl CoreErlangGenerator {
         include_standalone: bool,
         synthesize_supervision_spec: bool,
         package_name: Option<&str>,
+        provenance: MetaProvenance<'_>,
     ) -> Document<'static> {
         Self::build_meta_map_doc_with_extra(
             class,
@@ -3221,6 +3242,7 @@ impl CoreErlangGenerator {
             synthesize_supervision_spec,
             Document::Nil,
             package_name,
+            provenance,
         )
     }
 
@@ -3235,6 +3257,7 @@ impl CoreErlangGenerator {
         synthesize_supervision_spec: bool,
         extra_entries: Document<'static>,
         package_name: Option<&str>,
+        provenance: MetaProvenance<'_>,
     ) -> Document<'static> {
         let class_name = class.name.name.to_string();
         let superclass_name = class
@@ -3359,9 +3382,32 @@ impl CoreErlangGenerator {
             method_info_doc,
             ",\n      'class_method_info' => ",
             class_method_info_doc,
+            // ADR 0098 Phase 3: producing-toolchain identity (omitted when unknown).
+            Self::meta_provenance_entries(provenance),
             extra_entries,
             "\n    }~",
         ]
+    }
+
+    /// ADR 0098 Phase 3: emit the `beamtalk_version` / `otp_release` provenance
+    /// keys for `__beamtalk_meta`, as binary string literals.
+    ///
+    /// Each key is emitted only when known: an older toolchain (and REPL/test
+    /// codegen) leaves them absent, which `__beamtalk_meta` readers treat as a
+    /// provenance miss (stale → recompile), never an error. Both values are
+    /// compile-time literals from the CLI — never a runtime `erlang:system_info/1`
+    /// call, which would bake the bare OTP release rather than the compound key.
+    fn meta_provenance_entries(provenance: MetaProvenance<'_>) -> Document<'static> {
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        if let Some(version) = provenance.beamtalk_version {
+            parts.push(Document::Str(",\n      'beamtalk_version' => "));
+            parts.push(leaf::binary_lit(version));
+        }
+        if let Some(otp_release) = provenance.otp_release {
+            parts.push(Document::Str(",\n      'otp_release' => "));
+            parts.push(leaf::binary_lit(otp_release));
+        }
+        Document::Vec(parts)
     }
 
     /// Builds a Core Erlang atom list document from a slice of string names.
@@ -3750,10 +3796,10 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::{MetaTypeRepr, extract_package_from_module_name};
+    use super::{MetaProvenance, MetaTypeRepr, extract_package_from_module_name};
     use crate::ast::{
-        ClassKind, Expression, ExpressionStatement, Identifier, Literal, MessageSelector,
-        MethodDefinition, Module, TypeParamDecl,
+        ClassDefinition, ClassKind, Expression, ExpressionStatement, Identifier, Literal,
+        MessageSelector, MethodDefinition, Module, TypeParamDecl,
     };
     use crate::codegen::core_erlang::CoreErlangGenerator;
     use crate::source_analysis::Span;
@@ -4032,11 +4078,119 @@ mod tests {
             false,
             false,
             None,
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
             output.contains("'type_params' => ['T', 'E']"),
             "meta map should include type_params list. Got: {output}"
+        );
+    }
+
+    /// Helper: build a single-class module from an actor class (ADR 0098 tests).
+    fn module_with(class: ClassDefinition) -> Module {
+        Module {
+            classes: vec![class],
+            method_definitions: Vec::new(),
+            protocols: vec![],
+            expressions: Vec::new(),
+            span: s(),
+            file_leading_comments: vec![],
+            file_trailing_comments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_meta_provenance_keys_emitted_when_supplied() {
+        // ADR 0098 Phase 3: a known toolchain bakes beamtalk_version + otp_release
+        // into __beamtalk_meta as binary string literals (the same compound OTP key
+        // the stamp uses — never a runtime system_info call).
+        let module = module_with(make_actor_class("Counter"));
+        let provenance = MetaProvenance {
+            beamtalk_version: Some("0.4.0-dev+abc123"),
+            otp_release: Some("28-16.4"),
+        };
+        let output = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+            provenance,
+        )
+        .to_pretty_string();
+
+        assert!(
+            output.contains("'beamtalk_version' => "),
+            "meta map should include beamtalk_version key. Got: {output}"
+        );
+        assert!(
+            output.contains("'otp_release' => "),
+            "meta map should include otp_release key. Got: {output}"
+        );
+        // Values are baked verbatim as binary literals.
+        assert!(
+            output.contains(&CoreErlangGenerator::binary_string_literal(
+                "0.4.0-dev+abc123"
+            )),
+            "beamtalk_version value not baked correctly. Got: {output}"
+        );
+        assert!(
+            output.contains(&CoreErlangGenerator::binary_string_literal("28-16.4")),
+            "otp_release value not baked correctly. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_provenance_keys_absent_by_default() {
+        // REPL / test / older-toolchain codegen supplies no provenance; the keys
+        // must be omitted entirely (readers treat absence as a stale module).
+        let module = module_with(make_actor_class("Counter"));
+        let output = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+            MetaProvenance::default(),
+        )
+        .to_pretty_string();
+
+        assert!(
+            !output.contains("beamtalk_version"),
+            "meta map must omit beamtalk_version when unknown. Got: {output}"
+        );
+        assert!(
+            !output.contains("otp_release"),
+            "meta map must omit otp_release when unknown. Got: {output}"
+        );
+    }
+
+    #[test]
+    fn test_meta_provenance_version_only_when_otp_unknown() {
+        // OTP probe failed but the version is known: emit beamtalk_version alone.
+        let module = module_with(make_actor_class("Counter"));
+        let provenance = MetaProvenance {
+            beamtalk_version: Some("1.2.3"),
+            otp_release: None,
+        };
+        let output = CoreErlangGenerator::build_meta_map_doc(
+            module.classes.first().unwrap(),
+            &module,
+            false,
+            false,
+            None,
+            provenance,
+        )
+        .to_pretty_string();
+
+        assert!(
+            output.contains("'beamtalk_version' => "),
+            "beamtalk_version should be present. Got: {output}"
+        );
+        assert!(
+            !output.contains("otp_release"),
+            "otp_release must be omitted when OTP is unknown. Got: {output}"
         );
     }
 
@@ -4058,6 +4212,7 @@ mod tests {
             false,
             false,
             None,
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
@@ -4084,6 +4239,7 @@ mod tests {
             false,
             false,
             Some("my_counter"),
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
@@ -4110,6 +4266,7 @@ mod tests {
             false,
             false,
             None,
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
@@ -4136,6 +4293,7 @@ mod tests {
             false,
             false,
             None,
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
@@ -4163,6 +4321,7 @@ mod tests {
             false,
             false,
             None,
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
@@ -4207,6 +4366,7 @@ mod tests {
             false,
             false,
             None,
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
@@ -4234,6 +4394,7 @@ mod tests {
             false,
             false,
             None,
+            MetaProvenance::default(),
         );
         let output = doc.to_pretty_string();
         assert!(
