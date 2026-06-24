@@ -813,3 +813,71 @@ fn bt2624_union_singleton_class_resolves_to_symbol_metatype() {
     );
     assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
 }
+
+// ── BT-2647: non-union singleton receivers resolve against Symbol ─────────
+
+/// Infer `x <selector>` where `x :: #infinity` (a *non-union* singleton),
+/// returning the inferred type and rendered diagnostics.
+fn infer_singleton_send(
+    selector: MessageSelector,
+    args: Vec<Expression>,
+) -> (InferredType, Vec<String>) {
+    let module = Module::new(
+        vec![ExpressionStatement::bare(msg_send(
+            Expression::Identifier(ident("x")),
+            selector,
+            args,
+        ))],
+        span(),
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("x", InferredType::known("#infinity"));
+    let ty = checker.infer_expr(
+        &module.expressions[0].expression,
+        &hierarchy,
+        &mut env,
+        false,
+    );
+    let diags = checker
+        .diagnostics()
+        .iter()
+        .map(|d| format!("{:?}: {}", d.severity, d.message))
+        .collect();
+    (ty, diags)
+}
+
+/// BT-2647: a non-union singleton (`#infinity`) is a subtype of `Symbol`, so a
+/// method `Symbol` understands (`asString`) infers a concrete type — not the
+/// `Dynamic` it fell through to before this fix — with no DNU warning.
+#[test]
+fn bt2647_singleton_resolves_inherited_symbol_method() {
+    let (ty, diags) = infer_singleton_send(MessageSelector::Unary("asString".into()), vec![]);
+    assert_eq!(ty, InferredType::known("String"));
+    assert!(
+        diags.iter().all(|d| !d.contains("understand")),
+        "asString resolves on Symbol, got: {diags:?}"
+    );
+}
+
+/// BT-2647: a selector `Symbol` does not understand on a non-union singleton is a
+/// definite DNU — a Warning, not the silently-Dynamic non-result it was before.
+#[test]
+fn bt2647_singleton_genuine_nonresponder_warns() {
+    let (_ty, diags) = infer_singleton_send(MessageSelector::Unary("frobnicate".into()), vec![]);
+    let dnu: Vec<_> = diags.iter().filter(|d| d.contains("understand")).collect();
+    assert_eq!(dnu.len(), 1, "expected one DNU diagnostic, got: {diags:?}");
+    assert!(
+        dnu[0].starts_with("Warning:") && dnu[0].contains("Symbol"),
+        "singleton DNU should warn and resolve via Symbol: {dnu:?}"
+    );
+}
+
+/// BT-2647: `#infinity class` resolves through `Symbol`, so the metatype is
+/// `Symbol class` (`Meta("Symbol")`), not a phantom `Meta("#infinity")`.
+#[test]
+fn bt2647_singleton_class_resolves_to_symbol_metatype() {
+    let (ty, _diags) = infer_singleton_send(MessageSelector::Unary("class".into()), vec![]);
+    assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
+}

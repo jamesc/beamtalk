@@ -368,16 +368,15 @@ map_type_singleton_union_too_wide_falls_back_test() ->
         beamtalk_spec_reader:map_type({type, 0, union, Branches})
     ).
 
-%% Documented limitation (BT-2632): a pure-atom enumeration that *contains* the
-%% bare atom `error` (or `ok`) is intercepted by ADR-0076 ok/error Result
-%% recognition before the singleton-union path runs, so it does NOT become a
-%% singleton union. This locks in the current behaviour for `logLevel/0`'s
-%% `... | error | ...` spec; tightening it is deferred to BT-2647. The
-%% user-facing `Beamtalk logLevel` type is carried by the source annotation, not
-%% this inferred type.
-map_type_singleton_union_with_error_atom_is_result_not_singleton_test() ->
+%% BT-2647: a pure-atom enumeration that *contains* the bare atom `error` (or
+%% `ok`) but also has atoms beyond `ok`/`error` is a genuine enum, so the
+%% singleton-union path now wins over ADR-0076 ok/error Result recognition. This
+%% gives `logLevel/0`'s `... | error | ...` spec its narrow singleton union via
+%% FFI inference (previously `Result(Dynamic, Nil) | Symbol`, a documented
+%% BT-2632 limitation).
+map_type_singleton_union_with_error_atom_is_singleton_test() ->
     ?assertEqual(
-        <<"Result(Dynamic, Nil) | Symbol">>,
+        <<"#emergency | #error | #info | #debug">>,
         beamtalk_spec_reader:map_type(
             {type, 0, union, [
                 {atom, 0, emergency},
@@ -386,6 +385,52 @@ map_type_singleton_union_with_error_atom_is_result_not_singleton_test() ->
                 {atom, 0, debug}
             ]}
         )
+    ).
+
+%% BT-2647: a union whose only atoms are `ok`/`error` stays a Result — ADR-0076
+%% bare ok/error semantics are preserved (`has_non_result_atom/1` is false).
+map_type_bare_ok_error_stays_result_test() ->
+    ?assertEqual(
+        <<"Result(Nil, Nil)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{atom, 0, ok}, {atom, 0, error}]}
+        )
+    ).
+
+%% BT-2647: tuple-form Result recognition is unaffected by the enum precedence —
+%% a `{ok, T} | {error, E}` union with an extra plain atom is still a Result,
+%% because a tuple branch makes `singleton_union_members/1` reject the union.
+map_type_result_tuples_with_atom_stays_result_test() ->
+    ?assertEqual(
+        <<"Result(Integer, Symbol) | Symbol">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [
+                {type, 0, tuple, [{atom, 0, ok}, {type, 0, integer, []}]},
+                {type, 0, tuple, [{atom, 0, error}, {type, 0, atom, []}]},
+                {atom, 0, pending}
+            ]}
+        )
+    ).
+
+%% BT-2647 (decision 1): `undefined` is NOT mapped to `Nil`. The runtime does not
+%% coerce Erlang `undefined` -> Beamtalk `nil` at the FFI boundary
+%% (`beamtalk_erlang_proxy:coerce_result/1` passes it through), so the honest
+%% type for a `value | undefined` enum is the singleton union `#value |
+%% #undefined`, not `... | Nil`. A consumer must exact-match `#undefined`.
+map_type_undefined_in_atom_union_is_singleton_not_nil_test() ->
+    ?assertEqual(
+        <<"#found | #undefined">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, union, [{atom, 0, found}, {atom, 0, undefined}]}
+        )
+    ).
+
+%% BT-2647 (decision 1): a lone `undefined` atom maps to `Symbol` (the runtime
+%% value is the atom `undefined`, a Beamtalk Symbol), never `Nil`.
+map_type_lone_undefined_is_symbol_test() ->
+    ?assertEqual(
+        <<"Symbol">>,
+        beamtalk_spec_reader:map_type({atom, 0, undefined})
     ).
 
 %% Duplicate atoms are deduped; a union that collapses to a single member is
@@ -1366,8 +1411,12 @@ resolve_remote_type_prim_file_preloaded_test() ->
         {_, Bin, _} ->
             case beam_lib:chunks(Bin, [abstract_code]) of
                 {ok, {_, [{abstract_code, {raw_abstract_v1, _}}]}} ->
+                    %% BT-2647: `prim_file:prim_file_name_error()` is the pure-atom
+                    %% enum `error | ignore | warning`. Although it contains the bare
+                    %% atom `error`, the enum precedence rule now narrows it to a
+                    %% singleton union (was `Result(Dynamic, Nil) | Symbol`).
                     ?assertEqual(
-                        <<"Result(Dynamic, Nil) | Symbol">>,
+                        <<"#error | #ignore | #warning">>,
                         beamtalk_spec_reader:map_type(
                             {remote_type, 0, [
                                 {atom, 0, prim_file},

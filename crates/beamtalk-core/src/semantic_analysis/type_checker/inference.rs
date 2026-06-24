@@ -1326,11 +1326,23 @@ impl TypeChecker {
             }
 
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
+            // BT-2647: a non-union singleton receiver (`#text`) is a subtype of
+            // `Symbol` but not itself in the hierarchy, so method lookup and
+            // argument/return-type inference would otherwise fall through to
+            // Dynamic — losing the inference it had when typed `Symbol`. Resolve
+            // its protocol through `Symbol`, mirroring the singleton-union member
+            // handling from BT-2624. `class_name` (`#text`) is still used for
+            // `Self` returns and user-facing messages.
+            let resolve_class: EcoString = if class_name.starts_with('#') {
+                EcoString::from("Symbol")
+            } else {
+                class_name.clone()
+            };
             // Skip argument type check for binary messages — check_binary_operand_types
             // already provides more specific warnings for arithmetic/comparison/concat.
             if !matches!(selector, MessageSelector::Binary(_)) {
                 self.check_argument_types(
-                    class_name,
+                    &resolve_class,
                     &selector_name,
                     &arg_types,
                     span,
@@ -1342,7 +1354,7 @@ impl TypeChecker {
             }
 
             // Infer return type from method info
-            if let Some(method) = hierarchy.find_method(class_name, &selector_name) {
+            if let Some(method) = hierarchy.find_method(&resolve_class, &selector_name) {
                 if let Some(ref ret_ty) = method.return_type {
                     // `Self` resolves to the static receiver class (with type args)
                     if ret_ty.as_str() == "Self" {
@@ -1365,7 +1377,10 @@ impl TypeChecker {
                     // `find_class_method`. Pre-0083 this returned `Dynamic`
                     // (BT-1952).
                     if ret_ty.as_str() == "Self class" {
-                        return InferredType::meta(class_name.clone());
+                        // BT-2647: for a singleton receiver, `resolve_class` is
+                        // `Symbol` so `#text class` is `Symbol class` (`#text` is a
+                        // Symbol at runtime), not a phantom `Meta("#text")`.
+                        return InferredType::meta(resolve_class.clone());
                     }
                     // ADR 0083: `X class` — the method returns the metatype of a
                     // specific named class (BT-2034 annotation `X class`).
@@ -1384,7 +1399,7 @@ impl TypeChecker {
                     // if the method is inherited (ADR 0068 Phase 1b, BT-1577)
                     let subst = Self::build_inherited_substitution_map(
                         hierarchy,
-                        class_name,
+                        &resolve_class,
                         type_args,
                         &method.defined_in,
                     );

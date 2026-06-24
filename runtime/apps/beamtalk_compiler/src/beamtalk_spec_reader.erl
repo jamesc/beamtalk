@@ -872,6 +872,15 @@ map_type({atom, _, false}) ->
     <<"False">>;
 map_type({atom, _, nil}) ->
     <<"Nil">>;
+%% BT-2647: `undefined` is deliberately NOT mapped to `Nil`. Beamtalk's canonical
+%% Nil is the `nil` atom (class `UndefinedObject`); `undefined` is a distinct
+%% atom. The FFI boundary does not coerce `undefined` -> `nil`
+%% (`beamtalk_erlang_proxy:coerce_result/1` passes it through unchanged), so an
+%% FFI call returning `undefined` yields the Beamtalk Symbol `#undefined`, which
+%% `ifNil:` does not match. A lone `undefined` therefore maps to `Symbol` here,
+%% and inside a small pure-atom union it narrows to the singleton `#undefined`
+%% (see `singleton_binary/1`) — the honest type for the runtime value. Mapping it
+%% to `Nil` would be unsound.
 map_type({atom, _, _}) ->
     <<"Symbol">>;
 %% Catch-all types that map to Dynamic
@@ -953,6 +962,40 @@ Non-ok/error unions fall through to standard type mapping.
 """.
 -spec map_union([tuple()], term()) -> binary().
 map_union(Branches, _Line) ->
+    %% BT-2647: a pure-atom enumeration that contains atoms beyond `ok`/`error`
+    %% (e.g. the log levels `emergency | … | error | … | none`) is a genuine
+    %% enum, not a Result — even though it contains the bare atom `error`. Let the
+    %% singleton-union path win over ADR-0076 bare ok/error Result recognition in
+    %% that case, so the enum narrows to `#emergency | … | #none`. A union whose
+    %% atoms are *only* `ok`/`error` (subset of `{ok, error}`) stays a Result to
+    %% preserve ADR-0076 semantics. Tuple-form Result recognition is unaffected:
+    %% any tuple branch makes `singleton_union_members/1` return
+    %% `not_singleton_union`, so this guard never fires.
+    case singleton_union_members(Branches) of
+        {ok, Members} ->
+            case has_non_result_atom(Branches) of
+                true -> iolist_to_binary(lists:join(<<" | ">>, Members));
+                false -> map_union_result(Branches)
+            end;
+        not_singleton_union ->
+            map_union_result(Branches)
+    end.
+
+%% Whether a union of plain literal atoms contains an atom other than `ok`/`error`.
+%% Only called when `singleton_union_members/1` has already confirmed every branch
+%% is a plain literal atom, so the match on `{atom, _, A}` is total.
+-spec has_non_result_atom([tuple()]) -> boolean().
+has_non_result_atom(Branches) ->
+    lists:any(
+        fun({atom, _, A}) -> A =/= ok andalso A =/= error end,
+        Branches
+    ).
+
+%% Map a union via ADR-0076 ok/error Result recognition, falling back to a
+%% branch-by-branch standard mapping (including the singleton-union enumeration
+%% for pure ok/error-free atom unions).
+-spec map_union_result([tuple()]) -> binary().
+map_union_result(Branches) ->
     {OkTypes, ErrTypes, OtherBranches} = classify_union_branches(Branches),
     case {OkTypes, ErrTypes} of
         {[], []} ->
