@@ -30,12 +30,9 @@ make_msg(Op) ->
     {protocol_msg, Op, <<"id-1">>, undefined, #{}, false}.
 
 setup(SessionId) ->
-    application:ensure_all_started(compiler),
-    application:ensure_all_started(beamtalk_runtime),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    {ok, _} = application:ensure_all_started(compiler),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_compiler),
     %% Allow the runtime to register its bootstrap classes before compiling.
     timer:sleep(300),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
