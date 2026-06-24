@@ -160,7 +160,9 @@ impl TypeChecker {
                 || is_implicit_constructor
                 || (is_factory_selector && hierarchy.resolves_selector(class_name, selector));
             if !has_class_chain_method {
-                self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, true);
+                self.emit_unknown_selector_warning(
+                    class_name, class_name, selector, span, hierarchy, true,
+                );
             }
         }
 
@@ -465,24 +467,34 @@ impl TypeChecker {
         // `Symbol`'s protocol so DNU validation still applies — narrowing a getter
         // from `Symbol` to a singleton (e.g. `#text | #json`, then a single
         // member) would otherwise silently drop the selector checking it had.
-        // Mirrors the singleton-union inference handling from BT-2624. The
-        // "Symbol does not understand …" message matches the pre-narrowing text.
+        // Mirrors the singleton-union inference handling from BT-2624.
+        //
+        // BT-2679: `effective_class` is what we resolve selectors/suggestions
+        // against (`Symbol` for a singleton); `class_name` stays the type the user
+        // wrote so DNU messages name the singleton (e.g. `#infinity`) rather than
+        // `Symbol`.
         let symbol: EcoString;
-        let class_name: &EcoString = if class_name.starts_with('#') && !class_name.contains('|') {
-            symbol = EcoString::from("Symbol");
-            &symbol
-        } else {
-            class_name
-        };
-        if !hierarchy.has_class(class_name) {
+        let effective_class: &EcoString =
+            if class_name.starts_with('#') && !class_name.contains('|') {
+                symbol = EcoString::from("Symbol");
+                &symbol
+            } else {
+                class_name
+            };
+        if !hierarchy.has_class(effective_class) {
             // BT-1833: If the type is a protocol (from respondsTo: narrowing),
             // validate the selector against the protocol's required methods.
             if let Some(ref registry) = self.protocol_registry {
-                if let Some(proto_info) = registry.get(class_name) {
+                if let Some(proto_info) = registry.get(effective_class) {
                     let required = proto_info.all_required_selectors(registry);
                     if !required.iter().any(|s| s.as_str() == selector) {
                         self.emit_unknown_selector_warning(
-                            class_name, selector, span, hierarchy, false,
+                            class_name,
+                            effective_class,
+                            selector,
+                            span,
+                            hierarchy,
+                            false,
                         );
                     }
                 }
@@ -491,21 +503,28 @@ impl TypeChecker {
         }
 
         // ADR 0071 Phase 3 (BT-1702): E0403 — cross-package send to internal method
-        self.check_internal_method_access(class_name, selector, span, hierarchy, false);
+        self.check_internal_method_access(effective_class, selector, span, hierarchy, false);
 
         // Classes with instance-side doesNotUnderstand: override accept any message
-        if hierarchy.has_instance_dnu_override(class_name) {
+        if hierarchy.has_instance_dnu_override(effective_class) {
             return;
         }
 
         // Cross-file inheritance: if the parent class is not in the hierarchy,
         // we can't know the full method set — suppress false-positive DNU hints.
-        if hierarchy.has_cross_file_parent(class_name) {
+        if hierarchy.has_cross_file_parent(effective_class) {
             return;
         }
 
-        if !hierarchy.resolves_selector(class_name, selector) {
-            self.emit_unknown_selector_warning(class_name, selector, span, hierarchy, false);
+        if !hierarchy.resolves_selector(effective_class, selector) {
+            self.emit_unknown_selector_warning(
+                class_name,
+                effective_class,
+                selector,
+                span,
+                hierarchy,
+                false,
+            );
         }
     }
 
@@ -1724,8 +1743,13 @@ impl TypeChecker {
     }
 
     /// Emit a warning diagnostic for an unknown selector.
+    /// `display_name` is the type the user wrote (e.g. a singleton `#infinity`),
+    /// used only in the message text. `class_name` is the type we resolve
+    /// selectors and "did you mean" suggestions against (e.g. `Symbol` for a
+    /// singleton — BT-2679). They coincide for ordinary class receivers.
     fn emit_unknown_selector_warning(
         &mut self,
+        display_name: &EcoString,
         class_name: &EcoString,
         selector: &str,
         span: Span,
@@ -1734,7 +1758,7 @@ impl TypeChecker {
     ) {
         let side = if is_class_side { " class" } else { "" };
         let message: EcoString =
-            format!("{class_name}{side} does not understand '{selector}'").into();
+            format!("{display_name}{side} does not understand '{selector}'").into();
 
         let mut diag = Diagnostic::hint(message, span).with_category(DiagnosticCategory::Dnu);
 
