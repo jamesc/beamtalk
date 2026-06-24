@@ -1325,6 +1325,11 @@ impl TypeChecker {
                 return elem_ty;
             }
 
+            // Validation routes ALL singleton receivers (including binary sends)
+            // through `Symbol` — that is fine: `Symbol` understands `=:=`/`=`, so
+            // no spurious DNU, and the BT-2631 impossible-comparison hint fires
+            // via the Dynamic fall-through below, not via validation. Only the
+            // *inference* redirect (`resolve_class`) excludes binary sends.
             self.check_instance_selector(class_name, &selector_name, span, hierarchy);
             // BT-2647: a non-union singleton receiver (`#text`) is a subtype of
             // `Symbol` but not itself in the hierarchy, so method lookup and

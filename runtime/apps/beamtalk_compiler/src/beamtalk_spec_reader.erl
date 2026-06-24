@@ -999,7 +999,7 @@ map_union_result(Branches) ->
     {OkTypes, ErrTypes, OtherBranches} = classify_union_branches(Branches),
     case {OkTypes, ErrTypes} of
         {[], []} ->
-            %% No ok/error branches — standard union. `map_union/1` already tried
+            %% No ok/error branches — standard union. `map_union/2` already tried
             %% the narrow pure-atom singleton enumeration first (BT-2632/BT-2647)
             %% and only delegates here when the union is *not* such an enum, so a
             %% re-check would always be `not_singleton_union`. Map each branch via
