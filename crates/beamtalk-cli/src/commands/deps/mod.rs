@@ -342,6 +342,22 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
             return false;
         }
 
+        // ADR 0098 Phase 2: provenance gate. A dependency compiled by a different
+        // toolchain (a missing/corrupt/version-mismatched stamp) must be rebuilt,
+        // not reused — this is the beamtalk-http stale-`_build` fix, and it also
+        // treats pre-stamp deps as stale exactly once on the first build after
+        // this ships. mtime cannot detect a toolchain change.
+        let stamp_path = layout.dep_stamp_path(&dep.name);
+        if let crate::commands::build_stamp::StampStatus::Stale(reason) =
+            crate::commands::build_stamp::read_stamp_status(
+                &stamp_path,
+                crate::commands::build_stamp::current_otp_version(),
+            )
+        {
+            debug!(dep = %dep.name, %reason, "Dependency provenance miss — deps are stale");
+            return false;
+        }
+
         // Check if the dep's beamtalk.toml is newer than compiled output.
         // This catches transitive manifest changes (e.g., a dep changing its
         // own git dep to a new tag) that wouldn't be caught by root mtime checks.
@@ -480,6 +496,12 @@ mod tests {
         fs::create_dir_all(&ebin_dir).unwrap();
         // Create a fake .beam file
         fs::write(ebin_dir.join(format!("bt@{dep_name}@helper.beam")), b"BEAM").unwrap();
+        // ADR 0098 Phase 2: a compiled dep carries a current-toolchain provenance
+        // stamp, mirroring a real build, so the freshness check treats it as fresh.
+        crate::commands::build_stamp::write_stamp(
+            &layout.dep_stamp_path(dep_name),
+            crate::commands::build_stamp::current_otp_version(),
+        );
     }
 
     #[test]
@@ -534,6 +556,52 @@ mod tests {
 
         // Path deps with compiled ebin should be fresh
         assert!(deps_are_fresh(&root, &parsed));
+    }
+
+    #[test]
+    fn test_deps_stale_when_dep_stamp_version_mismatch() {
+        // ADR 0098 Phase 2: a dep compiled by a different toolchain (here, a
+        // forged older `beamtalk_version` in the stamp) must be treated as stale
+        // even though its ebin/.beam and mtimes look fine — the beamtalk-http fix.
+        let temp = TempDir::new().unwrap();
+        let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "helper.bt",
+            "Object subclass: Helper\n  greet => \"hi\"\n",
+        );
+
+        // Compiled ebin + a current-toolchain stamp → fresh.
+        create_dep_ebin_with_beam(temp.path(), "utils");
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            "[dependencies]\nutils = { path = \"utils\" }",
+        );
+
+        let manifest_path = root.join("beamtalk.toml");
+        let parsed = manifest::parse_manifest_full(&manifest_path).unwrap();
+        assert!(deps_are_fresh(&root, &parsed), "should start fresh");
+
+        // Forge an older-toolchain stamp: same shape, different version.
+        let layout = BuildLayout::new(&root);
+        let stamp = layout.dep_stamp_path("utils");
+        fs::write(
+            &stamp,
+            r#"{"schema":1,"beamtalk_version":"0.0.0-ancient","otp_release":null,"built_at":"2026-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+
+        assert!(
+            !deps_are_fresh(&root, &parsed),
+            "dep with a mismatched-version stamp should be stale (rebuild, not reuse)"
+        );
     }
 
     #[test]

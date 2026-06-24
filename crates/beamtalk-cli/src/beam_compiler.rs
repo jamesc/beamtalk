@@ -654,7 +654,13 @@ pub fn write_core_erlang_with_source(
     // Generate Core Erlang
     let core_erlang = beamtalk_core::erlang::generate_module(
         module,
-        beamtalk_core::erlang::CodegenOptions::new(module_name).with_source_opt(source_text),
+        beamtalk_core::erlang::CodegenOptions::new(module_name)
+            .with_source_opt(source_text)
+            // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
+            .with_provenance(
+                env!("BEAMTALK_VERSION"),
+                crate::commands::build_stamp::current_otp_version(),
+            ),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -757,7 +763,12 @@ pub fn write_core_erlang_with_bindings(
             .with_class_module_index(hierarchy.class_module_index.clone())
             .with_class_superclass_index(hierarchy.class_superclass_index.clone())
             .with_source_path_opt(source_path)
-            .with_class_hierarchy(hierarchy.pre_loaded_classes.clone()),
+            .with_class_hierarchy(hierarchy.pre_loaded_classes.clone())
+            // ADR 0098 Phase 3: bake the producing-toolchain identity into __beamtalk_meta.
+            .with_provenance(
+                env!("BEAMTALK_VERSION"),
+                crate::commands::build_stamp::current_otp_version(),
+            ),
     )
     .into_diagnostic()
     .wrap_err("Failed to generate Core Erlang")?;
@@ -1763,6 +1774,47 @@ pub struct OtpDiscovery {
     pub version: Option<String>,
     /// Absolute paths to all `.beam` files in the common OTP library ebins.
     pub beam_files: Vec<Utf8PathBuf>,
+}
+
+/// Probes the running OTP installation for its compound version key
+/// (`<otp_release>-<erts>`, e.g. `27-15.0.1`) without enumerating any `.beam`
+/// files.
+///
+/// This is the **same** key [`discover_otp_beam_files`] reports and the same one
+/// that keys the shared type-spec cache (BT-2470). ADR 0098 provenance stamps
+/// must use this compound — not bare `erlang:system_info(otp_release)`, which
+/// returns only `"27"` — so a minor OTP/ERTS bump still invalidates artifacts.
+///
+/// Returns `None` if `erl` cannot be invoked or did not report a version; the
+/// caller then compares provenance on `beamtalk_version` alone.
+pub fn discover_otp_version() -> Option<String> {
+    // Prefix the value with a sentinel (mirroring `discover_otp_beam_files`) and
+    // scan for it, rather than trusting the whole of stdout: some OTP/platform
+    // combinations emit ERTS startup lines before `io:format`, and a value
+    // polluted by that noise would never match a recorded stamp — turning every
+    // build into a full rebuild.
+    let probe = "io:format(\"otp-version:~s-~s~n\", [erlang:system_info(otp_release), erlang:system_info(version)]), halt().";
+    let output = Command::new("erl")
+        .arg("-noshell")
+        .arg("-noinput")
+        .arg("-boot")
+        .arg("no_dot_erlang")
+        .arg("-eval")
+        .arg(probe)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("otp-version:"))
+        // A bare "-" means both probes returned empty; treat as unknown.
+        .filter(|version| !version.is_empty() && *version != "-")
+        .map(str::to_string)
 }
 
 /// Discovers `.beam` files on the OTP code path and the OTP version.

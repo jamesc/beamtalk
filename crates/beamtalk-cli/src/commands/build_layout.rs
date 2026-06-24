@@ -61,6 +61,13 @@ impl BuildLayout {
         self.profile_dir().join("ebin")
     }
 
+    /// `_build/dev/.beamtalk-stamp.json` — the project's build provenance stamp
+    /// (ADR 0098). Records the toolchain that produced this scope so stale
+    /// artifacts from a different toolchain are rebuilt rather than reused.
+    pub fn stamp_path(&self) -> Utf8PathBuf {
+        self.profile_dir().join(".beamtalk-stamp.json")
+    }
+
     // ── Native Erlang ────────────────────────────────────────────────
 
     /// `_build/dev/native/` — base directory for native Erlang builds.
@@ -106,6 +113,14 @@ impl BuildLayout {
     pub fn dep_ebin_dir(&self, name: &str) -> Utf8PathBuf {
         self.dep_checkout_dir(name).join("ebin")
     }
+
+    /// `_build/deps/<name>/.beamtalk-stamp.json` — a dependency's build
+    /// provenance stamp (ADR 0098 Phase 2). Sits alongside the dep's `ebin/` so
+    /// a dep compiled by a different toolchain is rebuilt rather than reused
+    /// (the beamtalk-http stale-`_build` fix).
+    pub fn dep_stamp_path(&self, name: &str) -> Utf8PathBuf {
+        self.dep_checkout_dir(name).join(".beamtalk-stamp.json")
+    }
 }
 
 #[cfg(test)]
@@ -128,6 +143,15 @@ mod tests {
     fn test_ebin_dir() {
         let layout = BuildLayout::new("/home/user/my_app");
         assert_eq!(layout.ebin_dir(), "/home/user/my_app/_build/dev/ebin");
+    }
+
+    #[test]
+    fn test_stamp_path() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(
+            layout.stamp_path(),
+            "/home/user/my_app/_build/dev/.beamtalk-stamp.json"
+        );
     }
 
     #[test]
@@ -193,6 +217,15 @@ mod tests {
         assert_eq!(
             layout.dep_ebin_dir("utils"),
             "/home/user/my_app/_build/deps/utils/ebin"
+        );
+    }
+
+    #[test]
+    fn test_dep_stamp_path() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        assert_eq!(
+            layout.dep_stamp_path("utils"),
+            "/home/user/my_app/_build/deps/utils/.beamtalk-stamp.json"
         );
     }
 }

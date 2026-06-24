@@ -344,6 +344,12 @@ pub struct CodegenOptions {
     /// `None` = read from `BEAMTALK_CODEGEN_DIAGNOSTICS` env var at generator creation.
     /// `Some(true/false)` = override the env var (used by tests).
     codegen_diagnostics: Option<bool>,
+    /// ADR 0098 Phase 3: producing `BEAMTALK_VERSION` to bake into `__beamtalk_meta`.
+    /// Set by the CLI via [`CodegenOptions::with_provenance`]; absent for REPL/tests.
+    beamtalk_version: Option<String>,
+    /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`) to
+    /// bake into `__beamtalk_meta`. Set alongside `beamtalk_version`.
+    otp_release: Option<String>,
 }
 
 impl CodegenOptions {
@@ -360,7 +366,20 @@ impl CodegenOptions {
             stdlib_mode: false,
             pre_class_hierarchy: Vec::new(),
             codegen_diagnostics: None,
+            beamtalk_version: None,
+            otp_release: None,
         }
+    }
+
+    /// ADR 0098 Phase 3: set the producing-toolchain identity baked into each
+    /// module's `__beamtalk_meta/0` map. `beamtalk_version` is the full
+    /// `BEAMTALK_VERSION`; `otp_release` is the compound `<release>-<erts>` key
+    /// (the same the build stamp uses), `None` when OTP could not be probed.
+    #[must_use]
+    pub fn with_provenance(mut self, beamtalk_version: &str, otp_release: Option<&str>) -> Self {
+        self.beamtalk_version = Some(beamtalk_version.to_string());
+        self.otp_release = otp_release.map(String::from);
+        self
     }
 
     /// Sets the source text for `CompiledMethod` introspection (BT-101).
@@ -532,6 +551,9 @@ pub fn generate_module_with_warnings(
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.set_class_module_index(options.class_module_index);
     generator.source_path = options.source_path;
+    // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
+    generator.beamtalk_version = options.beamtalk_version.map(EcoString::from);
+    generator.otp_release = options.otp_release.map(EcoString::from);
     // BT-1343: Override codegen diagnostics flag if explicitly set in options.
     if let Some(enabled) = options.codegen_diagnostics {
         generator.codegen_diagnostics_enabled = enabled;
@@ -1243,6 +1265,12 @@ pub(crate) struct CoreErlangGenerator {
     /// parent-first `initialize` dispatches, and by the post-initialize validation
     /// check to collect inherited typed-no-default fields.
     pub(super) class_hierarchy: Option<crate::semantic_analysis::class_hierarchy::ClassHierarchy>,
+    /// ADR 0098 Phase 3: producing `BEAMTALK_VERSION`, baked into `__beamtalk_meta`.
+    /// Supplied by the CLI; `None` for REPL/test codegen (key omitted).
+    beamtalk_version: Option<EcoString>,
+    /// ADR 0098 Phase 3: producing compound OTP version (`<release>-<erts>`),
+    /// baked into `__beamtalk_meta`. Supplied by the CLI; `None` omits the key.
+    otp_release: Option<EcoString>,
 }
 
 impl CoreErlangGenerator {
@@ -1279,6 +1307,18 @@ impl CoreErlangGenerator {
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),
             class_hierarchy: None,
+            beamtalk_version: None,
+            otp_release: None,
+        }
+    }
+
+    /// ADR 0098 Phase 3: the producing-toolchain identity to bake into
+    /// `__beamtalk_meta`. Borrows the generator's version fields; both are `None`
+    /// unless the CLI supplied them via [`CodegenOptions::with_provenance`].
+    pub(super) fn meta_provenance(&self) -> gen_server::MetaProvenance<'_> {
+        gen_server::MetaProvenance {
+            beamtalk_version: self.beamtalk_version.as_deref(),
+            otp_release: self.otp_release.as_deref(),
         }
     }
 

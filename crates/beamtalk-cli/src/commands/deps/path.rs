@@ -450,6 +450,15 @@ fn compile_dependency_with_context(
         &source_files,
     )?;
 
+    // ADR 0098 Phase 2: stamp the dependency with the producing toolchain, LAST
+    // (after its ebin, .app, and corpus have all landed). On the next resolve a
+    // version/OTP mismatch marks this dep stale so it is rebuilt rather than
+    // reused — the beamtalk-http stale-`_build` fix.
+    crate::commands::build_stamp::write_stamp(
+        &BuildLayout::new(project_root).dep_stamp_path(dep_name),
+        crate::commands::build_stamp::current_otp_version(),
+    );
+
     info!(dep = %dep_name, "Dependency compiled successfully");
 
     Ok((ebin_path, own_class_module_index))

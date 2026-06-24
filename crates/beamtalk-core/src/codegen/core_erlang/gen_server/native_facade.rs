@@ -440,6 +440,7 @@ impl CoreErlangGenerator {
                 backing_module,
                 false,
                 package_name.as_deref(),
+                self.meta_provenance(),
             ),
             "\n\n",
         ])
@@ -456,6 +457,7 @@ impl CoreErlangGenerator {
         backing_module: &str,
         include_standalone: bool,
         package_name: Option<&str>,
+        provenance: super::methods::MetaProvenance<'_>,
     ) -> Document<'static> {
         let native_entries = docvec![
             ",\n      'native' => 'true'",
@@ -470,6 +472,7 @@ impl CoreErlangGenerator {
             false, // native actors don't synthesize supervision specs
             native_entries,
             package_name,
+            provenance,
         )
     }
 
@@ -705,6 +708,7 @@ impl CoreErlangGenerator {
                             backing_module,
                             true,
                             package_name.as_deref(),
+                            self.meta_provenance(),
                         ),
                         ",",
                         line(),

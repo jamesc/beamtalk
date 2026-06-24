@@ -675,6 +675,10 @@ fn execute_build_passes(
     dep_ctx: &DependencyContext,
     force: bool,
 ) -> Result<BuildPassesResult> {
+    // ADR 0098 Phase 1: gate the project build on provenance before Pass 1, so a
+    // toolchain-version mismatch forces a full rebuild regardless of mtime.
+    let force = force || provenance_requires_rebuild(env);
+
     let index = build_class_index(env, dep_ctx, options, force)?;
     let force = if index.force_pass2 { true } else { force };
 
@@ -773,6 +777,29 @@ fn execute_build_passes(
     })
 }
 
+/// ADR 0098 Phase 1: project provenance gate.
+///
+/// Returns `true` when the project's build scope was produced by a different
+/// toolchain (a `beamtalk_version` or OTP-version mismatch) or the stamp is
+/// missing/corrupt/unknown-schema — meaning every module must be recompiled
+/// regardless of mtime. On a miss the version-sensitive Pass 1 metadata cache is
+/// discarded too (its `ClassInfo` is compiler-derived). No-op (returns `false`)
+/// for single-file builds, which have no `_build/dev/` scope or stamp.
+fn provenance_requires_rebuild(env: &BuildEnvironment) -> bool {
+    if env.pkg_manifest().is_none() {
+        return false;
+    }
+    let current_otp = super::build_stamp::current_otp_version();
+    match super::build_stamp::read_stamp_status(&env.layout.stamp_path(), current_otp) {
+        super::build_stamp::StampStatus::Fresh => false,
+        super::build_stamp::StampStatus::Stale(reason) => {
+            info!("Build provenance miss ({reason}) — forcing full rebuild");
+            super::build_cache::discard_pass1_cache(&env.build_dir);
+            true
+        }
+    }
+}
+
 /// Phase 9: Clean stale artifacts and generate OTP application outputs
 /// (.app file, corpus, supervisor callback) for package builds.
 fn post_process_package_artifacts(
@@ -822,6 +849,15 @@ fn post_process_package_artifacts(
             source_files: &env.source_files,
         },
     )?;
+
+    // ADR 0098 Phase 1: write the provenance stamp LAST, after every artifact in
+    // the scope has landed, so a crash mid-build never leaves a stamp claiming
+    // freshness for incomplete output. Best-effort (a write failure just means
+    // the next build sees no stamp and rebuilds).
+    super::build_stamp::write_stamp(
+        &env.layout.stamp_path(),
+        super::build_stamp::current_otp_version(),
+    );
 
     Ok(())
 }

@@ -9,6 +9,7 @@ pub mod beam_environment;
 pub mod build;
 pub(crate) mod build_cache;
 pub mod build_layout;
+pub(crate) mod build_stamp;
 pub mod build_stdlib;
 pub mod clean;
 pub mod deps;
