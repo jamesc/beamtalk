@@ -1082,7 +1082,7 @@ walk_hierarchy(_ClassName, _Fun, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH -
     ?LOG_WARNING(
         "walk_hierarchy: max hierarchy depth ~p exceeded — possible cycle",
         [?MAX_HIERARCHY_DEPTH],
-        #{domain => [beamtalk, runtime]}
+        #{?BT_LOG_DOMAIN}
     ),
     Acc;
 walk_hierarchy(ClassName, Fun, Acc, Depth) ->
@@ -1111,7 +1111,7 @@ atom_to_class_object(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
             ?LOG_DEBUG("atom_to_class_object: class ~p not registered", [ClassName], #{
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             nil;
         ClassPid ->
