@@ -82,7 +82,7 @@ register_class() ->
     case beamtalk_object_class:start('Behaviour', ClassInfo) of
         {ok, _Pid} ->
             ?LOG_INFO("Registered Behaviour (ADR 0032 Phase 2 stub)", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
+                module => ?MODULE, ?BT_LOG_DOMAIN
             }),
             ok;
         {error, {already_started, _}} ->
@@ -91,13 +91,13 @@ register_class() ->
                     ok;
                 {error, UpdErr} ->
                     ?LOG_ERROR("Failed to update Behaviour class", #{
-                        reason => UpdErr, domain => [beamtalk, runtime]
+                        reason => UpdErr, ?BT_LOG_DOMAIN
                     }),
                     {error, UpdErr}
             end;
         {error, Reason} ->
             ?LOG_ERROR("Failed to register Behaviour", #{
-                reason => Reason, domain => [beamtalk, runtime]
+                reason => Reason, ?BT_LOG_DOMAIN
             }),
             {error, Reason}
     end.

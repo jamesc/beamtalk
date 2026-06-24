@@ -124,7 +124,7 @@ register_class() ->
     case beamtalk_object_class:start('Class', ClassInfo) of
         {ok, _Pid} ->
             ?LOG_INFO("Registered Class (ADR 0032 Phase 0 stub)", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
+                module => ?MODULE, ?BT_LOG_DOMAIN
             }),
             ok;
         {error, {already_started, _}} ->
@@ -134,7 +134,7 @@ register_class() ->
             ok;
         {error, Reason} ->
             ?LOG_WARNING("Failed to register Class", #{
-                reason => Reason, domain => [beamtalk, runtime]
+                reason => Reason, ?BT_LOG_DOMAIN
             }),
             ok
     end.

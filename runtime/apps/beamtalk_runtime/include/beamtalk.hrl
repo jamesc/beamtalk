@@ -105,6 +105,10 @@
 %% Prevents infinite loops if the ETS hierarchy table ever contains a cycle.
 -define(MAX_HIERARCHY_DEPTH, 20).
 
+%% Log metadata domain for the beamtalk runtime context.
+%% Use as a map association in logger calls: #{?BT_LOG_DOMAIN} or #{key => val, ?BT_LOG_DOMAIN}.
+-define(BT_LOG_DOMAIN, domain => [beamtalk, runtime]).
+
 %% @doc CompiledMethod value object type.
 %%
 %% DDD Context: Object System

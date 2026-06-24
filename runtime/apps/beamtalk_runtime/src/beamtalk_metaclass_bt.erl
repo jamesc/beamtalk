@@ -121,7 +121,7 @@ register_class() ->
     case beamtalk_object_class:start('Metaclass', ClassInfo) of
         {ok, _Pid} ->
             ?LOG_INFO("Registered Metaclass (ADR 0036 Phase 1 stub)", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
+                module => ?MODULE, ?BT_LOG_DOMAIN
             }),
             ok;
         {error, {already_started, _}} ->
@@ -131,7 +131,7 @@ register_class() ->
             ok;
         {error, Reason} ->
             ?LOG_WARNING("Failed to register Metaclass", #{
-                reason => Reason, domain => [beamtalk, runtime]
+                reason => Reason, ?BT_LOG_DOMAIN
             }),
             ok
     end.

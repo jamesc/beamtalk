@@ -124,7 +124,7 @@ MAX_HIERARCHY_DEPTH to prevent infinite recursion on corrupted hierarchies.
 -spec walk_superclass_chain(pid(), selector(), non_neg_integer()) -> compiled_method() | 'nil'.
 walk_superclass_chain(_ClassPid, _Selector, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
     ?LOG_WARNING(">> hierarchy walk exceeded ~p levels", [?MAX_HIERARCHY_DEPTH], #{
-        domain => [beamtalk, runtime]
+        ?BT_LOG_DOMAIN
     }),
     nil;
 walk_superclass_chain(ClassPid, Selector, Depth) ->
