@@ -120,7 +120,7 @@ live_class_entries() ->
     catch
         exit:{noproc, _} ->
             ?LOG_WARNING("pg not started when fetching class entries", #{
-                module => ?MODULE, domain => [beamtalk, runtime]
+                module => ?MODULE, ?BT_LOG_DOMAIN
             }),
             []
     end.
@@ -412,7 +412,7 @@ validate_class_update(ClassName, OldModule, ClassInfo) ->
                 class => ClassName,
                 stdlib_module => OldModule,
                 user_module => NewModule,
-                domain => [beamtalk, runtime]
+                ?BT_LOG_DOMAIN
             }),
             record_pending_load_error(ClassName, Error1),
             {error, Error1};
@@ -428,14 +428,14 @@ validate_class_update(ClassName, OldModule, ClassInfo) ->
                                 class => ClassName,
                                 stub => OldModule,
                                 stdlib => NewModule,
-                                domain => [beamtalk, runtime]
+                                ?BT_LOG_DOMAIN
                             });
                         false ->
                             ?LOG_WARNING("Class redefined from different module", #{
                                 class => ClassName,
                                 old_module => OldModule,
                                 new_module => NewModule,
-                                domain => [beamtalk, runtime]
+                                ?BT_LOG_DOMAIN
                             }),
                             record_class_collision_warning(ClassName, OldModule, NewModule)
                     end;
@@ -926,7 +926,7 @@ restart_class(ClassName) ->
                             class => ClassName,
                             module => Module,
                             new_pid => NewPid,
-                            domain => [beamtalk, runtime]
+                            ?BT_LOG_DOMAIN
                         }
                     ),
                     {ok, NewPid};
@@ -941,7 +941,7 @@ restart_class(ClassName) ->
                         #{
                             class => ClassName,
                             module => Module,
-                            domain => [beamtalk, runtime]
+                            ?BT_LOG_DOMAIN
                         }
                     ),
                     Err
