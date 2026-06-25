@@ -17,7 +17,6 @@ Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. T
 - **Test assertions:** Every expression in test files needs a `// =>` assertion (even `// => _`) — no assertion means no execution.
 - **Cross-platform temp paths:** Never hardcode `/tmp/`. Use `File tempDirectory` (BT) / `beamtalk_file:'tempDirectory'()` (Erlang) and concatenate, or prefer relative temp filenames in runtime EUnit tests. See `docs/development/testing-strategy.md`.
 - **Generated files:** Before editing `.app.src` or other generated artifacts, check if a build step owns them — `build_stdlib.rs` generates `beamtalk_stdlib.app.src`, so edit the generator.
-- **Worktree stale builds:** Run `just build` after entering/creating a worktree before tests — stale BEAM artifacts cause false failures.
 - **REPL output:** Confirm with the user before changing any REPL display value, prompt format, or output behaviour — it's usually intentional and covered by e2e tests.
 - **Surface parity:** When adding/modifying operations on any surface (CLI, REPL, MCP, LSP), update `docs/development/surface-parity.md`. Operations not labelled `surface-specific` must produce equivalent output across surfaces.
 

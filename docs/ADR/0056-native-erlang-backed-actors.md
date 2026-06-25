@@ -1,7 +1,7 @@
 # ADR 0056: Native Erlang-Backed Actors — `native:` and `self delegate`
 
 ## Status
-Accepted (partial, 2026-03-07) — revised from initial `@native` annotation design
+Accepted (2026-03-07) — revised from initial `@native` annotation design. Phases 1–2 Implemented (compiler `native:` support + stdlib migration, BT-1204–BT-1215); Phase 3 tooling (`gen-native`, LSP go-to-implementation/mismatch detection) outstanding
 
 ## Context
 

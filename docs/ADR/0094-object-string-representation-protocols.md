@@ -1,7 +1,7 @@
 # ADR 0094: Object String Representation Protocols (printString / displayString / inspect)
 
 ## Status
-Proposed (2026-06-07)
+Implemented (2026-06-07) — structural `printString`/`displayString` protocols, canonical `beamtalk_object_printer` renderer, kind-headed actor/supervisor labels (BT-2462, BT-2504)
 
 ## Context
 

@@ -1,7 +1,7 @@
 # ADR 0098: Build Artifact Provenance and Version-Based Staleness Invalidation
 
 ## Status
-Accepted (2026-06-23)
+Accepted (2026-06-23), Implemented — all 4 phases: project stamp, dependency provenance, self-describing modules, workspace attach gate (BT-2674–BT-2677)
 
 ## Context
 

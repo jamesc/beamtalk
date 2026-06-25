@@ -1,7 +1,7 @@
 # ADR 0091: Connection Security for Remote Workspace Access — Phoenix as Authenticated Front
 
 ## Status
-Accepted (2026-06-06)
+Accepted (2026-06-06), Implemented — OIDC front, RBAC op facade, transport hardening, deployment docs (BT-2417–BT-2424)
 
 Extends [ADR 0020 — Connection Security](0020-connection-security.md). Amends
 [ADR 0058 — Platform Security Model](0058-platform-security-model.md) Principle 6
