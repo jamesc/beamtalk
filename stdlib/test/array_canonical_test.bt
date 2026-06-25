@@ -1,0 +1,71 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E validation for ADR 0090 (BT-2680): Array's canonical representation.
+//
+// An Array updated via `at:put:` (or any other construction path) must be
+// `=`/`=:=`-equal to a literal with the same elements, so equal arrays from
+// different edit histories collapse to one Dictionary/Set key. Also guards that
+// a large `at:put:` update loop completes (was O(n^2) ~97s on the interim path).
+
+TestCase subclass: ArrayCanonicalTest
+
+  // An array reached via at:put: is equal to the literal with the same elements.
+  testAtPutEqualsLiteralAcrossBoundary =>
+    built := #[1, 2] at: 2 put: 9
+    self assert: built equals: #[1, 9]
+
+  // Chained construction paths all collapse to the same value.
+  testDifferentPathsAreEqual =>
+    viaChain := (#[0, 0, 0] at: 1 put: 7) at: 3 put: 9
+    viaChain2 := (#[1, 0, 9] at: 1 put: 7)
+    self assert: viaChain equals: #[7, 0, 9]
+    self assert: viaChain2 equals: #[7, 0, 9]
+    self assert: viaChain equals: viaChain2
+
+  // An array built via at:put: works as a Dictionary key equal to the literal.
+  testArrayAsDictionaryKeyAcrossBoundary =>
+    key := #[1, 2] at: 2 put: 9
+    d := Dictionary new at: key put: "hit"
+    self assert: (d at: #[1, 9]) equals: "hit"
+
+  // Equal arrays from different histories are the SAME key — the dict has one
+  // entry and the second put overwrites the first.
+  testEqualArrayKeysCollapse =>
+    a := #[5, 6, 7]
+    b := (#[0, 6, 7] at: 1 put: 5)
+    d := (Dictionary new at: a put: "first") at: b put: "second"
+    self assert: d size equals: 1
+    self assert: (d at: #[5, 6, 7]) equals: "second"
+
+  // An array built via at:put: is a member of a Set keyed by the literal.
+  testArrayAsSetMemberAcrossBoundary =>
+    built := #[1, 2] at: 2 put: 9
+    s := Set new add: built
+    self assert: (s includes: #[1, 9])
+    self deny: (s includes: #[1, 2])
+
+  // Set membership dedups equal arrays from different construction paths.
+  testEqualArraySetMembersDedup =>
+    s := (Set new add: #[3, 4]) add: (#[3, 0] at: 2 put: 4)
+    self assert: s size equals: 1
+    self assert: (s includes: #[3, 4])
+
+  // collect: produces a canonical Array equal to the literal.
+  testCollectIsCanonical =>
+    mapped := #[1, 2, 3] collect: [:x | x * 10]
+    self assert: mapped equals: #[10, 20, 30]
+    d := Dictionary new at: mapped put: "ok"
+    self assert: (d at: #[10, 20, 30]) equals: "ok"
+
+  // Large at:put: update loop completes and is correct. On the interim O(n)
+  // path this loop was O(n^2) and took ~97s; here it must finish well within
+  // the test timeout. Indices 1..5000 are overwritten to 0; the rest unchanged.
+  testLargeUpdateLoopCompletes =>
+    big := Array withAll: (1 to: 200000) asList
+    result := (1 to: 5000) inject: big into: [:acc :i | acc at: i put: 0]
+    self assert: result size equals: 200000
+    self assert: (result at: 1) equals: 0
+    self assert: (result at: 5000) equals: 0
+    self assert: (result at: 5001) equals: 5001
+    self assert: (result at: 200000) equals: 200000

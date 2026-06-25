@@ -466,7 +466,7 @@ dir_with_env_sets_both_test() ->
 validate_config_beamtalk_array_coercion_test() ->
     {EchoExe, EchoArgs} = echo_cmd(<<"hello">>),
     %% Beamtalk Array tagged map should be coerced to a plain list
-    BtArray = #{'$beamtalk_class' => 'Array', 'data' => array:from_list(EchoArgs)},
+    BtArray = beamtalk_array:from_list(EchoArgs),
     {ok, Pid} = beamtalk_subprocess:start(#{
         executable => EchoExe,
         args => BtArray

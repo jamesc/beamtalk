@@ -289,10 +289,14 @@ dictionary_size_excludes_tag_test() ->
     ?assertEqual(3, beamtalk_inspector:sizeOf(beamtalk_inspector:on(Tagged))),
     ?assertEqual(2, beamtalk_inspector:sizeOf(beamtalk_inspector:on(#{x => 1, y => 2}))).
 
-%% A large Array windows via `array:get/2` over the page's index range (not a
-%% whole-array `array:to_list/1`), with correct absolute indices (BT-2507).
+%% A large Array windows over the page's index range via direct key lookup into
+%% the canonical index→value `'data'` map (not a whole-array materialisation),
+%% with correct absolute indices (BT-2507, ADR 0090).
 large_array_windowed_test() ->
-    Arr = #{'$beamtalk_class' => 'Array', data => array:from_list(lists:seq(1, 1000))},
+    Arr = #{
+        '$beamtalk_class' => 'Array',
+        data => maps:from_list([{I - 1, I} || I <- lists:seq(1, 1000)])
+    },
     I = beamtalk_inspector:on(Arr),
     ?assertEqual(1000, beamtalk_inspector:sizeOf(I)),
     Fields = beamtalk_inspector:fieldsOf(I),

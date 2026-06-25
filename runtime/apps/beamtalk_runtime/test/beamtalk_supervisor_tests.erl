@@ -2171,7 +2171,7 @@ spec_to_otp_spawnAs_translates_to_beamtalk_actor_spawnAs_test() ->
     try
         StartArray = #{
             '$beamtalk_class' => 'Array',
-            data => array:from_list([ClassObj, 'spawnAs:', [Name]])
+            data => #{0 => ClassObj, 1 => 'spawnAs:', 2 => [Name]}
         },
         BtSpec = #{
             id => 'TestCounter',
@@ -2205,7 +2205,7 @@ spec_to_otp_spawnWithAs_translates_to_beamtalk_actor_spawnAs_arity3_test() ->
         InitArgs = #{value => 42},
         StartArray = #{
             '$beamtalk_class' => 'Array',
-            data => array:from_list([ClassObj, 'spawnWith:as:', [InitArgs, Name]])
+            data => #{0 => ClassObj, 1 => 'spawnWith:as:', 2 => [InitArgs, Name]}
         },
         BtSpec = #{
             id => 'TestCounter',

@@ -170,7 +170,7 @@ print_string_map(X) ->
             ElemStrs = [print_string(E) || E <- maps:get(elements, X, [])],
             iolist_to_binary([<<"Set(">>, lists:join(<<", ">>, ElemStrs), <<")">>]);
         'Array' ->
-            Elements = array:to_list(maps:get(data, X)),
+            Elements = beamtalk_tagged_map:array_to_list(X),
             Parts = [print_string(E) || E <- Elements],
             iolist_to_binary(["#[", lists:join(<<", ">>, Parts), "]"]);
         'Stream' ->

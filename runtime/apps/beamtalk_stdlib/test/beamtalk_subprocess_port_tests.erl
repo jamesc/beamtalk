@@ -130,14 +130,12 @@ bt_array_to_list_empty_list_test() ->
     ?assertEqual([], beamtalk_subprocess_port:bt_array_to_list('C', [], 'sel:')).
 
 bt_array_to_list_tagged_array_test() ->
-    %% Beamtalk Array (tagged map with array:new() data) is converted to a list
-    ErlArr = array:from_list([a, b, c]),
-    Tagged = #{'$beamtalk_class' => 'Array', 'data' => ErlArr},
+    %% Beamtalk Array (canonical map-backed tagged map) is converted to a list
+    Tagged = beamtalk_array:from_list([a, b, c]),
     ?assertEqual([a, b, c], beamtalk_subprocess_port:bt_array_to_list('C', Tagged, 'sel:')).
 
 bt_array_to_list_empty_array_test() ->
-    ErlArr = array:new(),
-    Tagged = #{'$beamtalk_class' => 'Array', 'data' => ErlArr},
+    Tagged = beamtalk_array:from_list([]),
     ?assertEqual([], beamtalk_subprocess_port:bt_array_to_list('C', Tagged, 'sel:')).
 
 bt_array_to_list_invalid_data_field_test() ->

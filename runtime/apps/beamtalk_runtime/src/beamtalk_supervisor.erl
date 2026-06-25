@@ -860,12 +860,12 @@ worker children use start_link/1 with an init-args map instead of spawn/0.
 """.
 -spec spec_to_otp(map()) -> map().
 spec_to_otp(BtSpec) ->
-    %% `start` is a Beamtalk Array #[ClassObj, StartFn, StartArgs].
-    %% Beamtalk Arrays are tagged maps: #{'$beamtalk_class' => 'Array', 'data' => ErlangArray}.
-    %% Use array:get/2 (0-based) to access elements.
+    %% `start` is a Beamtalk Array #[ClassObj, StartFn, StartArgs]. Beamtalk
+    %% Arrays are tagged maps with a canonical index→value `'data'` map (ADR
+    %% 0090); read the elements as an ordered list via beamtalk_tagged_map.
     StartBtArray = maps:get(start, BtSpec),
-    StartErlArray = maps:get(data, StartBtArray),
-    ClassObj = array:get(0, StartErlArray),
+    StartElems = beamtalk_tagged_map:array_to_list(StartBtArray),
+    ClassObj = lists:nth(1, StartElems),
     ChildModule = element(3, ClassObj),
     ChildClassPid = element(4, ClassObj),
     ChildClass = beamtalk_object_class:class_name(ChildClassPid),
@@ -877,7 +877,7 @@ spec_to_otp(BtSpec) ->
             false ->
                 %% Worker: use start_link/1 (returns {ok, Pid}) for OTP compatibility.
                 %% spawn/0 wraps the pid in {beamtalk_object,...} which OTP rejects.
-                StartFn = array:get(1, StartErlArray),
+                StartFn = lists:nth(2, StartElems),
                 case StartFn of
                     spawn ->
                         %% No init args — start with empty state map.
@@ -885,7 +885,7 @@ spec_to_otp(BtSpec) ->
                     'spawnWith:' ->
                         %% #(self args) uses list syntax (#(...)) so it compiles to an
                         %% Erlang list [ArgsMap] — use it directly as the start_link arg.
-                        InitArgs = array:get(2, StartErlArray),
+                        InitArgs = lists:nth(3, StartElems),
                         {ChildModule, start_link, InitArgs};
                     'spawnAs:' ->
                         %% ADR 0079 / BT-1990: SupervisionSpec withName: routes
@@ -894,7 +894,7 @@ spec_to_otp(BtSpec) ->
                         %% gen_server:start_link({local, Name}, ...). The startArgs
                         %% in `SupervisionSpec childSpec` carry just the Name as
                         %% `#(name)` — i.e. an Erlang list `[Name]`.
-                        SpawnAsArgs = array:get(2, StartErlArray),
+                        SpawnAsArgs = lists:nth(3, StartElems),
                         [Name] = SpawnAsArgs,
                         {beamtalk_actor, 'spawnAs', [Name, ChildModule]};
                     'spawnWith:as:' ->
@@ -902,7 +902,7 @@ spec_to_otp(BtSpec) ->
                         %% name. startArgs are `#(args, name)` → Erlang `[Args, Name]`.
                         %% Translates to `beamtalk_actor:spawnAs/3` so the child is
                         %% registered atomically with init args at start time.
-                        SpawnAsArgs2 = array:get(2, StartErlArray),
+                        SpawnAsArgs2 = lists:nth(3, StartElems),
                         [InitArgsMap, NameAtom] = SpawnAsArgs2,
                         {beamtalk_actor, 'spawnAs', [NameAtom, ChildModule, InitArgsMap]};
                     classMethod ->
@@ -911,7 +911,7 @@ spec_to_otp(BtSpec) ->
                         %% Erlang list [Selector, ArgsList]. The selector is stored
                         %% in source form (e.g., 'create:value:'); we prepend 'class_'
                         %% to get the compiled function name for call_class_method_direct.
-                        [Selector, ArgsList] = array:get(2, StartErlArray),
+                        [Selector, ArgsList] = lists:nth(3, StartElems),
                         % elp:fixme W0023 intentional atom creation
                         CompiledSelector = list_to_atom(
                             "class_" ++ atom_to_list(Selector)
