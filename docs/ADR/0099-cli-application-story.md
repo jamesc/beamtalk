@@ -138,8 +138,11 @@ line := Console readLine: "name? "   // prompt to stdout, then read
   prints as `abc`, not `"abc"`. `error:` / `errorLine:` are the stderr
   equivalents.
 - **Reading.** `readLine` returns a `String` with the trailing newline
-  stripped, or `nil` at end of input. `readLine:` writes a prompt to stdout
-  first (no newline) then reads.
+  stripped, or `nil` at end of input (`io:get_line/1` → `eof`). On an I/O error
+  (`io:get_line/1` → `{error, Reason}`) it raises a `#beamtalk_error{}` rather
+  than returning `nil`, so EOF and a genuine read failure stay distinguishable.
+  `readLine:` writes a prompt to stdout first (no newline) then reads, with the
+  same return contract.
 - **Backed by** a thin `beamtalk_console` Erlang module: `io:put_chars/2` to
   `standard_io` / `standard_error`, `io:get_line/1`.
 - **Deferred — `Console isInteractive` (tty detection).** Useful for "prompt
@@ -181,21 +184,36 @@ CommandLine exit                 // end this program with status 0
 CommandLine exit: 1              // end this program with status 1
 ```
 
-**Arguments.** `arguments` wraps `init:get_plain_arguments/0`. They reach the
-program through the **node tail**, not the entry selector, which keeps ADR
-0061's unary-selector rule intact:
+**Arguments.** `beamtalk run` gains a `--` separator; everything after it is the
+program's argv. They reach the program through the **node tail**, not the entry
+selector, which keeps ADR 0061's unary-selector rule intact:
 
 ```text
 beamtalk run Greeter run -- Alice Bob
-                         └─────────── forwarded as `-extra Alice Bob`
+                         └─────────── argv: ["Alice", "Bob"]
 ```
 
-`beamtalk run` gains a `--` separator: everything after it is appended to the
-BEAM invocation as `-extra <args...>`, which `init:get_plain_arguments/0`
-returns. The entry method stays unary (`Greeter run`); the program *pulls* its
-argv from `CommandLine arguments` rather than having it *pushed* through the
-selector — resolving the original ticket's `main: args` sketch. For a packaged
-escript, `arguments` returns the escript's `main/1` list directly.
+`CommandLine arguments` reads a **per-invocation seed**, not `init:get_plain_
+arguments/0` directly — because argv arrives differently in each of the three
+execution contexts, and only a seed is uniform across them:
+
+- **Run-mode / escript** (a *new* BEAM node): the CLI appends the `--` tokens as
+  `-extra <args...>`, and the harness seeds `CommandLine` from
+  `init:get_plain_arguments/0` (run) or the `main/1` list (escript) at startup.
+- **Connected mode** (ADR 0061 §3 — dispatched into a *live* node, no new `erl`
+  invocation): there is no new node tail, so `init:get_plain_arguments/0` on the
+  live node would return *that node's* startup args, not the user's `--` tokens.
+  Instead the CLI carries the tokens **inside the REPL-protocol eval request**,
+  and the session evaluator seeds them into a **session-scoped** store
+  (`beamtalk_command_line` keyed by the evaluating session, not a global) before
+  dispatching the entry point. This keeps argv correct and isolated when several
+  sessions run scripts against the same shared node concurrently.
+
+The entry method stays unary (`Greeter run`); the program *pulls* its argv from
+`CommandLine arguments` rather than having it *pushed* through the selector —
+resolving the original ticket's `main: args` sketch. The seed is the argv
+analogue of the `script_exit` harness handshake used for exit (below): each of
+the three harnesses populates it the same way `CommandLine arguments` reads it.
 
 **`programName`** is defined crisply per surface, not hand-waved: under a
 packaged escript it is `escript:script_name/0` (the invoked filename); under
@@ -221,6 +239,18 @@ and translates to the context-appropriate teardown. This is the cooperating-
 harness "job-level exit" flagged in Context as the one non-trivial exit
 primitive. `CommandLine exit:` is the **recommended** way for a program to exit
 deliberately; `System exit:` (§3) is the explicit nuclear alternative.
+
+**Process-boundary caveat.** Because the signal is a `throw`, it only unwinds to
+the harness when raised **in the harness-dispatched process** — the entry method
+and any synchronous call chain it drives. A `CommandLine exit:` called from a
+*spawned Actor* (each Actor is its own OTP process) is not caught by the
+harness: the Actor crashes with `{nocatch, {script_exit, N}}` and the status is
+lost. The contract is therefore: **`CommandLine exit:` is effective only from
+the entry method's own process.** An Actor that wants to end the program should
+return a status to the entry method (e.g. via a normal message/reply) and let
+*it* call `exit:`. A cross-process "exit from anywhere" primitive (e.g. an
+async signal to the session) is possible but deliberately out of scope for v1;
+the ADR states the boundary rather than hiding it.
 
 ### 3. `System exit` / `System exit:` — whole-VM halt (the nuclear option)
 
@@ -248,6 +278,16 @@ System exit: 1       // erlang:halt(1)
   Graceful shutdown of a service is a separate concern (`init:stop()`,
   supervision teardown) owned by the service-lifecycle / release story (ADR 0061
   "Future: Release Mode").
+- **How "owns the node" is detected.** The decision must not depend on a live
+  metadata process that might be starting up or unreachable. Each entry harness
+  sets a **`beamtalk_runtime` application env** (`node_owning => true`) *at boot*
+  — run-mode workspace startup and the escript `main/1` set it; the persistent
+  workspace path (REPL / connected) does not. `beamtalk_system:exit/1` reads
+  that env: `true` → `erlang:halt`, absent/`false` → the refusal error. An
+  application env is process-independent, set synchronously before any user code
+  dispatches, and trivially testable — preferred over inferring mode from the
+  `beamtalk_workspace_meta` `repl` flag (a process that may not be reachable at
+  the moment `exit` is called) or from workspace registration on disk.
 
 **Implicit exit code from the entry method (recommended path).** Most programs
 never call either `exit:` explicitly. When the entry method returns normally,
@@ -473,7 +513,8 @@ a Beamtalk package built on `CommandLine arguments`.
   — it needs a cooperating `script_exit` catch in three harness paths (run-mode
   dispatcher, escript `main/1`, connected-session evaluator).
 - `beamtalk run … -- args` adds a CLI surface (the `--` separator) and a
-  forwarding path through `-extra`.
+  per-context argv seed (the `-extra`/`main/1`/REPL-eval-request paths all feed
+  one session-scoped store) — three wiring points, like the exit harness.
 - Escript packaging adds a build mode (archive assembly, `main/1` generation,
   Windows executable-wrapper handling) to maintain.
 - `Console readLine` returning `nil` under the REPL is a sharp edge that will
@@ -503,16 +544,25 @@ Rough phases; each is independently shippable and testable.
   `examples/`-style smoke script for interactive read under `beamtalk run`.
 
 ### Phase 2 — `CommandLine` argv + `beamtalk run -- args`
-- `beamtalk_command_line.erl` wrapping `init:get_plain_arguments/0` →
-  `List(String)`; `programName` (`escript:script_name/0` under escript, else
-  `"beamtalk"`).
+- `beamtalk_command_line.erl`: a **session-scoped argv seed** (set/get) plus
+  `arguments` (reads the seed) and `programName` (`escript:script_name/0` under
+  escript, else `"beamtalk"`). `arguments` must NOT call
+  `init:get_plain_arguments/0` directly — that is only correct on a freshly-
+  launched node and returns the wrong list in connected mode.
 - `stdlib/src/CommandLine.bt` (argv methods; `exit`/`exit:` land in Phase 3).
-- CLI: `crates/beamtalk-cli/src/commands/run.rs` — accept a `--` separator and
-  append trailing tokens as `-extra <args...>`. **Ordering matters:**
-  everything after `-extra` becomes a plain argument, so `-extra` must be the
-  *last* group on the `erl` line — after the existing `-eval` (which
-  `build_script_eval_cmd` / arg assembly currently appends). Validate `--`
-  does not collide with existing flag parsing.
+- CLI / harness seeding, one per context:
+  - **Run-mode:** `crates/beamtalk-cli/src/commands/run.rs` accepts a `--`
+    separator and appends trailing tokens as `-extra <args...>`. **Ordering
+    matters:** everything after `-extra` becomes a plain argument, so `-extra`
+    must be the *last* group on the `erl` line — after the existing `-eval`
+    (which `build_script_eval_cmd` / arg assembly currently appends). The
+    run-mode startup seeds `beamtalk_command_line` from
+    `init:get_plain_arguments/0`.
+  - **Connected mode:** carry the `--` tokens inside the REPL-protocol eval
+    request; the session evaluator seeds `beamtalk_command_line` for *its
+    session* before dispatching. Without this, argv is wrong on a live node.
+  - **Escript:** `main/1` seeds from its `Args`.
+  - Validate `--` does not collide with existing flag parsing.
 
 ### Phase 3 — two-tier exit + implicit exit code
 - **Job-level (`CommandLine exit`/`exit:`):** raise a tagged `script_exit`
@@ -521,11 +571,17 @@ Rough phases; each is independently shippable and testable.
   evaluator (report status back over the REPL protocol; stop the session's
   process group; leave the node up). `stdlib/src/CommandLine.bt`: `class sealed
   exit -> Nil`, `class sealed exit: code :: Integer -> Nil` (do not return).
+  **Effective only in the harness-dispatched process** — a `throw` does not
+  cross process boundaries, so document that `exit:` from a spawned Actor
+  crashes that Actor (`{nocatch, {script_exit, N}}`) rather than exiting the
+  program; Actors return a status to the entry method instead (see §2).
 - **VM-level (`System exit`/`exit:`):** `beamtalk_system:exit/0,1` → flush
   `Console`, `erlang:halt/0,1`; Integer 0–255 validation (`#type_error`
-  otherwise); **refuse with a `#beamtalk_error{}` when not in a node-owning
-  (run-mode/escript) context.** `stdlib/src/System.bt`: `class sealed exit ->
-  Nil`, `class sealed exit: code :: Integer -> Nil`.
+  otherwise). Detect node-ownership via the `beamtalk_runtime` application env
+  `node_owning` (set at boot by run-mode startup and escript `main/1`; absent on
+  the persistent/connected path); when absent, **refuse with a
+  `#beamtalk_error{}`** pointing at `CommandLine exit:`. `stdlib/src/System.bt`:
+  `class sealed exit -> Nil`, `class sealed exit: code :: Integer -> Nil`.
 - **Implicit code:** harness maps normal return → 0, uncaught
   `#beamtalk_error{}` → stderr + non-zero.
 
