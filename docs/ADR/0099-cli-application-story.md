@@ -3,6 +3,11 @@
 ## Status
 Proposed (2026-06-25)
 
+**Amends ADR 0061** (Program Entry Points and Run Lifecycle): relaxes its
+unary-only entry-selector rule to also accept a single arity-1 keyword selector
+(`main:`) that receives the program's arguments. See "Amendment to ADR 0061"
+below.
+
 > **Numbering note:** This ADR was originally tracked (BT-1687) as "ADR 0071".
 > That number was taken by ADR 0071 (Class Visibility — `internal` Modifier)
 > before this draft landed; it is renumbered 0099.
@@ -31,9 +36,13 @@ Three primitives are missing, and one packaging story is absent:
    There is no `Console printLine: "hello"`, and no way to read a line from
    stdin. `Subprocess` covers child I/O; `Transcript` covers the workspace
    log; neither is the running program's own terminal.
-2. **CommandLine / Arguments** — access to the argv passed to the program.
-   `beamtalk run ClassName selector` (ADR 0061) dispatches a *unary* class
-   message and forwards nothing after it, so a script cannot see its arguments.
+2. **Arguments** — a program can't see its argv. `beamtalk run ClassName
+   selector` (ADR 0061) dispatches a *unary* class message and forwards nothing
+   after it. ADR 0061 deliberately fixed the entry point at two positional
+   tokens and *rejects* keyword selectors and trailing args (the validator in
+   `crates/beamtalk-cli/src/commands/run.rs`). That was the right call against
+   the old free-form `[run] entry = "App start: 'prod'"` footgun — but it also
+   means there is no argv path at all. This ADR reopens that, narrowly.
 3. **Exit with a status code** — a program needs to end with a status the shell
    can read. Scripts currently exit 0 when the entry method returns and have no
    way to signal failure. The subtlety (see Constraints) is that "exit" has
@@ -49,19 +58,19 @@ Most of the Erlang primitives behind this are one-liners (`io:get_line/1`,
 `erlang:halt/1`). Two are *not* trivial and the design must treat them as such:
 (a) portable **tty detection** — BEAM has no simple `isatty`, only heuristics
 (`io:getopts`/`io:columns`, `prim_tty`); and (b) **job-level exit** — ending
-one invocation's process group without halting the node, which needs a
-cooperating run harness, not a single FFI call. **The design work is the
-Beamtalk class API, the two-tier exit model, and the packaging/distribution
-story**, not the bulk of the FFI.
+one invocation without halting the node, which needs a cooperating run harness,
+not a single FFI call. **The design work is the Beamtalk class API, the entry
+argument contract, the two-tier exit model, and packaging** — not the bulk of
+the FFI.
 
 ### Constraints
 
-- **Unary entry points (ADR 0061).** `beamtalk run ClassName selector` accepts
-  exactly two positional CLI tokens and dispatches a unary class message. The
-  CLI validator explicitly rejects keyword selectors
-  (`crates/beamtalk-cli/src/commands/run.rs`). Whatever we do for arguments
-  must *not* reintroduce keyword-selector entry points — args reach the program
-  some other way.
+- **Entry-point contract (ADR 0061, amended here).** Today `beamtalk run` takes
+  exactly two positional tokens — `ClassName` + a *unary* selector — and the
+  validator rejects keyword selectors and extra args. This ADR amends that to
+  also allow a *single arity-1 keyword selector* (`main:`) carrying argv as one
+  list. It deliberately does **not** reopen general keyword-message dispatch on
+  the CLI (see "Amendment" and Alternatives for why that part stays closed).
 - **Group leader / where stdout goes.** In `beamtalk run` script mode the BEAM
   node's group leader is the invoking terminal, so `io:format/2` reaches the
   user. Under `beamtalk repl` (a detached/persistent workspace), the node's
@@ -87,33 +96,34 @@ story**, not the bulk of the FFI.
 ```beamtalk
 // greeter.bt
 Object subclass: Greeter
-  class run -> Nil =>
-    name := CommandLine arguments at: 1 ifAbsent: ["World"]
+  class main: args :: List(String) -> Nil =>
+    name := args at: 1 ifAbsent: ["World"]
     Console printLine: "Hello, " ++ name ++ "!"
 ```
 
 ```text
-$ beamtalk run Greeter run -- Alice
+$ beamtalk run Greeter main: Alice
 Hello, Alice!
-$ beamtalk run Greeter run
+$ beamtalk run Greeter main:
 Hello, World!
 ```
 
 …and, packaged:
 
 ```text
-$ beamtalk build --escript --entry "Greeter run" -o greeter
+$ beamtalk build --escript --entry "Greeter main:" -o greeter
 $ ./greeter Alice
 Hello, Alice!
 ```
 
 ## Decision
 
-Add three stdlib surfaces and one packaging command. Each is scoped to the one
-concern it owns; none overload an existing class whose meaning would blur. The
-key shape: `Console` owns the process's *stdio*, `CommandLine` owns *this
-invocation* (its args **and** its exit), and `System` owns *the machine/VM*
-(including the nuclear whole-node halt).
+Add two stdlib surfaces, one entry-argument contract, and one packaging
+command. Each is scoped to the one concern it owns; none overload an existing
+class whose meaning would blur. The key shape: `Console` owns the process's
+*stdio*, the **entry contract** delivers argv as a normal `main:` parameter,
+`CommandLine` owns *this invocation*'s name and its *job-level* exit, and
+`System` owns *the machine/VM* (including the nuclear whole-node halt).
 
 ### 1. `Console` — the current process's stdio
 
@@ -167,134 +177,148 @@ is typically closed) and returns `nil`. The hover/doc for `Console` states
 plainly: interactive console I/O is for `beamtalk run` / packaged scripts;
 inside the REPL, prefer `Transcript`.
 
-### 2. `CommandLine` — this invocation: arguments and exit
+### 2. Program arguments — the `main:` entry contract (amends ADR 0061)
 
-A new `sealed typed Object subclass: CommandLine` singleton. It represents the
-*current program invocation* — its arguments **and** its termination. This dual
-ownership is deliberate (see Steelman): `CommandLine` is the "job" object, which
-is exactly why argv lives here rather than on `System`.
+**Args arrive as a normal method parameter, not a global.** The entry selector
+may be either:
+
+- **unary** (`run`) — the program takes no arguments; or
+- **a single arity-1 keyword selector** (`main:`) — the program receives all
+  of its CLI arguments as one `List(String)`.
 
 ```beamtalk
-CommandLine arguments            // => List(String) — args after `--`
-CommandLine arguments size       // => count
-CommandLine arguments at: 1 ifAbsent: ["default"]
-CommandLine programName          // => see below
-
-CommandLine exit                 // end this program with status 0
-CommandLine exit: 1              // end this program with status 1
+class main: args :: List(String) -> Nil =>
+    // args is an ordinary value: thread it, pattern-match it, pass it to a parser
+    args isEmpty ifTrue: [Console errorLine: "usage: greeter <name>". CommandLine exit: 2]
+    Console printLine: "Hello, " ++ (args at: 1) ++ "!"
 ```
 
-**Arguments.** `beamtalk run` gains a `--` separator; everything after it is the
-program's argv. They reach the program through the **node tail**, not the entry
-selector, which keeps ADR 0061's unary-selector rule intact:
+On the CLI, everything after the entry selector is the program's argv:
 
 ```text
-beamtalk run Greeter run -- Alice Bob
-                         └─────────── argv: ["Alice", "Bob"]
+beamtalk run Greeter main: Alice Bob       // args = #("Alice" "Bob")
+beamtalk run Greeter main: -- --verbose    // args = #("--verbose")
 ```
 
-`CommandLine arguments` reads a **per-invocation seed**, not `init:get_plain_
-arguments/0` directly — because argv arrives differently in each of the three
-execution contexts, and only a seed is uniform across them:
+The `--` separator is **optional** — needed only to pass *flag-shaped* tokens
+(`--verbose`) that the `beamtalk` CLI's own argument parser would otherwise try
+to interpret. Bare-word args need no separator. (This is exactly the
+`cargo run alice` / `cargo run -- --flag` convention.) ADR 0061 already caps the
+CLI at two positionals — class + selector — so there are no further CLI slots
+for trailing bare words to collide with.
 
-- **Run-mode / escript** (a *new* BEAM node): the CLI appends the `--` tokens as
-  `-extra <args...>`, and the harness seeds `CommandLine` from
-  `init:get_plain_arguments/0` (run) or the `main/1` list (escript) at startup.
-- **Connected mode** (ADR 0061 §3 — dispatched into a *live* node, no new `erl`
-  invocation): there is no new node tail, so `init:get_plain_arguments/0` on the
-  live node would return *that node's* startup args, not the user's `--` tokens.
-  Instead the CLI carries the tokens **inside the REPL-protocol eval request**,
-  and the session evaluator seeds them into a **session-scoped** store
-  (`beamtalk_command_line` keyed by the evaluating session, not a global) before
-  dispatching the entry point. This keeps argv correct and isolated when several
-  sessions run scripts against the same shared node concurrently.
+**Why a parameter, not a global `CommandLine arguments`.** Delivering argv as
+the `main:` parameter makes it *ordinary data*: threaded explicitly, passed to
+an arg-parser at the top of the program, unit-testable by calling
+`Greeter main: #("x")` directly. A global reader would instead require a
+per-session argv store on the node (so a script dispatched into a shared
+workspace reads *its* argv, not the node's) — reintroducing cross-process reads,
+a backing-store choice, and a cleanup path for crashed sessions. The parameter
+model deletes all of that. It also mirrors the exit design symmetrically: **args
+flow *down* as parameters; status flows *up* as a return value or
+`CommandLine exit:`** — no ambient CLI singleton in the middle. A program that
+declares a unary entry (`run`) has simply opted out of args.
 
-The entry method stays unary (`Greeter run`); the program *pulls* its argv from
-`CommandLine arguments` rather than having it *pushed* through the selector —
-resolving the original ticket's `main: args` sketch. The seed is the argv
-analogue of the `script_exit` harness handshake used for exit (below): each of
-the three harnesses populates it the same way `CommandLine arguments` reads it.
+**How each context delivers argv** — in every case it is a one-shot dispatch
+argument, never stored:
 
-**`programName`** is defined crisply per surface, not hand-waved: under a
-packaged escript it is `escript:script_name/0` (the invoked filename); under
-`beamtalk run` there is no argv[0], so it is the literal `"beamtalk"`. (It is a
-convenience for usage/`--help` text, not load-bearing.)
+- **Run-mode** (new node): the CLI passes the post-selector tokens; the run
+  harness dispatches `Class>>main: List`.
+- **Connected mode** (ADR 0061 §3 — dispatched into a live node): the CLI
+  carries the tokens *inside the REPL-protocol eval request*; the session
+  evaluator dispatches `Class>>main: List` with them. No node-global state, so
+  concurrent sessions never see each other's argv.
+- **Escript**: the generated `main/1` dispatches `Class>>main:` with its `Args`.
 
-**Exit — the job-level, safe default.** `CommandLine exit` / `exit:` end *this
-invocation* with a status **without halting the VM**:
+**`programName`.** `CommandLine programName` is a convenience for usage/`--help`
+text (not load-bearing): under a packaged escript it is `escript:script_name/0`
+(the invoked filename); under `beamtalk run` there is no argv[0], so it is the
+literal `"beamtalk"`.
+
+### 3. Exit — two tiers (`CommandLine exit:` vs `System exit:`)
+
+Exit has two legitimate meanings depending on who owns the node, so it has two
+methods on two classes, named for what they do.
+
+**`CommandLine exit` / `exit:` — the job-level, safe default.** `CommandLine`
+is the *invocation/job* object; ending the job is its responsibility. These end
+*this invocation* with a status **without halting the VM**:
+
+```beamtalk
+CommandLine exit                 // end this program with status 0
+CommandLine exit: 2              // end this program with status 2
+```
 
 - In **run-mode** (the program owns the node), it unwinds the entry dispatch,
   tears down the run-mode workspace this invocation started, and the node exits
   with the status — a graceful shutdown, not a raw `halt`.
-- In **connected mode** (entry evaluated inside a live shared workspace, ADR
-  0061 §3), it stops only *this job's process group* (the session's
-  group-leader-scoped processes) and reports the status back over the REPL
-  protocol to the connecting CLI, which sets the shell exit code. **The shared
-  node and every other session keep running.**
+- In **connected mode** (entry evaluated inside a live shared workspace), it
+  stops only *this job's process group* (the session's group-leader-scoped
+  processes) and reports the status back over the REPL protocol to the
+  connecting CLI, which sets the shell exit code. **The shared node and every
+  other session keep running.**
 - In an **escript**, it ends `main/1` with the status.
 
 Mechanically, `exit:` raises a tagged `script_exit` signal that the run harness
 (run-mode dispatcher, escript `main/1`, or connected-session evaluator) catches
-and translates to the context-appropriate teardown. This is the cooperating-
-harness "job-level exit" flagged in Context as the one non-trivial exit
-primitive. `CommandLine exit:` is the **recommended** way for a program to exit
-deliberately; `System exit:` (§3) is the explicit nuclear alternative.
+and translates to the context-appropriate teardown.
 
-**Process-boundary caveat.** Because the signal is a `throw`, it only unwinds to
+*Process-boundary caveat.* Because the signal is a `throw`, it only unwinds to
 the harness when raised **in the harness-dispatched process** — the entry method
 and any synchronous call chain it drives. A `CommandLine exit:` called from a
 *spawned Actor* (each Actor is its own OTP process) is not caught by the
-harness: the Actor crashes with `{nocatch, {script_exit, N}}` and the status is
-lost. The contract is therefore: **`CommandLine exit:` is effective only from
-the entry method's own process.** An Actor that wants to end the program should
-return a status to the entry method (e.g. via a normal message/reply) and let
-*it* call `exit:`. A cross-process "exit from anywhere" primitive (e.g. an
-async signal to the session) is possible but deliberately out of scope for v1;
-the ADR states the boundary rather than hiding it.
+harness: the Actor exits with `{nocatch, {script_exit, N}}`, and — if it is
+under a supervisor (the normal OTP pattern) — the supervisor simply *restarts*
+it rather than propagating the status. Repeated restarts can even exhaust the
+supervisor's restart intensity and cascade a shutdown up the tree — the opposite
+of a clean exit. The contract is therefore: **`CommandLine exit:` is effective
+only from the entry method's own process.** An Actor that wants to end the
+program returns a status to the entry method (a normal message/reply) and lets
+*it* call `exit:`. A cross-process "exit from anywhere" primitive is deliberately
+out of scope for v1; the ADR states the boundary rather than hiding it.
 
-### 3. `System exit` / `System exit:` — whole-VM halt (the nuclear option)
-
-Where `CommandLine exit:` ends the *job*, `System exit:` halts the *whole node*.
-It lives on `System` because halting the VM is machine-level behaviour, next to
+**`System exit` / `exit:` — whole-VM halt (the nuclear option).** Where
+`CommandLine exit:` ends the *job*, `System exit:` halts the *whole node*. It
+lives on `System` because halting the VM is machine-level behaviour, next to
 `System`'s existing process/platform info (`pid`, env, architecture).
 
 ```beamtalk
-System exit          // erlang:halt(0) after flushing stdio
+System exit          // erlang:halt(0)
 System exit: 1       // erlang:halt(1)
 ```
 
 - `exit:` requires an `Integer` 0–255 (POSIX status range); out-of-range or
   non-Integer raises `#type_error` (consistent with `System setEnv:`).
-- Both flush `Console` before halting so buffered output is not lost.
 - **Semantics:** `erlang:halt/1` is an *immediate* VM halt — it does **not**
-  run OTP shutdown or `terminate/2` callbacks. Correct for a standalone app
-  that owns the node and wants to stop *now*.
+  run OTP shutdown or `terminate/2` callbacks. (`halt/1` flushes standard I/O
+  through the BEAM I/O server before terminating, so no explicit `Console`
+  pre-flush is needed unless Beamtalk later adds a user-space output buffer
+  above the `io` layer.) Correct for a standalone app that owns the node and
+  wants to stop *now*.
 - **⚠ Shared-workspace warning.** `System exit:` halts the entire node. Called
   inside a live, shared workspace (a connected `beamtalk run`, or in the REPL),
-  it kills the service and every other connected session. In a non-run-mode
-  workspace the runtime therefore **refuses** `System exit:` and raises a
-  `#beamtalk_error{}` directing the caller to `CommandLine exit:` instead; the
-  raw halt is permitted only when the program owns the node (run-mode / escript).
+  it kills the service and every other connected session. The runtime therefore
+  **refuses** `System exit:` outside a node-owning context and raises a
+  `#beamtalk_error{}` directing the caller to `CommandLine exit:` instead.
   Graceful shutdown of a service is a separate concern (`init:stop()`,
   supervision teardown) owned by the service-lifecycle / release story (ADR 0061
   "Future: Release Mode").
 - **How "owns the node" is detected.** The decision must not depend on a live
   metadata process that might be starting up or unreachable. Each entry harness
   sets a **`beamtalk_runtime` application env** (`node_owning => true`) *at boot*
-  — run-mode workspace startup and the escript `main/1` set it; the persistent
-  workspace path (REPL / connected) does not. `beamtalk_system:exit/1` reads
-  that env: `true` → `erlang:halt`, absent/`false` → the refusal error. An
-  application env is process-independent, set synchronously before any user code
-  dispatches, and trivially testable — preferred over inferring mode from the
-  `beamtalk_workspace_meta` `repl` flag (a process that may not be reachable at
-  the moment `exit` is called) or from workspace registration on disk.
+  — run-mode startup and the escript `main/1` set it; the persistent workspace
+  path (REPL / connected) does not. `beamtalk_system:exit/1` reads that env:
+  `true` → `erlang:halt`, absent/`false` → the refusal error. An application env
+  is process-independent, set synchronously before any user code dispatches, and
+  trivially testable — preferred over inferring mode from the
+  `beamtalk_workspace_meta` `repl` flag (a process that may not be reachable when
+  `exit` is called) or from workspace registration on disk.
 
-**Implicit exit code from the entry method (recommended path).** Most programs
-never call either `exit:` explicitly. When the entry method returns normally,
-the run exits `0`. If it raises an uncaught `#beamtalk_error{}`, the harness
-prints the error to stderr and exits non-zero (proposed: `1`). This gives
-well-behaved shell semantics for free; `CommandLine exit:` is for *early*
-termination, and `System exit:` for the deliberate whole-node halt.
+**Implicit exit code (recommended path).** Most programs never call either
+`exit:`. When the entry method returns normally, the run exits `0`. If it raises
+an uncaught `#beamtalk_error{}`, the harness prints the error to stderr and
+exits non-zero (proposed: `1`). `CommandLine exit:` is for *early* termination;
+`System exit:` for the deliberate whole-node halt.
 
 ### 4. `beamtalk build --escript` — single-file packaging
 
@@ -302,7 +326,7 @@ termination, and `System exit:` for the deliberate whole-node halt.
 self-contained executable escript.
 
 ```text
-$ beamtalk build --escript --entry "Greeter run" -o greeter
+$ beamtalk build --escript --entry "Greeter main:" -o greeter
 $ ./greeter Alice
 Hello, Alice!
 ```
@@ -313,219 +337,209 @@ Hello, Alice!
   exposing `main/1`.
 - **Entry resolution.** Escript requires a `main/1`. We generate a tiny wrapper
   whose `main(Args)`:
-  1. starts `beamtalk_runtime`,
+  1. starts `beamtalk_runtime` (with `node_owning => true`),
   2. starts a **run-mode workspace** (`repl = false` — ADR 0061 §5: no REPL
      server, not registered, no idle monitor) so all classes bootstrap in topo
      order,
-  3. seeds `CommandLine` from `Args`,
-  4. dispatches `ClassName>>selector`,
-  5. catches a `script_exit` from `CommandLine exit:` (→ its status) and maps a
-     normal return → 0 / any uncaught error → non-zero (per §2–§3).
+  3. dispatches `ClassName>>main: Args` (or the unary `ClassName>>selector`),
+  4. catches a `script_exit` from `CommandLine exit:` (→ its status) and maps a
+     normal return → 0 / any uncaught error → non-zero (per §3).
 - **Why run-mode reuse.** ADR 0061 already defined the exact
   "bootstrap-then-dispatch-then-exit" lifecycle a script needs. The escript
-  wrapper is that lifecycle with argv seeded and a `main/1` shell — no new
-  startup path to maintain.
+  wrapper is that lifecycle with a `main/1` shell — no new startup path to
+  maintain.
 - **`--entry` default.** If the project manifest declares a single obvious
   entry (future `[scripts]` table, ADR 0061), `--entry` may be omitted.
+
+### Amendment to ADR 0061
+
+ADR 0061 fixed the entry point at two positional tokens (`ClassName` + a unary
+selector) and the validator rejects keyword selectors and trailing args, to kill
+the old `[run] entry = "App start: 'prod'"` free-form-string footgun. This ADR
+**narrows that restriction rather than lifting it**: it adds exactly one new
+entry shape — a single arity-1 keyword selector (`main:`) receiving all argv as
+one `List(String)`. It does **not** restore general keyword-message dispatch on
+the CLI (`Robot move: 3 to: 5`), which is the genuinely-ambiguous part ADR 0061
+was right to close (see Alternatives). Implementation: relax
+`validate_class_and_selector` in `run.rs` to accept a lone trailing `:`
+(arity-1 keyword) and treat post-selector tokens as the argument list.
 
 ## Prior Art
 
 **Smalltalk (Pharo / Squeak).** `Transcript` is the workspace log — exactly our
-`TranscriptStream`. Pharo has no clean separate "current-process stdout" for
-headless scripts historically; `Stdio stdout` and `FileStream stdout` were
-bolted on later for command-line use. The split we draw (`Transcript` =
-workspace log, `Console` = OS stdio) is the lesson learned from Pharo
-conflating them. Pharo exits via `Smalltalk quit:` (status code).
+`TranscriptStream`. Pharo grew a separate `Stdio`/`FileStream stdout` for
+headless command-line use; our `Console`-vs-`Transcript` split is that lesson
+learned up front. Pharo's command-line entry is `CommandLineHandler` subclasses
+with an `activate` hook reading `self commandLine arguments` — argv-as-a-list,
+like ours, though they pull from a handler rather than a method parameter.
 
-**Erlang.** `io:format/2`, `io:get_line/1`, `init:get_plain_arguments/0`,
-`erlang:halt/1`, and the escript format (`main/1`, embedded archive) are the
-substrate we wrap directly. Escript is Erlang's canonical single-file CLI
-packaging — we adopt it wholesale rather than invent a format.
+**Erlang.** `io:format/2`, `io:get_line/1`, `erlang:halt/1`, and the escript
+format (`main/1`, embedded archive) are the substrate we wrap directly. Escript
+is Erlang's canonical single-file CLI packaging and its `main(Args)` *passes
+argv as a parameter* — precisely the model this ADR adopts for `main:`.
 
-**Elixir.** `IO.puts/2`, `IO.gets/1`, `IO.read/2`; `System.argv/0`,
-`System.halt/1`; packaging via `Mix.escript` (`mix escript.build` →
-single-file executable). Our `Console` maps onto `IO`, and `--escript` onto
-`escript.build`. We **diverge** on argv and exit: Elixir puts both `argv` and
-`halt` on `System`, whereas we put argv and the *safe job-level* exit on
-`CommandLine` and reserve `System exit:` for the whole-VM halt. The reason is
-that Elixir's `System.halt` always halts the OS process — Elixir has no notion
-of a long-lived *shared* node that a script is dispatched into, so it never
-needs a job-level exit. Beamtalk does (ADR 0061's connect-and-eval path), so the
-two-tier split is a real distinction, not gratuitous.
+**Elixir.** `IO.puts/2`, `IO.gets/1`; `System.argv/0`, `System.halt/1`;
+`mix escript.build`. Elixir reads argv from the global `System.argv` and exits
+via `System.halt`. We diverge on both: argv arrives as the `main:` parameter
+(no global), and exit is two-tier (`CommandLine exit:` job vs `System exit:`
+VM), because Elixir has no notion of a script dispatched into a long-lived
+*shared* node — Beamtalk does (ADR 0061's connect-and-eval path).
 
-**Gleam.** `gleam/io.println`, and `argv.load().arguments` from the `argv`
-package. Minimal, function-based; less relevant to a class-based API but
-confirms argv-as-a-pulled-list is the common shape.
+**Go / Rust / Java.** `func main()` reading `os.Args`; `fn main()` with
+`std::env::args`; `static void main(String[] args)`. Java's
+`main(String[] args)` is the closest match to our `main: List(String)` — argv
+delivered as a parameter, all strings, parsing left to the program. Rust/Go pull
+from a global; we prefer the parameter for testability and explicit data flow.
 
-**Rust.** `std::io` (`stdin`/`stdout`/`stderr` handles, line reading),
-`std::env::args`, `std::process::exit`, and `clap` for declarative arg parsing.
-We deliberately scope *parsing* (clap-style) out — `CommandLine arguments`
-returns raw strings; a richer arg-parser is a library/follow-up, not a
-language primitive.
-
-**What Beamtalk adopts:** Erlang escript packaging verbatim; the Elixir
-module split (stdio separate from system/exit); argv as a pulled list (Gleam /
-Rust / Elixir). **What it rejects:** conflating workspace log with process
-stdio (the Pharo trap); built-in declarative arg parsing (clap) — left to a
-library.
+**What Beamtalk adopts:** Erlang escript packaging verbatim and its
+parameter-passed `main(Args)` (Java-style `main:`); the Console/Transcript
+split (the Pharo lesson). **What it rejects:** general keyword-message dispatch
+on the CLI (the parsing-ambiguity trap); a global argv reader (the per-session
+store it would require); built-in declarative arg parsing (clap) — left to a
+library built on the `List(String)`.
 
 ## User Impact
 
-**Newcomer.** Can finally write the canonical first program: read args, print a
-greeting, exit. `Console printLine:` is discoverable and reads naturally.
-`beamtalk run Greeter run -- Alice` works; `beamtalk build --escript` produces
-something they can hand to a friend.
+**Newcomer.** Writes the canonical first program — `class main: args` — exactly
+as in every other language. `beamtalk run Greeter main: Alice` works; no `--`
+ceremony for ordinary args; `beamtalk build --escript` yields a file to hand to
+a friend.
 
 **Smalltalk developer.** The `Console`/`Transcript` distinction needs one
-sentence of explanation but maps to the Pharo `Stdio` vs `Transcript`
-distinction they may already know. `System exit:` mirrors `Smalltalk quit:`;
-`CommandLine exit:` is the gentler "end this doit" they'd want when evaluating
-against a live image.
+sentence but maps to Pharo's `Stdio` vs `Transcript`. `main:` echoes Pharo's
+`CommandLineHandler … arguments`. `System exit:` mirrors `Smalltalk quit:`;
+`CommandLine exit:` is the gentler "end this doit" wanted when evaluating against
+a live image.
 
-**Erlang/BEAM developer.** Recognises every primitive immediately —
-`io:format`, `init:get_plain_arguments`, `halt`, escript. The wrapper-`main/1`
-escript story is idiomatic, and the `CommandLine exit:` / `System exit:` split
-maps to the familiar "end the job vs `halt` the node" distinction. The "halt
-does not run terminate/2" note is exactly the semantics they expect.
+**Erlang/BEAM developer.** Recognises every primitive — `io:format`, `halt`,
+escript `main(Args)`. `main:`-as-parameter *is* the escript model. The
+`CommandLine exit:` / `System exit:` split maps to "end the job vs `halt` the
+node," and the process-boundary/supervisor caveat is the behaviour they'd
+predict.
 
-**Operator.** Gets POSIX-correct exit codes (0 on success, non-zero on error)
-so Beamtalk scripts compose in shell pipelines and CI `set -e`. Crucially, a
-script run against a live service (`beamtalk run Db migrate` on a running node)
-exits its job cleanly without taking the service down. Escript output is a
-single deployable file.
+**Operator.** POSIX-correct exit codes (0 on success, non-zero on error) compose
+in pipelines and CI `set -e`. A script run against a live service exits its job
+cleanly without taking the service down. Escript output is a single deployable
+file.
 
 ## Steelman Analysis
 
 **"Put stdout on `Transcript`, don't add `Console`."** *(Smalltalk cohort.)*
-One less class; `Transcript show:` already exists and Smalltalkers reach for it.
-Counter: `Transcript` is pub/sub and per-workspace; wiring real stdin/tty
-detection/stderr/exit-flush into it would overload a class whose whole point is
-the *workspace* log, and would behave bizarrely under the REPL (where Transcript
-goes to subscribers, not a terminal). The surfaces are genuinely different.
+One less class; `Transcript show:` already exists. Counter: `Transcript` is
+pub/sub and per-workspace; wiring stdin/tty/stderr into it would overload a
+class whose whole point is the *workspace* log and would misbehave under the
+REPL (output goes to subscribers, not a terminal). Genuinely different surfaces.
 
-**"Pass args to the entry method: `Greeter run: args`."** *(Newcomer cohort.)*
-`main(argv)` is the universal mental model; pulling from a `CommandLine`
-singleton is indirection. Counter: ADR 0061 deliberately fixed entry points at
-*unary* selectors and removed config-driven entry expressions; reintroducing a
-keyword entry selector reopens that design. `CommandLine arguments` keeps one
-entry contract and still gives the program its argv.
+**"Keep ADR 0061 unary-only; pass args via a `--` tail + a global reader."**
+*(Conservative cohort.)* Don't amend an accepted ADR; keep the entry contract
+frozen and expose argv through `CommandLine arguments`. Counter: a global reader
+forces a per-session argv store on the node (so a script dispatched into a
+shared workspace reads *its* argv) — bringing back cross-process reads, a
+backing-store choice, and crashed-session cleanup. The `main:` parameter deletes
+all of that, and the amendment is *narrow* (one new arity-1 shape), not a
+reopening of the free-form-entry footgun ADR 0061 actually killed. We judged the
+ergonomic + simplicity win worth the amendment.
 
-**"Put argv on `System` too, next to `exit` — like Elixir."** *(Consistency
-cohort.)* If exit is process-level and lives on `System`, argv is equally
-process-level; splitting them across `CommandLine` and `System` looks
-arbitrary, and Elixir keeps both on `System`. Counter: the split is *not*
-arbitrary once exit is two-tier. `CommandLine` is the **invocation/job** object
-— "this program, its inputs (argv) and its outcome (job-level `exit:`)" — while
-`System` is the **machine** ("this node, its env, its whole-VM halt"). Argv and
-the safe `exit:` belong together on the job; the nuclear `System exit:` belongs
-on the machine. Folding argv into `System` would split the *job's* two halves
-(its args and its exit) across two classes instead — the worse cut.
+**"Then go all the way — general keyword-message entry (`App start: 'prod'`)."**
+*(Expressiveness cohort.)* If we're amending anyway, support full keyword
+sends. Counter: that re-imports every ambiguity ADR 0061 closed — selector
+arity vs. token count, String-vs-Integer coercion of bare tokens, quoting for
+blocks/symbols/arrays, flag/arg/selector collision. The arity-1 `main:` shape
+gets the `main(argv)` ergonomics while keeping that can closed; a program that
+wants structured args parses the `List(String)` itself (or with a library).
 
-**"One exit, not two — `Console exit:` or a single `System exit:`."**
-*(Simplicity cohort.)* Two exit methods on two classes is more to learn than
-one. Counter: a single `erlang:halt`-backed exit is actively dangerous in the
-connect-and-eval path (it kills a shared service); a single *context-aware*
-exit hides a 100×-consequence difference behind one name. Two clearly-named
-tiers — safe-job-exit (`CommandLine exit:`) vs nuke-the-node (`System exit:`) —
-make the consequence legible at the call site. A one-method `ExitCode` class
-would be pure ceremony.
+**"One exit, not two."** *(Simplicity cohort.)* Two exit methods is more to
+learn. Counter: a single `halt`-backed exit is dangerous in the connect-and-eval
+path (kills a shared service); a single *context-aware* exit hides a
+100×-blast-radius difference behind one name. Two named tiers make the
+consequence legible at the call site.
 
 **"Ship OTP releases, not escripts."** *(Operator cohort.)* Releases are the
-production-grade BEAM artifact (hot upgrades, ERTS bundling, config). Counter:
-releases are heavyweight and ADR 0061 already earmarks `beamtalk release` as a
-separate future ADR. Escript is the right *first* packaging for scripts —
-single file, zero config — and does not preclude releases later.
+production artifact. Counter: heavyweight, and ADR 0061 already earmarks
+`beamtalk release` as a future ADR. Escript is the right *first* packaging —
+single file, zero config — and doesn't preclude releases later.
 
 **Tension points.** Two places reasonable people will disagree: (1) the
-`Console`/`Transcript` boundary — mitigated documentation-heavily via explicit
-hover text, a language-guide example, and the REPL caveat on `Console` itself;
-and (2) the `CommandLine exit:` / `System exit:` split — mitigated by making
-`CommandLine exit:` the documented default everywhere and having the runtime
-*refuse* `System exit:` in a shared workspace rather than letting it silently
-nuke the node.
+`Console`/`Transcript` boundary — mitigated documentation-heavily; and (2)
+amending ADR 0061 at all — mitigated by keeping the amendment to a single,
+unambiguous entry shape and refusing the general-keyword temptation.
 
 ## Alternatives Considered
 
-### Single `Stdio` class holding stdin/stdout/stderr/argv/exit
+### Args via a `--` tail + global `CommandLine arguments` (the earlier draft)
 
-```beamtalk
-Stdio out printLine: "hi".  Stdio args.  Stdio exit: 1.
+Keep ADR 0061 unary-only; require `beamtalk run Greeter run -- a b` and read
+argv from a global `CommandLine arguments` backed by a per-session seed store
+(ETS keyed by session, seeded from `-extra` / `main/1` / the REPL eval request).
+Rejected: the global forces a node-side per-session store with cross-process
+reads, a gen_server-vs-ETS choice, and a `DOWN`-monitor cleanup path to avoid
+leaking entries when a session crashes — all to avoid amending ADR 0061. The
+`main:` parameter is strictly simpler and removes that whole mechanism; the
+mandatory `--` was also awkward for the common bare-word case.
+
+### General keyword-message entry on the CLI
+
+```text
+beamtalk run Robot move: 3 to: 5      # arity-2 keyword send on argv
 ```
 
-One import, everything-CLI in one place (closer to Rust's `std::io` + `std::env`
-grab-bag). Rejected: bundles unrelated concerns (stdio, argv, exit) into one
-class and competes with `System`'s existing ownership of process-level info.
-The chosen split — `Console` (stdio) / `CommandLine` (this invocation: argv +
-job exit) / `System exit:` (whole-VM halt) — keeps each class coherent around a
-single subject (the terminal, the job, the machine).
+Most expressive. Rejected — it reopens exactly what ADR 0061 closed:
+- **Selector arity vs. token count** — the CLI must parse keyword-message
+  grammar and know the method's arity to find where the selector ends.
+- **Type coercion** — shell tokens are all strings; is `3` an `Integer` or
+  `"3"`? The old config form worked only because the compiler parsed it as
+  Beamtalk source (quotes → String). On bare argv there are no quotes.
+- **Quoting / shell-hostile syntax** — blocks, symbols, arrays, colons.
+- **Flag/arg/selector collision.**
+The arity-1 `main:` shape sidesteps all of these (one token, one List, all
+strings).
 
-### Context-aware single exit (`System exit:` that degrades when connected)
+### `Console` as a real `Stream` object (ADR 0021)
 
-One `System exit: N` that means `erlang:halt(N)` when the program owns the node
-but silently becomes a job-level exit when dispatched into a shared workspace.
-Fewer surfaces. Rejected: same name, two outcomes that differ by 100× in
-blast radius (end my script vs. kill everyone's service), with the difference
-invisible at the call site and dependent on runtime context the author may not
-know. The two-tier model makes the choice explicit; the dangerous one
-(`System exit:`) is named for what it does and refused where it would be
-catastrophic.
-
-### `Console` as a real instance / stream object (ADR 0021 Stream)
-
-`Console stdout` returns a writable `Stream` you can pipe into. More composable
-with the existing Stream protocol. Partially deferred: the **class-side
-convenience API** (`Console printLine:`) covers the 90% case now; exposing
-`Console stdin` / `Console stdout` as `Stream`s for piped/lazy I/O is a natural
-follow-up once the basics land, not a blocker.
-
-### Forward args via a generated entry-wrapper instead of `-extra`
-
-Generate a per-run module that closes over the parsed args. Rejected for
-`beamtalk run`: `-extra` + `init:get_plain_arguments/0` is the zero-codegen
-path and is exactly what the escript `main/1` already receives, so both
-surfaces share one argv source.
+`Console stdout` returns a writable `Stream` for piping. Partially deferred: the
+class-side convenience API covers the 90% case now; exposing `stdin`/`stdout`
+as `Stream`s is a natural follow-up, not a blocker.
 
 ### Declarative arg parsing as a primitive (clap-style)
 
-`CommandLine flag: "--verbose"` etc. baked into the language. Rejected: arg
-*parsing* policy (subcommands, validation, help generation) is library
-territory; the primitive is the raw `List(String)`. A `clap`-equivalent can be
-a Beamtalk package built on `CommandLine arguments`.
+`CommandLine flag: "--verbose"` baked into the language. Rejected: parsing
+policy (subcommands, validation, help) is library territory; the primitive is
+the raw `List(String)`. A clap-equivalent is a package built on `main:`'s
+argument.
 
 ## Consequences
 
 ### Positive
-- Standalone CLI applications become possible — a capability the language
-  currently lacks entirely.
-- POSIX-correct exit codes make Beamtalk scripts first-class shell/CI citizens.
-- The two-tier exit makes scripts safe to run *against a live shared workspace*
-  — `CommandLine exit:` ends the job without endangering the node.
+- Standalone CLI applications become possible — a capability the language lacks
+  entirely today.
+- Argv as a `main:` parameter is ordinary, testable data — no node-side
+  per-session store, no cross-process reads, no cleanup path.
+- POSIX-correct exit codes make scripts first-class shell/CI citizens; the
+  two-tier exit makes them safe to run *against a live shared workspace*.
 - Single-file escript artifacts are distributable without a project checkout.
 - Clear `Console` vs `Transcript` separation prevents the Pharo conflation.
 - Reuses ADR 0061's run-mode lifecycle for escript boot — no new startup path.
 
 ### Negative
-- One more concept (`Console`) that overlaps superficially with `Transcript`
-  and needs documentation to disambiguate.
+- Amends an accepted ADR (0061). The amendment is narrow, but it is a change to
+  a contract other docs/code reference, and `run.rs`'s validator must be
+  relaxed carefully (accept a lone arity-1 `:`, still reject multi-keyword).
+- One more concept (`Console`) overlapping superficially with `Transcript`.
 - Two exit methods to teach (`CommandLine exit:` vs `System exit:`); the
-  distinction must be made legible or users will reach for the wrong one.
-- The job-level `CommandLine exit:` is the one genuinely non-trivial primitive
-  — it needs a cooperating `script_exit` catch in three harness paths (run-mode
-  dispatcher, escript `main/1`, connected-session evaluator).
-- `beamtalk run … -- args` adds a CLI surface (the `--` separator) and a
-  per-context argv seed (the `-extra`/`main/1`/REPL-eval-request paths all feed
-  one session-scoped store) — three wiring points, like the exit harness.
+  distinction must be legible or users reach for the wrong one.
+- `CommandLine exit:`'s process boundary (no effect from spawned/supervised
+  Actors) is a real footgun that documentation must surface.
 - Escript packaging adds a build mode (archive assembly, `main/1` generation,
-  Windows executable-wrapper handling) to maintain.
-- `Console readLine` returning `nil` under the REPL is a sharp edge that will
-  surface as a "why is stdin empty" question despite the documented caveat.
+  Windows launcher) to maintain.
+- `Console readLine` returning `nil` under the REPL is a sharp edge.
 
 ### Neutral
-- `System` grows two methods (`exit`, `exit:`); `CommandLine` is net-new;
-  `Object >> show:`/`showCr:` and `Transcript` are unchanged.
+- `System` grows two methods (`exit`, `exit:`); `Console` and `CommandLine` are
+  net-new; `Object >> show:`/`showCr:` and `Transcript` are unchanged.
+- `CommandLine` is intentionally thin (`programName`, `exit`, `exit:`) — argv
+  lives on the `main:` parameter, not on the class.
 - `Console isInteractive` (tty detection) is explicitly deferred out of v1.
-- Full OTP releases remain a separate future ADR; this ADR neither blocks nor
-  presumes them.
+- Full OTP releases remain a separate future ADR.
 
 ## Implementation
 
@@ -534,93 +548,84 @@ Rough phases; each is independently shippable and testable.
 ### Phase 1 — `Console` (stdio)
 - `runtime/.../beamtalk_console.erl`: `printLine:`/`print:`/`errorLine:`/
   `error:`/`flush`/`readLine`/`readLine:` over `standard_io` / `standard_error`
-  (`io:put_chars/2`, `io:get_line/1`). `isInteractive` is **deferred** (no
-  portable tty check yet — see §1).
+  (`io:put_chars/2`, `io:get_line/1`; `{error, Reason}` → `#beamtalk_error{}`).
+  `isInteractive` is **deferred** (no portable tty check yet — see §1).
 - `stdlib/src/Console.bt`: class-side methods delegating via `(Erlang
   beamtalk_console) …`, `Printable`-typed print params, doc comments incl. the
   REPL caveat. `print:`/`printLine:` render via `displayString` (ADR 0094,
-  already implemented).
-- Tests: bootstrap/BUnit for the non-interactive methods; an
-  `examples/`-style smoke script for interactive read under `beamtalk run`.
+  implemented).
+- Tests: bootstrap/BUnit for the non-interactive methods; an `examples/`-style
+  smoke script for interactive read under `beamtalk run`.
 
-### Phase 2 — `CommandLine` argv + `beamtalk run -- args`
-- `beamtalk_command_line.erl`: a **session-scoped argv seed** (set/get) plus
-  `arguments` (reads the seed) and `programName` (`escript:script_name/0` under
-  escript, else `"beamtalk"`). `arguments` must NOT call
-  `init:get_plain_arguments/0` directly — that is only correct on a freshly-
-  launched node and returns the wrong list in connected mode.
-- `stdlib/src/CommandLine.bt` (argv methods; `exit`/`exit:` land in Phase 3).
-- CLI / harness seeding, one per context:
-  - **Run-mode:** `crates/beamtalk-cli/src/commands/run.rs` accepts a `--`
-    separator and appends trailing tokens as `-extra <args...>`. **Ordering
-    matters:** everything after `-extra` becomes a plain argument, so `-extra`
-    must be the *last* group on the `erl` line — after the existing `-eval`
-    (which `build_script_eval_cmd` / arg assembly currently appends). The
-    run-mode startup seeds `beamtalk_command_line` from
-    `init:get_plain_arguments/0`.
-  - **Connected mode:** carry the `--` tokens inside the REPL-protocol eval
-    request; the session evaluator seeds `beamtalk_command_line` for *its
-    session* before dispatching. Without this, argv is wrong on a live node.
-  - **Escript:** `main/1` seeds from its `Args`.
-  - Validate `--` does not collide with existing flag parsing.
+### Phase 2 — `main:` entry contract + `CommandLine programName`
+- `crates/beamtalk-cli/src/commands/run.rs`: relax `validate_class_and_selector`
+  to accept a single arity-1 keyword selector (one trailing `:`, still reject
+  multi-keyword and arbitrary args); treat post-selector tokens as the argument
+  list (clap `trailing_var_arg`/`allow_hyphen_values`, `--` optional and only
+  needed to shield flag-shaped tokens). Dispatch `Class>>main: List` (or unary).
+- Connected mode: carry the argument list inside the REPL-protocol eval request;
+  the session evaluator dispatches `Class>>main: List`. One-shot, no node-global
+  store.
+- `beamtalk_command_line.erl` + `stdlib/src/CommandLine.bt`: `programName`
+  (`escript:script_name/0` under escript, else `"beamtalk"`). `exit`/`exit:`
+  land in Phase 3.
 
 ### Phase 3 — two-tier exit + implicit exit code
 - **Job-level (`CommandLine exit`/`exit:`):** raise a tagged `script_exit`
-  carrying the status. Add the catch to all three harnesses: the run-mode
-  dispatcher (`run.rs` eval), the escript `main/1`, and the connected-session
-  evaluator (report status back over the REPL protocol; stop the session's
-  process group; leave the node up). `stdlib/src/CommandLine.bt`: `class sealed
-  exit -> Nil`, `class sealed exit: code :: Integer -> Nil` (do not return).
-  **Effective only in the harness-dispatched process** — a `throw` does not
-  cross process boundaries, so document that `exit:` from a spawned Actor
-  crashes that Actor (`{nocatch, {script_exit, N}}`) rather than exiting the
-  program; Actors return a status to the entry method instead (see §2).
-- **VM-level (`System exit`/`exit:`):** `beamtalk_system:exit/0,1` → flush
-  `Console`, `erlang:halt/0,1`; Integer 0–255 validation (`#type_error`
-  otherwise). Detect node-ownership via the `beamtalk_runtime` application env
-  `node_owning` (set at boot by run-mode startup and escript `main/1`; absent on
-  the persistent/connected path); when absent, **refuse with a
-  `#beamtalk_error{}`** pointing at `CommandLine exit:`. `stdlib/src/System.bt`:
-  `class sealed exit -> Nil`, `class sealed exit: code :: Integer -> Nil`.
+  carrying the status; catch in all three harnesses (run-mode dispatcher,
+  escript `main/1`, connected-session evaluator — the last reports status over
+  the REPL protocol, stops the session's process group, leaves the node up).
+  `stdlib/src/CommandLine.bt`: `class sealed exit -> Nil`, `class sealed exit:
+  code :: Integer -> Nil` (do not return). Document the entry-process-only
+  boundary and the supervised-Actor restart caveat (§3).
+- **VM-level (`System exit`/`exit:`):** `beamtalk_system:exit/0,1` →
+  `erlang:halt/0,1` (no explicit pre-flush; `halt` flushes the `io` layer);
+  Integer 0–255 validation (`#type_error` otherwise). Detect node-ownership via
+  the `beamtalk_runtime` `node_owning` application env (set at boot by run-mode
+  startup and escript `main/1`; absent on the persistent/connected path);
+  absent → **refuse with `#beamtalk_error{}`** pointing at `CommandLine exit:`.
+  `stdlib/src/System.bt`: `class sealed exit -> Nil`, `class sealed exit: code
+  :: Integer -> Nil`.
 - **Implicit code:** harness maps normal return → 0, uncaught
   `#beamtalk_error{}` → stderr + non-zero.
 
 ### Phase 4 — `beamtalk build --escript`
 - `crates/beamtalk-cli/src/commands/build.rs` (+ a new `escript` assembly
   module): collect `bt@*.beam` + runtime/stdlib beams, generate the `main/1`
-  bootstrap module (run-mode workspace + `CommandLine` seed + dispatch + exit
-  mapping), emit an escript archive; set the executable bit (Unix) / `.escript`
-  + launcher (Windows, per ADR 0027).
+  bootstrap module (run-mode workspace + `node_owning` + `Class>>main: Args`
+  dispatch + exit mapping), emit an escript archive; set the executable bit
+  (Unix) / `.escript` + launcher (Windows, per ADR 0027).
 - `--entry "ClassName selector"` parsing; default from manifest if unambiguous.
 
 ### Surface parity
 Per CLAUDE.md, update `docs/development/surface-parity.md`: `Console` and
 `CommandLine` are runtime stdlib (available everywhere a workspace runs);
-`beamtalk build --escript` and `beamtalk run -- args` are **CLI-specific**
-operations and should be labelled as such.
+`beamtalk build --escript` and the `beamtalk run … <args>` entry contract are
+**CLI-specific** and should be labelled as such.
 
 ## Migration Path
 
-Net-new capability — nothing to migrate. The `--` separator, the new
-`CommandLine` class, and the two new `System` methods are all additive;
-existing `beamtalk run ClassName selector` invocations (no `--`) behave
-identically.
+Net-new capability — nothing to migrate. The `main:` entry shape, the new
+`Console`/`CommandLine` classes, and the two `System` methods are additive;
+existing `beamtalk run ClassName selector` (unary, no args) invocations behave
+identically. ADR 0061 should be updated with an "Amended by ADR 0099" note on
+its entry-point contract.
 
 ## References
 - Related issues: BT-1687 (this ADR)
 - Related ADRs:
-  - ADR 0061 — Program Entry Points and Run Lifecycle (unary entry, run-mode
-    workspace, "Future: Release Mode")
+  - ADR 0061 — Program Entry Points and Run Lifecycle (**amended here**: entry
+    selector may be unary or a single arity-1 keyword `main:`)
   - ADR 0051 — Subprocess Execution (child-process I/O; contrast with Console)
   - ADR 0021 — Stream and I/O Design (future `Console` Stream surface)
   - ADR 0010 — Global Objects and Singleton Dispatch (`Transcript` global)
-  - ADR 0094 — Object String Representation Protocols (`displayString` for
-    `Console print:`)
+  - ADR 0094 — Object String Representation Protocols (`displayString`)
   - ADR 0027 — Cross-Platform Support (escript on Windows)
 - Existing stdlib: `stdlib/src/System.bt`, `File.bt`, `Subprocess.bt`,
   `OS.bt`, `TranscriptStream.bt`, `Object.bt` (`show:`/`showCr:`)
 - Erlang primitives: `io:put_chars/2`, `io:get_line/1`, `io:format/2`,
-  `init:get_plain_arguments/0`, `erlang:halt/1`, escript `main/1`
-- CLI: `crates/beamtalk-cli/src/commands/run.rs`, `build.rs`
+  `erlang:halt/1`, escript `main/1`
+- CLI: `crates/beamtalk-cli/src/commands/run.rs` (`validate_class_and_selector`),
+  `build.rs`
 - Follow-up work: `Console` Stream surface (ADR 0021), declarative arg-parsing
   library, `[scripts]` manifest table (ADR 0061), `beamtalk release` (future ADR)
