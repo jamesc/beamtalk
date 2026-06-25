@@ -795,7 +795,9 @@ Erlang file write_file: "/tmp/out.txt" with: "data"
 - Bare `error` atom becomes `Result error: nil`
 - Tuples with 3+ elements, non-ok/error tuples, and non-tuple values pass through unchanged
 
-**Atom-enum precedence (type inference):** When the spec reader maps a pure-atom union type containing atoms beyond `ok`/`error` (e.g. `text | json | xml`), it infers a singleton union (`#text | #json | #xml`) rather than applying ADR-0076 Result recognition. Only unions whose atoms are a subset of `{ok, error}` infer as `Result`. Note: runtime `ok`/`error` coercion (`coerce_result/1`) is unconditional and spec-unaware — a function returning bare `ok` or `error` at runtime still produces a `Result` regardless of the inferred type.
+**Atom-enum precedence (type inference):** When the spec reader maps a pure-atom union type containing atoms beyond `ok`/`error`, it infers a singleton union rather than applying ADR-0076 Result recognition. Only unions whose atoms are a subset of `{ok, error}` infer as `Result`. For example, a spec of `text | json | xml` infers `#text | #json | #xml`, while `ok | error` infers `Result`.
+
+> **⚠️ Type/runtime mismatch for enums containing `ok`/`error`.** Type inference and runtime coercion use different rules. A spec like `ok | error | pending` infers the singleton union `#ok | #error | #pending` at the type level, but runtime `ok`/`error` coercion (`coerce_result/1`) is unconditional and spec-unaware: at runtime a bare `ok` still arrives as `Result ok: nil` and a bare `error` as `Result error: nil`. So code that matches the inferred `#ok`/`#error` singletons passes the type checker but **never matches at runtime** for those branches. When a spec uses `ok` or `error` as semantic enum members, handle those call-site branches as `Result`, not as the inferred singleton (only the non-`ok`/`error` members — here `#pending` — arrive as singletons).
 
 **`undefined` stays `#undefined`:** Erlang `undefined` in an FFI return type spec maps to the singleton `#undefined` (a `Symbol`), not `Nil`. The FFI boundary does not coerce `undefined` → `nil` — callsites that want nil semantics must convert explicitly.
 

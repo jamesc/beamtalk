@@ -4297,17 +4297,19 @@ fn test_init_parent_actor_subclass_calls_parent_init() {
 
 // ── Type-annotation codegen coverage ─────────────────────────────────────────
 //
-// Target: gen_server/callbacks.rs — is_nilable_type Union branch (line 589),
+// Target: gen_server/callbacks.rs — is_nilable_type Union branch,
 // type_annotation_display Singleton/Generic/FalseOr/SelfType/SelfClass/ClassOf
-// variants (lines 604-620), user_defined_initialize_chain fallback when
-// class_hierarchy is None (lines 643-655), and inherited_typed_no_default_fields
-// fallback (lines 711-733).
+// variants, user_defined_initialize_chain fallback when class_hierarchy is None,
+// and inherited_typed_no_default_fields fallback.
+// (Function names rather than line numbers so these references don't drift as
+// callbacks.rs evolves.)
 //
 // Strategy:
 // - Tests 1-6: generate_module with actor having one typed-no-default field per
-//   TypeAnnotation variant; coverage comes from the hierarchy path (lines 748-763)
-//   that calls is_nilable_type and type_annotation_display.
-// - Tests 7-12: direct CoreErlangGenerator unit tests (class_hierarchy = None)
+//   TypeAnnotation variant; coverage comes from the hierarchy path in
+//   inherited_typed_no_default_fields that calls is_nilable_type and
+//   type_annotation_display.
+// - Tests 7-15: direct CoreErlangGenerator unit tests (class_hierarchy = None)
 //   to exercise the no-hierarchy fallback paths in both functions.
 
 /// Shared helper: a single-class Actor Module with one typed-no-default state field.
@@ -4356,7 +4358,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
 
 #[test]
 fn test_actor_typed_union_nil_field_is_nilable() {
-    // is_nilable_type Union branch (line 589): Union([Integer, Nil]) is nilable.
+    // is_nilable_type Union branch: Union([Integer, Nil]) is nilable.
     // The field is excluded from typed-no-default so no initialize continuation emitted.
     let s = Span::new(0, 0);
     let union_nil = TypeAnnotation::union(
@@ -4374,12 +4376,23 @@ fn test_actor_typed_union_nil_field_is_nilable() {
         !code.contains("{'continue', 'initialize'}"),
         "Nil-union field is nilable so no initialize continuation is needed. Got:\n{code}"
     );
+    // Positive guard (symmetric with test 2): a nilable field must NOT emit the
+    // typed-no-default validation. Without this, the negative assertion above
+    // would pass trivially if init generation broke for any unrelated reason.
+    assert!(
+        !code.contains("'uninitialized_state_error'"),
+        "Nilable Union field should not trigger typed-no-default validation. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'init'"),
+        "init/1 callback should still be generated for the actor. Got:\n{code}"
+    );
 }
 
 #[test]
 fn test_actor_typed_union_non_nil_field_triggers_validation() {
     // is_nilable_type Union branch: Union([Integer, String]) is not nilable → included.
-    // type_annotation_display Union branch (lines 599-603) also exercised.
+    // type_annotation_display Union branch also exercised.
     let s = Span::new(0, 0);
     let union_no_nil = TypeAnnotation::union(
         vec![
@@ -4400,7 +4413,7 @@ fn test_actor_typed_union_non_nil_field_triggers_validation() {
 
 #[test]
 fn test_actor_typed_singleton_field_triggers_validation() {
-    // type_annotation_display Singleton branch (line 604).
+    // type_annotation_display Singleton branch.
     let s = Span::new(0, 0);
     let singleton = TypeAnnotation::Singleton {
         name: "ok".into(),
@@ -4418,7 +4431,7 @@ fn test_actor_typed_singleton_field_triggers_validation() {
 
 #[test]
 fn test_actor_typed_generic_field_triggers_validation() {
-    // type_annotation_display Generic branch (lines 605-613).
+    // type_annotation_display Generic branch.
     let s = Span::new(0, 0);
     let generic = TypeAnnotation::generic(
         Identifier::new("Collection", s),
@@ -4437,7 +4450,7 @@ fn test_actor_typed_generic_field_triggers_validation() {
 
 #[test]
 fn test_actor_typed_false_or_field_triggers_validation() {
-    // type_annotation_display FalseOr branch (lines 615-616).
+    // type_annotation_display FalseOr branch.
     let s = Span::new(0, 0);
     let false_or = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", s), s);
     let module = make_actor_typed_no_default("result", false_or);
@@ -4452,7 +4465,7 @@ fn test_actor_typed_false_or_field_triggers_validation() {
 
 #[test]
 fn test_actor_typed_class_of_field_triggers_validation() {
-    // type_annotation_display ClassOf branch (line 620).
+    // type_annotation_display ClassOf branch.
     let s = Span::new(0, 0);
     let class_of = TypeAnnotation::ClassOf {
         class_name: Identifier::new("Actor", s),
@@ -4470,7 +4483,7 @@ fn test_actor_typed_class_of_field_triggers_validation() {
 
 #[test]
 fn test_user_defined_initialize_chain_fallback_with_initialize() {
-    // user_defined_initialize_chain fallback (lines 643-655): class_hierarchy is
+    // user_defined_initialize_chain fallback: class_hierarchy is
     // None, actor defines initialize → fallback returns chain containing the leaf.
     let src = concat!(
         "Actor subclass: TestActor\n",
@@ -4495,7 +4508,7 @@ fn test_user_defined_initialize_chain_fallback_with_initialize() {
 
 #[test]
 fn test_user_defined_initialize_chain_fallback_without_initialize() {
-    // user_defined_initialize_chain fallback (lines 643-655): class_hierarchy is
+    // user_defined_initialize_chain fallback: class_hierarchy is
     // None, no initialize method → fallback returns empty chain.
     let src = concat!(
         "Actor subclass: TestActor\n",
@@ -4514,7 +4527,7 @@ fn test_user_defined_initialize_chain_fallback_without_initialize() {
 
 #[test]
 fn test_inherited_typed_no_default_fallback_union_nil_excluded() {
-    // inherited_typed_no_default_fields fallback (line 721): Union([Integer, Nil])
+    // inherited_typed_no_default_fields fallback: Union([Integer, Nil])
     // is nilable → field excluded from the typed-no-default list.
     let s = Span::new(0, 0);
     let union_nil = TypeAnnotation::union(
@@ -4535,9 +4548,9 @@ fn test_inherited_typed_no_default_fallback_union_nil_excluded() {
 
 #[test]
 fn test_inherited_typed_no_default_fallback_singleton_type_display() {
-    // inherited_typed_no_default_fields fallback (lines 726-728): Singleton type
-    // annotation → type_annotation_display returns "#ok" → field included with
-    // the correct display name.
+    // inherited_typed_no_default_fields fallback: Singleton type annotation →
+    // type_annotation_display returns "#ok" → field included with the correct
+    // display name.
     let s = Span::new(0, 0);
     let singleton = TypeAnnotation::Singleton {
         name: "ok".into(),
@@ -4560,7 +4573,7 @@ fn test_inherited_typed_no_default_fallback_singleton_type_display() {
 
 #[test]
 fn test_inherited_typed_no_default_fallback_self_type_display() {
-    // type_annotation_display SelfType branch (line 618).
+    // type_annotation_display SelfType branch.
     let s = Span::new(0, 0);
     let self_type = TypeAnnotation::SelfType { span: s };
     let module = make_actor_typed_no_default("selfRef", self_type);
@@ -4579,7 +4592,7 @@ fn test_inherited_typed_no_default_fallback_self_type_display() {
 
 #[test]
 fn test_inherited_typed_no_default_fallback_self_class_display() {
-    // type_annotation_display SelfClass branch (line 619).
+    // type_annotation_display SelfClass branch.
     let s = Span::new(0, 0);
     let self_class = TypeAnnotation::SelfClass { span: s };
     let module = make_actor_typed_no_default("classRef", self_class);
@@ -4593,5 +4606,75 @@ fn test_inherited_typed_no_default_fallback_self_class_display() {
     assert_eq!(
         fields[0].type_name, "Self class",
         "SelfClass display should be 'Self class'"
+    );
+}
+
+#[test]
+fn test_inherited_typed_no_default_fallback_generic_type_display() {
+    // type_annotation_display Generic branch: directly assert the fallback
+    // display string (the generate_module test only checks it indirectly via
+    // emitted Core Erlang).
+    let s = Span::new(0, 0);
+    let generic = TypeAnnotation::generic(
+        Identifier::new("Collection", s),
+        vec![TypeAnnotation::simple("Integer", s)],
+        s,
+    );
+    let module = make_actor_typed_no_default("items", generic);
+    let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
+    let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
+    assert_eq!(
+        fields.len(),
+        1,
+        "Generic field should appear in typed-no-default"
+    );
+    assert_eq!(
+        fields[0].type_name, "Collection(Integer)",
+        "Generic display should be 'Collection(Integer)'"
+    );
+}
+
+#[test]
+fn test_inherited_typed_no_default_fallback_class_of_type_display() {
+    // type_annotation_display ClassOf branch: directly assert the fallback
+    // display string (the generate_module test only checks it indirectly via
+    // emitted Core Erlang).
+    let s = Span::new(0, 0);
+    let class_of = TypeAnnotation::ClassOf {
+        class_name: Identifier::new("Actor", s),
+        span: s,
+    };
+    let module = make_actor_typed_no_default("actorClass", class_of);
+    let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
+    let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
+    assert_eq!(
+        fields.len(),
+        1,
+        "ClassOf field should appear in typed-no-default"
+    );
+    assert_eq!(
+        fields[0].type_name, "Actor class",
+        "ClassOf display should be 'Actor class'"
+    );
+}
+
+#[test]
+fn test_inherited_typed_no_default_fallback_false_or_type_display() {
+    // type_annotation_display FalseOr branch: directly assert the fallback
+    // display string (the generate_module test only checks it indirectly via
+    // emitted Core Erlang).
+    let s = Span::new(0, 0);
+    let false_or = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", s), s);
+    let module = make_actor_typed_no_default("result", false_or);
+    let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
+    let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
+    assert_eq!(
+        fields.len(),
+        1,
+        "FalseOr field should appear in typed-no-default"
+    );
+    assert_eq!(
+        fields[0].type_name, "Integer | False",
+        "FalseOr display should be 'Integer | False'"
     );
 }

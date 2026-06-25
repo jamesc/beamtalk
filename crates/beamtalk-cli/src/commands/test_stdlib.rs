@@ -264,6 +264,7 @@ pub(crate) fn erlang_atom(name: &str) -> String {
 ///
 /// Both `TestCase` (btscript pipeline) and `DocTestCase` (doc-test pipeline)
 /// convert to this before calling [`generate_eunit_wrapper_for`].
+#[derive(Debug)]
 pub(crate) struct AssertionCase<'a> {
     pub expression: &'a str,
     pub expected: &'a Expected,
@@ -281,7 +282,9 @@ pub(crate) struct AssertionCase<'a> {
 ///   the `run_and_assert` call).
 /// - `test_fn_name` – the exported test function name exactly as it should
 ///   appear in the generated source, e.g. `"my_module_test_"` or
-///   `"'bt@class_test_'"` (with quotes when the name contains `@`).
+///   `"'bt@class_test_'"` (with quotes when the name contains `@`). This is
+///   decoupled from `module_name`: callers are responsible for deriving it
+///   from `module_name` and keeping the two in sync.
 /// - `header_comment` – the `%%` comment line written before `-module(...)`.
 /// - `source_path` – the source file path used inside location strings.
 /// - `cases` – normalised assertion cases.
