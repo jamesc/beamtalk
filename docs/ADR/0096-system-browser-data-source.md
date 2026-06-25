@@ -1,7 +1,7 @@
 # ADR 0096: System Browser Data Source — Class/Method Browse API for the LiveView IDE
 
 ## Status
-Proposed (2026-06-10)
+Implemented (2026-06-10) — four read-only browse ops in `beamtalk_repl_ops_browse` with origin/divergence metadata (BT-2482, BT-2488)
 
 ## Context
 
