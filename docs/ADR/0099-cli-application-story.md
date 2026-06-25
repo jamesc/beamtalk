@@ -154,10 +154,12 @@ line := Console readLine: "name? "   // prompt to stdout, then read
   than returning `nil`, so EOF and a genuine read failure stay distinguishable.
   `readLine:` writes a prompt to stdout first (no newline) then reads, with the
   same return contract. A **closed or absent stdin** (e.g. a detached node,
-  where `io:get_line/1` may yield `eof` *or* an error such as
-  `{error, terminated}`) is treated as end-of-input → `nil`; only a *genuine
-  mid-stream* I/O failure raises `#beamtalk_error{}`. This keeps the "returns
-  `nil` under the REPL" caveat below consistent with the error contract.
+  where `io:get_line/1` may yield `eof` *or* a closed-fd error — `{error,
+  terminated}`, or on some platforms `{error, ebadf}`) is treated as
+  end-of-input → `nil`; only a *genuine mid-stream* I/O failure raises
+  `#beamtalk_error{}`. Phase 1 carries the precise closed-stdin allowlist. This
+  keeps the "returns `nil` under the REPL" caveat below consistent with the
+  error contract.
 - **Backed by** a thin `beamtalk_console` Erlang module: `io:put_chars/2` to
   `standard_io` / `standard_error`, `io:get_line/1`.
 - **Deferred — `Console isInteractive` (tty detection).** Useful for "prompt
@@ -182,7 +184,7 @@ is typically closed) and returns `nil`. The hover/doc for `Console` states
 plainly: interactive console I/O is for `beamtalk run` / packaged scripts;
 inside the REPL, prefer `Transcript`.
 
-### 2. Program arguments — the `main:` entry contract (amends ADR 0061)
+### 2. Program arguments — the arity-1 entry contract (amends ADR 0061)
 
 **Args arrive as a normal method parameter, not a global.** The entry selector
 may be either:
@@ -594,8 +596,11 @@ Rough phases; each is independently shippable and testable.
 ### Phase 1 — `Console` (stdio)
 - `runtime/.../beamtalk_console.erl`: `printLine:`/`print:`/`errorLine:`/
   `error:`/`flush`/`readLine`/`readLine:` over `standard_io` / `standard_error`
-  (`io:put_chars/2`, `io:get_line/1`; `{error, Reason}` → `#beamtalk_error{}`).
-  `isInteractive` is **deferred** (no portable tty check yet — see §1).
+  (`io:put_chars/2`, `io:get_line/1`). `readLine` maps `eof` **and** the
+  closed-stdin errors `{error, terminated}` / `{error, ebadf}` to `nil`; any
+  *other* `{error, Reason}` (a genuine mid-stream failure) raises
+  `#beamtalk_error{}`. `isInteractive` is **deferred** (no portable tty check
+  yet — see §1).
 - `stdlib/src/Console.bt`: class-side methods delegating via `(Erlang
   beamtalk_console) …`, `Printable`-typed print params, doc comments incl. the
   REPL caveat. `print:`/`printLine:` render via `displayString` (ADR 0094,
@@ -625,6 +630,14 @@ Rough phases; each is independently shippable and testable.
   sealed exit -> Nil`, `class sealed exit: code :: Integer -> Nil` (do not
   return). Document the entry-process-only boundary and the supervised-Actor
   restart caveat (§3).
+  - **Prerequisite (connected-mode path only).** This path depends on a
+    **session-termination hook** — ending the current session's job with a
+    status. ADR 0081 (First-Class Session Object) is *Accepted* and `Session`
+    exists, but it is read-mostly (binding layers) and exposes **no** termination
+    operation today; that hook must land before the connected-mode `Program
+    exit:` can ship. The run-mode and escript paths have no such dependency, so
+    Phase 3 must not be marked complete on those alone — the connected-mode path
+    is gated on the session-termination capability.
 - **VM-level (`System halt`/`halt:`):** `beamtalk_system:halt/0,1` →
   `erlang:halt/0,1` (no explicit pre-flush; `halt` flushes the `io` layer);
   Integer 0–255 validation (`#type_error` otherwise). Detect node-ownership via
