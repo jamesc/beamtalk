@@ -795,7 +795,7 @@ Erlang file write_file: "/tmp/out.txt" with: "data"
 - Bare `error` atom becomes `Result error: nil`
 - Tuples with 3+ elements, non-ok/error tuples, and non-tuple values pass through unchanged
 
-**Atom-enum precedence:** A pure-atom union type containing atoms beyond `ok`/`error` (e.g. `emergency | error | info | ...`) narrows to a singleton union (`#emergency | #error | #info | ...`) rather than being intercepted by Result recognition. Only unions whose atoms are a subset of `{ok, error}` map to `Result`.
+**Atom-enum precedence (type inference):** When the spec reader maps a pure-atom union type containing atoms beyond `ok`/`error` (e.g. `text | json | xml`), it infers a singleton union (`#text | #json | #xml`) rather than applying ADR-0076 Result recognition. Only unions whose atoms are a subset of `{ok, error}` infer as `Result`. Note: runtime `ok`/`error` coercion (`coerce_result/1`) is unconditional and spec-unaware — a function returning bare `ok` or `error` at runtime still produces a `Result` regardless of the inferred type.
 
 **`undefined` stays `#undefined`:** Erlang `undefined` in an FFI return type spec maps to the singleton `#undefined` (a `Symbol`), not `Nil`. The FFI boundary does not coerce `undefined` → `nil` — callsites that want nil semantics must convert explicitly.
 
