@@ -4309,7 +4309,7 @@ fn test_init_parent_actor_subclass_calls_parent_init() {
 //   TypeAnnotation variant; coverage comes from the hierarchy path in
 //   inherited_typed_no_default_fields that calls is_nilable_type and
 //   type_annotation_display.
-// - Tests 7-12: direct CoreErlangGenerator unit tests (class_hierarchy = None)
+// - Tests 7-15: direct CoreErlangGenerator unit tests (class_hierarchy = None)
 //   to exercise the no-hierarchy fallback paths in both functions.
 
 /// Shared helper: a single-class Actor Module with one typed-no-default state field.
@@ -4655,5 +4655,26 @@ fn test_inherited_typed_no_default_fallback_class_of_type_display() {
     assert_eq!(
         fields[0].type_name, "Actor class",
         "ClassOf display should be 'Actor class'"
+    );
+}
+
+#[test]
+fn test_inherited_typed_no_default_fallback_false_or_type_display() {
+    // type_annotation_display FalseOr branch: directly assert the fallback
+    // display string (the generate_module test only checks it indirectly via
+    // emitted Core Erlang).
+    let s = Span::new(0, 0);
+    let false_or = TypeAnnotation::false_or(TypeAnnotation::simple("Integer", s), s);
+    let module = make_actor_typed_no_default("result", false_or);
+    let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
+    let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
+    assert_eq!(
+        fields.len(),
+        1,
+        "FalseOr field should appear in typed-no-default"
+    );
+    assert_eq!(
+        fields[0].type_name, "Integer | False",
+        "FalseOr display should be 'Integer | False'"
     );
 }
