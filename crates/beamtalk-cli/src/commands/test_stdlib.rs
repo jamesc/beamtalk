@@ -256,33 +256,42 @@ pub(crate) fn extract_assignment_var(expression: &str) -> Option<String> {
 /// Format an Erlang atom literal for use in generated assertion specs.
 ///
 /// Wraps the name in single quotes for Erlang atom safety.
-fn erlang_atom(name: &str) -> String {
+pub(crate) fn erlang_atom(name: &str) -> String {
     format!("'{name}'")
 }
 
-/// Check if a string contains `_` that should be treated as a wildcard.
+/// A single `EUnit` assertion case in normalised form.
 ///
-/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
-/// characters. This preserves literal underscores in identifiers like
-/// `does_not_understand` or `beamtalk_class`.
-pub(crate) fn has_wildcard_underscore(s: &str) -> bool {
-    let bytes = s.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        if b == b'_' {
-            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
-            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
-            if !before_alnum || !after_alnum {
-                return true;
-            }
-        }
-    }
-    false
+/// Both `TestCase` (btscript pipeline) and `DocTestCase` (doc-test pipeline)
+/// convert to this before calling [`generate_eunit_wrapper_for`].
+pub(crate) struct AssertionCase<'a> {
+    pub expression: &'a str,
+    pub expected: &'a Expected,
+    pub line: usize,
 }
 
-fn generate_eunit_wrapper(
-    test_module_name: &str,
-    test_file_path: &str,
-    cases: &[TestCase],
+/// Shared `EUnit` wrapper body used by both the btscript and doc-test pipelines.
+///
+/// Generates a complete `.erl` source string containing a single `EUnit` test
+/// that calls `beamtalk_stdlib_test:run_and_assert/2` with the supplied
+/// assertion specs.
+///
+/// # Parameters
+/// - `module_name` – the Erlang module name (used in `-module(...)` and in
+///   the `run_and_assert` call).
+/// - `test_fn_name` – the exported test function name exactly as it should
+///   appear in the generated source, e.g. `"my_module_test_"` or
+///   `"'bt@class_test_'"` (with quotes when the name contains `@`).
+/// - `header_comment` – the `%%` comment line written before `-module(...)`.
+/// - `source_path` – the source file path used inside location strings.
+/// - `cases` – normalised assertion cases.
+/// - `eval_module_names` – compiled eval module names, one per case.
+pub(crate) fn generate_eunit_wrapper_for(
+    module_name: &str,
+    test_fn_name: &str,
+    header_comment: &str,
+    source_path: &str,
+    cases: &[AssertionCase<'_>],
     eval_module_names: &[String],
 ) -> String {
     let mut erl = String::new();
@@ -290,8 +299,8 @@ fn generate_eunit_wrapper(
     // Module header
     let _ = writeln!(
         erl,
-        "%% Generated from {test_file_path}\n\
-         -module('{test_module_name}').\n\
+        "{header_comment}\n\
+         -module('{module_name}').\n\
          -include_lib(\"eunit/include/eunit.hrl\").\n"
     );
 
@@ -299,20 +308,20 @@ fn generate_eunit_wrapper(
     // Uses {timeout, 60, Fun} to avoid EUnit's 5s default (BT-729).
     let _ = writeln!(
         erl,
-        "{test_module_name}_test_() ->\n\
+        "{test_fn_name}() ->\n\
          \x20   {{timeout, 60, fun() ->\n\
-         \x20       beamtalk_stdlib_test:run_and_assert('{test_module_name}', ["
+         \x20       beamtalk_stdlib_test:run_and_assert('{module_name}', ["
     );
 
+    let escaped_file = escape_erlang_string(source_path);
     for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
-        // Build source location comment
-        let escaped_file = escape_erlang_string(test_file_path);
-        let escaped_expr = escape_erlang_string(&case.expression);
+        // Build source location string
+        let escaped_expr = escape_erlang_string(case.expression);
         let location = format!("{escaped_file}:{} `{escaped_expr}`", case.line);
         let location_bin = format!("<<\"{location}\"/utf8>>");
 
         // Variable binding name (atom or 'none')
-        let var_atom = match extract_assignment_var(&case.expression) {
+        let var_atom = match extract_assignment_var(case.expression) {
             Some(name) => erlang_atom(&name),
             None => "none".to_string(),
         };
@@ -320,7 +329,7 @@ fn generate_eunit_wrapper(
         // Trailing comma for all but last
         let comma = if i < cases.len() - 1 { "," } else { "" };
 
-        match &case.expected {
+        match case.expected {
             Expected::Error { kind } => {
                 let _ = writeln!(
                     erl,
@@ -366,8 +375,50 @@ fn generate_eunit_wrapper(
     }
 
     erl.push_str("       ])\n    end}.\n");
-
     erl
+}
+
+/// Check if a string contains `_` that should be treated as a wildcard.
+///
+/// A `_` is a wildcard if it is NOT flanked on both sides by alphanumeric
+/// characters. This preserves literal underscores in identifiers like
+/// `does_not_understand` or `beamtalk_class`.
+pub(crate) fn has_wildcard_underscore(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b == b'_' {
+            let before_alnum = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let after_alnum = i + 1 < bytes.len() && bytes[i + 1].is_ascii_alphanumeric();
+            if !before_alnum || !after_alnum {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn generate_eunit_wrapper(
+    test_module_name: &str,
+    test_file_path: &str,
+    cases: &[TestCase],
+    eval_module_names: &[String],
+) -> String {
+    let assertion_cases: Vec<AssertionCase<'_>> = cases
+        .iter()
+        .map(|c| AssertionCase {
+            expression: &c.expression,
+            expected: &c.expected,
+            line: c.line,
+        })
+        .collect();
+    generate_eunit_wrapper_for(
+        test_module_name,
+        &format!("{test_module_name}_test_"),
+        &format!("%% Generated from {test_file_path}"),
+        test_file_path,
+        &assertion_cases,
+        eval_module_names,
+    )
 }
 
 // ──────────────────────────────────────────────────────────────────────────

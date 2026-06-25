@@ -16,13 +16,11 @@
 
 use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
-    escape_erlang_string,
 };
 use beamtalk_core::file_walker::FileWalker;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write as _;
 use std::fs;
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
@@ -676,73 +674,24 @@ fn generate_doc_test_eunit_wrapper(
     cases: &[&super::doc_tests::DocTestCase],
     eval_module_names: &[String],
 ) -> String {
-    use super::doc_tests::Expected;
-    use super::test_stdlib::{
-        expected_to_binary_literal, extract_assignment_var, has_wildcard_underscore,
-    };
+    use super::test_stdlib::{AssertionCase, generate_eunit_wrapper_for};
 
-    let mut erl = String::new();
-
-    let _ = writeln!(
-        erl,
-        "%% Doc tests from {source_file} ({class_name})\n\
-         -module('{module_name}').\n\
-         -include_lib(\"eunit/include/eunit.hrl\").\n"
-    );
-
-    // Test generator — thin wrapper that delegates to beamtalk_stdlib_test.
-    let _ = writeln!(
-        erl,
-        "'{module_name}_test_'() ->\n\
-         \x20   {{timeout, 60, fun() ->\n\
-         \x20       beamtalk_stdlib_test:run_and_assert('{module_name}', ["
-    );
-
-    for (i, (case, eval_mod)) in cases.iter().zip(eval_module_names.iter()).enumerate() {
-        let escaped_file = escape_erlang_string(source_file);
-        let escaped_expr = escape_erlang_string(&case.expression);
-        let location = format!("{escaped_file}:{} `{escaped_expr}`", case.source_line);
-        let location_bin = format!("<<\"{location}\"/utf8>>");
-
-        let var_atom = match extract_assignment_var(&case.expression) {
-            Some(name) => format!("'{name}'"),
-            None => "none".to_string(),
-        };
-
-        let comma = if i < cases.len() - 1 { "," } else { "" };
-
-        match &case.expected {
-            Expected::Error { kind } => {
-                let _ = writeln!(
-                    erl,
-                    "           {{error, '{eval_mod}', '{kind}', {var_atom}, {location_bin}}}{comma}",
-                );
-            }
-            Expected::Value(v) if v == "_" => {
-                let _ = writeln!(
-                    erl,
-                    "           {{value_any, '{eval_mod}', {var_atom}, {location_bin}}}{comma}",
-                );
-            }
-            Expected::Value(v) if has_wildcard_underscore(v) => {
-                let expected_bin = expected_to_binary_literal(v);
-                let _ = writeln!(
-                    erl,
-                    "           {{value_wildcard, '{eval_mod}', {expected_bin}, {var_atom}, {location_bin}}}{comma}",
-                );
-            }
-            Expected::Value(v) => {
-                let expected_bin = expected_to_binary_literal(v);
-                let _ = writeln!(
-                    erl,
-                    "           {{value, '{eval_mod}', {expected_bin}, {var_atom}, {location_bin}}}{comma}",
-                );
-            }
-        }
-    }
-
-    erl.push_str("       ])\n    end}.\n");
-    erl
+    let assertion_cases: Vec<AssertionCase<'_>> = cases
+        .iter()
+        .map(|c| AssertionCase {
+            expression: &c.expression,
+            expected: &c.expected,
+            line: c.source_line,
+        })
+        .collect();
+    generate_eunit_wrapper_for(
+        module_name,
+        &format!("'{module_name}_test_'"),
+        &format!("%% Doc tests from {source_file} ({class_name})"),
+        source_file,
+        &assertion_cases,
+        eval_module_names,
+    )
 }
 
 // ──────────────────────────────────────────────────────────────────────────
