@@ -795,6 +795,10 @@ Erlang file write_file: "/tmp/out.txt" with: "data"
 - Bare `error` atom becomes `Result error: nil`
 - Tuples with 3+ elements, non-ok/error tuples, and non-tuple values pass through unchanged
 
+**Atom-enum precedence:** A pure-atom union type containing atoms beyond `ok`/`error` (e.g. `emergency | error | info | ...`) narrows to a singleton union (`#emergency | #error | #info | ...`) rather than being intercepted by Result recognition. Only unions whose atoms are a subset of `{ok, error}` map to `Result`.
+
+**`undefined` stays `#undefined`:** Erlang `undefined` in an FFI return type spec maps to the singleton `#undefined` (a `Symbol`), not `Nil`. The FFI boundary does not coerce `undefined` → `nil` — callsites that want nil semantics must convert explicitly.
+
 **Scope:** Conversion applies only to FFI calls via `Erlang module method: args`. Messages received from Erlang processes via `receive` or actor mailboxes remain raw Tuples. Use `Result fromTuple:` to explicitly convert those:
 
 ```beamtalk
@@ -1549,6 +1553,8 @@ withTimeout: ms :: Integer | #infinity => ...
 // a closed enum of singletons
 restart: policy :: #temporary | #transient | #permanent => ...
 ```
+
+A singleton receiver resolves methods against `Symbol`'s protocol — `#infinity asString` infers `String`, and an unknown selector produces a DNU hint naming the singleton (e.g. `#infinity does not understand 'frobnicate'`). Binary sends (`=:=`, `=`) are excluded from this redirect so statically-decidable comparison hints still fire.
 
 Discriminate a singleton union with `=:=` (identity) and the branches narrow — see [Control Flow Narrowing](#control-flow-narrowing).
 
@@ -3921,6 +3927,8 @@ All methods on an internal class are effectively internal. The method-level modi
 #### Metadata
 
 Visibility is recorded in `__beamtalk_meta/0` as a compile-time constant atom (`public` or `internal`). Tooling (LSP, REPL completions) uses this field to filter internal items from cross-package suggestions while still showing them in `:browse` and `:doc` output.
+
+`__beamtalk_meta/0` also carries toolchain provenance keys (`beamtalk_version` and `otp_release` as binary strings) when the module was compiled by a known toolchain (ADR 0098). Workspace attach and tooling use these to detect stale modules without re-reading the on-disk build stamp.
 
 See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full design, including edge cases (subclassing, protocol conformance, extension methods, `perform:` dynamic sends) and the enforcement model.
 
