@@ -4482,7 +4482,11 @@ fn test_user_defined_initialize_chain_fallback_with_initialize() {
     let (module, _) = crate::source_analysis::parse(tokens);
     let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
     let chain = generator.user_defined_initialize_chain(&module, "TestActor");
-    assert_eq!(chain.len(), 1, "Fallback should return one entry for the initialize method");
+    assert_eq!(
+        chain.len(),
+        1,
+        "Fallback should return one entry for the initialize method"
+    );
     assert_eq!(
         chain[0].class_name, "TestActor",
         "Chain entry should name the leaf class"
@@ -4542,9 +4546,16 @@ fn test_inherited_typed_no_default_fallback_singleton_type_display() {
     let module = make_actor_typed_no_default("status", singleton);
     let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
     let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
-    assert_eq!(fields.len(), 1, "Singleton field should appear in typed-no-default");
+    assert_eq!(
+        fields.len(),
+        1,
+        "Singleton field should appear in typed-no-default"
+    );
     assert_eq!(fields[0].field_name, "status");
-    assert_eq!(fields[0].type_name, "#ok", "Singleton display should be '#ok'");
+    assert_eq!(
+        fields[0].type_name, "#ok",
+        "Singleton display should be '#ok'"
+    );
 }
 
 #[test]
@@ -4555,8 +4566,15 @@ fn test_inherited_typed_no_default_fallback_self_type_display() {
     let module = make_actor_typed_no_default("selfRef", self_type);
     let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
     let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
-    assert_eq!(fields.len(), 1, "SelfType field should appear in typed-no-default");
-    assert_eq!(fields[0].type_name, "Self", "SelfType display should be 'Self'");
+    assert_eq!(
+        fields.len(),
+        1,
+        "SelfType field should appear in typed-no-default"
+    );
+    assert_eq!(
+        fields[0].type_name, "Self",
+        "SelfType display should be 'Self'"
+    );
 }
 
 #[test]
@@ -4567,7 +4585,11 @@ fn test_inherited_typed_no_default_fallback_self_class_display() {
     let module = make_actor_typed_no_default("classRef", self_class);
     let generator = crate::codegen::core_erlang::CoreErlangGenerator::new("bt@test_actor");
     let fields = generator.inherited_typed_no_default_fields(&module, "TestActor");
-    assert_eq!(fields.len(), 1, "SelfClass field should appear in typed-no-default");
+    assert_eq!(
+        fields.len(),
+        1,
+        "SelfClass field should appear in typed-no-default"
+    );
     assert_eq!(
         fields[0].type_name, "Self class",
         "SelfClass display should be 'Self class'"
