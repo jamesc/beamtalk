@@ -45,6 +45,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ClassRemoved"
             | "Collection"
             | "CompiledMethod"
+            | "Console"
             | "DateTime"
             | "Dictionary"
             | "DynamicSupervisor"
@@ -1071,6 +1072,38 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Convert the compiled method to a string.\n\n## Examples\n```beamtalk\n(Integer >> #+) asString\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Console".into(),
+        ClassInfo {
+            name: "Console".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "printLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stdout followed by a newline. Returns nil.\n\nRenders `aValue` via the `displayString` protocol (ADR 0094) — `\"abc\"`\nprints as `abc`, not `\"abc\"`.\n\n## Examples\n```beamtalk\nConsole printLine: \"hello\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "print:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stdout with no trailing newline. Returns nil.\n\n## Examples\n```beamtalk\nConsole print: \"hello\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "errorLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stderr followed by a newline. Returns nil.\n\n## Examples\n```beamtalk\nConsole errorLine: \"boom\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stderr with no trailing newline. Returns nil.\n\n## Examples\n```beamtalk\nConsole error: \"boom\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "flush".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Flush buffered output. Returns nil.\n\nThe BEAM io layer is synchronous, so output is already delivered when a\n`print:`/`printLine:` returns; `flush` exists for API symmetry and is\ncurrently a no-op.\n\n## Examples\n```beamtalk\nConsole flush\n// => nil\n```".into()) },
+                MethodInfo { selector: "readLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![], doc: Some("Read one line from stdin, with the trailing newline stripped.\n\nReturns the line as a `String`, or `nil` at end of input (including a\nclosed/absent stdin, e.g. under the REPL). Raises a `#beamtalk_error` on a\ngenuine mid-stream read failure.\n\n## Examples\n```beamtalk\n// Under `beamtalk run`; returns nil when stdin is closed.\nConsole readLine\n// => _\n```".into()) },
+                MethodInfo { selector: "readLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![Some("String".into())], doc: Some("Write a prompt to stdout (no newline), then read one line from stdin.\n\nSame return contract as `readLine`.\n\n## Examples\n```beamtalk\n// Under `beamtalk run`; returns nil when stdin is closed.\nConsole readLine: \"name? \"\n// => _\n```".into()) },
+            ],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],

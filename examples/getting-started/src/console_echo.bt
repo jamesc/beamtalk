@@ -1,0 +1,31 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Console echo — interactive-read smoke test for ADR 0099 §1 (Console).
+///
+/// Demonstrates the `Console` stdio surface: prompt, read a line from stdin,
+/// echo it to stdout, and write a goodbye to stderr. Returns nil at EOF
+/// (e.g. when stdin is closed or piped from /dev/null).
+///
+/// Run it (stdin attached to your terminal):
+///   $ beamtalk run ConsoleEcho run
+///   name? Alice
+///   Hello, Alice!
+///
+/// Or pipe input non-interactively:
+///   $ echo Bob | beamtalk run ConsoleEcho run
+///   Hello, Bob!
+///
+/// With no input (EOF), it reports the closed-stdin path:
+///   $ beamtalk run ConsoleEcho run < /dev/null
+///   no input (stdin closed or empty)
+Value subclass: ConsoleEcho
+
+  class run => self new run
+
+  run =>
+    line := Console readLine: "name? "
+    line isNil ifTrue: [
+      Console errorLine: "no input (stdin closed or empty)"
+    ] ifFalse: [Console printLine: "Hello, " ++ line ++ "!"]
+    self

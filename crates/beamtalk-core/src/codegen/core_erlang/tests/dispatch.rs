@@ -1408,6 +1408,55 @@ fn test_erlang_interop_direct_call_keyword_multi_arg() {
 }
 
 #[test]
+fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
+    // BT-2685: `(Erlang beamtalk_console) error: msg` is an Erlang FFI call to a
+    // function named `error`, NOT the `Object >> error:` error-signaling intrinsic.
+    // The receiver is wrapped in `Parenthesized` (the canonical `(Erlang mod)` form),
+    // which the FFI-receiver check must peel through. Regression for the bug where
+    // `Console error:` raised a `user_error` instead of writing to stderr.
+    let mut generator = CoreErlangGenerator::new("test");
+
+    let inner_receiver = Expression::MessageSend {
+        receiver: Box::new(Expression::ClassReference {
+            name: Identifier::new("Erlang", Span::new(1, 7)),
+            span: Span::new(1, 7),
+            package: None,
+        }),
+        selector: MessageSelector::Unary("beamtalk_console".into()),
+        arguments: vec![],
+        is_cast: false,
+        span: Span::new(1, 24),
+    };
+    // The parser wraps `(Erlang beamtalk_console)` in a Parenthesized node.
+    let receiver = Expression::Parenthesized {
+        expression: Box::new(inner_receiver),
+        span: Span::new(0, 25),
+    };
+    let selector = MessageSelector::Keyword(vec![KeywordPart::new("error:", Span::new(26, 32))]);
+    let arguments = vec![Expression::Literal(
+        Literal::String("boom".into()),
+        Span::new(33, 39),
+    )];
+
+    let doc = generator
+        .generate_message_send(&receiver, &selector, &arguments)
+        .unwrap();
+    let output = doc.to_pretty_string();
+
+    // The regression: error-signaling (`Object >> error:`) must NOT fire. It
+    // routes to the Erlang FFI proxy instead (the parenthesized receiver compiles
+    // to an `ErlangModule` proxy map dispatched at runtime to `beamtalk_console:error`).
+    assert!(
+        !output.contains("user_error") && !output.contains("with_message"),
+        "Must NOT generate the error-signaling intrinsic. Got: {output}"
+    );
+    assert!(
+        output.contains("ErlangModule") || output.contains("beamtalk_erlang_proxy"),
+        "Should route to the Erlang FFI proxy. Got: {output}"
+    );
+}
+
+#[test]
 fn test_erlang_interop_direct_call_zero_arg() {
     // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [])`
     // BT-1127: Routes through proxy for consistent validation/coercion
