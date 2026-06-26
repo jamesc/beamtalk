@@ -3,6 +3,10 @@
 ## Status
 Implemented (2026-03-10)
 
+**Amended by ADR 0099** (2026-06-25): the entry selector may also be a single
+arity-1 keyword selector (any name, e.g. `main:` — not a hard-coded literal)
+that receives argv as a `List(String)` — see ADR 0099 §"Amendment to ADR 0061".
+
 ## Context
 
 ### The Problem
