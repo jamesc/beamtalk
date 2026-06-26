@@ -213,7 +213,7 @@ canonical_slice_from_test() ->
 %% Property: many random construction paths to the same sequence collapse to one
 %% canonical term. Seeded for determinism.
 canonical_random_paths_property_test() ->
-    rand:seed(exsplus, {2680, 2681, 2682}),
+    rand:seed(exsss, {2680, 2681, 2682}),
     N = 40,
     Target = [rand:uniform(100) || _ <- lists:seq(1, N)],
     Literal = make_array(Target),
