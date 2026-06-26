@@ -52,10 +52,14 @@ is benign; a genuine I/O failure is surfaced.**
     `get_line` yielding `enotsup` is a genuine anomaly worth surfacing.
 
 * **Write side.** `print:` / `printLine:` / `error:` / `errorLine:` / `flush`
-  drop silently (returning `nil`) when the device is closed/absent
-  (`terminated`, `ebadf`) — writing to a detached node's stdout must not crash a
-  program. Any *other* failure, including `epipe` (a broken pipe is a genuine
-  mid-stream write failure, not an absent device), raises
+  drop silently (returning `nil`) when the device is closed/absent/broken —
+  writing to a detached node's stdout, or to a downstream pipe that has closed,
+  must not crash a program. `io:put_chars/2` does not *return* `{error, Reason}`
+  (its OTP spec is `-> ok`); a device failure *raises*. Empirically a broken pipe
+  (`… | head -1`) raises `error:terminated` (the writer process crashes with
+  `epipe` and the caller sees the io server gone), so `terminated` / `ebadf` /
+  `epipe` are all treated as closed-device and drop — `prog | head -1` exits 0,
+  the conventional Unix behaviour. A *genuine* data error (e.g. `badarg`) raises
   `#beamtalk_error{kind = io_error}`.
 
 ## REPL caveat
@@ -174,13 +178,14 @@ A closed/absent device drops silently (returns nil); any other failure raises
 """.
 -spec write(atom(), iodata(), atom()) -> 'nil'.
 write(Device, Data, Selector) ->
-    %% io:put_chars/2 returns `ok` and raises on failure. A genuine mid-stream
-    %% failure (e.g. a broken pipe) surfaces as an `error`-class exception whose
-    %% reason the allowlist classifies (`epipe` raises; `terminated`/`ebadf`
-    %% drop). An `exit`-class exception means the io *server process* itself is
-    %% gone — `noproc`, or `{normal, _}`/`{shutdown, _}` from a graceful
-    %% shutdown while the write was in flight — which is always the
-    %% closed/absent-device case, so it drops silently (symmetric with read/2).
+    %% io:put_chars/2 returns `ok`; device failures surface as *exceptions*, not a
+    %% `{error, Reason}` return (its OTP spec is `-> ok`). Empirically, a broken
+    %% downstream pipe (`… | head -1`) raises `error:terminated` — the writer
+    %% process crashes with `epipe` and the caller sees the io server as gone — so
+    %% the `error`-class catch routes it through the allowlist (`terminated` /
+    %% `ebadf` / `epipe` drop; genuine data errors like `badarg` raise). An
+    %% `exit`-class exception (a graceful/`noproc` shutdown mid-write) is likewise
+    %% the closed/absent-device case and drops (symmetric with read/2).
     try
         io:put_chars(Device, Data),
         nil
@@ -218,20 +223,24 @@ handle_io_error(Reason, Selector) ->
     end.
 
 -doc """
-The closed/absent-device allowlist for **error-class** io failures.
+The closed/absent/broken-device allowlist for **error-class** io failures.
 
-`terminated` — the io server (e.g. a detached node's) has gone.
-`ebadf` — the descriptor was never opened.
-Everything else (incl. `epipe`, `enotsup`) is a genuine failure — see module doc.
+`terminated` — the io server (e.g. a detached node's, or a broken downstream
+pipe whose writer process crashed) has gone. `ebadf` — the descriptor was never
+opened. `epipe` — a broken downstream pipe, included defensively in case a
+backend surfaces it as the raw reason rather than `terminated` (so `prog |
+head -1` is the conventional silent exit-0 either way).
 
-A dead io-*server process* surfaces as an `exit`-class exception (`noproc`,
-`{normal, _}`, `{shutdown, _}`, …), which the read/write catch clauses already
+Everything else (e.g. `badarg` from malformed data) is a genuine failure and
+raises. A dead io-*server process* can also surface as an `exit`-class exception
+(`noproc`, `{normal, _}`, `{shutdown, _}`, …), which the read/write catch clauses
 treat as the closed/absent-device case (`exit:_ -> nil`); those reasons never
 reach this error-class allowlist.
 """.
 -spec closed_device(term()) -> boolean().
 closed_device(terminated) -> true;
 closed_device(ebadf) -> true;
+closed_device(epipe) -> true;
 closed_device(_) -> false.
 
 -doc "Convert io:get_line/2 output (a codepoint list or binary) to a UTF-8 binary.".

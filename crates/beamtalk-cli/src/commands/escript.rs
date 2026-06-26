@@ -264,7 +264,7 @@ fn generate_boot_module(
          -export([main/1]).\n\
          \n\
          main(Args) ->\n\
-         {{ok, _}} = application:ensure_all_started(beamtalk_workspace),\n\
+         \x20   {{ok, _}} = application:ensure_all_started(beamtalk_workspace),\n\
          \x20   application:set_env(beamtalk_runtime, node_owning, true),\n\
          \x20   application:set_env(beamtalk_runtime, program_name,\n\
          \x20       unicode:characters_to_binary(filename:basename(escript:script_name()))),\n\

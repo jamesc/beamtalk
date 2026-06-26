@@ -98,6 +98,11 @@ init(Config) ->
     %% compiler-port binary, so it sets `start_compiler => false` to skip this —
     %% otherwise the compiler server crashes on the missing port and dumps a
     %% spurious SASL crash report to stderr.
+    %%
+    %% `start_compiler` is an internal boolean config (defaulting to `true`); the
+    %% two-clause match is intentionally fail-loud — an unexpected value is a
+    %% programming error, not a runtime input, so it should crash rather than be
+    %% silently coerced.
     case maps:get(start_compiler, Config, true) of
         false ->
             ok;
