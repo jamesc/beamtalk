@@ -42,6 +42,7 @@ leak compiler/runtime internals.
 |-----|-------|-------------|
 | result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, `clone`, tracing read ops |
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
+| script_exit | `{script_exit, Code, Output, Warnings}` | `eval` (connected `Program exit:`, BT-2688) |
 | actors | `{actors, [ActorMeta]}` | `actors` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
 | status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
@@ -98,6 +99,7 @@ tagged terms; `encode/2` is the only thing that turns them into JSON.
 -type op_result() ::
     {ok, Value :: term(), Output :: binary(), Warnings :: [binary()]}
     | {trace, Steps :: [term()], Output :: binary(), Warnings :: [binary()]}
+    | {script_exit, Code :: non_neg_integer(), Output :: binary(), Warnings :: [binary()]}
     | {actors, [map()]}
     | {inspect, map() | binary()}
     | {status, ok}
@@ -222,6 +224,11 @@ encode({trace, Steps, Output, Warnings}, Msg) ->
     beamtalk_repl_protocol:encode_trace_result(
         Steps, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
     );
+encode({script_exit, Code, Output, Warnings}, Msg) ->
+    %% BT-2688: connected-session `Program exit: Code`. Carries the POSIX exit
+    %% status in a dedicated `exit_code` field; the session shell has already
+    %% terminated by the time this reply is encoded.
+    beamtalk_repl_protocol:encode_script_exit(Code, Msg, Output, Warnings);
 encode({actors, Actors}, Msg) ->
     beamtalk_repl_protocol:encode_actors(Actors, Msg, fun beamtalk_repl_json:term_to_json/1);
 encode({inspect, Map}, Msg) when is_map(Map) ->

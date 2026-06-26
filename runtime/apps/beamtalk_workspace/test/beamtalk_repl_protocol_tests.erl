@@ -193,6 +193,35 @@ encode_sessions_new_format_test() ->
     SessionList = maps:get(<<"sessions">>, Decoded),
     ?assertEqual(2, length(SessionList)).
 
+%% BT-2688: connected-session `Program exit:` reply carries the POSIX exit status
+%% in `exit_code`, alongside a `done` status and a null value — NOT an error.
+encode_script_exit_new_format_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-exit-1">>, <<"alice">>, false),
+    Result = beamtalk_repl_protocol:encode_script_exit(5, Msg, <<>>, []),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"msg-exit-1">>, maps:get(<<"id">>, Decoded)),
+    ?assertEqual(<<"alice">>, maps:get(<<"session">>, Decoded)),
+    ?assertEqual(5, maps:get(<<"exit_code">>, Decoded)),
+    ?assertEqual(null, maps:get(<<"value">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
+    %% Crucially a success, not an error: no "error" flag in status.
+    ?assertNot(lists:member(<<"error">>, maps:get(<<"status">>, Decoded))).
+
+encode_script_exit_with_output_test() ->
+    Msg = make_msg(<<"eval">>, <<"msg-exit-2">>, undefined, false),
+    Result = beamtalk_repl_protocol:encode_script_exit(0, Msg, <<"bye\n">>, []),
+    Decoded = json:decode(Result),
+    ?assertEqual(0, maps:get(<<"exit_code">>, Decoded)),
+    ?assertEqual(<<"bye\n">>, maps:get(<<"output">>, Decoded)).
+
+encode_script_exit_legacy_format_test() ->
+    Msg = make_msg(<<"eval">>, undefined, undefined, true),
+    Result = beamtalk_repl_protocol:encode_script_exit(3, Msg, <<>>, []),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"result">>, maps:get(<<"type">>, Decoded)),
+    ?assertEqual(3, maps:get(<<"exit_code">>, Decoded)),
+    ?assertEqual(null, maps:get(<<"value">>, Decoded)).
+
 %%% Encode tests (legacy format)
 
 encode_result_legacy_format_test() ->
