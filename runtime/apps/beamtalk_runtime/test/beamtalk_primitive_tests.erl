@@ -1826,7 +1826,7 @@ print_string_map_set_test() ->
     ?assertMatch(<<"Set(", _/binary>>, Result).
 
 print_string_map_array_test() ->
-    ArrMap = #{'$beamtalk_class' => 'Array', data => array:from_list([1, 2])},
+    ArrMap = #{'$beamtalk_class' => 'Array', data => #{0 => 1, 1 => 2}},
     Result = beamtalk_primitive:print_string(ArrMap),
     ?assertMatch(<<"#[", _/binary>>, Result).
 

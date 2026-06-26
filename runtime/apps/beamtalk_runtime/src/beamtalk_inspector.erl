@@ -578,7 +578,7 @@ collection_size(Subject) when is_list(Subject) ->
     length(Subject);
 collection_size(Subject) when is_map(Subject) ->
     case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
-        'Array' -> array:size(array_data(Subject));
+        'Array' -> beamtalk_tagged_map:array_size(Subject);
         'Set' -> length(set_elements(Subject));
         'Bag' -> bag_size(Subject);
         _ -> dictionary_size(Subject)
@@ -615,26 +615,33 @@ collection_fields(Subject, Page, Prov) ->
     end.
 
 %% The page-`Page` window of an ordered collection's elements, materialising only
-%% the window. For an `Array` this is `array:get/2` over the window's index range
-%% — no full `array:to_list/1` per `fields` call. List/Set slice the in-memory
-%% list (already cheap; no conversion) (BT-2507).
+%% the window. For an `Array` this is direct key lookup into the index→value
+%% `'data'` map over the window's index range — no full materialisation per
+%% `fields` call. List/Set slice the in-memory list (already cheap; no
+%% conversion) (BT-2507).
 -spec ordered_window(term(), non_neg_integer()) -> [term()].
 ordered_window(Subject, Page) when is_map(Subject) ->
     case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
-        'Array' -> array_window(array_data(Subject), Page);
+        'Array' -> array_window(beamtalk_tagged_map:array_data(Subject), Page);
         _ -> window(ordered_elements(Subject), Page)
     end;
 ordered_window(Subject, Page) ->
     window(ordered_elements(Subject), Page).
 
-%% The page-`Page` window of an `array` via `array:get/2` over its index range —
-%% at most `?PAGE_SIZE` elements, never the whole array. Indices are 0-based; an
-%% empty range (past the end) yields `[]`.
--spec array_window(array:array(), non_neg_integer()) -> [term()].
-array_window(Arr, Page) ->
+%% The page-`Page` window of an Array's canonical index→value `'data'` map via
+%% direct key lookup over its index range — at most `?PAGE_SIZE` elements, never
+%% the whole map. Indices are 0-based; an empty range (past the end) yields `[]`.
+%% `maps:is_key/2` guards against a forged non-contiguous index set (BT-2509).
+-spec array_window(#{non_neg_integer() => term()}, non_neg_integer()) -> [term()].
+array_window(Data, Page) ->
     Start = Page * ?PAGE_SIZE,
-    End = min(Start + ?PAGE_SIZE, array:size(Arr)),
-    [array:get(I, Arr) || I <- lists:seq(Start, End - 1)].
+    End = min(Start + ?PAGE_SIZE, maps:size(Data)),
+    %% For a forged non-contiguous index set (BT-2509), `maps:size` counts all
+    %% keys but the `is_key` guard only emits those in the contiguous 0..N-1
+    %% prefix — so a malformed Array can render fewer elements than `sizeOf`
+    %% reports. Canonical arrays (the only ones beamtalk_array builds) always
+    %% have contiguous keys, so header and body agree.
+    [maps:get(I, Data) || I <- lists:seq(Start, End - 1), maps:is_key(I, Data)].
 
 %% The associations of a keyed collection (Dictionary key→value, Bag element→
 %% count) as a `{Key, Value}` list, or `not_keyed` for an ordered collection.
@@ -655,21 +662,9 @@ ordered_elements(Subject) when is_list(Subject) ->
     Subject;
 ordered_elements(Subject) when is_map(Subject) ->
     case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
-        'Array' -> array:to_list(array_data(Subject));
+        'Array' -> beamtalk_tagged_map:array_to_list(Subject);
         'Set' -> set_elements(Subject);
         _ -> []
-    end.
-
-%% The `array`-backing of an `Array` tagged map. A forged/malformed tagged map
-%% (e.g. `#{'$beamtalk_class' => 'Array', data => 42}`) whose `data` is missing or
-%% not a real `array` must not crash `array:size/1`/`array:to_list/1` — degrade to
-%% an empty array (BT-2509). `array:is_array/1` is total (false for any non-array).
--spec array_data(map()) -> array:array().
-array_data(Subject) ->
-    Data = maps:get(data, Subject, array:new()),
-    case array:is_array(Data) of
-        true -> Data;
-        false -> array:new()
     end.
 
 %% The `ordsets`-backed element list of a `Set` — `[]` for a forged map whose
@@ -747,9 +742,9 @@ element_at(Subject, Index) when is_integer(Index), Index >= 1 ->
         _ when is_map(Subject) ->
             case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
                 'Array' ->
-                    Arr = array_data(Subject),
-                    case Index =< array:size(Arr) of
-                        true -> {ok, array:get(Index - 1, Arr)};
+                    Data = beamtalk_tagged_map:array_data(Subject),
+                    case Index =< maps:size(Data) andalso maps:is_key(Index - 1, Data) of
+                        true -> {ok, maps:get(Index - 1, Data)};
                         false -> out_of_range
                     end;
                 'Set' ->

@@ -35,6 +35,9 @@ See also: beamtalk_object For Object base class reflection using tagged maps.
 %% Internal field management
 -export([internal_fields/0, user_field_keys/1]).
 
+%% Canonical Array representation readers (ADR 0090)
+-export([array_data/1, array_to_list/1, array_size/1]).
+
 %% Display
 -export([format_for_display/1]).
 
@@ -142,6 +145,50 @@ Filters out all internal fields (class, class_mod, methods, registry_pid).
 user_field_keys(State) when is_map(State) ->
     Internals = internal_fields(),
     [K || K <- maps:keys(State), not lists:member(K, Internals)].
+
+%%% ============================================================================
+%%% Array Representation Readers (ADR 0090)
+%%%
+%%% A Beamtalk `Array` is the tagged map
+%%% `#{'$beamtalk_class' => 'Array', 'data' => #{0 => V0, 1 => V1, ...}}`,
+%%% where `'data'` is a canonical index→value map (keys `0..N-1`). The canonical
+%%% map representation is owned and constructed by `beamtalk_array` (stdlib);
+%%% these readers let lower-layer runtime modules (which cannot depend on stdlib)
+%%% interpret the `'data'` payload from a single source of truth. They are
+%%% forge-tolerant — a malformed `'data'` (missing or not a map, BT-2509) degrades
+%%% to an empty array rather than crashing.
+%%% ============================================================================
+
+-doc """
+Return the canonical index→value `'data'` map of an Array tagged map.
+
+Degrades to `#{}` when `'data'` is absent or not a map (forged/malformed input).
+""".
+-spec array_data(map()) -> #{non_neg_integer() => term()}.
+array_data(Subject) when is_map(Subject) ->
+    case maps:get(data, Subject, #{}) of
+        Data when is_map(Data) -> Data;
+        _ -> #{}
+    end.
+
+-doc "Return the number of elements in an Array tagged map.".
+-spec array_size(map()) -> non_neg_integer().
+array_size(Subject) ->
+    maps:size(array_data(Subject)).
+
+-doc """
+Return the elements of an Array tagged map as an ordered list (index `0..N-1`).
+
+Sorts by the integer index key, so it is correct for canonical arrays and total
+for forged ones (no crash on a non-contiguous index set).
+""".
+-spec array_to_list(map()) -> [term()].
+array_to_list(Subject) ->
+    Data = array_data(Subject),
+    %% The sort gives forge-tolerance on a non-canonical index set. Hot paths
+    %% inside beamtalk_array instead use its private data_to_list/1, which reads
+    %% canonical 0..N-1 keys directly (no sort; assumes contiguous keys).
+    [Value || {_Index, Value} <- lists:sort(maps:to_list(Data))].
 
 %%% ============================================================================
 %%% Display

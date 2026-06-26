@@ -3976,7 +3976,7 @@ See [ADR 0071](ADR/0071-class-visibility-internal-modifier.md) for the full desi
 | Class | Description |
 |-------|-------------|
 | **Binary** | Byte-level data — Collection subclass, parent of String ([ADR 0086](ADR/0086-string-subclass-of-binary.md)) |
-| **Array** | Fixed-size indexed collection |
+| **Array** | Fixed-size indexed collection — O(log n) `at:`/`at:put:`, canonical value equality regardless of edit history ([ADR 0090](ADR/0090-array-canonical-representation.md)) |
 | **List** | Linked list with fast prepend (`#()` syntax) |
 | **Dictionary** | Key-value map |
 | **Set** | Unordered unique elements |

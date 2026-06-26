@@ -324,11 +324,10 @@ maybe_add_dir(Config, Base) ->
 
 -doc "Coerce a Beamtalk Array (tagged map) or plain list to an Erlang list.".
 -spec coerce_args(term()) -> {ok, list()} | {error, term()}.
-coerce_args(#{'$beamtalk_class' := 'Array', 'data' := Arr}) ->
-    case array:is_array(Arr) of
-        true -> {ok, array:to_list(Arr)};
-        false -> {error, {type_error, args, invalid_array}}
-    end;
+coerce_args(#{'$beamtalk_class' := 'Array', 'data' := Data} = Arr) when is_map(Data) ->
+    {ok, beamtalk_tagged_map:array_to_list(Arr)};
+coerce_args(#{'$beamtalk_class' := 'Array'}) ->
+    {error, {type_error, args, invalid_array}};
 coerce_args(List) when is_list(List) ->
     {ok, List};
 coerce_args(_Other) ->

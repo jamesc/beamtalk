@@ -1,7 +1,7 @@
 # ADR 0090: Canonical Array Representation for O(log n) `at:put:`
 
 ## Status
-Accepted (2026-06-02)
+Implemented (2026-06-25) — map-backed representation (BT-2680). Accepted 2026-06-02.
 
 ## Context
 
