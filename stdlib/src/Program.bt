@@ -31,3 +31,39 @@ sealed typed Object subclass: Program
   /// // => "beamtalk"
   /// ```
   class sealed name -> String => (Erlang beamtalk_program) name
+
+  /// End this program with status 0 — the job-level, safe exit. Does not return.
+  ///
+  /// In run-mode / escript (where the program owns the node) this exits the node
+  /// with status 0. See `exit:` for the full contract and the process-boundary
+  /// caveat.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program exit
+  /// // => _
+  /// ```
+  class sealed exit -> Nil => (Erlang beamtalk_program) exit
+
+  /// End this program with status `code` — the job-level, safe exit (ADR 0099).
+  /// Does not return.
+  ///
+  /// Where `System halt:` halts the whole VM, `Program exit:` ends *this program*.
+  /// In run-mode / escript it exits the node with `code`; in a shared/connected
+  /// workspace it ends only this session's job (pending the Session-termination
+  /// hook, BT-2688) and leaves the node up.
+  ///
+  /// **Process boundary:** the run-mode / escript path is an immediate node
+  /// halt, so it is effective from *any* process (the node is dedicated to this
+  /// program). The connected-mode path (Phase 5) instead ends the session via a
+  /// caught signal and so is effective only from the entry method's own call
+  /// chain — there a spawned Actor returns a status to the entry method and lets
+  /// *it* call `exit:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program exit: 2
+  /// // => _
+  /// ```
+  class sealed exit: code :: Integer -> Nil =>
+    (Erlang beamtalk_program) exit: code

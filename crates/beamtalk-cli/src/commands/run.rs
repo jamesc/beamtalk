@@ -284,7 +284,13 @@ fn run_script(
 
     if !status.success() {
         if let Some(code) = status.code() {
-            miette::bail!("Program exited with code {code}");
+            // ADR 0099 §3: the program owns its exit status. `Program exit: N`,
+            // `System halt: N`, and the implicit "uncaught error → 1" all surface
+            // as the BEAM node's exit code; propagate it verbatim as the CLI's own
+            // exit code (POSIX-correct for shells / CI `set -e`). The program has
+            // already written any diagnostics to its stderr, so we add no message.
+            info!(exit_code = code, "Script run exited non-zero");
+            std::process::exit(code);
         }
         // Signal-terminated (e.g. Ctrl+C) — exit silently
     }
@@ -330,6 +336,7 @@ fn build_script_eval_cmd(
         "{hex_deps_start}\
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
          application:set_env(beamtalk_runtime, program_name, <<\"beamtalk\">>), \
+         application:set_env(beamtalk_runtime, node_owning, true), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
          #{{workspace_id => <<\"{workspace_id}\">>, \
          project_path => <<\"{project_path_escaped}\">>, \
@@ -340,8 +347,7 @@ fn build_script_eval_cmd(
                  io:format(standard_error, \"Error: class '{class_name}' not found~n\", []), \
                  halt(1); \
              _ -> \
-                 beamtalk_class_dispatch:class_send(ClassPid, {selector_atom}, {dispatch_args}), \
-                 halt(0) \
+                 beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args}) \
          end."
     )
 }
@@ -798,13 +804,12 @@ mod tests {
     #[test]
     fn test_script_eval_cmd_contains_dispatch_and_halt() {
         let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[]);
+        // The entry dispatch + implicit exit-code mapping is owned by the run
+        // harness (ADR 0099 §3); the eval routes through it instead of an inline
+        // class_send + halt(0).
         assert!(
-            cmd.contains("class_send(ClassPid, 'run', [])"),
-            "Eval should dispatch the selector: {cmd}"
-        );
-        assert!(
-            cmd.contains("halt(0)"),
-            "Eval should halt on success: {cmd}"
+            cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'run', [])"),
+            "Eval should dispatch via the run harness: {cmd}"
         );
         assert!(
             cmd.contains("halt(1)"),
@@ -918,7 +923,9 @@ mod tests {
         let args = vec!["Alice".to_string(), "Bob".to_string()];
         let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
         assert!(
-            cmd.contains(r#"class_send(ClassPid, 'main:', [[<<"Alice">>, <<"Bob">>]])"#),
+            cmd.contains(
+                r#"beamtalk_script_harness:dispatch(ClassPid, 'main:', [[<<"Alice">>, <<"Bob">>]])"#
+            ),
             "Keyword entry should receive argv as one List(String): {cmd}"
         );
     }
@@ -928,7 +935,7 @@ mod tests {
         // No args → the argv List(String) is empty, but the entry is still arity-1.
         let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &[], &[]);
         assert!(
-            cmd.contains("class_send(ClassPid, 'main:', [[]])"),
+            cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'main:', [[]])"),
             "Empty argv should be a one-element dispatch list holding []: {cmd}"
         );
     }
@@ -953,6 +960,18 @@ mod tests {
         assert!(
             cmd.contains(r#"application:set_env(beamtalk_runtime, program_name, <<"beamtalk">>)"#),
             "Run-mode boot should seed program_name: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_seeds_node_owning_env() {
+        // node_owning app env is seeded at boot so `System halt:` / `Program exit:`
+        // know the program owns the node (ADR 0099 §3). Absent on the
+        // shared/persistent path, where halt is refused.
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[]);
+        assert!(
+            cmd.contains("application:set_env(beamtalk_runtime, node_owning, true)"),
+            "Run-mode boot should seed node_owning: {cmd}"
         );
     }
 }
