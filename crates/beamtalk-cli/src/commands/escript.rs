@@ -349,7 +349,7 @@ fn set_executable(path: &Path) -> Result<()> {
     // `\`), so the body must reference only the escript's file name — using the
     // full (possibly relative) path here would double-prefix the directory
     // (e.g. `-o dist/greeter` -> `C:\...\dist\dist/greeter`).
-    let file_name = path.file_name().unwrap_or_else(|| path.as_os_str());
+    let file_name = path.file_name().unwrap_or(path.as_os_str());
     let launcher = format!(
         "@echo off\r\nescript \"%~dp0{}\" %*\r\n",
         Path::new(file_name).display()

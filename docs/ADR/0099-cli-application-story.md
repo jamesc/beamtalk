@@ -629,7 +629,7 @@ Rough phases; each is independently shippable and testable.
 - Connected mode: carry the argument list inside the REPL-protocol eval request;
   the session evaluator dispatches `Class>>main: List`. One-shot, no node-global
   store.
-- `beamtalk_program.erl` + `stdlib/src/Program.bt`: `name`
+- `beamtalk_program.erl` + `stdlib/src/Program.bt`: `commandName`
   (`escript:script_name/0` under escript, else `"beamtalk"`). `exit`/`exit:`
   land in Phase 3.
 
