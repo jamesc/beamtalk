@@ -6,9 +6,9 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Maps `@primitive "selector"` annotations for the `Array` class to
-//! calls on `beamtalk_array`. Arrays are backed by Erlang's `array`
-//! module and stored as tagged maps:
-//!   `#{'$beamtalk_class' => 'Array', 'data' => ErlangArray}`
+//! calls on `beamtalk_array`. Arrays are stored as tagged maps with a
+//! canonical index→value `'data'` map (ADR 0090):
+//!   `#{'$beamtalk_class' => 'Array', 'data' => #{0 => V0, 1 => V1, ...}}`
 
 use super::super::document::Document;
 use super::super::document::leaf;

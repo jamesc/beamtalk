@@ -615,9 +615,10 @@ collection_fields(Subject, Page, Prov) ->
     end.
 
 %% The page-`Page` window of an ordered collection's elements, materialising only
-%% the window. For an `Array` this is `array:get/2` over the window's index range
-%% — no full `array:to_list/1` per `fields` call. List/Set slice the in-memory
-%% list (already cheap; no conversion) (BT-2507).
+%% the window. For an `Array` this is direct key lookup into the index→value
+%% `'data'` map over the window's index range — no full materialisation per
+%% `fields` call. List/Set slice the in-memory list (already cheap; no
+%% conversion) (BT-2507).
 -spec ordered_window(term(), non_neg_integer()) -> [term()].
 ordered_window(Subject, Page) when is_map(Subject) ->
     case beamtalk_tagged_map:class_of(Subject, 'Dictionary') of
