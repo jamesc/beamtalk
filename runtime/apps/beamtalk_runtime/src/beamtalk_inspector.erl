@@ -636,6 +636,11 @@ ordered_window(Subject, Page) ->
 array_window(Data, Page) ->
     Start = Page * ?PAGE_SIZE,
     End = min(Start + ?PAGE_SIZE, maps:size(Data)),
+    %% For a forged non-contiguous index set (BT-2509), `maps:size` counts all
+    %% keys but the `is_key` guard only emits those in the contiguous 0..N-1
+    %% prefix — so a malformed Array can render fewer elements than `sizeOf`
+    %% reports. Canonical arrays (the only ones beamtalk_array builds) always
+    %% have contiguous keys, so header and body agree.
     [maps:get(I, Data) || I <- lists:seq(Start, End - 1), maps:is_key(I, Data)].
 
 %% The associations of a keyed collection (Dictionary key→value, Bag element→
