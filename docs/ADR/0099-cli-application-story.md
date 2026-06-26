@@ -5,8 +5,8 @@ Proposed (2026-06-25)
 
 **Amends ADR 0061** (Program Entry Points and Run Lifecycle): relaxes its
 unary-only entry-selector rule to also accept a single arity-1 keyword selector
-(`main:`) that receives the program's arguments. See "Amendment to ADR 0061"
-below.
+(any name, e.g. `main:`) that receives the program's arguments. See "Amendment
+to ADR 0061" below.
 
 > **Numbering note:** This ADR was originally tracked (BT-1687) as "ADR 0071".
 > That number was taken by ADR 0071 (Class Visibility — `internal` Modifier)
@@ -134,9 +134,9 @@ of the *running* program.
 
 ```beamtalk
 Console printLine: aValue            // stdout + newline   (aValue :: Printable)
-Console print: aValue                // stdout, no newline
-Console errorLine: aValue            // stderr + newline
-Console error: aValue                // stderr, no newline
+Console print: aValue                // stdout, no newline  (aValue :: Printable)
+Console errorLine: aValue            // stderr + newline    (aValue :: Printable)
+Console error: aValue                // stderr, no newline  (aValue :: Printable)
 Console flush                        // flush buffered output
 
 line := Console readLine             // one line from stdin; nil at EOF
@@ -602,8 +602,10 @@ Rough phases; each is independently shippable and testable.
   `error:`/`flush`/`readLine`/`readLine:` over `standard_io` / `standard_error`
   (`io:put_chars/2`, `io:get_line/1`). `readLine` maps `eof` to `nil`; the
   closed-stdin allowlist (definitely `{error, terminated}`; evaluate `{error,
-  ebadf}` — only the never-opened case, *not* a mid-stream close — and `{error,
-  enotsup}` for non-tty stdin, each with documented rationale) also maps to
+  ebadf}` — only the never-opened case, *not* a mid-stream close — and confirm
+  whether `{error, enotsup}` ever arises for a readable stdin before including
+  it, since ordinary piped/redirected stdin returns data then `eof`; each with
+  documented rationale) also maps to
   `nil`, while any *other* `{error, Reason}` raises `#beamtalk_error{}`. Settle
   the write-side error contract too (see Open Questions). `isInteractive` is
   **deferred** (no portable tty check yet — see §1).
@@ -688,7 +690,9 @@ resolved (and tested) when its phase is built.
   `#beamtalk_error{}`, consistent with the `readLine` contract.
 - **Precise closed-stdin allowlist.** `{error, terminated}` is in; Phase 1 must
   decide `{error, ebadf}` (only the never-opened case, distinguished from a
-  mid-stream close) and `{error, enotsup}` (non-tty stdin), each with rationale.
+  mid-stream close) and whether `{error, enotsup}` ever arises for a *readable*
+  stdin at all (ordinary piped/redirected stdin returns data then `eof`), each
+  with documented rationale.
 - **`Program name` per-context value.** Run-mode and escript both set
   `node_owning => true`, so a second signal is needed to return `"beamtalk"` vs
   `escript:script_name/0` — a dedicated `program_name` `beamtalk_runtime` app env
