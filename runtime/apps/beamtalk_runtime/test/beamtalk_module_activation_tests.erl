@@ -90,6 +90,21 @@ topo_sort_map_format_test() ->
     ?assertEqual('A', maps:get(name, First)).
 
 %%% ============================================================================
+%%% activate_modules/2 tests (ADR 0099 §4 — escript-friendly list activation)
+%%% ============================================================================
+
+activate_modules_empty_test() ->
+    %% No modules → no work, no errors.
+    ?assertEqual({ok, []}, beamtalk_module_activation:activate_modules([], #{})).
+
+activate_modules_unloadable_reports_error_test() ->
+    %% An unknown/unloadable module is sorted into the no-class bucket and then
+    %% reported as an activation error rather than crashing the whole batch.
+    Bogus = 'bt@nonexistent@phantom_xyz',
+    {ok, Errors} = beamtalk_module_activation:activate_modules([Bogus], #{}),
+    ?assertMatch([{Bogus, _Reason}], Errors).
+
+%%% ============================================================================
 %%% is_valid_module_name/1 tests
 %%% ============================================================================
 

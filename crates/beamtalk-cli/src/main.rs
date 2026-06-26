@@ -59,6 +59,19 @@ enum Command {
         /// Force recompilation of all files, bypassing change detection
         #[arg(long)]
         force: bool,
+
+        /// Package the project as a single-file executable escript (ADR 0099)
+        #[arg(long)]
+        escript: bool,
+
+        /// Entry point for `--escript`, as `"ClassName selector"`
+        /// (e.g. `"Greeter main:"`)
+        #[arg(long, value_name = "ClassName selector")]
+        entry: Option<String>,
+
+        /// Output filename for `--escript` (defaults to the package name)
+        #[arg(short = 'o', long)]
+        output: Option<String>,
     },
 
     /// Compile the standard library (`lib/*.bt` → `runtime/apps/beamtalk_stdlib/ebin/`)
@@ -460,6 +473,9 @@ fn run() -> Result<()> {
             stdlib_mode,
             no_warnings,
             force,
+            escript,
+            entry,
+            output,
         } => {
             let options = beamtalk_core::CompilerOptions {
                 stdlib_mode,
@@ -468,7 +484,18 @@ fn run() -> Result<()> {
                 suppress_warnings: no_warnings,
                 ..Default::default()
             };
-            commands::build::build(&path, &options, force)
+            if escript {
+                let project_root = camino::Utf8PathBuf::from(&path);
+                commands::escript::build_escript(
+                    &project_root,
+                    entry.as_deref(),
+                    output.as_deref(),
+                    &options,
+                    force,
+                )
+            } else {
+                commands::build::build(&path, &options, force)
+            }
         }
         Command::BuildStdlib {
             quiet,
