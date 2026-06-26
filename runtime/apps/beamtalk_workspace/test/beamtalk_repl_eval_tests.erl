@@ -1780,8 +1780,48 @@ announce_binding_changed_session_id_nil_outside_worker_test() ->
 
 stdlib_gate_test_() ->
     {setup, fun stdlib_gate_setup/0, fun stdlib_gate_cleanup/1, [
-        {"compile_method on a stdlib class is refused", fun compile_method_stdlib_refused/0}
+        {"compile_method on a stdlib class is refused", fun compile_method_stdlib_refused/0},
+        {"resolve_entry finds a loaded class + selector", fun resolve_entry_loaded_class/0}
     ]}.
+
+%%====================================================================
+%% BT-2691: connected-mode `beamtalk run` entry dispatch (do_dispatch/5)
+%%====================================================================
+
+%% The arity-1 keyword form (`main:`) carries argv; the unary form (`run`) does
+%% not. A trailing `:` is the discriminator the CLI has already validated.
+is_keyword_selector_test() ->
+    ?assert(beamtalk_repl_eval:is_keyword_selector(<<"main:">>)),
+    ?assert(beamtalk_repl_eval:is_keyword_selector(<<"runWith:">>)),
+    ?assertNot(beamtalk_repl_eval:is_keyword_selector(<<"run">>)),
+    ?assertNot(beamtalk_repl_eval:is_keyword_selector(<<>>)).
+
+%% A class that is not loaded resolves to a structured class_not_found error,
+%% never a raise — so the connecting client gets a clean message + exit 1.
+do_dispatch_class_not_found_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:do_dispatch(
+        <<"NoSuchClassBT2691">>, <<"main:">>, [<<"a">>], undefined, State
+    ),
+    ?assertMatch(
+        {error, #beamtalk_error{kind = class_not_found}, <<>>, [], _}, Result
+    ),
+    {error, #beamtalk_error{message = Msg}, _, _, _} = Result,
+    ?assert(binary:match(Msg, <<"NoSuchClassBT2691">>) =/= nomatch).
+
+%% resolve_entry/2 against the live image: a loaded class + an existing selector
+%% yields `{ok, ClassPid, SelectorAtom}` (the inputs `class_send/3` consumes).
+resolve_entry_loaded_class() ->
+    ?assert(beamtalk_runtime_api:whereis_class('ErlangModule') =/= undefined),
+    Result = beamtalk_repl_eval:resolve_entry(
+        <<"ErlangModule">>, <<"doesNotUnderstand:args:">>
+    ),
+    ?assertMatch({ok, Pid, 'doesNotUnderstand:args:'} when is_pid(Pid), Result),
+    %% An unknown class is still a structured class_not_found error here.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = class_not_found}},
+        beamtalk_repl_eval:resolve_entry(<<"NoSuchClassBT2691">>, <<"main:">>)
+    ).
 
 stdlib_gate_setup() ->
     application:ensure_all_started(beamtalk_runtime),

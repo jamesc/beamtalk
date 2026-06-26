@@ -107,6 +107,17 @@ enum Command {
         /// tokens (e.g. `beamtalk run Greeter main: -- --verbose`).
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
+
+        /// Dispatch the entry into the project's live shared workspace over the
+        /// REPL protocol instead of starting a fresh run-mode node (BT-2691).
+        /// The workspace must already be running (`beamtalk repl` / `beamtalk run .`).
+        #[arg(long)]
+        connect: bool,
+
+        /// Connect to a specific workspace by name (implies `--connect`);
+        /// disambiguates when a project has more than one running workspace.
+        #[arg(long)]
+        workspace: Option<String>,
     },
 
     /// Create a new Beamtalk project (library by default, --app for application)
@@ -511,7 +522,15 @@ fn run() -> Result<()> {
             class_or_dot,
             selector,
             args,
-        } => commands::run::run(&class_or_dot, selector.as_deref(), &args),
+            connect,
+            workspace,
+        } => commands::run::run(
+            &class_or_dot,
+            selector.as_deref(),
+            &args,
+            connect,
+            workspace.as_deref(),
+        ),
         Command::New { name, app } => commands::new::new_project(&name, app),
         Command::Clean { deps, all, dry_run } => commands::clean::run(deps, all, dry_run),
         Command::Repl {

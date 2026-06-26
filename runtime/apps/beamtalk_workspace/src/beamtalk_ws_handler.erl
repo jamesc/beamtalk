@@ -409,6 +409,10 @@ handle_protocol(Data, SessionPid, State) ->
                 <<"eval">> ->
                     %% BT-696: Use async eval for streaming output
                     handle_eval_async(Msg, SessionPid, State);
+                <<"run-entry">> ->
+                    %% BT-2691: connected-mode `beamtalk run` — dispatch a class
+                    %% entry method with argv, streaming output like async eval.
+                    handle_run_entry_async(Msg, SessionPid, State);
                 <<"stdin">> ->
                     %% BT-698: Route stdin input to IO capture process
                     handle_stdin(Msg, State);
@@ -604,6 +608,76 @@ handle_eval_async(Msg, _SessionPid, State) ->
         Err2, Msg
     ),
     {[{text, Response}], State}.
+
+-doc """
+BT-2691: Handle the `run-entry` op — dispatch a class entry method (`class` /
+`selector` / `args`) with streaming output.
+
+The connected-mode `beamtalk run` consumer. `selector` carries its trailing `:`
+for the arity-1 keyword (`main:`) form; `args` is the program arguments as a JSON
+array of strings, delivered to the entry as a `List(String)`. Streams and
+terminates exactly like `handle_eval_async/3` (same `pending_eval` correlation and
+`{eval_*}` terminal messages), so a connected `Program exit: N` ends this session
+and the connecting client adopts `N`.
+""".
+handle_run_entry_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) ->
+    Params = beamtalk_repl_protocol:get_params(Msg),
+    ClassBin = maps:get(<<"class">>, Params, <<>>),
+    SelectorBin = maps:get(<<"selector">>, Params, <<>>),
+    RawArgs = maps:get(<<"args">>, Params, []),
+    case validate_run_entry(ClassBin, SelectorBin, RawArgs) of
+        {ok, Argv} ->
+            case is_process_alive(SessionPid) of
+                true ->
+                    beamtalk_repl_shell:dispatch_async(
+                        SessionPid, ClassBin, SelectorBin, Argv, self()
+                    ),
+                    {ok, State#ws_state{pending_eval = Msg}};
+                false ->
+                    Err = beamtalk_error:new(session_down, 'REPL'),
+                    Err1 = beamtalk_error:with_message(Err, <<"REPL session is not running">>),
+                    Err2 = beamtalk_error:with_hint(Err1, <<"Reconnect and retry.">>),
+                    {[{text, beamtalk_repl_json:encode_error(Err2, Msg)}], State}
+            end;
+        {error, Err} ->
+            {[{text, beamtalk_repl_json:encode_error(Err, Msg)}], State}
+    end;
+handle_run_entry_async(Msg, _SessionPid, State) ->
+    %% Already have a pending eval — reject to prevent mis-correlation
+    Err = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    {[{text, beamtalk_repl_json:encode_error(Err2, Msg)}], State}.
+
+%% Validate the `run-entry` op fields, returning the argv as a `List(String)`
+%% (a list of UTF-8 binaries) on success. `class`/`selector` must be non-empty
+%% binaries; `args` must be a (possibly empty) list of strings.
+-spec validate_run_entry(term(), term(), term()) ->
+    {ok, [binary()]} | {error, beamtalk_error:error()}.
+validate_run_entry(ClassBin, SelectorBin, RawArgs) when
+    is_binary(ClassBin), ClassBin =/= <<>>, is_binary(SelectorBin), SelectorBin =/= <<>>
+->
+    case run_entry_args(RawArgs, []) of
+        {ok, Argv} ->
+            {ok, Argv};
+        error ->
+            Err = beamtalk_error:new(invalid_argument, 'Program'),
+            Err1 = beamtalk_error:with_message(
+                Err, <<"run-entry `args` must be a list of strings">>
+            ),
+            {error, Err1}
+    end;
+validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
+    Err = beamtalk_error:new(invalid_argument, 'Program'),
+    Err1 = beamtalk_error:with_message(
+        Err, <<"run-entry requires non-empty `class` and `selector` strings">>
+    ),
+    {error, Err1}.
+
+-spec run_entry_args(term(), [binary()]) -> {ok, [binary()]} | error.
+run_entry_args([], Acc) -> {ok, lists:reverse(Acc)};
+run_entry_args([Arg | Rest], Acc) when is_binary(Arg) -> run_entry_args(Rest, [Arg | Acc]);
+run_entry_args(_, _Acc) -> error.
 
 -doc """
 BT-698: Handle stdin op — route input to IO capture process with ref correlation.
