@@ -119,7 +119,10 @@ fn ensure_runtime_built(
 /// `false` for the unary form.
 pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> Result<bool> {
     if class_name.is_empty()
-        || !class_name.chars().next().is_some_and(char::is_uppercase)
+        || !class_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase())
         || class_name
             .chars()
             .any(|c| !c.is_ascii_alphanumeric() && c != '_')

@@ -23,6 +23,16 @@
 /// (not the connected client) and `Console readLine` reads the server's stdin
 /// (typically closed) and returns `nil`. Inside the REPL, prefer `Transcript`.
 ///
+/// ## Closed streams
+///
+/// A *closed or absent* device is benign: writes drop silently (returning `nil`)
+/// and `readLine` returns `nil`, so a detached node's stdio never crashes a
+/// program. A *genuine* I/O failure is surfaced instead — notably a **broken
+/// pipe** (`epipe`, e.g. `beamtalk run Greeter main: | head -1` where the reader
+/// exits early) raises an error rather than silently dropping. Under `beamtalk
+/// run` that uncaught error makes the program exit non-zero; wrap the `Console`
+/// call if a clean exit on a closed downstream pipe is required.
+///
 /// ## Examples
 /// ```beamtalk
 /// Console printLine: "Hello, World!"
