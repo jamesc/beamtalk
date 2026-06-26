@@ -345,7 +345,15 @@ fn set_executable(path: &Path) -> Result<()> {
 #[cfg(not(unix))]
 fn set_executable(path: &Path) -> Result<()> {
     let cmd_path = format!("{}.cmd", path.display());
-    let launcher = format!("@echo off\r\nescript \"%~dp0{}\" %*\r\n", path.display());
+    // `%~dp0` already expands to the launcher's own drive+directory (trailing
+    // `\`), so the body must reference only the escript's file name — using the
+    // full (possibly relative) path here would double-prefix the directory
+    // (e.g. `-o dist/greeter` -> `C:\...\dist\dist/greeter`).
+    let file_name = path.file_name().unwrap_or_else(|| path.as_os_str());
+    let launcher = format!(
+        "@echo off\r\nescript \"%~dp0{}\" %*\r\n",
+        Path::new(file_name).display()
+    );
     std::fs::write(&cmd_path, launcher)
         .into_diagnostic()
         .wrap_err("Failed to write the Windows escript launcher")?;

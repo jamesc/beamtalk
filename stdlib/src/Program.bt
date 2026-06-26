@@ -8,13 +8,13 @@
 /// `nil` in compiled program code. All methods are class-side — `Program` has no
 /// instances (same shape as `System` and `Console`).
 ///
-/// It exposes `name` and the job-level half of the two-tier exit
+/// It exposes `commandName` and the job-level half of the two-tier exit
 /// (`exit` / `exit:`); `System halt:` is the node-level half.
 ///
 /// ## Examples
 /// ```beamtalk
 /// // Under `beamtalk run`, there is no argv[0]:
-/// Program name
+/// Program commandName
 /// // => "beamtalk"
 /// ```
 sealed typed Object subclass: Program
@@ -25,12 +25,17 @@ sealed typed Object subclass: Program
   /// there is no argv[0], so it is the literal `"beamtalk"`. Handy for usage and
   /// `--help` text; not load-bearing.
   ///
+  /// Named `commandName` (not `name`) deliberately: `name` is the sealed
+  /// reflective class-identity accessor (`Behaviour>>name`, a primitive used by
+  /// `SystemNavigation` and the class machinery), so a class-side `name` on
+  /// `Program` would shadow it and break reflection over the class universe.
+  ///
   /// ## Examples
   /// ```beamtalk
-  /// Program name
+  /// Program commandName
   /// // => "beamtalk"
   /// ```
-  class sealed name -> String => (Erlang beamtalk_program) name
+  class sealed commandName -> String => (Erlang beamtalk_program) commandName
 
   /// End this program with status 0 — the job-level, safe exit. Does not return.
   ///

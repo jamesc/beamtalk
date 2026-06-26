@@ -128,8 +128,8 @@ pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> R
             .any(|c| !c.is_ascii_alphanumeric() && c != '_')
     {
         miette::bail!(
-            "Invalid class name '{class_name}': class names must start with an uppercase letter \
-             and contain only alphanumeric characters and underscores"
+            "Invalid class name '{class_name}': class names must start with an ASCII uppercase \
+             letter and contain only ASCII alphanumeric characters and underscores"
         );
     }
 
@@ -162,8 +162,8 @@ pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> R
             .any(|c| !c.is_ascii_alphanumeric() && c != '_')
     {
         miette::bail!(
-            "Invalid selector '{selector}': selectors must start with a lowercase letter \
-             and contain only alphanumeric characters and underscores (an optional single \
+            "Invalid selector '{selector}': selectors must start with an ASCII lowercase letter \
+             and contain only ASCII alphanumeric characters and underscores (an optional single \
              trailing `:` for the arity-1 keyword form)."
         );
     }

@@ -8,12 +8,16 @@
 -moduledoc """
 Program class implementation — the running program/invocation (ADR 0099 §2).
 
-`Program` names *this running program* and ends it. It exposes `name` (a
-convenience for usage/`--help` text) and the job-level half of the two-tier exit
-(`exit`/`exit:`; `System halt:` is the node-level half). All methods are
+`Program` names *this running program* and ends it. It exposes `commandName`
+(a convenience for usage/`--help` text) and the job-level half of the two-tier
+exit (`exit`/`exit:`; `System halt:` is the node-level half). All methods are
 class-side — `Program` has no instances.
 
-## `name`
+The accessor is `commandName`, not `name`: `name` is the sealed reflective
+class-identity accessor (`Behaviour>>name`), so a class-side `name` on `Program`
+would shadow it and break `SystemNavigation` / reflection over the class universe.
+
+## `commandName`
 
 Returns the invoked program's name as a `String`:
 
@@ -33,7 +37,7 @@ mechanism settled for the `program_name` Open Question (ADR 0099 §2). Absent
 %% unqualified, and only ever call `erlang:halt/1` (also qualified).
 -compile({no_auto_import, [exit/1]}).
 
--export([name/0, exit/0, 'exit:'/1, exit/1]).
+-export([commandName/0, exit/0, 'exit:'/1, exit/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -42,8 +46,8 @@ mechanism settled for the `program_name` Open Question (ADR 0099 §2). Absent
 %%% ============================================================================
 
 -doc "Return the invoked program's name as a binary String.".
--spec name() -> binary().
-name() ->
+-spec commandName() -> binary().
+commandName() ->
     case application:get_env(beamtalk_runtime, program_name) of
         {ok, Name} when is_binary(Name) -> Name;
         {ok, Name} when is_list(Name) -> list_to_binary(Name);

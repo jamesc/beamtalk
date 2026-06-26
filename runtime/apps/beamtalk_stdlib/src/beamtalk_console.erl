@@ -249,8 +249,8 @@ to_binary(Data) when is_list(Data) ->
 strip_eol(Bin) ->
     Size = byte_size(Bin),
     case Bin of
-        <<Head:(Size - 2)/binary, "\r\n">> -> Head;
-        <<Head:(Size - 1)/binary, "\n">> -> Head;
+        <<Head:(Size - 2)/binary, "\r\n">> when Size >= 2 -> Head;
+        <<Head:(Size - 1)/binary, "\n">> when Size >= 1 -> Head;
         _ -> Bin
     end.
 

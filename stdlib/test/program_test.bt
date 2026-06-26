@@ -3,18 +3,25 @@
 
 // BUnit tests for the Program class (ADR 0099 §2, BT-2686).
 //
-// `Program name` reads the beamtalk_runtime `program_name` app env, defaulting
-// to "beamtalk" when unset (the run-mode / connected-workspace value). The
-// escript path overrides it with the script name in Phase 4.
+// `Program commandName` reads the beamtalk_runtime `program_name` app env,
+// defaulting to "beamtalk" when unset (the run-mode / connected-workspace value).
+// The escript path overrides it with the script name in Phase 4.
 
 TestCase subclass: ProgramTest
 
-  testNameReturnsString => self assert: Program name class equals: String
+  testCommandNameReturnsString =>
+    self assert: Program commandName class equals: String
 
-  testNameDefaultsToBeamtalk =>
-    // Under the test workspace the program_name env is unset, so name defaults
-    // to the run-mode literal "beamtalk".
-    self assert: Program name equals: "beamtalk"
+  testCommandNameDefaultsToBeamtalk =>
+    // Under the test workspace the program_name env is unset, so commandName
+    // defaults to the run-mode literal "beamtalk".
+    self assert: Program commandName equals: "beamtalk"
+
+  testNameIsReflectiveClassName =>
+    // `name` stays the sealed reflective class-identity accessor — defining the
+    // invocation accessor as `commandName` (not `name`) keeps this intact, so
+    // SystemNavigation's class-universe walk does not break (BT-2686 regression).
+    self assert: Program name equals: #Program
 
   testExitNonIntegerRaisesTypeError =>
     @expect type

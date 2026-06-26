@@ -237,9 +237,13 @@ argument, never stored:
   concurrent sessions never see each other's argv.
 - **Escript**: the generated `main/1` dispatches `Class>>main:` with its `Args`.
 
-**`Program name`.** A convenience for usage/`--help` text (not load-bearing):
-under a packaged escript it is `escript:script_name/0` (the invoked filename);
-under `beamtalk run` there is no argv[0], so it is the literal `"beamtalk"`.
+**`Program commandName`.** A convenience for usage/`--help` text (not
+load-bearing): under a packaged escript it is `escript:script_name/0` (the
+invoked filename); under `beamtalk run` there is no argv[0], so it is the literal
+`"beamtalk"`. It is spelled `commandName` rather than `name` because `name` is
+the sealed reflective class-identity accessor (`Behaviour>>name`); a class-side
+`name` on `Program` would shadow it and break `SystemNavigation` and other
+reflection over the class universe (`Program name` must stay `#Program`).
 
 ### 3. Exit — two tiers (`Program exit:` vs `System halt:`)
 
@@ -616,7 +620,7 @@ Rough phases; each is independently shippable and testable.
 - Tests: bootstrap/BUnit for the non-interactive methods; an `examples/`-style
   smoke script for interactive read under `beamtalk run`.
 
-### Phase 2 — `main:` entry contract + `Program name`
+### Phase 2 — `main:` entry contract + `Program commandName`
 - `crates/beamtalk-cli/src/commands/run.rs`: relax `validate_class_and_selector`
   to accept a single arity-1 keyword selector (one trailing `:`, still reject
   multi-keyword and arbitrary args); treat post-selector tokens as the argument
@@ -693,7 +697,7 @@ resolved (and tested) when its phase is built.
   mid-stream close) and whether `{error, enotsup}` ever arises for a *readable*
   stdin at all (ordinary piped/redirected stdin returns data then `eof`), each
   with documented rationale.
-- **`Program name` per-context value.** Run-mode and escript both set
+- **`Program commandName` per-context value.** Run-mode and escript both set
   `node_owning => true`, so a second signal is needed to return `"beamtalk"` vs
   `escript:script_name/0` — a dedicated `program_name` `beamtalk_runtime` app env
   seeded at boot is the likely mechanism (Phase 2).
