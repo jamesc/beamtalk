@@ -32,6 +32,11 @@ Transcript show: "Hello"; cr; show: "World"
 config := #{#host => "localhost", #port => 8080}
 ```
 
+…and a live, browser-based IDE attached to the running system — system browser,
+live method editing, and a workspace eval pane (the *[LiveView IDE](#liveview-ide)*):
+
+![The Beamtalk LiveView IDE — system browser, method editor, live bindings, and a workspace eval pane, all attached to a running workspace](docs/images/liveview-ide.png)
+
 ---
 
 ## Why Beamtalk?
@@ -45,27 +50,17 @@ config := #{#host => "localhost", #port => 8080}
 | **Reflection** | Inspect any actor's state and methods at runtime |
 | **Runs on BEAM** | Compiles to Core Erlang; deploy to existing OTP infrastructure |
 | **Native Erlang FFI** | Call any OTP function with typed specs and Result-shaped error coercion |
-| **Package manager** | Path / git / hex deps with lockfile, qualified `pkg@Class` names |
-| **Testing built-in** | SUnit-style `TestCase` framework with `beamtalk test` |
 
 ---
 
 ## What's New in 0.4
 
-- **Type system grows teeth.** Mark a class `typed` and the compiler flows types through generics, unions, narrowing predicates, FFI calls, and method-local type variables. `beamtalk type-coverage` reports per-file coverage, and the LSP "Dynamic with reason" hover shows *why* a chain decayed.
-- **Real package manager.** `[dependencies]` in `beamtalk.toml` (path / git / hex), `beamtalk.lock` for reproducibility, `beamtalk deps add`, and qualified `pkg@Class` names with cross-package collision detection.
-- **Native Erlang inside packages.** Drop `.erl` files in `native/` and they compile via a vendored `rebar3`; `beamtalk test` runs both `BUnit` and `EUnit`; `:h Erlang <module>` hovers on user-defined modules.
-- **Result-shaped FFI.** Erlang functions specced as `{ok, T} | {error, R}` are coerced to typed `Result(T, E)` at the boundary ([ADR 0076](docs/ADR/0076-ok-error-tuple-to-result-at-ffi-boundary.md)).
-- **Result-shaped supervisors.** `Supervisor>>supervise / terminate: / which:` and `DynamicSupervisor>>startChild` return `Result` instead of raising, with idempotent-startup semantics ([ADR 0080](docs/ADR/0080-supervisor-lifecycle-result.md)).
-- **Named actor registration.** `Class spawnAs: name`, `Class named: name`, supervised re-registration on restart ([ADR 0079](docs/ADR/0079-named-actor-registration.md)).
-- **`internal` modifier** for package-scoped access control ([ADR 0071](docs/ADR/0071-class-visibility-internal-modifier.md)).
-- **Local variable type annotations** — `name :: Type := expr`.
-- **Auto-chained `initialize`** across the actor hierarchy ([ADR 0078](docs/ADR/0078-actor-initialize-inheritance.md)).
-- **REPL `:sync`** supersedes `:load`/`:reload` for project-wide reloads; `:interrupt` cancels a running eval out-of-band; parallel `:test`.
-- **Live-edit save model** — `Counter >> sel => body` and `Counter compile: #sel source: body` patch memory and append to a workspace `ChangeLog`; `Workspace flush` (REPL `:flush`, MCP `flush`, LSP `beamtalk.flush*`) splices the patched body back into the `.bt` file via byte-span replacement, atomically, with external-edit conflict detection. `:dirty` / `:changes` show pending state; `Workspace autoflush: true` opts into write-through ([ADR 0082](docs/ADR/0082-method-level-edit-save-and-changelog.md)).
-- **Class crash recovery** via ETS `heir` so live actors keep dispatching after a class process restart.
+- **Type system grows teeth.** `typed` classes flow types through generics, unions, narrowing predicates, FFI calls, and method-local type variables; `beamtalk type-coverage` reports per-file coverage and the LSP shows *why* a chain decayed to `Dynamic`.
+- **Real package manager.** `[dependencies]` in `beamtalk.toml` (path / git / hex), `beamtalk.lock`, `beamtalk deps add`, and qualified `pkg@Class` names — including native `.erl` inside packages, compiled via a vendored `rebar3`.
+- **Result everywhere it counts.** FFI `{ok, T} | {error, R}` coerces to typed `Result(T, E)` at the boundary, and supervisor lifecycle calls return `Result` instead of raising.
+- **Live-edit save model.** Method-level edits patch memory and append to a workspace `ChangeLog`; `Workspace flush` splices the body back into the `.bt` file atomically, with external-edit conflict detection.
 
-See [CHANGELOG.md](CHANGELOG.md) for the full list.
+See [CHANGELOG.md](CHANGELOG.md) for the full list, including named actor registration, the `internal` modifier, auto-chained `initialize`, and class crash recovery.
 
 ---
 
@@ -244,7 +239,26 @@ If your stdlib source files are outside the project root, set:
 
 ### LiveView IDE
 
-A browser-based Smalltalk-style workspace (Workspace + live Transcript, Inspector, method editing) that attaches to a running Beamtalk workspace over Erlang distribution. It ships on its **own release lane** — a self-contained release archive and a Docker image (`ghcr.io/jamesc/beamtalk-ide`) — separate from the toolchain bundle.
+A browser-based, Smalltalk-style live IDE that **attaches to a running Beamtalk
+workspace** over Erlang distribution (the *Attach* topology) — Phoenix runs as
+its own BEAM node and calls the same workspace functions the REPL uses, so what
+you see in the browser is the live system, not a snapshot (pictured at the top).
+
+What's in the cockpit:
+
+- **System Browser** — a four-pane Smalltalk navigator (classes → protocols →
+  methods → source) over the live image, including stdlib and runtime classes.
+- **Method editor** — open any method as an editable tab with CodeMirror syntax
+  highlighting; *Compile* redefines it on the running system (live code reload),
+  with *Senders* / *Implementors* navigation and *Save All to Disk*.
+- **Workspace** — a *Do it / Print it / Inspect it* eval pane returning live
+  Erlang terms (not JSON), backed by a per-session workspace that persists state
+  across evals, plus a live **Transcript**.
+- **Bindings & Inspector** — workspace variables update live as you eval, and the
+  Inspector follows a reference through the object graph and can track a live actor.
+
+It ships on its **own release lane** — a self-contained release archive and a
+Docker image (`ghcr.io/jamesc/beamtalk-ide`) — separate from the toolchain bundle.
 
 - From source (contributors): `just web <workspace>` — see [editors/liveview/README.md](editors/liveview/README.md).
 - Prebuilt archive: extract and run `bin/server <workspace-id>` — resolves the workspace's node + cookie like `just web` does. Archive/Docker install and remote (OIDC) deployment: [docs/deployment/remote-liveview-ide.md](docs/deployment/remote-liveview-ide.md).
@@ -282,155 +296,19 @@ nil
 
 ## Development Setup
 
-### Prerequisites
+The fastest path is the **devcontainer**: open the repo in VS Code with the
+[Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers),
+click **Reopen in Container**, then run `just ci`. Everything — Rust, Erlang/OTP,
+rebar3, Just, the GitHub CLI, and the editor extensions — comes pre-configured.
 
-#### Required Dependencies
+Prefer a local toolchain? Install [Rust](https://rustup.rs/), the BEAM tools via
+[mise](https://mise.jdx.dev) (`mise install` reads the pinned `.tool-versions`),
+and `cargo install just`, then `just ci`.
 
-- **Docker Desktop** — For devcontainer support  
-- **VS Code** — With the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)  
-- **Rust** (latest stable) — For building the compiler  
-- **Erlang/OTP 27+** — With `erlc` on PATH
+**[CONTRIBUTING.md](CONTRIBUTING.md)** has the full guide — devcontainer details,
+GitHub/SSH commit-signing setup, the test layers, commit conventions, and the PR
+workflow. For AI agent contributors, see **[AGENTS.md](AGENTS.md)**.
 
-#### Optional Dependencies
-
-- **Node.js LTS + npm** — For building the VS Code extension (`editors/vscode/`)
-
-#### Required Environment Variables
-
-| Variable | Purpose | How to Set |
-|----------|---------|------------|
-| `GH_TOKEN` | GitHub authentication for devcontainers | `gh auth login`, then `$env:GH_TOKEN = (gh auth token)` |
-
-Linear issue tracking is handled by the Linear MCP server (`.vscode/mcp.json`), which authenticates via OAuth — no API token is required.
-
-### Quick Start: Basic Development
-
-**VS Code (Recommended):**
-
-1. Clone the repository
-2. Open in VS Code: **File → Open Folder**
-3. When prompted, click **Reopen in Container**
-4. Wait for container build (~5 minutes first time)
-5. Open a terminal and run: `just build`
-6. Enable the pre-push lint hook:
-   ```bash
-   git config core.hooksPath .githooks
-   ```
-
-The devcontainer includes all dependencies pre-configured:
-- Rust toolchain with `clippy`, `rustfmt`, `rust-analyzer`
-- Erlang/OTP 27+ and `rebar3`
-- Node.js LTS for build tooling
-- GitHub CLI (`gh`) with authentication
-- GitHub Copilot CLI for AI assistance
-- VS Code extensions for Rust, TOML, Erlang, GitHub, Linear
-
-### GitHub Integration
-
-#### Authentication
-
-The devcontainer uses `GH_TOKEN` for GitHub CLI authentication:
-
-```bash
-# Verify authentication (inside container)
-gh auth status
-
-# Login manually if needed
-gh auth login
-```
-
-**Priority order:**
-1. `GH_TOKEN` environment variable (from host)
-2. VS Code credential helper (auto-configured)
-3. Manual `gh auth login`
-
-#### Git Configuration
-
-Set your identity for commits:
-
-**Option 1: Environment variables**
-```bash
-export GIT_USER_NAME="Your Name"
-export GIT_USER_EMAIL="you@example.com"
-```
-
-**Option 2: Global git config (inside container)**
-```bash
-git config --global user.name "Your Name"
-git config --global user.email "you@example.com"
-```
-
-The `postStartCommand` in `devcontainer.json` automatically configures git from environment variables.
-
-### Commit Signing
-
-#### SSH Signing (Recommended)
-
-Configure SSH signing for verified commits:
-
-**1. Generate SSH signing key (on host):**
-```bash
-ssh-keygen -t ed25519 -C "you@example.com" -f ~/.ssh/id_ed25519_signing
-```
-
-**2. Add public key to GitHub:**
-```bash
-cat ~/.ssh/id_ed25519_signing.pub
-# Copy output to GitHub Settings → SSH and GPG keys → New SSH key (select "Signing Key")
-```
-
-**3. Configure git (inside container):**
-```bash
-git config --global gpg.format ssh
-git config --global user.signingkey ~/.ssh/id_ed25519_signing
-git config --global commit.gpgsign true
-```
-
-**4. Add private key to SSH agent:**
-```bash
-eval "$(ssh-agent -s)"
-ssh-add ~/.ssh/id_ed25519_signing
-```
-
-### Installed Tools & Extensions
-
-#### Command Line Tools
-
-| Tool | Version | Purpose |
-|------|---------|---------|
-| `rustc` | Latest stable | Rust compiler |
-| `cargo` | Latest | Rust package manager |
-| `clippy` | Latest | Rust linter |
-| `rustfmt` | Latest | Rust code formatter |
-| `just` | Latest | Task runner (alternative to Make) |
-| `erlc` | OTP 27+ | Erlang compiler |
-| `erl` | OTP 27+ | Erlang runtime |
-| `rebar3` | Latest | Erlang build tool |
-| `gh` | Latest | GitHub CLI |
-| `copilot` | Latest | GitHub Copilot CLI (AI assistant) |
-| `node` | LTS | Node.js runtime |
-| `npm` | Latest | Node package manager |
-
-#### Cargo Extensions
-
-Pre-installed via `cargo-binstall`:
-- `cargo-watch` — Auto-rebuild on file changes
-- `cargo-nextest` — Faster test runner
-- `cargo-insta` — Snapshot testing
-- `cargo-llvm-cov` — Code coverage reports
-
-#### VS Code Extensions
-
-Automatically installed in devcontainer:
-- `rust-lang.rust-analyzer` — Rust language server
-- `tamasfe.even-better-toml` — TOML file support
-- `vadimcn.vscode-lldb` — Debugger for Rust
-- `usernamehw.errorlens` — Inline error display
-- `erlang-ls.erlang-ls` — Erlang language server
-- `github.copilot` — AI pair programming
-- `github.vscode-github-actions` — GitHub Actions integration
-- `github.vscode-pull-request-github` — PR management
-- `linear.linear` — Linear issue tracking
 ---
 
 ## Project Status
@@ -456,10 +334,7 @@ Automatically installed in devcontainer:
 - ✅ **LSP** — Completions (incl. FFI), hover with type/Dynamic-reason, go-to-definition, find references, workspace symbols, diagnostics
 - ✅ **Testing** — SUnit-style `TestCase`, parallel runner, `BUnit` + `EUnit` integration
 - ✅ **Tooling** — `beamtalk doctor`, `beamtalk type-coverage`, `beamtalk gen-native`, `beamtalk generate stubs`, MCP server, VS Code extension
-
-### Planned
-
-- 📋 **Live browser** — Smalltalk-style class browser (Phoenix `LiveView`)
+- ✅ **LiveView IDE** — browser-based Smalltalk cockpit (system browser, live method editing, Workspace + Transcript, Bindings, Inspector) attached to a running workspace over Erlang distribution
 
 ---
 

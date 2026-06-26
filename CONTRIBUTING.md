@@ -57,6 +57,63 @@ If you prefer a local setup:
 5. _(Optional, for the LiveView IDE)_ `just web-setup` — the pinned Elixir
    from step 2 covers it; never use the distro `elixir` package.
 
+### GitHub & Git Setup
+
+The devcontainer authenticates the GitHub CLI from a `GH_TOKEN` environment
+variable on the host:
+
+| Variable | Purpose | How to set |
+|----------|---------|------------|
+| `GH_TOKEN` | GitHub authentication for the devcontainer | `gh auth login`, then `$env:GH_TOKEN = (gh auth token)` |
+
+Authentication resolves in priority order: (1) the `GH_TOKEN` env var from the
+host, (2) the VS Code credential helper (auto-configured), (3) a manual
+`gh auth login` inside the container. Verify with `gh auth status`.
+
+Set your commit identity either via environment variables (the
+`postStartCommand` in `devcontainer.json` applies them automatically) or
+global git config inside the container:
+
+```bash
+export GIT_USER_NAME="Your Name"
+export GIT_USER_EMAIL="you@example.com"
+# or:
+git config --global user.name "Your Name"
+git config --global user.email "you@example.com"
+```
+
+Linear issue tracking uses the Linear MCP server (`.vscode/mcp.json`), which
+authenticates via OAuth — no API token required.
+
+### Commit Signing (SSH)
+
+For verified commits, configure SSH signing. Steps 1–2 set up the key on the
+host; steps 3–4 run **wherever you actually commit** — see the note below if
+that's inside the devcontainer.
+
+```bash
+# 1. Generate a signing key (on the host)
+ssh-keygen -t ed25519 -C "you@example.com" -f ~/.ssh/id_ed25519_signing
+
+# 2. Add the public key to GitHub as a *Signing Key* (on the host)
+#    (Settings → SSH and GPG keys → New SSH key → key type: Signing Key)
+cat ~/.ssh/id_ed25519_signing.pub
+
+# 3. Configure git in the environment you commit from (host or container)
+git config --global gpg.format ssh
+git config --global user.signingkey ~/.ssh/id_ed25519_signing
+git config --global commit.gpgsign true
+
+# 4. Load the key into the SSH agent in that same environment
+eval "$(ssh-agent -s)"
+ssh-add ~/.ssh/id_ed25519_signing
+```
+
+> **Committing from inside the devcontainer?** The key generated in step 1 lives
+> on the host, so the container can't see `~/.ssh/id_ed25519_signing` by default.
+> Enable [SSH agent forwarding](https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials)
+> into the container (or mount/copy the key in) before running steps 3–4 there.
+
 ## Building & Testing
 
 We use [Just](https://github.com/casey/just) as our task runner. Run `just --list` to see all available commands.
