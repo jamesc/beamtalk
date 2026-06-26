@@ -174,13 +174,17 @@ A closed/absent device drops silently (returns nil); any other failure raises
 """.
 -spec write(atom(), iodata(), atom()) -> 'nil'.
 write(Device, Data, Selector) ->
-    %% io:put_chars/2 returns `ok` and raises (error:Reason) on failure — a dead
-    %% device surfaces as e.g. error:terminated, which the catch classifies.
+    %% io:put_chars/2 returns `ok` and raises on failure. A dead device surfaces
+    %% as `error:terminated`, which the catch classifies; if the io *server
+    %% process* itself is gone the call can instead raise an `exit`-class
+    %% exception (e.g. `exit:{noproc, …}`) — that is the closed/absent-device
+    %% case, so it drops silently per the write-side contract.
     try
         io:put_chars(Device, Data),
         nil
     catch
-        error:Reason -> handle_io_error(Reason, Selector)
+        error:Reason -> handle_io_error(Reason, Selector);
+        exit:_Reason -> nil
     end.
 
 -doc """
@@ -194,7 +198,10 @@ read(Prompt, Selector) ->
         {error, Reason} -> handle_io_error(Reason, Selector);
         Data -> strip_eol(to_binary(Data))
     catch
-        error:Reason -> handle_io_error(Reason, Selector)
+        error:Reason -> handle_io_error(Reason, Selector);
+        %% A dead io-server process surfaces as an exit-class exception — the
+        %% closed/absent-stdin case, treated as end-of-input (nil).
+        exit:_Reason -> nil
     end.
 
 -doc """

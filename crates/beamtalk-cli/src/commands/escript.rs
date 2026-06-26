@@ -241,11 +241,25 @@ fn generate_boot_module(
          \x20   application:set_env(beamtalk_runtime, program_name,\n\
          \x20       unicode:characters_to_binary(filename:basename(escript:script_name()))),\n\
          \x20   {{ok, _}} = beamtalk_workspace_sup:start_link(\n\
-         \x20       #{{workspace_id => <<\"escript\">>, project_path => undefined, repl => false}}),\n\
-         \x20   {{ok, _Errors}} = beamtalk_module_activation:activate_modules([{module_list}], #{{}}),\n\
+         \x20       #{{workspace_id => <<\"escript\">>, project_path => undefined,\n\
+         \x20         repl => false, start_compiler => false}}),\n\
+         \x20   {{ok, ActivationErrors}} =\n\
+         \x20       beamtalk_module_activation:activate_modules([{module_list}], #{{}}),\n\
+         \x20   case ActivationErrors of\n\
+         \x20       [] -> ok;\n\
+         \x20       _ ->\n\
+         \x20           io:format(standard_error,\n\
+         \x20               \"warning: ~b project class(es) failed to activate: ~p~n\",\n\
+         \x20               [length(ActivationErrors), ActivationErrors])\n\
+         \x20   end,\n\
          {arg_binding}\
-         \x20   ClassPid = beamtalk_class_registry:whereis_class('{class_name}'),\n\
-         \x20   beamtalk_script_harness:dispatch(ClassPid, '{selector}', {dispatch_args}).\n"
+         \x20   case beamtalk_class_registry:whereis_class('{class_name}') of\n\
+         \x20       undefined ->\n\
+         \x20           io:format(standard_error, \"Error: class '{class_name}' not found~n\", []),\n\
+         \x20           halt(1);\n\
+         \x20       ClassPid ->\n\
+         \x20           beamtalk_script_harness:dispatch(ClassPid, '{selector}', {dispatch_args})\n\
+         \x20   end.\n"
     )
 }
 

@@ -8,3 +8,6 @@
 .idea/
 *.swp
 *.swo
+
+# Packaged escript outputs (beamtalk build --escript)
+/greeter

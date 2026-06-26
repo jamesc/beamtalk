@@ -93,13 +93,23 @@ init(Config) ->
     %% This is started dynamically rather than as a static app dependency
     %% because the compiler port binary may not be available in all environments
     %% (e.g., unit tests).
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} ->
+    %%
+    %% A packaged escript (ADR 0099 §4) runs precompiled classes and ships no
+    %% compiler-port binary, so it sets `start_compiler => false` to skip this —
+    %% otherwise the compiler server crashes on the missing port and dumps a
+    %% spurious SASL crash report to stderr.
+    case maps:get(start_compiler, Config, true) of
+        false ->
             ok;
-        {error, Reason} ->
-            ?LOG_ERROR("Failed to start beamtalk_compiler app", #{
-                reason => Reason, domain => [beamtalk, runtime]
-            })
+        true ->
+            case application:ensure_all_started(beamtalk_compiler) of
+                {ok, _} ->
+                    ok;
+                {error, Reason} ->
+                    ?LOG_ERROR("Failed to start beamtalk_compiler app", #{
+                        reason => Reason, domain => [beamtalk, runtime]
+                    })
+            end
     end,
 
     ChildSpecs =

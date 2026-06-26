@@ -355,15 +355,23 @@ fn build_script_eval_cmd(
 /// Render the program arguments as an Erlang list of UTF-8 binaries — the
 /// runtime representation of a Beamtalk `List(String)`.
 ///
-/// Each argument is escaped for safe embedding in the `-eval` string; the
-/// result is the comma-joined inner content (no surrounding brackets), e.g.
-/// `<<"Alice">>, <<"Bob">>`.
+/// Each argument is emitted as an explicit byte-segment binary built from its
+/// UTF-8 bytes (e.g. `<<65,108,105,99,101>>` for `"Alice"`). This is encoding-
+/// agnostic — it does not depend on how `erl` decodes the `-eval` string — so a
+/// non-ASCII or multi-byte argument (`café`, an emoji) becomes the same correct
+/// UTF-8 `String` the escript path produces via `unicode:characters_to_binary`.
+/// The result is the comma-joined inner content (no surrounding brackets).
 fn format_program_args_list(program_args: &[String]) -> String {
     program_args
         .iter()
         .map(|arg| {
-            let escaped = crate::beam_compiler::escape_erlang_string(arg);
-            format!("<<\"{escaped}\">>")
+            let bytes = arg
+                .as_bytes()
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("<<{bytes}>>")
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -920,11 +928,14 @@ mod tests {
     fn test_script_eval_cmd_keyword_dispatch_wraps_args_as_one_list() {
         // `main:` is arity-1: the dispatch list holds exactly one element — the
         // argv List(String) — even when several args are passed.
+        // Args are emitted as explicit UTF-8 byte-segment binaries:
+        // "Alice" = 65,108,105,99,101  and  "Bob" = 66,111,98.
         let args = vec!["Alice".to_string(), "Bob".to_string()];
         let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
         assert!(
             cmd.contains(
-                r#"beamtalk_script_harness:dispatch(ClassPid, 'main:', [[<<"Alice">>, <<"Bob">>]])"#
+                "beamtalk_script_harness:dispatch(ClassPid, 'main:', \
+                 [[<<65, 108, 105, 99, 101>>, <<66, 111, 98>>]])"
             ),
             "Keyword entry should receive argv as one List(String): {cmd}"
         );
@@ -941,14 +952,26 @@ mod tests {
     }
 
     #[test]
-    fn test_script_eval_cmd_escapes_args() {
-        // Args are user-controlled and embedded in the -eval string; they must be
-        // escaped so quotes/backslashes cannot break out of the binary literal.
+    fn test_script_eval_cmd_encodes_args_as_utf8_bytes() {
+        // Byte-segment encoding is injection-proof (quotes/backslashes are just
+        // bytes) and encoding-agnostic. `a"b\c` = 97,34,98,92,99.
         let args = vec![r#"a"b\c"#.to_string()];
         let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
         assert!(
-            cmd.contains(r#"<<"a\"b\\c">>"#),
-            "Arg with quote/backslash should be escaped: {cmd}"
+            cmd.contains("<<97, 34, 98, 92, 99>>"),
+            "Arg should be emitted as raw UTF-8 bytes, not a quoted literal: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_non_ascii_arg_is_utf8() {
+        // "café" → UTF-8 bytes 99,97,102,195,169 (é = 0xC3 0xA9). This matches the
+        // escript path's `unicode:characters_to_binary`, not a mangled Latin-1 byte.
+        let args = vec!["café".to_string()];
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
+        assert!(
+            cmd.contains("<<99, 97, 102, 195, 169>>"),
+            "Non-ASCII arg should be a UTF-8 byte sequence: {cmd}"
         );
     }
 

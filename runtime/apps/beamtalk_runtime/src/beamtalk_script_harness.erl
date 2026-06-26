@@ -25,8 +25,6 @@ node — so they never unwind back here. This harness therefore only sees the tw
 
 -export([dispatch/3]).
 
--include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -42,24 +40,12 @@ dispatch(ClassPid, Selector, Args) ->
     try beamtalk_class_dispatch:class_send(ClassPid, Selector, Args) of
         _Result -> erlang:halt(0)
     catch
-        _Class:Reason:_Stacktrace ->
-            report_uncaught(Reason),
+        _Class:Reason:Stacktrace ->
+            %% `beamtalk_error:format_safe/2` handles every shape this can take —
+            %% a bare `#beamtalk_error{}`, the wrapped exception map from
+            %% `beamtalk_error:raise/1`, and a raw Erlang reason with the real
+            %% `#beamtalk_error{}` buried in the stacktrace — so no special-casing
+            %% here.
+            io:put_chars(standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]),
             erlang:halt(1)
     end.
-
-%%% ============================================================================
-%%% Internal helpers
-%%% ============================================================================
-
--doc "Write a readable one-line(+hint) rendering of an uncaught error to stderr.".
--spec report_uncaught(term()) -> ok.
-report_uncaught(#{error := #beamtalk_error{} = Error}) ->
-    write_error(beamtalk_error:format(Error));
-report_uncaught(#beamtalk_error{} = Error) ->
-    write_error(beamtalk_error:format(Error));
-report_uncaught(Other) ->
-    write_error(beamtalk_error:format_safe(Other)).
-
--spec write_error(binary()) -> ok.
-write_error(Message) ->
-    io:put_chars(standard_error, [Message, $\n]).
