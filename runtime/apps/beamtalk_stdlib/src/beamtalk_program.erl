@@ -74,13 +74,24 @@ entry method's own synchronous call chain; a spawned Actor there must return a
 status to the entry method and let *it* call `exit:`.
 """.
 -spec 'exit:'(integer()) -> no_return().
-'exit:'(Code) when is_integer(Code) ->
+'exit:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
     case node_owning() of
         true ->
             erlang:halt(Code);
         false ->
             raise_connected_exit_unsupported(Code)
     end;
+'exit:'(Code) when is_integer(Code) ->
+    %% Out of the POSIX range — a wrong *value*, not a wrong *type*. Validated
+    %% here (not deferred to erlang:halt/1, which would silently truncate to the
+    %% low byte) for consistency with System halt:.
+    Error0 = beamtalk_error:new(invalid_argument, 'Program'),
+    Error1 = beamtalk_error:with_selector(Error0, 'exit:'),
+    Error2 = beamtalk_error:with_details(Error1, #{got => Code}),
+    Error3 = beamtalk_error:with_hint(
+        Error2, <<"Exit status must be in the POSIX range 0..255">>
+    ),
+    beamtalk_error:raise(Error3);
 'exit:'(_Code) ->
     beamtalk_error:raise_type_error('Program', 'exit:', <<"Exit status must be an Integer">>).
 

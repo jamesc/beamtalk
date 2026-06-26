@@ -184,7 +184,10 @@ write(Device, Data, Selector) ->
         nil
     catch
         error:Reason -> handle_io_error(Reason, Selector);
-        exit:_Reason -> nil
+        %% A dead io-server process surfaces as an `exit`-class exception (e.g.
+        %% `noproc`); route it through the same allowlist so a closed device drops
+        %% silently while a genuine failure (e.g. `epipe`) still raises.
+        exit:Reason -> handle_io_error(Reason, Selector)
     end.
 
 -doc """
@@ -220,11 +223,15 @@ The closed/absent-device allowlist shared by the read and write sides.
 
 `terminated` — the io server (e.g. a detached node's) has gone.
 `ebadf` — the descriptor was never opened.
+`noproc` / `{noproc, _}` — the io-server *process* is dead, surfaced as the
+reason of an `exit`-class exception when the call reaches a gone process.
 Everything else (incl. `epipe`, `enotsup`) is a genuine failure — see module doc.
 """.
 -spec closed_device(term()) -> boolean().
 closed_device(terminated) -> true;
 closed_device(ebadf) -> true;
+closed_device(noproc) -> true;
+closed_device({noproc, _}) -> true;
 closed_device(_) -> false.
 
 -doc "Convert io:get_line/2 output (a codepoint list or binary) to a UTF-8 binary.".

@@ -494,6 +494,12 @@ fn run() -> Result<()> {
                     force,
                 )
             } else {
+                if entry.is_some() || output.is_some() {
+                    miette::bail!(
+                        "`--entry` and `-o`/`--output` only apply to `--escript`.\n\
+                         Did you mean: beamtalk build --escript --entry \"ClassName selector\" -o <name>?"
+                    );
+                }
                 commands::build::build(&path, &options, force)
             }
         }

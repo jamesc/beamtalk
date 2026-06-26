@@ -20,6 +20,11 @@ TestCase subclass: ProgramTest
     @expect type
     self should: [Program exit: "two"] raise: #type_error
 
+  testExitOutOfRangeRaisesError =>
+    // Out of POSIX 0..255 is a wrong value (validated before the node-owning
+    // gate), consistent with System halt:.
+    self should: [Program exit: 999] raise: #invalid_argument
+
   testExitInSharedWorkspaceRefuses =>
     // The test workspace is not node-owning, so Program exit: refuses (pending
     // the connected-mode Session-termination hook, BT-2688) rather than ending a

@@ -87,6 +87,23 @@ pub fn build_escript(
     let build_layout = BuildLayout::new(project_root);
     let project_ebin = build_layout.ebin_dir();
 
+    // Phase 4 bundles the runtime/stdlib (+ their deps), but not the *project's*
+    // own hex/native dependencies (`[native.dependencies]`, under `_build/deps`).
+    // A program that calls into one would package fine then fail at runtime with
+    // `{undef, …}`, so warn loudly rather than ship a silently-broken artifact.
+    if let Ok(beam_env) =
+        super::beam_environment::BeamEnvironment::from_layout(&build_layout, project_root)
+    {
+        if !beam_env.otp_apps.is_empty() {
+            eprintln!(
+                "warning: this project declares hex/native dependencies ({}) which are \
+                 NOT yet bundled into the escript. If the program calls into them it will \
+                 fail at runtime with `{{undef, …}}`. (escript hex-dep bundling is a follow-up.)",
+                beam_env.otp_apps.join(", ")
+            );
+        }
+    }
+
     // Collect the project's compiled class modules (`bt@*.beam`).
     let project_modules = collect_project_modules(&project_ebin)?;
     if project_modules.is_empty() {
@@ -362,8 +379,12 @@ collect_app(Dir) ->
         filelib:is_regular(F)].
 
 readf(F) ->
-    {ok, Bin} = file:read_file(F),
-    Bin.
+    case file:read_file(F) of
+        {ok, Bin} -> Bin;
+        {error, Reason} ->
+            io:format(standard_error, "error: cannot read ~s: ~p~n", [F, Reason]),
+            halt(1)
+    end.
 "#;
 
 #[cfg(test)]

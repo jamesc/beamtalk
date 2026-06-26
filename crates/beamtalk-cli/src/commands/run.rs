@@ -213,13 +213,15 @@ fn prepare_eval_environment(
         &beam_env.otp_apps,
     );
 
-    let mut args = repl_startup::beam_pa_args(&paths);
-    args.extend(beam_env.pa_args());
+    // BEAM code-path + `-eval` invocation args (distinct from the program `args`
+    // above, which were embedded into `eval_cmd`).
+    let mut beam_args = repl_startup::beam_pa_args(&paths);
+    beam_args.extend(beam_env.pa_args());
 
-    args.push(OsString::from("-eval"));
-    args.push(OsString::from(&eval_cmd));
+    beam_args.push(OsString::from("-eval"));
+    beam_args.push(OsString::from(&eval_cmd));
 
-    Ok(args)
+    Ok(beam_args)
 }
 
 /// Run a package script: start a run-mode workspace and call `ClassName>>selector`.
