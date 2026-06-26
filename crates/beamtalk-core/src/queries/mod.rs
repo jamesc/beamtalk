@@ -44,9 +44,28 @@ pub mod references_to_query;
 pub mod senders_query;
 pub mod signature_help_provider;
 
-use crate::ast::Module;
+use crate::ast::{MessageSelector, Module};
 use crate::semantic_analysis::type_checker::TypeMap;
 use crate::semantic_analysis::{ClassHierarchy, infer_types_and_returns};
+use crate::source_analysis::Span;
+
+/// Returns the source span covering a keyword selector's keyword tokens, if any.
+///
+/// For a keyword selector with at least one part, merges the span of the first and last
+/// keyword tokens. Returns `None` for unary and binary selectors.
+///
+/// Shared by [`senders_query`], [`all_sends_query`], [`announce_sites_query`], and
+/// [`ffi_sites_query`] to avoid duplicating the same nine-line function in each module.
+pub(crate) fn selector_span(selector: &MessageSelector) -> Option<Span> {
+    match selector {
+        MessageSelector::Keyword(parts) if !parts.is_empty() => {
+            let first = parts.first().unwrap().span;
+            let last = parts.last().unwrap().span;
+            Some(first.merge(last))
+        }
+        _ => None,
+    }
+}
 
 /// Enriches a class hierarchy with method return types inferred from a module's source,
 /// and returns the [`TypeMap`] from the same single [`TypeChecker`] pass (BT-1047).

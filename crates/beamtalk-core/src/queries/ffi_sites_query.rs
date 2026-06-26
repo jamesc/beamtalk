@@ -55,6 +55,7 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no sites found" identically to "could not parse".
 
+use super::selector_span;
 use crate::ast::{Expression, MessageSelector, Pattern, StringSegment};
 use crate::source_analysis::{Span, lex_with_eof, parse};
 
@@ -226,18 +227,6 @@ fn ffi_site_line(selector: &MessageSelector, fallback: Span, source: &str) -> u3
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)
-}
-
-/// The source span covering a keyword selector's keyword tokens, if any.
-fn selector_span(selector: &MessageSelector) -> Option<Span> {
-    match selector {
-        MessageSelector::Keyword(parts) if !parts.is_empty() => {
-            let first = parts.first().unwrap().span;
-            let last = parts.last().unwrap().span;
-            Some(first.merge(last))
-        }
-        _ => None,
-    }
 }
 
 /// Record a call site if `module` + `selector` (+ arity) match `target`.

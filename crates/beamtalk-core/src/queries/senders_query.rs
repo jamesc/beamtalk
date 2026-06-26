@@ -28,6 +28,7 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no senders found" identically to "could not parse".
 
+use super::selector_span;
 use crate::ast::{Expression, Pattern, StringSegment};
 use crate::source_analysis::{Span, lex_with_eof, parse};
 
@@ -264,17 +265,6 @@ fn selector_line(selector: &crate::ast::MessageSelector, fallback: Span, source:
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)
-}
-
-fn selector_span(selector: &crate::ast::MessageSelector) -> Option<Span> {
-    match selector {
-        crate::ast::MessageSelector::Keyword(parts) if !parts.is_empty() => {
-            let first = parts.first().unwrap().span;
-            let last = parts.last().unwrap().span;
-            Some(first.merge(last))
-        }
-        _ => None,
-    }
 }
 
 #[cfg(test)]
