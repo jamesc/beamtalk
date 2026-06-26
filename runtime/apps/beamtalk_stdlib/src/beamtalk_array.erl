@@ -175,7 +175,9 @@ do(#{'$beamtalk_class' := 'Array'}, _Block) ->
 -doc "Return true if the Array contains the given element.".
 -spec includes(map(), term()) -> boolean().
 includes(#{'$beamtalk_class' := 'Array', 'data' := Data}, Element) ->
-    lists:member(Element, maps:values(Data)).
+    %% Fold directly over the map (no intermediate maps:values/1 list); =:=
+    %% matches the strict-equality membership the old array:foldl scan used.
+    maps:fold(fun(_Index, Value, Found) -> Found orelse Value =:= Element end, false, Data).
 
 %%% ============================================================================
 %%% Functional
