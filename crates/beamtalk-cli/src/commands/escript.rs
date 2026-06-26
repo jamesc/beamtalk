@@ -215,6 +215,17 @@ fn collect_project_modules(project_ebin: &Utf8Path) -> Result<Vec<String>> {
         let name = name.to_string_lossy();
         if let Some(module) = name.strip_suffix(".beam") {
             if module.starts_with("bt@") {
+                // Real compiler output is always a valid atom, but a stray/
+                // malformed `.beam` would otherwise be embedded verbatim into the
+                // generated boot module and surface as a cryptic `erlc` error.
+                // Bail with a readable diagnostic instead.
+                if !crate::beam_compiler::is_valid_module_name(module) {
+                    miette::bail!(
+                        "Project ebin '{project_ebin}' contains a `.beam` file with an \
+                         invalid module name '{module}'. Expected an Erlang atom \
+                         (letters, digits, `_`, `@`). Clean the build directory and rebuild."
+                    );
+                }
                 modules.push(module.to_string());
             }
         }

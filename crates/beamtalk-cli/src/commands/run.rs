@@ -295,7 +295,7 @@ fn run_script(
             // as the BEAM node's exit code; propagate it verbatim as the CLI's own
             // exit code (POSIX-correct for shells / CI `set -e`). The program has
             // already written any diagnostics to its stderr, so we add no message.
-            info!(exit_code = code, "Script run exited non-zero");
+            info!(exit_code = code, "Forwarding script exit code");
             std::process::exit(code);
         }
         // Signal-terminated (e.g. Ctrl+C) — exit silently

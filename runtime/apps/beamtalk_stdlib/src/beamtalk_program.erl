@@ -111,15 +111,16 @@ node_owning() ->
     application:get_env(beamtalk_runtime, node_owning, false) =:= true.
 
 -spec raise_connected_exit_unsupported(integer()) -> no_return().
-raise_connected_exit_unsupported(_Code) ->
+raise_connected_exit_unsupported(Code) ->
     Error0 = beamtalk_error:new(unsupported, 'Program'),
     Error1 = beamtalk_error:with_selector(Error0, 'exit:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1,
+    Error2 = beamtalk_error:with_details(Error1, #{requested_code => Code}),
+    Error3 = beamtalk_error:with_hint(
+        Error2,
         <<
             "Program exit: in a shared/connected workspace needs the Session-termination "
             "hook (BT-2688), not yet available. Run the program with `beamtalk run` "
             "(run-mode) to use Program exit:, or halt the whole node with System halt:."
         >>
     ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise(Error3).
