@@ -1,7 +1,7 @@
 # ADR 0099: CLI Application Story — Console, Arguments, Exit, and Packaging
 
 ## Status
-Proposed (2026-06-25)
+Accepted (2026-06-26)
 
 **Amends ADR 0061** (Program Entry Points and Run Lifecycle): relaxes its
 unary-only entry-selector rule to also accept a single arity-1 keyword selector
