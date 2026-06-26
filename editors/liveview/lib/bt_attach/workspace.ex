@@ -164,6 +164,14 @@ defmodule BtAttach.Workspace do
       so no shared `.hrl` is needed)
 
   `output` is captured stdout (`String.t/0`) and `warnings` is a list of strings.
+
+  > #### Connected exit (BT-2688) {: .info}
+  > A `Program exit:` in this connected session makes the op layer return a
+  > `{:script_exit, code, output, warnings}` term. It is **not consumed here yet**
+  > — it falls through to `{:error, {:unexpected_reply, _}, …}` below — matching
+  > the protocol field doc ("no consumer reads it yet"). Wiring this shape into a
+  > clean exit-code surface is part of **BT-2691** (connected-mode `beamtalk run`);
+  > add a `{:script_exit, …}` arm here when that lands.
   """
   def eval(session_pid, expression) when is_pid(session_pid) and is_binary(expression) do
     case dispatch_eval(session_pid, expression) do

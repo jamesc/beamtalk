@@ -1195,7 +1195,13 @@ strip_internal_bindings(Bindings) ->
     maps:remove(?INTERNAL_REGISTRY_KEY, Stripped0).
 
 -doc "Inject captured output and warnings into an eval result tuple.".
--spec inject_output(tuple(), binary(), [binary()]) -> tuple().
+-spec inject_output(
+    {ok, term(), beamtalk_repl_state:state()}
+    | {error, term(), beamtalk_repl_state:state()}
+    | {script_exit, non_neg_integer(), beamtalk_repl_state:state()},
+    binary(),
+    [binary()]
+) -> eval_result().
 inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->

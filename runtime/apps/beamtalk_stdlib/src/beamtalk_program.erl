@@ -86,8 +86,9 @@ block that wraps `Program exit:` in an `on:do:` whose handler class matches
 re-raises after running cleanup, so the exit still propagates). The robust fix is
 to add this signal to the non-local-return passthrough the `on:do:` codegen
 already emits for `{'$bt_nlr', _}` (see `control_flow/exception_handling.rs`);
-that is a follow-up. In practice `Program exit:` is called at the top of a `main:`
-or as a bare REPL expression, neither of which is wrapped in such a handler.
+that is a follow-up (tracked on BT-2688). In practice `Program exit:` is called at
+the top of a `main:` or as a bare REPL expression, neither of which is wrapped in
+such a handler.
 """.
 -spec 'exit:'(integer()) -> no_return().
 'exit:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->

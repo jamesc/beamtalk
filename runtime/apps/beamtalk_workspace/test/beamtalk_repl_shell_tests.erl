@@ -719,7 +719,9 @@ script_exit_replies_and_terminates_session_test_() ->
                 after 2000 ->
                     ?assert(false)
                 end,
-                ?assertNot(is_process_alive(Pid))
+                ?assertNot(is_process_alive(Pid)),
+                %% Tidy up the stand-in worker (harmless if already gone).
+                exit(FakeWorkerPid, kill)
             end)
         ]
     end}.
