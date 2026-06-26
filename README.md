@@ -244,7 +244,28 @@ If your stdlib source files are outside the project root, set:
 
 ### LiveView IDE
 
-A browser-based Smalltalk-style workspace (Workspace + live Transcript, Inspector, method editing) that attaches to a running Beamtalk workspace over Erlang distribution. It ships on its **own release lane** — a self-contained release archive and a Docker image (`ghcr.io/jamesc/beamtalk-ide`) — separate from the toolchain bundle.
+A browser-based, Smalltalk-style live IDE that **attaches to a running Beamtalk
+workspace** over Erlang distribution (the *Attach* topology) — Phoenix runs as
+its own BEAM node and calls the same workspace functions the REPL uses, so what
+you see in the browser is the live system, not a snapshot.
+
+![The Beamtalk LiveView IDE — system browser, method editor, live bindings, and a workspace eval pane, all attached to a running workspace](docs/images/liveview-ide.png)
+
+What's in the cockpit:
+
+- **System Browser** — a four-pane Smalltalk navigator (classes → protocols →
+  methods → source) over the live image, including stdlib and runtime classes.
+- **Method editor** — open any method as an editable tab with CodeMirror syntax
+  highlighting; *Compile* redefines it on the running system (live code reload),
+  with *Senders* / *Implementors* navigation and *Save All to Disk*.
+- **Workspace** — a *Do it / Print it / Inspect it* eval pane returning live
+  Erlang terms (not JSON), backed by a per-session workspace that persists state
+  across evals, plus a live **Transcript**.
+- **Bindings & Inspector** — workspace variables update live as you eval, and the
+  Inspector follows a reference through the object graph and can track a live actor.
+
+It ships on its **own release lane** — a self-contained release archive and a
+Docker image (`ghcr.io/jamesc/beamtalk-ide`) — separate from the toolchain bundle.
 
 - From source (contributors): `just web <workspace>` — see [editors/liveview/README.md](editors/liveview/README.md).
 - Prebuilt archive: extract and run `bin/server <workspace-id>` — resolves the workspace's node + cookie like `just web` does. Archive/Docker install and remote (OIDC) deployment: [docs/deployment/remote-liveview-ide.md](docs/deployment/remote-liveview-ide.md).
@@ -456,10 +477,7 @@ Automatically installed in devcontainer:
 - ✅ **LSP** — Completions (incl. FFI), hover with type/Dynamic-reason, go-to-definition, find references, workspace symbols, diagnostics
 - ✅ **Testing** — SUnit-style `TestCase`, parallel runner, `BUnit` + `EUnit` integration
 - ✅ **Tooling** — `beamtalk doctor`, `beamtalk type-coverage`, `beamtalk gen-native`, `beamtalk generate stubs`, MCP server, VS Code extension
-
-### Planned
-
-- 📋 **Live browser** — Smalltalk-style class browser (Phoenix `LiveView`)
+- ✅ **LiveView IDE** — browser-based Smalltalk cockpit (system browser, live method editing, Workspace + Transcript, Bindings, Inspector) attached to a running workspace over Erlang distribution
 
 ---
 
