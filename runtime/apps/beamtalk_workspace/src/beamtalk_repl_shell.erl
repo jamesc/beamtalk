@@ -79,9 +79,18 @@ start_link(SessionId, Meta) when is_map(Meta) ->
 stop(SessionPid) ->
     gen_server:stop(SessionPid, normal, 5000).
 
--doc "Evaluate an expression in this session.".
+-doc """
+Evaluate an expression in this session.
+
+The `{script_exit, Code, Output, Warnings}` reply (BT-2688) signals a
+connected-session `Program exit: Code`: the shell sends it, then terminates this
+session (the caller surfaces the status to the connecting client). The shared
+node is unaffected.
+""".
 -spec eval(pid(), string()) ->
-    {ok, term(), binary(), [binary()]} | {error, term(), binary(), [binary()]}.
+    {ok, term(), binary(), [binary()]}
+    | {error, term(), binary(), [binary()]}
+    | {script_exit, non_neg_integer(), binary(), [binary()]}.
 eval(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval, Expression}, 30000).
 
@@ -91,13 +100,19 @@ Returns `{ok, Steps, Output, Warnings}' or `{error, Reason, Output, Warnings}'.
 """.
 -spec eval_trace(pid(), string()) ->
     {ok, [{binary(), term()}], binary(), [binary()]}
-    | {error, term(), binary(), [binary()]}.
+    | {error, term(), binary(), [binary()]}
+    | {script_exit, non_neg_integer(), binary(), [binary()]}.
 eval_trace(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval_trace, Expression}, 30000).
 
 -doc """
 Evaluate an expression with streaming subscriber (BT-696).
-Subscriber receives {eval_out, Chunk} messages during eval.
+
+Subscriber receives `{eval_out, Chunk}` messages during eval, then one terminal
+message: `{eval_done, Value, Output, Warnings}`, `{eval_error, Reason, Output,
+Warnings}`, or — when the expression called `Program exit:` in this connected
+session — `{eval_script_exit, Code, Output, Warnings}` (BT-2688), after which the
+session shell stops.
 """.
 -spec eval_async(pid(), string(), pid()) -> ok.
 eval_async(SessionPid, Expression, Subscriber) ->
@@ -489,7 +504,16 @@ handle_info({eval_result, WorkerPid, Result}, {SessionId, ShellState, {WorkerPid
             %% must not wipe every local because the line after `clear` failed.
             MergedState0 = apply_pending_removals(ShellState, WorkerState),
             MergedState = apply_pending_mutations_no_clear(ShellState, MergedState0, SessionId),
-            {noreply, {SessionId, MergedState, undefined}}
+            {noreply, {SessionId, MergedState, undefined}};
+        {script_exit, Code, Output, Warnings, _WorkerState} ->
+            %% BT-2688 (ADR 0099 §3 / Phase 5): `Program exit: Code` in this
+            %% connected session. Reply with the exit status, then stop this
+            %% session's shell so the job ends while the shared node stays up. The
+            %% shell is a `temporary` child of `beamtalk_session_sup`, so it is not
+            %% restarted. Pending session-local mutations are dropped — the session
+            %% is ending, so there is nothing left to read them back.
+            reply_eval(From, {eval_script_exit, Code, Output, Warnings}),
+            {stop, normal, {SessionId, ShellState, undefined}}
     end;
 %% Worker process crashed (BT-666)
 handle_info(
@@ -737,4 +761,8 @@ reply_eval({async, Subscriber}, Msg) ->
 reply_eval(From, {eval_done, Value, Output, Warnings}) ->
     gen_server:reply(From, {ok, Value, Output, Warnings});
 reply_eval(From, {eval_error, Reason, Output, Warnings}) ->
-    gen_server:reply(From, {error, Reason, Output, Warnings}).
+    gen_server:reply(From, {error, Reason, Output, Warnings});
+%% BT-2688: connected-session `Program exit:` — surface the status to the caller,
+%% which encodes it for the connecting client before the session shell stops.
+reply_eval(From, {eval_script_exit, Code, Output, Warnings}) ->
+    gen_server:reply(From, {script_exit, Code, Output, Warnings}).

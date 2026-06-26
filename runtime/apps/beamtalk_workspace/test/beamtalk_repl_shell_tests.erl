@@ -674,6 +674,58 @@ worker_state_with_bindings(Bindings) ->
     State = beamtalk_repl_state:new(undefined, 0),
     beamtalk_repl_state:set_bindings(Bindings, State).
 
+%%====================================================================
+%% BT-2688: connected-session Program exit: (ADR 0099 §3 / Phase 5)
+%%====================================================================
+
+%% A {script_exit, Code, Output, Warnings} eval result surfaces the exit status to
+%% the caller and then terminates the session shell (normal stop), leaving the
+%% shared node up. Mirrors the BT-2366 worker-injection pattern: a fake worker +
+%% an {async, self()} From so reply_eval sends us a message we can match.
+script_exit_replies_and_terminates_session_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(begin
+                {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-script-exit-1">>),
+                MonRef = erlang:monitor(process, Pid),
+                FakeWorkerPid = spawn(fun() ->
+                    receive
+                        _ -> ok
+                    end
+                end),
+                %% Capture the test pid here: the replace_state fun runs in the
+                %% gen_server process, so `self()` inside it would be the shell.
+                Self = self(),
+                sys:replace_state(Pid, fun({SId, State, _W}) ->
+                    {SId, State, {FakeWorkerPid, make_ref(), {async, Self}}}
+                end),
+                %% The worker→shell result is the 5-tuple
+                %% {script_exit, Code, Output, Warnings, WorkerState}.
+                WorkerState = worker_state_with_bindings(#{}),
+                Pid ! {eval_result, FakeWorkerPid, {script_exit, 5, <<>>, [], WorkerState}},
+                %% The shell surfaces the exit status to the caller...
+                receive
+                    {eval_script_exit, Code, Output, Warnings} ->
+                        ?assertEqual(5, Code),
+                        ?assertEqual(<<>>, Output),
+                        ?assertEqual([], Warnings)
+                after 2000 ->
+                    ?assert(false)
+                end,
+                %% ...and then ends the session with a normal stop.
+                receive
+                    {'DOWN', MonRef, process, Pid, Reason} ->
+                        ?assertEqual(normal, Reason)
+                after 2000 ->
+                    ?assert(false)
+                end,
+                ?assertNot(is_process_alive(Pid)),
+                %% Tidy up the stand-in worker (harmless if already gone).
+                exit(FakeWorkerPid, kill)
+            end)
+        ]
+    end}.
+
 unload_module_in_use_returns_error_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [

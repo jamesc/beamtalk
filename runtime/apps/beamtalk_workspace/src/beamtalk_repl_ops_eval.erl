@@ -31,7 +31,9 @@ handle(<<"eval">>, Params, Msg, SessionPid) ->
 
 -doc """
 Term-returning eval handler. Returns `{ok, Value, Output, Warnings}` on success,
-`{trace, Steps, Output, Warnings}` in trace mode, or
+`{trace, Steps, Output, Warnings}` in trace mode,
+`{script_exit, Code, Output, Warnings}` when the expression called
+`Program exit: Code` in this connected session (BT-2688), or
 `{error, #beamtalk_error{}}` / `{error, #beamtalk_error{}, Output, Warnings}` on
 failure. No JSON in this path — dist-attached clients consume the term directly.
 """.
@@ -53,6 +55,10 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
             case beamtalk_repl_shell:eval_trace(SessionPid, Code) of
                 {ok, Steps, Output, Warnings} ->
                     {trace, Steps, Output, Warnings};
+                {script_exit, Code2, Output, Warnings} ->
+                    %% BT-2688: `Program exit: Code2` inside a traced eval — same
+                    %% connected-exit handling as the non-trace branch.
+                    {script_exit, Code2, Output, Warnings};
                 {error, ErrorReason, Output, Warnings} ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
                     {error, WrappedReason, Output, Warnings}
@@ -61,6 +67,9 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
             case beamtalk_repl_shell:eval(SessionPid, Code) of
                 {ok, Result, Output, Warnings} ->
                     {ok, Result, Output, Warnings};
+                {script_exit, Code2, Output, Warnings} ->
+                    %% BT-2688: `Program exit: Code2` ended this connected session.
+                    {script_exit, Code2, Output, Warnings};
                 {error, ErrorReason, Output, Warnings} ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
                     {error, WrappedReason, Output, Warnings}

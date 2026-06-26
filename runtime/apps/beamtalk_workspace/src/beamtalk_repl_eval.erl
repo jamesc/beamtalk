@@ -76,19 +76,27 @@ module loading to beamtalk_repl_loader (BT-863).
 -define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
 -define(WORKSPACE_BINDINGS_KEY, '__workspace_user_bindings__').
 
+-doc """
+Result of evaluating an expression. The `script_exit` shape (BT-2688) carries the
+status of a connected-session `Program exit: Code` so the shell can report it and
+terminate the session; `ok`/`error` are the ordinary value/failure shapes.
+""".
+-type eval_result() ::
+    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {script_exit, non_neg_integer(), binary(), [binary()], beamtalk_repl_state:state()}.
+
+-export_type([eval_result/0]).
+
 %%% Public API
 
 -doc "Evaluate a Beamtalk expression.".
--spec do_eval(string(), beamtalk_repl_state:state()) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec do_eval(string(), beamtalk_repl_state:state()) -> eval_result().
 do_eval(Expression, State) ->
     do_eval(Expression, State, undefined).
 
 -doc "Evaluate with optional streaming subscriber (BT-696).".
--spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+-spec do_eval(string(), beamtalk_repl_state:state(), pid() | undefined) -> eval_result().
 do_eval(Expression, State, Subscriber) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     % elp:fixme W0023 intentional atom creation
@@ -144,7 +152,8 @@ or `{error, Reason, Output, Warnings, State}' on failure.
 """.
 -spec do_eval_trace(string(), beamtalk_repl_state:state()) ->
     {ok, [{binary(), term()}], binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {script_exit, non_neg_integer(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval_trace(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     % elp:fixme W0023 intentional atom creation
@@ -213,6 +222,13 @@ do_eval_trace(Expression, State) ->
                                     {ok, AwaitedSteps, FinalState}
                             end
                         catch
+                            throw:{beamtalk_script_exit, Code} ->
+                                %% BT-2688: `Program exit: Code` inside a traced eval.
+                                %% Honour it like the non-trace path
+                                %% (eval_loaded_module) instead of letting the generic
+                                %% clause wrap it as an error, so the shell reports the
+                                %% status and terminates the session consistently.
+                                {script_exit, Code, NewState};
                             Class:Reason:Stacktrace ->
                                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
                                     Class, Reason, Stacktrace
@@ -229,6 +245,8 @@ do_eval_trace(Expression, State) ->
                     case EvalResult of
                         {ok, Steps2, FinalState2} ->
                             {ok, Steps2, Output, Warnings, FinalState2};
+                        {script_exit, ExitCode, ScState} ->
+                            {script_exit, ExitCode, Output, Warnings, ScState};
                         {error, ErrorReason, ErrorState} ->
                             WrappedReason = beamtalk_repl_errors:ensure_structured_error(
                                 ErrorReason
@@ -843,8 +861,7 @@ first_token(SelectorBin) ->
     pid() | undefined,
     pid() | undefined
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    eval_result().
 handle_class_definition(
     ClassInfo, Warnings, Expression, MergedBindings, State, RegistryPid, Subscriber
 ) ->
@@ -961,14 +978,20 @@ maybe_register_protocol_class(ModuleName) ->
     [binary()],
     beamtalk_repl_state:state()
 ) ->
-    {ok, term(), binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    eval_result().
 eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Warnings, State) ->
     CaptureRef = beamtalk_io_capture:start(Subscriber),
     EvalResult =
         try
             execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State)
         catch
+            throw:{beamtalk_script_exit, Code} ->
+                %% BT-2688: `Program exit: Code` evaluated in a connected session
+                %% (ADR 0099 §3 / Phase 5). This is the job-level exit signal raised
+                %% by `beamtalk_program:'exit:'/1`, not a user error — surface the
+                %% status so the shell reports it and terminates the session. Caught
+                %% ahead of the generic clause so it is never wrapped as an error.
+                {script_exit, Code, State};
             Class:Reason:Stacktrace ->
                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(Class, Reason, Stacktrace),
                 CaughtBindings = Bindings#{'_error' => CaughtExObj},
@@ -1172,11 +1195,21 @@ strip_internal_bindings(Bindings) ->
     maps:remove(?INTERNAL_REGISTRY_KEY, Stripped0).
 
 -doc "Inject captured output and warnings into an eval result tuple.".
--spec inject_output(tuple(), binary(), [binary()]) -> tuple().
+-spec inject_output(
+    {ok, term(), beamtalk_repl_state:state()}
+    | {error, term(), beamtalk_repl_state:state()}
+    | {script_exit, non_neg_integer(), beamtalk_repl_state:state()},
+    binary(),
+    [binary()]
+) -> eval_result().
 inject_output({ok, Result, State}, Output, Warnings) ->
     {ok, Result, Output, Warnings, State};
 inject_output({error, Reason, State}, Output, Warnings) ->
-    {error, Reason, Output, Warnings, State}.
+    {error, Reason, Output, Warnings, State};
+%% BT-2688: connected-session `Program exit:` — carry the status alongside any
+%% output captured before the exit signal fired.
+inject_output({script_exit, Code, State}, Output, Warnings) ->
+    {script_exit, Code, Output, Warnings, State}.
 
 -doc "Wrap a compile error as a structured #beamtalk_error{} result tuple.".
 -spec wrap_compile_err(term(), beamtalk_repl_state:state()) ->
