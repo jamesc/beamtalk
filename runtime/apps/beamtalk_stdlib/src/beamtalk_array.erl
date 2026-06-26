@@ -165,7 +165,7 @@ at_put(#{'$beamtalk_class' := 'Array'}, _Index, _Value) ->
 -doc "Apply a block to each element of the Array in order. Returns nil.".
 -spec do(map(), fun((term()) -> term())) -> 'nil'.
 do(#{'$beamtalk_class' := 'Array', 'data' := Data}, Block) when is_function(Block, 1) ->
-    lists:foreach(fun(Elem) -> Block(Elem) end, data_to_list(Data)),
+    lists:foreach(Block, data_to_list(Data)),
     nil;
 do(#{'$beamtalk_class' := 'Array'}, _Block) ->
     Error0 = beamtalk_error:new(type_error, 'Array'),

@@ -185,6 +185,9 @@ for forged ones (no crash on a non-contiguous index set).
 -spec array_to_list(map()) -> [term()].
 array_to_list(Subject) ->
     Data = array_data(Subject),
+    %% O(n log n): the sort gives forge-tolerance on a non-canonical index set.
+    %% Hot paths inside beamtalk_array use its private data_to_list/1 (O(n),
+    %% assumes canonical 0..N-1 keys) instead.
     [Value || {_Index, Value} <- lists:sort(maps:to_list(Data))].
 
 %%% ============================================================================
