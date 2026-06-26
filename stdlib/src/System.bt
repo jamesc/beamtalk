@@ -144,3 +144,36 @@ sealed typed Object subclass: System
   /// // => _
   /// ```
   class sealed uniqueId -> Integer => (Erlang beamtalk_system) uniqueId
+
+  /// Halt the whole VM with status 0 — the nuclear, whole-node option.
+  /// Does not return.
+  ///
+  /// See `halt:` for the full contract. Refused outside a node-owning context.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System halt
+  /// // => _
+  /// ```
+  class sealed halt -> Nil => (Erlang beamtalk_system) halt
+
+  /// Halt the whole VM with status `code` (ADR 0099) — the nuclear option.
+  /// Does not return.
+  ///
+  /// Where `Program exit:` ends the *program*, `System halt:` halts the *whole
+  /// node* immediately (`erlang:halt` — no OTP shutdown / `terminate:` callbacks,
+  /// though it flushes buffered output). `code` must be an `Integer` (else
+  /// `#type_error`) in the POSIX range 0–255 (else `#beamtalk_error`).
+  ///
+  /// **⚠ Refused in a shared workspace.** Called inside a live, shared workspace
+  /// (a connected `beamtalk run`, or the REPL) it would kill the service and every
+  /// other connected session, so the runtime refuses it (with `#beamtalk_error`)
+  /// outside a node-owning context — use `Program exit:` there instead.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// System halt: 1
+  /// // => _
+  /// ```
+  class sealed halt: code :: Integer -> Nil =>
+    (Erlang beamtalk_system) halt: code

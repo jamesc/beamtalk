@@ -35,8 +35,10 @@ use super::workspace;
 ///
 /// - `class_or_dot`: either `"."` (service mode) or a class name (script mode).
 /// - `selector`: required when `class_or_dot` is a class name; the method to call.
+/// - `args`: program arguments for a `main:`-style (arity-1 keyword) entry,
+///   delivered as a `List(String)` (ADR 0099). Empty for the unary entry form.
 #[instrument(skip_all, fields(class_or_dot = %class_or_dot))]
-pub fn run(class_or_dot: &str, selector: Option<&str>) -> Result<()> {
+pub fn run(class_or_dot: &str, selector: Option<&str>, args: &[String]) -> Result<()> {
     info!("Starting run command");
 
     // Determine project root (always current directory for run)
@@ -69,8 +71,8 @@ pub fn run(class_or_dot: &str, selector: Option<&str>) -> Result<()> {
             }
         }
         (class_name, Some(sel)) => {
-            // Script mode: beamtalk run ClassName selector
-            run_script(&project_root, &pkg, class_name, sel)
+            // Script mode: beamtalk run ClassName selector [args...]
+            run_script(&project_root, &pkg, class_name, sel, args)
         }
         (class_name, None) if class_name != "." => {
             // Got class name but no selector
@@ -107,38 +109,66 @@ fn ensure_runtime_built(
 
 /// Validate class name and selector for script mode.
 ///
-/// Beamtalk class names must be `UpperCamelCase` identifiers. Selectors must be
-/// unary (keyword selectors with `:` are not supported in the CLI form).
-/// Both are injected into Erlang `-eval` strings, so full validation is required.
-fn validate_class_and_selector(class_name: &str, selector: &str) -> Result<()> {
+/// Beamtalk class names must be `UpperCamelCase` identifiers. The selector may be
+/// either **unary** (`run`) or a **single arity-1 keyword** (`main:`) — the latter
+/// receives the program arguments as a `List(String)` (ADR 0099, amends ADR 0061).
+/// Multi-keyword selectors (`move:to:`) stay rejected. Both are injected into
+/// Erlang `-eval` strings, so full validation is required.
+///
+/// Returns `true` when the selector is the arity-1 keyword form (carries args),
+/// `false` for the unary form.
+pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> Result<bool> {
     if class_name.is_empty()
-        || !class_name.chars().next().is_some_and(char::is_uppercase)
-        || class_name.chars().any(|c| !c.is_alphanumeric() && c != '_')
+        || !class_name
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_uppercase())
+        || class_name
+            .chars()
+            .any(|c| !c.is_ascii_alphanumeric() && c != '_')
     {
         miette::bail!(
-            "Invalid class name '{class_name}': class names must start with an uppercase letter \
-             and contain only alphanumeric characters and underscores"
+            "Invalid class name '{class_name}': class names must start with an ASCII uppercase \
+             letter and contain only ASCII alphanumeric characters and underscores"
         );
     }
+
+    // A single trailing colon makes it the arity-1 keyword form (`main:`). Any
+    // other colon (interior, or a second keyword like `move:to:`) is rejected —
+    // ADR 0099 deliberately does NOT reopen general keyword-message dispatch.
+    let colon_count = selector.matches(':').count();
+    let (name_part, is_keyword) = if selector.ends_with(':') && colon_count == 1 {
+        (&selector[..selector.len() - 1], true)
+    } else if colon_count == 0 {
+        (selector, false)
+    } else {
+        miette::bail!(
+            "Invalid selector '{selector}': only a unary selector (e.g. `run`) or a single \
+             arity-1 keyword selector (e.g. `main:`) is accepted.\n\
+             Multi-keyword sends (e.g. `move: 3 to: 5`) are not supported on the CLI — \
+             have your entry take the arguments as a `List(String)` parameter."
+        );
+    };
 
     // Erlang unquoted atoms must start with a lowercase letter; an uppercase first
     // character would be parsed as a variable reference, causing a confusing error.
-    if selector.is_empty()
-        || !selector
+    if name_part.is_empty()
+        || !name_part
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_lowercase())
-        || selector.chars().any(|c| !c.is_alphanumeric() && c != '_')
+        || name_part
+            .chars()
+            .any(|c| !c.is_ascii_alphanumeric() && c != '_')
     {
         miette::bail!(
-            "Invalid selector '{selector}': selectors must start with a lowercase letter \
-             and contain only alphanumeric characters and underscores.\n\
-             Keyword selectors (e.g. `start: 'prod'`) are not supported in the CLI form — \
-             wrap them in a unary entry method."
+            "Invalid selector '{selector}': selectors must start with an ASCII lowercase letter \
+             and contain only ASCII alphanumeric characters and underscores (an optional single \
+             trailing `:` for the arity-1 keyword form)."
         );
     }
 
-    Ok(())
+    Ok(is_keyword)
 }
 
 /// Prepare the BEAM environment and eval arguments for script mode.
@@ -150,6 +180,7 @@ fn prepare_eval_environment(
     project_root: &Utf8PathBuf,
     class_name: &str,
     selector: &str,
+    args: &[String],
 ) -> Result<Vec<OsString>> {
     println!("Building...");
     super::build::build(
@@ -185,16 +216,19 @@ fn prepare_eval_environment(
         &project_path_escaped,
         class_name,
         selector,
+        args,
         &beam_env.otp_apps,
     );
 
-    let mut args = repl_startup::beam_pa_args(&paths);
-    args.extend(beam_env.pa_args());
+    // BEAM code-path + `-eval` invocation args (distinct from the program `args`
+    // above, which were embedded into `eval_cmd`).
+    let mut beam_args = repl_startup::beam_pa_args(&paths);
+    beam_args.extend(beam_env.pa_args());
 
-    args.push(OsString::from("-eval"));
-    args.push(OsString::from(&eval_cmd));
+    beam_args.push(OsString::from("-eval"));
+    beam_args.push(OsString::from(&eval_cmd));
 
-    Ok(args)
+    Ok(beam_args)
 }
 
 /// Run a package script: start a run-mode workspace and call `ClassName>>selector`.
@@ -207,12 +241,28 @@ fn run_script(
     _pkg: &manifest::PackageManifest,
     class_name: &str,
     selector: &str,
+    program_args: &[String],
 ) -> Result<()> {
-    validate_class_and_selector(class_name, selector)?;
+    let is_keyword = validate_class_and_selector(class_name, selector)?;
+
+    // A unary entry opts out of arguments (ADR 0099). Reject trailing tokens so a
+    // typo like `beamtalk run Greeter run Alice` is a loud error, not a silent drop.
+    if !is_keyword && !program_args.is_empty() {
+        miette::bail!(
+            "The unary entry '{selector}' takes no arguments, but {n} were given \
+             ({args:?}).\n\
+             To receive arguments, declare an arity-1 keyword entry that takes a \
+             `List(String)`, e.g. `class main: args :: List(String) -> Nil`, and run \
+             `beamtalk run {class_name} main: {args_joined}`.",
+            n = program_args.len(),
+            args = program_args,
+            args_joined = program_args.join(" "),
+        );
+    }
 
     info!(class = %class_name, selector = %selector, "Running script");
 
-    let args = prepare_eval_environment(project_root, class_name, selector)?;
+    let args = prepare_eval_environment(project_root, class_name, selector, program_args)?;
 
     println!("\nRunning {class_name}>>{selector}...");
 
@@ -243,7 +293,13 @@ fn run_script(
 
     if !status.success() {
         if let Some(code) = status.code() {
-            miette::bail!("Program exited with code {code}");
+            // ADR 0099 §3: the program owns its exit status. `Program exit: N`,
+            // `System halt: N`, and the implicit "uncaught error → 1" all surface
+            // as the BEAM node's exit code; propagate it verbatim as the CLI's own
+            // exit code (POSIX-correct for shells / CI `set -e`). The program has
+            // already written any diagnostics to its stderr, so we add no message.
+            info!(exit_code = code, "Forwarding script exit code");
+            std::process::exit(code);
         }
         // Signal-terminated (e.g. Ctrl+C) — exit silently
     }
@@ -265,13 +321,31 @@ fn build_script_eval_cmd(
     project_path_escaped: &str,
     class_name: &str,
     selector: &str,
+    program_args: &[String],
     hex_dep_names: &[String],
 ) -> String {
     let hex_deps_start = repl_startup::hex_deps_start_fragment(hex_dep_names);
 
+    // The selector is always quoted as an atom so the arity-1 keyword form
+    // (`'main:'`) is valid Erlang; a unary `'run'` is equally well-formed.
+    let selector_atom = format!("'{selector}'");
+
+    // Dispatch arguments for `class_send/3` (a list of method arguments). A
+    // keyword entry (`main:`) is arity-1 and receives the program argv as a
+    // single `List(String)` argument — so the dispatch list has exactly one
+    // element, the argv list itself (`[[<<"a">>, <<"b">>]]`, or `[[]]` when no
+    // args). A unary entry receives no arguments (ADR 0099).
+    let dispatch_args = if selector.ends_with(':') {
+        format!("[[{}]]", format_program_args_list(program_args))
+    } else {
+        "[]".to_string()
+    };
+
     format!(
         "{hex_deps_start}\
          {{ok, _}} = application:ensure_all_started(beamtalk_workspace), \
+         application:set_env(beamtalk_runtime, program_name, <<\"beamtalk\">>), \
+         application:set_env(beamtalk_runtime, node_owning, true), \
          {{ok, _}} = beamtalk_workspace_sup:start_link(\
          #{{workspace_id => <<\"{workspace_id}\">>, \
          project_path => <<\"{project_path_escaped}\">>, \
@@ -282,10 +356,34 @@ fn build_script_eval_cmd(
                  io:format(standard_error, \"Error: class '{class_name}' not found~n\", []), \
                  halt(1); \
              _ -> \
-                 beamtalk_class_dispatch:class_send(ClassPid, {selector}, []), \
-                 halt(0) \
+                 beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args}) \
          end."
     )
+}
+
+/// Render the program arguments as an Erlang list of UTF-8 binaries — the
+/// runtime representation of a Beamtalk `List(String)`.
+///
+/// Each argument is emitted as an explicit byte-segment binary built from its
+/// UTF-8 bytes (e.g. `<<65,108,105,99,101>>` for `"Alice"`). This is encoding-
+/// agnostic — it does not depend on how `erl` decodes the `-eval` string — so a
+/// non-ASCII or multi-byte argument (`café`, an emoji) becomes the same correct
+/// UTF-8 `String` the escript path produces via `unicode:characters_to_binary`.
+/// The result is the comma-joined inner content (no surrounding brackets).
+fn format_program_args_list(program_args: &[String]) -> String {
+    program_args
+        .iter()
+        .map(|arg| {
+            let bytes = arg
+                .as_bytes()
+                .iter()
+                .map(u8::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("<<{bytes}>>")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Run a package as a persistent OTP service (BT-1191, BT-1319).
@@ -568,7 +666,7 @@ mod tests {
         fs::create_dir_all(&src_path).unwrap();
         fs::write(src_path.join("main.bt"), "main := [42].").unwrap();
 
-        let result = with_project_dir(temp.path(), || run(".", None));
+        let result = with_project_dir(temp.path(), || run(".", None, &[]));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -586,7 +684,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None));
+        let result = with_project_dir(temp.path(), || run(".", None, &[]));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -604,7 +702,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("Main", None));
+        let result = with_project_dir(temp.path(), || run("Main", None, &[]));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -622,7 +720,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("main", Some("run")));
+        let result = with_project_dir(temp.path(), || run("main", Some("run"), &[]));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -641,7 +739,7 @@ mod tests {
             &temp,
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
-        let result = with_project_dir(temp.path(), || run("/looks/like/path", None));
+        let result = with_project_dir(temp.path(), || run("/looks/like/path", None, &[]));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -659,7 +757,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("Main", Some("Run")));
+        let result = with_project_dir(temp.path(), || run("Main", Some("Run"), &[]));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -681,7 +779,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = with_project_dir(temp.path(), || run("Main", Some("run")));
+        let result = with_project_dir(temp.path(), || run("Main", Some("run"), &[]));
         assert!(result.is_err());
     }
 
@@ -696,7 +794,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None));
+        let result = with_project_dir(temp.path(), || run(".", None, &[]));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -709,7 +807,7 @@ mod tests {
     fn test_script_eval_cmd_no_erlang_comments() {
         // Regression: Erlang %% comments in a -eval string comment out
         // everything to end-of-line, which is the entire eval string.
-        let cmd = build_script_eval_cmd("run_42", "/tmp/foo", "SmokeTest", "answer", &[]);
+        let cmd = build_script_eval_cmd("run_42", "/tmp/foo", "SmokeTest", "answer", &[], &[]);
         assert!(
             !cmd.contains("%%"),
             "Eval string must not contain Erlang line comments: {cmd}"
@@ -722,14 +820,13 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_contains_dispatch_and_halt() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[]);
+        // The entry dispatch + implicit exit-code mapping is owned by the run
+        // harness (ADR 0099 §3); the eval routes through it instead of an inline
+        // class_send + halt(0).
         assert!(
-            cmd.contains("class_send(ClassPid, run, [])"),
-            "Eval should dispatch the selector: {cmd}"
-        );
-        assert!(
-            cmd.contains("halt(0)"),
-            "Eval should halt on success: {cmd}"
+            cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'run', [])"),
+            "Eval should dispatch via the run harness: {cmd}"
         );
         assert!(
             cmd.contains("halt(1)"),
@@ -756,7 +853,7 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_interpolates_parameters() {
-        let cmd = build_script_eval_cmd("run_99", "/my/project", "Counter", "increment", &[]);
+        let cmd = build_script_eval_cmd("run_99", "/my/project", "Counter", "increment", &[], &[]);
         assert!(cmd.contains("run_99"), "workspace_id not interpolated");
         assert!(cmd.contains("/my/project"), "project_path not interpolated");
         assert!(
@@ -772,7 +869,7 @@ mod tests {
     #[test]
     fn test_script_eval_cmd_starts_hex_deps() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &hex_deps);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &hex_deps);
         assert!(
             cmd.contains("application:ensure_all_started(cowboy)"),
             "Should start cowboy: {cmd}"
@@ -792,12 +889,121 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_no_hex_deps_unchanged() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[]);
+        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[]);
         // Should only have one ensure_all_started call (for workspace)
         let count = cmd.matches("ensure_all_started").count();
         assert_eq!(
             count, 1,
             "Should only start workspace when no hex deps: {cmd}"
+        );
+    }
+
+    // --- ADR 0099 Phase 2: arity-1 keyword entry + program_name (BT-2686) ---
+
+    #[test]
+    fn test_validate_accepts_unary_selector() {
+        // Unary selector → not a keyword form (false), and no error.
+        assert!(!validate_class_and_selector("Greeter", "run").unwrap());
+    }
+
+    #[test]
+    fn test_validate_accepts_arity1_keyword_selector() {
+        // A single trailing colon is the arity-1 keyword form (true). The name is
+        // not hard-coded to `main:` — any arity-1 keyword is accepted.
+        assert!(validate_class_and_selector("Greeter", "main:").unwrap());
+        assert!(validate_class_and_selector("Migration", "runWith:").unwrap());
+    }
+
+    #[test]
+    fn test_validate_rejects_multi_keyword_selector() {
+        let err = format!(
+            "{:?}",
+            validate_class_and_selector("Robot", "move:to:").unwrap_err()
+        );
+        assert!(err.contains("Invalid selector"), "got: {err}");
+    }
+
+    #[test]
+    fn test_validate_rejects_interior_colon() {
+        assert!(validate_class_and_selector("Robot", "foo:bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_uppercase_keyword_selector() {
+        assert!(validate_class_and_selector("Main", "Run:").is_err());
+    }
+
+    #[test]
+    fn test_script_eval_cmd_keyword_dispatch_wraps_args_as_one_list() {
+        // `main:` is arity-1: the dispatch list holds exactly one element — the
+        // argv List(String) — even when several args are passed.
+        // Args are emitted as explicit UTF-8 byte-segment binaries:
+        // "Alice" = 65,108,105,99,101  and  "Bob" = 66,111,98.
+        let args = vec!["Alice".to_string(), "Bob".to_string()];
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
+        assert!(
+            cmd.contains(
+                "beamtalk_script_harness:dispatch(ClassPid, 'main:', \
+                 [[<<65, 108, 105, 99, 101>>, <<66, 111, 98>>]])"
+            ),
+            "Keyword entry should receive argv as one List(String): {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_keyword_dispatch_empty_args_is_empty_list() {
+        // No args → the argv List(String) is empty, but the entry is still arity-1.
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &[], &[]);
+        assert!(
+            cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'main:', [[]])"),
+            "Empty argv should be a one-element dispatch list holding []: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_encodes_args_as_utf8_bytes() {
+        // Byte-segment encoding is injection-proof (quotes/backslashes are just
+        // bytes) and encoding-agnostic. `a"b\c` = 97,34,98,92,99.
+        let args = vec![r#"a"b\c"#.to_string()];
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
+        assert!(
+            cmd.contains("<<97, 34, 98, 92, 99>>"),
+            "Arg should be emitted as raw UTF-8 bytes, not a quoted literal: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_non_ascii_arg_is_utf8() {
+        // "café" → UTF-8 bytes 99,97,102,195,169 (é = 0xC3 0xA9). This matches the
+        // escript path's `unicode:characters_to_binary`, not a mangled Latin-1 byte.
+        let args = vec!["café".to_string()];
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[]);
+        assert!(
+            cmd.contains("<<99, 97, 102, 195, 169>>"),
+            "Non-ASCII arg should be a UTF-8 byte sequence: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_seeds_program_name_env() {
+        // program_name app env is seeded at boot so `Program name` returns
+        // "beamtalk" under run-mode (the escript path overrides it in Phase 4).
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[]);
+        assert!(
+            cmd.contains(r#"application:set_env(beamtalk_runtime, program_name, <<"beamtalk">>)"#),
+            "Run-mode boot should seed program_name: {cmd}"
+        );
+    }
+
+    #[test]
+    fn test_script_eval_cmd_seeds_node_owning_env() {
+        // node_owning app env is seeded at boot so `System halt:` / `Program exit:`
+        // know the program owns the node (ADR 0099 §3). Absent on the
+        // shared/persistent path, where halt is refused.
+        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[]);
+        assert!(
+            cmd.contains("application:set_env(beamtalk_runtime, node_owning, true)"),
+            "Run-mode boot should seed node_owning: {cmd}"
         );
     }
 }

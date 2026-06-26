@@ -80,3 +80,21 @@ TestCase subclass: SystemTest
     id1 := System uniqueId
     id2 := System uniqueId
     self assert: (id2 > id1)
+
+  // --- ADR 0099 §3: System halt: (two-tier exit, VM tier) ---
+  // The test workspace is NOT node-owning, so every halt: call is refused before
+  // it can reach erlang:halt — these tests never halt the runner.
+  testHaltNonIntegerRaisesTypeError =>
+    @expect type
+    self should: [System halt: "one"] raise: #type_error
+
+  testHaltOutOfRangeRaisesError =>
+    // A value outside POSIX 0..255 is a wrong *value*, not a wrong *type*.
+    self should: [System halt: 999] raise: #invalid_argument
+
+  testHaltInSharedWorkspaceRefuses =>
+    // Not node-owning → refused (directs the caller to Program exit:), never halts.
+    self should: [System halt: 0] raise: #unsupported
+
+  testHaltUnaryInSharedWorkspaceRefuses =>
+    self should: [System halt] raise: #unsupported

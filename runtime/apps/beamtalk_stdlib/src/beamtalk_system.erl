@@ -28,10 +28,15 @@ detecting the operating system and architecture, and querying process info.
 | `uniqueId`          | Unique positive monotonic integer         |
 """.
 
+%% `halt/0,1` shadow the auto-imported `erlang:halt/0,1` BIFs; we always call the
+%% BIF qualified (`erlang:halt/1`).
+-compile({no_auto_import, [halt/0, halt/1]}).
+
 -export(['getEnv:'/1, 'getEnv:default:'/2]).
 -export(['setEnv:value:'/2, 'unsetEnv:'/1]).
 -export([osPlatform/0, osFamily/0, architecture/0, hostname/0]).
 -export([erlangVersion/0, pid/0, uniqueId/0]).
+-export([halt/0, 'halt:'/1, halt/1]).
 -export([getEnv/1, getEnv/2]).
 -export([setEnv/2, unsetEnv/1]).
 
@@ -161,6 +166,48 @@ Each call returns a value strictly greater than any previous call.
 uniqueId() ->
     erlang:unique_integer([positive, monotonic]).
 
+-doc "Halt the whole VM with status 0 (the nuclear, whole-node option). Does not return.".
+-spec halt() -> no_return().
+halt() ->
+    do_halt(0, halt).
+
+-doc """
+Halt the whole VM with status `Code` (ADR 0099 §3) — the nuclear option.
+
+`erlang:halt/1` is an *immediate* halt: it does **not** run OTP shutdown or
+`terminate/2` callbacks (it does flush the `io` layer, so no explicit `Console`
+pre-flush is needed). Correct for a standalone app that owns the node and wants
+to stop *now*.
+
+`Code` must be an `Integer` (non-Integer → `#type_error`, consistent with
+`setEnv:`) in the POSIX range 0–255 (out-of-range → `#beamtalk_error`, a wrong
+*value* not a wrong *type*).
+
+**Refused outside a node-owning context.** Halting the node inside a live,
+shared workspace would kill the service and every other connected session, so
+`System halt:` raises a `#beamtalk_error` (pointing at `Program exit:`) unless
+the `beamtalk_runtime` `node_owning` app env is set — which only the run-mode
+and escript entry harnesses set, at boot.
+""".
+-spec 'halt:'(integer()) -> no_return().
+'halt:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
+    do_halt(Code, 'halt:');
+'halt:'(Code) when is_integer(Code) ->
+    Error0 = beamtalk_error:new(invalid_argument, 'System'),
+    Error1 = beamtalk_error:with_selector(Error0, 'halt:'),
+    Error2 = beamtalk_error:with_details(Error1, #{got => Code}),
+    Error3 = beamtalk_error:with_hint(
+        Error2, <<"Exit status must be in the POSIX range 0..255">>
+    ),
+    beamtalk_error:raise(Error3);
+'halt:'(_Code) ->
+    beamtalk_error:raise_type_error('System', 'halt:', <<"Exit status must be an Integer">>).
+
+-doc "FFI shim for `(Erlang beamtalk_system) halt:` (proxy strips the colon).".
+-spec halt(integer()) -> no_return().
+halt(Code) ->
+    'halt:'(Code).
+
 -doc """
 Shims for (Erlang beamtalk_system) FFI dispatch.
 The Erlang FFI proxy (beamtalk_erlang_proxy) maps any keyword selector to
@@ -185,6 +232,29 @@ unsetEnv(Name) -> 'unsetEnv:'(Name).
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
+
+-doc """
+Halt the node with `Code` if this invocation owns it; otherwise refuse with a
+`#beamtalk_error` directing the caller to the safe `Program exit:`.
+""".
+-spec do_halt(integer(), atom()) -> no_return().
+do_halt(Code, Selector) ->
+    case application:get_env(beamtalk_runtime, node_owning, false) of
+        true ->
+            erlang:halt(Code);
+        _ ->
+            Error0 = beamtalk_error:new(unsupported, 'System'),
+            Error1 = beamtalk_error:with_selector(Error0, Selector),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<
+                    "System halt: halts the whole node, which would kill a shared "
+                    "workspace and every other connected session. Use Program exit: "
+                    "to end just this program/session."
+                >>
+            ),
+            beamtalk_error:raise(Error2)
+    end.
 
 -doc "Map os:type() Name atom to platform string.".
 -spec platform_name(atom()) -> binary().

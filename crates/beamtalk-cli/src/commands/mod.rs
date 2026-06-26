@@ -19,6 +19,7 @@ pub mod doctor;
 pub(crate) mod erlang_eval;
 pub(crate) mod erlang_lint;
 pub(crate) mod erlfmt;
+pub mod escript;
 pub mod fmt;
 pub mod generate;
 pub mod lint;

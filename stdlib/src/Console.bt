@@ -1,0 +1,129 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Console — the running process's standard I/O (ADR 0099 §1).
+///
+/// `Console` wraps this OS process's `stdin`/`stdout`/`stderr`: line-oriented,
+/// point-to-point with the terminal, meaningful only while the program runs.
+/// All methods are class-side — `Console` has no instances (same shape as
+/// `System` and `OS`).
+///
+/// ## `Console` vs `Transcript`
+///
+/// `Transcript` is the *workspace* log — pub/sub, per-workspace, consumed by
+/// REPL/IDE subscribers, surviving across script runs. `Console` is *this
+/// process's* stdio. A CLI tool writes to `Console`; a live-coding session
+/// observes `Transcript`. `Object >> show:` / `showCr:` continue to target
+/// `Transcript`, unchanged.
+///
+/// ## REPL caveat
+///
+/// Interactive console I/O is a `beamtalk run` / packaged-script story. Under a
+/// detached/persistent workspace, `Console` writes reach the *node's* stdout
+/// (not the connected client) and `Console readLine` reads the server's stdin
+/// (typically closed) and returns `nil`. Inside the REPL, prefer `Transcript`.
+///
+/// ## Closed streams
+///
+/// A *closed, absent, or broken* device is benign: writes drop silently
+/// (returning `nil`) and `readLine` returns `nil`, so a detached node's stdio
+/// never crashes a program. This includes a **broken downstream pipe** — e.g.
+/// `beamtalk run Greeter main: | head -1`, where the reader exits early — so the
+/// program exits 0 (the conventional Unix behaviour) rather than erroring. A
+/// *genuine* data error (e.g. malformed output) is surfaced as an `io_error`.
+///
+/// ## Examples
+/// ```beamtalk
+/// Console printLine: "Hello, World!"
+/// // => nil
+/// Console print: 42
+/// // => nil
+/// Console errorLine: "something went wrong"
+/// // => nil
+/// Console flush
+/// // => nil
+/// ```
+sealed typed Object subclass: Console
+
+  /// Write a value to stdout followed by a newline. Returns nil.
+  ///
+  /// Renders `aValue` via the `displayString` protocol (ADR 0094) — `"abc"`
+  /// prints as `abc`, not `"abc"`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Console printLine: "hello"
+  /// // => nil
+  /// ```
+  class sealed printLine: aValue :: Printable -> Nil =>
+    (Erlang beamtalk_console) printLine: aValue
+
+  /// Write a value to stdout with no trailing newline. Returns nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Console print: "hello"
+  /// // => nil
+  /// ```
+  class sealed print: aValue :: Printable -> Nil =>
+    (Erlang beamtalk_console) print: aValue
+
+  /// Write a value to stderr followed by a newline. Returns nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Console errorLine: "boom"
+  /// // => nil
+  /// ```
+  class sealed errorLine: aValue :: Printable -> Nil =>
+    (Erlang beamtalk_console) errorLine: aValue
+
+  /// Write a value to stderr with no trailing newline. Returns nil.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Console error: "boom"
+  /// // => nil
+  /// ```
+  class sealed error: aValue :: Printable -> Nil =>
+    (Erlang beamtalk_console) error: aValue
+
+  /// Flush buffered output. Returns nil.
+  ///
+  /// The BEAM io layer is synchronous, so output is already delivered when a
+  /// `print:`/`printLine:` returns; `flush` exists for API symmetry and is
+  /// currently a no-op.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Console flush
+  /// // => nil
+  /// ```
+  class sealed flush -> Nil => (Erlang beamtalk_console) flush
+
+  /// Read one line from stdin, with the trailing newline stripped.
+  ///
+  /// Returns the line as a `String`, or `nil` at end of input (including a
+  /// closed/absent stdin, e.g. under the REPL). Raises a `#beamtalk_error` on a
+  /// genuine mid-stream read failure.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Under `beamtalk run`; returns nil when stdin is closed.
+  /// Console readLine
+  /// // => _
+  /// ```
+  class sealed readLine -> String | Nil => (Erlang beamtalk_console) readLine
+
+  /// Write a prompt to stdout (no newline), then read one line from stdin.
+  ///
+  /// Same return contract as `readLine`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Under `beamtalk run`; returns nil when stdin is closed.
+  /// Console readLine: "name? "
+  /// // => _
+  /// ```
+  class sealed readLine: prompt :: String -> String | Nil =>
+    (Erlang beamtalk_console) readLine: prompt

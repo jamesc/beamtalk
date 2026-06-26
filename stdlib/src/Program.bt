@@ -1,0 +1,74 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Program — the running program/invocation (ADR 0099 §2).
+///
+/// `Program` names *this running program*. It is the object that exists in every
+/// execution context (run-mode, escript, connected) — unlike `Session`, which is
+/// `nil` in compiled program code. All methods are class-side — `Program` has no
+/// instances (same shape as `System` and `Console`).
+///
+/// It exposes `commandName` and the job-level half of the two-tier exit
+/// (`exit` / `exit:`); `System halt:` is the node-level half.
+///
+/// ## Examples
+/// ```beamtalk
+/// // Under `beamtalk run`, there is no argv[0]:
+/// Program commandName
+/// // => "beamtalk"
+/// ```
+sealed typed Object subclass: Program
+
+  /// The invoked program's name as a `String`.
+  ///
+  /// Under a packaged escript it is the invoked filename; under `beamtalk run`
+  /// there is no argv[0], so it is the literal `"beamtalk"`. Handy for usage and
+  /// `--help` text; not load-bearing.
+  ///
+  /// Named `commandName` (not `name`) deliberately: `name` is the sealed
+  /// reflective class-identity accessor (`Behaviour>>name`, a primitive used by
+  /// `SystemNavigation` and the class machinery), so a class-side `name` on
+  /// `Program` would shadow it and break reflection over the class universe.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program commandName
+  /// // => "beamtalk"
+  /// ```
+  class sealed commandName -> String => (Erlang beamtalk_program) commandName
+
+  /// End this program with status 0 — the job-level, safe exit. Does not return.
+  ///
+  /// In run-mode / escript (where the program owns the node) this exits the node
+  /// with status 0. See `exit:` for the full contract and the process-boundary
+  /// caveat.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program exit
+  /// // => _
+  /// ```
+  class sealed exit -> Nil => (Erlang beamtalk_program) exit
+
+  /// End this program with status `code` — the job-level, safe exit (ADR 0099).
+  /// Does not return.
+  ///
+  /// Where `System halt:` halts the whole VM, `Program exit:` ends *this program*.
+  /// In run-mode / escript it exits the node with `code`; in a shared/connected
+  /// workspace it ends only this session's job (pending the Session-termination
+  /// hook, BT-2688) and leaves the node up.
+  ///
+  /// **Process boundary:** the run-mode / escript path is an immediate node
+  /// halt, so it is effective from *any* process (the node is dedicated to this
+  /// program). The connected-mode path (Phase 5) instead ends the session via a
+  /// caught signal and so is effective only from the entry method's own call
+  /// chain — there a spawned Actor returns a status to the entry method and lets
+  /// *it* call `exit:`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program exit: 2
+  /// // => _
+  /// ```
+  class sealed exit: code :: Integer -> Nil =>
+    (Erlang beamtalk_program) exit: code

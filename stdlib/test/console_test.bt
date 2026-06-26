@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Console class (ADR 0099 §1, BT-2685).
+//
+// Covers the non-interactive write side: print:/printLine:/error:/errorLine:/
+// flush all return nil and accept any Printable. The interactive read side
+// (readLine / readLine:) is exercised by an examples smoke script under
+// `beamtalk run` (examples/getting-started/src/console_echo.bt), since reading
+// stdin is not meaningful under the test harness.
+//
+// These tests write a few short lines to the node's real stdout/stderr; the
+// assertions are on the returned value (nil), not the captured output.
+
+TestCase subclass: ConsoleTest
+
+  testPrintLineReturnsNil =>
+    self assert: (Console printLine: "console_test: printLine") equals: nil
+
+  testPrintReturnsNil =>
+    self assert: (Console print: "console_test: print\n") equals: nil
+
+  testErrorLineReturnsNil =>
+    self assert: (Console errorLine: "console_test: errorLine") equals: nil
+
+  testErrorReturnsNil =>
+    self assert: (Console error: "console_test: error\n") equals: nil
+
+  testFlushReturnsNil => self assert: Console flush equals: nil
+
+  testPrintLineRendersInteger =>
+    // Integers render via displayString (no quotes / no #() wrapping).
+    self assert: (Console printLine: 42) equals: nil
+
+  testPrintLineRendersBoolean =>
+    self assert: (Console printLine: true) equals: nil
+
+  testPrintLineRendersNil => self assert: (Console printLine: nil) equals: nil
+
+  testPrintLineRendersList =>
+    self assert: (Console printLine: #(1, 2, 3)) equals: nil
+
+  testPrintLineRendersFloat => self assert: (Console printLine: 3.5) equals: nil

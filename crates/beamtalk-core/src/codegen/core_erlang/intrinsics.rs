@@ -718,13 +718,15 @@ impl CoreErlangGenerator {
             "module_name",
             "printString",
         ];
+        // BT-2685: peel `(Erlang mod)` parentheses so a parenthesized FFI receiver
+        // is recognised (the canonical `(Erlang beamtalk_console) error: x` form).
         if let Expression::MessageSend {
             receiver: inner_receiver,
             selector: MessageSelector::Unary(module_name),
             ..
-        } = expr
+        } = Self::peel_parens(expr)
         {
-            if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
+            if let Expression::ClassReference { name, .. } = Self::peel_parens(inner_receiver) {
                 return name.name == "Erlang"
                     && !CLASS_PROTOCOL_SELECTORS.contains(&module_name.as_str());
             }
@@ -1451,6 +1453,12 @@ impl CoreErlangGenerator {
         // Also covers `Logger error: "msg"` — see `WellKnownSelector::Error` rustdoc
         // for the dual-use caveat (Object >> error: vs Logger class >> error:).
         if matches!(receiver, Expression::ClassReference { .. }) {
+            return Ok(None);
+        }
+        // BT-2685: `(Erlang mod) error: arg` / `error:metadata:` is an Erlang FFI call to a
+        // function named `error` (e.g. `Console error:` delegating to `beamtalk_console:error/1`),
+        // not the Object#error: error-signaling intrinsic. Skip so the FFI proxy handles it.
+        if Self::is_erlang_ffi_receiver(receiver) {
             return Ok(None);
         }
         // BT-2073: `error:` is well-known; dispatch via the enum.

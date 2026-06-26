@@ -36,6 +36,7 @@ source text) are handled via the `on_activate` callback in activation options.
     activate_dependencies/2,
     activate_module/1,
     activate_module/2,
+    activate_modules/2,
     find_bt_modules_in_dir/1,
     sort_modules_by_dependency/2,
     topo_sort/1,
@@ -198,6 +199,34 @@ activate_dependencies(ProjectPath, Opts) ->
             end
     end,
     DepErrors.
+
+-doc """
+Activate an explicit list of (loadable) Beamtalk class modules, in dependency
+(topo) order.
+
+Unlike `activate_ebin/2`, this takes a module list rather than scanning an ebin
+*directory*, and reads each module's `beamtalk_class` attribute from the
+**loaded module** (`code:ensure_loaded/1` + `module_info/1`) instead of a
+`.beam` file on disk. That makes it usable where the modules are supplied by an
+escript archive (ADR 0099 §4) — there is no source ebin directory to scan, but
+the modules are loadable by name from the archive's code path.
+
+Returns `{ok, Errors}` where `Errors` is a (possibly empty) list of
+`{Module, Reason}` activation failures.
+""".
+-spec activate_modules([module()], opts()) -> {ok, [{module(), term()}]}.
+activate_modules(Modules, Opts) ->
+    Sorted = sort_loaded_modules_by_dependency(Modules),
+    ModErrors = lists:filtermap(
+        fun(Mod) ->
+            case activate_module(Mod, Opts) of
+                ok -> false;
+                {error, Reason} -> {true, {Mod, Reason}}
+            end
+        end,
+        Sorted
+    ),
+    {ok, ModErrors}.
 
 -doc "Activate a single module with default options.".
 -spec activate_module(module()) -> ok | {error, term()}.
@@ -585,6 +614,58 @@ is_valid_module_char(C) when C >= $0, C =< $9 -> true;
 is_valid_module_char($@) -> true;
 is_valid_module_char($_) -> true;
 is_valid_module_char(_) -> false.
+
+-doc """
+Topo-sort loaded class modules by superclass dependency (escript-friendly).
+
+Mirrors `sort_modules_by_dependency/2` but reads the `beamtalk_class` attribute
+from the loaded module rather than a `.beam` file in a directory.
+""".
+-spec sort_loaded_modules_by_dependency([module()]) -> [module()].
+sort_loaded_modules_by_dependency([]) ->
+    [];
+sort_loaded_modules_by_dependency(Modules) ->
+    {WithClass, WithoutClass} = lists:foldl(
+        fun(Mod, {WC, WOC}) ->
+            case extract_class_info_from_loaded(Mod) of
+                {ok, ClassName, Superclass} ->
+                    {[{Mod, ClassName, Superclass} | WC], WOC};
+                error ->
+                    {WC, [Mod | WOC]}
+            end
+        end,
+        {[], []},
+        Modules
+    ),
+    Sorted = topo_sort(lists:reverse(WithClass)),
+    lists:reverse(WithoutClass, [Mod || {Mod, _, _} <- Sorted]).
+
+-doc """
+Read a module's `beamtalk_class` attribute from its object code
+(escript-friendly).
+
+Uses `code:get_object_code/1` (which resolves through the code path, including
+an escript archive) + `beam_lib`, rather than `Module:module_info/1`. A `bt@`
+class module has an `on_load` (its `register_class/0`); querying it via
+`module_info` before activation would force an early load mid-`on_load`, so we
+read the BEAM binary directly here and let `activate_module/2` do the real load.
+""".
+-spec extract_class_info_from_loaded(module()) -> {ok, atom(), atom()} | error.
+extract_class_info_from_loaded(Module) ->
+    case code:get_object_code(Module) of
+        {Module, Beam, _Filename} ->
+            case beam_lib:chunks(Beam, [attributes]) of
+                {ok, {_, [{attributes, Attrs}]}} ->
+                    case proplists:get_value(beamtalk_class, Attrs) of
+                        [{ClassName, Superclass} | _] -> {ok, ClassName, Superclass};
+                        _ -> error
+                    end;
+                _ ->
+                    error
+            end;
+        error ->
+            error
+    end.
 
 -doc "Extract class name and superclass from a BEAM file's attributes.".
 -spec extract_class_info_from_beam(file:filename(), module()) -> {ok, atom(), atom()} | error.

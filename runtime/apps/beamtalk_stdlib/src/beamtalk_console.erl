@@ -1,0 +1,272 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+-module(beamtalk_console).
+
+%%% **DDD Context:** Object System Context
+
+-moduledoc """
+Console class implementation — the running process's standard I/O (ADR 0099 §1).
+
+`Console` wraps the BEAM `standard_io` / `standard_error` of the *current*
+OS process: line-oriented, point-to-point with the terminal. It is distinct
+from `Transcript` (`beamtalk_transcript_stream`), which is the per-workspace
+pub/sub log. A CLI tool writes to `Console`; a live-coding session observes
+`Transcript`.
+
+All methods are class-side — `Console` has no instances.
+
+## Methods
+
+| Selector      | Description                                       |
+|---------------|---------------------------------------------------|
+| `print:`      | Write a value to stdout (no newline)              |
+| `printLine:`  | Write a value to stdout followed by a newline     |
+| `error:`      | Write a value to stderr (no newline)              |
+| `errorLine:`  | Write a value to stderr followed by a newline     |
+| `flush`       | Flush buffered output (no-op on the BEAM io layer)|
+| `readLine`    | Read one line from stdin; `nil` at EOF            |
+| `readLine:`   | Write a prompt to stdout, then read one line      |
+
+## Rendering
+
+`print:` / `printLine:` / `error:` / `errorLine:` render their argument via the
+`displayString` protocol (ADR 0094) using `beamtalk_primitive:display_string/1`
+— the same rendering `Transcript show:` uses — so `"abc"` prints as `abc`,
+not `"abc"`.
+
+## Error contract (ADR 0099 §1 Open Questions, resolved here)
+
+Both the read and write sides share one principle: **a closed or absent device
+is benign; a genuine I/O failure is surfaced.**
+
+* **Read side.** `readLine` / `readLine:` map `eof` to `nil`. A closed or
+  never-opened stdin — `{error, terminated}` (the io server for a detached
+  node has gone) and `{error, ebadf}` (stdin was never opened) — is treated as
+  end-of-input and also maps to `nil`. Any *other* `{error, Reason}` (a genuine
+  mid-stream failure) raises `#beamtalk_error{kind = io_error}`, keeping EOF and
+  a real read error distinguishable.
+  * `{error, enotsup}` is **not** on the closed-stdin allowlist: ordinary
+    piped/redirected stdin returns data then `eof`, and `enotsup` is a property
+    of `io:getopts`/tty queries rather than a `get_line` result, so a
+    `get_line` yielding `enotsup` is a genuine anomaly worth surfacing.
+
+* **Write side.** `print:` / `printLine:` / `error:` / `errorLine:` / `flush`
+  drop silently (returning `nil`) when the device is closed/absent/broken —
+  writing to a detached node's stdout, or to a downstream pipe that has closed,
+  must not crash a program. `io:put_chars/2` does not *return* `{error, Reason}`
+  (its OTP spec is `-> ok`); a device failure *raises*. Empirically a broken pipe
+  (`… | head -1`) raises `error:terminated` (the writer process crashes with
+  `epipe` and the caller sees the io server gone), so `terminated` / `ebadf` /
+  `epipe` are all treated as closed-device and drop — `prog | head -1` exits 0,
+  the conventional Unix behaviour. A *genuine* data error (e.g. `badarg`) raises
+  `#beamtalk_error{kind = io_error}`.
+
+## REPL caveat
+
+Under a detached/persistent workspace these calls reach the *node's* stdio, not
+the connected client's terminal, and `readLine` typically sees a closed stdin
+and returns `nil`. Interactive console I/O is a `beamtalk run` / packaged-script
+story; inside the REPL prefer `Transcript`.
+""".
+
+-export(['print:'/1, 'printLine:'/1, 'error:'/1, 'errorLine:'/1]).
+-export([flush/0, readLine/0, 'readLine:'/1]).
+%% FFI shims: the Erlang proxy strips the trailing colon from keyword
+%% selectors before dispatch, so `print:` arrives as `print`, etc.
+-export([print/1, printLine/1, error/1, errorLine/1, readLine/1]).
+
+%%% ============================================================================
+%%% Public API — write side
+%%% ============================================================================
+
+-doc "Write a value to stdout with no trailing newline. Returns nil.".
+-spec 'print:'(term()) -> 'nil'.
+'print:'(Value) ->
+    write(standard_io, render(Value), 'print:').
+
+-doc "Write a value to stdout followed by a newline. Returns nil.".
+-spec 'printLine:'(term()) -> 'nil'.
+'printLine:'(Value) ->
+    write(standard_io, [render(Value), $\n], 'printLine:').
+
+-doc "Write a value to stderr with no trailing newline. Returns nil.".
+-spec 'error:'(term()) -> 'nil'.
+'error:'(Value) ->
+    write(standard_error, render(Value), 'error:').
+
+-doc "Write a value to stderr followed by a newline. Returns nil.".
+-spec 'errorLine:'(term()) -> 'nil'.
+'errorLine:'(Value) ->
+    write(standard_error, [render(Value), $\n], 'errorLine:').
+
+-doc """
+Flush buffered output. Returns nil.
+
+The BEAM io protocol is synchronous request/reply, so output written via
+`print:`/`printLine:` has already been delivered to the io server by the time
+the call returns; there is no user-space buffer above the io layer to flush
+(ADR 0099 §3). `flush` therefore exists for API symmetry and forward
+compatibility and is currently a no-op.
+""".
+-spec flush() -> 'nil'.
+flush() ->
+    nil.
+
+%%% ============================================================================
+%%% Public API — read side
+%%% ============================================================================
+
+-doc """
+Read one line from stdin, with the trailing newline stripped.
+
+Returns the line as a String, or `nil` at end of input (including a
+closed/absent stdin). Raises `#beamtalk_error{kind = io_error}` on a genuine
+mid-stream read failure. See the module doc for the closed-stdin allowlist.
+""".
+-spec readLine() -> binary() | 'nil'.
+readLine() ->
+    read(<<>>, readLine).
+
+-doc """
+Write a prompt to stdout (no newline), then read one line from stdin.
+
+Same return contract as `readLine`.
+""".
+-spec 'readLine:'(term()) -> binary() | 'nil'.
+'readLine:'(Prompt) ->
+    read(render(Prompt), 'readLine:').
+
+%%% ============================================================================
+%%% FFI shims (proxy strips the trailing colon before dispatch)
+%%% ============================================================================
+
+-doc "FFI shim for `(Erlang beamtalk_console) print:`.".
+-spec print(term()) -> 'nil'.
+print(Value) -> 'print:'(Value).
+
+-doc "FFI shim for `(Erlang beamtalk_console) printLine:`.".
+-spec printLine(term()) -> 'nil'.
+printLine(Value) -> 'printLine:'(Value).
+
+-doc "FFI shim for `(Erlang beamtalk_console) error:`.".
+-spec error(term()) -> 'nil'.
+error(Value) -> 'error:'(Value).
+
+-doc "FFI shim for `(Erlang beamtalk_console) errorLine:`.".
+-spec errorLine(term()) -> 'nil'.
+errorLine(Value) -> 'errorLine:'(Value).
+
+-doc "FFI shim for `(Erlang beamtalk_console) readLine:`.".
+-spec readLine(term()) -> binary() | 'nil'.
+readLine(Prompt) -> 'readLine:'(Prompt).
+
+%%% ============================================================================
+%%% Internal helpers
+%%% ============================================================================
+
+-doc "Render a value via the displayString protocol (matches Transcript show:).".
+-spec render(term()) -> binary().
+render(Value) ->
+    beamtalk_primitive:display_string(Value).
+
+-doc """
+Write iodata to a device, applying the write-side error contract.
+
+A closed/absent device drops silently (returns nil); any other failure raises
+`#beamtalk_error{kind = io_error}`.
+""".
+-spec write(atom(), iodata(), atom()) -> 'nil'.
+write(Device, Data, Selector) ->
+    %% io:put_chars/2 returns `ok`; device failures surface as *exceptions*, not a
+    %% `{error, Reason}` return (its OTP spec is `-> ok`). Empirically, a broken
+    %% downstream pipe (`… | head -1`) raises `error:terminated` — the writer
+    %% process crashes with `epipe` and the caller sees the io server as gone — so
+    %% the `error`-class catch routes it through the allowlist (`terminated` /
+    %% `ebadf` / `epipe` drop; genuine data errors like `badarg` raise). An
+    %% `exit`-class exception (a graceful/`noproc` shutdown mid-write) is likewise
+    %% the closed/absent-device case and drops (symmetric with read/2).
+    try
+        io:put_chars(Device, Data),
+        nil
+    catch
+        error:Reason -> handle_io_error(Reason, Selector);
+        exit:_Reason -> nil
+    end.
+
+-doc """
+Read one line from stdin after writing the (already-rendered) prompt iodata,
+applying the read-side error contract.
+""".
+-spec read(iodata(), atom()) -> binary() | 'nil'.
+read(Prompt, Selector) ->
+    try io:get_line(standard_io, Prompt) of
+        eof -> nil;
+        {error, Reason} -> handle_io_error(Reason, Selector);
+        Data -> strip_eol(to_binary(Data))
+    catch
+        error:Reason -> handle_io_error(Reason, Selector);
+        %% A dead io-server process surfaces as an exit-class exception — the
+        %% closed/absent-stdin case, treated as end-of-input (nil).
+        exit:_Reason -> nil
+    end.
+
+-doc """
+Apply the shared error contract: a closed/absent device maps to `nil`, any
+other reason raises `#beamtalk_error{kind = io_error}`.
+""".
+-spec handle_io_error(term(), atom()) -> 'nil' | no_return().
+handle_io_error(Reason, Selector) ->
+    case closed_device(Reason) of
+        true -> nil;
+        false -> raise_io_error(Selector, Reason)
+    end.
+
+-doc """
+The closed/absent/broken-device allowlist for **error-class** io failures.
+
+`terminated` — the io server (e.g. a detached node's, or a broken downstream
+pipe whose writer process crashed) has gone. `ebadf` — the descriptor was never
+opened. `epipe` — a broken downstream pipe, included defensively in case a
+backend surfaces it as the raw reason rather than `terminated` (so `prog |
+head -1` is the conventional silent exit-0 either way).
+
+Everything else (e.g. `badarg` from malformed data) is a genuine failure and
+raises. A dead io-*server process* can also surface as an `exit`-class exception
+(`noproc`, `{normal, _}`, `{shutdown, _}`, …), which the read/write catch clauses
+treat as the closed/absent-device case (`exit:_ -> nil`); those reasons never
+reach this error-class allowlist.
+""".
+-spec closed_device(term()) -> boolean().
+closed_device(terminated) -> true;
+closed_device(ebadf) -> true;
+closed_device(epipe) -> true;
+closed_device(_) -> false.
+
+-doc "Convert io:get_line/2 output (a codepoint list or binary) to a UTF-8 binary.".
+-spec to_binary(string() | binary()) -> binary().
+to_binary(Data) when is_binary(Data) ->
+    Data;
+to_binary(Data) when is_list(Data) ->
+    case unicode:characters_to_binary(Data) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> iolist_to_binary(Data)
+    end.
+
+-doc "Strip a single trailing line terminator (\\n or \\r\\n) from a line.".
+-spec strip_eol(binary()) -> binary().
+strip_eol(Bin) ->
+    Size = byte_size(Bin),
+    case Bin of
+        <<Head:(Size - 2)/binary, "\r\n">> when Size >= 2 -> Head;
+        <<Head:(Size - 1)/binary, "\n">> when Size >= 1 -> Head;
+        _ -> Bin
+    end.
+
+-spec raise_io_error(atom(), term()) -> no_return().
+raise_io_error(Selector, Reason) ->
+    Error0 = beamtalk_error:new(io_error, 'Console'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Error2 = beamtalk_error:with_details(Error1, #{reason => Reason}),
+    Error3 = beamtalk_error:with_hint(Error2, <<"Console I/O operation failed">>),
+    beamtalk_error:raise(Error3).

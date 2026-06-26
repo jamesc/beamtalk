@@ -45,6 +45,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ClassRemoved"
             | "Collection"
             | "CompiledMethod"
+            | "Console"
             | "DateTime"
             | "Dictionary"
             | "DynamicSupervisor"
@@ -76,6 +77,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Pid"
             | "Port"
             | "ProcessNavigation"
+            | "Program"
             | "ProtoObject"
             | "Protocol"
             | "Queue"
@@ -1071,6 +1073,38 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "asString".into(), arity: 0, kind: MethodKind::Primary, defined_in: "CompiledMethod".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Convert the compiled method to a string.\n\n## Examples\n```beamtalk\n(Integer >> #+) asString\n```".into()) },
             ],
             class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Console".into(),
+        ClassInfo {
+            name: "Console".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "printLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stdout followed by a newline. Returns nil.\n\nRenders `aValue` via the `displayString` protocol (ADR 0094) — `\"abc\"`\nprints as `abc`, not `\"abc\"`.\n\n## Examples\n```beamtalk\nConsole printLine: \"hello\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "print:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stdout with no trailing newline. Returns nil.\n\n## Examples\n```beamtalk\nConsole print: \"hello\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "errorLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stderr followed by a newline. Returns nil.\n\n## Examples\n```beamtalk\nConsole errorLine: \"boom\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "error:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Printable".into())], doc: Some("Write a value to stderr with no trailing newline. Returns nil.\n\n## Examples\n```beamtalk\nConsole error: \"boom\"\n// => nil\n```".into()) },
+                MethodInfo { selector: "flush".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Flush buffered output. Returns nil.\n\nThe BEAM io layer is synchronous, so output is already delivered when a\n`print:`/`printLine:` returns; `flush` exists for API symmetry and is\ncurrently a no-op.\n\n## Examples\n```beamtalk\nConsole flush\n// => nil\n```".into()) },
+                MethodInfo { selector: "readLine".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![], doc: Some("Read one line from stdin, with the trailing newline stripped.\n\nReturns the line as a `String`, or `nil` at end of input (including a\nclosed/absent stdin, e.g. under the REPL). Raises a `#beamtalk_error` on a\ngenuine mid-stream read failure.\n\n## Examples\n```beamtalk\n// Under `beamtalk run`; returns nil when stdin is closed.\nConsole readLine\n// => _\n```".into()) },
+                MethodInfo { selector: "readLine:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Console".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String | Nil".into()), param_types: vec![Some("String".into())], doc: Some("Write a prompt to stdout (no newline), then read one line from stdin.\n\nSame return contract as `readLine`.\n\n## Examples\n```beamtalk\n// Under `beamtalk run`; returns nil when stdin is closed.\nConsole readLine: \"name? \"\n// => _\n```".into()) },
+            ],
             class_variables: vec![],
             type_params: vec![],
             type_param_bounds: vec![],
@@ -2241,6 +2275,34 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     );
 
     classes.insert(
+        "Program".into(),
+        ClassInfo {
+            name: "Program".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "commandName".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Program".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("The invoked program's name as a `String`.\n\nUnder a packaged escript it is the invoked filename; under `beamtalk run`\nthere is no argv[0], so it is the literal `\"beamtalk\"`. Handy for usage and\n`--help` text; not load-bearing.\n\nNamed `commandName` (not `name`) deliberately: `name` is the sealed\nreflective class-identity accessor (`Behaviour>>name`, a primitive used by\n`SystemNavigation` and the class machinery), so a class-side `name` on\n`Program` would shadow it and break reflection over the class universe.\n\n## Examples\n```beamtalk\nProgram commandName\n// => \"beamtalk\"\n```".into()) },
+                MethodInfo { selector: "exit".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Program".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("End this program with status 0 — the job-level, safe exit. Does not return.\n\nIn run-mode / escript (where the program owns the node) this exits the node\nwith status 0. See `exit:` for the full contract and the process-boundary\ncaveat.\n\n## Examples\n```beamtalk\nProgram exit\n// => _\n```".into()) },
+                MethodInfo { selector: "exit:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "Program".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into())], doc: Some("End this program with status `code` — the job-level, safe exit (ADR 0099).\nDoes not return.\n\nWhere `System halt:` halts the whole VM, `Program exit:` ends *this program*.\nIn run-mode / escript it exits the node with `code`; in a shared/connected\nworkspace it ends only this session's job (pending the Session-termination\nhook, BT-2688) and leaves the node up.\n\n**Process boundary:** the run-mode / escript path is an immediate node\nhalt, so it is effective from *any* process (the node is dedicated to this\nprogram). The connected-mode path (Phase 5) instead ends the session via a\ncaught signal and so is effective only from the entry method's own call\nchain — there a spawned Actor returns a status to the entry method and lets\n*it* call `exit:`.\n\n## Examples\n```beamtalk\nProgram exit: 2\n// => _\n```".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
         "ProtoObject".into(),
         ClassInfo {
             name: "ProtoObject".into(),
@@ -3193,6 +3255,8 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "erlangVersion".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("Return the OTP/Erlang version string (e.g., \"27\").\n\n## Examples\n```beamtalk\nSystem erlangVersion\n// => _\n```".into()) },
                 MethodInfo { selector: "pid".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return the OS process ID as an Integer.\n\n## Examples\n```beamtalk\nSystem pid\n// => _\n```".into()) },
                 MethodInfo { selector: "uniqueId".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Integer".into()), param_types: vec![], doc: Some("Return a unique positive monotonic integer.\n\nEach call returns a value strictly greater than any previous call\nwithin this VM instance. Useful for generating unique IDs.\n\n## Examples\n```beamtalk\nSystem uniqueId\n// => _\n```".into()) },
+                MethodInfo { selector: "halt".into(), arity: 0, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![], doc: Some("Halt the whole VM with status 0 — the nuclear, whole-node option.\nDoes not return.\n\nSee `halt:` for the full contract. Refused outside a node-owning context.\n\n## Examples\n```beamtalk\nSystem halt\n// => _\n```".into()) },
+                MethodInfo { selector: "halt:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "System".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("Nil".into()), param_types: vec![Some("Integer".into())], doc: Some("Halt the whole VM with status `code` (ADR 0099) — the nuclear option.\nDoes not return.\n\nWhere `Program exit:` ends the *program*, `System halt:` halts the *whole\nnode* immediately (`erlang:halt` — no OTP shutdown / `terminate:` callbacks,\nthough it flushes buffered output). `code` must be an `Integer` (else\n`#type_error`) in the POSIX range 0–255 (else `#beamtalk_error`).\n\n**⚠ Refused in a shared workspace.** Called inside a live, shared workspace\n(a connected `beamtalk run`, or the REPL) it would kill the service and every\nother connected session, so the runtime refuses it (with `#beamtalk_error`)\noutside a node-owning context — use `Program exit:` there instead.\n\n## Examples\n```beamtalk\nSystem halt: 1\n// => _\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],

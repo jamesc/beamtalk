@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Program class (ADR 0099 §2, BT-2686).
+//
+// `Program commandName` reads the beamtalk_runtime `program_name` app env,
+// defaulting to "beamtalk" when unset (the run-mode / connected-workspace value).
+// The escript path overrides it with the script name in Phase 4.
+
+TestCase subclass: ProgramTest
+
+  testCommandNameReturnsString =>
+    self assert: Program commandName class equals: String
+
+  testCommandNameDefaultsToBeamtalk =>
+    // Under the test workspace the program_name env is unset, so commandName
+    // defaults to the run-mode literal "beamtalk".
+    self assert: Program commandName equals: "beamtalk"
+
+  testNameIsReflectiveClassName =>
+    // `name` stays the sealed reflective class-identity accessor — defining the
+    // invocation accessor as `commandName` (not `name`) keeps this intact, so
+    // SystemNavigation's class-universe walk does not break (BT-2686 regression).
+    self assert: Program name equals: #Program
+
+  testExitNonIntegerRaisesTypeError =>
+    @expect type
+    self should: [Program exit: "two"] raise: #type_error
+
+  testExitOutOfRangeRaisesError =>
+    // Out of POSIX 0..255 is a wrong value (validated before the node-owning
+    // gate), consistent with System halt:.
+    self should: [Program exit: 999] raise: #invalid_argument
+
+  testExitInSharedWorkspaceRefuses =>
+    // The test workspace is not node-owning, so Program exit: refuses (pending
+    // the connected-mode Session-termination hook, BT-2688) rather than ending a
+    // shared node. (If this ever halts the runner, node_owning leaked into tests.)
+    self should: [Program exit: 0] raise: #unsupported

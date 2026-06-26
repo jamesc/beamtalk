@@ -117,7 +117,7 @@ pub(crate) fn escape_erlang_string(s: &str) -> String {
 ///
 /// Module names should only contain ASCII alphanumeric characters and underscores
 /// to prevent path traversal vulnerabilities.
-fn is_valid_module_name(name: &str) -> bool {
+pub(crate) fn is_valid_module_name(name: &str) -> bool {
     // ADR 0016: @ is legal in Erlang unquoted atoms and used for namespacing
     !name.is_empty()
         && name
