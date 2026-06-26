@@ -25,6 +25,7 @@ Legacy format (backward compatible):
     decode/1,
     parse_request/1,
     encode_result/3, encode_result/4, encode_result/5,
+    encode_script_exit/4,
     encode_error/3, encode_error/4, encode_error/5, encode_error/6,
     encode_status/3,
     encode_out/3,
@@ -228,6 +229,39 @@ encode_result(Value, Msg, TermToJson, Output, Warnings) ->
         false ->
             Base = base_response(Msg),
             Full = Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]},
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
+            )
+    end.
+
+-doc """
+Encode a connected-session `Program exit:` response (BT-2688, ADR 0099 §3).
+
+A successful `done` response (NOT an error) that additionally carries the POSIX
+exit status in a dedicated `exit_code` field, so the connecting client can adopt
+it as its own process exit code. `value` is `null` — `Program exit:` does not
+return a value. The session shell has already terminated by the time this is
+encoded; the shared node stays up.
+""".
+-spec encode_script_exit(non_neg_integer(), protocol_msg(), binary(), [binary()]) -> binary().
+encode_script_exit(Code, Msg, Output, Warnings) ->
+    case Msg#protocol_msg.legacy of
+        true ->
+            %% Legacy protocol has no status array; surface the exit code alongside
+            %% the result envelope so legacy clients can still read it.
+            Base = #{
+                <<"type">> => <<"result">>, <<"value">> => null, <<"exit_code">> => Code
+            },
+            iolist_to_binary(
+                json:encode(maybe_add_warnings(maybe_add_output(Base, Output), Warnings))
+            );
+        false ->
+            Base = base_response(Msg),
+            Full = Base#{
+                <<"value">> => null,
+                <<"status">> => [<<"done">>],
+                <<"exit_code">> => Code
+            },
             iolist_to_binary(
                 json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
             )

@@ -48,6 +48,13 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<Vec<String>>,
 
+    /// POSIX exit status from a connected-session `Program exit:` (BT-2688,
+    /// ADR 0099 §3). Present only on the `done` reply that ended the session; the
+    /// connecting client adopts it as its own process exit code. `None` for every
+    /// other response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<u8>,
+
     // --- Common payload ---
     /// Result value (eval, clear, kill, clone, etc.).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -307,6 +314,23 @@ mod tests {
         let resp: ReplResponse = serde_json::from_str(json).unwrap();
         assert!(resp.is_error());
         assert_eq!(resp.error_message(), Some("Something went wrong"));
+    }
+
+    #[test]
+    fn deserialize_script_exit_response() {
+        // BT-2688: connected-session `Program exit: 5` — a `done` reply (not an
+        // error) carrying the POSIX exit status the CLI adopts.
+        let json = r#"{"id":"msg-008","value":null,"status":["done"],"exit_code":5}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        assert!(!resp.is_error());
+        assert_eq!(resp.exit_code, Some(5));
+    }
+
+    #[test]
+    fn exit_code_absent_on_ordinary_response() {
+        let json = r#"{"id":"msg-009","value":42,"status":["done"]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.exit_code, None);
     }
 
     #[test]

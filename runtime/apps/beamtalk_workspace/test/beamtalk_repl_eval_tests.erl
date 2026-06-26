@@ -157,6 +157,15 @@ do_eval_preserves_bindings_on_error_test() ->
     %% New binding should NOT be there (eval failed)
     ?assertEqual(false, maps:is_key(z, FinalBindings)).
 
+%%% BT-2688: connected-session Program exit: result plumbing
+
+inject_output_script_exit_test() ->
+    %% inject_output/3 threads captured output + warnings into the script_exit
+    %% shape so the shell can report the exit status (ADR 0099 §3 / Phase 5).
+    State = beamtalk_repl_state:new(undefined, 0),
+    Result = beamtalk_repl_eval:inject_output({script_exit, 7, State}, <<"out">>, [<<"w">>]),
+    ?assertEqual({script_exit, 7, <<"out">>, [<<"w">>], State}, Result).
+
 %%% rebuild_bindings_from_steps tests (BT-1261)
 
 rebuild_bindings_from_steps_simple_assignment_test() ->

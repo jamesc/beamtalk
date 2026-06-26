@@ -64,19 +64,30 @@ End this program with status `Code` — the job-level, safe exit (ADR 0099 §3).
 
 In a **node-owning** context (run-mode / escript — the program *is* the node)
 this exits the node with `Code` via `erlang:halt/1` (which flushes the `io`
-layer). In a **shared/connected** context it must end only *this session's* job
-and leave the node up; that needs the `Session`-termination hook (BT-2688,
-ADR 0099 §3 / Phase 5) which is not yet wired, so it refuses loudly rather than
-halt a shared node.
+layer). In a **shared/connected** context (REPL / MCP / LSP / connected
+`beamtalk run`) it must end only *this session's* job and leave the node up; it
+raises a tagged `script_exit` signal carrying the status, which the session
+evaluator catches to report the status to the connecting client and terminate
+the session (BT-2688, ADR 0099 §3 / Phase 5).
 
 **Process boundary.** The run-mode/escript path is an immediate `erlang:halt/1`,
 so it is effective from *any* process — including a spawned/supervised Actor —
 because the node is dedicated to this one program; there is no harness throw to
 unwind, so the ADR 0099 §3 supervised-Actor-restart caveat does not apply here.
-That caveat is about the *connected-mode* path (Phase 5), which ends the session
-via a signal caught by the session evaluator and so is effective only from the
-entry method's own synchronous call chain; a spawned Actor there must return a
-status to the entry method and let *it* call `exit:`.
+That caveat *does* apply to the connected-mode path: the signal is caught by the
+session evaluator, so it is effective only from the entry method's own
+synchronous call chain; a spawned Actor there must return a status to the entry
+method and let *it* call `exit:`.
+
+**`on:do:` caveat (connected mode).** Because the connected exit is a `throw`, a
+block that wraps `Program exit:` in an `on:do:` whose handler class matches
+(`on: Error do:` / `on: Exception do:` / a catch-all) will intercept it as an
+`erlang_throw` rather than letting the session end. `ensure:` is unaffected (it
+re-raises after running cleanup, so the exit still propagates). The robust fix is
+to add this signal to the non-local-return passthrough the `on:do:` codegen
+already emits for `{'$bt_nlr', _}` (see `control_flow/exception_handling.rs`);
+that is a follow-up. In practice `Program exit:` is called at the top of a `main:`
+or as a bare REPL expression, neither of which is wrapped in such a handler.
 """.
 -spec 'exit:'(integer()) -> no_return().
 'exit:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
@@ -84,7 +95,14 @@ status to the entry method and let *it* call `exit:`.
         true ->
             erlang:halt(Code);
         false ->
-            raise_connected_exit_unsupported(Code)
+            %% Connected/shared context: end only THIS session's job, not the
+            %% shared node. The tagged `script_exit` signal carries the status; the
+            %% session evaluator (`beamtalk_repl_eval`/`beamtalk_repl_shell`) catches
+            %% it, replies with the exit status, and stops the session shell
+            %% (BT-2688). `throw` (not `error`) keeps it distinct from a user-level
+            %% `#beamtalk_error{}`, so an ordinary `on:do:` handler does not swallow
+            %% it.
+            throw({beamtalk_script_exit, Code})
     end;
 'exit:'(Code) when is_integer(Code) ->
     %% Out of the POSIX range — a wrong *value*, not a wrong *type*. Validated
@@ -113,18 +131,3 @@ exit(Code) ->
 -spec node_owning() -> boolean().
 node_owning() ->
     application:get_env(beamtalk_runtime, node_owning, false) =:= true.
-
--spec raise_connected_exit_unsupported(integer()) -> no_return().
-raise_connected_exit_unsupported(Code) ->
-    Error0 = beamtalk_error:new(unsupported, 'Program'),
-    Error1 = beamtalk_error:with_selector(Error0, 'exit:'),
-    Error2 = beamtalk_error:with_details(Error1, #{requested_code => Code}),
-    Error3 = beamtalk_error:with_hint(
-        Error2,
-        <<
-            "Program exit: in a shared/connected workspace needs the Session-termination "
-            "hook (BT-2688), not yet available. Run the program with `beamtalk run` "
-            "(run-mode) to use Program exit:, or halt the whole node with System halt:."
-        >>
-    ),
-    beamtalk_error:raise(Error3).
