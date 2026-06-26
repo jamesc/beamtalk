@@ -166,3 +166,52 @@ find_function_arities_returns_sorted_arities_test() ->
 
 find_function_arities_returns_empty_for_nonexistent_test() ->
     ?assertEqual([], beamtalk_erlang_help:find_function_arities(lists, zzz_nonexistent_fn_xyz)).
+
+find_function_arities_nonexistent_module_returns_empty_test() ->
+    %% Module does not exist — catch clause returns []
+    ?assertEqual([], beamtalk_erlang_help:find_function_arities(zzz_nonexistent_module_xyz, foo)).
+
+%%====================================================================
+%% format_function_help/2 — preloaded module (erlang)
+%%====================================================================
+
+format_function_help_for_preloaded_module_function_test() ->
+    %% erlang is a preloaded module; exercises the preloaded branch in
+    %% format_function_help/2 and format_function_with_docs/3
+    {ok, Text} = beamtalk_erlang_help:format_function_help(erlang, abs),
+    ?assertNotEqual(nomatch, binary:match(Text, <<"erlang:abs">>)).
+
+format_function_help_nonexistent_fn_in_preloaded_module_test() ->
+    %% Preloaded module, function not found — exercises find_types_in_beam preloaded branch
+    ?assertEqual(
+        {error, not_found},
+        beamtalk_erlang_help:format_function_help(erlang, zzz_nonexistent_fn_xyz)
+    ).
+
+%%====================================================================
+%% format_exports_list/1
+%%====================================================================
+
+format_exports_list_nonexistent_module_returns_fallback_test() ->
+    %% Module not loaded — catch clause returns fallback string
+    Result = beamtalk_erlang_help:format_exports_list(zzz_nonexistent_module_xyz),
+    ?assertEqual(<<"(no export information available)\n">>, Result).
+
+%%====================================================================
+%% dedupe_keyword_aliases/1 — empty name
+%%====================================================================
+
+dedupe_empty_name_spec_is_kept_test() ->
+    %% Empty binary name: is_keyword_name(<<>>) -> false, so no dedup occurs
+    Result = beamtalk_erlang_help:dedupe_keyword_aliases([#{name => <<>>, arity => 0}]),
+    ?assertEqual(1, length(Result)).
+
+%%====================================================================
+%% format_beamtalk_signature/3 — empty param name fallback
+%%====================================================================
+
+signature_empty_param_name_uses_arg_fallback_test() ->
+    %% format_param_name(<<>>) -> <<"arg">>
+    Params = [#{name => <<>>, type => <<"Integer">>}],
+    Result = beamtalk_erlang_help:format_beamtalk_signature(<<"test:">>, Params, <<"String">>),
+    ?assertNotEqual(nomatch, binary:match(Result, <<"arg">>)).
