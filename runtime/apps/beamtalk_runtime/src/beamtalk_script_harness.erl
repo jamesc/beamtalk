@@ -35,7 +35,7 @@ Dispatch the entry method and halt with the implicit exit status.
 Never returns: a normal return halts `0`, an uncaught error prints to stderr
 and halts `1`. `Program exit:` / `System halt:` halt before reaching the catch.
 """.
--spec dispatch(pid() | undefined, atom(), list()) -> no_return().
+-spec dispatch(pid(), atom(), list()) -> no_return().
 dispatch(ClassPid, Selector, Args) ->
     try beamtalk_class_dispatch:class_send(ClassPid, Selector, Args) of
         _Result -> erlang:halt(0)
@@ -46,6 +46,13 @@ dispatch(ClassPid, Selector, Args) ->
             %% `beamtalk_error:raise/1`, and a raw Erlang reason with the real
             %% `#beamtalk_error{}` buried in the stacktrace — so no special-casing
             %% here.
-            io:put_chars(standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]),
+            %%
+            %% The write itself is guarded: if `standard_error`'s io server has
+            %% exited (a detached node), `io:put_chars` raises an exit-class
+            %% exception; swallow it with `catch` so the contract's `halt(1)`
+            %% always runs rather than letting the node crash out of dispatch/3.
+            catch io:put_chars(
+                standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]
+            ),
             erlang:halt(1)
     end.

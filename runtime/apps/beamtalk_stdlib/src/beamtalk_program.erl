@@ -8,9 +8,10 @@
 -moduledoc """
 Program class implementation — the running program/invocation (ADR 0099 §2).
 
-`Program` names *this running program*. In Phase 2 it exposes only `name`, a
-convenience for usage/`--help` text; the two-tier exit (`exit`/`exit:`) lands in
-Phase 3. All methods are class-side — `Program` has no instances.
+`Program` names *this running program* and ends it. It exposes `name` (a
+convenience for usage/`--help` text) and the job-level half of the two-tier exit
+(`exit`/`exit:`; `System halt:` is the node-level half). All methods are
+class-side — `Program` has no instances.
 
 ## `name`
 

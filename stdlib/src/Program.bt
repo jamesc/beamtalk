@@ -8,8 +8,8 @@
 /// `nil` in compiled program code. All methods are class-side — `Program` has no
 /// instances (same shape as `System` and `Console`).
 ///
-/// Phase 2 exposes only `name`; the two-tier exit (`exit` / `exit:`) lands in
-/// Phase 3.
+/// It exposes `name` and the job-level half of the two-tier exit
+/// (`exit` / `exit:`); `System halt:` is the node-level half.
 ///
 /// ## Examples
 /// ```beamtalk
