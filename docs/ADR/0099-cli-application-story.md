@@ -154,12 +154,12 @@ line := Console readLine: "name? "   // prompt to stdout, then read
   than returning `nil`, so EOF and a genuine read failure stay distinguishable.
   `readLine:` writes a prompt to stdout first (no newline) then reads, with the
   same return contract. A **closed or absent stdin** (e.g. a detached node,
-  where `io:get_line/1` may yield `eof` *or* a closed-fd error — `{error,
-  terminated}`, or on some platforms `{error, ebadf}`) is treated as
-  end-of-input → `nil`; only a *genuine mid-stream* I/O failure raises
-  `#beamtalk_error{}`. Phase 1 carries the precise closed-stdin allowlist. This
-  keeps the "returns `nil` under the REPL" caveat below consistent with the
-  error contract.
+  where `io:get_line/1` may yield `eof` *or* a closed-fd error such as `{error,
+  terminated}`) is treated as end-of-input → `nil`; only a *genuine mid-stream*
+  I/O failure raises `#beamtalk_error{}`. Phase 1 owns the precise closed-stdin
+  allowlist and the per-atom rationale (see Open Questions). This keeps the
+  "returns `nil` under the REPL" caveat below consistent with the error
+  contract.
 - **Backed by** a thin `beamtalk_console` Erlang module: `io:put_chars/2` to
   `standard_io` / `standard_error`, `io:get_line/1`.
 - **Deferred — `Console isInteractive` (tty detection).** Useful for "prompt
@@ -286,7 +286,10 @@ of a clean exit. The contract is therefore: **`Program exit:` is effective only
 from the entry method's own process.** An Actor that wants to end the program
 returns a status to the entry method (a normal message/reply) and lets *it* call
 `exit:`. A cross-process "exit from anywhere" primitive is deliberately out of
-scope for v1; the ADR states the boundary rather than hiding it.
+scope for v1; the ADR states the boundary rather than hiding it. (A *linked*,
+non-supervised Actor is a related case: the link propagates the exit to the
+harness, so the harness must `trap_exit` or document linked-process callers as
+unsupported — see Open Questions.)
 
 **`System halt` / `halt:` — whole-VM halt (the nuclear option).** Where
 `Program exit:` ends the *program*, `System halt:` halts the *whole node*. It
@@ -300,8 +303,9 @@ System halt          // erlang:halt(0)
 System halt: 1       // erlang:halt(1)
 ```
 
-- `halt:` requires an `Integer` 0–255 (POSIX status range); out-of-range or
-  non-Integer raises `#type_error` (consistent with `System setEnv:`).
+- `halt:` requires an `Integer`: a non-Integer raises `#type_error`
+  (consistent with `System setEnv:`), while a value outside the POSIX range
+  0–255 raises a `#beamtalk_error{}` — a wrong *value*, not a wrong *type*.
 - **Semantics:** `erlang:halt/1` is an *immediate* VM halt — it does **not**
   run OTP shutdown or `terminate/2` callbacks. (`halt/1` flushes standard I/O
   through the BEAM I/O server before terminating, so no explicit `Console`
@@ -596,11 +600,13 @@ Rough phases; each is independently shippable and testable.
 ### Phase 1 — `Console` (stdio)
 - `runtime/.../beamtalk_console.erl`: `printLine:`/`print:`/`errorLine:`/
   `error:`/`flush`/`readLine`/`readLine:` over `standard_io` / `standard_error`
-  (`io:put_chars/2`, `io:get_line/1`). `readLine` maps `eof` **and** the
-  closed-stdin errors `{error, terminated}` / `{error, ebadf}` to `nil`; any
-  *other* `{error, Reason}` (a genuine mid-stream failure) raises
-  `#beamtalk_error{}`. `isInteractive` is **deferred** (no portable tty check
-  yet — see §1).
+  (`io:put_chars/2`, `io:get_line/1`). `readLine` maps `eof` to `nil`; the
+  closed-stdin allowlist (definitely `{error, terminated}`; evaluate `{error,
+  ebadf}` — only the never-opened case, *not* a mid-stream close — and `{error,
+  enotsup}` for non-tty stdin, each with documented rationale) also maps to
+  `nil`, while any *other* `{error, Reason}` raises `#beamtalk_error{}`. Settle
+  the write-side error contract too (see Open Questions). `isInteractive` is
+  **deferred** (no portable tty check yet — see §1).
 - `stdlib/src/Console.bt`: class-side methods delegating via `(Erlang
   beamtalk_console) …`, `Printable`-typed print params, doc comments incl. the
   REPL caveat. `print:`/`printLine:` render via `displayString` (ADR 0094,
@@ -637,10 +643,12 @@ Rough phases; each is independently shippable and testable.
     operation today; that hook must land before the connected-mode `Program
     exit:` can ship. The run-mode and escript paths have no such dependency, so
     Phase 3 must not be marked complete on those alone — the connected-mode path
-    is gated on the session-termination capability.
+    is gated on the session-termination capability (tracked: file a follow-up
+    issue before closing Phase 3; see Open Questions).
 - **VM-level (`System halt`/`halt:`):** `beamtalk_system:halt/0,1` →
   `erlang:halt/0,1` (no explicit pre-flush; `halt` flushes the `io` layer);
-  Integer 0–255 validation (`#type_error` otherwise). Detect node-ownership via
+  Integer-type validation (`#type_error`) + range 0–255 (`#beamtalk_error{}`).
+  Detect node-ownership via
   the `beamtalk_runtime` `node_owning` application env (set at boot by run-mode
   startup and escript `main/1`; absent on the persistent/connected path);
   absent → **refuse with `#beamtalk_error{}`** pointing at `Program exit:`.
@@ -662,6 +670,32 @@ Per CLAUDE.md, update `docs/development/surface-parity.md`: `Console` and
 `Program` are runtime stdlib (available everywhere a workspace runs);
 `beamtalk build --escript` and the `beamtalk run … <args>` entry contract are
 **CLI-specific** and should be labelled as such.
+
+## Open Questions (for implementation)
+
+These are deferred to the implementation phases — not design blockers. A
+*Proposed* ADR records them rather than guessing the answers now; each is
+resolved (and tested) when its phase is built.
+
+- **`Program exit:` from a *linked* (non-supervised) Actor.** A link propagates
+  the `{nocatch, {script_exit, N}}` exit to the harness; unless the harness runs
+  `process_flag(trap_exit, true)`, it is killed by the signal instead of mapping
+  it to status N. Phase 3 must trap exits in the harness or document
+  linked-process callers as unsupported.
+- **`Console` write-side error contract.** `print:` / `printLine:` / `errorLine:`
+  / `error:` / `flush` have no specified behaviour when the underlying stream
+  fails (e.g. stdout closed mid-run). Phase 1 must choose drop-silently vs raise
+  `#beamtalk_error{}`, consistent with the `readLine` contract.
+- **Precise closed-stdin allowlist.** `{error, terminated}` is in; Phase 1 must
+  decide `{error, ebadf}` (only the never-opened case, distinguished from a
+  mid-stream close) and `{error, enotsup}` (non-tty stdin), each with rationale.
+- **`Program name` per-context value.** Run-mode and escript both set
+  `node_owning => true`, so a second signal is needed to return `"beamtalk"` vs
+  `escript:script_name/0` — a dedicated `program_name` `beamtalk_runtime` app env
+  seeded at boot is the likely mechanism (Phase 2).
+- **Connected-mode session-termination hook (Phase 3).** The connected-mode
+  `Program exit:` needs a `Session` termination operation that ADR 0081 does not
+  expose today; file a tracking follow-up before that path is implemented.
 
 ## Migration Path
 
