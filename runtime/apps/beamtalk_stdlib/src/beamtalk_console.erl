@@ -174,20 +174,19 @@ A closed/absent device drops silently (returns nil); any other failure raises
 """.
 -spec write(atom(), iodata(), atom()) -> 'nil'.
 write(Device, Data, Selector) ->
-    %% io:put_chars/2 returns `ok` and raises on failure. A dead device surfaces
-    %% as `error:terminated`, which the catch classifies; if the io *server
-    %% process* itself is gone the call can instead raise an `exit`-class
-    %% exception (e.g. `exit:{noproc, …}`) — that is the closed/absent-device
-    %% case, so it drops silently per the write-side contract.
+    %% io:put_chars/2 returns `ok` and raises on failure. A genuine mid-stream
+    %% failure (e.g. a broken pipe) surfaces as an `error`-class exception whose
+    %% reason the allowlist classifies (`epipe` raises; `terminated`/`ebadf`
+    %% drop). An `exit`-class exception means the io *server process* itself is
+    %% gone — `noproc`, or `{normal, _}`/`{shutdown, _}` from a graceful
+    %% shutdown while the write was in flight — which is always the
+    %% closed/absent-device case, so it drops silently (symmetric with read/2).
     try
         io:put_chars(Device, Data),
         nil
     catch
         error:Reason -> handle_io_error(Reason, Selector);
-        %% A dead io-server process surfaces as an `exit`-class exception (e.g.
-        %% `noproc`); route it through the same allowlist so a closed device drops
-        %% silently while a genuine failure (e.g. `epipe`) still raises.
-        exit:Reason -> handle_io_error(Reason, Selector)
+        exit:_Reason -> nil
     end.
 
 -doc """
@@ -219,19 +218,20 @@ handle_io_error(Reason, Selector) ->
     end.
 
 -doc """
-The closed/absent-device allowlist shared by the read and write sides.
+The closed/absent-device allowlist for **error-class** io failures.
 
 `terminated` — the io server (e.g. a detached node's) has gone.
 `ebadf` — the descriptor was never opened.
-`noproc` / `{noproc, _}` — the io-server *process* is dead, surfaced as the
-reason of an `exit`-class exception when the call reaches a gone process.
 Everything else (incl. `epipe`, `enotsup`) is a genuine failure — see module doc.
+
+A dead io-*server process* surfaces as an `exit`-class exception (`noproc`,
+`{normal, _}`, `{shutdown, _}`, …), which the read/write catch clauses already
+treat as the closed/absent-device case (`exit:_ -> nil`); those reasons never
+reach this error-class allowlist.
 """.
 -spec closed_device(term()) -> boolean().
 closed_device(terminated) -> true;
 closed_device(ebadf) -> true;
-closed_device(noproc) -> true;
-closed_device({noproc, _}) -> true;
 closed_device(_) -> false.
 
 -doc "Convert io:get_line/2 output (a codepoint list or binary) to a UTF-8 binary.".

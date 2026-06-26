@@ -120,7 +120,9 @@ fn ensure_runtime_built(
 pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> Result<bool> {
     if class_name.is_empty()
         || !class_name.chars().next().is_some_and(char::is_uppercase)
-        || class_name.chars().any(|c| !c.is_alphanumeric() && c != '_')
+        || class_name
+            .chars()
+            .any(|c| !c.is_ascii_alphanumeric() && c != '_')
     {
         miette::bail!(
             "Invalid class name '{class_name}': class names must start with an uppercase letter \
@@ -152,7 +154,9 @@ pub(crate) fn validate_class_and_selector(class_name: &str, selector: &str) -> R
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_lowercase())
-        || name_part.chars().any(|c| !c.is_alphanumeric() && c != '_')
+        || name_part
+            .chars()
+            .any(|c| !c.is_ascii_alphanumeric() && c != '_')
     {
         miette::bail!(
             "Invalid selector '{selector}': selectors must start with a lowercase letter \
