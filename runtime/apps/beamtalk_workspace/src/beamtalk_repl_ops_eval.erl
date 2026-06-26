@@ -55,6 +55,10 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
             case beamtalk_repl_shell:eval_trace(SessionPid, Code) of
                 {ok, Steps, Output, Warnings} ->
                     {trace, Steps, Output, Warnings};
+                {script_exit, Code2, Output, Warnings} ->
+                    %% BT-2688: `Program exit: Code2` inside a traced eval — same
+                    %% connected-exit handling as the non-trace branch.
+                    {script_exit, Code2, Output, Warnings};
                 {error, ErrorReason, Output, Warnings} ->
                     WrappedReason = beamtalk_repl_errors:ensure_structured_error(ErrorReason),
                     {error, WrappedReason, Output, Warnings}

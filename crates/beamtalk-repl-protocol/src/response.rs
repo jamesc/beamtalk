@@ -49,9 +49,11 @@ pub struct ReplResponse {
     pub status: Option<Vec<String>>,
 
     /// POSIX exit status from a connected-session `Program exit:` (BT-2688,
-    /// ADR 0099 §3). Present only on the `done` reply that ended the session; the
-    /// connecting client adopts it as its own process exit code. `None` for every
-    /// other response.
+    /// ADR 0099 §3). Present only on the `done` reply that ended the session.
+    /// This is the wire contract a connecting client *will* adopt as its own
+    /// process exit code once connected-mode `beamtalk run` dispatch lands
+    /// (BT-2691); no consumer reads it yet, so it does not affect any CLI exit
+    /// code today. `None` for every other response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<u8>,
 

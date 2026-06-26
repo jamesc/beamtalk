@@ -100,13 +100,19 @@ Returns `{ok, Steps, Output, Warnings}' or `{error, Reason, Output, Warnings}'.
 """.
 -spec eval_trace(pid(), string()) ->
     {ok, [{binary(), term()}], binary(), [binary()]}
-    | {error, term(), binary(), [binary()]}.
+    | {error, term(), binary(), [binary()]}
+    | {script_exit, non_neg_integer(), binary(), [binary()]}.
 eval_trace(SessionPid, Expression) ->
     gen_server:call(SessionPid, {eval_trace, Expression}, 30000).
 
 -doc """
 Evaluate an expression with streaming subscriber (BT-696).
-Subscriber receives {eval_out, Chunk} messages during eval.
+
+Subscriber receives `{eval_out, Chunk}` messages during eval, then one terminal
+message: `{eval_done, Value, Output, Warnings}`, `{eval_error, Reason, Output,
+Warnings}`, or — when the expression called `Program exit:` in this connected
+session — `{eval_script_exit, Code, Output, Warnings}` (BT-2688), after which the
+session shell stops.
 """.
 -spec eval_async(pid(), string(), pid()) -> ok.
 eval_async(SessionPid, Expression, Subscriber) ->

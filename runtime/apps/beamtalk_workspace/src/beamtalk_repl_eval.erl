@@ -152,7 +152,8 @@ or `{error, Reason, Output, Warnings, State}' on failure.
 """.
 -spec do_eval_trace(string(), beamtalk_repl_state:state()) ->
     {ok, [{binary(), term()}], binary(), [binary()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}.
+    | {error, term(), binary(), [binary()], beamtalk_repl_state:state()}
+    | {script_exit, non_neg_integer(), binary(), [binary()], beamtalk_repl_state:state()}.
 do_eval_trace(Expression, State) ->
     Counter = beamtalk_repl_state:get_eval_counter(State),
     % elp:fixme W0023 intentional atom creation
@@ -221,6 +222,13 @@ do_eval_trace(Expression, State) ->
                                     {ok, AwaitedSteps, FinalState}
                             end
                         catch
+                            throw:{beamtalk_script_exit, Code} ->
+                                %% BT-2688: `Program exit: Code` inside a traced eval.
+                                %% Honour it like the non-trace path
+                                %% (eval_loaded_module) instead of letting the generic
+                                %% clause wrap it as an error, so the shell reports the
+                                %% status and terminates the session consistently.
+                                {script_exit, Code, NewState};
                             Class:Reason:Stacktrace ->
                                 CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
                                     Class, Reason, Stacktrace
@@ -237,6 +245,8 @@ do_eval_trace(Expression, State) ->
                     case EvalResult of
                         {ok, Steps2, FinalState2} ->
                             {ok, Steps2, Output, Warnings, FinalState2};
+                        {script_exit, ExitCode, ScState} ->
+                            {script_exit, ExitCode, Output, Warnings, ScState};
                         {error, ErrorReason, ErrorState} ->
                             WrappedReason = beamtalk_repl_errors:ensure_structured_error(
                                 ErrorReason

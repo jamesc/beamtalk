@@ -147,12 +147,31 @@ websocket_info(
         io_capture_pid = undefined,
         stdin_ref = undefined
     }};
+%% BT-2688: connected-session `Program exit:` under a streaming eval. Surface the
+%% exit-status reply (parity with the synchronous op path) so the subscriber gets
+%% a terminal message rather than waiting forever; the session shell has already
+%% stopped. Rare in practice — `Program exit:` is documented for `main:` / bare
+%% expressions, not streaming contexts.
+websocket_info(
+    {eval_script_exit, Code, Output, Warnings},
+    State = #ws_state{authenticated = true, pending_eval = Msg}
+) when
+    Msg =/= undefined
+->
+    Response = beamtalk_repl_protocol:encode_script_exit(Code, Msg, Output, Warnings),
+    {[{text, Response}], State#ws_state{
+        pending_eval = undefined,
+        io_capture_pid = undefined,
+        stdin_ref = undefined
+    }};
 %% BT-696: Late streaming messages after eval completed — drop silently
 websocket_info({eval_out, _Chunk}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
 websocket_info({eval_done, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
 websocket_info({eval_error, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
+    {ok, State};
+websocket_info({eval_script_exit, _, _, _}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
 %% Transcript push — forwarded from beamtalk_transcript_stream subscriber (ADR 0017)
 websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true}) ->
