@@ -20,8 +20,12 @@ Erlang helpers.
 """.
 
 -export([
+    average/1,
     from_list_like/2,
     inject_into/3,
+    maximum/1,
+    minimum/1,
+    sum/1,
     to_list/1
 ]).
 
@@ -46,6 +50,84 @@ inject_into(Self, Initial, Block) ->
         fun(Elem, Acc) -> Block(Acc, Elem) end,
         Initial,
         List
+    ).
+
+-doc """
+Sum all elements, returning 0 for an empty collection.
+
+Backs `@primitive "sum"` on Collection. Elements must support `+`.
+""".
+-spec sum(term()) -> number().
+sum(Self) ->
+    lists:foldl(fun(Elem, Acc) -> Acc + Elem end, 0, to_list(Self)).
+
+-doc """
+Return the largest element, comparing with `>`.
+
+Backs `@primitive "max"` on Collection. Raises a user_error on an empty
+collection — there is no sensible maximum of nothing.
+""".
+-spec maximum(term()) -> term().
+maximum(Self) ->
+    case to_list(Self) of
+        [] ->
+            raise_empty('max');
+        [H | T] ->
+            lists:foldl(
+                fun(E, Acc) ->
+                    case E > Acc of
+                        true -> E;
+                        false -> Acc
+                    end
+                end,
+                H,
+                T
+            )
+    end.
+
+-doc """
+Return the smallest element, comparing with `<`.
+
+Backs `@primitive "min"` on Collection. Raises a user_error on an empty
+collection.
+""".
+-spec minimum(term()) -> term().
+minimum(Self) ->
+    case to_list(Self) of
+        [] ->
+            raise_empty('min');
+        [H | T] ->
+            lists:foldl(
+                fun(E, Acc) ->
+                    case E < Acc of
+                        true -> E;
+                        false -> Acc
+                    end
+                end,
+                H,
+                T
+            )
+    end.
+
+-doc """
+Return the mean of the elements as a float.
+
+Backs `@primitive "average"` on Collection. Raises a user_error on an empty
+collection.
+""".
+-spec average(term()) -> float().
+average(Self) ->
+    case to_list(Self) of
+        [] -> raise_empty('average');
+        List -> lists:sum(List) / length(List)
+    end.
+
+-spec raise_empty(atom()) -> no_return().
+raise_empty(Selector) ->
+    Error0 = beamtalk_error:new(user_error, 'Collection'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(Error1, <<"Collection is empty">>)
     ).
 
 -doc """

@@ -38,6 +38,13 @@ pub(crate) fn generate_collection_bif(
                 ")"
             ])
         }
+        // Numeric aggregates over any collection (built on do:/to_list).
+        // Pure-BT folds can't type-check arithmetic on the generic element
+        // type, so these stay primitives backed by beamtalk_collection.
+        "sum" => Some(docvec!["call 'beamtalk_collection':'sum'(Self)"]),
+        "max" => Some(docvec!["call 'beamtalk_collection':'maximum'(Self)"]),
+        "min" => Some(docvec!["call 'beamtalk_collection':'minimum'(Self)"]),
+        "average" => Some(docvec!["call 'beamtalk_collection':'average'(Self)"]),
         _ => None,
     }
 }
@@ -72,5 +79,25 @@ mod tests {
     fn test_unknown_selector_returns_none() {
         assert!(generate_collection_bif("do:", &[]).is_none());
         assert!(generate_collection_bif("collect:", &[]).is_none());
+    }
+
+    #[test]
+    fn test_numeric_aggregates_lower_to_collection_helpers() {
+        assert_eq!(
+            doc_to_string(generate_collection_bif("sum", &[])),
+            Some("call 'beamtalk_collection':'sum'(Self)".to_string())
+        );
+        assert_eq!(
+            doc_to_string(generate_collection_bif("max", &[])),
+            Some("call 'beamtalk_collection':'maximum'(Self)".to_string())
+        );
+        assert_eq!(
+            doc_to_string(generate_collection_bif("min", &[])),
+            Some("call 'beamtalk_collection':'minimum'(Self)".to_string())
+        );
+        assert_eq!(
+            doc_to_string(generate_collection_bif("average", &[])),
+            Some("call 'beamtalk_collection':'average'(Self)".to_string())
+        );
     }
 }
