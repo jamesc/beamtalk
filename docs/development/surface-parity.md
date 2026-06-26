@@ -196,7 +196,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 |---------------|----------|----------------|-------|
 | `build` | -- | -- | `surface-specific: offline compiler, no workspace` |
 | `build-stdlib` | -- | -- | `surface-specific: internal stdlib build step` |
-| `run` | -- | -- | `surface-specific: script/service runner` |
+| `run` | -- | -- | `surface-specific: script/service runner`. The script-mode **entry-argument contract** (ADR 0099 §2, BT-2686) is CLI-specific: `beamtalk run ClassName selector` accepts either a unary selector (`run`, no args) or a single arity-1 keyword selector (`main:`) whose post-selector tokens are delivered to `ClassName>>main:` as one `List(String)`. Bare words need no `--`; `--` shields flag-shaped tokens (`-- --verbose`). Multi-keyword sends (`move:to:`) stay rejected (the validator amends ADR 0061). The `Console` and `Program` **stdlib classes** themselves are not CLI-specific — they are runtime stdlib reachable via `eval`/`evaluate` on every surface (like `System`/`OS`); only the `run … <args>` invocation form is. |
 | `new` | -- | -- | `surface-specific: project scaffolding` |
 | `clean` | -- | -- | `surface-specific: removes build artifacts (offline, no workspace)`. Removes generated output only — never source. Default removes the project's `_build/<profile>/` output (compiled BEAM, generated `beamtalk_classes.hrl`, native `ebin`/`include`) and the type cache; `--deps` also clears dependency artifacts (`_build/deps/`); `--all` removes the whole `_build/`; `--dry-run` lists without deleting. All paths resolve through `BuildLayout` (BT-2672), so `src/`, `native/` source, and `beamtalk.toml` are never touched. |
 | `repl` | -- | -- | `surface-specific: starts the REPL client` |

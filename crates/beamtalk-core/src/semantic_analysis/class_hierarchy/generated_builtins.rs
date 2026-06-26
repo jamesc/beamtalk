@@ -77,6 +77,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Pid"
             | "Port"
             | "ProcessNavigation"
+            | "Program"
             | "ProtoObject"
             | "Protocol"
             | "Queue"
@@ -2265,6 +2266,32 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
                 MethodInfo { selector: "system".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ProcessNavigation".into()), param_types: vec![], doc: Some("A navigation over *everything*, including runtime infrastructure and\nforeign processes (the `system` scope). Privileged (ADR 0091). Cannot fail.\n\n## Examples\n```beamtalk\nProcessNavigation system tree size\n```".into()) },
                 MethodInfo { selector: "from:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("Result(ProcessNavigation, Error)".into()), param_types: vec![Some("Supervisor | Pid".into())], doc: Some("A navigation over the subtree rooted at `aRoot` — a `Supervisor` handle or\na raw `Pid`.\n\nReturns a `Result`: the root is user-supplied and may already be dead. The\n`:: Supervisor | Pid` annotation lets the type checker reject a wrong-type\nargument statically, so `ProcessNavigation from: 42` never reaches runtime;\nthe `Result error: (beamtalk_error type_error)` variant remains the\ndefensive runtime fallback for untyped/FFI input. A dead root surfaces as\n`Result error: (beamtalk_error stale_handle)`. A pid that is simply not a\nsupervisor is **not** an error — it yields `Result ok:` with a single-node\ntree.\n\n## Examples\n```beamtalk\n(ProcessNavigation from: aSup) unwrap tree\n(ProcessNavigation from: aSup) ifOk: [:nav | nav tree] ifError: [:e | nil]\n```".into()) },
                 MethodInfo { selector: "nodes:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProcessNavigation".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some("ProcessNavigation".into()), param_types: vec![Some("List(SupervisionNode)".into())], doc: Some("Creates a new `ProcessNavigation`. Args: nodes (default: ...).\n\n*(compiler-generated)*".into()) },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+        },
+    );
+
+    classes.insert(
+        "Program".into(),
+        ClassInfo {
+            name: "Program".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "name".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Program".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some("String".into()), param_types: vec![], doc: Some("The invoked program's name as a `String`.\n\nUnder a packaged escript it is the invoked filename; under `beamtalk run`\nthere is no argv[0], so it is the literal `\"beamtalk\"`. Handy for usage and\n`--help` text; not load-bearing.\n\n## Examples\n```beamtalk\nProgram name\n// => \"beamtalk\"\n```".into()) },
             ],
             class_variables: vec![],
             type_params: vec![],

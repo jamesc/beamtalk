@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Program — the running program/invocation (ADR 0099 §2).
+///
+/// `Program` names *this running program*. It is the object that exists in every
+/// execution context (run-mode, escript, connected) — unlike `Session`, which is
+/// `nil` in compiled program code. All methods are class-side — `Program` has no
+/// instances (same shape as `System` and `Console`).
+///
+/// Phase 2 exposes only `name`; the two-tier exit (`exit` / `exit:`) lands in
+/// Phase 3.
+///
+/// ## Examples
+/// ```beamtalk
+/// // Under `beamtalk run`, there is no argv[0]:
+/// Program name
+/// // => "beamtalk"
+/// ```
+sealed typed Object subclass: Program
+
+  /// The invoked program's name as a `String`.
+  ///
+  /// Under a packaged escript it is the invoked filename; under `beamtalk run`
+  /// there is no argv[0], so it is the literal `"beamtalk"`. Handy for usage and
+  /// `--help` text; not load-bearing.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Program name
+  /// // => "beamtalk"
+  /// ```
+  class sealed name -> String => (Erlang beamtalk_program) name

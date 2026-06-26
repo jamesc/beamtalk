@@ -85,8 +85,15 @@ enum Command {
         #[arg(default_value = ".")]
         class_or_dot: String,
 
-        /// Selector to call in script mode (e.g. `run`)
+        /// Selector to call in script mode — unary (`run`) or a single
+        /// arity-1 keyword (`main:`) that receives the program arguments
         selector: Option<String>,
+
+        /// Arguments for a `main:`-style entry, delivered as a `List(String)`
+        /// (ADR 0099). Bare words need no `--`; use `--` to shield flag-shaped
+        /// tokens (e.g. `beamtalk run Greeter main: -- --verbose`).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
 
     /// Create a new Beamtalk project (library by default, --app for application)
@@ -470,7 +477,8 @@ fn run() -> Result<()> {
         Command::Run {
             class_or_dot,
             selector,
-        } => commands::run::run(&class_or_dot, selector.as_deref()),
+            args,
+        } => commands::run::run(&class_or_dot, selector.as_deref(), &args),
         Command::New { name, app } => commands::new::new_project(&name, app),
         Command::Clean { deps, all, dry_run } => commands::clean::run(deps, all, dry_run),
         Command::Repl {

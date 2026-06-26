@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Greeter — the canonical `main:` CLI program (ADR 0099 §2).
+///
+/// The entry selector is a single arity-1 keyword (`main:`) that receives all
+/// CLI arguments as one `List(String)`. Args flow *down* as an ordinary method
+/// parameter — threadable, testable (`Greeter main: #("x")`), no global argv.
+///
+/// Run it:
+///   $ beamtalk run Greeter main: Alice
+///   Hello, Alice!
+///   $ beamtalk run Greeter main:
+///   Hello, World!
+///
+/// Bare-word args need no `--`; use `--` only to shield flag-shaped tokens:
+///   $ beamtalk run Greeter main: -- --verbose
+///   Hello, --verbose!
+Object subclass: Greeter
+
+  class main: args :: List(String) -> Nil =>
+    name := args isEmpty ifTrue: ["World"] ifFalse: [args first]
+    Console printLine: "Hello, " ++ name ++ "!"

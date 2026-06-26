@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Program class (ADR 0099 §2, BT-2686).
+//
+// `Program name` reads the beamtalk_runtime `program_name` app env, defaulting
+// to "beamtalk" when unset (the run-mode / connected-workspace value). The
+// escript path overrides it with the script name in Phase 4.
+
+TestCase subclass: ProgramTest
+
+  testNameReturnsString => self assert: Program name class equals: String
+
+  testNameDefaultsToBeamtalk =>
+    // Under the test workspace the program_name env is unset, so name defaults
+    // to the run-mode literal "beamtalk".
+    self assert: Program name equals: "beamtalk"

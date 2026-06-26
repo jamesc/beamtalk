@@ -64,6 +64,7 @@
             #{name => 'Pid', module => 'bt@stdlib@pid', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Port', module => 'bt@stdlib@port', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ProcessNavigation', module => 'bt@stdlib@process_navigation', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
+            #{name => 'Program', module => 'bt@stdlib@program', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ProtoObject', module => 'bt@stdlib@proto_object', parent => 'none', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Protocol', module => 'bt@stdlib@protocol', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Queue', module => 'bt@stdlib@queue', parent => 'Value', package => 'stdlib', kind => value, type_params => []},

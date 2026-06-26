@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for the Greeter `main:` entry (ADR 0099 §2).
+//
+// Because argv arrives as an ordinary `main:` parameter (not a global), the
+// entry is unit-testable by calling `Greeter main: #(...)` directly. The method
+// writes to Console and returns nil; these tests assert it runs without error
+// for the with-arg, no-arg, and flag-shaped-arg cases.
+//
+// Run in the REPL:
+//   > :load src/greeter.bt
+//   > :load test/greeter_test.bt
+//   > GreeterTest runAll
+
+TestCase subclass: GreeterTest
+
+  testMainWithArgReturnsNil =>
+    self assert: (Greeter main: #("Alice")) equals: nil
+
+  testMainWithNoArgsReturnsNil => self assert: (Greeter main: #()) equals: nil
+
+  testMainWithMultipleArgsReturnsNil =>
+    self assert: (Greeter main: #("Alice", "Bob")) equals: nil
