@@ -35,4 +35,4 @@ TestCase subclass: TestRunnerTest
 
   testResultFailuresEmpty =>
     result := TestRunner run: SampleTestCase
-    self assert: (result failures == nil) equals: false
+    self assert: result failures equals: #()
