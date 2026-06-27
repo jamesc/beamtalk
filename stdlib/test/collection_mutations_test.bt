@@ -43,6 +43,19 @@ TestCase subclass: CollectionMutationsTest
     self assert: (counter joinSum: #(5)) equals: 5
     self assert: counter getTotal equals: 5
 
+  // BT-2703: empty collection — the fold body never runs, so `finalize_enumeration_fold`'s
+  // `element(2, EnumFold)` only works because the threaded inject seeds `foldl` with a
+  // `{Seed, State}` tuple (returned unchanged for `[]`), not a bare seed.
+  testActorEachWithIndexEmptyCollection =>
+    counter := CollectionMutationCounter spawn
+    self assert: (counter sumWithIndex: #()) equals: 0
+    self assert: counter getTotal equals: 0
+
+  testActorDoSeparatedByEmptyCollection =>
+    counter := CollectionMutationCounter spawn
+    self assert: (counter joinSum: #()) equals: 0
+    self assert: counter getTotal equals: 0
+
   // BT-2703: eachWithIndex: threading an outer local alongside a field write.
   testActorEachWithIndexLocalAndField =>
     counter := CollectionMutationCounter spawn

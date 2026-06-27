@@ -172,6 +172,9 @@ impl CoreErlangGenerator {
                 ")}",
             ]);
         }
+        // Both callers (`try_generate_each_with_index` / `try_generate_do_separated_by`)
+        // build `inject_send` via `inject_into`, which always returns an
+        // `Expression::MessageSend`, so this destructure cannot fail.
         let Expression::MessageSend {
             receiver,
             selector,
