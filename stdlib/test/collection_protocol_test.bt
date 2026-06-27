@@ -143,13 +143,14 @@ TestCase subclass: CollectionProtocolTest
     #(1, 2, 3) do: [:x | self assert: (x between: 1 and: 3)] separatedBy: [nil]
 
   testConversionProtocol =>
-    // asArray preserves order for ordered sources
+    // asArray preserves order for ordered sources (incl. non-trivial by: step)
     self assert: #(1, 2, 3) asArray asList equals: #(1, 2, 3)
     self assert: (1 to: 3) asArray asList equals: #(1, 2, 3)
+    self assert: (1 to: 10 by: 3) asArray asList equals: #(1, 4, 7, 10)
     // asList on a List is identity-valued
     self assert: #(1, 2, 3) asList equals: #(1, 2, 3)
-    // asSet discards duplicates
-    self assert: #(1, 2, 2, 3) asSet size equals: 3
+    // asSet discards duplicates (assert contents, not just size)
+    self assert: ((#(1, 2, 2, 3) asSet) asList sort) equals: #(1, 2, 3)
     self assert: ((Set withAll: #(1, 2, 3)) asList sort) equals: #(1, 2, 3)
     // asBag counts occurrences; Bag asList expands by count
     self assert: ((#(1, 1, 2) asBag) occurrencesOf: 1) equals: 2
@@ -158,7 +159,7 @@ TestCase subclass: CollectionProtocolTest
     self assert: ((#{#a => 10, #b => 20} asList) sort) equals: #(10, 20)
     // Interval conversions
     self assert: (1 to: 3) asList equals: #(1, 2, 3)
-    self assert: (1 to: 3) asSet size equals: 3
+    self assert: ((1 to: 3) asSet asList sort) equals: #(1, 2, 3)
     // round trip List -> Set -> List (dedup)
     self assert: ((#(3, 1, 2, 1) asSet) asList sort) equals: #(1, 2, 3)
 
