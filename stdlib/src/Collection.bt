@@ -226,9 +226,10 @@ abstract typed Value subclass: Collection(E)
 
   /// Sum all elements. Returns `0` for an empty collection.
   ///
-  /// Elements must support `+`. Kept as `@primitive` because the pure-BT
-  /// fold performs arithmetic on the generic element type `E`, which the
-  /// gradual type checker cannot prove is numeric.
+  /// Uses native numeric addition (intended for `Integer`/`Float`); it does
+  /// not dispatch a Beamtalk `+` message. Kept as `@primitive` because the
+  /// pure-BT fold performs arithmetic on the generic element type `E`, which
+  /// the gradual type checker cannot prove is numeric.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -237,10 +238,12 @@ abstract typed Value subclass: Collection(E)
   /// ```
   sum -> Number => @primitive "sum"
 
-  /// Return the largest element, comparing with `>`.
+  /// Return the largest element.
   ///
-  /// Raises a `#beamtalk_error` on an empty collection — there is no
-  /// sensible maximum of nothing. Elements must support `>`.
+  /// Compares using the runtime's native total ordering (intended for
+  /// `Integer`/`Float`) — it does *not* dispatch a Beamtalk `>` message, so a
+  /// custom `>` method on the element type is not honoured. Raises a
+  /// `#beamtalk_error` on an empty collection — there is no maximum of nothing.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -248,9 +251,11 @@ abstract typed Value subclass: Collection(E)
   /// ```
   max -> E => @primitive "max"
 
-  /// Return the smallest element, comparing with `<`.
+  /// Return the smallest element.
   ///
-  /// Raises a `#beamtalk_error` on an empty collection. Elements must support `<`.
+  /// Compares using the runtime's native total ordering (intended for
+  /// `Integer`/`Float`) — it does *not* dispatch a Beamtalk `<` message. Raises
+  /// a `#beamtalk_error` on an empty collection.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -260,7 +265,8 @@ abstract typed Value subclass: Collection(E)
 
   /// Return the mean of the elements as a Float.
   ///
-  /// Raises a `#beamtalk_error` on an empty collection. Elements must support `+`.
+  /// Uses native numeric addition (intended for `Integer`/`Float`). Raises a
+  /// `#beamtalk_error` on an empty collection.
   ///
   /// ## Examples
   /// ```beamtalk

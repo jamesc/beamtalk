@@ -60,14 +60,16 @@ inject_into(Self, Initial, Block) ->
 -doc """
 Sum all elements, returning 0 for an empty collection.
 
-Backs `@primitive "sum"` on Collection. Elements must support `+`.
+Backs `@primitive "sum"` on Collection. Uses native numeric `+` (Integer/Float),
+not a dispatched Beamtalk `+` message.
 """.
 -spec sum(term()) -> number().
 sum(Self) ->
     lists:foldl(fun(Elem, Acc) -> Acc + Elem end, 0, to_list(Self)).
 
 -doc """
-Return the largest element, comparing with `>`.
+Return the largest element using Erlang's native term ordering (`>`), not a
+dispatched Beamtalk `>` message.
 
 Backs `@primitive "max"` on Collection. Raises a user_error on an empty
 collection — there is no sensible maximum of nothing.
@@ -91,7 +93,8 @@ maximum(Self) ->
     end.
 
 -doc """
-Return the smallest element, comparing with `<`.
+Return the smallest element using Erlang's native term ordering (`<`), not a
+dispatched Beamtalk `<` message.
 
 Backs `@primitive "min"` on Collection. Raises a user_error on an empty
 collection.
