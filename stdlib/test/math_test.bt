@@ -97,3 +97,22 @@ TestCase subclass: MathTest
     self should: [(2 asFloat) asin] raise: #badarith
     // acos outside [-1, 1] range
     self should: [(2 asFloat) acos] raise: #badarith
+
+  // Hyperbolic functions (10-digit truncation for non-exact values).
+  testHyperbolicMethods =>
+    self assert: 0.0 sinh equals: 0.0
+    self assert: 0.0 cosh equals: 1.0
+    self assert: 0.0 tanh equals: 0.0
+    // sinh of 1 = 1.1752011936...
+    self assert: (1.0 sinh * 10000000000.0) truncated equals: 11752011936
+    // cosh of 1 = 1.5430806348...
+    self assert: (1.0 cosh * 10000000000.0) truncated equals: 15430806348
+    // tanh of 1 = 0.7615941559...
+    self assert: (1.0 tanh * 10000000000.0) truncated equals: 7615941559
+
+  // Degree/radian conversion.
+  testDegreesRadians =>
+    // 90 degrees = pi/2 = 1.5707963267...
+    self assert: (90 degreesToRadians * 10000000000.0) truncated equals: 15707963267
+    // pi radians = 180 degrees
+    self assert: (Float pi) radiansToDegrees rounded equals: 180

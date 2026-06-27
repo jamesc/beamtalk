@@ -216,6 +216,31 @@ sealed typed Number subclass: Float
   /// ```
   truncated -> Integer => @primitive "truncated"
 
+  /// The receiver multiplied by itself.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 2.5 squared      // => 6.25
+  /// ```
+  squared -> Float => self * self
+
+  /// Round to the nearest multiple of `quantum`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3.14159 roundTo: 0.5   // => 3.0
+  /// ```
+  roundTo: quantum :: Number -> Number => (self / quantum) rounded * quantum
+
+  /// Truncate towards zero to a multiple of `quantum`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 3.78 truncateTo: 0.5   // => 3.5
+  /// ```
+  truncateTo: quantum :: Number -> Number =>
+    (self / quantum) truncated * quantum
+
   /// Always returns false. BEAM has no NaN representation.
   ///
   /// ## Examples
@@ -291,6 +316,30 @@ sealed typed Number subclass: Float
   /// 0.0 tan              // => 0.0
   /// ```
   tan -> Float => @primitive "tan"
+
+  /// Hyperbolic sine of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 sinh             // => 0.0
+  /// ```
+  sinh -> Float => @primitive "sinh"
+
+  /// Hyperbolic cosine of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 cosh             // => 1.0
+  /// ```
+  cosh -> Float => @primitive "cosh"
+
+  /// Hyperbolic tangent of the receiver.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 0.0 tanh             // => 0.0
+  /// ```
+  tanh -> Float => @primitive "tanh"
 
   /// Arcsine of the receiver. Result in radians.
   ///

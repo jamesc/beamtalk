@@ -88,3 +88,48 @@ abstract typed Value subclass: Number
   /// ```
   between: min :: Number and: max :: Number -> Boolean =>
     (self >= min) and: [self <= max]
+
+  // === Convenience ===
+
+  /// The reciprocal of the receiver (`1 / self`), as a Float.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 4 reciprocal      // => 0.25
+  /// 0.5 reciprocal    // => 2.0
+  /// ```
+  reciprocal -> Float => 1 / self
+
+  /// Convert the receiver, interpreted as degrees, to radians.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 180 degreesToRadians   // => 3.141592653589793
+  /// ```
+  degreesToRadians -> Float => Float pi * self / 180
+
+  /// Convert the receiver, interpreted as radians, to degrees.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Float pi radiansToDegrees   // => 180.0
+  /// ```
+  radiansToDegrees -> Float => 180 * self / Float pi
+
+  /// Test if the receiver is an `Integer`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 5 isInteger       // => true
+  /// 5.0 isInteger     // => false
+  /// ```
+  isInteger -> Boolean => self isKindOf: Integer
+
+  /// Test if the receiver is a `Float`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 5.0 isFloat       // => true
+  /// 5 isFloat         // => false
+  /// ```
+  isFloat -> Boolean => self isKindOf: Float

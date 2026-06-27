@@ -36,6 +36,9 @@ pub(crate) fn generate_float_bif(selector: &str, params: &[String]) -> Option<Do
         "asin" => Some(Document::Str("call 'math':'asin'(Self)")),
         "acos" => Some(Document::Str("call 'math':'acos'(Self)")),
         "atan" => Some(Document::Str("call 'math':'atan'(Self)")),
+        "sinh" => Some(Document::Str("call 'math':'sinh'(Self)")),
+        "cosh" => Some(Document::Str("call 'math':'cosh'(Self)")),
+        "tanh" => Some(Document::Str("call 'math':'tanh'(Self)")),
         "atan2:" => {
             let p0 = params.first()?;
             Some(docvec![
