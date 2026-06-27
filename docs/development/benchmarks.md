@@ -90,3 +90,61 @@ re-introduces the per-call cost the index was meant to remove.
   meaning every navigation query currently source-scans them via the fallback
   and logs an `xref_miss` warning. They should be baked into `register_class/0`
   like the rest; tracked as a Phase 2 completeness gap.
+
+## Self-hosting cost: pure-BT enumeration vs native primitives (BT-2692 / BT-2708)
+
+A spike for the de-primitivization direction: how much slower is a pure-BT
+collection method (built on `do:`/`inject:into:` and dispatched per element)
+than the native `@primitive`? This determines whether the per-class enumeration
+overrides (`List`/`Array` re-implementing `Collection`'s `collect:`/`select:`/…)
+are worth removing, and what self-hosting the aggregates (BT-2711) would cost.
+
+### Harness
+
+`runtime/perf/bench_collect_selfhost.escript`. Run from `runtime/` after
+`just build`:
+
+```bash
+escript perf/bench_collect_selfhost.escript
+```
+
+Compares, on a `List` receiver (outputs asserted identical):
+- `collect:`/`select:` — native `bt@stdlib@list` `@primitive` vs the pure-BT
+  `bt@stdlib@collection` versions (`do:`/`inject:`-based).
+- `sum` — native `beamtalk_collection:sum/1` (`lists:foldl`) vs the
+  `inject:into:` + `+` block a self-hosted `sum` would compile to.
+
+### Results (N = 100 000)
+
+| Op | native µs/op | pure-BT µs/op | ratio |
+|----|---|---|---|
+| `collect:` | ~1100 | ~10800 | **~10×** |
+| `select:`  | ~670  | ~12200 | **~18×** |
+| `sum`      | ~363  | ~870   | **~2.4×** |
+
+Ratios hold at N = 1000 (collect ~13×, select ~16×, sum ~2.5×).
+
+### Interpretation
+
+The cost is **per-element BT-level dispatch**, and it splits by operation shape:
+
+- **List-building** (`collect:`/`select:`/`reject:`/`flatMap:`): 10–18×. Each
+  element pays a dispatched `addFirst:` to build the result cons, plus a
+  `reversed` second pass and `species withAll:`, vs native's single tight
+  `lists:map`/`filter`. **Conclusion: keep these `@primitive`** — self-hosting
+  them is a major regression.
+- **Reducing** (`sum`/`max`/`min`/`count:`): ~2.4×. Single fold, no list
+  building; the overhead is double-fun-indirection (`inject:into:` →
+  `beamtalk_collection:inject_into`'s arg-swap wrapper → the BT block → `+`),
+  i.e. two fun calls per element vs native's one. The arithmetic itself is free.
+
+### Takeaways
+
+- Per-element collection primitives are **earned** — de-primitivization should
+  not target hot per-element paths.
+- Self-hosting the aggregates (BT-2711) costs ~2.4× on `sum`; treat it as
+  optional, not a free win.
+- The 2.4× is mostly `inject:into:`'s wrapper. A leaner `List>>inject:into:`
+  (inline `lists:foldl`, no `beamtalk_collection` indirection) would narrow
+  *every* inject-based pure-BT fold at once — higher ROI than self-hosting
+  individual aggregates.
