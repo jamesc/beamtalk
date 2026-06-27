@@ -307,7 +307,10 @@ use the same `{'generic', 'Base', [...]}` / `{'type_param', 'Name', Index}` tagg
 tuples (ADR 0068). Consumer and contributor therefore share one decoder.
 `length(param_types)` is authoritative for the parameter type information; `arity`
 is a convenience count carried for consistency with the `method_info` tuple
-encoding, and a decoder that finds the two disagreeing trusts `param_types`.
+encoding. A decoder that finds the two disagreeing MUST emit a build diagnostic
+(malformed extension record) rather than silently trusting either field — the only
+way they can disagree is a serialiser bug or the `.app`-vs-`.beam` divergence this
+design otherwise avoids, so it should surface loudly, not be papered over.
 
 On dependency resolution the consumer's checker reads these records and feeds them
 into the **same** `register_extensions` path used for intra-project extensions
@@ -332,7 +335,9 @@ Scope and boundaries:
   extension's selector as a hard error.
 - **Conflicting extensions are surfaced, not silently merged.** If two dependencies
   both contribute `String >> toJson`, the consumer's checker now holds two records
-  for the same `{target, side, selector}` key — the static analogue of ADR 0066's
+  for the same `{target, selector}` key — where instance vs class side is already
+  encoded in the `target` atom (`'String'` vs `'String class'`), not a separate
+  field — the static analogue of ADR 0066's
   runtime last-writer-wins. The checker MUST reuse the existing extension conflict
   detector (`detect_extension_conflicts` / `conflict_diagnostics` in
   `crates/beamtalk-core/src/compilation/extension_conflicts.rs`, ADR 0066) — today
