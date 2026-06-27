@@ -22,3 +22,45 @@ TestCase subclass: CollectionMutationsTest
       #c => 30
     })) equals: 60
     self assert: counter3 getTotal equals: 60
+
+  // BT-2703: eachWithIndex: threads actor state through the block.
+  testActorEachWithIndexMutation =>
+    counter := CollectionMutationCounter spawn
+    // 10*1 + 20*2 + 30*3 = 10 + 40 + 90 = 140
+    self assert: (counter sumWithIndex: #(10, 20, 30)) equals: 140
+    self assert: counter getTotal equals: 140
+
+  // BT-2703: do:separatedBy: threads actor state through both blocks.
+  testActorDoSeparatedByMutation =>
+    counter := CollectionMutationCounter spawn
+    // elements 1+2+3 = 6; two separators between them = 200; total = 206
+    self assert: (counter joinSum: #(1, 2, 3)) equals: 206
+    self assert: counter getTotal equals: 206
+
+  // BT-2703: do:separatedBy: with a single element runs no separator.
+  testActorDoSeparatedBySingleElement =>
+    counter := CollectionMutationCounter spawn
+    self assert: (counter joinSum: #(5)) equals: 5
+    self assert: counter getTotal equals: 5
+
+  // BT-2703: eachWithIndex: threading an outer local alongside a field write.
+  testActorEachWithIndexLocalAndField =>
+    counter := CollectionMutationCounter spawn
+    // returns the outer local `seen` (one per element); field gets 10*1+20*2+30*3
+    self assert: (counter countWithIndex: #(10, 20, 30)) equals: 3
+    self assert: counter getTotal equals: 140
+
+  // BT-2703: do:separatedBy: threading an outer local mutated only in the separator.
+  testActorDoSeparatedByLocalSeparator =>
+    counter := CollectionMutationCounter spawn
+    // 3 elements -> 2 gaps; field accumulates 1+2+3 = 6
+    self assert: (counter gapCount: #(1, 2, 3)) equals: 2
+    self assert: counter getTotal equals: 6
+
+  // BT-2703: regression guard — in a value type these selectors with a mutating
+  // block must not crash with `badarity`. The captured-local write is lost here
+  // (pre-existing, out-of-scope value-type behaviour), so the result is the initial 0.
+  testValueTypeEnumerationDoesNotCrash =>
+    vt := EnumerationValueType new
+    self assert: (vt eachWithIndexSum: #(10, 20, 30)) equals: 0
+    self assert: (vt doSeparatedBySum: #(1, 2, 3)) equals: 0

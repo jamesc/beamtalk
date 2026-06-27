@@ -2994,6 +2994,12 @@ impl CoreErlangGenerator {
                         format!("State{}", self.state_version())
                     };
 
+                    // BT-2703: Rebind the local to the freshly-written value so a later
+                    // read *within the same iteration* (`idx := idx + 1` … `x * idx`) sees
+                    // the new value instead of the stale iteration-start `maps:get` binding.
+                    // Mirrors the tuple-acc path (`generate_direct_var_update_in_loop`).
+                    self.bind_var(&id.name, &val_var);
+
                     // BT-1053: Return val_var so callers (e.g. generate_conditional_branch_inline)
                     // can use it as the branch result.
                     return Ok((
@@ -3040,6 +3046,9 @@ impl CoreErlangGenerator {
                 // BT-1397: If the RHS produced an open scope (class method self-send),
                 // emit the open scope first, then bind the variable to the result.
                 if let Some(open_scope_result) = open_scope {
+                    // BT-2703: see note below — rebind so later same-iteration reads
+                    // observe the freshly-written value.
+                    self.bind_var(&id.name, &val_var);
                     return Ok((
                         docvec![
                             value_code,
@@ -3060,6 +3069,12 @@ impl CoreErlangGenerator {
                         val_var,
                     ));
                 }
+
+                // BT-2703: Rebind the local to the freshly-written value so a later read
+                // *within the same iteration* sees the new value rather than the stale
+                // iteration-start `maps:get` binding (the map-acc analogue of the
+                // tuple-acc rebind in `generate_direct_var_update_in_loop`).
+                self.bind_var(&id.name, &val_var);
 
                 // BT-1053: Return val_var so callers (e.g. generate_conditional_branch_inline)
                 // can use it as the branch result.

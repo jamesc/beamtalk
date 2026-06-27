@@ -2887,6 +2887,20 @@ impl CoreErlangGenerator {
             "inject:into:" if arguments.len() == 2 => {
                 self.threaded_locals_of_loop_body(arguments.get(1))
             }
+            // BT-2703: `eachWithIndex:`/`do:separatedBy:` desugar to an `inject:into:`
+            // fold (see `enumeration_ops`), packing the block's outer-local mutations
+            // into the same `__local__` StateAcc keys. The element block is the first
+            // argument; `do:separatedBy:`'s separator (the second block) runs in the
+            // fold too, so its outer-local writes are unioned in as well. Gated on
+            // `enumeration_threads_actor_state`: only the actor fold packs those keys
+            // into a `{Acc, State}` reply tuple, so outside it (value types, REPL, a
+            // direct-params loop) there is no `__local__` StateAcc to extract from.
+            "eachWithIndex:" if arguments.len() == 1 && self.enumeration_threads_actor_state() => {
+                self.threaded_locals_of_loop_body(arguments.first())
+            }
+            "do:separatedBy:" if arguments.len() == 2 && self.enumeration_threads_actor_state() => {
+                Self::non_empty(self.conditional_threaded_locals(&Self::block_args(arguments)))
+            }
             // BT-2355: conditionals thread outer-local mutations through the StateAcc
             // map under `__local__` keys (see generate_*_with_mutations, which also seed
             // those keys so extraction is safe even when the taken branch did not write
