@@ -17,6 +17,11 @@ body on the abstract Collection class.  Most other collection methods
 (collect:, select:, reject:, includes:, detect:, anySatisfy:, allSatisfy:)
 are now self-hosted as pure Beamtalk on Collection.bt and no longer need
 Erlang helpers.
+
+BT-2695: Provides the numeric aggregates `sum/1`, `maximum/1`, `minimum/1`,
+and `average/1` — backing the `@primitive` `sum`/`max`/`min`/`average` on
+Collection. They fold over `to_list/1`; `max`/`min`/`average` raise a
+user_error on an empty collection.
 """.
 
 -export([

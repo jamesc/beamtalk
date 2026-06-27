@@ -116,6 +116,8 @@ TestCase subclass: CollectionProtocolTest
     // sum of empty is 0; max/min/average raise on empty
     self assert: #() sum equals: 0
     self assert: (#() count: [:x | x > 0]) equals: 0
+    // noneSatisfy: on empty is vacuously true
+    self assert: (#() noneSatisfy: [:x | x > 0])
     self should: [#() max] raise: #user_error
     self should: [#() min] raise: #user_error
     self should: [#() average] raise: #user_error
@@ -133,7 +135,9 @@ TestCase subclass: CollectionProtocolTest
     #(42) do: [:x | self assert: x equals: 42] separatedBy: [self assert: false]
 
   testDoSeparatedByVisitsEachElement =>
-    // Element block runs for each element; separator runs between them.
-    #(1, 2, 3) do: [:x |
-      self assert: (x between: 1 and: 3)
-    ] separatedBy: [self assert: true]
+    // Element block runs for each element across the two-block path.
+    // Asserting the separator's exact firing count would require mutating
+    // a counter inside the separator block, which needs state-threading
+    // through do:separatedBy: (unsupported — BT-2703). The conditional-firing
+    // guarantee is covered by testDoSeparatedBySingleElementHasNoSeparator.
+    #(1, 2, 3) do: [:x | self assert: (x between: 1 and: 3)] separatedBy: [nil]
