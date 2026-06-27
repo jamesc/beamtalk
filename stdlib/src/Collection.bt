@@ -313,5 +313,45 @@ abstract typed Value subclass: Collection(E)
       ]
     nil
 
+  // === Conversions ===
+
+  /// Convert to a `List`, in iteration order.
+  ///
+  /// `List` is the canonical eager sequence. Note: for a `Dictionary` this
+  /// yields its *values* (consistent with `do:`); for a `Bag`, each element is
+  /// repeated by its occurrence count.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 3) asList                          // => #(1, 2, 3)
+  /// (Set withAll: #(1, 2, 3)) asList sort     // => #(1, 2, 3)
+  /// ```
+  asList -> List(E) =>
+    (self inject: #() into: [:acc :each | acc addFirst: each]) reversed
+
+  /// Convert to an `Array`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (1 to: 3) asArray         // => #[1, 2, 3]
+  /// ```
+  asArray -> Array(E) => Array withAll: self asList
+
+  /// Convert to a `Set`, discarding duplicates.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 2, 3) asSet size  // => 3
+  /// ```
+  asSet -> Set(E) => Set withAll: self asList
+
+  /// Convert to a `Bag`, counting occurrences.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (#(1, 1, 2) asBag) occurrencesOf: 1   // => 2
+  /// ```
+  asBag -> Bag(E) => Bag withAll: self asList
+
   /// Return a string representation.
   asString -> String => self printString
