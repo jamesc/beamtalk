@@ -82,6 +82,9 @@ sealed typed Collection(E) subclass: List(E)
 
   /// Return the element at the given 1-based index.
   ///
+  /// **O(n)** — `List` is a cons list. For frequent random access by position,
+  /// use `Array` (`aList asArray`), whose `at:` is O(log n).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// #(10, 20, 30) at: 2      // => 20

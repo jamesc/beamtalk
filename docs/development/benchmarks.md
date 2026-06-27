@@ -148,3 +148,39 @@ The cost is **per-element BT-level dispatch**, and it splits by operation shape:
   (inline `lists:foldl`, no `beamtalk_collection` indirection) would narrow
   *every* inject-based pure-BT fold at once — higher ROI than self-hosting
   individual aggregates.
+
+## Array backing: map (current) vs alternatives — does Vector earn its place? (BT-2696)
+
+BT-2696 proposed a bit-partitioned-trie `Vector` on the premise that core lacked
+an indexed sequence. It doesn't: `Array` already provides O(log n) random access
++ persistent `at:put:`, backed by a canonical index→value map (ADR 0090 / BT-2680,
+chosen *for* `=:=`/`phash2` correctness after the Erlang `array` module's
+copy-on-write cache broke equality). This benchmark asks whether a faster backing
+(what a trie resembles) would justify the correctness cost.
+
+### Harness
+
+`runtime/perf/bench_array_backing.escript` — single random `at:`/`at:put:`
+(persistent: each op on the original structure, result discarded), comparing the
+current `beamtalk_array` map backing against raw `maps`, the Erlang `:array`
+module, a raw tuple, and a list.
+
+### Results (N = 100 000, 200k random ops)
+
+| op | `beamtalk_array` | raw map | `:array` | tuple | list |
+|----|---|---|---|---|---|
+| `at:`    | 135 ns | 76 ns | **45 ns** | 18 ns | O(n) |
+| `at:put:`| 377 ns | 311 ns | **154 ns** | O(n) | — |
+
+`at:put:` is flat across N=1k→100k (374→377 ns) — O(log n), no degradation.
+
+### Conclusion
+
+- The current map-backed `Array` is sub-microsecond and **canonical** (correct as
+  a Dictionary/Set key). Good enough for a general indexed sequence.
+- `:array` (≈ a trie's profile) is ~2–3× faster but is *exactly* the backing
+  ADR 0090 rejected for breaking `=:=`. A bit-trie `Vector` inherits that
+  tradeoff. **Not worth trading correctness for 2–3× on an already-sub-µs op.**
+- **No perf justification for a `Vector` class or a backing swap. BT-2696 closed.**
+- Minor optional win: `beamtalk_array:at` adds ~2× over raw `maps:get` (it
+  recomputes `maps:size` for the bounds check each call) — trimmable, low priority.
