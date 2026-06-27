@@ -283,29 +283,7 @@ impl BeamCompiler {
         // -mode minimal: only loads kernel+stdlib, skips scanning other -pa dirs at boot
         // -boot no_dot_erlang: skips .erlang config file
         debug!("Spawning BEAM node with beamtalk_build_worker");
-        let temp_dir = std::env::temp_dir();
-        let mut child = Command::new("erl")
-            .arg("-noshell")
-            .arg("-mode")
-            .arg("minimal")
-            .arg("-boot")
-            .arg("no_dot_erlang")
-            // Redirect OTP default logger to stderr (BT-1431). Without this,
-            // logger output goes to stdout and mixes into the compilation
-            // protocol, causing parse failures or ugly error messages.
-            .arg("-kernel")
-            .arg("logger")
-            .arg(beamtalk_cli::repl_startup::KERNEL_LOGGER_STDERR)
-            .args(&pa_args)
-            .arg("-s")
-            .arg("beamtalk_build_worker")
-            .arg("main")
-            .current_dir(&temp_dir)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .into_diagnostic()
+        let mut child = spawn_build_worker_node(&pa_args)
             .wrap_err("Failed to start BEAM node for compilation.\nIs Erlang/OTP installed?")?;
 
         // From here, the protocol is identical to the escript backend
@@ -1646,6 +1624,36 @@ fn extract_specs_from_child(
     read_specs_protocol(stdout, stderr)
 }
 
+/// Spawns a `beamtalk_build_worker` BEAM node with the given `-pa` path arguments.
+///
+/// Applies the standard boot flags (`-noshell -mode minimal -boot no_dot_erlang`) and
+/// the kernel logger redirect (BT-1431).  Callers supply the variable `-pa` paths and
+/// add a context-specific `wrap_err` message on the returned `Result`.
+fn spawn_build_worker_node(pa_args: &[String]) -> Result<std::process::Child> {
+    use beamtalk_cli::repl_startup;
+    Command::new("erl")
+        .arg("-noshell")
+        .arg("-mode")
+        .arg("minimal")
+        .arg("-boot")
+        .arg("no_dot_erlang")
+        // Redirect OTP default logger to stderr (BT-1431). Without this, logger
+        // output goes to stdout and mixes into the compilation protocol.
+        .arg("-kernel")
+        .arg("logger")
+        .arg(repl_startup::KERNEL_LOGGER_STDERR)
+        .args(pa_args)
+        .arg("-s")
+        .arg("beamtalk_build_worker")
+        .arg("main")
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .into_diagnostic()
+}
+
 /// Spawns a `beamtalk_build_worker` BEAM node for spec extraction.
 fn spawn_build_worker_for_specs() -> Result<std::process::Child> {
     use beamtalk_cli::repl_startup;
@@ -1694,28 +1702,7 @@ fn spawn_build_worker_for_specs() -> Result<std::process::Child> {
             pa_args.push(ebin.display().to_string());
         }
     }
-    let temp_dir = std::env::temp_dir();
-
-    Command::new("erl")
-        .arg("-noshell")
-        .arg("-mode")
-        .arg("minimal")
-        .arg("-boot")
-        .arg("no_dot_erlang")
-        .arg("-kernel")
-        .arg("logger")
-        .arg(repl_startup::KERNEL_LOGGER_STDERR)
-        .args(&pa_args)
-        .arg("-s")
-        .arg("beamtalk_build_worker")
-        .arg("main")
-        .current_dir(&temp_dir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .into_diagnostic()
-        .wrap_err("Failed to start BEAM node for spec extraction")
+    spawn_build_worker_node(&pa_args).wrap_err("Failed to start BEAM node for spec extraction")
 }
 
 /// Reads the `beamtalk-specs-module:` protocol lines from the build worker's stdout.
