@@ -441,6 +441,8 @@ impl CoreErlangGenerator {
             self.reset_state_version();
             self.push_scope();
             self.current_method_params.clear();
+            // BT-2709: Reset arithmetic fast-path parameter-type tracking.
+            self.clear_method_param_types();
 
             // Generate parameter list and populate current_method_params
             // (needed for @primitive codegen which reads current_method_params)
@@ -448,6 +450,8 @@ impl CoreErlangGenerator {
             for param in &method.parameters {
                 let var_name = self.fresh_var(&param.name.name);
                 self.current_method_params.push(var_name.clone());
+                // BT-2709: Record declared type for the arithmetic fast path.
+                self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
                 params.push(var_name);
             }
 

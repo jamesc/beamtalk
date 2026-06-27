@@ -1343,12 +1343,16 @@ impl CoreErlangGenerator {
         self.push_scope();
         // BT-295: Track method params for @primitive codegen
         self.current_method_params.clear();
+        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
+        self.clear_method_param_types();
         // BT-1435: Track current method selector for Logger intrinsic metadata.
         self.current_method_selector = Some(method.selector.name().to_string());
         let mut params = vec!["Self".to_string()];
         for param in &method.parameters {
             let var_name = self.fresh_var(&param.name.name);
             self.current_method_params.push(var_name.clone());
+            // BT-2709: Record declared type for the arithmetic fast path.
+            self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
             params.push(var_name);
         }
 

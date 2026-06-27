@@ -16,6 +16,19 @@ abstract typed Value subclass: Number
 
   // === Abstract protocol (subclasses must implement) ===
 
+  /// Addition. Subclasses (Integer/Float) implement this as a primitive;
+  /// declared here so receiver-dispatched `a + b` has a protocol target (BT-2709).
+  + _other :: Number -> Number => self subclassResponsibility
+
+  /// Subtraction.
+  - _other :: Number -> Number => self subclassResponsibility
+
+  /// Multiplication.
+  * _other :: Number -> Number => self subclassResponsibility
+
+  /// Division.
+  / _other :: Number -> Number => self subclassResponsibility
+
   /// Strict equality comparison.
   =:= _other :: Number -> Boolean => self subclassResponsibility
 

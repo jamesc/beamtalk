@@ -21,9 +21,11 @@
 1 div: 0
 // => ERROR: badarith
 
-// Arithmetic type error (string is not a number)
+// Arithmetic `+` is a dispatchable message (BT-2709): a non-numeric receiver
+// routes through message dispatch, so `String + Integer` surfaces a structured
+// `does_not_understand` (String defines no `+`) instead of a raw Erlang badarith.
 "hello" + 42
-// => ERROR: badarith
+// => ERROR: does_not_understand
 
 // ===========================================================================
 // DOES NOT UNDERSTAND (unknown methods)

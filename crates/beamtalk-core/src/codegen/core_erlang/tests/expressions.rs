@@ -121,6 +121,139 @@ fn test_generate_binary_op_no_wrap_for_identifiers() {
     );
 }
 
+// BT-2709: arithmetic operators are dispatchable messages. The bare-BIF fast
+// path must hold for statically-numeric receivers (literals, `self` in
+// Integer/Float, `:: Number`-family params); everything else gets a runtime
+// `is_number` guard that falls back to message dispatch.
+
+#[test]
+fn test_arith_bare_bif_for_numeric_literal_receiver() {
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(3), Span::new(0, 1));
+    let right = vec![Expression::Literal(Literal::Integer(4), Span::new(4, 5))];
+    let output = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert_eq!(output, "call 'erlang':'+'(3, 4)");
+    assert!(
+        !output.contains("is_number"),
+        "numeric literal receiver must skip the guard; got: {output}"
+    );
+}
+
+#[test]
+fn test_arith_bare_bif_for_self_in_numeric_class() {
+    use crate::ast::Identifier;
+    for class in ["Integer", "Float"] {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.set_class_identity(Some(util::ClassIdentity::new(class)));
+        let left = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
+        let right = vec![Expression::Identifier(Identifier::new(
+            "Other",
+            Span::new(7, 12),
+        ))];
+        let output = generator
+            .generate_binary_op("*", &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("call 'erlang':'*'(") && !output.contains("is_number"),
+            "`self * x` in {class} must be a bare BIF; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_arith_bare_bif_for_numeric_param() {
+    use crate::ast::Identifier;
+    for ty in ["Integer", "Float", "Number"] {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .current_method_param_types
+            .insert("other".to_string(), ty.to_string());
+        let left = Expression::Identifier(Identifier::new("other", Span::new(0, 5)));
+        let right = vec![Expression::Literal(Literal::Integer(1), Span::new(8, 9))];
+        let output = generator
+            .generate_binary_op("-", &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("call 'erlang':'-'(") && !output.contains("is_number"),
+            "`other - 1` with other :: {ty} must be a bare BIF; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_arith_guard_for_unknown_receiver() {
+    use crate::ast::Identifier;
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "y",
+        Span::new(4, 5),
+    ))];
+    let output = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    // Runtime guard: is_number → BIF, else dispatch (no try/catch, no bare BIF).
+    assert!(
+        output.contains("call 'erlang':'is_number'("),
+        "unknown receiver must emit an is_number guard; got: {output}"
+    );
+    assert!(
+        output.contains("call 'beamtalk_message_dispatch':'send'(") && output.contains("'+'"),
+        "guard must dispatch '+' as a message on the false arm; got: {output}"
+    );
+    assert!(
+        !output.contains("try "),
+        "guard must not use try/catch; got: {output}"
+    );
+}
+
+#[test]
+fn test_arith_guard_for_self_in_non_numeric_class() {
+    use crate::ast::Identifier;
+    // A user value-type overloading `+`: `self + other` must NOT be a bare BIF.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.set_class_identity(Some(util::ClassIdentity::new("Money")));
+    let left = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "Other",
+        Span::new(7, 12),
+    ))];
+    let output = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'erlang':'is_number'("),
+        "`self + x` in a non-numeric class must be guarded; got: {output}"
+    );
+}
+
+#[test]
+fn test_comparison_op_stays_bare_phase1() {
+    use crate::ast::Identifier;
+    // Phase 1 only message-dispatches `+ - * /`; comparison stays a bare BIF.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "y",
+        Span::new(4, 5),
+    ))];
+    let output = generator
+        .generate_binary_op("<", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'erlang':'<'(") && !output.contains("is_number"),
+        "comparison must stay a bare BIF in Phase 1; got: {output}"
+    );
+}
+
 #[test]
 fn test_generate_power_op_no_wrap() {
     use crate::ast::Identifier;

@@ -149,6 +149,37 @@ The cost is **per-element BT-level dispatch**, and it splits by operation shape:
   *every* inject-based pure-BT fold at once — higher ROI than self-hosting
   individual aggregates.
 
+### Arithmetic operator guard vs bare BIF (BT-2709)
+
+Phase 1 makes `+ - * /` dispatchable messages. A statically-numeric receiver
+(numeric literal, `self` in `Integer`/`Float`, a `:: Integer/Float/Number`
+param, or a `self.<field>` read) keeps the **bare** `erlang:'+'`; any other
+receiver emits a runtime `is_number` guard that picks the BIF for numbers and
+`beamtalk_message_dispatch:send/3` for objects. The `bench_guard/0` case in the
+same escript times a tight add-loop both ways — the **honest upper bound**, since
+the add is the entire loop body.
+
+| Path | µs/loop (N = 5 000 000 adds, best of 25) |
+|------|---|
+| bare `erlang:'+'`   | ~15 900 |
+| guarded `is_number` | ~42 300 |
+| **overhead** | **~5.3 ns/add · ratio ~2.66×** |
+
+#### Interpretation
+
+- The 2.66× is a **worst case**: in a loop that does nothing but add, the guard
+  is a large fraction of the work. In real code the add is a small part of the
+  expression, so the **absolute** ~5.3 ns/add is what matters, not the ratio.
+- It applies **only to the guarded path**. The bare fast path — all hot stdlib
+  arithmetic and ~95% of user code — is byte-for-byte unchanged and pays nothing
+  (asserted by codegen regression tests in `tests/expressions.rs`).
+- The guarded path currently includes synthetic fold accumulators (e.g. the
+  `I + 1` index increment compiled for `do:`/`eachWithIndex:`), since codegen
+  can't statically prove the accumulator is numeric. Extending
+  `receiver_is_statically_numeric` to recognise numeric-seeded fold/loop
+  accumulators would return those to the bare path — a worthwhile follow-up if
+  collection-iteration microbenchmarks regress, out of scope for Phase 1.
+
 ## Array backing: map (current) vs alternatives — does Vector earn its place? (BT-2696)
 
 BT-2696 proposed a bit-partitioned-trie `Vector` on the premise that core lacked

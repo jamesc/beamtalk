@@ -16,8 +16,8 @@ module 'value_type_param_collision' ['new'/0, 'new'/1, 'compute:'/2, 'dispatch'/
 
 
 'compute:'/2 = fun (Self, _seq01) ->
-    let _seq2 = call 'erlang':'+'(_seq01, 1) in
-    call 'erlang':'*'(_seq01, 2)
+    let _seq2 = let _BinLeft3 = _seq01 in let _BinRight4 = 1 in case call 'erlang':'is_number'(_BinLeft3) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft3, _BinRight4) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft3, '+', [_BinRight4]) end in
+    let _BinLeft5 = _seq01 in let _BinRight6 = 2 in case call 'erlang':'is_number'(_BinLeft5) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft5, _BinRight6) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft5, '*', [_BinRight6]) end
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of

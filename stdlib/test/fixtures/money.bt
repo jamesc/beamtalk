@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2709 fixture: a tiny value-type money amount (in cents) that overloads the
+// arithmetic operators `+ - *`, so `aMoney + bMoney` dispatches to `Money>>+`.
+
+Value subclass: Money
+  field: cents :: Integer = 0
+
+  /// The amount in cents.
+  cents -> Integer => self.cents
+
+  /// Add two money amounts (receiver-dispatched `+`).
+  + other :: Money -> Money => (Money new) withCents: self.cents + other cents
+
+  /// Subtract two money amounts.
+  - other :: Money -> Money => (Money new) withCents: self.cents - other cents
+
+  /// Scale a money amount by an integer factor.
+  * factor :: Integer -> Money => (Money new) withCents: self.cents * factor

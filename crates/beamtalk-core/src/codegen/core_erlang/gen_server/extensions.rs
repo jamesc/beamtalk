@@ -237,6 +237,8 @@ impl CoreErlangGenerator {
         self.reset_self_version();
         self.push_scope();
         self.current_method_params.clear();
+        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
+        self.clear_method_param_types();
         let prev_selector = self.current_method_selector.take();
         self.current_method_selector = Some(method.selector.name().to_string());
 
@@ -307,6 +309,8 @@ impl CoreErlangGenerator {
         self.reset_state_version();
         self.push_scope();
         self.current_method_params.clear();
+        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
+        self.clear_method_param_types();
 
         let arg_prelude = self.bind_extension_params(method);
 
@@ -379,6 +383,8 @@ impl CoreErlangGenerator {
         for (i, param) in method.parameters.iter().enumerate() {
             let var_name = self.fresh_var(&param.name.name);
             self.current_method_params.push(var_name.clone());
+            // BT-2709: Record declared type for the arithmetic fast path.
+            self.record_method_param_type(&param.name.name, param.type_annotation.as_ref());
 
             // Access the i-th element of _ExtArgs: hd(tl(tl(...(_ExtArgs))))
             let mut access: Document<'static> = Document::Str("_ExtArgs");

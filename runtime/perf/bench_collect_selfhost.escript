@@ -30,6 +30,7 @@ main(_) ->
     Pred = fun(X) -> X rem 2 =:= 0 end,
     lists:foreach(fun(N) -> run_size(N, Blk, Pred) end, [1000, 100000]),
     bench_reduce(),
+    bench_guard(),
     ok.
 
 run_size(N, Blk, Pred) ->
@@ -67,3 +68,39 @@ bench_reduce() ->
         io:format("sum  N=~6w  native ~8.2f us/op | pureBT(inject) ~8.2f us/op | ratio ~.2fx  (same: ~p)~n",
                   [N, Nat/Iters, Pbt/Iters, Pbt/Nat, Same])
     end, [1000, 100000]).
+
+%% --- BT-2709: arithmetic-operator guard vs bare `erlang:'+'` ---
+%% `+ - * /` are now dispatchable messages. For a statically-numeric receiver
+%% (literal, `self` in Integer/Float, `:: Number` param, `self.field`) codegen
+%% keeps the bare BIF; otherwise it emits a runtime `is_number` guard that picks
+%% the BIF for numbers and `beamtalk_message_dispatch:send/3` for objects. This
+%% measures the per-add cost of that guard against the bare BIF in a tight loop —
+%% the honest upper bound, since real code with unknown receivers also evaluates
+%% the operands and the surrounding expression.
+bench_guard() ->
+    N = 5000000,
+    Reps = 25,
+    Bare = fun BareLoop(0, A) -> A; BareLoop(K, A) -> BareLoop(K - 1, A + K) end,
+    %% Mirrors the generated guard: is_number(Lhs) ? BIF : dispatch.
+    Guard = fun GuardLoop(0, A) -> A;
+                GuardLoop(K, A) ->
+                    A2 = case is_number(A) of
+                             true -> A + K;
+                             false -> guard_fallback(A, K)
+                         end,
+                    GuardLoop(K - 1, A2)
+            end,
+    Bare(N, 0), Guard(N, 0),   %% warm
+    BareUs = min_us(Reps, fun() -> Bare(N, 0) end),
+    GuardUs = min_us(Reps, fun() -> Guard(N, 0) end),
+    io:format("~n=== arithmetic guard vs bare (N=~p adds/loop, best of ~p) ===~n", [N, Reps]),
+    io:format("bare  erlang:'+'  : ~8.1f us/loop~n", [float(BareUs)]),
+    io:format("guarded is_number : ~8.1f us/loop~n", [float(GuardUs)]),
+    io:format("overhead          : ~.3f ns/add | ratio ~.2fx~n",
+              [(GuardUs - BareUs) * 1000 / N, GuardUs / BareUs]).
+
+%% Never reached for numeric input; present so the guard's false arm is live.
+guard_fallback(A, B) -> A + B.
+
+min_us(Reps, F) ->
+    lists:min([element(1, timer:tc(F)) || _ <- lists:seq(1, Reps)]).

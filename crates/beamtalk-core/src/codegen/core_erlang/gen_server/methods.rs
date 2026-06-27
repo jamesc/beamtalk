@@ -182,6 +182,24 @@ impl CoreErlangGenerator {
         Ok(Document::Vec(docs))
     }
 
+    /// BT-295/BT-2709: Allocates a fresh variable for each method parameter,
+    /// recording both the param var name (for dispatch argument lists) and its
+    /// declared type (for the arithmetic fast-path classifier). Returns the
+    /// fresh var names in declaration order.
+    fn collect_method_param_vars(&mut self, method: &MethodDefinition) -> Vec<String> {
+        method
+            .parameters
+            .iter()
+            .map(|p| {
+                let var_name = self.fresh_var(&p.name.name);
+                self.current_method_params.push(var_name.clone());
+                // BT-2709: Record declared type for the arithmetic fast path.
+                self.record_method_param_type(&p.name.name, p.type_annotation.as_ref());
+                var_name
+            })
+            .collect()
+    }
+
     /// Generates a single method dispatch case clause.
     pub(in crate::codegen::core_erlang) fn generate_method_dispatch(
         &mut self,
@@ -195,21 +213,15 @@ impl CoreErlangGenerator {
         self.push_scope();
         // BT-295: Clear method params (will be populated below if present)
         self.current_method_params.clear();
+        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
+        self.clear_method_param_types();
 
         let selector_name = method.selector.name();
         // BT-1435: Track current method selector for Logger intrinsic metadata.
         self.current_method_selector = Some(selector_name.to_string());
 
         // BT-295: Collect parameter variable names (mutates scope via fresh_var)
-        let param_vars: Vec<String> = method
-            .parameters
-            .iter()
-            .map(|p| {
-                let var_name = self.fresh_var(&p.name.name);
-                self.current_method_params.push(var_name.clone());
-                var_name
-            })
-            .collect();
+        let param_vars: Vec<String> = self.collect_method_param_vars(method);
 
         // BT-851: Populate tier2_block_params for this method from pre-scanned info
         self.tier2_block_params.clear();
@@ -2262,6 +2274,8 @@ impl CoreErlangGenerator {
             // Push scope for parameter bindings
             self.push_scope();
             self.current_method_params.clear();
+            // BT-2709: Reset arithmetic fast-path parameter-type tracking.
+            self.clear_method_param_types();
             self.reset_state_version();
             self.set_class_var_version(0);
             self.set_class_var_mutated(false);
@@ -2279,6 +2293,8 @@ impl CoreErlangGenerator {
                 .map(|p| {
                     let var_name = self.fresh_var(&p.name.name);
                     self.current_method_params.push(var_name.clone());
+                    // BT-2709: Record declared type for the arithmetic fast path.
+                    self.record_method_param_type(&p.name.name, p.type_annotation.as_ref());
                     var_name
                 })
                 .collect();
@@ -2510,6 +2526,8 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         self.push_scope();
         self.current_method_params.clear();
+        // BT-2709: Reset arithmetic fast-path parameter-type tracking.
+        self.clear_method_param_types();
         self.reset_state_version();
         self.set_class_var_version(0);
         self.set_class_var_mutated(false);
