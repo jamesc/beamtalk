@@ -37,8 +37,19 @@ use super::workspace;
 /// - `selector`: required when `class_or_dot` is a class name; the method to call.
 /// - `args`: program arguments for a `main:`-style (arity-1 keyword) entry,
 ///   delivered as a `List(String)` (ADR 0099). Empty for the unary entry form.
+/// - `connect`: when set (or `workspace` is given), dispatch the entry into a
+///   live shared workspace over the REPL protocol instead of starting a fresh
+///   run-mode node (BT-2691). Only valid in script mode.
+/// - `workspace`: explicit workspace name to connect to (implies `connect`);
+///   disambiguates when a project has more than one.
 #[instrument(skip_all, fields(class_or_dot = %class_or_dot))]
-pub fn run(class_or_dot: &str, selector: Option<&str>, args: &[String]) -> Result<()> {
+pub fn run(
+    class_or_dot: &str,
+    selector: Option<&str>,
+    args: &[String],
+    connect: bool,
+    workspace: Option<&str>,
+) -> Result<()> {
     info!("Starting run command");
 
     // Determine project root (always current directory for run)
@@ -52,8 +63,16 @@ pub fn run(class_or_dot: &str, selector: Option<&str>, args: &[String]) -> Resul
         ));
     };
 
+    let connect = connect || workspace.is_some();
+
     match (class_or_dot, selector) {
         (".", None) => {
+            if connect {
+                return Err(miette!(
+                    "`--connect` / `--workspace` apply to script mode \
+                     (`beamtalk run ClassName selector`), not to `beamtalk run .`."
+                ));
+            }
             // Service mode: requires [application] section
             let app_config = manifest::find_application_config(&project_root)?;
             match app_config {
@@ -69,6 +88,10 @@ pub fn run(class_or_dot: &str, selector: Option<&str>, args: &[String]) -> Resul
                      For a script, use: beamtalk run ClassName selector"
                 )),
             }
+        }
+        (class_name, Some(sel)) if connect => {
+            // Connected mode: dispatch into a live shared workspace (BT-2691).
+            run_connected(&project_root, class_name, sel, args, workspace)
         }
         (class_name, Some(sel)) => {
             // Script mode: beamtalk run ClassName selector [args...]
@@ -305,6 +328,123 @@ fn run_script(
     }
 
     info!("Script run completed");
+    Ok(())
+}
+
+/// Run a class entry method inside a live shared workspace (BT-2691, ADR 0099 §3).
+///
+/// The connected counterpart of [`run_script`]: instead of booting a fresh
+/// run-mode node, discover the project's running workspace (registry under
+/// `~/.beamtalk/workspaces/`), connect over the REPL TCP/JSON protocol, and
+/// dispatch `ClassName selector [args]` into that node via the `run-entry` op.
+/// `Console` output streams back to this CLI; on completion the connecting
+/// process adopts the entry's status:
+///
+/// * `Program exit: N` ends only that session (the node and other sessions stay
+///   up) and this process exits `N`;
+/// * a normal return exits `0`;
+/// * an uncaught error prints to stderr and exits `1`
+///
+/// — mirroring `beamtalk_script_harness`'s implicit exit contract, but driven by
+/// the protocol's `exit_code` / error reply rather than the node's own exit code.
+fn run_connected(
+    project_root: &Utf8PathBuf,
+    class_name: &str,
+    selector: &str,
+    program_args: &[String],
+    workspace_name: Option<&str>,
+) -> Result<()> {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    use crate::commands::repl::process::connect_with_retries;
+
+    let is_keyword = validate_class_and_selector(class_name, selector)?;
+
+    // A unary entry opts out of arguments (ADR 0099) — same guard as run_script,
+    // so a typo like `beamtalk run Greeter run Alice --connect` is a loud error.
+    if !is_keyword && !program_args.is_empty() {
+        miette::bail!(
+            "The unary entry '{selector}' takes no arguments, but {n} were given \
+             ({args:?}).\n\
+             To receive arguments, declare an arity-1 keyword entry that takes a \
+             `List(String)`, e.g. `class main: args :: List(String) -> Nil`, and run \
+             `beamtalk run {class_name} main: {args_joined} --connect`.",
+            n = program_args.len(),
+            args = program_args,
+            args_joined = program_args.join(" "),
+        );
+    }
+
+    info!(class = %class_name, selector = %selector, "Dispatching entry into shared workspace");
+
+    // Discover the project's workspace from the registry (no build — the live
+    // node already holds the compiled project).
+    let workspace_id =
+        workspace::workspace_id_for_project(project_root.as_std_path(), workspace_name)?;
+    let Some(node_info) = workspace::get_node_info(&workspace_id)? else {
+        miette::bail!(
+            "No workspace is registered for this project.\n\
+             Start one first — `beamtalk repl` (interactive) or `beamtalk run .` \
+             (service) — or omit `--connect` to run in a fresh node."
+        );
+    };
+    if !workspace::is_node_running(&node_info, Some(&workspace_id)) {
+        miette::bail!(
+            "The workspace for this project (`{workspace_id}`) is registered but not \
+             running.\n\
+             Start it with `beamtalk repl` or `beamtalk run .`, or omit `--connect` \
+             to run in a fresh node."
+        );
+    }
+
+    let cookie = workspace::read_workspace_cookie(&workspace_id)?
+        .trim()
+        .to_string();
+    let host = node_info.connect_host().to_string();
+    let port = node_info.port;
+
+    println!("Connecting to workspace {workspace_id} (port {port})...");
+    let mut client = connect_with_retries(&host, port, &cookie)?;
+
+    println!("Running {class_name}>>{selector} (connected)...\n");
+
+    // Ctrl-C interrupts the dispatched job (parity with the REPL eval path).
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let _ = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&interrupted));
+
+    let response = client.dispatch_entry(class_name, selector, program_args, &interrupted)?;
+
+    // Streaming already printed incremental `Console` output; a non-streamed
+    // reply may still carry buffered output in `output`.
+    if let Some(out) = &response.output {
+        print!("{out}");
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+
+    // ADR 0099 §3: adopt the dispatched entry's status as this process's exit
+    // code. `Program exit: N` carries `exit_code`; the session has already ended
+    // server-side while the shared node stays up.
+    if let Some(code) = response.exit_code {
+        info!(exit_code = code, "Adopting connected Program exit: status");
+        std::process::exit(i32::from(code));
+    }
+
+    // An uncaught error → message to stderr + exit 1 (mirror the run harness).
+    let is_error = response
+        .status
+        .as_ref()
+        .is_some_and(|s| s.iter().any(|f| f == "error" || f == "test-error"));
+    if is_error {
+        if let Some(err) = response.error.as_ref().or(response.message.as_ref()) {
+            eprintln!("{err}");
+        }
+        std::process::exit(1);
+    }
+
+    // Normal return → exit 0. The entry's return value is discarded, matching
+    // run-mode's `beamtalk_script_harness:dispatch/3`.
+    info!("Connected script run completed");
     Ok(())
 }
 
@@ -666,12 +806,76 @@ mod tests {
         fs::create_dir_all(&src_path).unwrap();
         fs::write(src_path.join("main.bt"), "main := [42].").unwrap();
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[]));
+        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
             err.contains("No beamtalk.toml"),
             "Should mention missing manifest: {err}"
+        );
+    }
+
+    // --- BT-2691: connected-mode `beamtalk run --connect` ---
+
+    #[test]
+    #[serial(cwd)]
+    fn test_run_connect_rejects_dot_service_mode() {
+        // `--connect` is a script-mode feature; `beamtalk run . --connect` is rejected
+        // before any service-mode work.
+        let temp = TempDir::new().unwrap();
+        create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+        let result = with_project_dir(temp.path(), || run(".", None, &[], true, None));
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("script mode"),
+            "`--connect` with `.` should be rejected: {err}"
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_run_connect_unary_entry_rejects_args() {
+        // The connected path applies the same unary-entry argument guard as run_script,
+        // and does so before attempting any workspace discovery (so no live node needed).
+        let temp = TempDir::new().unwrap();
+        create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+        let args = vec!["Alice".to_string()];
+        let result = with_project_dir(temp.path(), || {
+            run("Greeter", Some("run"), &args, true, None)
+        });
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("takes no arguments"),
+            "Unary entry with args should be rejected in connected mode: {err}"
+        );
+    }
+
+    #[test]
+    #[serial(cwd)]
+    fn test_run_connect_validates_class_name() {
+        // An invalid class name is rejected in connected mode (validation runs before
+        // discovery), so a `--workspace` (implies `--connect`) with a bad class fails fast.
+        let temp = TempDir::new().unwrap();
+        create_test_project_with_manifest(
+            &temp,
+            "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+        );
+        let result = with_project_dir(temp.path(), || {
+            run("bad", Some("main:"), &[], false, Some("ws"))
+        });
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("Invalid class name"),
+            "Invalid class name should be rejected in connected mode: {err}"
         );
     }
 
@@ -684,7 +888,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[]));
+        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -702,7 +906,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("Main", None, &[]));
+        let result = with_project_dir(temp.path(), || run("Main", None, &[], false, None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -720,7 +924,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("main", Some("run"), &[]));
+        let result = with_project_dir(temp.path(), || run("main", Some("run"), &[], false, None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -739,7 +943,9 @@ mod tests {
             &temp,
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
-        let result = with_project_dir(temp.path(), || run("/looks/like/path", None, &[]));
+        let result = with_project_dir(temp.path(), || {
+            run("/looks/like/path", None, &[], false, None)
+        });
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -757,7 +963,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("Main", Some("Run"), &[]));
+        let result = with_project_dir(temp.path(), || run("Main", Some("Run"), &[], false, None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -779,7 +985,7 @@ mod tests {
         )
         .unwrap();
 
-        let result = with_project_dir(temp.path(), || run("Main", Some("run"), &[]));
+        let result = with_project_dir(temp.path(), || run("Main", Some("run"), &[], false, None));
         assert!(result.is_err());
     }
 
@@ -794,7 +1000,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[]));
+        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(

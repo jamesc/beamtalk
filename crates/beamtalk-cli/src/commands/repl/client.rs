@@ -122,9 +122,40 @@ impl ReplClient {
         expression: &str,
         interrupted: &Arc<AtomicBool>,
     ) -> Result<ReplResponse> {
-        // Send the eval request
-        let request = RequestBuilder::eval(expression);
-        self.inner.send_only(&request)?;
+        self.send_streaming(&RequestBuilder::eval(expression), interrupted)
+    }
+
+    /// Dispatch a class entry method (`ClassName selector [args]`) in the
+    /// connected session and stream its output (BT-2691, ADR 0099 §3).
+    ///
+    /// The connected-mode `beamtalk run … --connect` consumer: sends a
+    /// `run-entry` op carrying `class` / `selector` / `args`, streams `Console`
+    /// output incrementally, and returns the terminal response. When the entry
+    /// called `Program exit: N`, the response's `exit_code` is `Some(N)` and the
+    /// session has ended on the server; the shared node stays up.
+    pub(crate) fn dispatch_entry(
+        &mut self,
+        class: &str,
+        selector: &str,
+        args: &[String],
+        interrupted: &Arc<AtomicBool>,
+    ) -> Result<ReplResponse> {
+        self.send_streaming(
+            &RequestBuilder::run_entry(class, selector, args),
+            interrupted,
+        )
+    }
+
+    /// Send a request that streams incremental `out` chunks, then return the
+    /// terminal response. Shared by [`eval_interruptible`] and [`dispatch_entry`]
+    /// (BT-2691) — both consume the same streaming + `need-input` + interrupt
+    /// protocol; only the request op differs.
+    fn send_streaming(
+        &mut self,
+        request: &serde_json::Value,
+        interrupted: &Arc<AtomicBool>,
+    ) -> Result<ReplResponse> {
+        self.inner.send_only(request)?;
 
         // Set a short read timeout for polling
         self.inner

@@ -3,5 +3,6 @@
 #
 # The README is included as crate docs (beamtalk-core/src/lib.rs), so product
 # names that look like camelCase identifiers — e.g. "LiveView" (the Phoenix
-# LiveView IDE, BT-2512) — would otherwise trip the lint in prose/headings.
-doc-valid-idents = ["LiveView", ".."]
+# LiveView IDE, BT-2512) or "CodeMirror" (the LiveView IDE's editor) — would
+# otherwise trip the lint in prose/headings.
+doc-valid-idents = ["LiveView", "CodeMirror", ".."]

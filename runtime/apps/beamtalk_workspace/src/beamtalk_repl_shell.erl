@@ -29,6 +29,7 @@ bindings while sharing access to actors and loaded modules.
     stop/1,
     eval/2,
     eval_async/3,
+    dispatch_async/5,
     eval_trace/2,
     interrupt/1,
     get_bindings/1,
@@ -117,6 +118,24 @@ session shell stops.
 -spec eval_async(pid(), string(), pid()) -> ok.
 eval_async(SessionPid, Expression, Subscriber) ->
     gen_server:cast(SessionPid, {eval_async, Expression, Subscriber}).
+
+-doc """
+Dispatch a class entry method with streaming output (BT-2691, ADR 0099 §3).
+
+The connected-mode `beamtalk run ClassName selector [args] --connect` path: rather
+than compiling an expression, run `ClassName selector` against the live image with
+`Argv` (the program arguments as a `List(String)`) on a session eval worker.
+`SelectorBin` keeps its trailing `:` for the arity-1 keyword (`main:`) form.
+
+Streaming and termination mirror `eval_async/3` exactly — the `Subscriber`
+receives `{eval_out, Chunk}` chunks, then one terminal `{eval_done, …}`,
+`{eval_error, …}`, or `{eval_script_exit, Code, …}` message — so a connected
+`Program exit: N` ends this session while the shared node stays up, and the
+connecting client adopts `N` as its process exit status.
+""".
+-spec dispatch_async(pid(), binary(), binary(), [binary()], pid()) -> ok.
+dispatch_async(SessionPid, ClassNameBin, SelectorBin, Argv, Subscriber) ->
+    gen_server:cast(SessionPid, {dispatch_async, ClassNameBin, SelectorBin, Argv, Subscriber}).
 
 -doc """
 Compile expression and return Core Erlang source (BT-700).
@@ -464,6 +483,34 @@ handle_cast(
     {eval_async, _Expression, Subscriber}, {_SessionId, _State, {_Pid, _Ref, _}} = FullState
 ) ->
     %% Already evaluating — reject concurrent eval
+    Err0 = beamtalk_error:new(eval_busy, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
+    Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),
+    Subscriber ! {eval_error, Err2, <<>>, []},
+    {noreply, FullState};
+handle_cast(
+    {dispatch_async, ClassNameBin, SelectorBin, Argv, Subscriber}, {SessionId, State, undefined}
+) ->
+    %% BT-2691: connected-mode `beamtalk run` entry dispatch. Spawns a worker
+    %% exactly like {eval_async, …} but runs `do_dispatch/5` (class entry) instead
+    %% of compiling an expression, returning the same `eval_result()` shape so the
+    %% existing {eval_result, …} handling (including the connected `Program exit:`
+    %% / {script_exit, …} branch) applies unchanged.
+    Self = self(),
+    SessionMeta = beamtalk_repl_state:get_client_meta(State),
+    {WorkerPid, MonRef} = spawn_monitor(fun() ->
+        seed_session_context(Self, SessionId, SessionMeta),
+        Result = beamtalk_repl_eval:do_dispatch(
+            ClassNameBin, SelectorBin, Argv, Subscriber, State
+        ),
+        Self ! {eval_result, self(), Result}
+    end),
+    {noreply, {SessionId, State, {WorkerPid, MonRef, {async, Subscriber}}}};
+handle_cast(
+    {dispatch_async, _ClassNameBin, _SelectorBin, _Argv, Subscriber},
+    {_SessionId, _State, {_Pid, _Ref, _}} = FullState
+) ->
+    %% Already evaluating — reject concurrent dispatch (parity with eval_async)
     Err0 = beamtalk_error:new(eval_busy, 'REPL'),
     Err1 = beamtalk_error:with_message(Err0, <<"An evaluation is already in progress">>),
     Err2 = beamtalk_error:with_hint(Err1, <<"Use Ctrl-C to interrupt the current evaluation.">>),

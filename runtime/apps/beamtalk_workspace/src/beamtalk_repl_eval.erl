@@ -19,6 +19,7 @@ module loading to beamtalk_repl_loader (BT-863).
 -export([
     do_eval/2, do_eval/3,
     do_eval_trace/2,
+    do_dispatch/5,
     do_show_codegen/2,
     handle_load/2, handle_load/3,
     handle_load_source/3
@@ -69,7 +70,9 @@ module loading to beamtalk_repl_loader (BT-863).
     handle_method_definition/4,
     handle_protocol_definition/3,
     wrap_load_err/3,
-    normalize_method_source/2
+    normalize_method_source/2,
+    resolve_entry/2,
+    is_keyword_selector/1
 ]).
 -endif.
 
@@ -142,6 +145,134 @@ do_eval(Expression, State, Subscriber) ->
         {error, Reason} ->
             wrap_compile_err(Reason, NewState)
     end.
+
+-doc """
+Dispatch a class entry method (`ClassName selector [argv]`) in this connected
+session (BT-2691, ADR 0099 §3 / Phase 5).
+
+The connected-mode counterpart of run-mode's `beamtalk_script_harness:dispatch/3`:
+`beamtalk run ClassName selector [args] --connect` sends a `run-entry` op, which
+lands here on a session eval worker. The class is resolved from the live image,
+then `beamtalk_class_dispatch:class_send/3` runs the entry on **this worker's own
+synchronous call chain** — so a `Program exit: N` raised by the entry unwinds as
+`{beamtalk_script_exit, N}` and is caught here exactly like the `do_eval` path,
+letting the shell report the status and end the session while the shared node
+stays up.
+
+`SelectorBin` carries the trailing `:` for the arity-1 keyword (`main:`) form, in
+which case `Argv` (the program arguments as a `List(String)`, i.e. a list of
+UTF-8 binaries) is passed as the single method argument; a unary entry (`run`)
+receives no arguments. `Subscriber` is the streaming output sink (the connecting
+client) — `Console` writes reach it via the captured group leader, mirroring the
+streaming `eval` path.
+
+Returns the shared `eval_result()` shape (`{ok, …}` / `{error, …}` /
+`{script_exit, …}`) so the shell's existing `eval_result` handling applies
+unchanged. A class that is not loaded, or a selector the class does not
+understand, is returned as a structured `#beamtalk_error{}` error rather than
+raised.
+""".
+-spec do_dispatch(
+    binary(), binary(), [binary()], pid() | undefined, beamtalk_repl_state:state()
+) -> eval_result().
+do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
+    case resolve_entry(ClassNameBin, SelectorBin) of
+        {ok, ClassPid, Selector} ->
+            %% A unary entry takes no arguments; the arity-1 keyword form
+            %% (`main:`) receives the whole argv list as its single
+            %% `List(String)` argument (parity with run-mode's dispatch list).
+            DispatchArgs =
+                case is_keyword_selector(SelectorBin) of
+                    true -> [Argv];
+                    false -> []
+                end,
+            CaptureRef = beamtalk_io_capture:start(Subscriber),
+            EvalResult =
+                try beamtalk_class_dispatch:class_send(ClassPid, Selector, DispatchArgs) of
+                    RawResult ->
+                        case maybe_await_future(RawResult) of
+                            {future_rejected, FutureReason} ->
+                                FutExObj = beamtalk_exception_handler:ensure_wrapped(FutureReason),
+                                {error, FutExObj, State};
+                            Value ->
+                                {ok, Value, State}
+                        end
+                catch
+                    throw:{beamtalk_script_exit, Code} ->
+                        %% BT-2691: `Program exit: Code` from the dispatched entry —
+                        %% same connected-exit handling as the `do_eval` path.
+                        {script_exit, Code, State};
+                    Class:Reason:Stacktrace ->
+                        CaughtExObj = beamtalk_exception_handler:ensure_wrapped(
+                            Class, Reason, Stacktrace
+                        ),
+                        {error, {eval_error, Class, CaughtExObj}, State}
+                after
+                    %% Unlike the eval path there is no transient eval module to
+                    %% purge — the entry runs in already-loaded class code.
+                    ok
+                end,
+            Output = beamtalk_io_capture:stop(CaptureRef),
+            inject_output(EvalResult, Output, []);
+        {error, Err} ->
+            {error, Err, <<>>, [], State}
+    end.
+
+%% Resolve a `(ClassName, Selector)` entry against the live image for
+%% `do_dispatch/5`. Both names must already exist (the class is loaded; the
+%% selector names one of its methods), so we use existing-atom lookups and never
+%% grow the atom table from client-supplied strings. A missing class or selector
+%% becomes a structured error the caller surfaces verbatim.
+-spec resolve_entry(binary(), binary()) ->
+    {ok, pid(), atom()} | {error, #beamtalk_error{}}.
+resolve_entry(ClassNameBin, SelectorBin) ->
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
+        {ok, ClassName} ->
+            case beamtalk_runtime_api:whereis_class(ClassName) of
+                undefined ->
+                    {error, dispatch_class_not_found_error(ClassNameBin)};
+                ClassPid ->
+                    case beamtalk_repl_errors:safe_to_existing_atom(SelectorBin) of
+                        {ok, Selector} ->
+                            {ok, ClassPid, Selector};
+                        {error, _} ->
+                            {error, dispatch_dnu_error(ClassNameBin, SelectorBin)}
+                    end
+            end;
+        {error, _} ->
+            {error, dispatch_class_not_found_error(ClassNameBin)}
+    end.
+
+%% True when the selector is the arity-1 keyword form (`main:`), i.e. it ends in
+%% a single trailing colon — the CLI validates the shape, so a non-empty binary
+%% ending in `:` is the keyword entry and anything else is the unary entry.
+-spec is_keyword_selector(binary()) -> boolean().
+is_keyword_selector(<<>>) -> false;
+is_keyword_selector(SelectorBin) -> binary:last(SelectorBin) =:= $:.
+
+-spec dispatch_class_not_found_error(binary()) -> #beamtalk_error{}.
+dispatch_class_not_found_error(ClassNameBin) ->
+    Err0 = beamtalk_error:new(class_not_found, 'Program'),
+    Err1 = beamtalk_error:with_message(
+        Err0,
+        <<"Class '", ClassNameBin/binary,
+            "' is not loaded in this workspace, so it cannot be run connected.">>
+    ),
+    beamtalk_error:with_hint(
+        Err1,
+        <<
+            "Load the project into the running workspace first (open it with `beamtalk repl` "
+            "or start it with `beamtalk run .`), or omit `--connect` to run it in a fresh node."
+        >>
+    ).
+
+-spec dispatch_dnu_error(binary(), binary()) -> #beamtalk_error{}.
+dispatch_dnu_error(ClassNameBin, SelectorBin) ->
+    Err0 = beamtalk_error:new(does_not_understand, 'Program'),
+    beamtalk_error:with_message(
+        Err0,
+        <<"Class '", ClassNameBin/binary, "' has no entry method '", SelectorBin/binary, "'.">>
+    ).
 
 -doc """
 Evaluate a Beamtalk expression in trace mode (BT-1238).

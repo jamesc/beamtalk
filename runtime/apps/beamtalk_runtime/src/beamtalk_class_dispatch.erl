@@ -335,6 +335,14 @@ class_send_dispatch(ClassPid, Selector, Args) ->
                     ),
                     beamtalk_error:raise(Error)
             end;
+        {error, {beamtalk_script_exit, _} = ScriptExit} ->
+            %% BT-2691 (ADR 0099 §3): a connected `Program exit: N` raised inside
+            %% the dispatched class method surfaces here as the class gen_server's
+            %% error reply. Re-raise it as the `{beamtalk_script_exit, N}` *throw*
+            %% in the caller's (eval/dispatch worker's) process, so that worker
+            %% reports the status and ends the session — instead of
+            %% unwrap_class_call/1 wrapping it as an ordinary method failure.
+            throw(ScriptExit);
         Other ->
             unwrap_class_call(Other)
     end.
@@ -407,6 +415,11 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
                     Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
                     error(Wrapped)
             end;
+        {error, {beamtalk_script_exit, _} = ScriptExit} ->
+            %% BT-2691 (ADR 0099 §3): re-raise a connected `Program exit:` from a
+            %% metaclass-dispatched class method as the script-exit throw (parity
+            %% with class_send_dispatch/3), so the worker adopts the status.
+            throw(ScriptExit);
         Other ->
             unwrap_class_call(Other)
     end.
@@ -591,6 +604,12 @@ apply_class_method_fun(Fun, ClassSelf, ClassVars, Args, ClassName, Selector) ->
         Raw ->
             {ok, Raw}
     catch
+        %% BT-2691 (ADR 0099 §3): a connected `Program exit: N` raised inside a
+        %% class method is a control-flow signal, not a method failure. Pass it
+        %% through unchanged (no error log) so class_send_dispatch/3 can re-raise
+        %% it to the eval/dispatch worker that reports the status.
+        throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
+            {error, {raised, throw, ScriptExit, ScriptST}};
         error:undef:ST ->
             ?LOG_ERROR(
                 "Runtime class method ~p:~p raised undef internally",
@@ -632,6 +651,11 @@ apply_compiled_class_method(
         Raw ->
             {ok, Raw}
     catch
+        %% BT-2691 (ADR 0099 §3): pass a connected `Program exit: N` through as a
+        %% control-flow signal (no "method failed" log); class_send_dispatch/3
+        %% re-raises it to the eval/dispatch worker.
+        throw:({beamtalk_script_exit, _} = ScriptExit):ScriptST ->
+            {error, {raised, throw, ScriptExit, ScriptST}};
         error:undef:ST ->
             classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST);
         ErrClass:Error:ErrST ->

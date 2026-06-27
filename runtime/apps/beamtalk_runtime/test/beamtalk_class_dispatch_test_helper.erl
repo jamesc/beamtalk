@@ -23,6 +23,7 @@ Function naming convention follows Beamtalk's `class_` prefix scheme:
     'class_testWith:'/3,
     class_testInternalUndef/2,
     class_testRaise/2,
+    class_testScriptExit/2,
     'class_testTwoArgs:and:'/4,
     class_testSupervisorNew/2,
     class_testAlreadyStarted/2,
@@ -80,6 +81,17 @@ Exercises the ErrClass:Error:ErrST catch branch in invoke_class_method.
 -spec class_testRaise(term(), map()) -> no_return().
 class_testRaise(_ClassSelf, _ClassVars) ->
     error(test_deliberate_error).
+
+-doc """
+Zero-argument class method that raises the connected `Program exit:` signal
+(BT-2691, ADR 0099 §3) — `throw({beamtalk_script_exit, 7})` — exactly as
+`beamtalk_program:'exit:'/1` does inside a method body. Exercises the
+script-exit pass-through in the class-method apply catch + the re-raise in
+class_send_dispatch/3.
+""".
+-spec class_testScriptExit(term(), map()) -> no_return().
+class_testScriptExit(_ClassSelf, _ClassVars) ->
+    throw({beamtalk_script_exit, 7}).
 
 -doc """
 Two-argument keyword class method for arity testing.

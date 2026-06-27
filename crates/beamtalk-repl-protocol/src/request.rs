@@ -42,6 +42,24 @@ impl RequestBuilder {
         })
     }
 
+    /// Build a `run-entry` request — dispatch a class entry method with argv
+    /// in a connected session (BT-2691, ADR 0099 §3).
+    ///
+    /// `selector` keeps its trailing `:` for the arity-1 keyword (`main:`) form;
+    /// `args` is the program arguments delivered to the entry as a `List(String)`.
+    /// The argv crosses as a structured JSON array — never spliced into source —
+    /// so no string escaping is needed.
+    #[must_use]
+    pub fn run_entry(class: &str, selector: &str, args: &[String]) -> serde_json::Value {
+        serde_json::json!({
+            "op": "run-entry",
+            "id": next_msg_id(),
+            "class": class,
+            "selector": selector,
+            "args": args,
+        })
+    }
+
     /// Build an `eval` request with optional trace mode (BT-1238).
     #[must_use]
     pub fn eval_with_trace(code: &str, trace: bool) -> serde_json::Value {
@@ -527,6 +545,27 @@ mod tests {
         assert_eq!(req["op"], "eval");
         assert_eq!(req["code"], "1 + 2");
         assert!(req["id"].as_str().unwrap().starts_with("msg-"));
+    }
+
+    #[test]
+    fn run_entry_request_has_correct_shape() {
+        let args = vec!["Alice".to_string(), "Bob".to_string()];
+        let req = RequestBuilder::run_entry("Greeter", "main:", &args);
+        assert_eq!(req["op"], "run-entry");
+        assert_eq!(req["class"], "Greeter");
+        assert_eq!(req["selector"], "main:");
+        // argv crosses as a structured JSON array, not a source string.
+        assert_eq!(req["args"][0], "Alice");
+        assert_eq!(req["args"][1], "Bob");
+        assert!(req["id"].as_str().unwrap().starts_with("msg-"));
+    }
+
+    #[test]
+    fn run_entry_unary_has_empty_args() {
+        let req = RequestBuilder::run_entry("Server", "run", &[]);
+        assert_eq!(req["op"], "run-entry");
+        assert_eq!(req["selector"], "run");
+        assert_eq!(req["args"].as_array().unwrap().len(), 0);
     }
 
     #[test]

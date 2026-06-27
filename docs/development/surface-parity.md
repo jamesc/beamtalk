@@ -81,6 +81,7 @@ changes no op output (the underlying capability is still the same `eval` /
 | `show-codegen` | -- | `:show-codegen` / `:sc` | `show_codegen` | -- | Show generated Core Erlang |
 | `load-source` | -- | `surface-specific: LiveView IDE Editor pane` | -- | -- | Load inline source string (the Phase-1 vanilla-JS browser workspace was removed in BT-2415; the op is now consumed by the Phoenix LiveView IDE) |
 | `load-project` | -- | `:sync` / `:s` | `load_project` | -- | Sync project files from `beamtalk.toml` |
+| `run-entry` | `beamtalk run … --connect` | -- | -- | -- | `surface-specific`: connected-mode `beamtalk run` entry dispatch (BT-2691, ADR 0099 §3). Dispatches `ClassName selector [args]` into the project's **live shared workspace** over the protocol instead of booting a fresh run-mode node; argv crosses as a structured JSON array (no source-string splice). The entry runs on a session eval worker's synchronous call chain, so it reuses the streaming-output + `script_exit`→`exit_code` machinery (BT-2688): a connected `Program exit: N` ends only that session (the node + other sessions stay up) and the CLI process adopts `N`, a normal return exits 0, an uncaught error exits 1. CLI-only — there is no REPL/MCP/LSP analogue (the REPL surface dispatches entries via plain `eval`). |
 
 ## Session Operations
 

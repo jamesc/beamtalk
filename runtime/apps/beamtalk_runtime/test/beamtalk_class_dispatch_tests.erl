@@ -485,7 +485,9 @@ class_send_test_() ->
                 fun test_class_send_undefined/0},
             {"class_send spawn creates an actor instance", fun test_class_send_new/0},
             {"class_send unknown selector raises does_not_understand", fun test_class_send_dnu/0},
-            {"class_send successful user-defined class method", fun test_class_send_user_method/0}
+            {"class_send successful user-defined class method", fun test_class_send_user_method/0},
+            {"class_send re-raises a connected Program exit: as a throw",
+                fun test_class_send_script_exit_propagates/0}
         ]
     end}.
 
@@ -543,6 +545,35 @@ test_class_send_user_method() ->
     try
         Result = beamtalk_class_dispatch:class_send(Pid, testSuccess, []),
         ?assertEqual(test_success_result, Result)
+    after
+        (try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end)
+    end.
+
+%% BT-2691 (ADR 0099 §3): a connected `Program exit: N` raised inside a class
+%% method must propagate across the class gen_server boundary back to the caller
+%% (the eval/dispatch worker) as the `{beamtalk_script_exit, N}` *throw*, so the
+%% worker reports the status and ends the session. Without the
+%% class_send_dispatch/3 re-raise it would be wrapped by unwrap_class_call/1 as an
+%% `error:`-class exception and the connected exit code would be lost (CLI exits 1
+%% instead of N).
+test_class_send_script_exit_propagates() ->
+    ClassName = 'BT2691ScriptExitTest',
+    ClassInfo = #{
+        superclass => none,
+        module => beamtalk_class_dispatch_test_helper,
+        class_methods => #{testScriptExit => <<>>},
+        class_state => #{}
+    },
+    {ok, Pid} = beamtalk_object_class:start_link(ClassName, ClassInfo),
+    try
+        ?assertThrow(
+            {beamtalk_script_exit, 7},
+            beamtalk_class_dispatch:class_send(Pid, testScriptExit, [])
+        )
     after
         (try
             gen_server:stop(Pid, normal, 5000)
@@ -906,6 +937,8 @@ invoke_class_method_errors_test_() ->
             {"internal undef in method body returns {error, undef}",
                 fun test_invoke_internal_undef/0},
             {"method that raises error returns {error, Reason}", fun test_invoke_raises_error/0},
+            {"connected Program exit: passes through the apply catch",
+                fun test_invoke_script_exit_passthrough/0},
             {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0}
         ]
     end}.
@@ -935,6 +968,22 @@ test_invoke_raises_error() ->
         #{}
     ),
     ?assertMatch({reply, {error, test_deliberate_error}, _}, Result).
+
+%% BT-2691: a class method raising the connected `Program exit:` signal
+%% (`throw({beamtalk_script_exit, 7})`) is passed through the apply catch as
+%% `{error, {beamtalk_script_exit, 7}}` — no "method failed" log, ready for
+%% class_send_dispatch/3 to re-raise as a throw.
+test_invoke_script_exit_passthrough() ->
+    LocalMethods = #{testScriptExit => <<>>},
+    Result = beamtalk_class_dispatch:handle_class_method_call(
+        testScriptExit,
+        [],
+        'BT2691ScriptExitClass',
+        beamtalk_class_dispatch_test_helper,
+        LocalMethods,
+        #{}
+    ),
+    ?assertMatch({reply, {error, {beamtalk_script_exit, 7}}, _}, Result).
 
 %% Two-argument keyword selector dispatches correctly.
 test_invoke_two_arg_keyword() ->
