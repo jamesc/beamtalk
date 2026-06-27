@@ -31,6 +31,7 @@ main(_) ->
     lists:foreach(fun(N) -> run_size(N, Blk, Pred) end, [1000, 100000]),
     bench_reduce(),
     bench_guard(),
+    bench_guard_fold(),
     ok.
 
 run_size(N, Blk, Pred) ->
@@ -98,6 +99,44 @@ bench_guard() ->
     io:format("guarded is_number : ~8.1f us/loop~n", [float(GuardUs)]),
     io:format("overhead          : ~.3f ns/add | ratio ~.2fx~n",
               [(GuardUs - BareUs) * 1000 / N, GuardUs / BareUs]).
+
+%% --- BT-2709: guard cost at the realistic fold level (sum / inject:into:) ---
+%% The tight loop above is the worst case (the add is the whole body). This
+%% measures the guard where it actually lands in stdlib collection code: a
+%% `lists:foldl` accumulator step — the shape `sum`/`inject:into:` compile to —
+%% so the per-element list traversal is the "surrounding work" that dilutes the
+%% guard's relative cost. A/B over the same list: bare `Acc + X` vs the guarded
+%% form codegen now emits for the (statically non-numeric) fold accumulator.
+bench_guard_fold() ->
+    N = 1000000,
+    Reps = 25,
+    List = lists:seq(1, N),
+    Bare = fun() -> lists:foldl(fun(X, Acc) -> Acc + X end, 0, List) end,
+    Guard = fun() ->
+        lists:foldl(
+            fun(X, Acc) ->
+                case is_number(Acc) of
+                    true -> Acc + X;
+                    false -> guard_fallback(Acc, X)
+                end
+            end,
+            0,
+            List
+        )
+    end,
+    Bare(),
+    Guard(),
+    BareUs = min_us(Reps, Bare),
+    GuardUs = min_us(Reps, Guard),
+    Same = Bare() =:= Guard(),
+    io:format("~n=== fold sum: guarded vs bare accumulator (N=~p elems, best of ~p) ===~n", [
+        N, Reps
+    ]),
+    io:format("bare  foldl Acc+X   : ~8.1f us~n", [float(BareUs)]),
+    io:format("guarded foldl       : ~8.1f us~n", [float(GuardUs)]),
+    io:format("overhead            : ~.3f ns/elem | ratio ~.2fx  (same: ~p)~n", [
+        (GuardUs - BareUs) * 1000 / N, GuardUs / BareUs, Same
+    ]).
 
 %% Never reached for numeric input; present so the guard's false arm is live.
 guard_fallback(A, B) -> A + B.
