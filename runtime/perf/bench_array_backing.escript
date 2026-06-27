@@ -27,21 +27,33 @@ bench(N) ->
     Arr = array:from_list(List),                      %% erlang :array module
     Tup = list_to_tuple(List),                        %% raw tuple
     Idx = [rand:uniform(N) || _ <- lists:seq(1, K)],  %% 1-based random indices
+    %% The list/tuple "sequence" candidates are O(n) per op: at N=100k they would
+    %% run for minutes (lists:nth traverses ~50k cons cells; setelement copies the
+    %% whole 100k tuple) with no new information — the docs already record them as
+    %% O(n). Skip them above a threshold so the script never appears hung.
+    Big = N >= 100000,
     io:format("~n=== N=~p, ~p random ops ===~n", [N, K]),
     %% READ (at:)
     rd("at: beamtalk_array ", fun(I) -> beamtalk_array:at(BtArr, I) end, Idx, K),
     rd("at: raw maps:get   ", fun(I) -> maps:get(I-1, RawMap) end, Idx, K),
     rd("at: :array module  ", fun(I) -> array:get(I-1, Arr) end, Idx, K),
     rd("at: tuple element  ", fun(I) -> element(I, Tup) end, Idx, K),
-    rd("at: list lists:nth ", fun(I) -> lists:nth(I, List) end, Idx, K),
+    rd_unless(Big, "at: list lists:nth ", fun(I) -> lists:nth(I, List) end, Idx, K),
     %% WRITE (at:put:) — persistent single update
     wr("at:put: beamtalk_array", fun(I) -> beamtalk_array:at_put(BtArr, I, 0) end, Idx, K),
     wr("at:put: raw maps:put  ", fun(I) -> maps:put(I-1, 0, RawMap) end, Idx, K),
     wr("at:put: :array set    ", fun(I) -> array:set(I-1, 0, Arr) end, Idx, K),
-    wr("at:put: tuple setelem ", fun(I) -> setelement(I, Tup, 0) end, Idx, K).
+    wr_unless(Big, "at:put: tuple setelem ", fun(I) -> setelement(I, Tup, 0) end, Idx, K).
 
 rd(Label, F, Idx, K) ->
     F(1),
     {Us, _} = timer:tc(fun() -> lists:foreach(F, Idx) end),
     io:format("  ~s ~7.3f ns/op~n", [Label, (Us * 1000) / K]).
 wr(Label, F, Idx, K) -> rd(Label, F, Idx, K).
+
+%% Run an O(n)-per-op candidate only when N is small; otherwise note the skip.
+rd_unless(true, Label, _F, _Idx, _K) ->
+    io:format("  ~s   skipped (O(n) per op, impractical at this N)~n", [Label]);
+rd_unless(false, Label, F, Idx, K) ->
+    rd(Label, F, Idx, K).
+wr_unless(Big, Label, F, Idx, K) -> rd_unless(Big, Label, F, Idx, K).
