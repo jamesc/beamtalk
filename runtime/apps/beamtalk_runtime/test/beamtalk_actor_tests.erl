@@ -2328,7 +2328,11 @@ method_badarg_error_test() ->
     %% Trigger a badarg error in a method to cover format_method_error_message badarg path
     {ok, Actor} = test_badarg_actor:start_link(),
     Result = gen_server:call(Actor, {triggerBadarg, []}),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = triggerBadarg}}, Result),
+    %% BT-2704: the runtime-only method path now classifies the kind (badarg ->
+    %% argument_error) the same as the compiled path, keeping its MFA message.
+    ?assertMatch(
+        {error, #beamtalk_error{kind = argument_error, selector = triggerBadarg}}, Result
+    ),
     %% Message should contain "Bad argument"
     {error, Err} = Result,
     ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Bad argument">>)),
@@ -2338,8 +2342,9 @@ method_badarith_error_test() ->
     %% Trigger a badarith error to cover format_method_error_message badarith path
     {ok, Actor} = test_badarg_actor:start_link(),
     Result = gen_server:call(Actor, {triggerBadarith, []}),
+    %% BT-2704: badarith -> type_error, matching the compiled path.
     ?assertMatch(
-        {error, #beamtalk_error{kind = runtime_error, selector = triggerBadarith}}, Result
+        {error, #beamtalk_error{kind = type_error, selector = triggerBadarith}}, Result
     ),
     {error, Err} = Result,
     ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"Arithmetic error">>)),
@@ -2358,8 +2363,9 @@ method_function_clause_error_test() ->
     %% Trigger a function_clause error to cover that path
     {ok, Actor} = test_badarg_actor:start_link(),
     Result = gen_server:call(Actor, {triggerFunctionClause, []}),
+    %% BT-2704: function_clause is an internal bug -> internal_error.
     ?assertMatch(
-        {error, #beamtalk_error{kind = runtime_error, selector = triggerFunctionClause}}, Result
+        {error, #beamtalk_error{kind = internal_error, selector = triggerFunctionClause}}, Result
     ),
     {error, Err} = Result,
     ?assertNotEqual(nomatch, binary:match(Err#beamtalk_error.message, <<"No matching clause">>)),

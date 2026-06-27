@@ -2132,7 +2132,7 @@ wrap_method_error(Selector, State, Class, Reason, Stacktrace) ->
         stacktrace => Stacktrace,
         domain => [beamtalk, runtime]
     }),
-    Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
+    Error0 = beamtalk_error:new(method_error_kind(Class, Reason), ClassName, Selector),
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error = beamtalk_error:with_details(Error1, #{
         original_class => Class,
@@ -2140,6 +2140,15 @@ wrap_method_error(Selector, State, Class, Reason, Stacktrace) ->
         erlang_stacktrace => Stacktrace
     }),
     {error, Error, State}.
+
+%% Classify the kind for a raw method-dispatch failure on the runtime-only
+%% (`__methods__`) path, mirroring the compiled path (BT-2704): error-class
+%% reasons run through the shared classifier so a raw error surfaces as the same
+%% kind whether the method was compiled or runtime-defined. exit/throw stay
+%% runtime_error here. The richer MFA message is kept regardless.
+-spec method_error_kind(atom(), term()) -> atom().
+method_error_kind(error, Reason) -> beamtalk_exception_handler:classify_kind(Reason);
+method_error_kind(_Class, _Reason) -> runtime_error.
 
 -doc "Format a human-readable error message from a method dispatch failure.".
 -spec format_method_error_message(atom(), atom(), term(), term(), list()) -> binary().
@@ -2205,7 +2214,9 @@ wrap_dnu_handler_error(Selector, State, Class, Reason, Stacktrace) ->
         stacktrace => Stacktrace,
         domain => [beamtalk, runtime]
     }),
-    Error0 = beamtalk_error:new(runtime_error, ClassName, 'doesNotUnderstand:args:'),
+    Error0 = beamtalk_error:new(
+        method_error_kind(Class, Reason), ClassName, 'doesNotUnderstand:args:'
+    ),
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error = beamtalk_error:with_details(Error1, #{
         original_class => Class,

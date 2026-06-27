@@ -704,6 +704,64 @@ wrap_raw_unknown_stays_runtime_error_test() ->
     Inner = classify({some_unknown_reason, 1, 2}),
     ?assertEqual(runtime_error, Inner#beamtalk_error.kind).
 
+%%% --- classify_kind/1 — canonical raw-reason -> kind map (BT-2704 follow-up) ---
+
+classify_kind_buckets_test() ->
+    C = fun beamtalk_exception_handler:classify_kind/1,
+    %% Bucket A — user-input
+    ?assertEqual(type_error, C(badarith)),
+    ?assertEqual(type_error, C({badmap, #{}})),
+    ?assertEqual(key_error, C({badkey, missing})),
+    ?assertEqual(argument_error, C(badarg)),
+    %% Bucket B — internal bugs
+    ?assertEqual(internal_error, C(function_clause)),
+    ?assertEqual(internal_error, C(if_clause)),
+    ?assertEqual(internal_error, C({case_clause, x})),
+    ?assertEqual(internal_error, C({badmatch, x})),
+    ?assertEqual(internal_error, C({try_clause, x})),
+    %% Bucket C — resource/environment
+    ?assertEqual(resource_error, C(system_limit)),
+    ?assertEqual(process_not_found, C(noproc)),
+    ?assertEqual(process_not_found, C({noproc, {gen_server, call, []}})),
+    ?assertEqual(timeout_error, C(timeout)),
+    ?assertEqual(timeout_error, C({timeout, ref})),
+    %% Fallback — undef and unknown terms stay generic
+    ?assertEqual(runtime_error, C(undef)),
+    ?assertEqual(runtime_error, C({weird, term})).
+
+%% The kind wrap_raw/2 produces must equal classify_kind/1 for every reason —
+%% they share one taxonomy, so the runtime-only method path (which borrows
+%% classify_kind directly) cannot drift from the dispatch-boundary path.
+classify_kind_agrees_with_wrap_raw_test() ->
+    Reasons = [
+        badarith,
+        {badmap, #{}},
+        {badkey, missing},
+        badarg,
+        function_clause,
+        if_clause,
+        {case_clause, x},
+        {badmatch, x},
+        {try_clause, x},
+        system_limit,
+        noproc,
+        {noproc, mfa},
+        timeout,
+        {timeout, ref},
+        undef,
+        {weird, term}
+    ],
+    lists:foreach(
+        fun(Reason) ->
+            #{error := Inner} = beamtalk_exception_handler:wrap_raw(Reason),
+            ?assertEqual(
+                beamtalk_exception_handler:classify_kind(Reason),
+                Inner#beamtalk_error.kind
+            )
+        end,
+        Reasons
+    ).
+
 %%% --- BT-2705: breadcrumb produces located messages ---
 
 wrap_raw_badarith_with_breadcrumb_is_located_test() ->

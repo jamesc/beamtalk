@@ -56,6 +56,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     class_signal_message/2,
     kind_to_class/1,
     class_to_kind/1,
+    classify_kind/1,
     is_exception_class/1
 ]).
 
@@ -212,6 +213,40 @@ wrap(Other) ->
     wrap_raw(Other).
 
 -doc """
+Map a raw Erlang error reason to its Beamtalk error kind (BT-2707).
+
+The single source of truth for raw-error classification. `wrap_raw/2` uses it to
+pick the kind for the error it builds; the runtime-only actor method-error path
+(`beamtalk_actor:wrap_method_error/5`) borrows it to classify the kind while
+keeping its own richer MFA message — so a raw error surfaces as the *same* kind
+regardless of whether the failing method was compiled or runtime-defined.
+
+Buckets: A user-input (`type_error`/`key_error`/`argument_error`), B internal
+bugs (`internal_error`), C resource/env (`resource_error`/`process_not_found`/
+`timeout_error`); anything unrecognised stays `runtime_error`.
+""".
+-spec classify_kind(term()) -> atom().
+%% Bucket A — user-input
+classify_kind(badarith) -> type_error;
+classify_kind({badmap, _}) -> type_error;
+classify_kind({badkey, _}) -> key_error;
+classify_kind(badarg) -> argument_error;
+%% Bucket B — internal bugs
+classify_kind(function_clause) -> internal_error;
+classify_kind(if_clause) -> internal_error;
+classify_kind({case_clause, _}) -> internal_error;
+classify_kind({badmatch, _}) -> internal_error;
+classify_kind({try_clause, _}) -> internal_error;
+%% Bucket C — resource/environment
+classify_kind(system_limit) -> resource_error;
+classify_kind(noproc) -> process_not_found;
+classify_kind({noproc, _}) -> process_not_found;
+classify_kind(timeout) -> timeout_error;
+classify_kind({timeout, _}) -> timeout_error;
+%% Fallback
+classify_kind(_) -> runtime_error.
+
+-doc """
 Wrap a raw Erlang error into a classified Exception tagged map.
 
 Equivalent to `wrap_raw/2` with no dispatch context. See `wrap_raw/2`.
@@ -262,18 +297,18 @@ wrap_raw(badarith, Context) ->
     Message = located(Sel, Cls, <<"bad arithmetic operation">>),
     Hint =
         <<"Arithmetic requires numbers; check for a non-numeric operand or division by zero.">>,
-    wrap_classified(type_error, Cls, Sel, Message, Hint, #{reason => badarith});
+    wrap_classified(classify_kind(badarith), Cls, Sel, Message, Hint, #{reason => badarith});
 wrap_raw({badkey, Key}, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     Core = iolist_to_binary(io_lib:format("key not found: ~tp", [Key])),
     Message = located(Sel, Cls, Core),
     Hint = <<"Use 'includesKey:' to test first, or 'at:ifAbsent:' to supply a default.">>,
-    wrap_classified(key_error, Cls, Sel, Message, Hint, #{key => Key});
+    wrap_classified(classify_kind({badkey, Key}), Cls, Sel, Message, Hint, #{key => Key});
 wrap_raw({badmap, Value}, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"expected a Dictionary but got a non-map value">>),
     Hint = <<"This message is only understood by Dictionary values.">>,
-    wrap_classified(type_error, Cls, Sel, Message, Hint, #{value => Value});
+    wrap_classified(classify_kind({badmap, Value}), Cls, Sel, Message, Hint, #{value => Value});
 wrap_raw(badarg, Context) ->
     %% `badarg` is overloaded (user mistake vs internal misuse) and the bare
     %% error can't tell which. With a dispatch breadcrumb we can locate it as a
@@ -282,7 +317,7 @@ wrap_raw(badarg, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"invalid argument">>),
     Hint = <<"Check the argument types and values for this message.">>,
-    wrap_classified(argument_error, Cls, Sel, Message, Hint, #{reason => badarg});
+    wrap_classified(classify_kind(badarg), Cls, Sel, Message, Hint, #{reason => badarg});
 %%% --- Bucket B: internal bugs --------------------------------------------
 wrap_raw(Reason, Context) when
     Reason =:= function_clause orelse
@@ -302,13 +337,13 @@ wrap_raw(Reason, Context) when
         )
     ),
     Hint = <<"Please report this with the code that triggered it; it should not happen.">>,
-    wrap_classified(internal_error, Cls, Sel, Message, Hint, #{reason => Reason});
+    wrap_classified(classify_kind(Reason), Cls, Sel, Message, Hint, #{reason => Reason});
 %%% --- Bucket C: resource/environment -------------------------------------
 wrap_raw(system_limit, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"a system limit was reached">>),
     Hint = <<"The VM hit a hard limit (e.g. too many processes, atoms, or ports).">>,
-    wrap_classified(resource_error, Cls, Sel, Message, Hint, #{reason => system_limit});
+    wrap_classified(classify_kind(system_limit), Cls, Sel, Message, Hint, #{reason => system_limit});
 wrap_raw(Reason, Context) when
     Reason =:= noproc orelse
         (is_tuple(Reason) andalso tuple_size(Reason) >= 1 andalso element(1, Reason) =:= noproc)
@@ -316,7 +351,7 @@ wrap_raw(Reason, Context) when
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"the target process no longer exists">>),
     Hint = <<"The actor or process may have already terminated.">>,
-    wrap_classified(process_not_found, Cls, Sel, Message, Hint, #{reason => Reason});
+    wrap_classified(classify_kind(Reason), Cls, Sel, Message, Hint, #{reason => Reason});
 wrap_raw(Reason, Context) when
     Reason =:= timeout orelse
         (is_tuple(Reason) andalso tuple_size(Reason) >= 1 andalso element(1, Reason) =:= timeout)
@@ -324,12 +359,12 @@ wrap_raw(Reason, Context) when
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"the operation timed out">>),
     Hint = <<"The operation did not complete within its time limit.">>,
-    wrap_classified(timeout_error, Cls, Sel, Message, Hint, #{reason => Reason});
+    wrap_classified(classify_kind(Reason), Cls, Sel, Message, Hint, #{reason => Reason});
 %%% --- Fallback: unclassified ---------------------------------------------
 wrap_raw(Other, Context) ->
     {Sel, Cls} = breadcrumb(Context),
     wrap_classified(
-        runtime_error,
+        classify_kind(Other),
         Cls,
         Sel,
         iolist_to_binary(io_lib:format("~p", [Other])),
