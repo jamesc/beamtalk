@@ -738,14 +738,27 @@ ensure_wrapped_4_classifies_with_context_test() ->
 
 ensure_wrapped_4_already_wrapped_preserves_innermost_test() ->
     %% Inner frame already classified the error with its selector; an outer frame
-    %% with a different breadcrumb must NOT overwrite it (innermost wins).
+    %% with a different breadcrumb must NOT overwrite the classification (innermost
+    %% wins). A stacktrace may be backfilled when the inner map lacked one, so we
+    %% compare the classified error rather than full-map equality.
     InnerWrapped = beamtalk_exception_handler:wrap_raw(badarith, #{
         selector => sum, class => 'Tuple'
     }),
     Result = beamtalk_exception_handler:ensure_wrapped(
         error, InnerWrapped, [], #{selector => 'do:', class => 'OuterThing'}
     ),
-    ?assertEqual(InnerWrapped, Result).
+    ?assertEqual(maps:get(error, InnerWrapped), maps:get(error, Result)),
+    ?assertEqual('TypeError', maps:get('$beamtalk_class', Result)).
+
+ensure_wrapped_4_already_wrapped_with_stacktrace_kept_test() ->
+    %% When the inner map already carries a stacktrace, it is preserved verbatim.
+    InnerWrapped = (beamtalk_exception_handler:wrap_raw(badarith, #{selector => sum}))#{
+        stacktrace => [frame_a, frame_b]
+    },
+    Result = beamtalk_exception_handler:ensure_wrapped(error, InnerWrapped, [], #{
+        selector => 'do:'
+    }),
+    ?assertEqual([frame_a, frame_b], maps:get(stacktrace, Result)).
 
 ensure_wrapped_4_empty_context_delegates_test() ->
     %% No breadcrumb → identical to ensure_wrapped/3.

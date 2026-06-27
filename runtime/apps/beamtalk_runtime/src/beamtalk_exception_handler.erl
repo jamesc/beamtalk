@@ -309,11 +309,14 @@ wrap_raw(system_limit, Context) ->
     Message = located(Sel, Cls, <<"a system limit was reached">>),
     Hint = <<"The VM hit a hard limit (e.g. too many processes, atoms, or ports).">>,
     wrap_classified(resource_error, Cls, Sel, Message, Hint, #{reason => system_limit});
-wrap_raw(noproc, Context) ->
+wrap_raw(Reason, Context) when
+    Reason =:= noproc orelse
+        (is_tuple(Reason) andalso tuple_size(Reason) >= 1 andalso element(1, Reason) =:= noproc)
+->
     {Sel, Cls} = breadcrumb(Context),
     Message = located(Sel, Cls, <<"the target process no longer exists">>),
     Hint = <<"The actor or process may have already terminated.">>,
-    wrap_classified(process_not_found, Cls, Sel, Message, Hint, #{reason => noproc});
+    wrap_classified(process_not_found, Cls, Sel, Message, Hint, #{reason => Reason});
 wrap_raw(Reason, Context) when
     Reason =:= timeout orelse
         (is_tuple(Reason) andalso tuple_size(Reason) >= 1 andalso element(1, Reason) =:= timeout)
@@ -340,9 +343,20 @@ wrap_raw(Other, Context) ->
 ) ->
     map().
 wrap_classified(Kind, Class, Selector, Message, Hint, Details) ->
+    %% `Class` is the *receiver* breadcrumb (already baked into the located
+    %% Message). Do not store it as the error's class when it is itself an
+    %% exception class: matches_class_name/2 treats #beamtalk_error.class as
+    %% authoritative for hierarchy matching (BT-480), so a raw error that merely
+    %% occurred on an Exception-subclass receiver must not hijack catch matching.
+    %% Fall back to undefined there, letting the kind-derived class drive matching.
+    RecordClass =
+        case Class =/= undefined andalso is_exception_class(Class) of
+            true -> undefined;
+            false -> Class
+        end,
     GenError = #beamtalk_error{
         kind = Kind,
-        class = Class,
+        class = RecordClass,
         selector = Selector,
         message = Message,
         hint = Hint,
@@ -359,10 +373,12 @@ breadcrumb(Context) ->
 -spec located(atom() | undefined, atom() | undefined, binary()) -> binary().
 located(undefined, _Class, Core) ->
     Core;
+%% ~ts (not ~s): an error formatter must never itself crash, even on an
+%% interop-supplied class/selector atom carrying non-Latin1 codepoints.
 located(Selector, undefined, Core) ->
-    iolist_to_binary(io_lib:format("'~s': ~s", [Selector, Core]));
+    iolist_to_binary(io_lib:format("'~ts': ~ts", [Selector, Core]));
 located(Selector, Class, Core) ->
-    iolist_to_binary(io_lib:format("~s>>~s: ~s", [Class, Selector, Core])).
+    iolist_to_binary(io_lib:format("~ts>>~ts: ~ts", [Class, Selector, Core])).
 
 %% Human-readable tag for a bucket-B internal reason.
 -spec internal_reason_tag(term()) -> atom().
@@ -490,9 +506,14 @@ more specific inner one. `undef`, `exit`, `throw`, and `#beamtalk_error{}` keep
 their existing ensure_wrapped/3 handling.
 """.
 -spec ensure_wrapped(atom(), term(), list(), map()) -> map().
-ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, _Stacktrace, _Context) ->
-    %% Innermost classification already applied — preserve it (and its stacktrace).
-    Already;
+ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace, _Context) ->
+    %% Innermost classification already applied — preserve it and any stacktrace it
+    %% already carries. Backfill from this frame only when absent, so stacktrace
+    %% capture never regresses versus ensure_wrapped/3 (which always attached one).
+    case Already of
+        #{stacktrace := _} -> Already;
+        _ -> Already#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}
+    end;
 ensure_wrapped(error, Reason, Stacktrace, Context) when
     map_size(Context) > 0, Reason =/= undef, not is_record(Reason, beamtalk_error)
 ->
