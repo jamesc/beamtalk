@@ -29,12 +29,13 @@ ensure_wrapped_wraps_raw_error_test() ->
     #{error := Inner} = Result,
     ?assertEqual(type_error, Inner#beamtalk_error.kind).
 
-%% Raw Erlang terms get wrapped as runtime_error
+%% Raw Erlang terms get wrapped and classified (BT-2707): a bare badarg with no
+%% dispatch context becomes its own argument_error kind, not generic runtime_error.
 ensure_wrapped_wraps_raw_erlang_test() ->
     Result = beamtalk_exception_handler:ensure_wrapped(badarg),
     ?assertMatch(#{'$beamtalk_class' := _, error := _}, Result),
     #{error := Inner} = Result,
-    ?assertEqual(runtime_error, Inner#beamtalk_error.kind).
+    ?assertEqual(argument_error, Inner#beamtalk_error.kind).
 
 %% Double-wrapping doesn't happen
 ensure_wrapped_no_double_wrap_test() ->
@@ -617,6 +618,161 @@ wrap_raw_badarity_test() ->
     ?assert(is_binary(Inner#beamtalk_error.message)),
     ?assert(is_binary(Inner#beamtalk_error.hint)),
     #{expected_args := 1, actual_args := 3} = Inner#beamtalk_error.details.
+
+%%% ===================================================================
+%%% wrap_raw/2 — raw-error classification into buckets A/B/C (BT-2707)
+%%% ===================================================================
+
+%% Helper: classify a raw reason (no context) and return the inner error.
+classify(Reason) ->
+    #{error := Inner} = beamtalk_exception_handler:wrap_raw(Reason),
+    Inner.
+
+%% Helper: classify a raw reason with a dispatch breadcrumb.
+classify(Reason, Context) ->
+    #{error := Inner} = beamtalk_exception_handler:wrap_raw(Reason, Context),
+    Inner.
+
+%%% --- Bucket A: user-input errors ---
+
+wrap_raw_badarith_is_type_error_test() ->
+    Inner = classify(badarith),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assert(is_binary(Inner#beamtalk_error.hint)).
+
+wrap_raw_badarith_class_is_type_error_test() ->
+    #{'$beamtalk_class' := Class} = beamtalk_exception_handler:wrap_raw(badarith),
+    ?assertEqual('TypeError', Class).
+
+wrap_raw_badkey_is_key_error_test() ->
+    Inner = classify({badkey, <<"missing">>}),
+    ?assertEqual(key_error, Inner#beamtalk_error.kind),
+    ?assertEqual(#{key => <<"missing">>}, Inner#beamtalk_error.details).
+
+wrap_raw_badmap_is_type_error_test() ->
+    Inner = classify({badmap, 42}),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind).
+
+wrap_raw_badarg_no_context_is_argument_error_test() ->
+    Inner = classify(badarg),
+    ?assertEqual(argument_error, Inner#beamtalk_error.kind),
+    %% Without a breadcrumb the message is unlocated.
+    ?assertEqual(<<"invalid argument">>, Inner#beamtalk_error.message).
+
+%%% --- Bucket B: internal bugs (loud, not dressed up as user errors) ---
+
+wrap_raw_function_clause_is_internal_error_test() ->
+    Inner = classify(function_clause),
+    ?assertEqual(internal_error, Inner#beamtalk_error.kind),
+    %% Internal bugs must read as "please report", never as a user mistake.
+    ?assertEqual('RuntimeError', kind_to_class_of(Inner)),
+    ?assertNotEqual(type_error, Inner#beamtalk_error.kind).
+
+wrap_raw_case_clause_is_internal_error_test() ->
+    Inner = classify({case_clause, some_value}),
+    ?assertEqual(internal_error, Inner#beamtalk_error.kind).
+
+wrap_raw_badmatch_is_internal_error_test() ->
+    Inner = classify({badmatch, []}),
+    ?assertEqual(internal_error, Inner#beamtalk_error.kind).
+
+wrap_raw_if_clause_is_internal_error_test() ->
+    Inner = classify(if_clause),
+    ?assertEqual(internal_error, Inner#beamtalk_error.kind).
+
+%%% --- Bucket C: resource/environment ---
+
+wrap_raw_system_limit_is_resource_error_test() ->
+    Inner = classify(system_limit),
+    ?assertEqual(resource_error, Inner#beamtalk_error.kind).
+
+wrap_raw_noproc_is_process_not_found_test() ->
+    Inner = classify(noproc),
+    ?assertEqual(process_not_found, Inner#beamtalk_error.kind).
+
+wrap_raw_timeout_is_timeout_error_test() ->
+    Inner = classify(timeout),
+    ?assertEqual(timeout_error, Inner#beamtalk_error.kind).
+
+wrap_raw_timeout_tuple_is_timeout_error_test() ->
+    Inner = classify({timeout, gen_server_call}),
+    ?assertEqual(timeout_error, Inner#beamtalk_error.kind).
+
+%%% --- Fallback ---
+
+wrap_raw_unknown_stays_runtime_error_test() ->
+    Inner = classify({some_unknown_reason, 1, 2}),
+    ?assertEqual(runtime_error, Inner#beamtalk_error.kind).
+
+%%% --- BT-2705: breadcrumb produces located messages ---
+
+wrap_raw_badarith_with_breadcrumb_is_located_test() ->
+    Inner = classify(badarith, #{selector => sum, class => 'Tuple'}),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assertEqual(sum, Inner#beamtalk_error.selector),
+    ?assertEqual('Tuple', Inner#beamtalk_error.class),
+    %% Message names the originating Class>>selector.
+    ?assertEqual(
+        match,
+        re:run(Inner#beamtalk_error.message, "Tuple>>sum", [{capture, none}])
+    ).
+
+wrap_raw_badarg_with_selector_only_is_located_test() ->
+    Inner = classify(badarg, #{selector => 'at:'}),
+    ?assertEqual('at:', Inner#beamtalk_error.selector),
+    ?assertEqual(
+        match,
+        re:run(Inner#beamtalk_error.message, "'at:'", [{capture, none}])
+    ).
+
+%%% --- ensure_wrapped/4: context-aware idempotent wrapper (BT-2705) ---
+
+ensure_wrapped_4_classifies_with_context_test() ->
+    Result = beamtalk_exception_handler:ensure_wrapped(
+        error, badarith, [], #{selector => sum, class => 'Tuple'}
+    ),
+    ?assertMatch(#{'$beamtalk_class' := 'TypeError', error := _, stacktrace := _}, Result),
+    #{error := Inner} = Result,
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assertEqual(sum, Inner#beamtalk_error.selector).
+
+ensure_wrapped_4_already_wrapped_preserves_innermost_test() ->
+    %% Inner frame already classified the error with its selector; an outer frame
+    %% with a different breadcrumb must NOT overwrite it (innermost wins).
+    InnerWrapped = beamtalk_exception_handler:wrap_raw(badarith, #{
+        selector => sum, class => 'Tuple'
+    }),
+    Result = beamtalk_exception_handler:ensure_wrapped(
+        error, InnerWrapped, [], #{selector => 'do:', class => 'OuterThing'}
+    ),
+    ?assertEqual(InnerWrapped, Result).
+
+ensure_wrapped_4_empty_context_delegates_test() ->
+    %% No breadcrumb → identical to ensure_wrapped/3.
+    R3 = beamtalk_exception_handler:ensure_wrapped(error, badarith, []),
+    R4 = beamtalk_exception_handler:ensure_wrapped(error, badarith, [], #{}),
+    ?assertEqual(R3, R4).
+
+%% Helper: the exception class an inner error maps to.
+kind_to_class_of(#beamtalk_error{kind = Kind}) ->
+    beamtalk_exception_handler:kind_to_class(Kind).
+
+%%% kind_to_class/1 — new classified kinds (BT-2707)
+
+kind_to_class_key_error_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(key_error)).
+
+kind_to_class_argument_error_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(argument_error)).
+
+kind_to_class_resource_error_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(resource_error)).
+
+kind_to_class_process_not_found_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(process_not_found)).
+
+kind_to_class_timeout_error_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(timeout_error)).
 
 %%% ===================================================================
 %%% signal_message/1 tests

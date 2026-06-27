@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2705: helper actor whose compiled method triggers a raw Erlang badarith,
+// used by raw_error_classification_test to verify the actor dispatch boundary
+// attaches the active selector/class breadcrumb to the wrapped error.
+
+Actor subclass: RawErrorActor
+
+  triggerBadArith => #(1, "x") sum

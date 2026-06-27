@@ -39,9 +39,12 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
 
 -export([
     wrap/1,
+    wrap_raw/1,
+    wrap_raw/2,
     ensure_wrapped/1,
     ensure_wrapped/2,
     ensure_wrapped/3,
+    ensure_wrapped/4,
     matches_class/2,
     dispatch/3,
     has_method/1,
@@ -80,6 +83,14 @@ kind_to_class(callback_failed) -> 'RuntimeError';
 kind_to_class(actor_dead) -> 'RuntimeError';
 kind_to_class(future_not_awaited) -> 'RuntimeError';
 kind_to_class(internal_error) -> 'RuntimeError';
+%% BT-2707: classified raw-error kinds (bucket A user-input, bucket C resource/env).
+%% No dedicated stdlib class exists for these yet, so they live under RuntimeError
+%% for catchability (a future KeyError/ResourceError hierarchy can refine this).
+kind_to_class(key_error) -> 'RuntimeError';
+kind_to_class(argument_error) -> 'RuntimeError';
+kind_to_class(resource_error) -> 'RuntimeError';
+kind_to_class(process_not_found) -> 'RuntimeError';
+kind_to_class(timeout_error) -> 'RuntimeError';
 kind_to_class(type_error) -> 'TypeError';
 kind_to_class(instantiation_error) -> 'InstantiationError';
 %% BEAM interop exceptions (ADR 0028 §1, BT-678)
@@ -201,10 +212,37 @@ wrap(Other) ->
     wrap_raw(Other).
 
 -doc """
-Wrap raw Erlang errors into structured beamtalk errors.
-Recognizes common Erlang error patterns and produces better messages.
+Wrap a raw Erlang error into a classified Exception tagged map.
+
+Equivalent to `wrap_raw/2` with no dispatch context. See `wrap_raw/2`.
 """.
-wrap_raw({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
+-spec wrap_raw(term()) -> map().
+wrap_raw(Reason) ->
+    wrap_raw(Reason, #{}).
+
+-doc """
+Wrap a raw Erlang error into a well-classified `#beamtalk_error{}` (BT-2707).
+
+Raw Erlang errors (`badarith`, `{badkey,K}`, `function_clause`, …) are sorted
+into three buckets that are presented differently (BT-2704):
+
+* **Bucket A — user-input** (`type_error`/`key_error`/`argument_error`):
+  `badarith`, `{badkey,K}`, `{badmap,M}`, `badarg`. Carries selector + value
+  + an actionable hint.
+* **Bucket B — internal bugs** (`internal_error`): `function_clause`,
+  `case_clause`, `badmatch`, `if_clause`. Loud, "please report" — NOT dressed
+  up as a user mistake (mislabeling a bug as a user error misdirects debugging).
+* **Bucket C — resource/env** (`resource_error`/`process_not_found`/
+  `timeout_error`): `system_limit`, `noproc`, `timeout`.
+
+`Context` is the dispatch-layer breadcrumb (BT-2705): a map that may carry
+`selector` and `class` for the active send. It disambiguates the overloaded
+`badarg` and lets bucket-A errors render located messages
+(e.g. `Tuple>>sum: …`). It is consulted only on this (error) path, so it adds
+nothing to successful dispatch.
+""".
+-spec wrap_raw(term(), map()) -> map().
+wrap_raw({badarity, {Fun, Args}}, _Context) when is_function(Fun), is_list(Args) ->
     {arity, Expected} = erlang:fun_info(Fun, arity),
     Actual = length(Args),
     Message = iolist_to_binary(
@@ -215,25 +253,121 @@ wrap_raw({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
     ),
     Hint =
         <<"Check that your block has the right number of parameters (e.g., [:x | ...] for 1 argument)">>,
+    wrap_classified(arity_mismatch, 'Block', undefined, Message, Hint, #{
+        expected_args => Expected, actual_args => Actual
+    });
+%%% --- Bucket A: user-input errors ----------------------------------------
+wrap_raw(badarith, Context) ->
+    {Sel, Cls} = breadcrumb(Context),
+    Message = located(Sel, Cls, <<"bad arithmetic operation">>),
+    Hint =
+        <<"Arithmetic requires numbers; check for a non-numeric operand or division by zero.">>,
+    wrap_classified(type_error, Cls, Sel, Message, Hint, #{reason => badarith});
+wrap_raw({badkey, Key}, Context) ->
+    {Sel, Cls} = breadcrumb(Context),
+    Core = iolist_to_binary(io_lib:format("key not found: ~tp", [Key])),
+    Message = located(Sel, Cls, Core),
+    Hint = <<"Use 'includesKey:' to test first, or 'at:ifAbsent:' to supply a default.">>,
+    wrap_classified(key_error, Cls, Sel, Message, Hint, #{key => Key});
+wrap_raw({badmap, Value}, Context) ->
+    {Sel, Cls} = breadcrumb(Context),
+    Message = located(Sel, Cls, <<"expected a Dictionary but got a non-map value">>),
+    Hint = <<"This message is only understood by Dictionary values.">>,
+    wrap_classified(type_error, Cls, Sel, Message, Hint, #{value => Value});
+wrap_raw(badarg, Context) ->
+    %% `badarg` is overloaded (user mistake vs internal misuse) and the bare
+    %% error can't tell which. With a dispatch breadcrumb we can locate it as a
+    %% user argument error; without one we still give it its own kind rather
+    %% than the generic runtime_error catch-all (BT-2707 floor).
+    {Sel, Cls} = breadcrumb(Context),
+    Message = located(Sel, Cls, <<"invalid argument">>),
+    Hint = <<"Check the argument types and values for this message.">>,
+    wrap_classified(argument_error, Cls, Sel, Message, Hint, #{reason => badarg});
+%%% --- Bucket B: internal bugs --------------------------------------------
+wrap_raw(Reason, Context) when
+    Reason =:= function_clause orelse
+        Reason =:= if_clause orelse
+        (is_tuple(Reason) andalso tuple_size(Reason) =:= 2 andalso
+            (element(1, Reason) =:= case_clause orelse
+                element(1, Reason) =:= badmatch orelse
+                element(1, Reason) =:= try_clause))
+->
+    {Sel, Cls} = breadcrumb(Context),
+    Tag = internal_reason_tag(Reason),
+    Message = located(
+        Sel,
+        Cls,
+        iolist_to_binary(
+            io_lib:format("internal error (~s) - this is a bug in Beamtalk", [Tag])
+        )
+    ),
+    Hint = <<"Please report this with the code that triggered it; it should not happen.">>,
+    wrap_classified(internal_error, Cls, Sel, Message, Hint, #{reason => Reason});
+%%% --- Bucket C: resource/environment -------------------------------------
+wrap_raw(system_limit, Context) ->
+    {Sel, Cls} = breadcrumb(Context),
+    Message = located(Sel, Cls, <<"a system limit was reached">>),
+    Hint = <<"The VM hit a hard limit (e.g. too many processes, atoms, or ports).">>,
+    wrap_classified(resource_error, Cls, Sel, Message, Hint, #{reason => system_limit});
+wrap_raw(noproc, Context) ->
+    {Sel, Cls} = breadcrumb(Context),
+    Message = located(Sel, Cls, <<"the target process no longer exists">>),
+    Hint = <<"The actor or process may have already terminated.">>,
+    wrap_classified(process_not_found, Cls, Sel, Message, Hint, #{reason => noproc});
+wrap_raw(Reason, Context) when
+    Reason =:= timeout orelse
+        (is_tuple(Reason) andalso tuple_size(Reason) >= 1 andalso element(1, Reason) =:= timeout)
+->
+    {Sel, Cls} = breadcrumb(Context),
+    Message = located(Sel, Cls, <<"the operation timed out">>),
+    Hint = <<"The operation did not complete within its time limit.">>,
+    wrap_classified(timeout_error, Cls, Sel, Message, Hint, #{reason => Reason});
+%%% --- Fallback: unclassified ---------------------------------------------
+wrap_raw(Other, Context) ->
+    {Sel, Cls} = breadcrumb(Context),
+    wrap_classified(
+        runtime_error,
+        Cls,
+        Sel,
+        iolist_to_binary(io_lib:format("~p", [Other])),
+        undefined,
+        #{reason => Other}
+    ).
+
+%% Build a classified Exception tagged map from explicit error parts.
+-spec wrap_classified(
+    atom(), atom() | undefined, atom() | undefined, binary(), binary() | undefined, map()
+) ->
+    map().
+wrap_classified(Kind, Class, Selector, Message, Hint, Details) ->
     GenError = #beamtalk_error{
-        kind = arity_mismatch,
-        class = 'Block',
-        selector = undefined,
+        kind = Kind,
+        class = Class,
+        selector = Selector,
         message = Message,
         hint = Hint,
-        details = #{expected_args => Expected, actual_args => Actual}
+        details = Details
     },
-    #{'$beamtalk_class' => kind_to_class(arity_mismatch), error => GenError};
-wrap_raw(Other) ->
-    GenError = #beamtalk_error{
-        kind = runtime_error,
-        class = undefined,
-        selector = undefined,
-        message = iolist_to_binary(io_lib:format("~p", [Other])),
-        hint = undefined,
-        details = #{reason => Other}
-    },
-    #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError}.
+    #{'$beamtalk_class' => kind_to_class(Kind), error => GenError}.
+
+%% Extract the {Selector, Class} breadcrumb from a dispatch context (BT-2705).
+-spec breadcrumb(map()) -> {atom() | undefined, atom() | undefined}.
+breadcrumb(Context) ->
+    {maps:get(selector, Context, undefined), maps:get(class, Context, undefined)}.
+
+%% Prefix a core error message with its location (class/selector) when known.
+-spec located(atom() | undefined, atom() | undefined, binary()) -> binary().
+located(undefined, _Class, Core) ->
+    Core;
+located(Selector, undefined, Core) ->
+    iolist_to_binary(io_lib:format("'~s': ~s", [Selector, Core]));
+located(Selector, Class, Core) ->
+    iolist_to_binary(io_lib:format("~s>>~s: ~s", [Class, Selector, Core])).
+
+%% Human-readable tag for a bucket-B internal reason.
+-spec internal_reason_tag(term()) -> atom().
+internal_reason_tag(Reason) when is_atom(Reason) -> Reason;
+internal_reason_tag(Reason) when is_tuple(Reason) -> element(1, Reason).
 
 -doc """
 Idempotent exception wrapper (ADR 0015).
@@ -341,6 +475,31 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
 ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped = wrap(Other),
     Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)}.
+
+-doc """
+Idempotent exception wrapper with a dispatch breadcrumb (BT-2705).
+
+Like ensure_wrapped/3 but threads a dispatch `Context` (a map that may carry
+`selector` and `class` for the active send) into `wrap_raw/2`, so raw Erlang
+errors escaping a send are classified *and* located.
+
+The breadcrumb is consulted only here, on the error path, so successful
+dispatch is unaffected. Already-wrapped exceptions pass through untouched so
+the *innermost* frame's classification wins — an outer frame never overwrites a
+more specific inner one. `undef`, `exit`, `throw`, and `#beamtalk_error{}` keep
+their existing ensure_wrapped/3 handling.
+""".
+-spec ensure_wrapped(atom(), term(), list(), map()) -> map().
+ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, _Stacktrace, _Context) ->
+    %% Innermost classification already applied — preserve it (and its stacktrace).
+    Already;
+ensure_wrapped(error, Reason, Stacktrace, Context) when
+    map_size(Context) > 0, Reason =/= undef, not is_record(Reason, beamtalk_error)
+->
+    Wrapped = wrap_raw(Reason, Context),
+    Wrapped#{stacktrace => beamtalk_stack_frame:wrap(Stacktrace)};
+ensure_wrapped(Type, Reason, Stacktrace, _Context) ->
+    ensure_wrapped(Type, Reason, Stacktrace).
 
 -doc """
 Dispatch a message to an Exception object.

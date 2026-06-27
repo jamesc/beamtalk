@@ -28,9 +28,10 @@
 // EXCEPTION OBJECT FIELD ACCESS
 // ===========================================================================
 
-// Access exception message from caught error
+// Access exception message from caught error (BT-2707: raw badarith is
+// classified and given a readable message, not the bare Erlang atom)
 [1 / 0] on: Exception do: [:e | e message]
-// => badarith
+// => bad arithmetic operation
 
 // Access exception kind from caught error
 [42 noSuchMethod] on: Exception do: [:e | e kind]
@@ -48,9 +49,9 @@
 [42 noSuchMethod] on: Exception do: [:e | e printString]
 // => Integer does not understand 'noSuchMethod'\nHint: Check spelling or use 'respondsTo:' to verify method exists
 
-// Exception hint — nil when no hint available
+// Exception hint — BT-2707 classified arithmetic errors carry an actionable hint
 [1 / 0] on: Exception do: [:e | e hint]
-// => nil
+// => Arithmetic requires numbers; check for a non-numeric operand or division by zero.
 
 // ===========================================================================
 // BLOCK ensure: — CLEANUP HANDLING
