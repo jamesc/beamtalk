@@ -285,11 +285,26 @@ extensions => [
     selector => 'shoutLouder',
     package  => 'shout',         % contributing package (ADR 0066 Owner)
     arity    => 0,
-    param_types  => [],          % [] here; None => Dynamic (gradual, ADR 0075)
-    return_type  => 'String'     % None => Dynamic
+    param_types  => [],          % zero params (the list is empty)
+    return_type  => 'String'     % concrete type, as an atom
+  },
+  % a 1-arity, unannotated extension — "type unknown" is the atom 'none',
+  % NOT an empty list (which means zero params):
+  #{target   => 'Array',
+    selector => 'padTo:',
+    package  => 'shout',
+    arity    => 1,
+    param_types  => ['none'],    % one param, type unknown => 'none'
+    return_type  => 'none'       % return type unknown => 'none'
   }
 ]
 ```
+
+The unknown-type sentinel is the atom `'none'` — the *same* term `method_info`
+already emits (`MetaTypeRepr::None`,
+`codegen/core_erlang/gen_server/methods.rs`); generic and type-parameter signatures
+use the same `{'generic', 'Base', [...]}` / `{'type_param', 'Name', Index}` tagged
+tuples (ADR 0068). Consumer and contributor therefore share one decoder.
 
 On dependency resolution the consumer's checker reads these records and feeds them
 into the **same** `register_extensions` path used for intra-project extensions
@@ -315,13 +330,16 @@ Scope and boundaries:
 - **Conflicting extensions are surfaced, not silently merged.** If two dependencies
   both contribute `String >> toJson`, the consumer's checker now holds two records
   for the same `{target, side, selector}` key — the static analogue of ADR 0066's
-  runtime last-writer-wins. The checker MUST reuse the existing
-  `ExtensionConflictDetector` (ADR 0066 Phase 3) to report a cross-package extension
-  conflict diagnostic at the consumer's compile time (consistent with §3 treating
-  class collisions as errors, not silent shadowing), rather than arbitrarily picking
-  one signature. If the two signatures *differ*, the conflict is reported with both
-  so the divergence is visible; the runtime behaviour (which fun wins) remains
-  ADR 0066's load-order concern.
+  runtime last-writer-wins. The checker MUST reuse the existing extension conflict
+  detector (`detect_extension_conflicts` / `conflict_diagnostics` in
+  `crates/beamtalk-core/src/compilation/extension_conflicts.rs`, ADR 0066) — today
+  it runs over an intra-project `ExtensionIndex`; cross-package records are fed into
+  the same index and pass — to report a cross-package extension conflict diagnostic
+  at the consumer's compile time (consistent with §3 treating class collisions as
+  errors, not silent shadowing), rather than arbitrarily picking one signature. If
+  the two signatures *differ*, the conflict is reported with both so the divergence
+  is visible; the runtime behaviour (which fun wins) remains ADR 0066's load-order
+  concern.
 - **An extension calling its own package's `internal` methods** (ADR 0071) still
   works at runtime; the consumer sees only the extension's public signature, never
   its body, so no cross-package reachability leak occurs — but any future

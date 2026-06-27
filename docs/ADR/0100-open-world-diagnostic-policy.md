@@ -180,9 +180,11 @@ final disposition is resolved most-specific-wins, in this order:
 
 1. **Site-level `@expect dnu` / `@expect type`** (ADR 0077) — always wins; an
    explicit acknowledgement at the call site silences it regardless of any global
-   setting. (A site that resolves after WS1/WS2 makes its `@expect` *stale*; ADR
-   0077 already warns on stale directives, so improved resolution self-reports the
-   now-dead annotation — no new mechanism needed.)
+   setting. (A site that resolves after WS1/WS2 makes its `@expect` *stale*; the
+   existing stale-directive warning — BT-1412,
+   `queries/diagnostic_provider.rs` — already flags an `@expect` with no matching
+   diagnostic, so improved resolution self-reports the now-dead annotation with no
+   new mechanism.)
 2. **Per-category project table** (`beamtalk.toml`, future) — sets the category's
    base severity for the package (`ignore` / `hint` / `warn` / `error`).
 3. **Rule 1 default** — the completeness-ladder severity, when nothing above
@@ -431,8 +433,9 @@ transitions warrant care:
   by correcting the selector or adding `@expect dnu` where the send is intentionally
   dynamic.
 - **Stale `@expect` directives**: a site that becomes resolvable after WS1/WS2 has a
-  now-unnecessary `@expect`; ADR 0077's stale-directive warning flags these
-  automatically, so cleanup is mechanical and self-surfacing.
+  now-unnecessary `@expect`; the existing stale-directive warning (BT-1412,
+  `queries/diagnostic_provider.rs`) flags these automatically, so cleanup is
+  mechanical and self-surfacing.
 
 ## References
 - Related issues: BT-2251 (epic: project-scoped compilation & type-checking;
