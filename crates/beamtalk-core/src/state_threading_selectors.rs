@@ -59,6 +59,8 @@ pub(crate) fn is_state_threading_keyword_selector(sel: &str) -> bool {
             | "partition:"
             | "sort:"
             | "inject:into:"
+            | "eachWithIndex:"
+            | "do:separatedBy:"
             | "doWithKey:"
             | "keysAndValuesDo:"
             | "ensure:"
@@ -125,6 +127,9 @@ mod tests {
         assert!(is_state_threading_keyword_selector("groupBy:"));
         assert!(is_state_threading_keyword_selector("partition:"));
         assert!(is_state_threading_keyword_selector("sort:"));
+        // BT-2703: enumeration helpers self-hosted on inject:into:
+        assert!(is_state_threading_keyword_selector("eachWithIndex:"));
+        assert!(is_state_threading_keyword_selector("do:separatedBy:"));
         assert!(!is_state_threading_keyword_selector("perform:"));
     }
 

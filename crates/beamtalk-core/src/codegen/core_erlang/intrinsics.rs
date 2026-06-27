@@ -597,6 +597,17 @@ impl CoreErlangGenerator {
                         let doc = self.generate_list_sort(receiver, &arguments[0])?;
                         Ok(Some(doc))
                     }
+                    // BT-2703: `eachWithIndex:`/`do:separatedBy:` are self-hosted in
+                    // Collection.bt. In an actor method that mutates state, desugar to a
+                    // stateful `inject:into:` fold so the mutation threads; otherwise
+                    // return `None` and let the ordinary dispatch reach the Collection.bt
+                    // method.
+                    "eachWithIndex:" if arguments.len() == 1 => {
+                        self.try_generate_each_with_index(receiver, &arguments[0])
+                    }
+                    "do:separatedBy:" if arguments.len() == 2 => {
+                        self.try_generate_do_separated_by(receiver, &arguments[0], &arguments[1])
+                    }
                     _ => Ok(None),
                 }
             }

@@ -19,6 +19,7 @@
 //!   `dropWhile:`, `partition:`, `groupBy:`, `sort:` codegen
 
 mod basic_ops;
+mod enumeration_ops;
 mod filter_ops;
 mod search_ops;
 mod transform_ops;

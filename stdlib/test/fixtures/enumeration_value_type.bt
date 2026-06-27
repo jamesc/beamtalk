@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2703: regression guard for the non-actor path of eachWithIndex:/do:separatedBy:.
+// In a value type the desugar still fires (so the mutating block is consumed by the
+// fold rather than dispatched at the wrong arity to the Collection.bt method). The
+// captured-local mutation does not escape the fold here — that is pre-existing,
+// out-of-scope value-type behaviour — but it must compile and run without the
+// `badarity` crash that the state-threading classification would otherwise cause.
+
+Value subclass: EnumerationValueType
+
+  eachWithIndexSum: aColl =>
+    sum := 0
+    aColl eachWithIndex: [:item :i | sum := sum + (item * i)]
+    sum
+
+  doSeparatedBySum: aColl =>
+    total := 0
+    aColl do: [:item |
+      total := total + item
+    ] separatedBy: [total := total + 100]
+    total

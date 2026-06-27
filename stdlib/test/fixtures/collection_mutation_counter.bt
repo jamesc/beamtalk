@@ -26,3 +26,38 @@ Actor subclass: CollectionMutationCounter
         acc + val
       ]
     self.total
+
+  // BT-2703: eachWithIndex: with field mutation. The 1-based index threads
+  // through the block while self.total is mutated as a side effect.
+  sumWithIndex: aColl =>
+    aColl eachWithIndex: [:item :i | self.total := self.total + (item * i)]
+    self.total
+
+  // BT-2703: do:separatedBy: with field mutation in BOTH blocks. The element
+  // block and the separator block each mutate self.total; the separator runs
+  // between consecutive elements only.
+  joinSum: aColl =>
+    aColl do: [:item |
+      self.total := self.total + item
+    ] separatedBy: [self.total := self.total + 100]
+    self.total
+
+  // BT-2703: eachWithIndex: mixing an outer local (`seen`) with a field write.
+  // Returns the outer local, which must be threaded back out of the loop.
+  countWithIndex: aColl =>
+    seen := 0
+    aColl
+      eachWithIndex: [:item :i |
+        seen := seen + 1
+        self.total := self.total + (item * i)
+      ]
+    seen
+
+  // BT-2703: do:separatedBy: where the separator mutates an outer local (counts
+  // the gaps between elements) while the element block mutates the field.
+  gapCount: aColl =>
+    gaps := 0
+    aColl do: [:item |
+      self.total := self.total + item
+    ] separatedBy: [gaps := gaps + 1]
+    gaps
