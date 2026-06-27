@@ -229,10 +229,13 @@ sealed typed Number subclass: Integer
 
   /// Round to the nearest multiple of `quantum`.
   ///
+  /// A Float `quantum` yields a Float result (Integer × Float promotes).
+  ///
   /// ## Examples
   /// ```beamtalk
   /// 42 roundTo: 5    // => 40
   /// 43 roundTo: 5    // => 45
+  /// 42 roundTo: 0.5  // => 42.0
   /// ```
   roundTo: quantum :: Number -> Number => (self / quantum) rounded * quantum
 

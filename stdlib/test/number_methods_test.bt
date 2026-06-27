@@ -124,15 +124,22 @@ TestCase subclass: NumberMethodsTest
   testReciprocal =>
     self assert: 4 reciprocal equals: 0.25
     self assert: 0.5 reciprocal equals: 2.0
+    // reciprocal of zero is a domain error (raw badarith)
+    self should: [0 reciprocal] raise: #badarith
 
   testRoundTo =>
     self assert: (42 roundTo: 5) equals: 40
     self assert: (43 roundTo: 5) equals: 45
+    self assert: (-7 roundTo: 5) equals: -5
     self assert: (3.14159 roundTo: 0.5) equals: 3.0
+    // Float quantum on an Integer promotes the result to Float
+    self assert: (42 roundTo: 0.5) equals: 42.0
 
   testTruncateTo =>
     self assert: (47 truncateTo: 10) equals: 40
+    self assert: (-47 truncateTo: 10) equals: -40
     self assert: (3.78 truncateTo: 0.5) equals: 3.5
+    self assert: (-3.78 truncateTo: 1.0) equals: -3.0
 
   testIsIntegerIsFloat =>
     self assert: 5 isInteger
