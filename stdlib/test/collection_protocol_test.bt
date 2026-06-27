@@ -141,3 +141,29 @@ TestCase subclass: CollectionProtocolTest
     // through do:separatedBy: (unsupported — BT-2703). The conditional-firing
     // guarantee is covered by testDoSeparatedBySingleElementHasNoSeparator.
     #(1, 2, 3) do: [:x | self assert: (x between: 1 and: 3)] separatedBy: [nil]
+
+  testConversionProtocol =>
+    // asArray preserves order for ordered sources
+    self assert: #(1, 2, 3) asArray asList equals: #(1, 2, 3)
+    self assert: (1 to: 3) asArray asList equals: #(1, 2, 3)
+    // asList on a List is identity-valued
+    self assert: #(1, 2, 3) asList equals: #(1, 2, 3)
+    // asSet discards duplicates
+    self assert: #(1, 2, 2, 3) asSet size equals: 3
+    self assert: ((Set withAll: #(1, 2, 3)) asList sort) equals: #(1, 2, 3)
+    // asBag counts occurrences; Bag asList expands by count
+    self assert: ((#(1, 1, 2) asBag) occurrencesOf: 1) equals: 2
+    self assert: (((Bag withAll: #(1, 1, 2)) asList) sort) equals: #(1, 1, 2)
+    // Dictionary converts its values (consistent with do:)
+    self assert: ((#{#a => 10, #b => 20} asList) sort) equals: #(10, 20)
+    // Interval conversions
+    self assert: (1 to: 3) asList equals: #(1, 2, 3)
+    self assert: (1 to: 3) asSet size equals: 3
+    // round trip List -> Set -> List (dedup)
+    self assert: ((#(3, 1, 2, 1) asSet) asList sort) equals: #(1, 2, 3)
+
+  testConversionEmpty =>
+    self assert: #() asList equals: #()
+    self assert: #() asArray asList equals: #()
+    self assert: #() asSet size equals: 0
+    self assert: #() asBag size equals: 0

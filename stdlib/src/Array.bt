@@ -96,6 +96,9 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```
   do: block :: Block(E, Object) -> Nil => @primitive "do:"
 
+  /// An Array is already an Array — identity override of `Collection>>asArray`.
+  asArray -> Array(E) => self
+
   /// Map a block over the array, returning a new Array.
   ///
   /// ## Examples

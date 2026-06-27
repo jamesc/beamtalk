@@ -108,6 +108,9 @@ typed Collection(E) subclass: Bag(E)
       count timesRepeat: [block value: elem]
     ]
 
+  /// A Bag is already a Bag — identity override of `Collection>>asBag`.
+  asBag -> Bag(E) => self
+
   /// Return a developer-readable string representation.
   ///
   /// ## Examples

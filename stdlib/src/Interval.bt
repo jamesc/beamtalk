@@ -72,6 +72,9 @@ typed Collection subclass: Interval
   /// Materialise the interval into a `List` of its elements (ADR 0095 §6 — the
   /// canonical large-collection example `(1 to: 100000) asList`).
   ///
+  /// Perf override of `Collection>>asList`: expands the range natively in a
+  /// single pass, faster than the generic `do:`-fold.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (1 to: 5) asList            // => #(1, 2, 3, 4, 5)

@@ -110,11 +110,17 @@ sealed typed Collection(E) subclass: Set(E)
 
   /// Convert the set to a list of elements.
   ///
+  /// Perf override of `Collection>>asList`: converts directly from the
+  /// underlying map keys, faster than the generic `do:`-fold.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// (Set new add: 1) asList        // => #(1)
   /// ```
   asList -> List(E) => @primitive "asList"
+
+  /// A Set is already a Set — identity override of `Collection>>asSet`.
+  asSet -> Set(E) => self
 
   /// Create a set from a list of elements.
   ///
