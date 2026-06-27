@@ -305,6 +305,9 @@ already emits (`MetaTypeRepr::None`,
 `codegen/core_erlang/gen_server/methods.rs`); generic and type-parameter signatures
 use the same `{'generic', 'Base', [...]}` / `{'type_param', 'Name', Index}` tagged
 tuples (ADR 0068). Consumer and contributor therefore share one decoder.
+`length(param_types)` is authoritative for the parameter type information; `arity`
+is a convenience count carried for consistency with the `method_info` tuple
+encoding, and a decoder that finds the two disagreeing trusts `param_types`.
 
 On dependency resolution the consumer's checker reads these records and feeds them
 into the **same** `register_extensions` path used for intra-project extensions
@@ -334,9 +337,10 @@ Scope and boundaries:
   detector (`detect_extension_conflicts` / `conflict_diagnostics` in
   `crates/beamtalk-core/src/compilation/extension_conflicts.rs`, ADR 0066) — today
   it runs over an intra-project `ExtensionIndex`; cross-package records are fed into
-  the same index and pass — to report a cross-package extension conflict diagnostic
-  at the consumer's compile time (consistent with §3 treating class collisions as
-  errors, not silent shadowing), rather than arbitrarily picking one signature. If
+  the same index, which is then run through the detector, reporting a cross-package
+  extension conflict diagnostic at the consumer's compile time (consistent with §3
+  treating class collisions as errors, not silent shadowing), rather than
+  arbitrarily picking one signature. If
   the two signatures *differ*, the conflict is reported with both so the divergence
   is visible; the runtime behaviour (which fun wins) remains ADR 0066's load-order
   concern.
