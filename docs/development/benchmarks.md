@@ -120,7 +120,7 @@ Compares, on a `List` receiver (outputs asserted identical):
 |----|---|---|---|
 | `collect:` | ~1100 | ~10800 | **~10×** |
 | `select:`  | ~670  | ~12200 | **~18×** |
-| `sum`      | ~363  | ~870   | **~2.4×** |
+| `sum`      | ~363  | ~870   | **~2.4×** (was; see BT-2713 below) |
 
 Ratios hold at N = 1000 (collect ~13×, select ~16×, sum ~2.5×).
 
@@ -133,21 +133,47 @@ The cost is **per-element BT-level dispatch**, and it splits by operation shape:
   `reversed` second pass and `species withAll:`, vs native's single tight
   `lists:map`/`filter`. **Conclusion: keep these `@primitive`** — self-hosting
   them is a major regression.
-- **Reducing** (`sum`/`max`/`min`/`count:`): ~2.4×. Single fold, no list
-  building; the overhead is double-fun-indirection (`inject:into:` →
-  `beamtalk_collection:inject_into`'s arg-swap wrapper → the BT block → `+`),
-  i.e. two fun calls per element vs native's one. The arithmetic itself is free.
+- **Reducing** (`sum`/`max`/`min`/`count:`): ~2.4× originally. Single fold, no
+  list building, so the gap is pure machinery, not arithmetic. The original
+  reading blamed "double-fun-indirection" (the arg-swap wrapper around the
+  block). That was **wrong** — see BT-2713.
+
+### BT-2713: leaner `inject:into:` — the real cause was the loop's register layout
+
+`beamtalk_collection:inject_into/3` used to wrap the block in a `lists:foldl`
+arg-swapper (`fun(Elem, Acc) -> Block(Acc, Elem) end`). Removing that wrapper in
+favour of a hand-rolled fold turned out to make **no difference** (~0%): on a
+controlled best-of-N micro-benchmark, `lists:foldl`+wrapper and a hand-rolled
+fold that calls `Block(Acc, Elem)` directly both clocked ~900 µs/op. The extra
+fun call was not the bottleneck.
+
+The real lever (OTP 28 BEAM JIT) is **which argument carries the accumulator in
+the recursive loop function**:
+
+| fold loop shape (block still called `Block(Acc, Elem)`) | µs/op | vs native |
+|---|---|---|
+| `lists:foldl` + arg-swap wrapper (old) | ~940 | ~1.8× |
+| hand-rolled, accumulator in the *middle* arg `(List, Acc, Block)` | ~900 | ~1.8× |
+| hand-rolled, accumulator as the *last* arg `(List, Block, Acc)` | ~590 | **~1.1×** |
+| native `lists:foldl` baseline (`Fun(Elem, Acc)`) | ~510 | 1.0× |
+
+Threading the accumulator as the loop's **last** argument (list first, block in
+the middle) lets the JIT keep it in a register the fun-call ABI doesn't disturb,
+recovering ~1.6× and landing within ~1.1–1.3× of native — *without* touching the
+block call (BT blocks are unavoidably accumulator-first, `Block(Acc, Elem)`).
+`inject_into/3` now uses that shape, so every inject-based pure-BT fold is leaner
+at once. Re-measured `sum`-via-`inject:` ratio: **~1.1–1.3×** (N = 100 000),
+down from ~1.8–2.4×.
 
 ### Takeaways
 
 - Per-element collection primitives are **earned** — de-primitivization should
   not target hot per-element paths.
-- Self-hosting the aggregates (BT-2711) costs ~2.4× on `sum`; treat it as
-  optional, not a free win.
-- The 2.4× is mostly `inject:into:`'s wrapper. A leaner `List>>inject:into:`
-  (inline `lists:foldl`, no `beamtalk_collection` indirection) would narrow
-  *every* inject-based pure-BT fold at once — higher ROI than self-hosting
-  individual aggregates.
+- Reducing/fold-based aggregates are now within ~1.1–1.3× of native after
+  BT-2713; self-hosting them (BT-2711) is no longer a ~2.4× tax.
+- On the BEAM JIT, a tail-recursive fold's **accumulator-argument position**
+  matters more than fun-call count. Accumulator-last is the fast shape; prefer
+  it for hot hand-rolled folds.
 
 ## Array backing: map (current) vs alternatives — does Vector earn its place? (BT-2696)
 

@@ -45,17 +45,25 @@ Calls Block(Acc, Elem) for each element — accumulator first, element
 second — matching the Beamtalk `block value: acc value: each` convention
 used by Collection.bt's `collect:`, `select:`, and `reject:`.
 
-Note: Erlang's `lists:foldl/3` calls Fun(Elem, Acc), so we wrap the
-block to swap the argument order.
+Hand-rolls the fold rather than wrapping `lists:foldl/3` (which calls
+`Fun(Elem, Acc)`): the BT block takes the accumulator first, so a foldl
+wrapper would have to swap arguments per element. Beyond avoiding that
+wrapper, the loop deliberately threads the accumulator as its *last*
+argument (`fold_block(List, Block, Acc)`, not `(List, Acc, Block)`). On the
+BEAM JIT (OTP 28) that layout folds ~1.6x faster — close to native
+`lists:foldl` — than the accumulator-in-the-middle shape, with no change to
+the block call itself (BT-2713). See `runtime/perf/bench_collect_selfhost.escript`.
 """.
 -spec inject_into(term(), term(), function()) -> term().
 inject_into(Self, Initial, Block) ->
-    List = to_list(Self),
-    lists:foldl(
-        fun(Elem, Acc) -> Block(Acc, Elem) end,
-        Initial,
-        List
-    ).
+    fold_block(to_list(Self), Block, Initial).
+
+%% Tail-recursive fold; accumulator is the last argument (see inject_into/3 doc).
+-spec fold_block(list(), function(), term()) -> term().
+fold_block([], _Block, Acc) ->
+    Acc;
+fold_block([Elem | Rest], Block, Acc) ->
+    fold_block(Rest, Block, Block(Acc, Elem)).
 
 -doc """
 Sum all elements, returning 0 for an empty collection.
