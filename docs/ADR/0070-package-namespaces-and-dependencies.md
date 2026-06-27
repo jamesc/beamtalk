@@ -251,6 +251,62 @@ This allows the compiler to:
 - Check protocol conformance at use sites using method signatures from `__beamtalk_meta/0`
 - Provide chain completion and `:help` for dependency classes in the REPL and LSP
 
+#### Amendment (2026-06-27, BT-2251 WS3): extension contributions in the package interface
+
+The cross-package metadata above carries a package's **classes** but not its
+**open-class extensions** (ADR 0066, `TargetClass >> selector => …`). Extensions
+are discovered today only by scanning a package's own source ASTs at *its* compile
+time (`ExtensionIndex`), so a *consumer* package's type checker has no way to learn
+that a dependency adds `String >> shoutLouder`. The extension activates at runtime
+(its `register/5` call ships in the dependency's `.beam`), but a consumer that
+writes `someString shoutLouder` gets a false `Dnu` hint at compile time — the
+static-analysis analogue of the intra-project gap BT-2251 WS1 closes, now across
+package boundaries.
+
+**Decision:** a package's compiled interface also records the **extensions it
+contributes**, through the same channel its classes already use — no new artifact
+(consistent with reusing existing machinery; see ADR 0026 / ADR 0098). The `.app`
+`{env, …}` metadata gains an `extensions` list, mirrored in the host class's
+`__beamtalk_meta/0` where one exists:
+
+```erlang
+{env, [
+  {classes, [ ... ]},
+  {extensions, [
+    #{target   => 'String',        % class (or 'String class' for class-side)
+      selector => 'shoutLouder',
+      package  => 'shout',         % contributing package (ADR 0066 Owner)
+      arity    => 0,
+      param_types  => [],          % None => Dynamic (gradual)
+      return_type  => 'String'     % None => Dynamic
+    }
+  ]}
+]}
+```
+
+On dependency resolution the consumer's checker loads these alongside the
+dependency's `ClassInfo` and feeds them into the **same** `register_extensions`
+path used for intra-project extensions (BT-2251 WS1), so a dependency's extension
+becomes part of the target class's statically-visible method surface. Diagnostic
+severity for any still-unresolved selector follows ADR 0100 (open-world policy) —
+extensions add resolution; they do not change the severity rule.
+
+Scope and boundaries:
+
+- **Extensions are exported by default**, like classes (visibility is the ADR 0070
+  §9 follow-up; when it lands, extensions inherit the same export rules as their
+  contributing package's classes).
+- **Protocol conformance stays use-site computed**, unchanged — the structural-
+  conformance argument above still holds; only the *extension method surface* is
+  serialised, not derived conformance facts.
+- **Sourceless / computed extensions** (`register/4`, runtime-built funs) carry no
+  type signature; they are recorded with `Dynamic` param/return like any
+  unannotated extension, consistent with the runtime xref index's
+  known-present-but-unindexable handling (ADR 0087).
+- This is the **static** complement to the runtime write path (BT-2250) and the
+  live xref index (ADR 0087 / BT-2228): the same extension facts, made visible to a
+  *consumer's compiler* rather than only to the running image.
+
 ### 8. Package Reflection: The `Package` Class
 
 Packages are first-class objects, inspectable via messages like any other part of the system. The `Package` class ships with the package system — it is the Smalltalk answer to "where does this class come from?" and a core part of the tooling story for LSP, MCP, and AI agents.

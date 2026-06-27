@@ -126,6 +126,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Proposed | 2026-06-13 |
 | [0098](0098-build-artifact-provenance.md) | Build Artifact Provenance and Version-Based Staleness Invalidation | Accepted | 2026-06-23 |
 | [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Accepted | 2026-06-26 |
+| [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Proposed | 2026-06-27 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
