@@ -284,21 +284,7 @@ sealed typed Collection(E) subclass: List(E)
       ]
     nil
 
-  /// Iterate with both element and 1-based index.
-  ///
-  /// ## Examples
-  /// ```beamtalk
-  /// #("a", "b") eachWithIndex: [:item :i | Transcript show: i]
-  /// ```
-  eachWithIndex: block :: Block(E, Integer, Object) -> Nil =>
-    self
-      inject: 0
-      into: [:i :each |
-        newI := i + 1
-        block value: each value: newI
-        newI
-      ]
-    nil
+  // `eachWithIndex:` is inherited from Collection (pure-BT, built on inject:into:).
 
   /// Combine two lists element-wise into a list of pairs.
   ///

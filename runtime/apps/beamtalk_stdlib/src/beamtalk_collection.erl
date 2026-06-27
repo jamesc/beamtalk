@@ -17,11 +17,20 @@ body on the abstract Collection class.  Most other collection methods
 (collect:, select:, reject:, includes:, detect:, anySatisfy:, allSatisfy:)
 are now self-hosted as pure Beamtalk on Collection.bt and no longer need
 Erlang helpers.
+
+BT-2695: Provides the numeric aggregates `sum/1`, `maximum/1`, `minimum/1`,
+and `average/1` — backing the `@primitive` `sum`/`max`/`min`/`average` on
+Collection. They fold over `to_list/1`; `max`/`min`/`average` raise a
+user_error on an empty collection.
 """.
 
 -export([
+    average/1,
     from_list_like/2,
     inject_into/3,
+    maximum/1,
+    minimum/1,
+    sum/1,
     to_list/1
 ]).
 
@@ -47,6 +56,66 @@ inject_into(Self, Initial, Block) ->
         Initial,
         List
     ).
+
+-doc """
+Sum all elements, returning 0 for an empty collection.
+
+Backs `@primitive "sum"` on Collection. Uses native numeric `+` (Integer/Float),
+not a dispatched Beamtalk `+` message.
+""".
+-spec sum(term()) -> number().
+sum(Self) ->
+    lists:foldl(fun(Elem, Acc) -> Acc + Elem end, 0, to_list(Self)).
+
+-doc """
+Return the largest element using Erlang's native term ordering (`>`), not a
+dispatched Beamtalk `>` message.
+
+Backs `@primitive "max"` on Collection. Raises a user_error on an empty
+collection — there is no sensible maximum of nothing.
+""".
+-spec maximum(term()) -> term().
+maximum(Self) ->
+    case to_list(Self) of
+        [] -> raise_empty('max');
+        List -> lists:max(List)
+    end.
+
+-doc """
+Return the smallest element using Erlang's native term ordering (`<`), not a
+dispatched Beamtalk `<` message.
+
+Backs `@primitive "min"` on Collection. Raises a user_error on an empty
+collection.
+""".
+-spec minimum(term()) -> term().
+minimum(Self) ->
+    case to_list(Self) of
+        [] -> raise_empty('min');
+        List -> lists:min(List)
+    end.
+
+-doc """
+Return the mean of the elements as a float.
+
+Backs `@primitive "average"` on Collection. Raises a user_error on an empty
+collection.
+""".
+-spec average(term()) -> float().
+average(Self) ->
+    case to_list(Self) of
+        [] -> raise_empty('average');
+        List -> lists:sum(List) / length(List)
+    end.
+
+-spec raise_empty(atom()) -> no_return().
+raise_empty(Selector) ->
+    Error0 = beamtalk_error:new(user_error, 'Collection'),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
+    Hint = iolist_to_binary([
+        <<"Cannot compute ">>, atom_to_binary(Selector, utf8), <<" of an empty collection">>
+    ]),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
 
 -doc """
 Reconstruct a `collect:`/`select:`/`reject:` result so its type matches the

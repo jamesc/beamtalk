@@ -87,3 +87,57 @@ TestCase subclass: CollectionProtocolTest
     self assert: #(1, 2, 3) class equals: List
     self assert: Set new class equals: Set
     self assert: #{} class equals: Dictionary
+
+  testAggregationOnList =>
+    // sum / count: / noneSatisfy: / max / min / average
+    self assert: #(1, 2, 3, 4) sum equals: 10
+    self assert: (#(1, 2, 3, 4) count: [:x | x > 2]) equals: 2
+    self assert: (#(1, 2, 3) noneSatisfy: [:x | x > 5])
+    self deny: (#(1, 2, 3) noneSatisfy: [:x | x > 2])
+    self assert: #(3, 1, 4, 1, 5) max equals: 5
+    self assert: #(3, 1, 4, 1, 5) min equals: 1
+    self assert: #(1, 2, 3, 4) average equals: 2.5
+
+  testAggregationInheritedBySetAndInterval =>
+    // Set (inherited from Collection via do:)
+    self assert: (((Set new add: 1) add: 2) add: 3) sum equals: 6
+    self assert: (((Set new add: 3) add: 1) add: 2) max equals: 3
+    self assert: (((Set new add: 3) add: 1) add: 2) min equals: 1
+    self assert: ((((Set new add: 1) add: 2) add: 3) count: [:x |
+      x > 1
+    ]) equals: 2
+    // Interval (inherited from Collection via do:)
+    self assert: (1 to: 5) sum equals: 15
+    self assert: (1 to: 5) max equals: 5
+    self assert: (1 to: 5) min equals: 1
+    self assert: (1 to: 4) average equals: 2.5
+
+  testAggregationEmptyCollection =>
+    // sum of empty is 0; max/min/average raise on empty
+    self assert: #() sum equals: 0
+    self assert: (#() count: [:x | x > 0]) equals: 0
+    // noneSatisfy: on empty is vacuously true
+    self assert: (#() noneSatisfy: [:x | x > 0])
+    self should: [#() max] raise: #user_error
+    self should: [#() min] raise: #user_error
+    self should: [#() average] raise: #user_error
+
+  testEachWithIndexInheritedFromCollection =>
+    // List inherits eachWithIndex: from Collection: 1-based index paired
+    // with the matching element. Verified with assertions inside the block.
+    #("a", "b", "c") eachWithIndex: [:item :i |
+      self assert: (#("a", "b", "c") at: i) equals: item
+    ]
+
+  testDoSeparatedBySingleElementHasNoSeparator =>
+    // For a single element the separator block must never run — if it does,
+    // this assertion fails the test.
+    #(42) do: [:x | self assert: x equals: 42] separatedBy: [self assert: false]
+
+  testDoSeparatedByVisitsEachElement =>
+    // Element block runs for each element across the two-block path.
+    // Asserting the separator's exact firing count would require mutating
+    // a counter inside the separator block, which needs state-threading
+    // through do:separatedBy: (unsupported — BT-2703). The conditional-firing
+    // guarantee is covered by testDoSeparatedBySingleElementHasNoSeparator.
+    #(1, 2, 3) do: [:x | self assert: (x between: 1 and: 3)] separatedBy: [nil]

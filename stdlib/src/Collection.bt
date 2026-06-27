@@ -200,5 +200,118 @@ abstract typed Value subclass: Collection(E)
     self do: [:each | (block value: each) ifFalse: [^false]]
     true
 
+  /// Test if no element satisfies `block`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) noneSatisfy: [:x | x > 5]  // => true
+  /// #(1, 2, 3) noneSatisfy: [:x | x > 2]  // => false
+  /// ```
+  noneSatisfy: block :: Block(E, Boolean) -> Boolean =>
+    (self anySatisfy: block) not
+
+  /// Count the elements for which `block` returns true.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) count: [:x | x > 2]   // => 2
+  /// #() count: [:x | x > 2]             // => 0
+  /// ```
+  count: block :: Block(E, Boolean) -> Integer =>
+    self inject: 0 into: [:n :each |
+      (block value: each) ifTrue: [n + 1] ifFalse: [n]
+    ]
+
+  // === Aggregation ===
+
+  /// Sum all elements. Returns `0` for an empty collection.
+  ///
+  /// Uses native numeric addition (intended for `Integer`/`Float`); it does
+  /// not dispatch a Beamtalk `+` message. Kept as `@primitive` because the
+  /// pure-BT fold performs arithmetic on the generic element type `E`, which
+  /// the gradual type checker cannot prove is numeric.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) sum               // => 6
+  /// #() sum                      // => 0
+  /// ```
+  sum -> Number => @primitive "sum"
+
+  /// Return the largest element.
+  ///
+  /// Compares using the runtime's native total ordering (intended for
+  /// `Integer`/`Float`) — it does *not* dispatch a Beamtalk `>` message, so a
+  /// custom `>` method on the element type is not honoured. Raises a
+  /// `#beamtalk_error` on an empty collection — there is no maximum of nothing.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(3, 1, 4, 1, 5) max         // => 5
+  /// ```
+  max -> E => @primitive "max"
+
+  /// Return the smallest element.
+  ///
+  /// Compares using the runtime's native total ordering (intended for
+  /// `Integer`/`Float`) — it does *not* dispatch a Beamtalk `<` message. Raises
+  /// a `#beamtalk_error` on an empty collection.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(3, 1, 4, 1, 5) min         // => 1
+  /// ```
+  min -> E => @primitive "min"
+
+  /// Return the mean of the elements as a Float.
+  ///
+  /// Uses native numeric addition (intended for `Integer`/`Float`). Raises a
+  /// `#beamtalk_error` on an empty collection.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3, 4) average        // => 2.5
+  /// ```
+  average -> Float => @primitive "average"
+
+  // === Indexed iteration ===
+
+  /// Iterate over each element with its 1-based index.
+  ///
+  /// Evaluates `block` with `(element, index)` for each element.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #("a", "b") eachWithIndex: [:item :i | Transcript show: i]
+  /// ```
+  eachWithIndex: block :: Block(E, Integer, Object) -> Nil =>
+    self
+      inject: 0
+      into: [:i :each |
+        newI := i + 1
+        block value: each value: newI
+        newI
+      ]
+    nil
+
+  /// Iterate over each element, evaluating `separatorBlock` between elements.
+  ///
+  /// The separator runs *between* consecutive elements, not before the first
+  /// or after the last. Useful for joining/formatting.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// #(1, 2, 3) do: [:x | Transcript show: x] separatedBy: [Transcript show: ", "]
+  /// ```
+  do: block :: Block(E, Object) separatedBy: separatorBlock :: Block(Object) -> Nil =>
+    self
+      inject: true
+      into: [:isFirst :each |
+        isFirst ifFalse: [separatorBlock value]
+        block value: each
+        false
+      ]
+    nil
+
   /// Return a string representation.
   asString -> String => self printString
