@@ -218,6 +218,36 @@ sealed typed Number subclass: Integer
   /// ```
   truncated -> Integer => self
 
+  /// The receiver multiplied by itself.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 5 squared        // => 25
+  /// -3 squared       // => 9
+  /// ```
+  squared -> Integer => self * self
+
+  /// Round to the nearest multiple of `quantum`.
+  ///
+  /// A Float `quantum` yields a Float result (Integer × Float promotes).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 42 roundTo: 5    // => 40
+  /// 43 roundTo: 5    // => 45
+  /// 42 roundTo: 0.5  // => 42.0
+  /// ```
+  roundTo: quantum :: Number -> Number => (self / quantum) rounded * quantum
+
+  /// Truncate towards zero to a multiple of `quantum`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// 47 truncateTo: 10   // => 40
+  /// ```
+  truncateTo: quantum :: Number -> Number =>
+    (self / quantum) truncated * quantum
+
   /// Test if the receiver is even.
   ///
   /// ## Examples
