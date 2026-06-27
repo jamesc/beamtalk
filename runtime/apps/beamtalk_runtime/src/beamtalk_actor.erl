@@ -783,9 +783,13 @@ sync_send_remote(ActorPid, Selector, Args) ->
                             %% BT-1822: safe_dispatch caught an Erlang exception with stacktrace;
                             %% re-raise with full type/stacktrace context.
                             %% Guard prevents false-match on non-stacktrace 3-tuples.
+                            %% BT-2705: attach the active selector/class breadcrumb so a raw
+                            %% error escaping the method is classified *and* located.
                             error(
                                 beamtalk_exception_handler:ensure_wrapped(
-                                    ErlType, ErrorValue, Stacktrace
+                                    ErlType, ErrorValue, Stacktrace, #{
+                                        selector => Selector, class => Class
+                                    }
                                 )
                             );
                         {error, {ErlType, ErrorValue}} ->
@@ -866,9 +870,12 @@ sync_send(ActorPid, Selector, Args, Timeout) when
                                     {Result, Metadata#{outcome => ok}};
                                 {error, {ErlType, ErrorValue, Stacktrace}} ->
                                     %% BT-1822: safe_dispatch with stacktrace
+                                    %% BT-2705: attach selector/class breadcrumb (see sync_send/3).
                                     error(
                                         beamtalk_exception_handler:ensure_wrapped(
-                                            ErlType, ErrorValue, Stacktrace
+                                            ErlType, ErrorValue, Stacktrace, #{
+                                                selector => Selector, class => Class
+                                            }
                                         )
                                     );
                                 {error, {ErlType, ErrorValue}} ->

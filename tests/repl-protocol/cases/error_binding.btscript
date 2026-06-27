@@ -51,9 +51,10 @@ _error kind
 // => does_not_understand
 
 // Trigger a new error (division by zero)
+// (BT-2707: raw badarith is classified as a type_error with a readable message)
 1 / 0
-// => ERROR: badarith
+// => ERROR: bad arithmetic
 
 // _error now holds the new error
 _error kind
-// => runtime_error
+// => type_error

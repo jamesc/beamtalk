@@ -141,8 +141,9 @@ obj foo:
 // Multiple errors in one expression - parser should recover
 
 // Block with empty body evaluates to nil, then nil + 1 is arithmetic error
+// (BT-2707: raw badarith is classified into a readable arithmetic message)
 [:x :y | ] + 1
-// => ERROR: badarith
+// => ERROR: bad arithmetic
 
 // Multiple syntax errors in sequence
 ] + [ + )

@@ -402,7 +402,10 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
                                         domain => [beamtalk, runtime]
                                     }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                                        Type, Reason, Stack
+                                        Type,
+                                        Reason,
+                                        Stack,
+                                        dispatch_context(Selector, Self, State, MethodOwner)
                                     ),
                                     #{error := BtError} = Wrapped,
                                     {error, BtError}
@@ -427,7 +430,10 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
                                         domain => [beamtalk, runtime]
                                     }),
                                     Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                                        Type, Reason, Stack
+                                        Type,
+                                        Reason,
+                                        Stack,
+                                        dispatch_context(Selector, Self, State, MethodOwner)
                                     ),
                                     #{error := BtError} = Wrapped,
                                     {error, BtError}
@@ -435,6 +441,14 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State, Depth) ->
                     end
             end
     end.
+
+%% Build the dispatch breadcrumb (BT-2705) handed to the error-wrap boundary so
+%% raw Erlang errors escaping a compiled method are classified *and* located.
+%% Computed only on the error path; the receiver's actual class is preferred
+%% over the method owner so the breadcrumb names what the user sent to.
+-spec dispatch_context(selector(), bt_self(), state(), class_name()) -> map().
+dispatch_context(Selector, Self, State, MethodOwner) ->
+    #{selector => Selector, class => class_name_from(Self, State, MethodOwner)}.
 
 -doc """
 Continue hierarchy walk to superclass when current class can't dispatch.
