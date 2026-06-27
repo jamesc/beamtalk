@@ -77,19 +77,8 @@ collection — there is no sensible maximum of nothing.
 -spec maximum(term()) -> term().
 maximum(Self) ->
     case to_list(Self) of
-        [] ->
-            raise_empty('max');
-        [H | T] ->
-            lists:foldl(
-                fun(E, Acc) ->
-                    case E > Acc of
-                        true -> E;
-                        false -> Acc
-                    end
-                end,
-                H,
-                T
-            )
+        [] -> raise_empty('max');
+        List -> lists:max(List)
     end.
 
 -doc """
@@ -102,19 +91,8 @@ collection.
 -spec minimum(term()) -> term().
 minimum(Self) ->
     case to_list(Self) of
-        [] ->
-            raise_empty('min');
-        [H | T] ->
-            lists:foldl(
-                fun(E, Acc) ->
-                    case E < Acc of
-                        true -> E;
-                        false -> Acc
-                    end
-                end,
-                H,
-                T
-            )
+        [] -> raise_empty('min');
+        List -> lists:min(List)
     end.
 
 -doc """
@@ -134,9 +112,10 @@ average(Self) ->
 raise_empty(Selector) ->
     Error0 = beamtalk_error:new(user_error, 'Collection'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:raise(
-        beamtalk_error:with_hint(Error1, <<"Collection is empty">>)
-    ).
+    Hint = iolist_to_binary([
+        <<"Cannot compute ">>, atom_to_binary(Selector, utf8), <<" of an empty collection">>
+    ]),
+    beamtalk_error:raise(beamtalk_error:with_hint(Error1, Hint)).
 
 -doc """
 Reconstruct a `collect:`/`select:`/`reject:` result so its type matches the
