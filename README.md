@@ -248,7 +248,7 @@ What's in the cockpit:
 
 - **System Browser** — a four-pane Smalltalk navigator (classes → protocols →
   methods → source) over the live image, including stdlib and runtime classes.
-- **Method editor** — open any method as an editable tab with CodeMirror syntax
+- **Method editor** — open any method as an editable tab with `CodeMirror` syntax
   highlighting; *Compile* redefines it on the running system (live code reload),
   with *Senders* / *Implementors* navigation and *Save All to Disk*.
 - **Workspace** — a *Do it / Print it / Inspect it* eval pane returning live
