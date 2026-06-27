@@ -30,6 +30,8 @@ main(_) ->
     Pred = fun(X) -> X rem 2 =:= 0 end,
     lists:foreach(fun(N) -> run_size(N, Blk, Pred) end, [1000, 100000]),
     bench_reduce(),
+    bench_guard(),
+    bench_guard_fold(),
     ok.
 
 run_size(N, Blk, Pred) ->
@@ -67,3 +69,81 @@ bench_reduce() ->
         io:format("sum  N=~6w  native ~8.2f us/op | pureBT(inject) ~8.2f us/op | ratio ~.2fx  (same: ~p)~n",
                   [N, Nat/Iters, Pbt/Iters, Pbt/Nat, Same])
     end, [1000, 100000]).
+
+%% --- BT-2709: arithmetic-operator guard vs bare `erlang:'+'` ---
+%% `+ - * /` are now dispatchable messages. For a statically-numeric receiver
+%% (literal, `self` in Integer/Float, `:: Number` param, `self.field`) codegen
+%% keeps the bare BIF; otherwise it emits a runtime `is_number` guard that picks
+%% the BIF for numbers and `beamtalk_message_dispatch:send/3` for objects. This
+%% measures the per-add cost of that guard against the bare BIF in a tight loop —
+%% the honest upper bound, since real code with unknown receivers also evaluates
+%% the operands and the surrounding expression.
+bench_guard() ->
+    N = 5000000,
+    Reps = 25,
+    Bare = fun BareLoop(0, A) -> A; BareLoop(K, A) -> BareLoop(K - 1, A + K) end,
+    %% Mirrors the generated guard: is_number(Lhs) ? BIF : dispatch.
+    Guard = fun GuardLoop(0, A) -> A;
+                GuardLoop(K, A) ->
+                    A2 = case is_number(A) of
+                             true -> A + K;
+                             false -> guard_fallback(A, K)
+                         end,
+                    GuardLoop(K - 1, A2)
+            end,
+    Bare(N, 0), Guard(N, 0),   %% warm
+    BareUs = min_us(Reps, fun() -> Bare(N, 0) end),
+    GuardUs = min_us(Reps, fun() -> Guard(N, 0) end),
+    io:format("~n=== arithmetic guard vs bare (N=~p adds/loop, best of ~p) ===~n", [N, Reps]),
+    io:format("bare  erlang:'+'  : ~8.1f us/loop~n", [float(BareUs)]),
+    io:format("guarded is_number : ~8.1f us/loop~n", [float(GuardUs)]),
+    io:format("overhead          : ~.3f ns/add | ratio ~.2fx~n",
+              [(GuardUs - BareUs) * 1000 / N, GuardUs / BareUs]).
+
+%% --- BT-2709: guard cost at the realistic fold level (sum / inject:into:) ---
+%% The tight loop above is the worst case (the add is the whole body). This
+%% measures the guard where it actually lands in stdlib collection code: a
+%% `lists:foldl` accumulator step — the shape `sum`/`inject:into:` compile to —
+%% so the per-element list traversal is the "surrounding work" that dilutes the
+%% guard's relative cost. A/B over the same list: bare `Acc + X` vs the guarded
+%% form codegen now emits for the (statically non-numeric) fold accumulator.
+bench_guard_fold() ->
+    N = 1000000,
+    Reps = 25,
+    List = lists:seq(1, N),
+    Bare = fun() -> lists:foldl(fun(X, Acc) -> Acc + X end, 0, List) end,
+    Guard = fun() ->
+        lists:foldl(
+            fun(X, Acc) ->
+                case is_number(Acc) of
+                    true -> Acc + X;
+                    false -> guard_fallback(Acc, X)
+                end
+            end,
+            0,
+            List
+        )
+    end,
+    %% Warm + correctness gate: assert the two accumulators agree *before*
+    %% timing, so a logic divergence fails loudly instead of whispering in a
+    %% footer after the numbers have already printed.
+    BareResult = Bare(),
+    GuardResult = Guard(),
+    BareResult =:= GuardResult orelse
+        error({guard_fold_mismatch, BareResult, GuardResult}),
+    BareUs = min_us(Reps, Bare),
+    GuardUs = min_us(Reps, Guard),
+    io:format("~n=== fold sum: guarded vs bare accumulator (N=~p elems, best of ~p) ===~n", [
+        N, Reps
+    ]),
+    io:format("bare  foldl Acc+X   : ~8.1f us~n", [float(BareUs)]),
+    io:format("guarded foldl       : ~8.1f us~n", [float(GuardUs)]),
+    io:format("overhead            : ~.3f ns/elem | ratio ~.2fx~n", [
+        (GuardUs - BareUs) * 1000 / N, GuardUs / BareUs
+    ]).
+
+%% Never reached for numeric input; present so the guard's false arm is live.
+guard_fallback(A, B) -> A + B.
+
+min_us(Reps, F) ->
+    lists:min([element(1, timer:tc(F)) || _ <- lists:seq(1, Reps)]).

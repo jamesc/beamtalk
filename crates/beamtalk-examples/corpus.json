@@ -11782,6 +11782,36 @@
       "explanation": "Advanced arithmetic operations tests - migrated from bootstrap/arithmetic.bt (BT-827)"
     },
     {
+      "id": "stdlib-test-arithmetic-operator-overload-test",
+      "title": "ArithmeticOperatorOverloadTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ArithmeticOperatorOverloadTest",
+        "TestCase",
+        "arithmetic_operator_overload_test",
+        "assign",
+        "assignment",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testNoOperatorRaisesDoesNotUnderstand",
+        "testNumericArithmeticUnchanged",
+        "testUserTypeAddDispatches",
+        "testUserTypeMultiplyDispatches",
+        "testUserTypeSubtractDispatches"
+      ],
+      "source": "// BT-2709: Phase 1 — arithmetic operators (`+ - * /`) are dispatchable as real\n// messages, so a user value-type can overload them and have `aMoney + bMoney`\n// dispatch to `Money>>+` (receiver decides). A type with no operator falls\n// through to a `does_not_understand` DNU rather than a raw `badarith`.\n//\n// The `Money` and `Widget` value-types live in `fixtures/` (one class per file).\n\nTestCase subclass: ArithmeticOperatorOverloadTest\n\n  /// `aMoney + bMoney` dispatches to `Money>>+`.\n  testUserTypeAddDispatches =>\n    a := (Money new) withCents: 150\n    b := (Money new) withCents: 250\n    self assert: (a + b) cents equals: 400\n\n  /// `aMoney - bMoney` dispatches to `Money>>-`.\n  testUserTypeSubtractDispatches =>\n    a := (Money new) withCents: 500\n    b := (Money new) withCents: 175\n    self assert: (a - b) cents equals: 325\n\n  /// `aMoney * anInteger` dispatches to `Money>>*`.\n  testUserTypeMultiplyDispatches =>\n    a := (Money new) withCents: 100\n    self assert: (a * 3) cents equals: 300\n\n  /// Numeric arithmetic still works (the bare-BIF fast path is unchanged).\n  testNumericArithmeticUnchanged =>\n    self assert: (2 + 3) equals: 5\n    self assert: (10 - 4) equals: 6\n    self assert: (6 * 7) equals: 42\n\n  /// `+` on a type with no operator raises a DNU, not a raw `badarith`.\n  /// `w` is statically a `Widget` (which defines no `+`), so the checker also\n  /// flags this at compile time — `@expect dnu` acknowledges that hint while\n  /// the assertion verifies the runtime DNU behaviour.\n  testNoOperatorRaisesDoesNotUnderstand =>\n    w := (Widget new) withSize: 5\n    @expect dnu\n    self should: [w + 1] raise: #does_not_understand",
+      "explanation": "BT-2709: Phase 1 — arithmetic operators (`+ - * /`) are dispatchable as real messages, so a user value-type can overload them and have `aMoney + bMoney` dispatch to `Money>>+` (receiver decides). A type with no operator falls through to a `does_not_understand` DNU rather than a raw `badarith`.  The `Money` and `Widget` value-types live in `fixtures/` (one class per file)."
+    },
+    {
       "id": "stdlib-test-arithmetic-test",
       "title": "ArithmeticTest",
       "category": "stdlib-tests",
@@ -19215,6 +19245,39 @@
       "explanation": "BT-870: Mixed Tier 1/Tier 2 call site fixture Tests that a HOM called from two different methods — one with a plain Tier 1 block and one with a Tier 2 (captured-mutation) block — compiles and runs correctly for both call sites"
     },
     {
+      "id": "stdlib-test-fixtures-money",
+      "title": "Money",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "*",
+        "+",
+        "-",
+        "Money",
+        "Value",
+        "async",
+        "cents",
+        "concurrent",
+        "constructor",
+        "create",
+        "extends",
+        "field",
+        "gen_server",
+        "genserver",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "instantiate",
+        "member",
+        "money",
+        "process",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-2709 fixture: a tiny value-type money amount (in cents) that overloads the\n// arithmetic operators `+ - *`, so `aMoney + bMoney` dispatches to `Money>>+`.\n\nValue subclass: Money\n  field: cents :: Integer = 0\n\n  /// The amount in cents.\n  cents -> Integer => self.cents\n\n  /// Add two money amounts (receiver-dispatched `+`).\n  + other :: Money -> Money => (Money new) withCents: self.cents + other cents\n\n  /// Subtract two money amounts.\n  - other :: Money -> Money => (Money new) withCents: self.cents - other cents\n\n  /// Scale a money amount by an integer factor.\n  * factor :: Integer -> Money => (Money new) withCents: self.cents * factor",
+      "explanation": "BT-2709 fixture: a tiny value-type money amount (in cents) that overloads the arithmetic operators `+ - *`, so `aMoney + bMoney` dispatches to `Money>>+`."
+    },
+    {
       "id": "stdlib-test-fixtures-multi-expr-calc",
       "title": "MultiExprCalc",
       "category": "stdlib-fixtures",
@@ -21692,6 +21755,28 @@
       ],
       "source": "// ValueTypeBuilder - demonstrates immutable-update semantics via with*: (BT-833)\n// Value types auto-generate withX:/withY: setters that return new instances\n\nValue subclass: ValueTypeBuilder\n  field: x = 0\n  field: y = 0\n\n  // Setter that assigns multiple fields sequentially (BT-833: sequential threading)\n  setX: newX y: newY => (self withX: newX) withY: newY\n\n  // Read-then-write: reads current field value, adds delta, writes back (BT-833)\n  incrementX: delta => self withX: self.x + delta\n\n  // Getters\n  getX => self.x\n\n  getY => self.y",
       "explanation": "ValueTypeBuilder - demonstrates immutable-update semantics via with*: (BT-833) Value types auto-generate withX:/withY: setters that return new instances"
+    },
+    {
+      "id": "stdlib-test-fixtures-widget",
+      "title": "Widget",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "Value",
+        "Widget",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "property",
+        "size",
+        "subclassing",
+        "value",
+        "widget"
+      ],
+      "source": "// BT-2709 fixture: a value-type with NO arithmetic operators, used to exercise\n// the DNU path — `aWidget + 1` must raise `does_not_understand`, not `badarith`.\n\nValue subclass: Widget\n  field: size :: Integer = 0\n\n  /// The widget size.\n  size -> Integer => self.size",
+      "explanation": "BT-2709 fixture: a value-type with NO arithmetic operators, used to exercise the DNU path — `aWidget + 1` must raise `does_not_understand`, not `badarith`."
     },
     {
       "id": "stdlib-test-foreign-extension-codegen-test",

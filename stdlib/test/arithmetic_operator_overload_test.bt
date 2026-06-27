@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2709: Phase 1 — arithmetic operators (`+ - * /`) are dispatchable as real
+// messages, so a user value-type can overload them and have `aMoney + bMoney`
+// dispatch to `Money>>+` (receiver decides). A type with no operator falls
+// through to a `does_not_understand` DNU rather than a raw `badarith`.
+//
+// The `Money` and `Widget` value-types live in `fixtures/` (one class per file).
+
+TestCase subclass: ArithmeticOperatorOverloadTest
+
+  /// `aMoney + bMoney` dispatches to `Money>>+`.
+  testUserTypeAddDispatches =>
+    a := (Money new) withCents: 150
+    b := (Money new) withCents: 250
+    self assert: (a + b) cents equals: 400
+
+  /// `aMoney - bMoney` dispatches to `Money>>-`.
+  testUserTypeSubtractDispatches =>
+    a := (Money new) withCents: 500
+    b := (Money new) withCents: 175
+    self assert: (a - b) cents equals: 325
+
+  /// `aMoney * anInteger` dispatches to `Money>>*`.
+  testUserTypeMultiplyDispatches =>
+    a := (Money new) withCents: 100
+    self assert: (a * 3) cents equals: 300
+
+  /// Numeric arithmetic still works (the bare-BIF fast path is unchanged).
+  testNumericArithmeticUnchanged =>
+    self assert: (2 + 3) equals: 5
+    self assert: (10 - 4) equals: 6
+    self assert: (6 * 7) equals: 42
+
+  /// `+` on a type with no operator raises a DNU, not a raw `badarith`.
+  /// `w` is statically a `Widget` (which defines no `+`), so the checker also
+  /// flags this at compile time — `@expect dnu` acknowledges that hint while
+  /// the assertion verifies the runtime DNU behaviour.
+  testNoOperatorRaisesDoesNotUnderstand =>
+    w := (Widget new) withSize: 5
+    @expect dnu
+    self should: [w + 1] raise: #does_not_understand

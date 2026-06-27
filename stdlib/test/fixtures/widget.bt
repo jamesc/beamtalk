@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2709 fixture: a value-type with NO arithmetic operators, used to exercise
+// the DNU path — `aWidget + 1` must raise `does_not_understand`, not `badarith`.
+
+Value subclass: Widget
+  field: size :: Integer = 0
+
+  /// The widget size.
+  size -> Integer => self.size

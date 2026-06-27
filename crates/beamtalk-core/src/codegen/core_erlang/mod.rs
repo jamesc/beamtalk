@@ -1197,6 +1197,15 @@ pub(crate) struct CoreErlangGenerator {
     /// BT-295: Parameters of the current method being compiled (if any).
     /// Used by `Expression::Primitive` to generate dispatch argument lists.
     current_method_params: Vec<String>,
+    /// BT-2709: Declared types of the current method's parameters, keyed by
+    /// **source** parameter name → simple type name (e.g. `"other" -> "Number"`).
+    /// Used by the arithmetic fast-path classifier
+    /// (`receiver_is_statically_numeric`) to drop the runtime `is_number` guard
+    /// when a receiver is a `:: Integer/Float/Number`-annotated parameter. Only
+    /// `Simple` annotations are recorded; absence falls back to the guard, which
+    /// is always correct. Cleared at every method-body entry so a prior method's
+    /// annotations never leak into the next.
+    current_method_param_types: std::collections::HashMap<String, String>,
     /// BT-412/BT-1448: Internal side-channel for open-scope expression results.
     ///
     /// Set deep inside `generate_expression` when a class var assignment, class method
@@ -1291,6 +1300,7 @@ impl CoreErlangGenerator {
             source_text: None,
             primitive_bindings: PrimitiveBindingTable::new(),
             current_method_params: Vec::new(),
+            current_method_param_types: std::collections::HashMap::new(),
             last_open_scope_result: None,
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
@@ -1556,6 +1566,38 @@ impl CoreErlangGenerator {
             // (REPL) builder cascades don't leak a class context.
             self.class_context = None;
         }
+    }
+
+    /// BT-2709: Clears per-method parameter-type tracking. Call alongside
+    /// `current_method_params.clear()` at every method-body entry so a prior
+    /// method's `:: Number` annotations never leak into the next and cause a
+    /// spurious bare-BIF fast path.
+    pub(super) fn clear_method_param_types(&mut self) {
+        self.current_method_param_types.clear();
+    }
+
+    /// BT-2709: Records a method parameter's declared type for the arithmetic
+    /// fast-path classifier (keyed by **source** name → simple type name).
+    /// Only `Simple` annotations are recorded; anything else is left absent so
+    /// the classifier falls back to the runtime `is_number` guard, which is
+    /// always correct.
+    pub(super) fn record_method_param_type(
+        &mut self,
+        source_name: &str,
+        annotation: Option<&crate::ast::TypeAnnotation>,
+    ) {
+        if let Some(crate::ast::TypeAnnotation::Simple(id)) = annotation {
+            self.current_method_param_types
+                .insert(source_name.to_string(), id.name.to_string());
+        }
+    }
+
+    /// BT-2709: Whether `name` refers to a `:: Integer/Float/Number`-annotated
+    /// parameter of the current method.
+    pub(super) fn param_is_numeric(&self, name: &str) -> bool {
+        self.current_method_param_types
+            .get(name)
+            .is_some_and(|ty| matches!(ty.as_str(), "Integer" | "Float" | "Number"))
     }
 
     /// Returns whether stdlib mode is active.

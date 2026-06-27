@@ -18,7 +18,7 @@ module 'match_exhaustiveness_missing_arm' ['new'/0, 'new'/1, 'run:'/2, 'dispatch
 
 
 'run:'/2 = fun (Self, _r1) ->
-let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' := 'true', 'okValue' := V}~> when 'true' -> fun () -> call 'erlang':'+'(V, 1) end
+let _Match2 = _r1 in case _Match2 of <~{'$beamtalk_class' := 'Result', 'isOk' := 'true', 'okValue' := V}~> when 'true' -> fun () -> let _BinLeft3 = V in let _BinRight4 = 1 in case call 'erlang':'is_number'(_BinLeft3) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft3, _BinRight4) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft3, '+', [_BinRight4]) end end
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of

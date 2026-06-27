@@ -140,10 +140,11 @@ obj foo:
 // ===========================================================================
 // Multiple errors in one expression - parser should recover
 
-// Block with empty body evaluates to nil, then nil + 1 is arithmetic error
-// (BT-2707: raw badarith is classified into a readable arithmetic message)
+// A block is not a number, so `aBlock + 1` dispatches `+` as a message
+// (BT-2709) and the block does not understand it — a structured DNU rather
+// than a raw arithmetic error.
 [:x :y | ] + 1
-// => ERROR: bad arithmetic
+// => ERROR: does not understand
 
 // Multiple syntax errors in sequence
 ] + [ + )

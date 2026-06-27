@@ -175,6 +175,39 @@ down from ~1.8–2.4×.
   matters more than fun-call count. Accumulator-last is the fast shape; prefer
   it for hot hand-rolled folds.
 
+### Arithmetic operator guard vs bare BIF (BT-2709)
+
+Phase 1 makes `+ - * /` dispatchable messages. A statically-numeric receiver
+(numeric literal, `self` in `Integer`/`Float`, a `:: Integer/Float/Number`
+param, or a `self.<field>` read) keeps the **bare** `erlang:'+'`; any other
+receiver emits a runtime `is_number` guard that picks the BIF for numbers and
+`beamtalk_message_dispatch:send/3` for objects. Two cases measure it: `bench_guard/0`
+(a tight add-loop — the worst case) and `bench_guard_fold/0` (a `lists:foldl`
+accumulator — the realistic shape `sum`/`inject:into:` compile to).
+
+| Case | overhead | ratio |
+|------|---|---|
+| `bench_guard` — tight add-loop (N = 5M adds) | ~5.5 ns/add | **~2.7–3.0×** (run-dependent) |
+| `bench_guard_fold` — foldl accumulator (N = 1M elems) | **~0.5 ns/elem** | **~1.09×** |
+
+#### Interpretation
+
+- The ~3× tight-loop ratio is the **worst case**: in a loop that does nothing but
+  add, the guard is a large fraction of the work. What matters in real code is the
+  **absolute** ~5 ns/add — and once it's one step in a larger expression the ratio
+  collapses: the realistic fold A/B measures only **~1.09× (~0.5 ns/elem)**.
+- It applies **only to the guarded path**. The bare fast path — all hot stdlib
+  arithmetic and ~95% of user code — is byte-for-byte unchanged and pays nothing
+  (asserted by codegen regression tests in `tests/expressions.rs`).
+- The guarded path includes synthetic fold accumulators (e.g. the `I + 1` index
+  increment compiled for `do:`/`eachWithIndex:`), since codegen can't statically
+  prove the accumulator is numeric. **Measured, this is negligible** (~1.09× on a
+  bare foldl, and pure-BT collection iteration is already dominated 10–18× by
+  per-element *dispatch*, not the add). So returning fold accumulators to the bare
+  path (by teaching `receiver_is_statically_numeric` about numeric-seeded
+  accumulators) is **not worth pursuing** — recorded here so the decision isn't
+  re-litigated.
+
 ## Array backing: map (current) vs alternatives — does Vector earn its place? (BT-2696)
 
 BT-2696 proposed a bit-partitioned-trie `Vector` on the premise that core lacked

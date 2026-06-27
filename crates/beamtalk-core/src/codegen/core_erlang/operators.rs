@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 
 use super::document::Document;
-use super::document::leaf::var;
+use super::document::leaf::{atom, var};
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::ast::Expression;
 use crate::docvec;
@@ -74,6 +74,18 @@ impl CoreErlangGenerator {
             }
         };
 
+        // BT-2709: Arithmetic operators (`+ - * /`) are dispatchable messages so
+        // user value-types can overload them. When the receiver is *statically*
+        // known to be numeric (a numeric literal, `self` inside Integer/Float, or
+        // a `:: Integer/Float/Number`-annotated parameter), we keep the bare BIF
+        // fast path (zero cost — all stdlib hot arithmetic). Otherwise we emit a
+        // runtime `is_number` guard that selects the BIF for numbers and falls
+        // back to message dispatch for objects (so `aMoney + bMoney` reaches
+        // `Money>>+` and `vector + 5` raises a DNU rather than raw `badarith`).
+        // Comparison/`%`/`**` are not yet message-dispatched here (Phase 2+).
+        let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
+        let guard_dispatch = is_arithmetic && !self.receiver_is_statically_numeric(left);
+
         // BT-1937: Capture both operands in evaluation order. When either
         // operand produces an open let-chain (e.g., a class method self-send
         // mutating a class var), capture_subexpr_sequence force-hoists BOTH
@@ -85,20 +97,117 @@ impl CoreErlangGenerator {
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
 
-        // CLAUDE.md: Core Erlang fragments MUST use Document/docvec!, never
-        // format!(). erlang_op is one of the static literals in the match
-        // arms above, so Document::Str is safe.
-        let call_doc = docvec![
-            "call 'erlang':'",
-            Document::Str(erlang_op),
-            "'(",
-            left_code,
-            ", ",
-            right_code,
-            ")",
-        ];
+        let call_doc = if guard_dispatch {
+            self.guarded_arithmetic_doc(op, erlang_op, left_code, right_code)
+        } else {
+            // CLAUDE.md: Core Erlang fragments MUST use Document/docvec!, never
+            // format!(). erlang_op is one of the static literals in the match
+            // arms above, so Document::Str is safe.
+            docvec![
+                "call 'erlang':'",
+                Document::Str(erlang_op),
+                "'(",
+                left_code,
+                ", ",
+                right_code,
+                ")",
+            ]
+        };
 
         Ok(self.finalize_dispatch_with_preamble(preamble, call_doc, "BinOp"))
+    }
+
+    /// BT-2709: Whether `expr` is statically known to evaluate to a number, so
+    /// the arithmetic fast path can skip the runtime `is_number` guard.
+    ///
+    /// Mirrors the gradual-typing contract: an annotation (or a syntactic fact)
+    /// *removes* the guard; its absence keeps the guard, which is always correct.
+    /// Recognises sources of numeric certainty already present in the
+    /// AST / codegen context — no new analysis pass:
+    /// * a numeric literal receiver (`1 + x`),
+    /// * `self` inside a numeric class (`Integer`/`Float` method bodies),
+    /// * an identifier bound to a `:: Integer/Float/Number` parameter, and
+    /// * a `self.<field>` read.
+    ///
+    /// The last case keeps actor/value-type instance-field arithmetic on the
+    /// bare numeric path exactly as before Phase 1 — both to avoid regressing
+    /// the broad `self.count := self.count + 1` counter pattern (and the
+    /// dependent `ifTrue:` inline-case state-threading optimisation) and because
+    /// the receiver-dispatch contract this issue introduces targets
+    /// local-variable receivers (`aMoney + bMoney`), not fields. Dispatching on
+    /// value-type-valued fields is left to a follow-up.
+    pub(in crate::codegen::core_erlang) fn receiver_is_statically_numeric(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        use crate::ast::Literal;
+        match expr {
+            Expression::Literal(Literal::Integer(_) | Literal::Float(_), _) => true,
+            Expression::Identifier(id) => {
+                if id.name == "self" {
+                    matches!(self.class_name().as_str(), "Integer" | "Float")
+                } else {
+                    self.param_is_numeric(&id.name)
+                }
+            }
+            // `self.<field>` reads stay on the numeric fast path (see doc above).
+            Expression::FieldAccess { receiver, .. } => {
+                matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            }
+            _ => false,
+        }
+    }
+
+    /// BT-2709: Builds the runtime-guarded arithmetic dispatch for an
+    /// unknown/generic receiver, mirroring `generate_concat_op`'s `is_list` arm:
+    ///
+    /// ```erlang
+    /// let <Lhs> = <left> in
+    ///   let <Rhs> = <right> in
+    ///     case call 'erlang':'is_number'(Lhs) of
+    ///       <'true'>  when 'true' -> call 'erlang':'+'(Lhs, Rhs)
+    ///       <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(Lhs, '+', [Rhs])
+    ///     end
+    /// ```
+    ///
+    /// Numbers take the bare BIF; objects route through unified message dispatch
+    /// (receiver-overloaded operators, or a DNU `#beamtalk_error` when undefined).
+    /// `erlang_op` is a static match-arm literal (safe as `Document::Str`); the
+    /// dispatch selector uses `leaf::atom` for the original Beamtalk operator.
+    fn guarded_arithmetic_doc(
+        &mut self,
+        op: &str,
+        erlang_op: &'static str,
+        left_code: Document<'static>,
+        right_code: Document<'static>,
+    ) -> Document<'static> {
+        let left_var = self.fresh_temp_var("BinLeft");
+        let right_var = self.fresh_temp_var("BinRight");
+        docvec![
+            "let ",
+            var(left_var.clone()),
+            " = ",
+            left_code,
+            " in let ",
+            var(right_var.clone()),
+            " = ",
+            right_code,
+            " in case call 'erlang':'is_number'(",
+            var(left_var.clone()),
+            ") of <'true'> when 'true' -> call 'erlang':'",
+            Document::Str(erlang_op),
+            "'(",
+            var(left_var.clone()),
+            ", ",
+            var(right_var.clone()),
+            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
+            var(left_var),
+            ", ",
+            atom(op.to_string()),
+            ", [",
+            var(right_var),
+            "]) end",
+        ]
     }
 
     /// Generates `**` exponentiation via `math:pow/2` + `erlang:round/1`.

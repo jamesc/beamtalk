@@ -227,13 +227,13 @@ module 'nested_blocks' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_contin
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     case Selector of
         <'outerBlock'> when 'true' ->
-            let _Result = fun (_x1) -> call 'erlang':'+'(_x1, 1) in {'reply', _Result, State}
+            let _Result = fun (_x1) -> let _BinLeft2 = _x1 in let _BinRight3 = 1 in case call 'erlang':'is_number'(_BinLeft2) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft2, _BinRight3) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft2, '+', [_BinRight3]) end in {'reply', _Result, State}
         <'deeplyNested'> when 'true' ->
             let _Result = fun () -> fun () -> 42 in {'reply', _Result, State}
         <'blockWithNested'> when 'true' ->
             case Args of
-                <[_x2]> when 'true' ->
-                    let Inner = fun (_y3) -> call 'erlang':'*'(_y3, 2) in let _Result = let _ValRecv4 = Inner in let _ValArg5 = _x2 in case call 'erlang':'is_function'(_ValRecv4) of 'true' when 'true' -> apply _ValRecv4 (_ValArg5) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv4, 'value:', [_ValArg5]) end in {'reply', _Result, State}
+                <[_x4]> when 'true' ->
+                    let Inner = fun (_y5) -> let _BinLeft6 = _y5 in let _BinRight7 = 2 in case call 'erlang':'is_number'(_BinLeft6) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft6, _BinRight7) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft6, '*', [_BinRight7]) end in let _Result = let _ValRecv8 = Inner in let _ValArg9 = _x4 in case call 'erlang':'is_function'(_ValRecv8) of 'true' when 'true' -> apply _ValRecv8 (_ValArg9) 'false' when 'true' -> call 'beamtalk_primitive':'send'(_ValRecv8, 'value:', [_ValArg9]) end in {'reply', _Result, State}
                 <_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}
             end
         <OtherSelector> when 'true' ->
