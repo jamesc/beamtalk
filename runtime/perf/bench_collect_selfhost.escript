@@ -124,18 +124,22 @@ bench_guard_fold() ->
             List
         )
     end,
-    Bare(),
-    Guard(),
+    %% Warm + correctness gate: assert the two accumulators agree *before*
+    %% timing, so a logic divergence fails loudly instead of whispering in a
+    %% footer after the numbers have already printed.
+    BareResult = Bare(),
+    GuardResult = Guard(),
+    BareResult =:= GuardResult orelse
+        error({guard_fold_mismatch, BareResult, GuardResult}),
     BareUs = min_us(Reps, Bare),
     GuardUs = min_us(Reps, Guard),
-    Same = Bare() =:= Guard(),
     io:format("~n=== fold sum: guarded vs bare accumulator (N=~p elems, best of ~p) ===~n", [
         N, Reps
     ]),
     io:format("bare  foldl Acc+X   : ~8.1f us~n", [float(BareUs)]),
     io:format("guarded foldl       : ~8.1f us~n", [float(GuardUs)]),
-    io:format("overhead            : ~.3f ns/elem | ratio ~.2fx  (same: ~p)~n", [
-        (GuardUs - BareUs) * 1000 / N, GuardUs / BareUs, Same
+    io:format("overhead            : ~.3f ns/elem | ratio ~.2fx~n", [
+        (GuardUs - BareUs) * 1000 / N, GuardUs / BareUs
     ]).
 
 %% Never reached for numeric input; present so the guard's false arm is live.
