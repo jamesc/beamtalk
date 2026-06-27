@@ -99,6 +99,28 @@ or `Warning` only when failure is *provable* (the union case). This mirrors
 Dialyzer's success-typing stance: complain only when a call can be *shown* to
 fail, stay quiet otherwise.
 
+**Classification is conservative — when in doubt, classify *down*.** A receiver is
+`ClosedComplete` only when the checker can enumerate its *entire* method surface
+with certainty. The following force a downgrade to `Open` (→ silent), so they are
+never misreported:
+
+- **Any `Dynamic` in a union** (`Integer | Dynamic`) downgrades the *whole* union
+  to `Open`. The checker does not emit per-arm hints on a mixed union — a partial
+  "hint on the `Integer` arm, silence on the `Dynamic` arm" is more confusing than
+  useful, and the `Dynamic` arm could be the one that flows at runtime.
+- **A receiver that is also the target of `perform:` / reflective dispatch** in
+  scope is `Open` for the reflectively-sent selectors — a typed receiver does not
+  become provably-closed just because it has a static type.
+- **A class whose method surface depends on data not yet loaded** — e.g. a
+  dependency type whose *extension* metadata has not been loaded (pre-WS3, see
+  ADR 0070 amendment). The checker must treat "I have the class but maybe not all
+  its extensions" as `Open`, not `ClosedComplete` (see Rule 2 sequencing).
+
+Because severity hinges entirely on this classification, the
+`Dynamic`/`Open`/`ClosedComplete` decision MUST be made in **one shared place** so
+`validation.rs` and `inference.rs` cannot disagree about the same call site
+(see Implementation).
+
 ### Rule 2 — Completeness improves accuracy, it does not raise severity
 
 When project-scoped compilation (BT-2251 WS1/WS2) gives the checker complete
@@ -119,6 +141,24 @@ resolution** — but the *default severity is unchanged*. Specifically:
 This is the crux: **project scope buys precision, not strictness.** Strictness is
 a separate, explicit choice (Rule 3).
 
+**Sequencing guard (important).** The incompleteness workarounds may be removed
+*only* once the knowledge that made them necessary actually exists — removing them
+early turns every previously-suppressed site into a fresh false positive. The
+binding order:
+
+1. The **cross-file-parent** suppression stays until project-wide hierarchy
+   assembly (WS2) is verified complete.
+2. A receiver whose class may carry **cross-package extensions** stays classified
+   `Open` (Rule 1) until cross-package extension metadata is loaded (WS3 / the
+   ADR 0070 amendment). Until then, a fully-known *intra-project* surface is **not**
+   sufficient to call such a receiver `ClosedComplete`, or the checker would emit a
+   `Hint` for a dependency-contributed method that genuinely exists.
+
+In other words: **suppression is removed per-receiver only when the checker can
+prove its surface is complete for *that* receiver**, not globally when "WS1 has
+landed." A feature flag gates the removal until the corresponding workstream is
+verified, so a partially-landed epic never regresses diagnostics.
+
 ### Rule 3 — Escalation is opt-in and per-category
 
 Promotion of soft diagnostics to build-failing `Error`s is never the default. It
@@ -134,6 +174,26 @@ is requested explicitly:
   escalation. This ADR reserves the policy seam but does not define the schema —
   that is a follow-up once project scope lands and real false-positive rates are
   known.
+
+**Precedence (so the sources never silently conflict).** A `Dnu` diagnostic's
+final disposition is resolved most-specific-wins, in this order:
+
+1. **Site-level `@expect dnu` / `@expect type`** (ADR 0077) — always wins; an
+   explicit acknowledgement at the call site silences it regardless of any global
+   setting. (A site that resolves after WS1/WS2 makes its `@expect` *stale*; ADR
+   0077 already warns on stale directives, so improved resolution self-reports the
+   now-dead annotation — no new mechanism needed.)
+2. **Per-category project table** (`beamtalk.toml`, future) — sets the category's
+   base severity for the package (`ignore` / `hint` / `warn` / `error`).
+3. **Rule 1 default** — the completeness-ladder severity, when nothing above
+   applies.
+
+`--warnings-as-errors` is a **final promotion pass**, not a competing base
+severity: after 1–3 resolve a diagnostic to `Warning`/`Hint`, the flag promotes it
+to `Error` (minus the gradual-migration exclusions). So `[lints] dnu = "ignore"`
+removes the diagnostic before the flag ever sees it, while `[lints] dnu = "warn"`
+plus `--warnings-as-errors` yields an error. This keeps the flag's meaning ("treat
+what remains as fatal") intact and orthogonal to the base policy.
 
 ### What a user sees
 
@@ -237,16 +297,26 @@ as intentionally dynamic.
 - 🎨 **Language designer:** "Severity tracking certainty argues that *maximum*
   certainty (closed + complete) deserves the higher soft level."
 
-This is the strongest competitor and the tension is real: a *complete closed*
-receiver is arguably as provable as the union case that already warns. It was not
-chosen as the default because (a) a single concrete receiver still has the
-`perform:`/extension/hot-reload escape that a frozen union analysis less commonly
-hits in practice, (b) raising the floor the moment project-scope lands would make
-WS1/WS2 *feel* like a regression ("why did my hints become warnings?"), violating
-Rule 2's promise that precision ≠ strictness, and (c) anyone who wants this can
-get it per-category via Rule 3. If post-WS1 false-positive rates prove low, the
-default ceiling for the closed-complete case can be revisited — the policy seam
-(Rule 3) is where that lever lives.
+This is the strongest competitor, and the tension is real — honestly, a complete
+closed receiver is *exactly as provable* as the union case that already warns. The
+distinction is **not** provability (claiming otherwise would be inconsistent: both
+rest on "every candidate class is closed and none responds"). The distinction is
+**blast radius and frequency**:
+
+- The "no union member responds" case is **rare** — it requires the user to have
+  written branching control flow whose arms disagree, then send a selector none of
+  them has. When it fires it is almost always a genuine bug, so `Warning` is
+  low-noise.
+- A bare send to a single concrete receiver is the **most common shape in the
+  language**. Making it `Warning`-by-default the instant WS1/WS2 land would convert
+  a large body of today's quiet hints into warnings overnight — the precise
+  "project scope feels like a regression" outcome Rule 2 promises to avoid.
+
+So the union `Warning` is retained as an existing, *narrow* aggressive case, and
+the common single-receiver case stays `Hint` — with escalation available
+per-category (Rule 3) for teams that want union-level strictness everywhere. If
+post-WS1 false-positive rates prove low, raising the closed-complete ceiling is a
+one-line change to that table, not a re-decision of this ADR.
 
 ### Option C — Hard error when statically complete (Gleam-style)
 
@@ -285,6 +355,18 @@ Rejected. It is an incompleteness workaround, not a policy: it silences *real*
 typos whenever a class happens to have an out-of-file parent. Project scope (WS2)
 removes the incompleteness, so the workaround should go with it (Rule 2), not
 calcify into the contract.
+
+### Route `Dnu` to the `Lint` channel instead of `Hint`
+A genuine option: emit unresolved-selector diagnostics at `Severity::Lint`
+(invisible in a normal `beamtalk build`, surfaced only by `beamtalk lint`) rather
+than `Hint` (always shown as an informational note). Lint gives a *stronger*
+opt-in separation than Hint — the default build is completely silent on
+unresolved sends. Rejected as the default because the typo-catching value of the
+hint is highest *in the editor, inline, as you type* (LSP surfaces `Hint`s;
+`Lint` implies a separate command run), and Smalltalkers expect the tool to point
+at a suspicious send immediately, not on a deferred lint pass. `Lint` remains
+available as a per-category choice under Rule 3 for teams who want unresolved
+sends out of the default build entirely.
 
 ### One global strictness flag only (no categories)
 Rejected. `UnresolvedClass`/`UnresolvedFfi`/`ArityMismatch` already need
@@ -333,6 +415,24 @@ This ADR is policy; the code changes ride the BT-2251 workstreams.
   `--warnings-as-errors` now; the `beamtalk.toml` per-category table (Rule 3) is a
   separate, later issue.
 - **No runtime/codegen changes.**
+
+## Migration Path
+
+This ADR mostly codifies existing behaviour, so most code needs no change. Two
+transitions warrant care:
+
+- **Teams already running `--warnings-as-errors`** will see *new* build failures
+  when WS1/WS2 land — not because their code changed, but because improved
+  resolution surfaces previously-*suppressed* true positives (e.g. a real typo on a
+  class that happened to have a cross-file parent). This is a genuine, if benign,
+  tightening. Mitigation: WS1/WS2 ship behind the Rule 2 sequencing flag, and the
+  workstream that flips it should call out the expected new diagnostics in its
+  changelog so CI breakage is anticipated, not mysterious. Affected sites are fixed
+  by correcting the selector or adding `@expect dnu` where the send is intentionally
+  dynamic.
+- **Stale `@expect` directives**: a site that becomes resolvable after WS1/WS2 has a
+  now-unnecessary `@expect`; ADR 0077's stale-directive warning flags these
+  automatically, so cleanup is mechanical and self-surfacing.
 
 ## References
 - Related issues: BT-2251 (epic: project-scoped compilation & type-checking;

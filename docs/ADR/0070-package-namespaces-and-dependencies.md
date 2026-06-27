@@ -265,37 +265,68 @@ package boundaries.
 
 **Decision:** a package's compiled interface also records the **extensions it
 contributes**, through the same channel its classes already use — no new artifact
-(consistent with reusing existing machinery; see ADR 0026 / ADR 0098). The `.app`
-`{env, …}` metadata gains an `extensions` list, mirrored in the host class's
-`__beamtalk_meta/0` where one exists:
+(consistent with reusing existing machinery; see ADR 0026 / ADR 0098).
+
+**Single source of truth.** The contributing module's `__beamtalk_meta/0` is the
+**canonical** carrier — extension records gain an `extensions` key there, alongside
+the existing `method_info` (the same function the runtime xref index and class
+metadata already use, ADR 0050 / 0098). The `.app` `{env, …}` metadata carries only
+a lightweight **index** — *which modules contribute extensions to which target
+classes* — so the consumer's build knows which `__beamtalk_meta/0` functions to
+read; it does **not** duplicate the type signatures. This avoids the `.app`-vs-`.beam`
+divergence that an independent `.app` copy would invite (a partial recompile or
+hand-edited `.app` can disagree with the actual `register/5` calls in the module).
+Each extension record:
 
 ```erlang
-{env, [
-  {classes, [ ... ]},
-  {extensions, [
-    #{target   => 'String',        % class (or 'String class' for class-side)
-      selector => 'shoutLouder',
-      package  => 'shout',         % contributing package (ADR 0066 Owner)
-      arity    => 0,
-      param_types  => [],          % None => Dynamic (gradual)
-      return_type  => 'String'     % None => Dynamic
-    }
-  ]}
-]}
+% in the contributing module's __beamtalk_meta/0:
+extensions => [
+  #{target   => 'String',        % class (or 'String class' for class-side)
+    selector => 'shoutLouder',
+    package  => 'shout',         % contributing package (ADR 0066 Owner)
+    arity    => 0,
+    param_types  => [],          % [] here; None => Dynamic (gradual, ADR 0075)
+    return_type  => 'String'     % None => Dynamic
+  }
+]
 ```
 
-On dependency resolution the consumer's checker loads these alongside the
-dependency's `ClassInfo` and feeds them into the **same** `register_extensions`
-path used for intra-project extensions (BT-2251 WS1), so a dependency's extension
-becomes part of the target class's statically-visible method surface. Diagnostic
-severity for any still-unresolved selector follows ADR 0100 (open-world policy) —
-extensions add resolution; they do not change the severity rule.
+On dependency resolution the consumer's checker reads these records and feeds them
+into the **same** `register_extensions` path used for intra-project extensions
+(BT-2251 WS1) — carrying the contributing `package` as the ADR 0066 `Owner`, so a
+cross-package extension is never miscounted as project-owned (relevant once the §9
+visibility story lands). A dependency's extension thus becomes part of the target
+class's statically-visible method surface. Diagnostic severity for any
+still-unresolved selector follows ADR 0100 (open-world policy) — extensions add
+resolution; they do not change the severity rule.
 
 Scope and boundaries:
 
-- **Extensions are exported by default**, like classes (visibility is the ADR 0070
-  §9 follow-up; when it lands, extensions inherit the same export rules as their
-  contributing package's classes).
+- **Extensions are always exported — visibility cannot hide them from the runtime.**
+  Unlike a class (which a package may keep `internal`, ADR 0071), an extension adds
+  a method to a *target* class the contributing package does not own, and BEAM
+  dispatch makes that method callable by **any** caller at runtime. So the interface
+  exports every contributed extension unconditionally; there is no coherent
+  "package-private extension" (it would be a checker-only fiction the runtime does
+  not enforce). The §9 visibility follow-up may still choose to *hide an extension
+  from completion/checker suggestions*, but that is explicitly advisory — the method
+  is dispatchable regardless, and the ADR 0100 policy must not treat a hidden
+  extension's selector as a hard error.
+- **Conflicting extensions are surfaced, not silently merged.** If two dependencies
+  both contribute `String >> toJson`, the consumer's checker now holds two records
+  for the same `{target, side, selector}` key — the static analogue of ADR 0066's
+  runtime last-writer-wins. The checker MUST reuse the existing
+  `ExtensionConflictDetector` (ADR 0066 Phase 3) to report a cross-package extension
+  conflict diagnostic at the consumer's compile time (consistent with §3 treating
+  class collisions as errors, not silent shadowing), rather than arbitrarily picking
+  one signature. If the two signatures *differ*, the conflict is reported with both
+  so the divergence is visible; the runtime behaviour (which fun wins) remains
+  ADR 0066's load-order concern.
+- **An extension calling its own package's `internal` methods** (ADR 0071) still
+  works at runtime; the consumer sees only the extension's public signature, never
+  its body, so no cross-package reachability leak occurs — but any future
+  cross-package call-graph analysis must not treat such internal calls as public
+  edges.
 - **Protocol conformance stays use-site computed**, unchanged — the structural-
   conformance argument above still holds; only the *extension method surface* is
   serialised, not derived conformance facts.
@@ -303,6 +334,16 @@ Scope and boundaries:
   type signature; they are recorded with `Dynamic` param/return like any
   unannotated extension, consistent with the runtime xref index's
   known-present-but-unindexable handling (ADR 0087).
+- **Type encoding is not new.** Extension `param_types` / `return_type` use the
+  *same* serialization as class `method_info` (including generics / type params,
+  ADR 0068 / 0075). Extensions inherit whatever that encoding supports — no
+  separate type-serialization strategy is introduced, so a consumer unifies
+  extension and method signatures through one decoder.
+- **Sequencing (with ADR 0100 Rule 2).** Until a consumer's build actually loads a
+  dependency's extension records, a receiver of that dependency's type must stay
+  classified `Open`, not `ClosedComplete` — otherwise the checker emits a false
+  `Dnu` hint for a real cross-package extension. WS3 (this amendment) must therefore
+  precede removing the open-world suppression for cross-package receivers.
 - This is the **static** complement to the runtime write path (BT-2250) and the
   live xref index (ADR 0087 / BT-2228): the same extension facts, made visible to a
   *consumer's compiler* rather than only to the running image.
