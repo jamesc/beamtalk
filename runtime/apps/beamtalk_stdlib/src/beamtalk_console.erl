@@ -76,6 +76,11 @@ story; inside the REPL prefer `Transcript`.
 %% selectors before dispatch, so `print:` arrives as `print`, etc.
 -export([print/1, printLine/1, error/1, errorLine/1, readLine/1]).
 
+-ifdef(TEST).
+%% Expose pure internal helpers for EUnit testing.
+-export([closed_device/1, to_binary/1, strip_eol/1]).
+-endif.
+
 %%% ============================================================================
 %%% Public API — write side
 %%% ============================================================================
