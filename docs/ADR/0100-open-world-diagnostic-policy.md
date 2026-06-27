@@ -115,6 +115,13 @@ never misreported:
   dependency type whose *extension* metadata has not been loaded (pre-WS3, see
   ADR 0070 amendment). The checker must treat "I have the class but maybe not all
   its extensions" as `Open`, not `ClosedComplete` (see Rule 2 sequencing).
+  Note the scope this implies: because *any* class — including stdlib `String`,
+  `Integer`, `Array` — can be extended by a dependency, until WS3 loads
+  cross-package extension metadata the only receivers that reach `ClosedComplete`
+  are classes the checker can confirm are dependency-extension-free (in practice,
+  classes local to a package with no dependencies). So WS1/WS2 alone deliver the
+  `Hint` precision benefit only for local, dependency-free types; the full benefit
+  for stdlib and imported types waits on WS3. This is intentional, not a gap.
 
 Because severity hinges entirely on this classification, the
 `Dynamic`/`Open`/`ClosedComplete` decision MUST be made in **one shared place** so
@@ -192,10 +199,11 @@ final disposition is resolved most-specific-wins, in this order:
 
 `--warnings-as-errors` is a **final promotion pass**, not a competing base
 severity: after 1–3 resolve a diagnostic to `Warning`/`Hint`, the flag promotes it
-to `Error` (minus the gradual-migration exclusions). So `[lints] dnu = "ignore"`
-removes the diagnostic before the flag ever sees it, while `[lints] dnu = "warn"`
-plus `--warnings-as-errors` yields an error. This keeps the flag's meaning ("treat
-what remains as fatal") intact and orthogonal to the base policy.
+to `Error` (minus the gradual-migration exclusions). So a `dnu = "ignore"` table
+entry removes the diagnostic before the flag ever sees it, while `dnu = "warn"`
+plus `--warnings-as-errors` yields an error (the `beamtalk.toml` keys here are
+illustrative — the actual schema is deferred, per Rule 3). This keeps the flag's
+meaning ("treat what remains as fatal") intact and orthogonal to the base policy.
 
 ### What a user sees
 
