@@ -8,8 +8,7 @@
 TestCase subclass: PrintableProtocolTest
 
   // --- Protocol registration ---
-  testPrintableIsRegistered =>
-    self assert: (Protocol isProtocol: #Printable)
+  testPrintableIsRegistered => self assert: (Protocol isProtocol: #Printable)
 
   testRequiredMethods =>
     methods := Protocol requiredMethods: #Printable
@@ -21,29 +20,23 @@ TestCase subclass: PrintableProtocolTest
     self assert: (Protocol allProtocols includes: #Printable)
 
   // --- Conforming classes (have both asString and printString) ---
-  testIntegerConforms =>
-    self assert: (Integer conformsTo: #Printable)
+  testIntegerConforms => self assert: (Integer conformsTo: #Printable)
 
   testFloatConforms => self assert: (Float conformsTo: #Printable)
 
-  testStringConforms =>
-    self assert: (String conformsTo: #Printable)
+  testStringConforms => self assert: (String conformsTo: #Printable)
 
-  testCharacterConforms =>
-    self assert: (Character conformsTo: #Printable)
+  testCharacterConforms => self assert: (Character conformsTo: #Printable)
 
-  testSymbolConforms =>
-    self assert: (Symbol conformsTo: #Printable)
+  testSymbolConforms => self assert: (Symbol conformsTo: #Printable)
 
-  testDateTimeConforms =>
-    self assert: (DateTime conformsTo: #Printable)
+  testDateTimeConforms => self assert: (DateTime conformsTo: #Printable)
 
   testListConforms => self assert: (List conformsTo: #Printable)
 
   testArrayConforms => self assert: (Array conformsTo: #Printable)
 
-  testDictionaryConforms =>
-    self assert: (Dictionary conformsTo: #Printable)
+  testDictionaryConforms => self assert: (Dictionary conformsTo: #Printable)
 
   testSetConforms => self assert: (Set conformsTo: #Printable)
 
@@ -51,21 +44,18 @@ TestCase subclass: PrintableProtocolTest
 
   testTupleConforms => self assert: (Tuple conformsTo: #Printable)
 
-  testBinaryConforms =>
-    self assert: (Binary conformsTo: #Printable)
+  testBinaryConforms => self assert: (Binary conformsTo: #Printable)
 
   testPidConforms => self assert: (Pid conformsTo: #Printable)
 
   testPortConforms => self assert: (Port conformsTo: #Printable)
 
-  testReferenceConforms =>
-    self assert: (Reference conformsTo: #Printable)
+  testReferenceConforms => self assert: (Reference conformsTo: #Printable)
 
   testCompiledMethodConforms =>
     self assert: (CompiledMethod conformsTo: #Printable)
 
-  testCollectionConforms =>
-    self assert: (Collection conformsTo: #Printable)
+  testCollectionConforms => self assert: (Collection conformsTo: #Printable)
 
   // --- Conformance via protocols method ---
   testIntegerProtocolsIncludesPrintable =>
