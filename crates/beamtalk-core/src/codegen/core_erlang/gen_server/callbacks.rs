@@ -568,9 +568,11 @@ impl CoreErlangGenerator {
                                 leaf::var(err_var1),
                                 ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                 line(),
+                                // BT-2717: terminating path — state is discarded, but keep
+                                // the cleaned binding for consistency with the success arm.
                                 "{'stop', ",
                                 leaf::var(fmt_var),
-                                ", InitNewState}",
+                                ", InitCleanState}",
                             ]
                         ),
                         line(),
@@ -1487,7 +1489,19 @@ impl CoreErlangGenerator {
                             docvec![
                                 line(),
                                 "<{'reply', _Result, NewState}> when 'true' ->",
-                                nest(INDENT, docvec![line(), "{'noreply', NewState}",]),
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        // BT-2717: handle_info is an outermost state-commit
+                                        // boundary too — a Server `handleInfo:` that threads an
+                                        // outer local through a control-flow desugar must not
+                                        // persist `__local__` temps into the committed state.
+                                        line(),
+                                        "let CleanInfoNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
+                                        line(),
+                                        "{'noreply', CleanInfoNewState}",
+                                    ]
+                                ),
                                 line(),
                                 // BT-1822: Destructure error triple to log stacktrace
                                 "<{'error', {InfoType, InfoReason, InfoStacktrace}, _ErrState}> when 'true' ->",

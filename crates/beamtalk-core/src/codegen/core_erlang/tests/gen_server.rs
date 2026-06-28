@@ -2613,6 +2613,42 @@ Actor subclass: Counter
 }
 
 #[test]
+fn test_bt2717_handle_info_strips_local_temps_for_server_subclass() {
+    // BT-2717: a Server subclass's handle_info is an outermost state-commit boundary
+    // too — a `handleInfo:` that threads an outer local through a control-flow desugar
+    // must not persist `__local__` temps into the committed gen_server state.
+    let src = "
+Server subclass: TickServer
+  state: count = 0
+  handleInfo: msg =>
+    msg == #tick ifTrue: [self.count := self.count + 1]
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("tick_server"))
+        .expect("codegen should succeed")
+        .code;
+
+    // Sanity: this is the Server-subclass handle_info (dispatches handleInfo:), not
+    // the plain Actor delegate stub.
+    assert!(
+        code.contains("'safe_dispatch'('handleInfo:', [Msg], State)"),
+        "expected a Server-subclass handle_info dispatching handleInfo:. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "let CleanInfoNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"
+        ),
+        "handle_info must strip __local__ threading temps before committing the \
+         post-handleInfo: state. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'noreply', CleanInfoNewState}"),
+        "handle_info must commit the cleaned state. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_bt1005_explicit_annotation_not_overwritten_by_writeback() {
     // BT-1005: An explicitly annotated method must NOT be changed by the writeback pass.
     let src = "
