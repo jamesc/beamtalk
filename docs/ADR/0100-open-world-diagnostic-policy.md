@@ -426,11 +426,11 @@ This ADR is policy; the code changes ride the BT-2251 workstreams.
   separate, later issue.
 - **No runtime/codegen changes.**
 - **Coordination with ADR 0101 (`native:` for stateless Objects):** the
-  receiver-knowledge scan must count bodyless `native:`-delegated method
-  signatures as *declared methods*. A `native:` Object is `ClosedComplete`
+  receiver-knowledge scan must count `self delegate` `native:` methods as
+  *declared methods*. A `native:` Object is `ClosedComplete`
   (no extension hook → a DNU hint on an unknown selector is correct), but its
-  delegated methods have no body, so a naive "has a body?" check would treat
-  them as missing and emit false `Dnu` hints. `@primitive` classes (including
+  delegated methods have only a `self delegate` sentinel body, so a naive
+  "has a real body?" check would treat them as missing and emit false `Dnu` hints. `@primitive` classes (including
   the reflection facades) remain `Open`. See ADR 0101 § Migration Path.
 
 ## Migration Path
