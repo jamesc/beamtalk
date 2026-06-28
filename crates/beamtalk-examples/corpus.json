@@ -13975,6 +13975,38 @@
       "explanation": "BT-44, BT-75: Tests List methods — creation, literals, mutation (add:, remove:), iteration (do:, collect:, select:, reject:, inject:into:), sort, advanced methods (zip:, groupBy:, partition:), and new methods (++, from:to:, indexOf:, eachWithIndex:, intersperse:)"
     },
     {
+      "id": "stdlib-test-comparison-operator-overload-test",
+      "title": "ComparisonOperatorOverloadTest",
+      "category": "stdlib-tests",
+      "tags": [
+        "ComparisonOperatorOverloadTest",
+        "TestCase",
+        "assign",
+        "assignment",
+        "comparison_operator_overload_test",
+        "constructor",
+        "create",
+        "extends",
+        "inherit",
+        "inheritance",
+        "instantiate",
+        "mutate",
+        "mutation",
+        "object",
+        "set",
+        "subclassing",
+        "testCharAndStringComparisonUnchanged",
+        "testNoOperatorRaisesDoesNotUnderstand",
+        "testNumericComparisonUnchanged",
+        "testUserTypeGreaterOrEqualDispatches",
+        "testUserTypeGreaterThanDispatches",
+        "testUserTypeLessOrEqualDispatches",
+        "testUserTypeLessThanDispatches"
+      ],
+      "source": "// BT-2710: Phase 2 — comparison operators (`< > <= >=`) are dispatchable as real\n// messages, so a user value-type can overload them and have `aMoney < bMoney`\n// dispatch to `Money>><` (receiver decides). Unlike a bare `erlang:'<'` — which\n// defines a total order over *every* term and would silently term-order an\n// object — the codegen guard discriminates on \"is this a Beamtalk object?\", so\n// a type with no comparison operator falls through to a `does_not_understand`\n// DNU rather than a silently-wrong term-order result.\n//\n// The `Money` and `Widget` value-types live in `fixtures/` (one class per file).\n\nTestCase subclass: ComparisonOperatorOverloadTest\n\n  /// `aMoney < bMoney` dispatches to `Money>><`.\n  testUserTypeLessThanDispatches =>\n    a := (Money new) withCents: 150\n    b := (Money new) withCents: 250\n    self assert: (a < b)\n    self deny: (b < a)\n\n  /// `aMoney > bMoney` dispatches to `Money>>>`.\n  testUserTypeGreaterThanDispatches =>\n    a := (Money new) withCents: 500\n    b := (Money new) withCents: 175\n    self assert: (a > b)\n    self deny: (b > a)\n\n  /// `aMoney <= bMoney` dispatches to `Money>><=` (true at the boundary).\n  testUserTypeLessOrEqualDispatches =>\n    a := (Money new) withCents: 200\n    b := (Money new) withCents: 200\n    self assert: (a <= b)\n    self assert: (a >= b)\n\n  /// `aMoney >= bMoney` dispatches to `Money>>>=`.\n  testUserTypeGreaterOrEqualDispatches =>\n    a := (Money new) withCents: 300\n    b := (Money new) withCents: 150\n    self assert: (a >= b)\n    self deny: (b >= a)\n\n  /// Numeric comparison still works (the bare-BIF fast path is unchanged).\n  testNumericComparisonUnchanged =>\n    self assert: (2 < 3)\n    self assert: (10 > 4)\n    self assert: (5 <= 5)\n    self assert: (7 >= 7)\n\n  /// Character and string comparison still take the bare comparison BIF.\n  testCharAndStringComparisonUnchanged =>\n    self assert: ($a < $b)\n    self assert: (\"abc\" < \"abd\")\n\n  /// `<` on a type with no comparison operator raises a DNU, not a silently\n  /// wrong term-order result. `w` is statically a `Widget` (which defines no\n  /// `<`), so the checker also flags this at compile time — `@expect dnu`\n  /// acknowledges that hint while the assertion verifies the runtime behaviour.\n  testNoOperatorRaisesDoesNotUnderstand =>\n    w := (Widget new) withSize: 5\n    @expect dnu\n    self should: [w < 1] raise: #does_not_understand",
+      "explanation": "BT-2710: Phase 2 — comparison operators (`< > <= >=`) are dispatchable as real messages, so a user value-type can overload them and have `aMoney < bMoney` dispatch to `Money>><` (receiver decides). Unlike a bare `erlang:'<'` — which defines a total order over *every* term and would silently term-order an object — the codegen guard discriminates on \"is this a Beamtalk object?\", so a type with no comparison operator falls through to a `does_not_understand` DNU rather than a silently-wrong term-order result.  The `Money` and `Widget` value-types live in `fixtures/` (one class per file)."
+    },
+    {
       "id": "stdlib-test-compiled-method-test",
       "title": "CompiledMethodTest",
       "category": "stdlib-tests",
@@ -14955,7 +14987,7 @@
         "testErlangRespondsToDisplayString",
         "testErlangRespondsToIsNil"
       ],
-      "source": "// ErlangModule and Erlang Object-inheritance tests (BT-1763)\n//\n// After removing the module_for_value overrides for ErlangModule and Erlang,\n// dispatch goes through the compiled bt@stdlib@erlang_module and bt@stdlib@erlang\n// modules. These tests verify that Object-inherited methods work correctly\n// and that Erlang FFI dispatch is preserved.\n\nTestCase subclass: ErlangObjectInheritanceTest\n  field: proxy\n  field: e\n\n  // proxy = ErlangModule for `lists`; e = the Erlang class object itself.\n  // `e` is stored in a field (not used bare as `Erlang <selector>`) so that\n  // dispatch goes through dynamic lookup instead of the compile-time static\n  // path that always creates an ErlangModule proxy.\n  setUp => (self withProxy: Erlang lists) withE: Erlang\n\n  // === ErlangModule: Object-inherited methods ===\n  testErlangModuleDisplayString =>\n    self assert: (self.proxy displayString isKindOf: String)\n\n  // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.\n  testErlangModuleInspect =>\n    self assert: (self.proxy inspect isKindOf: Inspector)\n\n  testErlangModuleIsNilReturnsFalse => self deny: self.proxy isNil\n\n  testErlangModuleRespondsToDisplayString =>\n    self assert: (self.proxy respondsTo: #displayString)\n\n  testErlangModuleRespondsToIsNil =>\n    self assert: (self.proxy respondsTo: #isNil)\n\n  testErlangModuleHash => self assert: (self.proxy hash isKindOf: Integer)\n\n  // === ErlangModule: FFI dispatch still works ===\n  testErlangModuleKeywordDispatch =>\n    self assert: (self.proxy reverse: #(3, 2, 1)) equals: #(1, 2, 3)\n\n  testErlangModuleUnaryDispatch => self assert: (Erlang erlang) node notNil\n\n  // === Erlang: Object-inherited methods ===\n  // Note: Must use dynamic dispatch (via variable or perform:) because\n  // compile-time `Erlang <selector>` always creates an ErlangModule proxy.\n  // self.e holds the Erlang class object and provides the needed indirection.\n  testErlangDisplayString =>\n    self assert: (self.e displayString isKindOf: String)\n\n  // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.\n  testErlangInspect => self assert: (self.e inspect isKindOf: Inspector)\n\n  testErlangIsNilReturnsFalse => self deny: self.e isNil\n\n  testErlangRespondsToDisplayString =>\n    self assert: (self.e respondsTo: #displayString)\n\n  testErlangRespondsToIsNil => self assert: (self.e respondsTo: #isNil)\n\n  testErlangHash => self assert: (self.e hash isKindOf: Integer)\n\n  // === Erlang: module lookup still works ===\n  testErlangModuleLookup =>\n    self assert: (Erlang lists) class equals: ErlangModule\n\n  testErlangModuleLookupAndDispatch =>\n    self assert: (Erlang lists reverse: #(1, 2)) equals: #(2, 1)",
+      "source": "// ErlangModule and Erlang Object-inheritance tests (BT-1763)\n//\n// After removing the module_for_value overrides for ErlangModule and Erlang,\n// dispatch goes through the compiled bt@stdlib@erlang_module and bt@stdlib@erlang\n// modules. These tests verify that Object-inherited methods work correctly\n// and that Erlang FFI dispatch is preserved.\n\nTestCase subclass: ErlangObjectInheritanceTest\n  field: proxy\n  field: e\n\n  // proxy = ErlangModule for `lists`; e = the Erlang class object itself.\n  // `e` is stored in a field (not used bare as `Erlang <selector>`) so that\n  // dispatch goes through dynamic lookup instead of the compile-time static\n  // path that always creates an ErlangModule proxy.\n  setUp => (self withProxy: Erlang lists) withE: Erlang\n\n  // === ErlangModule: Object-inherited methods ===\n  testErlangModuleDisplayString =>\n    self assert: (self.proxy displayString isKindOf: String)\n\n  // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.\n  testErlangModuleInspect =>\n    self assert: (self.proxy inspect isKindOf: Inspector)\n\n  testErlangModuleIsNilReturnsFalse => self deny: self.proxy isNil\n\n  testErlangModuleRespondsToDisplayString =>\n    self assert: (self.proxy respondsTo: #displayString)\n\n  testErlangModuleRespondsToIsNil =>\n    self assert: (self.proxy respondsTo: #isNil)\n\n  testErlangModuleHash => self assert: (self.proxy hash isKindOf: Integer)\n\n  // === ErlangModule: FFI dispatch still works ===\n  testErlangModuleKeywordDispatch =>\n    self assert: (self.proxy reverse: #(3, 2, 1)) equals: #(1, 2, 3)\n\n  testErlangModuleUnaryDispatch =>\n    self assert: ((Erlang erlang) node isKindOf: Symbol)\n\n  // === Erlang: Object-inherited methods ===\n  // Note: Must use dynamic dispatch (via variable or perform:) because\n  // compile-time `Erlang <selector>` always creates an ErlangModule proxy.\n  // self.e holds the Erlang class object and provides the needed indirection.\n  testErlangDisplayString =>\n    self assert: (self.e displayString isKindOf: String)\n\n  // ADR 0095 Phase 3 (BT-2504): inspect returns an Inspector cursor, not a String.\n  testErlangInspect => self assert: (self.e inspect isKindOf: Inspector)\n\n  testErlangIsNilReturnsFalse => self deny: self.e isNil\n\n  testErlangRespondsToDisplayString =>\n    self assert: (self.e respondsTo: #displayString)\n\n  testErlangRespondsToIsNil => self assert: (self.e respondsTo: #isNil)\n\n  testErlangHash => self assert: (self.e hash isKindOf: Integer)\n\n  // === Erlang: module lookup still works ===\n  testErlangModuleLookup =>\n    self assert: (Erlang lists) class equals: ErlangModule\n\n  testErlangModuleLookupAndDispatch =>\n    self assert: (Erlang lists reverse: #(1, 2)) equals: #(2, 1)",
       "explanation": "ErlangModule and Erlang Object-inheritance tests (BT-1763)  After removing the module_for_value overrides for ErlangModule and Erlang, dispatch goes through the compiled bt@stdlib@erlang_module and bt@stdlib@erlang modules. These tests verify that Object-inherited methods work correctly and that Erlang FFI dispatch is preserved."
     },
     {
@@ -19252,6 +19284,10 @@
         "*",
         "+",
         "-",
+        "<",
+        "<=",
+        ">",
+        ">=",
         "Money",
         "Value",
         "async",
@@ -19274,8 +19310,8 @@
         "subclassing",
         "value"
       ],
-      "source": "// BT-2709 fixture: a tiny value-type money amount (in cents) that overloads the\n// arithmetic operators `+ - *`, so `aMoney + bMoney` dispatches to `Money>>+`.\n\nValue subclass: Money\n  field: cents :: Integer = 0\n\n  /// The amount in cents.\n  cents -> Integer => self.cents\n\n  /// Add two money amounts (receiver-dispatched `+`).\n  + other :: Money -> Money => (Money new) withCents: self.cents + other cents\n\n  /// Subtract two money amounts.\n  - other :: Money -> Money => (Money new) withCents: self.cents - other cents\n\n  /// Scale a money amount by an integer factor.\n  * factor :: Integer -> Money => (Money new) withCents: self.cents * factor",
-      "explanation": "BT-2709 fixture: a tiny value-type money amount (in cents) that overloads the arithmetic operators `+ - *`, so `aMoney + bMoney` dispatches to `Money>>+`."
+      "source": "// BT-2709/BT-2710 fixture: a tiny value-type money amount (in cents) that\n// overloads the arithmetic operators `+ - *` (so `aMoney + bMoney` dispatches\n// to `Money>>+`) and the comparison operators `< > <= >=` (so `aMoney < bMoney`\n// dispatches to `Money>><` rather than silently comparing by Erlang term-order).\n\nValue subclass: Money\n  field: cents :: Integer = 0\n\n  /// The amount in cents.\n  cents -> Integer => self.cents\n\n  /// Add two money amounts (receiver-dispatched `+`).\n  + other :: Money -> Money => (Money new) withCents: self.cents + other cents\n\n  /// Subtract two money amounts.\n  - other :: Money -> Money => (Money new) withCents: self.cents - other cents\n\n  /// Scale a money amount by an integer factor.\n  * factor :: Integer -> Money => (Money new) withCents: self.cents * factor\n\n  /// Less than, by cents (receiver-dispatched `<`).\n  < other :: Money -> Boolean => self.cents < other cents\n\n  /// Greater than, by cents.\n  > other :: Money -> Boolean => self.cents > other cents\n\n  /// Less than or equal, by cents.\n  <= other :: Money -> Boolean => self.cents <= other cents\n\n  /// Greater than or equal, by cents.\n  >= other :: Money -> Boolean => self.cents >= other cents",
+      "explanation": "BT-2709/BT-2710 fixture: a tiny value-type money amount (in cents) that overloads the arithmetic operators `+ - *` (so `aMoney + bMoney` dispatches to `Money>>+`) and the comparison operators `< > <= >=` (so `aMoney < bMoney` dispatches to `Money>><` rather than silently comparing by Erlang term-order)."
     },
     {
       "id": "stdlib-test-fixtures-multi-expr-calc",

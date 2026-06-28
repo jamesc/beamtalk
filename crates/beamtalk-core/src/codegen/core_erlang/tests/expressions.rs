@@ -234,10 +234,102 @@ fn test_arith_guard_for_self_in_non_numeric_class() {
     );
 }
 
+// BT-2710: comparison operators (`< > <= >=`) are dispatchable messages. The
+// bare-BIF fast path holds for statically-comparable receivers (numeric / char
+// / string literals, `self` in Integer/Float/Character/String, and
+// Integer/Float/Number/Character/String params); everything else gets a runtime
+// `is_object` guard (NOT `is_number`) that dispatches on objects and keeps the
+// bare comparison BIF for primitives.
+
 #[test]
-fn test_comparison_op_stays_bare_phase1() {
+fn test_comparison_bare_bif_for_literal_receivers() {
+    // Numeric, character, and string literals all keep the bare comparison BIF.
+    for (left, erl) in [
+        (
+            Expression::Literal(Literal::Integer(3), Span::new(0, 1)),
+            "<",
+        ),
+        (
+            Expression::Literal(Literal::Character('a'), Span::new(0, 2)),
+            "<",
+        ),
+        (
+            Expression::Literal(Literal::String("x".into()), Span::new(0, 3)),
+            "<",
+        ),
+    ] {
+        let mut generator = CoreErlangGenerator::new("test");
+        let right = vec![Expression::Literal(Literal::Integer(4), Span::new(5, 6))];
+        let output = generator
+            .generate_binary_op("<", &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains(&format!("call 'erlang':'{erl}'(")) && !output.contains("is_object"),
+            "literal receiver must skip the comparison guard; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_comparison_op_maps_to_erlang_le() {
+    // `<=` maps to Erlang `=<` on the bare fast path.
+    let mut generator = CoreErlangGenerator::new("test");
+    let left = Expression::Literal(Literal::Integer(3), Span::new(0, 1));
+    let right = vec![Expression::Literal(Literal::Integer(4), Span::new(5, 6))];
+    let output = generator
+        .generate_binary_op("<=", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert_eq!(output, "call 'erlang':'=<'(3, 4)");
+}
+
+#[test]
+fn test_comparison_bare_bif_for_self_in_comparable_class() {
     use crate::ast::Identifier;
-    // Phase 1 only message-dispatches `+ - * /`; comparison stays a bare BIF.
+    for class in ["Integer", "Float", "Character", "String"] {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator.set_class_identity(Some(util::ClassIdentity::new(class)));
+        let left = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
+        let right = vec![Expression::Identifier(Identifier::new(
+            "Other",
+            Span::new(7, 12),
+        ))];
+        let output = generator
+            .generate_binary_op(">", &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("call 'erlang':'>'(") && !output.contains("is_object"),
+            "`self > x` in {class} must be a bare BIF; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_comparison_bare_bif_for_comparable_param() {
+    use crate::ast::Identifier;
+    for ty in ["Integer", "Float", "Number", "Character", "String"] {
+        let mut generator = CoreErlangGenerator::new("test");
+        generator
+            .current_method_param_types
+            .insert("other".to_string(), ty.to_string());
+        let left = Expression::Identifier(Identifier::new("other", Span::new(0, 5)));
+        let right = vec![Expression::Literal(Literal::Integer(1), Span::new(8, 9))];
+        let output = generator
+            .generate_binary_op(">=", &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("call 'erlang':'>='(") && !output.contains("is_object"),
+            "`other >= 1` with other :: {ty} must be a bare BIF; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_comparison_guard_for_unknown_receiver() {
+    use crate::ast::Identifier;
     let mut generator = CoreErlangGenerator::new("test");
     let left = Expression::Identifier(Identifier::new("x", Span::new(0, 1)));
     let right = vec![Expression::Identifier(Identifier::new(
@@ -248,9 +340,47 @@ fn test_comparison_op_stays_bare_phase1() {
         .generate_binary_op("<", &left, &right)
         .unwrap()
         .to_pretty_string();
+    // Inverted guard (BT-2710): is_object → dispatch, else bare comparison BIF.
     assert!(
-        output.contains("call 'erlang':'<'(") && !output.contains("is_number"),
-        "comparison must stay a bare BIF in Phase 1; got: {output}"
+        output.contains("call 'beamtalk_primitive':'is_object'("),
+        "unknown comparison receiver must emit an is_object guard; got: {output}"
+    );
+    assert!(
+        !output.contains("is_number"),
+        "comparison guard must NOT use is_number; got: {output}"
+    );
+    assert!(
+        output.contains("call 'beamtalk_message_dispatch':'send'(") && output.contains("'<'"),
+        "guard must dispatch '<' as a message on the object arm; got: {output}"
+    );
+    assert!(
+        output.contains("call 'erlang':'<'("),
+        "guard must keep a bare comparison BIF on the primitive arm; got: {output}"
+    );
+    assert!(
+        !output.contains("try "),
+        "guard must not use try/catch; got: {output}"
+    );
+}
+
+#[test]
+fn test_comparison_guard_for_self_in_non_comparable_class() {
+    use crate::ast::Identifier;
+    // A user value-type overloading `<`: `self < other` must NOT be a bare BIF.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator.set_class_identity(Some(util::ClassIdentity::new("Money")));
+    let left = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
+    let right = vec![Expression::Identifier(Identifier::new(
+        "Other",
+        Span::new(7, 12),
+    ))];
+    let output = generator
+        .generate_binary_op("<", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'beamtalk_primitive':'is_object'("),
+        "`self < x` in a non-comparable class must be guarded; got: {output}"
     );
 }
 

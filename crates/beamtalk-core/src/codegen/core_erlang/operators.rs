@@ -12,6 +12,28 @@ use crate::ast::Expression;
 use crate::docvec;
 use crate::source_analysis::Span;
 
+/// BT-2709/BT-2710: Which runtime guard a dispatchable binary operator emits
+/// for an unknown/generic receiver. The two variants differ only in the guard
+/// predicate and which `case` branch dispatches vs. takes the bare BIF.
+#[derive(Clone, Copy)]
+enum OperatorGuard {
+    /// `+ - * /`: `is_number` → bare BIF; non-number → message dispatch.
+    Arithmetic,
+    /// `< > <= >=`: `is_object` → message dispatch; primitive → bare BIF.
+    Comparison,
+}
+
+impl OperatorGuard {
+    /// Returns `(predicate_module, predicate_fn, dispatch_on_true)` for the
+    /// guard. All three are static, so they are safe as `Document::Str` leaves.
+    fn predicate(self) -> (&'static str, &'static str, bool) {
+        match self {
+            Self::Arithmetic => ("erlang", "is_number", false),
+            Self::Comparison => ("beamtalk_primitive", "is_object", true),
+        }
+    }
+}
+
 impl CoreErlangGenerator {
     /// Generates code for binary operators.
     ///
@@ -74,17 +96,29 @@ impl CoreErlangGenerator {
             }
         };
 
-        // BT-2709: Arithmetic operators (`+ - * /`) are dispatchable messages so
-        // user value-types can overload them. When the receiver is *statically*
-        // known to be numeric (a numeric literal, `self` inside Integer/Float, or
-        // a `:: Integer/Float/Number`-annotated parameter), we keep the bare BIF
-        // fast path (zero cost — all stdlib hot arithmetic). Otherwise we emit a
-        // runtime `is_number` guard that selects the BIF for numbers and falls
-        // back to message dispatch for objects (so `aMoney + bMoney` reaches
-        // `Money>>+` and `vector + 5` raises a DNU rather than raw `badarith`).
-        // Comparison/`%`/`**` are not yet message-dispatched here (Phase 2+).
+        // BT-2709/BT-2710: Arithmetic (`+ - * /`) and comparison (`< > <= >=`)
+        // operators are dispatchable messages so user value-types can overload
+        // them. When the receiver is *statically* known to be a builtin (a
+        // literal, `self` inside a builtin class, or a suitably-annotated
+        // parameter) we keep the bare BIF fast path (zero cost — all stdlib hot
+        // paths). Otherwise we emit a runtime guard.
+        //
+        // The two guards differ in *predicate* and *branch order* (BT-2710):
+        //   * Arithmetic — `is_number`: non-numbers `badarith`, so number→BIF,
+        //     object→dispatch is the safe discriminator.
+        //   * Comparison — `is_object`: Erlang `<` is a total order over every
+        //     term and never raises, so a bare BIF on an object would *silently*
+        //     term-order it. The guard inverts to object→dispatch, builtin→BIF.
+        // `%`/`**`/equality are not message-dispatched here.
         let is_arithmetic = matches!(op, "+" | "-" | "*" | "/");
-        let guard_dispatch = is_arithmetic && !self.receiver_is_statically_numeric(left);
+        let is_comparison = matches!(op, "<" | ">" | "<=" | ">=");
+        let guard = if is_arithmetic && !self.receiver_is_statically_numeric(left) {
+            Some(OperatorGuard::Arithmetic)
+        } else if is_comparison && !self.receiver_is_statically_comparable(left) {
+            Some(OperatorGuard::Comparison)
+        } else {
+            None
+        };
 
         // BT-1937: Capture both operands in evaluation order. When either
         // operand produces an open let-chain (e.g., a class method self-send
@@ -97,8 +131,8 @@ impl CoreErlangGenerator {
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
 
-        let call_doc = if guard_dispatch {
-            self.guarded_arithmetic_doc(op, erlang_op, left_code, right_code)
+        let call_doc = if let Some(guard) = guard {
+            self.guarded_op_doc(guard, op, erlang_op, left_code, right_code)
         } else {
             // CLAUDE.md: Core Erlang fragments MUST use Document/docvec!, never
             // format!(). erlang_op is one of the static literals in the match
@@ -158,31 +192,110 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// BT-2709: Builds the runtime-guarded arithmetic dispatch for an
-    /// unknown/generic receiver, mirroring `generate_concat_op`'s `is_list` arm:
+    /// BT-2710: Whether `expr` is statically known to evaluate to a value with a
+    /// builtin total order, so the comparison fast path can skip the runtime
+    /// `is_object` guard and emit a bare comparison BIF.
+    ///
+    /// A broader set than [`Self::receiver_is_statically_numeric`]: bare
+    /// `erlang:'<'` is correct for *every* primitive-ordered type, so this also
+    /// accepts `Character`/`String` (both define `< <=` as `@primitive`) and
+    /// their literals — only Beamtalk objects need dispatch. Recognises:
+    /// * numeric / character / string literals,
+    /// * `self` inside a builtin comparable class
+    ///   (`Integer`/`Float`/`Character`/`String`),
+    /// * an identifier bound to a `:: Integer/Float/Number/Character/String`
+    ///   parameter, and
+    /// * a `self.<field>` read (kept bare exactly as the arithmetic path does —
+    ///   dispatching on value-type-valued fields is left to a follow-up).
+    pub(in crate::codegen::core_erlang) fn receiver_is_statically_comparable(
+        &self,
+        expr: &Expression,
+    ) -> bool {
+        use crate::ast::Literal;
+        match expr {
+            Expression::Literal(
+                Literal::Integer(_)
+                | Literal::Float(_)
+                | Literal::String(_)
+                | Literal::Character(_),
+                _,
+            ) => true,
+            Expression::Identifier(id) => {
+                if id.name == "self" {
+                    matches!(
+                        self.class_name().as_str(),
+                        "Integer" | "Float" | "Character" | "String"
+                    )
+                } else {
+                    self.param_is_comparable(&id.name)
+                }
+            }
+            Expression::FieldAccess { receiver, .. } => {
+                matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            }
+            _ => false,
+        }
+    }
+
+    /// BT-2709/BT-2710: Builds a runtime-guarded operator dispatch for an
+    /// unknown/generic receiver, mirroring `generate_concat_op`'s `is_list` arm.
+    /// One helper serves both arithmetic and comparison; the [`OperatorGuard`]
+    /// selects the predicate and which branch dispatches:
     ///
     /// ```erlang
     /// let <Lhs> = <left> in
     ///   let <Rhs> = <right> in
-    ///     case call 'erlang':'is_number'(Lhs) of
-    ///       <'true'>  when 'true' -> call 'erlang':'+'(Lhs, Rhs)
-    ///       <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(Lhs, '+', [Rhs])
+    ///     case call '<Mod>':'<Pred>'(Lhs) of
+    ///       <'true'>  when 'true' -> <true branch>
+    ///       <'false'> when 'true' -> <false branch>
     ///     end
     /// ```
     ///
-    /// Numbers take the bare BIF; objects route through unified message dispatch
-    /// (receiver-overloaded operators, or a DNU `#beamtalk_error` when undefined).
-    /// `erlang_op` is a static match-arm literal (safe as `Document::Str`); the
-    /// dispatch selector uses `leaf::atom` for the original Beamtalk operator.
-    fn guarded_arithmetic_doc(
+    /// * Arithmetic (`is_number`): true → bare BIF, false → dispatch. Numbers
+    ///   take the BIF; objects route through dispatch (overload or DNU).
+    /// * Comparison (`is_object`): true → dispatch, false → bare BIF. Objects
+    ///   dispatch (so `aMoney < bMoney` reaches `Money>><` and an unknown type
+    ///   raises a DNU); primitives keep Erlang's total term-order.
+    ///
+    /// `erlang_op` and the predicate module/function are static literals (safe as
+    /// `Document::Str`); the dispatch selector uses `leaf::atom` for the original
+    /// Beamtalk operator.
+    fn guarded_op_doc(
         &mut self,
+        guard: OperatorGuard,
         op: &str,
         erlang_op: &'static str,
         left_code: Document<'static>,
         right_code: Document<'static>,
     ) -> Document<'static> {
+        let (pred_module, pred_fn, dispatch_on_true) = guard.predicate();
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
+
+        let bif_branch = docvec![
+            "call 'erlang':'",
+            Document::Str(erlang_op),
+            "'(",
+            var(left_var.clone()),
+            ", ",
+            var(right_var.clone()),
+            ")",
+        ];
+        let send_branch = docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            var(left_var.clone()),
+            ", ",
+            atom(op.to_string()),
+            ", [",
+            var(right_var.clone()),
+            "])",
+        ];
+        let (true_branch, false_branch) = if dispatch_on_true {
+            (send_branch, bif_branch)
+        } else {
+            (bif_branch, send_branch)
+        };
+
         docvec![
             "let ",
             var(left_var.clone()),
@@ -192,21 +305,17 @@ impl CoreErlangGenerator {
             var(right_var.clone()),
             " = ",
             right_code,
-            " in case call 'erlang':'is_number'(",
-            var(left_var.clone()),
-            ") of <'true'> when 'true' -> call 'erlang':'",
-            Document::Str(erlang_op),
+            " in case call '",
+            Document::Str(pred_module),
+            "':'",
+            Document::Str(pred_fn),
             "'(",
-            var(left_var.clone()),
-            ", ",
-            var(right_var.clone()),
-            ") <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
             var(left_var),
-            ", ",
-            atom(op.to_string()),
-            ", [",
-            var(right_var),
-            "]) end",
+            ") of <'true'> when 'true' -> ",
+            true_branch,
+            " <'false'> when 'true' -> ",
+            false_branch,
+            " end",
         ]
     }
 

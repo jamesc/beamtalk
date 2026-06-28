@@ -1600,6 +1600,20 @@ impl CoreErlangGenerator {
             .is_some_and(|ty| matches!(ty.as_str(), "Integer" | "Float" | "Number"))
     }
 
+    /// BT-2710: Whether `name` refers to a parameter declared with a builtin
+    /// comparable type. A superset of [`Self::param_is_numeric`]: bare
+    /// comparison BIFs are correct for `Character`/`String` too (both define
+    /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
+    /// the bare-BIF fast path and skips the `is_object` guard.
+    pub(super) fn param_is_comparable(&self, name: &str) -> bool {
+        self.current_method_param_types.get(name).is_some_and(|ty| {
+            matches!(
+                ty.as_str(),
+                "Integer" | "Float" | "Number" | "Character" | "String"
+            )
+        })
+    }
+
     /// Returns whether stdlib mode is active.
     pub(super) fn stdlib_mode(&self) -> bool {
         self.class_context
