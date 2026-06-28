@@ -3636,3 +3636,71 @@ bt1990_wait_until_unregistered_loop(Name, Deadline) ->
                     bt1990_wait_until_unregistered_loop(Name, Deadline)
             end
     end.
+
+%%% BT-2717: `__local__` threading temporaries must not leak into persisted
+%%% actor state or watch-notification changed slots.
+%%%
+%%% When an actor method threads an outer local through a desugared control-flow
+%%% construct (eachWithIndex:/do:separatedBy:, conditionals, counted loops) the
+%%% local is packed into the gen_server State under a `__local__<name>` key. Those
+%%% codegen-internal temps must be stripped before the state is committed and its
+%%% changes published. `strip_local_temps/1` does the codegen-side strip (called
+%%% from generated handle_call/handle_cast); `changed_state_keys/2` excludes the
+%%% prefix as belt-and-braces for any residual leak on the notification path.
+
+strip_local_temps_removes_threading_temps_test() ->
+    %% Mirrors the gapCount: leak: a `__local__gaps` temp packed alongside a real
+    %% `total` field. All `__local__*` keys are dropped; user fields and the
+    %% internal `__class_mod__` survive.
+    State = #{
+        total => 5,
+        '__local__gaps' => 2,
+        '__local__i' => 9,
+        '__class_mod__' => some_mod
+    },
+    ?assertEqual(
+        #{total => 5, '__class_mod__' => some_mod},
+        beamtalk_actor:strip_local_temps(State)
+    ).
+
+strip_local_temps_noop_without_temps_test() ->
+    %% Common case: no threading temps → the same map is returned unchanged.
+    State = #{total => 5, '__class_mod__' => some_mod},
+    ?assertEqual(State, beamtalk_actor:strip_local_temps(State)).
+
+%% Watch-notification path: a watched actor whose committed NewState still carried
+%% a `__local__*` temp must publish no changed slot keyed on that temp. Drives the
+%% real beamtalk_object_watch substrate via notify_state_change/2.
+local_temp_not_published_as_changed_slot_test_() ->
+    {setup, fun bt2717_watch_setup/0, fun bt2717_watch_teardown/1, fun(_) ->
+        ?_test(begin
+            Self = self(),
+            ok = beamtalk_object_watch:subscribe(Self, Self),
+            _ = sys:get_state(beamtalk_object_watch),
+            ?assert(beamtalk_object_watch:is_watched(Self)),
+            OldState = #{'__class_mod__' => some_mod, total => 0},
+            %% `total` changes (a real field) and a `__local__gaps` temp appears —
+            %% as it would after gapCount: threads its outer local through the fold.
+            NewState = OldState#{total => 5, '__local__gaps' => 2},
+            ok = beamtalk_actor:notify_state_change(OldState, NewState),
+            Slots =
+                receive
+                    {object_changed, Self, S} -> S
+                after 1000 -> ?assert(false)
+                end,
+            ?assert(lists:member(total, Slots)),
+            ?assertNot(lists:member('__local__gaps', Slots)),
+            beamtalk_object_watch:unsubscribe(Self, Self)
+        end)
+    end}.
+
+bt2717_watch_setup() ->
+    case whereis(beamtalk_object_watch) of
+        undefined -> {ok, _} = beamtalk_object_watch:start_link();
+        _ -> ok
+    end,
+    [beamtalk_object_watch:unsubscribe(P, self()) || P <- beamtalk_object_watch:watched_pids()],
+    ok.
+
+bt2717_watch_teardown(_) ->
+    ok.

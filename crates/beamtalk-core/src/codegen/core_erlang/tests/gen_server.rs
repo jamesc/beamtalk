@@ -2556,17 +2556,28 @@ Actor subclass: Counter
         .expect("codegen should succeed")
         .code;
 
-    // handle_call commits NewState; the hook fires before returning the reply.
+    // BT-2717: handle_call strips codegen-internal `__local__` threading temps from
+    // the committed state, then notifies + persists the cleaned state.
     assert!(
-        code.contains("'beamtalk_actor':'notify_state_change'(State, NewState)"),
-        "handle_call must notify the per-object change substrate after committing \
-         state. Got:\n{code}"
+        code.contains("let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in"),
+        "handle_call must strip __local__ threading temps before persist/notify. Got:\n{code}"
     );
-    // handle_cast (fire-and-forget) commits CastNewState; same hook.
     assert!(
-        code.contains("'beamtalk_actor':'notify_state_change'(State, CastNewState)"),
-        "handle_cast must notify the per-object change substrate after committing \
-         state. Got:\n{code}"
+        code.contains("'beamtalk_actor':'notify_state_change'(State, CleanNewState)"),
+        "handle_call must notify the per-object change substrate with the cleaned \
+         state after committing. Got:\n{code}"
+    );
+    // handle_cast (fire-and-forget) commits CastNewState; same strip + hook.
+    assert!(
+        code.contains(
+            "let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in"
+        ),
+        "handle_cast must strip __local__ threading temps before persist/notify. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_actor':'notify_state_change'(State, CleanCastNewState)"),
+        "handle_cast must notify the per-object change substrate with the cleaned \
+         state after committing. Got:\n{code}"
     );
 }
 

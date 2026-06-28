@@ -1216,12 +1216,16 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
+                            // BT-2717: strip codegen-internal `__local__` threading
+                            // temporaries before persist + notify (see handle_call).
+                            line(),
+                            "let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in",
                             // BT-2524: same per-object change push as handle_call, for
                             // a state write committed via a fire-and-forget cast.
                             line(),
-                            "let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CastNewState) in",
+                            "let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in",
                             line(),
-                            "{'noreply', CastNewState}",
+                            "{'noreply', CleanCastNewState}",
                         ]
                     ),
                     line(),
@@ -1384,14 +1388,20 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
+                            // BT-2717: strip codegen-internal `__local__` threading
+                            // temporaries before persist + notify, so an outer local
+                            // threaded through a control-flow desugar never leaks into
+                            // the committed actor state or a watch notification.
+                            line(),
+                            "let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
                             // BT-2524: notify the per-object change substrate so a
                             // watched compiled actor's committed state write pushes
                             // {object_changed, …} to the live Inspector — the runtime
                             // beamtalk_actor path does this via log_dispatch_complete.
                             line(),
-                            "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, NewState) in",
+                            "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in",
                             line(),
-                            "{'reply', {'ok', Result}, NewState}",
+                            "{'reply', {'ok', Result}, CleanNewState}",
                         ]
                     ),
                     // Error case: pass error (now includes stacktrace) opaquely to caller
