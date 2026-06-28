@@ -22,7 +22,7 @@ Measuring the current stdlib (`stdlib/src/*.bt`):
 
 Two smells fall out of this:
 
-**Smell 1 — `@primitive` is overloaded.** Of the 362, only ~306 are genuine: `self` is a native BEAM value (Integer, Float, String, a `#beamtalk_error{}` record, a fun) that needs guarded dispatch and an extension table. The other ~56 are *not* value types — they are reflection over class objects (`Behaviour`, `Metaclass`, `Class`, `Protocol`) or dispatch substrate (`ProtoObject`, the base `Actor` lifecycle hooks). They became `@primitive` only because there was no better keyword to bind them to Erlang.
+**Smell 1 — `@primitive` is overloaded.** Of the 362, ~306 are value-type primitives: `self` is a native BEAM value (Integer, Float, String, a `#beamtalk_error{}` record, a fun) needing guarded dispatch + an extension table. But ~56 others use `@primitive` for unrelated reasons — ~36 are reflection over class objects (`Behaviour`, `Metaclass`, `Class`, `Protocol`), ~15 are dispatch/actor substrate (`ProtoObject`, base `Actor` lifecycle), ~5 are an Erlang-backed actor (`ReactiveSubprocess`). The keyword conflates "native value type" with "anything bound to Erlang." (Part 3 shows the right split is subtler than "value type vs not" — some reflection *correctly* stays `@primitive` because it needs the dispatch+extension+wrapping layer, while substrate moves to `@intrinsic` and the actor to `native:`.)
 
 **Smell 2 — `native:` is the missing twin of FFI.** Of the 350 FFI methods, **305 are pure pass-through** — the entire body is one `(Erlang module) selector: self with: arg` call. These are *exactly* what `self delegate` expresses for actors, but because the class is a stateless `Object` (not an `Actor`), the author must hand-thread `self` into every call. The poster child is `Stream`, which sits **next to** its actor twin `TranscriptStream` in the tree:
 
@@ -81,7 +81,7 @@ sealed typed Object subclass: Stream(E) native: beamtalk_stream
 
 Bodyless methods on a `native:` class are pure signatures — needed anyway for types/docs/completion. A class may mix `native:` delegation with real-body methods (TranscriptStream already does).
 
-### Part 2 — FFI wraps by default; `RawErlang` opts out
+### Part 2 — FFI wraps by default (no opt-out in v1)
 
 `(Erlang module) call:` becomes **safe by default and unified across both proxy paths**: `error`-class exceptions are converted to `#beamtalk_error{}` (reusing `beamtalk_exception_handler:ensure_wrapped`, which is idempotent). This is **not purely additive** — it changes both existing paths in opposite directions, which the migration path must account for:
 
@@ -93,14 +93,15 @@ Bodyless methods on a `native:` class are pure signatures — needed anyway for 
 
 The `exit`/`throw` rows are a deliberate choice: process exit and throws are semantically meaningful (intentional `erlang:exit/1`, `{noproc,_}` from a dead actor, control-flow throws) and should not be flattened into `#beamtalk_error{}`. `Erlang erlang exit: 1` keeps working with no opt-out. **Risk:** any code currently relying on `ErlangModule`-dispatch wrapping `exit`/`throw` as a catchable `#beamtalk_error{}` changes behavior — Phase 2 must grep for and migrate such call sites (expected to be rare; `exit`/`throw` from FFI is unusual).
 
-The opt-out is a distinct receiver for the rare "I want raw BEAM semantics / the raw error tuple" case:
+**No opt-out receiver in v1 (decided).** An earlier draft proposed a `(RawErlang …)` receiver as the opt-out. Review showed its use case collapsed once `exit`/`throw` propagate by default — the *only* thing it would still buy is returning a raw `error:*` tuple instead of `#beamtalk_error{}`, a rare low-level need. So v1 ships **no opt-out**:
 
 ```beamtalk
-(Erlang beamtalk_xref) senders_of_bt: sel   // safe: error: → #beamtalk_error{}
-(RawErlang erlang) exit: 1                   // opt-out: raw, propagates unchanged
+(Erlang erlang) exit: 1                       // propagates unchanged (exit not wrapped)
+(Erlang beamtalk_xref) senders_of_bt: sel     // error:* → #beamtalk_error{}
+// raw error:* tuple → not supported in v1
 ```
 
-`RawErlang` is greppable for audits and reads as "dropping into unmanaged BEAM." **Open question (Phase 2):** `beamtalk_erlang_proxy:dispatch/3` already exposes a `call:args:` escape for reserved selectors (`beamtalk_erlang_proxy.erl:80-86`); Phase 2 must decide whether `RawErlang` is a genuinely new receiver or sugar over that existing escape — if `(Erlang erlang) call: #exit args: {1}` already bypasses wrapping, `RawErlang` may be ceremony and should be justified by ergonomics/greppability alone. The existing per-module hand-wrapping (`beamtalk_file:readAll:`'s `file_not_found` + hint, etc.) is **demoted to an enrichment layer** — kept where it adds domain-specific hints, deleted where it only duplicated the generic `try…catch → beamtalk_error:new` boilerplate the default now provides.
+A future raw-`error:*` escape (receiver or `@raw` pragma) is left as a documented option to add only if a concrete need appears; the existing `beamtalk_erlang_proxy:dispatch/3` `call:args:` form is *not* it (it routes through `validate_and_apply`, which wraps). The existing per-module hand-wrapping (`beamtalk_file:readAll:`'s `file_not_found` + hint, etc.) is **demoted to an enrichment layer** — kept where it adds domain-specific hints, deleted where it only duplicated the generic `try…catch → beamtalk_error:new` boilerplate the default now provides.
 
 **Limitation (documented, accepted):** at the FFI boundary the proxy knows the Erlang MFA, not the Beamtalk class/selector, so an auto-wrapped error carries `beamtalk_xref:senders_of_bt` context rather than `SystemNavigation>>sendersOf:`. Still structured, still no raw crash.
 
@@ -171,7 +172,7 @@ This does **not** make `SystemNavigation` a `native:` class — it hits four bac
 
 - **Newcomer** — sees one keyword (`native:`) for "backed by Erlang" instead of guessing between `@primitive` and `(Erlang …)`. Errors are structured `#beamtalk_error{}` regardless of which mechanism backs a method.
 - **Smalltalk developer** — `native:` reads as message delegation; value-type `@primitive` preserves the "primitive method" tradition. Reflection over classes (`Behaviour`) stops masquerading as primitives.
-- **Erlang/BEAM developer** — `RawErlang` gives a clear, greppable escape for raw OTP semantics (`exit`, ports, links). Wrap-by-default means casual FFI no longer leaks `badarg`. Per-module hand-wrapping shrinks to domain hints only.
+- **Erlang/BEAM developer** — `exit`/`throw` still propagate (raw OTP semantics for ports, links, intentional exits preserved without ceremony); wrap-by-default means casual FFI no longer leaks `badarg`. Per-module hand-wrapping shrinks to domain hints only.
 - **Operator** — no behavior change to `exit`/links (still propagate); fewer raw crashes surfacing from stdlib reflection paths.
 - **Tooling developer** — bodyless `native:` signatures are clean AST for completion/docs; the `@primitive`/`@intrinsic`/`native:` split is now semantically meaningful for analysis.
 
@@ -190,7 +191,7 @@ Rejected: the lowering difference is exactly what *class kind* should hide; the 
 Rejected (the user explicitly chose wrap-by-default): the 45 embedded sites are the leak source today, and opt-*in* safety means the default is unsafe — the same class-of-bug ADR 0007 eliminated for value types. `exit`/`throw` still propagate, so the BEAM-honest cases are preserved without ceremony.
 
 ### Tension points
-- BEAM veterans lean raw-by-default; everyone else leans wrap-by-default. Resolved by wrapping only `error:*` and keeping `RawErlang` one keyword away.
+- BEAM veterans lean raw-by-default; everyone else leans wrap-by-default. Resolved by wrapping only `error:*` while `exit`/`throw` propagate — the raw-OTP cases veterans care about are preserved without an opt-out.
 - Language designers split on `native:` reuse vs `backedBy:`; the symmetry argument and "parser already allows it" broke the tie toward reuse.
 
 ## Alternatives Considered
@@ -204,7 +205,7 @@ Leave the three mechanisms as-is; fix only the 45 embedded-FFI leak sites by han
 Deliver only the Part 3 de-ceremony (bare `@primitive` infers the selector) without introducing `native:` for non-Actor Objects. Smaller surface. **Rejected** because it leaves the 305 pure-delegate FFI methods stuck with hand-threaded `self` and no error-wrapping unification — it fixes the smaller smell and ignores the larger one.
 
 ### Per-method `@delegate mod` annotation instead of class-level `native:`
-Allow `select: predicate => @delegate beamtalk_stream` per method rather than a class-level declaration. Directly analogous to Elixir's `defdelegate` (cited in Prior Art) and handles the multi-module case (e.g. SystemNavigation's four backing modules) without forcing one module per class. **Partially rejected** for the common case — class-level `native:` is far less repetitive when a class delegates wholesale to one module (Stream, File). **Worth revisiting** as a complement for mixed-module classes; flagged as an open question rather than fully dismissed, since it could also supply the per-method name-override the reflection classes would need.
+Allow `select: predicate => @delegate beamtalk_stream` per method rather than a class-level declaration. Directly analogous to Elixir's `defdelegate` (cited in Prior Art) and handles the multi-module case (e.g. SystemNavigation's four backing modules) without forcing one module per class. **Rejected for v1** — class-level `native:` is far less repetitive when a class delegates wholesale to one module (Stream, File), and first-keyword+`self` inference covers all 305 pure-delegate methods. Deferred (not dismissed): if selector/function-name mismatches prove common, `@delegate … as: fn` is the natural way to add per-method name-overrides without the reflection classes needing it.
 
 ### Consolidate SystemNavigation to one backing module
 Make `SystemNavigation` `native: beamtalk_system_navigation` by introducing a facade module that fans out to interface/xref/extensions. **Rejected** — pushes Beamtalk-level fold/fan-out logic into Erlang (wrong layer) or is pure indirection. The `internal`-seam approach (Part 4) keeps orchestration in Beamtalk.
@@ -237,10 +238,10 @@ Phased, bottom-up; each phase leaves CI green.
 **Phase ordering note:** `native:`-Object wrapping relies on Part 2 (the FFI boundary wraps `error:*`). Phase 1 should land Stream-style migrations whose backing functions don't crash on valid input first; classes whose delegation can fail need Phase 2 merged for structured errors. Phases 1 and 2 are best landed together or 2-before-1 for any failure-prone delegation.
 
 - **Phase 1 — `native:` for stateless Objects.** Codegen: add a stateless-`Object` branch so `native:` + bodyless/`self delegate` emits `beamtalk_<mod>:Fn(Self, Args)` (self-threading by declaration side); lift the actor-only validators. **Constraint:** the inference rule `methodName → mod:methodName(Self)` only works when the Erlang function name matches the selector — verified true for the 305 pure-delegate FFI methods (they already write the Erlang selector inline) but **not** for the reflection classes (`name`→`className`), which is why those stay `@primitive`. Migrate `Stream` as the worked example. *Files:* `codegen/core_erlang/mod.rs`, `codegen/core_erlang/gen_server/native_facade.rs`, `semantic_analysis/validators/native_validators.rs`, `stdlib/src/Stream.bt`.
-- **Phase 2 — wrap-by-default FFI + `RawErlang`.** `beamtalk_erlang_proxy`: wrap `error:*` via `ensure_wrapped`, propagate `exit`/`throw`. Parser/codegen: `RawErlang` receiver → existing unwrapped path. *Files:* `beamtalk_erlang_proxy.erl`, lexer/parser FFI-receiver handling, `codegen/core_erlang/`.
+- **Phase 2 — wrap-by-default FFI.** `beamtalk_erlang_proxy`: unify both apply paths to wrap `error:*` via `ensure_wrapped` and propagate `exit`/`throw` (rolling back `validate_and_apply`'s exit/throw wrapping). No new opt-out receiver. Grep for and migrate any call site relying on `exit`/`throw` being caught as `#beamtalk_error{}`. *Files:* `beamtalk_erlang_proxy.erl`, `codegen/core_erlang/`.
 - **Phase 3 — reclassify the 362.** Optional selector string; relabel the 15 `@intrinsic` methods (ProtoObject/Actor/Object substrate); migrate only `ReactiveSubprocess` (5) to `native:`. Reflection facades stay `@primitive` (see Part 3). *Files:* `codegen/core_erlang/primitives/`, `primitive_bindings.rs`, the affected `stdlib/src/*.bt`.
 - **Phase 4 — `internal` seams for embedded FFI.** Extract SystemNavigation's 29 (+ thin tail) into `internal` helpers. *Files:* `stdlib/src/SystemNavigation.bt` et al.
-- **E2E** — btscript exercising `native:` Object delegation, a wrapped FFI error surfacing as `#beamtalk_error{}`, and `RawErlang` propagation.
+- **E2E** — btscript exercising `native:` Object delegation, a wrapped FFI error surfacing as `#beamtalk_error{}`, and an `(Erlang erlang) exit:` still propagating.
 
 ## Migration Path
 
@@ -248,11 +249,13 @@ Phased, bottom-up; each phase leaves CI green.
 - **Pure-delegate FFI classes** — mechanical: drop `(Erlang mod)` + self-threading, add `native: mod`, leave bodyless. ~40 classes convert wholesale (File, Tracing, Ets, …).
 - **Reclassified primitives** — relabel keyword; behavior identical for value types staying `@primitive`.
 - **Per-module wrappers** — delete generic `try…catch → beamtalk_error:new`; keep domain-hint wrapping.
+- **ADR 0100 sequencing** — no hard ordering. ADR 0100 is still *Proposed* (not implemented), so shipping ADR 0101 first introduces no false diagnostics (there's no classifier running yet). Whenever ADR 0100 is built, it must satisfy the coordination requirement (count bodyless `native:` delegates as declared methods; treat `native:` Objects as `ClosedComplete`, `@primitive` as Open). Doing 0100 first is *not* required and would not de-risk 0101 — the coupling is a one-line rule in 0100's surface scan, cheapest to honor when 0100 is implemented.
 
-## Open Questions
-1. **`RawErlang` vs existing `call:args:` escape** — is a new receiver justified, or sugar over the existing reserved-selector escape? (Phase 2)
-2. **Per-method `@delegate`** — adopt as a complement for mixed-module classes and to supply name-overrides, or keep class-level `native:` only?
-3. **ADR 0100 coordination** — Part 3 keeps reflection classes on `@primitive` (dispatch + extension registry), so they remain runtime-extensible. The `native:`-migrated Objects (Stream, File, …) have a closed method surface — confirm ADR 0100's `ClosedComplete` classifier treats `native:` Objects correctly (no false `Dnu` hints where a method is bodyless-delegated) and that extension-bearing classes are never reclassified as closed.
+## Resolved Decisions
+These three forks were raised in review and resolved:
+1. **No `RawErlang` opt-out in v1.** `exit`/`throw` propagate by default, so the only remaining use was raw `error:*` tuples — too narrow to justify new receiver syntax now. A `@raw`/receiver escape is a documented future option. (See Part 2.)
+2. **Class-level `native:` only; no per-method `@delegate`.** First-keyword + `self` inference covers all 305 pure-delegate methods (written with that same convention); the few selector/function-name mismatches stay inline `(Erlang …)` (wrapped-by-default). `@delegate` is deferred — revisit only if mismatches prove common.
+3. **ADR 0100: coordination, not conflict.** `native:` Objects are legitimately `ClosedComplete` (no extension hook → a DNU hint on an unknown selector is *correct*). `@primitive` classes (incl. the reflection facades) keep their Open/extensible treatment. **Requirement on ADR 0100's implementation:** its method-surface scan must count bodyless `native:`-delegated signatures as declared methods (so they don't read as "missing" and trigger false hints). Neither ADR blocks the other (see Migration Path).
 
 ## References
 - Related issues: BT-XXX
