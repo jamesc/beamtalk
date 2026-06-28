@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot test for BT-2703 enumeration desugar codegen (enumeration_ops.rs),
+// value-type context.
+//
+// In a value-type method, finalize_enumeration_fold takes the non-actor
+// (passthrough) branch: the fold result is the un-annotated inject:into: send,
+// and the outer call-site annotation is the only one.
+//
+// Covers:
+//   try_generate_each_with_index  — local variable mutation in a Value context
+//   finalize_enumeration_fold     — non-actor passthrough path
+
+Value subclass: EnumerationValue
+
+  // try_generate_each_with_index: captured-local mutation → desugar fires.
+  // finalize_enumeration_fold takes the non-actor (passthrough) branch here.
+  sumWithIndex: coll =>
+    sum := 0
+    coll eachWithIndex: [:item :i | sum := sum + (item * i)]
+    sum

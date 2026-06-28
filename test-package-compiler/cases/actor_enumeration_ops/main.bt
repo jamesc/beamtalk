@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot test for BT-2703 enumeration desugar codegen (enumeration_ops.rs),
+// actor context.
+//
+// `eachWithIndex:` and `do:separatedBy:` are desugared to `inject:into:` when
+// a block mutates state. Without snapshot tests the entire enumeration_ops.rs
+// was at 0% Rust coverage despite BUnit tests exercising the runtime behaviour
+// (BUnit runs via `beamtalk test`, not `cargo test`).
+//
+// In an actor method, finalize_enumeration_fold re-projects the fold's
+// {Acc, NewState} tuple to {'nil', element(2, EnumFold)}.
+//
+// Covers:
+//   try_generate_each_with_index   — field mutation → desugar fires
+//   try_generate_do_separated_by   — element-block mutation
+//                                    separator-block-only mutation (outer local)
+//   finalize_enumeration_fold      — actor re-projection path
+
+Actor subclass: EnumerationActor
+  state: total :: Integer = 0
+
+  // try_generate_each_with_index: field mutation in block → desugar fires.
+  // Accumulates item * 1-based-index into self.total; returns the updated total.
+  sumWithIndex: coll =>
+    coll eachWithIndex: [:item :i | self.total := self.total + (item * i)]
+    self.total
+
+  // try_generate_do_separated_by: element block mutates field → desugar fires.
+  // The separator block also mutates the field (adds 100 per gap between elements).
+  joinSum: coll =>
+    coll do: [:item |
+      self.total := self.total + item
+    ] separatedBy: [self.total := self.total + 100]
+    self.total
+
+  // try_generate_do_separated_by: only the separator block mutates an outer local.
+  // The element block is pure; separator increments `gaps` per gap.
+  gapCount: coll =>
+    gaps := 0
+    coll do: [:item | item] separatedBy: [gaps := gaps + 1]
+    gaps
