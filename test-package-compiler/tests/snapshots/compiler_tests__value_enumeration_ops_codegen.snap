@@ -1,0 +1,148 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: core_erlang
+---
+module 'value_enumeration_ops' ['new'/0, 'new'/1, 'sumWithIndex:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0]
+  attributes ['on_load' = [{'register_class', 0}],
+     'beamtalk_class' = [{'EnumerationValue', 'Value'}],
+     'spec' =
+        [{{'sumWithIndex:', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}, {'type', 0, 'any', []}]}, {'type', 0, 'integer', []}]}]}]]
+
+'new'/0 = fun () ->
+    ~{'$beamtalk_class' => 'EnumerationValue'}~
+
+
+'new'/1 = fun (InitArgs) ->
+    let DefaultState = call 'value_enumeration_ops':'new'() in
+    call 'maps':'merge'(DefaultState, InitArgs)
+
+
+'sumWithIndex:'/2 = fun (Self, _coll1) ->
+    let Sum = 0 in
+    let _seq2 = let _InitMap8 = call 'maps':'new'() in let _Packed9 = call 'maps':'put'('__local__sum', Sum, _InitMap8) in let _temp3 = _coll1 in let _temp4 = case call 'erlang':'is_list'(_temp3) of <'true'> when 'true' -> _temp3 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp3) end in let _temp5 = 1 in let _temp6 = fun (Item, _AccSt7) -> let Acc = call 'erlang':'element'(1, _AccSt7) in let StateAcc = call 'erlang':'element'(2, _AccSt7) in let Sum = call 'maps':'get'('__local__sum', StateAcc) in let _Val10 = let _BinLeft13 = Sum in let _BinRight14 = let _BinLeft11 = Item in let _BinRight12 = Acc in case call 'erlang':'is_number'(_BinLeft11) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft11, _BinRight12) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft11, '*', [_BinRight12]) end in case call 'erlang':'is_number'(_BinLeft13) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft13, _BinRight14) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft13, '+', [_BinRight14]) end in let StateAcc1 = call 'maps':'put'('__local__sum', _Val10, StateAcc) in let _AccOut15 = let _BinLeft16 = Acc in let _BinRight17 = 1 in case call 'erlang':'is_number'(_BinLeft16) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft16, _BinRight17) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft16, '+', [_BinRight17]) end in {_AccOut15, StateAcc1} in let _temp18 = call 'lists':'foldl'(_temp6, {_temp5, _Packed9}, _temp4) in let _AccOut19 = call 'erlang':'element'(1, _temp18) in let _StOut20 = call 'erlang':'element'(2, _temp18) in let Sum = call 'maps':'get'('__local__sum', _StOut20) in {_AccOut19, _StOut20} in
+    Sum
+
+'dispatch'/3 = fun (Selector, Args, Self) ->
+    case Selector of
+        <'class'> when 'true' ->
+            'EnumerationValue'
+        <'respondsTo:'> when 'true' ->
+            case Args of
+                <[RtSelector | _]> when 'true' -> call 'value_enumeration_ops':'has_method'(RtSelector)
+                <_> when 'true' -> 'false'
+            end
+        <'fieldNames'> when 'true' ->
+            call 'beamtalk_reflection':'field_names'(Self)
+        <'fieldAt:'> when 'true' ->
+            let <FaName> = call 'erlang':'hd'(Args) in
+            call 'beamtalk_reflection':'read_field'(FaName, Self)
+        <'fieldAt:put:'> when 'true' ->
+            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', 'EnumerationValue') in
+            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'fieldAt:put:') in
+            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, #{#<67>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<226>(8,1,'integer',['unsigned'|['big']]),#<128>(8,1,'integer',['unsigned'|['big']]),#<148>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<83>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']])}#) in
+            call 'beamtalk_error':'raise'(ImmErr2)
+        <'perform:'> when 'true' ->
+            let <PerfSel> = call 'erlang':'hd'(Args) in
+            call 'value_enumeration_ops':'dispatch'(PerfSel, [], Self)
+        <'perform:withArguments:'> when 'true' ->
+            let <PwaSel> = call 'erlang':'hd'(Args) in
+            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in
+            call 'value_enumeration_ops':'dispatch'(PwaSel, PwaArgs, Self)
+        <'sumWithIndex:'> when 'true' ->
+            let <DispArg0> = call 'erlang':'hd'(Args) in
+            call 'value_enumeration_ops':'sumWithIndex:'(Self, DispArg0)
+        <_Other> when 'true' ->
+            case call 'beamtalk_extensions':'lookup'('EnumerationValue', Selector) of
+                <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                    apply ExtFun(Args, Self)
+                <'not_found'> when 'true' ->
+                    call 'bt@stdlib@value':'dispatch'(Selector, Args, Self)
+            end
+    end
+
+
+'dispatch'/4 = fun (Selector, Args, Self, State) ->
+    try call 'value_enumeration_ops':'dispatch'(Selector, Args, Self)
+    of <D4Result> -> {'reply', D4Result, State}
+    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+
+
+'has_method'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'perform:', 'perform:withArguments:', 'sumWithIndex:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('EnumerationValue', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'bt@stdlib@value':'has_method'(Selector)
+            end
+    end
+
+
+'superclass'/0 = fun () -> 'Value'
+
+'register_class'/0 = fun () ->
+    try
+        let _BuilderState0 = ~{
+            'className' => 'EnumerationValue',
+            'superclassRef' => 'Value',
+            'moduleName' => 'value_enumeration_ops',
+            'methodSource' => ~{'sumWithIndex:' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<91>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<124>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<40>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<42>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<41>(8,1,'integer',['unsigned'|['big']]),#<93>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classMethodSource' => ~{}~,
+            'methodSignatures' => ~{'sumWithIndex:' => #{#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<87>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classMethodSignatures' => ~{}~,
+            'methodXref' => [~{'class_side' => 'false', 'selector' => 'sumWithIndex:', 'line' => 1, 'sends' => [~{'selector' => 'eachWithIndex:', 'line' => 3, 'recv_kind' => 'other'}~, ~{'selector' => '+', 'line' => 3, 'recv_kind' => 'other'}~, ~{'selector' => '*', 'line' => 3, 'recv_kind' => 'other'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~],
+            'classState' => ~{}~,
+            'classDoc' => 'none',
+            'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
+            'meta' => ~{'class' => 'EnumerationValue',
+      'superclass' => 'Value',
+      'package' => 'none',
+      'kind' => 'value',
+      'fields' => [],
+      'class_fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'true',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
+      'method_info' => ~{'sumWithIndex:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{}~
+    }~
+        }~
+        in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', _Err0}> when 'true' -> {'error', _Err0}
+        end
+
+        in _Reg0
+
+    of _ClassRegResult -> _ClassRegResult
+    catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
+
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'EnumerationValue',
+      'superclass' => 'Value',
+      'package' => 'none',
+      'kind' => 'value',
+      'fields' => [],
+      'class_fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'true',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
+      'method_info' => ~{'sumWithIndex:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{}~
+    }~
+
+end

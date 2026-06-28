@@ -1,0 +1,99 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Token { kind: Identifier("Actor"), span: Span { start: 895, end: 900 }, leading_trivia: [LineComment("// Copyright 2026 James Casey"), Whitespace("\n"), LineComment("// SPDX-License-Identifier: Apache-2.0"), Whitespace("\n\n"), LineComment("// Snapshot test for BT-2703 enumeration desugar codegen (enumeration_ops.rs),"), Whitespace("\n"), LineComment("// actor context."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// `eachWithIndex:` and `do:separatedBy:` are desugared to `inject:into:` when"), Whitespace("\n"), LineComment("// a block mutates state. Without snapshot tests the entire enumeration_ops.rs"), Whitespace("\n"), LineComment("// was at 0% Rust coverage despite BUnit tests exercising the runtime behaviour"), Whitespace("\n"), LineComment("// (BUnit runs via `beamtalk test`, not `cargo test`)."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// In an actor method, finalize_enumeration_fold re-projects the fold's"), Whitespace("\n"), LineComment("// {Acc, NewState} tuple to {'nil', element(2, EnumFold)}."), Whitespace("\n"), LineComment("//"), Whitespace("\n"), LineComment("// Covers:"), Whitespace("\n"), LineComment("//   try_generate_each_with_index   — field mutation → desugar fires"), Whitespace("\n"), LineComment("//   try_generate_do_separated_by   — element-block mutation"), Whitespace("\n"), LineComment("//                                    separator-block-only mutation (outer local)"), Whitespace("\n"), LineComment("//   finalize_enumeration_fold      — actor re-projection path"), Whitespace("\n\n")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("subclass:"), span: Span { start: 901, end: 910 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("EnumerationActor"), span: Span { start: 911, end: 927 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("state:"), span: Span { start: 930, end: 936 }, leading_trivia: [Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("total"), span: Span { start: 937, end: 942 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: DoubleColon, span: Span { start: 943, end: 945 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("Integer"), span: Span { start: 946, end: 953 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("="), span: Span { start: 954, end: 955 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 956, end: 957 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("sumWithIndex:"), span: Span { start: 1121, end: 1134 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// try_generate_each_with_index: field mutation in block → desugar fires."), Whitespace("\n  "), LineComment("// Accumulates item * 1-based-index into self.total; returns the updated total."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("coll"), span: Span { start: 1135, end: 1139 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1140, end: 1142 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("coll"), span: Span { start: 1147, end: 1151 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("eachWithIndex:"), span: Span { start: 1152, end: 1166 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 1167, end: 1168 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 1168, end: 1169 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("item"), span: Span { start: 1169, end: 1173 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Colon, span: Span { start: 1174, end: 1175 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("i"), span: Span { start: 1175, end: 1176 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 1177, end: 1178 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 1179, end: 1183 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1183, end: 1184 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1184, end: 1189 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1190, end: 1192 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 1193, end: 1197 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1197, end: 1198 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1198, end: 1203 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 1204, end: 1205 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftParen, span: Span { start: 1206, end: 1207 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("item"), span: Span { start: 1207, end: 1211 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("*"), span: Span { start: 1212, end: 1213 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("i"), span: Span { start: 1214, end: 1215 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightParen, span: Span { start: 1215, end: 1216 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 1216, end: 1217 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1222, end: 1226 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1226, end: 1227 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1227, end: 1232 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("joinSum:"), span: Span { start: 1403, end: 1411 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// try_generate_do_separated_by: element block mutates field → desugar fires."), Whitespace("\n  "), LineComment("// The separator block also mutates the field (adds 100 per gap between elements)."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("coll"), span: Span { start: 1412, end: 1416 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1417, end: 1419 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("coll"), span: Span { start: 1424, end: 1428 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("do:"), span: Span { start: 1429, end: 1432 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 1433, end: 1434 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 1434, end: 1435 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("item"), span: Span { start: 1435, end: 1439 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 1440, end: 1441 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1448, end: 1452 }, leading_trivia: [Whitespace("\n      ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1452, end: 1453 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1453, end: 1458 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1459, end: 1461 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 1462, end: 1466 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1466, end: 1467 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1467, end: 1472 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 1473, end: 1474 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("item"), span: Span { start: 1475, end: 1479 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 1484, end: 1485 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("separatedBy:"), span: Span { start: 1486, end: 1498 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 1499, end: 1500 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1500, end: 1504 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1504, end: 1505 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1505, end: 1510 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1511, end: 1513 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("self"), span: Span { start: 1514, end: 1518 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1518, end: 1519 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1519, end: 1524 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 1525, end: 1526 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("100"), span: Span { start: 1527, end: 1530 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 1530, end: 1531 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("self"), span: Span { start: 1536, end: 1540 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Period, span: Span { start: 1540, end: 1541 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("total"), span: Span { start: 1541, end: 1546 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Keyword("gapCount:"), span: Span { start: 1703, end: 1712 }, leading_trivia: [Whitespace("\n\n  "), LineComment("// try_generate_do_separated_by: only the separator block mutates an outer local."), Whitespace("\n  "), LineComment("// The element block is pure; separator increments `gaps` per gap."), Whitespace("\n  ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("coll"), span: Span { start: 1713, end: 1717 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: FatArrow, span: Span { start: 1718, end: 1720 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("gaps"), span: Span { start: 1725, end: 1729 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1730, end: 1732 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("0"), span: Span { start: 1733, end: 1734 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("coll"), span: Span { start: 1739, end: 1743 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("do:"), span: Span { start: 1744, end: 1747 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 1748, end: 1749 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Colon, span: Span { start: 1749, end: 1750 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("item"), span: Span { start: 1750, end: 1754 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Pipe, span: Span { start: 1755, end: 1756 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("item"), span: Span { start: 1757, end: 1761 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 1761, end: 1762 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Keyword("separatedBy:"), span: Span { start: 1763, end: 1775 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: LeftBracket, span: Span { start: 1776, end: 1777 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("gaps"), span: Span { start: 1777, end: 1781 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Assign, span: Span { start: 1782, end: 1784 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Identifier("gaps"), span: Span { start: 1785, end: 1789 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: BinarySelector("+"), span: Span { start: 1790, end: 1791 }, leading_trivia: [], trailing_trivia: [Whitespace(" ")] }
+Token { kind: Integer("1"), span: Span { start: 1792, end: 1793 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: RightBracket, span: Span { start: 1793, end: 1794 }, leading_trivia: [], trailing_trivia: [] }
+Token { kind: Identifier("gaps"), span: Span { start: 1799, end: 1803 }, leading_trivia: [Whitespace("\n    ")], trailing_trivia: [] }
+Token { kind: Eof, span: Span { start: 1804, end: 1804 }, leading_trivia: [Whitespace("\n")], trailing_trivia: [] }
