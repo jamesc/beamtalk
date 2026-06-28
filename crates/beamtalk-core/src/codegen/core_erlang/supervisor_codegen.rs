@@ -46,6 +46,10 @@ impl CoreErlangGenerator {
             CodeGenError::Internal("supervisor module must have a class".to_string())
         })?;
         self.set_class_identity(Some(ClassIdentity::new(&class.name.name)));
+        // BT-2710 follow-up: record field declared types so `self.<field>`
+        // comparisons/arithmetic on object-typed fields dispatch here too,
+        // consistent with value-type and actor modules.
+        self.set_class_field_types(&class.state);
 
         match class.supervisor_kind.as_ref().ok_or_else(|| {
             CodeGenError::Internal("supervisor_kind must be set for supervisor module".to_string())

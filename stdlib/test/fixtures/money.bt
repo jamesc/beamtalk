@@ -1,8 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-2709 fixture: a tiny value-type money amount (in cents) that overloads the
-// arithmetic operators `+ - *`, so `aMoney + bMoney` dispatches to `Money>>+`.
+// BT-2709/BT-2710 fixture: a tiny value-type money amount (in cents) that
+// overloads the arithmetic operators `+ - *` (so `aMoney + bMoney` dispatches
+// to `Money>>+`) and the comparison operators `< > <= >=` (so `aMoney < bMoney`
+// dispatches to `Money>><` rather than silently comparing by Erlang term-order).
 
 Value subclass: Money
   field: cents :: Integer = 0
@@ -18,3 +20,15 @@ Value subclass: Money
 
   /// Scale a money amount by an integer factor.
   * factor :: Integer -> Money => (Money new) withCents: self.cents * factor
+
+  /// Less than, by cents (receiver-dispatched `<`).
+  < other :: Money -> Boolean => self.cents < other cents
+
+  /// Greater than, by cents.
+  > other :: Money -> Boolean => self.cents > other cents
+
+  /// Less than or equal, by cents.
+  <= other :: Money -> Boolean => self.cents <= other cents
+
+  /// Greater than or equal, by cents.
+  >= other :: Money -> Boolean => self.cents >= other cents

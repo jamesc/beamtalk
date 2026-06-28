@@ -212,6 +212,9 @@ impl CoreErlangGenerator {
         // Set class identity early so that class_name() returns the AST
         // class name rather than deriving from the module name.
         self.set_class_identity(Some(ClassIdentity::new(&class.name.name)));
+        // BT-2710 follow-up: record field declared types so `self.<field>`
+        // comparisons/arithmetic on object-typed fields route through the guard.
+        self.set_class_field_types(&class.state);
 
         // Check if the class explicitly defines new/new: methods
         // (e.g., Object.bt defines `new => @primitive basicNew`)

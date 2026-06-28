@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2710 follow-up fixture: a value type with an OBJECT-typed field
+// (`key :: DescendingInt`) that it compares on. Because `key`'s declared type is
+// a user value-type, `self.key < other key` must route through the runtime
+// `is_object` guard and dispatch to `DescendingInt>><` — NOT take a bare
+// `erlang:'<'` that would silently term-order the inner tagged map.
+
+Value subclass: DescendingPair
+  field: key :: DescendingInt
+
+  /// The object-typed sort key.
+  key -> DescendingInt => self.key
+
+  /// Compare by the (descending-ordered) key. `self.key` is object-typed, so
+  /// this dispatches to `DescendingInt>><`.
+  < other :: DescendingPair -> Boolean => self.key < other key

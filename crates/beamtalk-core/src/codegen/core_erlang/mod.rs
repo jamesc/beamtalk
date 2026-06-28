@@ -1206,6 +1206,17 @@ pub(crate) struct CoreErlangGenerator {
     /// is always correct. Cleared at every method-body entry so a prior method's
     /// annotations never leak into the next.
     current_method_param_types: std::collections::HashMap<String, String>,
+    /// BT-2710 follow-up: maps an instance field's source name → its declared
+    /// `Simple` type name, for the operator fast-path classifiers. Lets a
+    /// `self.<field>` read with an explicit **non-primitive** (object) type be
+    /// routed through the runtime guard so it dispatches (e.g. `self.lo < x`
+    /// where `lo :: Money` reaches `Money>><`) instead of silently term-ordering
+    /// the tagged map. Primitive-typed and *untyped* fields are absent from the
+    /// guarding decision and stay on the bare BIF, preserving the counter /
+    /// accumulator hot paths and their state-threading optimisations. Populated
+    /// at value-type / actor class entry; cleared in extension bodies (which
+    /// don't carry the target class's field types).
+    current_class_field_types: std::collections::HashMap<String, String>,
     /// BT-412/BT-1448: Internal side-channel for open-scope expression results.
     ///
     /// Set deep inside `generate_expression` when a class var assignment, class method
@@ -1301,6 +1312,7 @@ impl CoreErlangGenerator {
             primitive_bindings: PrimitiveBindingTable::new(),
             current_method_params: Vec::new(),
             current_method_param_types: std::collections::HashMap::new(),
+            current_class_field_types: std::collections::HashMap::new(),
             last_open_scope_result: None,
             source_path: None,
             tier2_block_params: std::collections::HashSet::new(),
@@ -1598,6 +1610,68 @@ impl CoreErlangGenerator {
         self.current_method_param_types
             .get(name)
             .is_some_and(|ty| matches!(ty.as_str(), "Integer" | "Float" | "Number"))
+    }
+
+    /// BT-2710: Whether `name` refers to a parameter declared with a builtin
+    /// comparable type. A superset of [`Self::param_is_numeric`]: bare
+    /// comparison BIFs are correct for `Character`/`String` too (both define
+    /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
+    /// the bare-BIF fast path and skips the `is_object` guard.
+    pub(super) fn param_is_comparable(&self, name: &str) -> bool {
+        self.current_method_param_types.get(name).is_some_and(|ty| {
+            matches!(
+                ty.as_str(),
+                "Integer" | "Float" | "Number" | "Character" | "String"
+            )
+        })
+    }
+
+    /// BT-2710 follow-up: Records each instance field's declared `Simple` type
+    /// from a class's state declarations, for the operator fast-path
+    /// classifiers. Replaces any previously-recorded set (call once per class at
+    /// codegen entry). Only `Simple` annotations are recorded; untyped fields
+    /// are deliberately absent so they keep the bare-BIF status quo.
+    pub(super) fn set_class_field_types(&mut self, state: &[crate::ast::StateDeclaration]) {
+        self.current_class_field_types.clear();
+        for decl in state {
+            if let Some(crate::ast::TypeAnnotation::Simple(id)) = decl.type_annotation.as_ref() {
+                self.current_class_field_types
+                    .insert(decl.name.name.to_string(), id.name.to_string());
+            }
+        }
+    }
+
+    /// BT-2710 follow-up: Clears instance-field type tracking. Call in contexts
+    /// that don't carry the current class's fields (e.g. extension method
+    /// bodies) so a prior class's field types never leak into the guard
+    /// decision — the absence simply restores the bare-BIF status quo.
+    pub(super) fn clear_class_field_types(&mut self) {
+        self.current_class_field_types.clear();
+    }
+
+    /// BT-2710 follow-up: Whether `self.<name>` is known to hold a value with a
+    /// builtin total order / numeric type, so the comparison/arithmetic fast
+    /// path may stay bare. True when the field is **untyped** (no info — keep
+    /// the status quo) or its declared type is in `primitive_set`; false only
+    /// when the field has an explicit non-primitive (object) type, which then
+    /// routes through the runtime guard and dispatches.
+    fn field_is_bare(&self, name: &str, primitive_set: &[&str]) -> bool {
+        match self.current_class_field_types.get(name) {
+            Some(ty) => primitive_set.contains(&ty.as_str()),
+            None => true,
+        }
+    }
+
+    /// BT-2710 follow-up: `self.<field>` is comparison-bare when untyped or a
+    /// primitive-ordered type (numeric, `Character`, or `String`).
+    pub(super) fn field_is_comparable(&self, name: &str) -> bool {
+        self.field_is_bare(name, &["Integer", "Float", "Number", "Character", "String"])
+    }
+
+    /// BT-2709 / BT-2710 follow-up: `self.<field>` is arithmetic-bare when
+    /// untyped or a numeric type.
+    pub(super) fn field_is_numeric(&self, name: &str) -> bool {
+        self.field_is_bare(name, &["Integer", "Float", "Number"])
     }
 
     /// Returns whether stdlib mode is active.

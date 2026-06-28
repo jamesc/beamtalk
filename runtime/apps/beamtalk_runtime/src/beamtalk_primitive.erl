@@ -22,7 +22,8 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     class_name_to_module/1,
     print_string/1,
     display_string/1,
-    process_label/1
+    process_label/1,
+    is_object/1
 ]).
 
 -include("beamtalk.hrl").
@@ -34,6 +35,45 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
+
+-doc """
+True if `X` is a Beamtalk object whose comparison must route through message
+dispatch rather than a bare Erlang term-order BIF (BT-2710).
+
+Erlang's `<`/`=<`/`>`/`>=` define a *total order over every term* and never
+raise, so a user value-type compared with a bare BIF would silently compare by
+term-order instead of dispatching to its overloaded operator. The comparison
+codegen guard therefore discriminates on "is this a Beamtalk object?" — not
+"is this a number" (the arithmetic guard's `is_number`, which is safe only
+because non-numbers there `badarith`).
+
+Returns `true` for value-type / tagged-collection instances (maps carrying the
+`'$beamtalk_class'` key), live actor and class objects (`#beamtalk_object{}`),
+and actor process refs (pids). Primitives — numbers, atoms, binaries
+(strings), characters (integers), lists, and plain (untagged) maps — return
+`false`, so the fast path keeps Erlang's total term-order for them.
+
+Limitation (single-node assumption): the pid case delegates to
+`beamtalk_actor:is_beamtalk_actor/1`, which reads `process_info(Pid,
+dictionary)` and so returns `false` for a **remote** actor pid (another node)
+just as it does for a dead one. A comparison of two remote actor refs would
+therefore take the bare term-order path rather than dispatching. This is
+correct for single-node deployments (actor refs are always local); distributed
+comparison of actor references is not a supported use case. Tagged value-type
+maps and `#beamtalk_object{}` refs are node-agnostic and unaffected.
+""".
+-spec is_object(term()) -> boolean().
+is_object(X) when is_map(X) ->
+    is_map_key('$beamtalk_class', X);
+is_object(#beamtalk_object{}) ->
+    true;
+is_object(X) when is_pid(X) ->
+    beamtalk_actor:is_beamtalk_actor(X);
+is_object(_) ->
+    %% Non-pid primitives (numbers, atoms, lists, plain maps, …) are never
+    %% objects — return via a local pattern match rather than paying a
+    %% cross-module call to is_beamtalk_actor/1 (which only guards `is_pid`).
+    false.
 
 -doc "Determine the Beamtalk class of any value.".
 -spec class_of(term()) -> atom().
