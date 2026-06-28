@@ -568,8 +568,10 @@ impl CoreErlangGenerator {
                                 leaf::var(err_var1),
                                 ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                 line(),
-                                // BT-2717: terminating path — state is discarded, but keep
-                                // the cleaned binding for consistency with the success arm.
+                                // BT-2717: terminating path — the state flows to
+                                // terminate/2, not persistence, so no clean-up contract
+                                // applies; use the cleaned binding for consistency with
+                                // the success arm.
                                 "{'stop', ",
                                 leaf::var(fmt_var),
                                 ", InitCleanState}",

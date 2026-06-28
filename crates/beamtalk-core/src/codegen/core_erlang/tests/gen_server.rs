@@ -4487,6 +4487,20 @@ fn test_actor_typed_union_non_nil_field_triggers_validation() {
         code.contains("'uninitialized_state_error'"),
         "Non-nil Union field should trigger typed-no-default validation. Got:\n{code}"
     );
+    // BT-2717: the typed-no-default field-check path must also strip __local__
+    // threading temps from the committed post-initialize state — the `let
+    // InitCleanState = …` binding is emitted before the nested field-check case,
+    // and the success arm replies with it.
+    assert!(
+        code.contains(
+            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in"
+        ),
+        "typed-no-default post-init path must strip __local__ temps. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'noreply', InitCleanState}"),
+        "typed-no-default post-init success arm must reply with the cleaned state. Got:\n{code}"
+    );
 }
 
 #[test]
