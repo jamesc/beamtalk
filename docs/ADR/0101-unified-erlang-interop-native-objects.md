@@ -116,6 +116,27 @@ A future raw-`error:*` escape (receiver or `@raw` pragma) is left as a documente
 
 **Limitation (documented, accepted):** at the FFI boundary the proxy knows the Erlang MFA, not the Beamtalk class/selector, so an auto-wrapped error carries `beamtalk_xref:senders_of_bt` context rather than `SystemNavigation>>sendersOf:`. Still structured, still no raw crash.
 
+#### Interaction with `Result` (ADR 0076) and typing
+
+Wrap-by-default touches the **exception channel**; ADR 0076's ok/error→`Result` coercion touches the **return-value channel**. They are orthogonal and **mutually exclusive per call** — a function either returns a value or raises — so they never collide:
+
+| Outcome of an FFI call | Mechanism | Beamtalk result | Type-visible? | Handled with |
+|---|---|---|---|---|
+| *returns* `{ok,V}` / `{error,R}` | ADR 0076 | `Result(V, R)` — a **value** | **yes** (`-> Result(T,E)` from the FFI spec, ADR 0075) | `andThen:` / `unwrap` / `isOk` |
+| *raises* `error:Reason` | ADR 0101 | `#beamtalk_error{}` — **raised** | **no** (out of band, like any exception) | `on:do:` / `ensure:`, or bubbles to REPL |
+| *raises* `exit:Reason` | ADR 0101 | propagates raw (process death) | no | supervisor / let-it-crash |
+| *raises* `throw:Term` | ADR 0101 | passes through unchanged | no | required — `^` and Beamtalk exceptions are throw/catch in codegen |
+
+The pipeline in `direct_call/3` makes the exclusivity explicit: `try V = apply(M,F,A), coerce_result(coerce_charlist(V)) catch error:E -> raise(ensure_wrapped(E)); exit/throw -> propagate end`. The coercion runs only if the call **returned**; the wrapping only if it **raised**.
+
+**The disambiguator is returned-vs-raised, not tuple shape.** A function that *returns* `{error, enoent}` → `Result error: …`; a function that *raises* `erlang:error({error, enoent})` → a raised `#beamtalk_error{}`. Same tuple, different channel.
+
+**Consequence to document (it surprises otherwise):** the *same* function may use both channels. `File readAll: path -> Result(String, Error)` *returns* `Result error: file_not_found` for the modeled domain failure, but *raises* `#beamtalk_error{}` if called with a non-binary path (`badarg`). The split is principled — **`Result` for expected/recoverable outcomes the API models, exceptions for misuse/faults** — but the user guide must state it so "File returns `Result`, why did it throw?" doesn't bite.
+
+**Typing bottom line:** wrap-by-default changes **no return type**. `select: pred -> Stream(E)` stays `Stream(E)`; a raised `#beamtalk_error{}` is invisible to the type system. `Result` remains the *only* type-visible error channel, driven by the FFI spec, not by the wrapping.
+
+**Residual leak (accepted):** because `throw` must pass through (Beamtalk's own `^`/exceptions are throw/catch), a *foreign* Erlang `throw(SomeRawTerm)` of a non-`#beamtalk_error{}` term can still surface raw. Rare in OTP across module boundaries; not worth special-casing in v1, but noted against the "never see raw Erlang" goal.
+
 ### Part 3 — Reclassify the 362 `@primitive`s
 
 The deciding question is **not** "what is `self`" (an earlier draft used that and mis-routed the reflection classes). It is **what mechanism does the method need**:
@@ -189,21 +210,34 @@ This does **not** make `SystemNavigation` a `native:` class — it hits four bac
 
 ## Steelman Analysis
 
-### Alternative: introduce a new keyword `backedBy:` instead of reusing `native:`
-- 🎨 **Language designer**: "A distinct keyword signals the distinct lowering (direct call vs `sync_send`) and avoids overloading `delegate` with two delivery semantics."
-- 🧑‍💻 **Newcomer**: "Two names would tell me upfront whether a call crosses a process boundary."
+### Alternative A — a distinct keyword `backedBy:` instead of reusing `native:`
+- ⚙️ **BEAM veteran** (strongest case): "Debugging a production hang, `self delegate` on `Stream` and `TranscriptStream` read *identically* — but one is an in-process call that cannot block and the other crosses a process boundary that can block indefinitely, time out, raise `noproc`, and cross nodes. The single fact I need to reason about the hang — *does this call leave the process?* — is exactly what the shared keyword hides. `backedBy:` vs `native:` would put it in the source, one token, no jumping to the class header."
+- 🏭 **Operator**: "Which methods can time out is a deploy-time risk question. A distinct keyword is a greppable signal of where the process boundaries are."
+- 🎨 **Language designer**: "Two lowerings (`sync_send` vs direct call) with fundamentally different failure modes deserve two names; overloading `delegate` is a leaky abstraction by construction."
+- 🧑‍💻 **Newcomer**: "Two names would tell me upfront whether a call is cheap-and-local or might hang."
+- 🎩 **Smalltalk purist** (cuts the *other* way): "No — in Smalltalk everything is a message send; whether the receiver is a process or a module is precisely what I should *not* have to know at the call site. One keyword is the *more* Smalltalk answer."
 
-Rejected: the lowering difference is exactly what *class kind* should hide; the symmetry between `Stream` and `TranscriptStream` is the feature. Two keywords for one concept re-creates the very smell we're removing.
+**Rejected, on merits:** the process-boundary distinction is real, but it is *already* encoded by class kind — the reader sees `Actor subclass:` vs `Object subclass:` one line above. Duplicating it into the delegation keyword is redundant *and* re-creates the "two mechanisms for one concept" smell this ADR exists to delete. The leaky-abstraction cost is genuine and kept as an explicit Negative; the mitigation is docgen/hover/`:help` labelling which kind a `native:` class is — metadata, not a second keyword. The veteran and the purist pull in opposite directions; "class kind already says it" + symmetry + "parser already allows it" breaks the tie toward reuse.
 
-### Alternative: make raw FFI the default, add a `SafeErlang`/wrapping opt-in
-- ⚙️ **BEAM veteran**: "Don't pay wrapping cost I didn't ask for; raw is the honest BEAM default."
-- 🏭 **Operator**: "Explicit wrapping is auditable."
+### Alternative B — raw FFI by default, opt-in `SafeErlang` wrapping
+- ⚙️ **BEAM veteran** (strongest case): "BEAM is let-it-crash. Supervisors are *designed* to see `error:*` and restart. Intercepting `error:*` at the boundary risks turning a clean crash-and-restart into a swallowed fault that limps on with a wrong answer — you're fighting the platform's core reliability model, and that's worse than an ugly tuple."
+- 🏭 **Operator**: "`SafeErlang` is auditable — I can grep exactly which calls are protected. A blanket default hides where wrapping happens and adds a `try/catch` to every FFI call I never asked for."
+- 🎨 **Performance / language designer**: "Every FFI call now pays `try/catch` + `ensure_wrapped` for a safety net most calls never trip. On a tight FFI loop that's measurable."
+- 🎩 **Smalltalk purist** (for wrap-by-default): "A raw `badarg` tuple at the REPL is a layering violation — Smalltalk never shows you the VM. Wrapping is the *more* faithful choice."
+- 🧑‍💻 **Newcomer** (for wrap-by-default): "`badarg` means nothing to me; a structured error with a hint is the only one I can act on."
 
-Rejected (the user explicitly chose wrap-by-default): the 45 embedded sites are the leak source today, and opt-*in* safety means the default is unsafe — the same class-of-bug ADR 0007 eliminated for value types. `exit`/`throw` still propagate, so the BEAM-honest cases are preserved without ceremony.
+**Rejected, on merits:** the let-it-crash worry conflates two layers. Wrap-by-default converts `error:*` into a *raised* `#beamtalk_error{}` — still an exception that propagates and kills the process if uncaught, so **supervision still fires**; and `exit`/links are untouched, propagating raw. The only thing that changes is the *shape* a caller sees *if it chooses to catch* — structured instead of raw. Auditability is real but inverts the cost onto the ~99% of sites that want safety (precisely the ADR 0007 anti-pattern); a future `@raw` marker covers the rare audited-raw case. Performance: the `try/catch` is cheap next to the cross-module call itself, and the genuinely hot path (value-type ops) is `@primitive`/`@intrinsic`, not FFI. The decisive cohorts are the newcomer + purist at the REPL — never leaking the VM is the ADR's primary motivation.
+
+### Alternative C — status quo: keep three mechanisms, hand-fix only the 45 leak sites
+- 🏭 **Operator/maintainer**: "Zero migration risk, no behavior change, no new surface — just add `try/catch` to the 45 leaky sites and move on."
+- ⚙️ **BEAM veteran**: "Every wrap is explicit and visible; nothing is magic."
+
+**Rejected, on merits:** cheapest *today*, most expensive *cumulatively* — it entrenches the `@primitive`/FFI duplication and the 305-method self-threading ceremony, and leaves safety as per-author discipline forever (forget once → a leak). It is genuinely available as a fallback (Parts 1–3 stand without Part 4), but it fixes the *smallest* smell while leaving the structural one.
 
 ### Tension points
-- BEAM veterans lean raw-by-default; everyone else leans wrap-by-default. Resolved by wrapping only `error:*` while `exit`/`throw` propagate — the raw-OTP cases veterans care about are preserved without an opt-out.
-- Language designers split on `native:` reuse vs `backedBy:`; the symmetry argument and "parser already allows it" broke the tie toward reuse.
+- **Smalltalk purist vs BEAM veteran on wrapping** — purist wants the VM hidden (wrap); veteran wants let-it-crash honored (don't intercept). Resolved by wrapping `error:*` *as a raised exception* (supervision still works) while `exit`/links propagate untouched — each gets most of what they want.
+- **Language designer vs Smalltalk purist on `native:` vs `backedBy:`** — designer wants the process boundary surfaced; purist wants it hidden ("all messages"). Resolved toward reuse: class kind already encodes it, and "all messages" is the more Smalltalk stance.
+- **Operator auditability** — the one cost wrap-by-default does *not* fully answer: you can't grep which FFI is protected, because all of it is. Accepted, with a future `@raw` marker as the deliberate-unprotected escape if the need is shown.
 
 ## Alternatives Considered
 
