@@ -3,6 +3,13 @@
 ## Status
 Accepted (2026-06-28)
 
+## Implementation Tracking
+
+**Epic:** BT-2719
+**Issues:** BT-2720 (native: codegen) · BT-2721 (bulk migrate) · BT-2722 (unify FFI proxy) · BT-2723 (migrate exit/throw catches) · BT-2724 (optional @primitive string) · BT-2725 (substrate→@intrinsic + ReactiveSubprocess) · BT-2726 (internal seams) · BT-2727 (E2E + docs)
+**Start:** BT-2720 ∥ BT-2722 (both foundations, no deps)
+**Status:** Planned
+
 ## Context
 
 ### Problem statement
