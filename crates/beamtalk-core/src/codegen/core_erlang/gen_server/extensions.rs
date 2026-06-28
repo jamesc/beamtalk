@@ -239,8 +239,13 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
         // BT-2709: Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
-        // BT-2710 follow-up: extension bodies don't carry the target class's
-        // field types, so clear them — `self.<field>` reads fall back to bare.
+        // BT-2710 follow-up: extension bodies have no access to the target
+        // class's state declarations, so clear field types — `self.<field>`
+        // reads fall back to the bare BIF. Known limitation: an extension
+        // method comparing an object-typed field silently term-orders rather
+        // than dispatching (status quo, unchanged from pre-BT-2710). Threading
+        // the target class's state into extension codegen is a tracked
+        // follow-up under the BT-2708 operators-as-messages epic.
         self.clear_class_field_types();
         let prev_selector = self.current_method_selector.take();
         self.current_method_selector = Some(method.selector.name().to_string());
@@ -314,8 +319,13 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
         // BT-2709: Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
-        // BT-2710 follow-up: extension bodies don't carry the target class's
-        // field types, so clear them — `self.<field>` reads fall back to bare.
+        // BT-2710 follow-up: extension bodies have no access to the target
+        // class's state declarations, so clear field types — `self.<field>`
+        // reads fall back to the bare BIF. Known limitation: an extension
+        // method comparing an object-typed field silently term-orders rather
+        // than dispatching (status quo, unchanged from pre-BT-2710). Threading
+        // the target class's state into extension codegen is a tracked
+        // follow-up under the BT-2708 operators-as-messages epic.
         self.clear_class_field_types();
 
         let arg_prelude = self.bind_extension_params(method);

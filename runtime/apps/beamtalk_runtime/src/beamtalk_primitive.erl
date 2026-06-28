@@ -67,8 +67,13 @@ is_object(X) when is_map(X) ->
     is_map_key('$beamtalk_class', X);
 is_object(#beamtalk_object{}) ->
     true;
-is_object(X) ->
-    beamtalk_actor:is_beamtalk_actor(X).
+is_object(X) when is_pid(X) ->
+    beamtalk_actor:is_beamtalk_actor(X);
+is_object(_) ->
+    %% Non-pid primitives (numbers, atoms, lists, plain maps, …) are never
+    %% objects — return via a local pattern match rather than paying a
+    %% cross-module call to is_beamtalk_actor/1 (which only guards `is_pid`).
+    false.
 
 -doc "Determine the Beamtalk class of any value.".
 -spec class_of(term()) -> atom().
