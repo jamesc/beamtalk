@@ -384,6 +384,121 @@ fn test_comparison_guard_for_self_in_non_comparable_class() {
     );
 }
 
+// BT-2710 follow-up: `self.<field>` operator fast path is type-aware. A field
+// with an explicit non-primitive (object) declared type routes through the
+// runtime guard so it dispatches (silent-wrong-result fix for comparison;
+// badarith fix for arithmetic); numeric/primitive and untyped fields stay bare.
+
+/// Builds a `self.<field>` access expression for the field fast-path tests.
+fn self_field_access(field: &str) -> Expression {
+    use crate::ast::Identifier;
+    let end = 5 + u32::try_from(field.len()).expect("short field name");
+    Expression::FieldAccess {
+        receiver: Box::new(Expression::Identifier(Identifier::new(
+            "self",
+            Span::new(0, 4),
+        ))),
+        field: Identifier::new(field, Span::new(5, end)),
+        span: Span::new(0, end),
+    }
+}
+
+#[test]
+fn test_comparison_object_typed_field_is_guarded() {
+    use crate::ast::Identifier;
+    // `self.lo < y` where `lo :: Money` must dispatch (is_object guard), not
+    // silently term-order the tagged map.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator
+        .current_class_field_types
+        .insert("lo".to_string(), "Money".to_string());
+    let left = self_field_access("lo");
+    let right = vec![Expression::Identifier(Identifier::new(
+        "y",
+        Span::new(10, 11),
+    ))];
+    let output = generator
+        .generate_binary_op("<", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'beamtalk_primitive':'is_object'("),
+        "object-typed self.<field> comparison must be guarded; got: {output}"
+    );
+}
+
+#[test]
+fn test_comparison_primitive_and_untyped_field_stay_bare() {
+    // Integer-typed and untyped fields keep the bare comparison BIF (status quo;
+    // preserves counter/accumulator hot paths and their state-threading).
+    for (field_name, ty) in [("count", Some("Integer")), ("x", None)] {
+        let mut generator = CoreErlangGenerator::new("test");
+        if let Some(t) = ty {
+            generator
+                .current_class_field_types
+                .insert(field_name.to_string(), t.to_string());
+        }
+        let left = self_field_access(field_name);
+        let right = vec![Expression::Literal(Literal::Integer(0), Span::new(10, 11))];
+        let output = generator
+            .generate_binary_op("<", &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("call 'erlang':'<'(") && !output.contains("is_object"),
+            "field {field_name} ({ty:?}) comparison must stay bare; got: {output}"
+        );
+    }
+}
+
+#[test]
+fn test_arith_object_typed_field_is_guarded() {
+    use crate::ast::Identifier;
+    // Arithmetic analog: `self.lo + y` where `lo :: Money` routes through the
+    // is_number guard so it dispatches instead of badarith-ing.
+    let mut generator = CoreErlangGenerator::new("test");
+    generator
+        .current_class_field_types
+        .insert("lo".to_string(), "Money".to_string());
+    let left = self_field_access("lo");
+    let right = vec![Expression::Identifier(Identifier::new(
+        "y",
+        Span::new(10, 11),
+    ))];
+    let output = generator
+        .generate_binary_op("+", &left, &right)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'erlang':'is_number'("),
+        "object-typed self.<field> arithmetic must be guarded; got: {output}"
+    );
+}
+
+#[test]
+fn test_arith_numeric_and_untyped_field_stay_bare() {
+    // Numeric-typed and untyped fields keep the bare arithmetic BIF — no
+    // regression to the `self.count := self.count + 1` counter pattern.
+    for (field_name, ty) in [("count", Some("Integer")), ("x", None)] {
+        let mut generator = CoreErlangGenerator::new("test");
+        if let Some(t) = ty {
+            generator
+                .current_class_field_types
+                .insert(field_name.to_string(), t.to_string());
+        }
+        let left = self_field_access(field_name);
+        let right = vec![Expression::Literal(Literal::Integer(1), Span::new(10, 11))];
+        let output = generator
+            .generate_binary_op("+", &left, &right)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            output.contains("call 'erlang':'+'(") && !output.contains("is_number"),
+            "field {field_name} ({ty:?}) arithmetic must stay bare; got: {output}"
+        );
+    }
+}
+
 #[test]
 fn test_generate_power_op_no_wrap() {
     use crate::ast::Identifier;

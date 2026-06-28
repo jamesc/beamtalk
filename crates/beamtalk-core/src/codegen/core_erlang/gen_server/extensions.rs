@@ -239,6 +239,9 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
         // BT-2709: Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
+        // BT-2710 follow-up: extension bodies don't carry the target class's
+        // field types, so clear them — `self.<field>` reads fall back to bare.
+        self.clear_class_field_types();
         let prev_selector = self.current_method_selector.take();
         self.current_method_selector = Some(method.selector.name().to_string());
 
@@ -311,6 +314,9 @@ impl CoreErlangGenerator {
         self.current_method_params.clear();
         // BT-2709: Reset arithmetic fast-path parameter-type tracking.
         self.clear_method_param_types();
+        // BT-2710 follow-up: extension bodies don't carry the target class's
+        // field types, so clear them — `self.<field>` reads fall back to bare.
+        self.clear_class_field_types();
 
         let arg_prelude = self.bind_extension_params(method);
 

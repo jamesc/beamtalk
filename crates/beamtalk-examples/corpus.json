@@ -13998,12 +13998,13 @@
         "testCharAndStringComparisonUnchanged",
         "testNoOperatorRaisesDoesNotUnderstand",
         "testNumericComparisonUnchanged",
+        "testObjectTypedFieldComparisonDispatches",
         "testUserTypeGreaterOrEqualDispatches",
         "testUserTypeGreaterThanDispatches",
         "testUserTypeLessOrEqualDispatches",
         "testUserTypeLessThanDispatches"
       ],
-      "source": "// BT-2710: Phase 2 — comparison operators (`< > <= >=`) are dispatchable as real\n// messages, so a user value-type can overload them and have `aMoney < bMoney`\n// dispatch to `Money>><` (receiver decides). Unlike a bare `erlang:'<'` — which\n// defines a total order over *every* term and would silently term-order an\n// object — the codegen guard discriminates on \"is this a Beamtalk object?\", so\n// a type with no comparison operator falls through to a `does_not_understand`\n// DNU rather than a silently-wrong term-order result.\n//\n// The `Money` and `Widget` value-types live in `fixtures/` (one class per file).\n\nTestCase subclass: ComparisonOperatorOverloadTest\n\n  /// `aMoney < bMoney` dispatches to `Money>><`.\n  testUserTypeLessThanDispatches =>\n    a := (Money new) withCents: 150\n    b := (Money new) withCents: 250\n    self assert: (a < b)\n    self deny: (b < a)\n\n  /// `aMoney > bMoney` dispatches to `Money>>>`.\n  testUserTypeGreaterThanDispatches =>\n    a := (Money new) withCents: 500\n    b := (Money new) withCents: 175\n    self assert: (a > b)\n    self deny: (b > a)\n\n  /// `aMoney <= bMoney` dispatches to `Money>><=` (true at the boundary).\n  testUserTypeLessOrEqualDispatches =>\n    a := (Money new) withCents: 200\n    b := (Money new) withCents: 200\n    self assert: (a <= b)\n    self assert: (a >= b)\n\n  /// `aMoney >= bMoney` dispatches to `Money>>>=`.\n  testUserTypeGreaterOrEqualDispatches =>\n    a := (Money new) withCents: 300\n    b := (Money new) withCents: 150\n    self assert: (a >= b)\n    self deny: (b >= a)\n\n  /// Numeric comparison still works (the bare-BIF fast path is unchanged).\n  testNumericComparisonUnchanged =>\n    self assert: (2 < 3)\n    self assert: (10 > 4)\n    self assert: (5 <= 5)\n    self assert: (7 >= 7)\n\n  /// Character and string comparison still take the bare comparison BIF.\n  testCharAndStringComparisonUnchanged =>\n    self assert: ($a < $b)\n    self assert: (\"abc\" < \"abd\")\n\n  /// `<` on a type with no comparison operator raises a DNU, not a silently\n  /// wrong term-order result. `w` is statically a `Widget` (which defines no\n  /// `<`), so the checker also flags this at compile time — `@expect dnu`\n  /// acknowledges that hint while the assertion verifies the runtime behaviour.\n  testNoOperatorRaisesDoesNotUnderstand =>\n    w := (Widget new) withSize: 5\n    @expect dnu\n    self should: [w < 1] raise: #does_not_understand",
+      "source": "// BT-2710: Phase 2 — comparison operators (`< > <= >=`) are dispatchable as real\n// messages, so a user value-type can overload them and have `aMoney < bMoney`\n// dispatch to `Money>><` (receiver decides). Unlike a bare `erlang:'<'` — which\n// defines a total order over *every* term and would silently term-order an\n// object — the codegen guard discriminates on \"is this a Beamtalk object?\", so\n// a type with no comparison operator falls through to a `does_not_understand`\n// DNU rather than a silently-wrong term-order result.\n//\n// The `Money` and `Widget` value-types live in `fixtures/` (one class per file).\n\nTestCase subclass: ComparisonOperatorOverloadTest\n\n  /// `aMoney < bMoney` dispatches to `Money>><`.\n  testUserTypeLessThanDispatches =>\n    a := (Money new) withCents: 150\n    b := (Money new) withCents: 250\n    self assert: (a < b)\n    self deny: (b < a)\n\n  /// `aMoney > bMoney` dispatches to `Money>>>`.\n  testUserTypeGreaterThanDispatches =>\n    a := (Money new) withCents: 500\n    b := (Money new) withCents: 175\n    self assert: (a > b)\n    self deny: (b > a)\n\n  /// `aMoney <= bMoney` dispatches to `Money>><=` (true at the boundary).\n  testUserTypeLessOrEqualDispatches =>\n    a := (Money new) withCents: 200\n    b := (Money new) withCents: 200\n    self assert: (a <= b)\n    self assert: (a >= b)\n\n  /// `aMoney >= bMoney` dispatches to `Money>>>=`.\n  testUserTypeGreaterOrEqualDispatches =>\n    a := (Money new) withCents: 300\n    b := (Money new) withCents: 150\n    self assert: (a >= b)\n    self deny: (b >= a)\n\n  /// Numeric comparison still works (the bare-BIF fast path is unchanged).\n  testNumericComparisonUnchanged =>\n    self assert: (2 < 3)\n    self assert: (10 > 4)\n    self assert: (5 <= 5)\n    self assert: (7 >= 7)\n\n  /// Character and string comparison still take the bare comparison BIF.\n  testCharAndStringComparisonUnchanged =>\n    self assert: ($a < $b)\n    self assert: (\"abc\" < \"abd\")\n\n  /// BT-2710 follow-up: comparing on an OBJECT-typed field dispatches to the\n  /// field type's `<`, not Erlang term-order. `DescendingPair>><` delegates to\n  /// `self.key < other key` where `key :: DescendingInt` — a type whose order is\n  /// the REVERSE of its underlying integer. So the pair with the larger inner\n  /// `n` is \"less than\", the opposite of what term-ordering the inner tagged map\n  /// would yield. This assertion fails if the field stays on the bare BIF.\n  testObjectTypedFieldComparisonDispatches =>\n    small := (DescendingPair new) withKey: ((DescendingInt new) withN: 2)\n    big := (DescendingPair new) withKey: ((DescendingInt new) withN: 8)\n    self assert: (big < small)\n    self deny: (small < big)\n\n  /// `<` on a type with no comparison operator raises a DNU, not a silently\n  /// wrong term-order result. `w` is statically a `Widget` (which defines no\n  /// `<`), so the checker also flags this at compile time — `@expect dnu`\n  /// acknowledges that hint while the assertion verifies the runtime behaviour.\n  testNoOperatorRaisesDoesNotUnderstand =>\n    w := (Widget new) withSize: 5\n    @expect dnu\n    self should: [w < 1] raise: #does_not_understand",
       "explanation": "BT-2710: Phase 2 — comparison operators (`< > <= >=`) are dispatchable as real messages, so a user value-type can overload them and have `aMoney < bMoney` dispatch to `Money>><` (receiver decides). Unlike a bare `erlang:'<'` — which defines a total order over *every* term and would silently term-order an object — the codegen guard discriminates on \"is this a Beamtalk object?\", so a type with no comparison operator falls through to a `does_not_understand` DNU rather than a silently-wrong term-order result.  The `Money` and `Widget` value-types live in `fixtures/` (one class per file)."
     },
     {
@@ -17820,6 +17821,53 @@
       ],
       "source": "// BT-1951 / ADR 0078 — Phase 1 fixture (deep hierarchy test).\n// Leaf class. Final log should be \"ABC\" after the auto-chain runs.\n\nDeepHierarchyB subclass: DeepHierarchyC\n\n  initialize => self.log := self.log ++ \"C\"",
       "explanation": "BT-1951 / ADR 0078 — Phase 1 fixture (deep hierarchy test). Leaf class. Final log should be \"ABC\" after the auto-chain runs."
+    },
+    {
+      "id": "stdlib-test-fixtures-descending-int",
+      "title": "DescendingInt",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "<",
+        ">",
+        "DescendingInt",
+        "Value",
+        "descending_int",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "member",
+        "n",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-2710 follow-up fixture: an integer wrapper whose comparison order is the\n// REVERSE of the underlying integer (a larger `n` sorts earlier). Because this\n// order disagrees with Erlang term-order on the underlying value, it lets a test\n// prove that `self.<objectField> < x` actually DISPATCHES to this `<` rather\n// than silently term-ordering the tagged map.\n\nValue subclass: DescendingInt\n  field: n :: Integer = 0\n\n  /// The wrapped integer (`self.n` is Integer-typed → bare comparison BIF).\n  n -> Integer => self.n\n\n  /// Reversed order: larger magnitude is \"less than\".\n  < other :: DescendingInt -> Boolean => self.n > other n\n\n  /// Reversed order: smaller magnitude is \"greater than\".\n  > other :: DescendingInt -> Boolean => self.n < other n",
+      "explanation": "BT-2710 follow-up fixture: an integer wrapper whose comparison order is the REVERSE of the underlying integer (a larger `n` sorts earlier). Because this order disagrees with Erlang term-order on the underlying value, it lets a test prove that `self.<objectField> < x` actually DISPATCHES to this `<` rather than silently term-ordering the tagged map."
+    },
+    {
+      "id": "stdlib-test-fixtures-descending-pair",
+      "title": "DescendingPair",
+      "category": "stdlib-fixtures",
+      "tags": [
+        "<",
+        "DescendingPair",
+        "Value",
+        "descending_pair",
+        "extends",
+        "field",
+        "inherit",
+        "inheritance",
+        "instance variable",
+        "key",
+        "member",
+        "property",
+        "subclassing",
+        "value"
+      ],
+      "source": "// BT-2710 follow-up fixture: a value type with an OBJECT-typed field\n// (`key :: DescendingInt`) that it compares on. Because `key`'s declared type is\n// a user value-type, `self.key < other key` must route through the runtime\n// `is_object` guard and dispatch to `DescendingInt>><` — NOT take a bare\n// `erlang:'<'` that would silently term-order the inner tagged map.\n\nValue subclass: DescendingPair\n  field: key :: DescendingInt\n\n  /// The object-typed sort key.\n  key -> DescendingInt => self.key\n\n  /// Compare by the (descending-ordered) key. `self.key` is object-typed, so\n  /// this dispatches to `DescendingInt>><`.\n  < other :: DescendingPair -> Boolean => self.key < other key",
+      "explanation": "BT-2710 follow-up fixture: a value type with an OBJECT-typed field (`key :: DescendingInt`) that it compares on. Because `key`'s declared type is a user value-type, `self.key < other key` must route through the runtime `is_object` guard and dispatch to `DescendingInt>><` — NOT take a bare `erlang:'<'` that would silently term-order the inner tagged map."
     },
     {
       "id": "stdlib-test-fixtures-do-accumulator-value",

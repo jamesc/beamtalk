@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-2710 follow-up fixture: an integer wrapper whose comparison order is the
+// REVERSE of the underlying integer (a larger `n` sorts earlier). Because this
+// order disagrees with Erlang term-order on the underlying value, it lets a test
+// prove that `self.<objectField> < x` actually DISPATCHES to this `<` rather
+// than silently term-ordering the tagged map.
+
+Value subclass: DescendingInt
+  field: n :: Integer = 0
+
+  /// The wrapped integer (`self.n` is Integer-typed → bare comparison BIF).
+  n -> Integer => self.n
+
+  /// Reversed order: larger magnitude is "less than".
+  < other :: DescendingInt -> Boolean => self.n > other n
+
+  /// Reversed order: smaller magnitude is "greater than".
+  > other :: DescendingInt -> Boolean => self.n < other n

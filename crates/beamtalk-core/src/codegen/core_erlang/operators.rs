@@ -23,13 +23,34 @@ enum OperatorGuard {
     Comparison,
 }
 
+/// The runtime test a guarded operator emits: the discriminating predicate plus
+/// which `case` branch dispatches (vs. takes the bare BIF). Named fields rather
+/// than a positional tuple so the branch order isn't an ambiguous bare `bool`.
+struct GuardSpec {
+    /// Module of the predicate (`erlang` / `beamtalk_primitive`).
+    predicate_module: &'static str,
+    /// Predicate function name (`is_number` / `is_object`).
+    predicate_fn: &'static str,
+    /// When `true`, the `'true'` (predicate-holds) branch is the message
+    /// dispatch and the `'false'` branch is the bare BIF; when `false`, swapped.
+    dispatch_on_true: bool,
+}
+
 impl OperatorGuard {
-    /// Returns `(predicate_module, predicate_fn, dispatch_on_true)` for the
-    /// guard. All three are static, so they are safe as `Document::Str` leaves.
-    fn predicate(self) -> (&'static str, &'static str, bool) {
+    /// The predicate + branch order for this guard. All strings are static, so
+    /// they are safe as `Document::Str` leaves.
+    fn spec(self) -> GuardSpec {
         match self {
-            Self::Arithmetic => ("erlang", "is_number", false),
-            Self::Comparison => ("beamtalk_primitive", "is_object", true),
+            Self::Arithmetic => GuardSpec {
+                predicate_module: "erlang",
+                predicate_fn: "is_number",
+                dispatch_on_true: false,
+            },
+            Self::Comparison => GuardSpec {
+                predicate_module: "beamtalk_primitive",
+                predicate_fn: "is_object",
+                dispatch_on_true: true,
+            },
         }
     }
 }
@@ -161,15 +182,18 @@ impl CoreErlangGenerator {
     /// * a numeric literal receiver (`1 + x`),
     /// * `self` inside a numeric class (`Integer`/`Float` method bodies),
     /// * an identifier bound to a `:: Integer/Float/Number` parameter, and
-    /// * a `self.<field>` read.
+    /// * a `self.<field>` read whose field is numeric-typed or untyped.
     ///
-    /// The last case keeps actor/value-type instance-field arithmetic on the
-    /// bare numeric path exactly as before Phase 1 — both to avoid regressing
-    /// the broad `self.count := self.count + 1` counter pattern (and the
-    /// dependent `ifTrue:` inline-case state-threading optimisation) and because
-    /// the receiver-dispatch contract this issue introduces targets
-    /// local-variable receivers (`aMoney + bMoney`), not fields. Dispatching on
-    /// value-type-valued fields is left to a follow-up.
+    /// The `self.<field>` case keeps numeric / untyped instance-field arithmetic
+    /// on the bare path — both to avoid regressing the broad
+    /// `self.count := self.count + 1` counter pattern (and the dependent
+    /// `ifTrue:` inline-case state-threading optimisation) and because untyped
+    /// fields carry no type information. A field with an explicit **non-numeric**
+    /// declared type (e.g. `field: lo :: Money`) instead routes through the
+    /// `is_number` guard so `self.lo + x` dispatches to the field type's `+`. (On
+    /// the arithmetic path a non-number field would otherwise `badarith`; on the
+    /// comparison path the analogous miss is *silently wrong* — see
+    /// [`Self::receiver_is_statically_comparable`].)
     pub(in crate::codegen::core_erlang) fn receiver_is_statically_numeric(
         &self,
         expr: &Expression,
@@ -184,9 +208,13 @@ impl CoreErlangGenerator {
                     self.param_is_numeric(&id.name)
                 }
             }
-            // `self.<field>` reads stay on the numeric fast path (see doc above).
-            Expression::FieldAccess { receiver, .. } => {
+            // `self.<field>` stays bare only when the field is numeric-typed or
+            // untyped (see doc above); explicit object-typed fields are guarded.
+            Expression::FieldAccess {
+                receiver, field, ..
+            } => {
                 matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+                    && self.field_is_numeric(&field.name)
             }
             _ => false,
         }
@@ -205,8 +233,17 @@ impl CoreErlangGenerator {
     ///   (`Integer`/`Float`/`Character`/`String`),
     /// * an identifier bound to a `:: Integer/Float/Number/Character/String`
     ///   parameter, and
-    /// * a `self.<field>` read (kept bare exactly as the arithmetic path does —
-    ///   dispatching on value-type-valued fields is left to a follow-up).
+    /// * a `self.<field>` read whose field is primitive-ordered-typed or untyped.
+    ///
+    /// The `self.<field>` case is **type-aware** (BT-2710 follow-up), and the
+    /// stakes are higher here than for arithmetic: `erlang:'<'` is a total order
+    /// over every term and never raises, so a bare comparison on an object-typed
+    /// field would *silently* term-order the tagged map instead of dispatching —
+    /// a wrong boolean, not a `badarith`. So a field with an explicit
+    /// non-primitive declared type (e.g. `field: lo :: Money`) routes through the
+    /// `is_object` guard, making `self.lo < other lo` dispatch to `Money>><`.
+    /// Numeric / `Character` / `String` fields, and untyped fields (no info, kept
+    /// bare for status quo), stay on the bare comparison BIF.
     pub(in crate::codegen::core_erlang) fn receiver_is_statically_comparable(
         &self,
         expr: &Expression,
@@ -230,8 +267,11 @@ impl CoreErlangGenerator {
                     self.param_is_comparable(&id.name)
                 }
             }
-            Expression::FieldAccess { receiver, .. } => {
+            Expression::FieldAccess {
+                receiver, field, ..
+            } => {
                 matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+                    && self.field_is_comparable(&field.name)
             }
             _ => false,
         }
@@ -268,7 +308,11 @@ impl CoreErlangGenerator {
         left_code: Document<'static>,
         right_code: Document<'static>,
     ) -> Document<'static> {
-        let (pred_module, pred_fn, dispatch_on_true) = guard.predicate();
+        let GuardSpec {
+            predicate_module: pred_module,
+            predicate_fn: pred_fn,
+            dispatch_on_true,
+        } = guard.spec();
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
 
