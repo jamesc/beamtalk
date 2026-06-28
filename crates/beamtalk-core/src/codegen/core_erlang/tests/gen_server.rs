@@ -2582,6 +2582,37 @@ Actor subclass: Counter
 }
 
 #[test]
+fn test_bt2717_handle_continue_strips_local_temps_from_init_state() {
+    // BT-2717: handle_continue is an outermost state-commit boundary (it persists
+    // the post-initialize state). An `initialize` that threads an outer local must
+    // not leave a `__local__` temp in the actor's first committed state, so the
+    // post-initialize path strips it before the {'noreply', …} reply — the same
+    // clean-up handle_call/handle_cast apply.
+    let src = "
+Actor subclass: Counter
+  state: value = 0
+  initialize => self.value := 1
+";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let code = generate_module_with_warnings(&module, CodegenOptions::new("counter"))
+        .expect("codegen should succeed")
+        .code;
+
+    assert!(
+        code.contains(
+            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in"
+        ),
+        "handle_continue must strip __local__ threading temps from the committed \
+         post-initialize state. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'noreply', InitCleanState}"),
+        "handle_continue must reply with the cleaned post-initialize state. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_bt1005_explicit_annotation_not_overwritten_by_writeback() {
     // BT-1005: An explicitly annotated method must NOT be changed by the writeback pass.
     let src = "

@@ -474,12 +474,22 @@ impl CoreErlangGenerator {
             .unwrap_or_default();
 
         if typed_no_default.is_empty() {
-            return docvec![line(), "{'noreply', InitNewState}"];
+            // BT-2717: strip codegen-internal `__local__` threading temps from the
+            // post-initialize committed state, the same outermost-boundary clean-up
+            // handle_call/handle_cast apply — an `initialize` that threads an outer
+            // local must not persist the temporary into the actor's first state.
+            return docvec![
+                line(),
+                "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in",
+                line(),
+                "{'noreply', InitCleanState}",
+            ];
         }
 
         // Build nested checks: each field gets a case that either stops or continues.
-        // We build from the inside out — the innermost is {'noreply', InitNewState}.
-        let mut body: Document<'static> = docvec!["{'noreply', InitNewState}"];
+        // We build from the inside out — the innermost is the cleaned {'noreply', …}
+        // (BT-2717: __local__ threading temps stripped from the committed state).
+        let mut body: Document<'static> = docvec!["{'noreply', InitCleanState}"];
 
         for (i, field) in typed_no_default.iter().enumerate().rev() {
             let field_name = field.field_name.clone();
@@ -574,6 +584,10 @@ impl CoreErlangGenerator {
         }
 
         docvec![
+            line(),
+            // BT-2717: clean the committed state once before the field checks; the
+            // checks read user fields (never `__local__`) so they are unaffected.
+            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in",
             line(),
             "%% BT-1949/BT-1951: Verify typed-no-default fields (including inherited) were initialized",
             line(),

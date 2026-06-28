@@ -112,7 +112,8 @@ module 'initializing_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
             let _ClearStack0 = call 'erlang':'erase'('$bt_call_stack') in
             case _InitResult0 of
                 <{'reply', _InitRet0, InitNewState}> when 'true' ->
-                    {'noreply', InitNewState}
+                    let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in
+                    {'noreply', InitCleanState}
                 <{'error', {_InitType0, _InitReason0, _InitStack0}, _InitErrState0}> when 'true' ->
                     let _InitErrMsg0 = call 'beamtalk_error':'format_safe'({_InitType0, _InitReason0}, _InitStack0) in
                     let _InitErrClass0 = call 'bt@initializing_counter':'class_name'() in
