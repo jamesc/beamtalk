@@ -35,22 +35,7 @@ Tests the Phase 2 dispatch/3 interface for WorkspaceInterface primitives:
 fake_self(Pid) ->
     {beamtalk_object, 'WorkspaceInterface', 'bt@stdlib@workspace_interface', Pid}.
 
-%% Cross-platform temporary directory (Windows has no /tmp).
-tmp_dir() ->
-    case os:type() of
-        {win32, _} ->
-            case os:getenv("TEMP") of
-                false ->
-                    case os:getenv("TMP") of
-                        false -> ".";
-                        Tmp -> Tmp
-                    end;
-                Temp ->
-                    Temp
-            end;
-        _ ->
-            "/tmp"
-    end.
+tmp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
 %% Create a unique empty directory under tmp_dir().
 make_empty_tmp_dir(Prefix) ->

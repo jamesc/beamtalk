@@ -1450,13 +1450,8 @@ map_type_remote_type_no_context_resolves_test() ->
 %%% ---------------------------------------------------------------
 
 make_tmp_dir() ->
-    TmpBase =
-        case os:getenv("TMPDIR") of
-            false -> "/tmp";
-            Dir -> Dir
-        end,
     TmpDir = filename:join(
-        TmpBase,
+        binary_to_list(beamtalk_file:'tempDirectory'()),
         "bt_spec_reader_test_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = filelib:ensure_dir(filename:join(TmpDir, "x")),

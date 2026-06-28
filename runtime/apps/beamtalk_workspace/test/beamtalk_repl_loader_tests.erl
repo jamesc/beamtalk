@@ -11,16 +11,7 @@
 %% Helpers
 %%====================================================================
 
-temp_dir() ->
-    case os:getenv("TMPDIR") of
-        false ->
-            case os:getenv("TEMP") of
-                false -> "/tmp";
-                Dir -> Dir
-            end;
-        Dir ->
-            Dir
-    end.
+temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
 %%====================================================================
 %% is_stdlib_path/1

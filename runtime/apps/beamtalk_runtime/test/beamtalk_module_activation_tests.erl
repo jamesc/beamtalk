@@ -737,16 +737,7 @@ create_temp_dir() ->
     Base.
 
 -doc "Platform-agnostic temp directory.".
-get_tmp_base() ->
-    case os:getenv("TMPDIR") of
-        false ->
-            case os:getenv("TEMP") of
-                false -> "/tmp";
-                Dir -> Dir
-            end;
-        Dir ->
-            Dir
-    end.
+get_tmp_base() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
 remove_temp_dir(Dir) ->
     case file:list_dir(Dir) of

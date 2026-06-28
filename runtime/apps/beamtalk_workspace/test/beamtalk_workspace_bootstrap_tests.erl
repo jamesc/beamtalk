@@ -616,16 +616,7 @@ find_bt_modules_skips_invalid_names_test() ->
 %% Test helpers for temp directories
 %%====================================================================
 
-get_temp_dir() ->
-    case os:getenv("TMPDIR") of
-        false ->
-            case os:getenv("TEMP") of
-                false -> "/tmp";
-                Temp -> Temp
-            end;
-        TmpDir ->
-            TmpDir
-    end.
+get_temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
 make_temp_beam_dir(FileNames) ->
     Dir = filename:join(

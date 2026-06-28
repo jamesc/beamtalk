@@ -180,21 +180,8 @@ handle_read_specs_crash_caught_test() ->
 %%% ---------------------------------------------------------------
 
 setup_temp_dir() ->
-    TmpBase =
-        case os:getenv("TMPDIR") of
-            false ->
-                case os:getenv("TEMP") of
-                    false -> "/tmp";
-                    "" -> "/tmp";
-                    WinDir -> WinDir
-                end;
-            "" ->
-                "/tmp";
-            Dir ->
-                Dir
-        end,
     TmpDir = filename:join([
-        TmpBase,
+        binary_to_list(beamtalk_file:'tempDirectory'()),
         "beamtalk_build_worker_test_" ++
             integer_to_list(erlang:unique_integer([positive]))
     ]),

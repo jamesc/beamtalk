@@ -15,17 +15,7 @@ Tests expression evaluation, file loading, and compilation.
 %% Helpers
 %%====================================================================
 
-%% Cross-platform temp directory (TMPDIR on Unix, TEMP on Windows)
-temp_dir() ->
-    case os:getenv("TMPDIR") of
-        false ->
-            case os:getenv("TEMP") of
-                false -> "/tmp";
-                Dir -> Dir
-            end;
-        Dir ->
-            Dir
-    end.
+temp_dir() -> binary_to_list(beamtalk_file:'tempDirectory'()).
 
 %%====================================================================
 %% Tests
