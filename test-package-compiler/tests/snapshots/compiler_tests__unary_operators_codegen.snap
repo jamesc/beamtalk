@@ -97,7 +97,8 @@ module 'unary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
     case Continue of
         <'initialize'> when 'true' ->
             let InitNewState = State in
-            {'noreply', InitNewState}
+            let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in
+            {'noreply', InitCleanState}
         <_> when 'true' -> {'noreply', State}
     end
 
@@ -118,8 +119,9 @@ module 'unary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _CastDispatchResult of
                 <{'reply', _CastResult, CastNewState}> when 'true' ->
-                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CastNewState) in
-                    {'noreply', CastNewState}
+                    let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
+                    {'noreply', CleanCastNewState}
                 <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                     let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
                     let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
@@ -142,8 +144,9 @@ module 'unary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _CastDispatchResult of
                 <{'reply', _CastResult, CastNewState}> when 'true' ->
-                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CastNewState) in
-                    {'noreply', CastNewState}
+                    let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in
+                    let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in
+                    {'noreply', CleanCastNewState}
                 <{'error', {CastType, CastReason, CastStacktrace}, _CastState}> when 'true' ->
                     let CastErrMsg = call 'beamtalk_error':'format_safe'({CastType, CastReason}, CastStacktrace) in
                     let _ = call 'logger':'warning'(CastErrMsg, ~{'selector' => CastSelector, 'reason' => {CastType, CastReason}, 'stacktrace' => CastStacktrace, 'domain' => ['beamtalk'|['runtime'|[]]]}~)
@@ -173,8 +176,9 @@ module 'unary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _DispatchResult of
                 <{'reply', Result, NewState}> when 'true' ->
-                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, NewState) in
-                    {'reply', {'ok', Result}, NewState}
+                    let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
+                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
+                    {'reply', {'ok', Result}, CleanNewState}
                 <{'error', Error, ErrState}> when 'true' ->
                     {'reply', {'error', Error}, ErrState}
             end
@@ -191,8 +195,9 @@ module 'unary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
             let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in
             case _DispatchResult of
                 <{'reply', Result, NewState}> when 'true' ->
-                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, NewState) in
-                    {'reply', {'ok', Result}, NewState}
+                    let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in
+                    let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in
+                    {'reply', {'ok', Result}, CleanNewState}
                 <{'error', Error, ErrState}> when 'true' ->
                     {'reply', {'error', Error}, ErrState}
             end

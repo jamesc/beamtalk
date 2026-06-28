@@ -474,12 +474,22 @@ impl CoreErlangGenerator {
             .unwrap_or_default();
 
         if typed_no_default.is_empty() {
-            return docvec![line(), "{'noreply', InitNewState}"];
+            // BT-2717: strip codegen-internal `__local__` threading temps from the
+            // post-initialize committed state, the same outermost-boundary clean-up
+            // handle_call/handle_cast apply — an `initialize` that threads an outer
+            // local must not persist the temporary into the actor's first state.
+            return docvec![
+                line(),
+                "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in",
+                line(),
+                "{'noreply', InitCleanState}",
+            ];
         }
 
         // Build nested checks: each field gets a case that either stops or continues.
-        // We build from the inside out — the innermost is {'noreply', InitNewState}.
-        let mut body: Document<'static> = docvec!["{'noreply', InitNewState}"];
+        // We build from the inside out — the innermost is the cleaned {'noreply', …}
+        // (BT-2717: __local__ threading temps stripped from the committed state).
+        let mut body: Document<'static> = docvec!["{'noreply', InitCleanState}"];
 
         for (i, field) in typed_no_default.iter().enumerate().rev() {
             let field_name = field.field_name.clone();
@@ -558,9 +568,13 @@ impl CoreErlangGenerator {
                                 leaf::var(err_var1),
                                 ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
                                 line(),
+                                // BT-2717: terminating path — the state flows to
+                                // terminate/2, not persistence, so no clean-up contract
+                                // applies; use the cleaned binding for consistency with
+                                // the success arm.
                                 "{'stop', ",
                                 leaf::var(fmt_var),
-                                ", InitNewState}",
+                                ", InitCleanState}",
                             ]
                         ),
                         line(),
@@ -574,6 +588,10 @@ impl CoreErlangGenerator {
         }
 
         docvec![
+            line(),
+            // BT-2717: clean the committed state once before the field checks; the
+            // checks read user fields (never `__local__`) so they are unaffected.
+            "let InitCleanState = call 'beamtalk_actor':'strip_local_temps'(InitNewState) in",
             line(),
             "%% BT-1949/BT-1951: Verify typed-no-default fields (including inherited) were initialized",
             line(),
@@ -1216,12 +1234,16 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
+                            // BT-2717: strip codegen-internal `__local__` threading
+                            // temporaries before persist + notify (see handle_call).
+                            line(),
+                            "let CleanCastNewState = call 'beamtalk_actor':'strip_local_temps'(CastNewState) in",
                             // BT-2524: same per-object change push as handle_call, for
                             // a state write committed via a fire-and-forget cast.
                             line(),
-                            "let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CastNewState) in",
+                            "let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in",
                             line(),
-                            "{'noreply', CastNewState}",
+                            "{'noreply', CleanCastNewState}",
                         ]
                     ),
                     line(),
@@ -1384,14 +1406,20 @@ impl CoreErlangGenerator {
                     nest(
                         INDENT,
                         docvec![
+                            // BT-2717: strip codegen-internal `__local__` threading
+                            // temporaries before persist + notify, so an outer local
+                            // threaded through a control-flow desugar never leaks into
+                            // the committed actor state or a watch notification.
+                            line(),
+                            "let CleanNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
                             // BT-2524: notify the per-object change substrate so a
                             // watched compiled actor's committed state write pushes
                             // {object_changed, …} to the live Inspector — the runtime
                             // beamtalk_actor path does this via log_dispatch_complete.
                             line(),
-                            "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, NewState) in",
+                            "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in",
                             line(),
-                            "{'reply', {'ok', Result}, NewState}",
+                            "{'reply', {'ok', Result}, CleanNewState}",
                         ]
                     ),
                     // Error case: pass error (now includes stacktrace) opaquely to caller
@@ -1463,7 +1491,19 @@ impl CoreErlangGenerator {
                             docvec![
                                 line(),
                                 "<{'reply', _Result, NewState}> when 'true' ->",
-                                nest(INDENT, docvec![line(), "{'noreply', NewState}",]),
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        // BT-2717: handle_info is an outermost state-commit
+                                        // boundary too — a Server `handleInfo:` that threads an
+                                        // outer local through a control-flow desugar must not
+                                        // persist `__local__` temps into the committed state.
+                                        line(),
+                                        "let CleanInfoNewState = call 'beamtalk_actor':'strip_local_temps'(NewState) in",
+                                        line(),
+                                        "{'noreply', CleanInfoNewState}",
+                                    ]
+                                ),
                                 line(),
                                 // BT-1822: Destructure error triple to log stacktrace
                                 "<{'error', {InfoType, InfoReason, InfoStacktrace}, _ErrState}> when 'true' ->",

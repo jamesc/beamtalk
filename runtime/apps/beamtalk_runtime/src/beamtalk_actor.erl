@@ -189,7 +189,9 @@ handle_getValue([], State) ->
 
 %% BT-2524: per-object change publish hook, called from compiled actor
 %% gen_server callbacks after a method commits new state.
--export([notify_state_change/2]).
+%% BT-2717: strip_local_temps/1 cleans codegen-internal `__local__` threading
+%% temporaries from committed state before the reply is emitted.
+-export([notify_state_change/2, strip_local_temps/1]).
 
 %% Named registration (ADR 0079, BT-1987)
 -export([
@@ -1830,17 +1832,55 @@ notify_state_change(OldState, NewState) ->
 
 -doc """
 Compute which user-visible state keys changed between two state maps.
-Excludes internal keys (__methods__, $beamtalk_class, __class_mod__).
+
+Excludes internal keys (__methods__, $beamtalk_class, __class_mod__) and, per
+BT-2717, `__local__`-prefixed control-flow threading temporaries: those are
+codegen-internal locals packed into the state map while threading an outer local
+through a desugared loop/conditional, never user-observable fields. Belt-and-braces
+alongside the codegen-side `strip_local_temps/1` so a stray `__local__` key from any
+leak path never surfaces as a watched-actor changed slot.
 """.
 -spec changed_state_keys(map(), map()) -> [atom()].
 changed_state_keys(OldState, NewState) ->
     InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), '__class_mod__'],
     AllKeys = lists:usort(maps:keys(OldState) ++ maps:keys(NewState)),
-    UserKeys = AllKeys -- InternalKeys,
+    UserKeys = [K || K <- AllKeys -- InternalKeys, not is_local_temp_key(K)],
     [
         K
      || K <- UserKeys, maps:get(K, OldState, '__absent__') =/= maps:get(K, NewState, '__absent__')
     ].
+
+-doc """
+Strip codegen-internal `__local__`-prefixed control-flow threading temporaries from
+an actor state map before it is persisted or its changes published (BT-2717).
+
+When an actor method threads an outer local through a desugared control-flow
+construct (`eachWithIndex:`, `do:separatedBy:`, conditionals, counted loops) the
+local is packed into the gen_server `State` map under a `__local__<name>` key. Those
+keys are a purely internal threading mechanism — they must not leak into the
+persisted actor state or be mistaken for user-observable fields by the watch
+notification path. Compiled actor `handle_call`/`handle_cast` callbacks call this on
+the committed `NewState` before replying, so the persisted state stays clean
+regardless of which codegen path packed the temporary.
+
+Returns the map unchanged (no rebuild) when it carries no such keys — the common
+case for a method that threads nothing.
+""".
+-spec strip_local_temps(map()) -> map().
+strip_local_temps(State) ->
+    case [K || K <- maps:keys(State), is_local_temp_key(K)] of
+        [] -> State;
+        LocalKeys -> maps:without(LocalKeys, State)
+    end.
+
+-spec is_local_temp_key(term()) -> boolean().
+is_local_temp_key(Key) when is_atom(Key) ->
+    case atom_to_binary(Key, utf8) of
+        <<"__local__", _/binary>> -> true;
+        _ -> false
+    end;
+is_local_temp_key(_Key) ->
+    false.
 
 -doc """
 Construct a Self reference (#beamtalk_object{}) from the actor's state.
