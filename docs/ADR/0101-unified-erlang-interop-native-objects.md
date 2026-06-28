@@ -90,7 +90,11 @@ Delegated methods use an explicit `=> self delegate` body — **identical** to t
 
 ### Part 2 — FFI wraps by default (no opt-out in v1)
 
-`(Erlang module) call:` becomes **safe by default and unified across both proxy paths**: `error`-class exceptions are converted to `#beamtalk_error{}` (reusing `beamtalk_exception_handler:ensure_wrapped`, which is idempotent). This is **not purely additive** — it changes both existing paths in opposite directions, which the migration path must account for:
+`(Erlang module) call:` becomes **safe by default and unified across both proxy paths**: `error`-class exceptions are converted to `#beamtalk_error{}` (reusing `beamtalk_exception_handler:ensure_wrapped`, which is idempotent).
+
+**Primary motivation — a user must never see a raw Erlang error tuple.** In an interactive, Smalltalk-style environment the REPL surfaces errors constantly; a raw `** exception error: badarg` or `{badarg, [...]}` tuple leaks the host VM, breaks the illusion of being *in* Beamtalk, and stops a newcomer cold. Wrap-by-default guarantees every error a user sees is a `#beamtalk_error{}` with `kind`/`hint`/`selector` — the *same* shape whether it originated in a value-type `@primitive`, a `native:` delegate, or raw FFI. That uniformity matters most at the REPL, which is the surface where the abstraction is most exposed.
+
+This is **not purely additive** — it changes both existing paths in opposite directions, which the migration path must account for:
 
 | Exception class | `direct_call/3` today | `validate_and_apply/4` today | **Proposed unified default** | Net change |
 |---|---|---|---|---|
@@ -177,7 +181,7 @@ This does **not** make `SystemNavigation` a `native:` class — it hits four bac
 
 ## User Impact
 
-- **Newcomer** — sees one keyword (`native:`) for "backed by Erlang" instead of guessing between `@primitive` and `(Erlang …)`. Errors are structured `#beamtalk_error{}` regardless of which mechanism backs a method.
+- **Newcomer** — sees one keyword (`native:`) for "backed by Erlang" instead of guessing between `@primitive` and `(Erlang …)`. Crucially, **never sees a raw Erlang error tuple at the REPL** — every error is a structured `#beamtalk_error{}` regardless of which mechanism backs a method, so the host VM never leaks through the interactive surface.
 - **Smalltalk developer** — `native:` reads as message delegation; value-type `@primitive` preserves the "primitive method" tradition. Reflection over classes (`Behaviour`) stops masquerading as primitives.
 - **Erlang/BEAM developer** — `exit`/`throw` still propagate (raw OTP semantics for ports, links, intentional exits preserved without ceremony); wrap-by-default means casual FFI no longer leaks `badarg`. Per-module hand-wrapping shrinks to domain hints only.
 - **Operator** — no behavior change to `exit`/links (still propagate); fewer raw crashes surfacing from stdlib reflection paths.
