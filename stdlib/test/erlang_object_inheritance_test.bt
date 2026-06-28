@@ -40,7 +40,8 @@ TestCase subclass: ErlangObjectInheritanceTest
   testErlangModuleKeywordDispatch =>
     self assert: (self.proxy reverse: #(3, 2, 1)) equals: #(1, 2, 3)
 
-  testErlangModuleUnaryDispatch => self assert: ((Erlang erlang) node isKindOf: Symbol)
+  testErlangModuleUnaryDispatch =>
+    self assert: ((Erlang erlang) node isKindOf: Symbol)
 
   // === Erlang: Object-inherited methods ===
   // Note: Must use dynamic dispatch (via variable or perform:) because
