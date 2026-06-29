@@ -16,8 +16,9 @@ TestCase subclass: ErrorMessageTest
     self assert: result failed equals: 1
     failures := result failures
     errorMsg := (failures first) at: #error
-    // Should say "not found in dictionary" instead of raw {badkey,...}
-    self assert: (errorMsg includesSubstring: "not found in dictionary")
+    // ADR 0101: FFI {badkey,_} is now wrapped by default at the proxy boundary
+    // into a readable key_error ("key not found: ...") instead of leaking raw.
+    self assert: (errorMsg includesSubstring: "key not found")
 
   testBadarithMessageIsReadable =>
     result := TestRunner run: ErrorMessageHelperTest method: #triggerBadarith
