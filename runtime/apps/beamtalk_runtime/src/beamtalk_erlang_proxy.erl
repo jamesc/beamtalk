@@ -205,6 +205,12 @@ the bare Erlang MFA. Crucially, `error:undef` is still caught (the compile-time
 guarantee does not survive **hot code reload** — a backing function can be
 swapped between compile and call) and surfaced as a structured
 `does_not_understand` carrying `{Class, Sel}`.
+
+**Codegen-only.** This entry deliberately omits the proactive
+`get_exports`/arity pre-check that `direct_call/3` and `validate_and_apply/4`
+run, so it must only be called with the exact `{Mod, Fn, Args}` shape codegen
+emits. Hand-written code wanting export validation up front should use
+`direct_call/3` (or the `(Erlang module)` FFI surface) instead.
 """.
 -spec native_call(atom(), atom(), list(), {atom(), atom()}) -> term().
 native_call(Module, FunName, Args, {Class, Selector}) ->
@@ -237,8 +243,9 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
     try
         coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
     catch
-        error:badarg:Stack ->
-            maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack);
+        %% Clause order mirrors maybe_retry_badarg/6 for readability. The patterns
+        %% are mutually exclusive (distinct atoms vs map vs record), so order only
+        %% matters for the trailing catch-all, which must stay last.
         error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
             %% Re-raise already-wrapped Beamtalk exceptions unchanged
             %% (e.g. from Beamtalk code reached via Erlang). Idempotent.
@@ -249,6 +256,8 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
             %% classified — wrap it into the map form *preserving its kind*
             %% (idempotent); do not reclassify it as a generic runtime_error.
             erlang:raise(error, beamtalk_exception_handler:wrap(Rec), RecStack);
+        error:badarg:Stack ->
+            maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack);
         error:undef:_Stack ->
             %% TOCTOU / hot code reload: function unloaded between check and apply
             raise_undef_error(Module, FunName, length(Args), OrigSelector, Context);
