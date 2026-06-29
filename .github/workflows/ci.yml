@@ -54,7 +54,7 @@ jobs:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -138,7 +138,7 @@ jobs:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -188,7 +188,7 @@ jobs:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -233,7 +233,7 @@ jobs:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -306,7 +306,7 @@ jobs:
           toolchain: stable
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
           version-type: strict
@@ -380,7 +380,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Install Erlang/OTP
-        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           version-file: .tool-versions
           version-type: strict
