@@ -74,3 +74,6 @@ TestCase subclass: ErlangInteropTest
     caught := [(Erlang erlang) abs: #notanumber] on: Exception do: [:e | e]
     self assert: caught kind equals: #type_error
     self assert: caught message class equals: String
+    // ...and the human-readable message never leaks the raw `badarg` atom
+    // (the raw reason lives in details, not the user-facing message).
+    self assert: (caught message includesSubstring: "badarg") equals: false
