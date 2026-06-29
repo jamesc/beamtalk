@@ -1745,4 +1745,28 @@ mod tests {
             "Should emit spawns_block: true. Got: {code}"
         );
     }
+
+    #[test]
+    fn test_generate_method_list_emits_is_internal_true() {
+        // ADR 0101 Part 4: internal seam helpers must propagate `is_internal:
+        // true` into the generated builtin metadata (it was previously
+        // hardcoded `false`). Guards the `true` path of the `{internal}` field.
+        let methods = vec![MethodMeta {
+            selector: "xrefImplementorsOf:".to_string(),
+            arity: 1,
+            kind: MethodKindMeta::Primary,
+            is_sealed: false,
+            is_internal: true,
+            spawns_block: false,
+            return_type: Some("Dictionary".to_string()),
+            param_types: vec![Some("Symbol".to_string())],
+            doc: None,
+        }];
+        let mut code = String::new();
+        generate_method_list(&mut code, "methods", &methods, "SystemNavigation");
+        assert!(
+            code.contains("is_internal: true"),
+            "Should emit is_internal: true for an internal method. Got: {code}"
+        );
+    }
 }

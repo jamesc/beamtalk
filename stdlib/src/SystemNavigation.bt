@@ -2462,6 +2462,15 @@ sealed typed Object subclass: SystemNavigation
     (Erlang beamtalk_extensions) extensions_by: anOwner
 
   /// Every registered extension `{classTag, selector, source}` entry.
+  ///
+  /// INVARIANT: the third tuple element (`entry at: 3`, the extension source)
+  /// is always a String. The underlying FFI spec types it `binary()`
+  /// (String | Binary, BT-2254), but the runtime always delivers source text.
+  /// The `List(Tuple)` return type drops per-element precision, so callers
+  /// see `entry at: 3` as `Dynamic` — this silently bypasses the static
+  /// `String | Binary` check the inline FFI used to give (e.g. at the
+  /// `ffiSitesIn:…` seam in `collectExtensionFfiSitesFor:`). If a non-String
+  /// third element ever appears, that mistyping would surface only at runtime.
   internal allExtensionsWithSource -> List(Tuple) =>
     (Erlang beamtalk_extensions) listAllWithSource
 
