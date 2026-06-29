@@ -153,8 +153,13 @@ sealed typed Value subclass: ChangeLog
   /// Workspace changes clear   // => _
   /// ```
   clear -> ChangeLog =>
-    (Erlang beamtalk_workspace_interface_primitives) changeLogClear
+    self changeLogClear
     self
+
+  /// Internal FFI seam (ADR 0101 Part 4): discard every pending entry. Keeps
+  /// `clear` pure Beamtalk.
+  internal changeLogClear -> Object =>
+    (Erlang beamtalk_workspace_interface_primitives) changeLogClear
 
   /// Flush only the ChangeEntries whose kind or author_kind is in `kinds`
   /// (ADR 0082 Phase 4).

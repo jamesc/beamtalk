@@ -183,9 +183,18 @@ sealed typed Value subclass: Result(T, E)
   /// (Result error: #x) unwrap      // => Exception: unwrap called on Result error: #x
   /// ```
   sealed unwrap -> T =>
-    self.isOk ifTrue: [
-      self.okValue
-    ] ifFalse: [(Erlang beamtalk_result) unwrapError: self.errReason]
+    self.isOk ifTrue: [self.okValue] ifFalse: [self unwrapError: self.errReason]
+
+  /// Internal FFI seam (ADR 0101 Part 4): raise the appropriate exception for
+  /// `unwrap` on a `Result error` (re-raising an `Exception` reason directly,
+  /// or signalling a generic `Error` for a raw reason). Keeps `unwrap` pure
+  /// Beamtalk.
+  ///
+  /// This method NEVER returns a value — it always raises. The `-> T` return
+  /// annotation exists only so the call typechecks as the `ifFalse:` branch of
+  /// `unwrap -> T` (Beamtalk has no `Never`/`Bot` type to express divergence).
+  internal unwrapError: aReason :: E -> T =>
+    (Erlang beamtalk_result) unwrapError: aReason
 
   // ===== Instance Methods — Transformers =====
 

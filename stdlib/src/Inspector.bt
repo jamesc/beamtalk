@@ -116,8 +116,13 @@ sealed typed Object subclass: Inspector
   /// ```
   size -> Integer =>
     self kind == #collection ifTrue: [
-      (Erlang beamtalk_inspector) sizeOf: self
+      self sizeOfCollection
     ] ifFalse: [self fields size]
+
+  /// Internal FFI seam (ADR 0101 Part 4): the cheap element count of a
+  /// `#collection` cursor. Keeps `size` pure Beamtalk.
+  internal sizeOfCollection -> Integer =>
+    (Erlang beamtalk_inspector) sizeOf: self
 
   /// Drill into one field by name, returning a child `Inspector` cursor on that
   /// field's value (ADR 0095 §1).

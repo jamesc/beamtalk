@@ -44,7 +44,12 @@ typed Value subclass: ProcessNavigation
   /// ProcessNavigation default tree root
   /// ```
   class default -> ProcessNavigation =>
-    ProcessNavigation nodes: (Erlang beamtalk_process_navigation) default_snapshot
+    ProcessNavigation nodes: self defaultSnapshot
+
+  /// Internal FFI seam (ADR 0101 Part 4): the default-scope snapshot. Keeps
+  /// `default` pure Beamtalk.
+  class internal defaultSnapshot -> List(SupervisionNode) =>
+    (Erlang beamtalk_process_navigation) default_snapshot
 
   /// A navigation over *everything*, including runtime infrastructure and
   /// foreign processes (the `system` scope). Privileged (ADR 0091). Cannot fail.
@@ -54,7 +59,12 @@ typed Value subclass: ProcessNavigation
   /// ProcessNavigation system tree size
   /// ```
   class system -> ProcessNavigation =>
-    ProcessNavigation nodes: (Erlang beamtalk_process_navigation) system_snapshot
+    ProcessNavigation nodes: self systemSnapshot
+
+  /// Internal FFI seam (ADR 0101 Part 4): the privileged system-scope
+  /// snapshot. Keeps `system` pure Beamtalk.
+  class internal systemSnapshot -> List(SupervisionNode) =>
+    (Erlang beamtalk_process_navigation) system_snapshot
 
   /// A navigation over the subtree rooted at `aRoot` — a `Supervisor` handle or
   /// a raw `Pid`.
@@ -74,9 +84,14 @@ typed Value subclass: ProcessNavigation
   /// (ProcessNavigation from: aSup) ifOk: [:nav | nav tree] ifError: [:e | nil]
   /// ```
   class from: aRoot :: Supervisor | Pid -> Result(ProcessNavigation, Error) =>
-    ((Erlang beamtalk_process_navigation) from: aRoot) map: [:snapshot |
+    (self snapshotFrom: aRoot) map: [:snapshot |
       ProcessNavigation nodes: snapshot
     ]
+
+  /// Internal FFI seam (ADR 0101 Part 4): the raw `Result`-shaped subtree
+  /// snapshot rooted at `aRoot`. Keeps `from:` pure Beamtalk.
+  class internal snapshotFrom: aRoot :: Supervisor | Pid -> Result(List(SupervisionNode), Error) =>
+    (Erlang beamtalk_process_navigation) from: aRoot
 
   /// The navigable `SupervisionTree` snapshot for this navigation.
   ///

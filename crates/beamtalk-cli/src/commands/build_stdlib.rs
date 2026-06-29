@@ -485,6 +485,8 @@ struct MethodMeta {
     kind: MethodKindMeta,
     /// Whether this method is sealed (cannot be overridden).
     is_sealed: bool,
+    /// Whether this method is internal (package-scoped visibility, ADR 0071).
+    is_internal: bool,
     /// Whether this method spawns its block argument in a separate BEAM process.
     spawns_block: bool,
     /// Return type annotation (e.g., `"Integer"`), if present.
@@ -524,6 +526,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
         arity: m.selector.arity(),
         kind: MethodKindMeta::from_ast(m.kind),
         is_sealed: m.is_sealed,
+        is_internal: m.is_internal,
         spawns_block: false,
         return_type: m.return_type.as_ref().map(|t| t.type_name().to_string()),
         param_types: m
@@ -545,6 +548,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
 /// This mirrors the logic in `add_value_auto_methods` in the semantic analyzer
 /// (`class_hierarchy/mod.rs`) and ensures the type checker can resolve
 /// state-based accessors without having to process the source `.bt` file first.
+#[allow(clippy::too_many_lines)] // synthesizes getter + updater + constructor metadata inline
 fn synthesize_value_auto_methods(
     class: &beamtalk_core::ast::ClassDefinition,
     class_name: &str,
@@ -573,6 +577,7 @@ fn synthesize_value_auto_methods(
                 arity: 0,
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
+                is_internal: false,
                 spawns_block: false,
                 return_type: slot
                     .type_annotation
@@ -607,6 +612,7 @@ fn synthesize_value_auto_methods(
                 arity: 1,
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
+                is_internal: false,
                 spawns_block: false,
                 return_type: Some(class_name.to_string()),
                 param_types: vec![param_type],
@@ -651,6 +657,7 @@ fn synthesize_value_auto_methods(
             arity,
             kind: MethodKindMeta::Primary,
             is_sealed: false,
+            is_internal: false,
             spawns_block: false,
             return_type: Some(class_name.to_string()),
             param_types,
@@ -1272,11 +1279,12 @@ fn generate_method_list(
             code,
             "                MethodInfo {{ selector: \"{selector}\".into(), arity: {arity}, \
              kind: {kind}, defined_in: \"{class}\".into(), is_sealed: {sealed}, \
-             is_internal: false, spawns_block: {spawns_block}, \
+             is_internal: {internal}, spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr} }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,
+            internal = m.is_internal,
             spawns_block = m.spawns_block,
         );
     }
@@ -1451,6 +1459,7 @@ mod tests {
                     arity: 0,
                     kind: MethodKindMeta::Primary,
                     is_sealed: false,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: None,
                     param_types: vec![],
@@ -1461,6 +1470,7 @@ mod tests {
                     arity: 1,
                     kind: MethodKindMeta::Primary,
                     is_sealed: true,
+                    is_internal: false,
                     spawns_block: false,
                     return_type: Some("Counter".to_string()),
                     param_types: vec![Some("Integer".to_string())],
@@ -1472,6 +1482,7 @@ mod tests {
                 arity: 0,
                 kind: MethodKindMeta::Primary,
                 is_sealed: false,
+                is_internal: false,
                 spawns_block: false,
                 return_type: Some("Counter".to_string()),
                 param_types: vec![],
@@ -1671,6 +1682,7 @@ mod tests {
             arity: 1,
             kind: MethodKindMeta::Primary,
             is_sealed: false,
+            is_internal: false,
             spawns_block: false,
             return_type: Some("Counter".to_string()),
             param_types: vec![Some("Integer".to_string())],
@@ -1695,6 +1707,7 @@ mod tests {
             arity: 0,
             kind: MethodKindMeta::Primary,
             is_sealed: false,
+            is_internal: false,
             spawns_block: false,
             return_type: None,
             param_types: vec![],
@@ -1719,6 +1732,7 @@ mod tests {
             arity: 2,
             kind: MethodKindMeta::Primary,
             is_sealed: false,
+            is_internal: false,
             spawns_block: true,
             return_type: None,
             param_types: vec![Some("Integer".to_string()), None],
