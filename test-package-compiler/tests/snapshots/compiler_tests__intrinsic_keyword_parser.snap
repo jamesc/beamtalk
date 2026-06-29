@@ -46,6 +46,7 @@ Module {
                                 name: "blockValue",
                                 is_quoted: false,
                                 is_intrinsic: true,
+                                is_inferred: false,
                                 span: Span {
                                     start: 242,
                                     end: 263,
@@ -85,6 +86,7 @@ Module {
                                 name: "size",
                                 is_quoted: true,
                                 is_intrinsic: true,
+                                is_inferred: false,
                                 span: Span {
                                     start: 275,
                                     end: 292,

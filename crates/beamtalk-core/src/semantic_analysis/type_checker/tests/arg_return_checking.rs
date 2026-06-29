@@ -159,6 +159,7 @@ fn test_return_type_skip_primitive_methods() {
                 name: "value".into(),
                 is_quoted: true,
                 is_intrinsic: false,
+                is_inferred: false,
                 span: span(),
             })],
             TypeAnnotation::Simple(ident("Integer")),

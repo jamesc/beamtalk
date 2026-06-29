@@ -681,6 +681,7 @@ fn primitive_expr() -> Expression {
         name: "+".into(),
         is_quoted: true,
         is_intrinsic: false,
+        is_inferred: false,
         span: span(),
     }
 }

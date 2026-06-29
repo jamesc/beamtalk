@@ -78,6 +78,7 @@ Module {
                                 name: "size",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 287,
                                     end: 304,
@@ -127,6 +128,7 @@ Module {
                                 name: "isEmpty",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 319,
                                     end: 339,
@@ -185,6 +187,7 @@ Module {
                                 name: "includes:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 380,
                                     end: 402,
@@ -253,6 +256,7 @@ Module {
                                 name: "add:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 458,
                                     end: 475,
@@ -321,6 +325,7 @@ Module {
                                 name: "remove:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 498,
                                     end: 518,
@@ -379,6 +384,7 @@ Module {
                                 name: "union:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 576,
                                     end: 595,
@@ -447,6 +453,7 @@ Module {
                                 name: "intersection:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 622,
                                     end: 648,
@@ -505,6 +512,7 @@ Module {
                                 name: "difference:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 673,
                                     end: 697,
@@ -563,6 +571,7 @@ Module {
                                 name: "isSubsetOf:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 738,
                                     end: 762,
@@ -612,6 +621,7 @@ Module {
                                 name: "asList",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 792,
                                     end: 811,
@@ -680,6 +690,7 @@ Module {
                                 name: "fromList:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 833,
                                     end: 855,
@@ -738,6 +749,7 @@ Module {
                                 name: "do:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 887,
                                     end: 903,

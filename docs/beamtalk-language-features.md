@@ -4392,16 +4392,20 @@ There are two pragma forms:
 
 | Pragma | Syntax | Purpose |
 |--------|--------|---------|
-| `@primitive 'selector'` | Quoted selector | **Selector-based dispatch** — routes through runtime dispatch modules (`beamtalk_primitive.erl` → type-specific modules). Used for arithmetic, comparison, string operations, etc. |
+| `@primitive` | Bare (no selector) | **Selector-based dispatch**, selector inferred from the enclosing method. Equivalent to `@primitive 'sel'` where `sel` is the method's own selector. Preferred form. |
+| `@primitive 'selector'` | Quoted selector | Same selector-based dispatch, but with an **explicit selector override** — used when the runtime function name differs from the method selector (e.g. class-side aliases like `signal => @primitive 'classSignal'`). |
 | `@intrinsic name` | Unquoted identifier | **Structural intrinsic** — the compiler generates specialized code inline. Used for spawning, block evaluation, control flow, reflection, etc. |
 
 Both forms are semantically equivalent at the compiler level (they produce the same AST node), but the naming convention distinguishes their intent:
 
-**`@primitive` (quoted)** — runtime-dispatched method implementations:
+**`@primitive` (bare or quoted)** — runtime-dispatched method implementations. A bare `@primitive` infers its selector from the method, so the explicit string is only needed for genuine renames:
 ```beamtalk
-// In stdlib/src/Integer.bt
-+ other => @primitive '+'
-asString => @primitive 'asString'
+// In stdlib/src/Integer.bt — bare form, selector inferred ('+' and 'asString')
++ other => @primitive
+asString => @primitive
+
+// In stdlib/src/Exception.bt — explicit override (method 'signal' → runtime 'classSignal')
+class signal => @primitive 'classSignal'
 ```
 
 **`@intrinsic` (unquoted)** — compiler structural intrinsics:

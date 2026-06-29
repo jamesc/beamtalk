@@ -94,7 +94,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary serialize: 42) size   // => _
   /// ```
-  size -> Integer => @primitive "size"
+  size -> Integer => @primitive
 
   /// Iterate over each byte (Integer 0-255), evaluating `block` with each one.
   ///
@@ -102,7 +102,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101)) do: [:b | Transcript show: b]
   /// ```
-  do: block :: Block -> Nil => @primitive "do:"
+  do: block :: Block -> Nil => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -113,7 +113,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101)) printString   // => _
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive
 
   // ═══════════════════════════════════════════════════════════════════
   // Byte-level access
@@ -127,7 +127,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101, 108)) at: 1   // => 104
   /// ```
-  at: index :: Integer -> Integer => @primitive "at:"
+  at: index :: Integer -> Integer => @primitive
 
   /// Return the byte value (0-255) at the given 0-based offset.
   ///
@@ -138,7 +138,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101, 108)) byteAt: 0   // => 104
   /// ```
-  byteAt: offset :: Integer -> Integer => @primitive "byteAt:"
+  byteAt: offset :: Integer -> Integer => @primitive
 
   /// Return the byte count of this binary.
   ///
@@ -149,7 +149,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101, 108)) byteSize   // => 3
   /// ```
-  byteSize -> Integer => @primitive "byteSize"
+  byteSize -> Integer => @primitive
 
   // ═══════════════════════════════════════════════════════════════════
   // Slicing and concatenation
@@ -164,8 +164,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(1, 2, 3, 4, 5)) part: 1 size: 3   // => _
   /// ```
-  part: offset :: Integer size: length :: Integer -> Binary =>
-    @primitive "part:size:"
+  part: offset :: Integer size: length :: Integer -> Binary => @primitive
 
   /// Concatenate this binary with another binary.
   ///
@@ -173,7 +172,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(1, 2)) concat: (Binary fromBytes: #(3, 4))   // => _
   /// ```
-  concat: other :: Binary -> Binary => @primitive "concat:"
+  concat: other :: Binary -> Binary => @primitive
 
   // ═══════════════════════════════════════════════════════════════════
   // Conversion
@@ -185,7 +184,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101)) toBytes   // => #(104, 101)
   /// ```
-  toBytes -> List(Integer) => @primitive "toBytes"
+  toBytes -> List(Integer) => @primitive
 
   /// Validate UTF-8 and return the binary as a String.
   ///
@@ -196,7 +195,7 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asString   // => _
   /// ```
-  asString -> Object => @primitive "asString"
+  asString -> Object => @primitive
 
   /// Return this binary as a String without UTF-8 validation.
   ///
@@ -206,4 +205,4 @@ sealed typed Collection subclass: Binary
   /// ```beamtalk
   /// (Binary fromBytes: #(104, 101, 108, 108, 111)) asStringUnchecked   // => "hello"
   /// ```
-  asStringUnchecked -> String => @primitive "asStringUnchecked"
+  asStringUnchecked -> String => @primitive

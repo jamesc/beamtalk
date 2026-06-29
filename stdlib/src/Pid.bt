@@ -24,7 +24,7 @@ sealed typed Object subclass: Pid
   /// ```beamtalk
   /// pid asString           // => "#Pid<0.123.0>"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -40,7 +40,7 @@ sealed typed Object subclass: Pid
   /// ```beamtalk
   /// pid1 =:= pid2          // => false
   /// ```
-  =:= other -> Boolean => @primitive "=:="
+  =:= other -> Boolean => @primitive
 
   /// Test strict inequality with another pid.
   ///
@@ -48,7 +48,7 @@ sealed typed Object subclass: Pid
   /// ```beamtalk
   /// pid1 =/= pid2           // => true
   /// ```
-  =/= other -> Boolean => @primitive "=/="
+  =/= other -> Boolean => @primitive
 
   /// Test inequality with another pid.
   ///
@@ -56,10 +56,10 @@ sealed typed Object subclass: Pid
   /// ```beamtalk
   /// pid1 /= pid2           // => true
   /// ```
-  /= other -> Boolean => @primitive "/="
+  /= other -> Boolean => @primitive
 
   /// Return a hash value for the pid.
-  hash -> Integer => @primitive "hash"
+  hash -> Integer => @primitive
 
   /// Test if the process referred to by this pid is alive.
   ///
@@ -67,7 +67,7 @@ sealed typed Object subclass: Pid
   /// ```beamtalk
   /// pid isAlive            // => true
   /// ```
-  isAlive -> Boolean => @primitive "isAlive"
+  isAlive -> Boolean => @primitive
 
   /// Forcefully terminate the process (erlang:exit(Pid, kill)).
   ///
@@ -78,7 +78,7 @@ sealed typed Object subclass: Pid
   /// ```beamtalk
   /// pid kill               // => true
   /// ```
-  kill -> Boolean => @primitive "kill"
+  kill -> Boolean => @primitive
 
   /// Send an exit signal with the given reason to the process.
   ///
@@ -89,4 +89,4 @@ sealed typed Object subclass: Pid
   /// ```beamtalk
   /// pid exit: #shutdown    // => true
   /// ```
-  exit: reason -> Boolean => @primitive "exit:"
+  exit: reason -> Boolean => @primitive

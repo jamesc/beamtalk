@@ -1576,6 +1576,7 @@ mod tests {
             name: "erlang_add".into(),
             is_quoted: true,
             is_intrinsic: false,
+            is_inferred: false,
             span: Span::new(0, 22),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None);
@@ -1596,6 +1597,7 @@ mod tests {
             name: "size".into(),
             is_quoted: false,
             is_intrinsic: false,
+            is_inferred: false,
             span: Span::new(0, 15),
         };
         let hover = find_hover_in_expr(&expr, 5, &ctx, &hierarchy, &TypeMap::new(), None);

@@ -293,11 +293,22 @@ pub enum Expression {
     /// Example: `new => @primitive basicNew`
     Primitive {
         /// The primitive name (selector string or intrinsic identifier).
+        ///
+        /// When `is_inferred` is true, this was filled in from the enclosing
+        /// method's selector rather than written in source.
         name: EcoString,
         /// Whether the name was quoted (`"+"`) vs bare (`basicNew`).
+        ///
+        /// Inferred selectors set this to `true` so that codegen treats them
+        /// identically to an explicit quoted selector (BT-2724).
         is_quoted: bool,
         /// Whether the original source used `@intrinsic` instead of `@primitive`.
         is_intrinsic: bool,
+        /// Whether the selector was inferred from the enclosing method because
+        /// the source wrote a bare `@primitive` with no selector string
+        /// (BT-2724). Only affects unparsing (round-tripping back to bare
+        /// form); codegen and analysis use `name`/`is_quoted` unchanged.
+        is_inferred: bool,
         /// Source location of the entire `@primitive name` expression.
         span: Span,
     },

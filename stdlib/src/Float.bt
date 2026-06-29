@@ -25,7 +25,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// Float pi             // => 3.141592653589793
   /// ```
-  class pi -> Float => @primitive "pi"
+  class pi -> Float => @primitive
 
   /// Euler's number (e ≈ 2.71828...).
   ///
@@ -33,7 +33,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// Float e              // => 2.718281828459045
   /// ```
-  class e -> Float => @primitive "e"
+  class e -> Float => @primitive
 
   /// Positive infinity.
   ///
@@ -54,7 +54,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 1.5 + 2.5        // => 4.0
   /// ```
-  + other :: Number -> Float => @primitive "+"
+  + other :: Number -> Float => @primitive
 
   /// Subtract a number from the receiver.
   ///
@@ -62,7 +62,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 5.0 - 2.5        // => 2.5
   /// ```
-  - other :: Number -> Float => @primitive "-"
+  - other :: Number -> Float => @primitive
 
   /// Multiply the receiver by a number.
   ///
@@ -70,7 +70,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 2.5 * 4.0        // => 10.0
   /// ```
-  * other :: Number -> Float => @primitive "*"
+  * other :: Number -> Float => @primitive
 
   /// Divide the receiver by a number.
   ///
@@ -78,7 +78,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 10.0 / 4.0       // => 2.5
   /// ```
-  / other :: Number -> Float => @primitive "/"
+  / other :: Number -> Float => @primitive
 
   /// Test strict equality with another number.
   ///
@@ -87,7 +87,7 @@ sealed typed Number subclass: Float
   /// 3.14 =:= 3.14      // => true
   /// 1.0 =:= 2.0        // => false
   /// ```
-  =:= other :: Number -> Boolean => @primitive "=:="
+  =:= other :: Number -> Boolean => @primitive
 
   /// Test strict inequality with another number.
   ///
@@ -96,7 +96,7 @@ sealed typed Number subclass: Float
   /// 1.0 =/= 2.0        // => true
   /// 3.14 =/= 3.14      // => false
   /// ```
-  =/= other :: Number -> Boolean => @primitive "=/="
+  =/= other :: Number -> Boolean => @primitive
 
   /// Test inequality with another number.
   ///
@@ -105,7 +105,7 @@ sealed typed Number subclass: Float
   /// 1.0 /= 2.0       // => true
   /// 3.14 /= 3.14     // => false
   /// ```
-  /= other :: Number -> Boolean => @primitive "/="
+  /= other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is less than another number.
   ///
@@ -114,7 +114,7 @@ sealed typed Number subclass: Float
   /// 1.0 < 2.0        // => true
   /// 5.0 < 3.0        // => false
   /// ```
-  < other :: Number -> Boolean => @primitive "<"
+  < other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is greater than another number.
   ///
@@ -123,7 +123,7 @@ sealed typed Number subclass: Float
   /// 5.0 > 3.0        // => true
   /// 1.0 > 2.0        // => false
   /// ```
-  > other :: Number -> Boolean => @primitive ">"
+  > other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is less than or equal to another number.
   ///
@@ -132,7 +132,7 @@ sealed typed Number subclass: Float
   /// 1.0 <= 2.0       // => true
   /// 3.0 <= 3.0       // => true
   /// ```
-  <= other :: Number -> Boolean => @primitive "<="
+  <= other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is greater than or equal to another number.
   ///
@@ -141,7 +141,7 @@ sealed typed Number subclass: Float
   /// 5.0 >= 3.0       // => true
   /// 3.0 >= 3.0       // => true
   /// ```
-  >= other :: Number -> Boolean => @primitive ">="
+  >= other :: Number -> Boolean => @primitive
 
   /// Negate the receiver.
   ///
@@ -189,7 +189,7 @@ sealed typed Number subclass: Float
   /// 3.7 rounded      // => 4
   /// 3.2 rounded      // => 3
   /// ```
-  rounded -> Integer => @primitive "rounded"
+  rounded -> Integer => @primitive
 
   /// Round up to the nearest integer.
   ///
@@ -197,7 +197,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 3.2 ceiling      // => 4
   /// ```
-  ceiling -> Integer => @primitive "ceiling"
+  ceiling -> Integer => @primitive
 
   /// Round down to the nearest integer.
   ///
@@ -205,7 +205,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 3.7 floor        // => 3
   /// ```
-  floor -> Integer => @primitive "floor"
+  floor -> Integer => @primitive
 
   /// Truncate toward zero.
   ///
@@ -214,7 +214,7 @@ sealed typed Number subclass: Float
   /// 3.7 truncated    // => 3
   /// -3.7 truncated   // => -3
   /// ```
-  truncated -> Integer => @primitive "truncated"
+  truncated -> Integer => @primitive
 
   /// The receiver multiplied by itself.
   ///
@@ -272,7 +272,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 3.7 asInteger    // => 3
   /// ```
-  asInteger -> Integer => @primitive "asInteger"
+  asInteger -> Integer => @primitive
 
   /// Convert the receiver to its string representation.
   ///
@@ -280,7 +280,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 3.14 asString    // => "3.14"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -288,7 +288,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 3.14 printString // => "3.14"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive
 
   // === Trigonometric methods ===
 
@@ -299,7 +299,7 @@ sealed typed Number subclass: Float
   /// 0.0 sin              // => 0.0
   /// (Float pi / 2) sin   // => 1.0
   /// ```
-  sin -> Float => @primitive "sin"
+  sin -> Float => @primitive
 
   /// Cosine of the receiver (in radians).
   ///
@@ -307,7 +307,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 0.0 cos              // => 1.0
   /// ```
-  cos -> Float => @primitive "cos"
+  cos -> Float => @primitive
 
   /// Tangent of the receiver (in radians).
   ///
@@ -315,7 +315,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 0.0 tan              // => 0.0
   /// ```
-  tan -> Float => @primitive "tan"
+  tan -> Float => @primitive
 
   /// Hyperbolic sine of the receiver.
   ///
@@ -323,7 +323,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 0.0 sinh             // => 0.0
   /// ```
-  sinh -> Float => @primitive "sinh"
+  sinh -> Float => @primitive
 
   /// Hyperbolic cosine of the receiver.
   ///
@@ -331,7 +331,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 0.0 cosh             // => 1.0
   /// ```
-  cosh -> Float => @primitive "cosh"
+  cosh -> Float => @primitive
 
   /// Hyperbolic tangent of the receiver.
   ///
@@ -339,7 +339,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 0.0 tanh             // => 0.0
   /// ```
-  tanh -> Float => @primitive "tanh"
+  tanh -> Float => @primitive
 
   /// Arcsine of the receiver. Result in radians.
   ///
@@ -348,7 +348,7 @@ sealed typed Number subclass: Float
   /// 0.0 asin             // => 0.0
   /// 1.0 asin             // => 1.5707963267948966
   /// ```
-  asin -> Float => @primitive "asin"
+  asin -> Float => @primitive
 
   /// Arccosine of the receiver. Result in radians.
   ///
@@ -356,7 +356,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 1.0 acos             // => 0.0
   /// ```
-  acos -> Float => @primitive "acos"
+  acos -> Float => @primitive
 
   /// Arctangent of the receiver. Result in radians.
   ///
@@ -364,7 +364,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 1.0 atan             // => 0.7853981633974483
   /// ```
-  atan -> Float => @primitive "atan"
+  atan -> Float => @primitive
 
   /// Two-argument arctangent. Returns the angle in radians between
   /// the positive x-axis and the point (other, self).
@@ -373,7 +373,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 1.0 atan2: 1.0       // => 0.7853981633974483
   /// ```
-  atan2: other :: Number -> Float => @primitive "atan2:"
+  atan2: other :: Number -> Float => @primitive
 
   // === Exponential / logarithmic methods ===
 
@@ -384,7 +384,7 @@ sealed typed Number subclass: Float
   /// 4.0 sqrt             // => 2.0
   /// 2.0 sqrt             // => 1.4142135623730951
   /// ```
-  sqrt -> Float => @primitive "sqrt"
+  sqrt -> Float => @primitive
 
   /// Natural logarithm (base e) of the receiver.
   ///
@@ -393,7 +393,7 @@ sealed typed Number subclass: Float
   /// 1.0 log              // => 0.0
   /// (Float e) log        // => 1.0
   /// ```
-  log -> Float => @primitive "log"
+  log -> Float => @primitive
 
   /// Natural logarithm (base e) of the receiver. Alias for `log`.
   ///
@@ -401,7 +401,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 1.0 ln               // => 0.0
   /// ```
-  ln -> Float => @primitive "ln"
+  ln -> Float => @primitive
 
   /// Base-2 logarithm of the receiver.
   ///
@@ -409,7 +409,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 8.0 log2             // => 3.0
   /// ```
-  log2 -> Float => @primitive "log2"
+  log2 -> Float => @primitive
 
   /// Base-10 logarithm of the receiver.
   ///
@@ -417,7 +417,7 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 100.0 log10          // => 2.0
   /// ```
-  log10 -> Float => @primitive "log10"
+  log10 -> Float => @primitive
 
   /// Euler's number (e) raised to the power of the receiver.
   ///
@@ -426,7 +426,7 @@ sealed typed Number subclass: Float
   /// 0.0 exp              // => 1.0
   /// 1.0 exp              // => 2.718281828459045
   /// ```
-  exp -> Float => @primitive "exp"
+  exp -> Float => @primitive
 
   /// Raise the receiver to the power of `exponent`.
   ///
@@ -434,4 +434,4 @@ sealed typed Number subclass: Float
   /// ```beamtalk
   /// 2.0 raisedTo: 10     // => 1024.0
   /// ```
-  raisedTo: exponent :: Number -> Float => @primitive "raisedTo:"
+  raisedTo: exponent :: Number -> Float => @primitive

@@ -26,7 +26,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// String class withAll: #("h", "e", "l", "l", "o")  // => "hello"
   /// ```
-  class withAll: list :: List -> String => @primitive "withAll:"
+  class withAll: list :: List -> String => @primitive
 
   /// Create a single-character String from a Unicode code point integer.
   ///
@@ -35,8 +35,7 @@ sealed typed Binary subclass: String
   /// String fromCodePoint: 65    // => "A"
   /// String fromCodePoint: 8364  // => "€"
   /// ```
-  class fromCodePoint: codePoint :: Integer -> String =>
-    @primitive "fromCodePoint:"
+  class fromCodePoint: codePoint :: Integer -> String => @primitive
 
   /// Create a String from a list of Unicode code point integers.
   ///
@@ -45,7 +44,7 @@ sealed typed Binary subclass: String
   /// String fromCodePoints: #(72, 105)   // => "Hi"
   /// String fromCodePoints: #(123, 125)  // => "\{\}"
   /// ```
-  class fromCodePoints: list :: List -> String => @primitive "fromCodePoints:"
+  class fromCodePoints: list :: List -> String => @primitive
 
   /// Convert an Erlang iolist or charlist to a String binary.
   ///
@@ -56,7 +55,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// String fromIolist: #(104, 105)   // => "hi"
   /// ```
-  class fromIolist: iolist -> String => @primitive "fromIolist:"
+  class fromIolist: iolist -> String => @primitive
 
   /// Test strict equality with another string.
   ///
@@ -65,7 +64,7 @@ sealed typed Binary subclass: String
   /// "abc" =:= "abc"      // => true
   /// "abc" =:= "xyz"      // => false
   /// ```
-  =:= other -> Boolean => @primitive "=:="
+  =:= other -> Boolean => @primitive
 
   /// Test strict inequality with another string.
   ///
@@ -74,7 +73,7 @@ sealed typed Binary subclass: String
   /// "abc" =/= "xyz"      // => true
   /// "abc" =/= "abc"      // => false
   /// ```
-  =/= other -> Boolean => @primitive "=/="
+  =/= other -> Boolean => @primitive
 
   /// Test inequality with another string.
   ///
@@ -83,7 +82,7 @@ sealed typed Binary subclass: String
   /// "abc" /= "xyz"     // => true
   /// "abc" /= "abc"     // => false
   /// ```
-  /= other -> Boolean => @primitive "/="
+  /= other -> Boolean => @primitive
 
   /// Test if the receiver sorts before another string.
   ///
@@ -92,7 +91,7 @@ sealed typed Binary subclass: String
   /// "abc" < "xyz"      // => true
   /// "xyz" < "abc"      // => false
   /// ```
-  < other -> Boolean => @primitive "<"
+  < other -> Boolean => @primitive
 
   /// Test if the receiver sorts after another string.
   ///
@@ -101,7 +100,7 @@ sealed typed Binary subclass: String
   /// "xyz" > "abc"      // => true
   /// "abc" > "xyz"      // => false
   /// ```
-  > other -> Boolean => @primitive ">"
+  > other -> Boolean => @primitive
 
   /// Test if the receiver sorts before or equal to another string.
   ///
@@ -110,7 +109,7 @@ sealed typed Binary subclass: String
   /// "abc" <= "xyz"     // => true
   /// "abc" <= "abc"     // => true
   /// ```
-  <= other -> Boolean => @primitive "<="
+  <= other -> Boolean => @primitive
 
   /// Test if the receiver sorts after or equal to another string.
   ///
@@ -119,7 +118,7 @@ sealed typed Binary subclass: String
   /// "xyz" >= "abc"     // => true
   /// "abc" >= "abc"     // => true
   /// ```
-  >= other -> Boolean => @primitive ">="
+  >= other -> Boolean => @primitive
 
   /// Concatenate the receiver with another string.
   ///
@@ -128,7 +127,7 @@ sealed typed Binary subclass: String
   /// "hello" ++ " world"  // => "hello world"
   /// "a" ++ "b"           // => "ab"
   /// ```
-  ++ other :: String -> String => @primitive "++"
+  ++ other :: String -> String => @primitive
 
   /// Concatenate the receiver with another string (Smalltalk-style comma operator).
   ///
@@ -139,7 +138,7 @@ sealed typed Binary subclass: String
   /// "foo" , "bar"   // => "foobar"
   /// "hello" , " world"  // => "hello world"
   /// ```
-  , other :: String -> String => @primitive ","
+  , other :: String -> String => @primitive
 
   /// Number of grapheme clusters in the string.
   ///
@@ -148,7 +147,7 @@ sealed typed Binary subclass: String
   /// "hello" length       // => 5
   /// "" length            // => 0
   /// ```
-  length -> Integer => @primitive "length"
+  length -> Integer => @primitive
 
   /// Alias for `length`.
   ///
@@ -165,7 +164,7 @@ sealed typed Binary subclass: String
   /// "hello" at: 1        // => "h"
   /// "hello" at: 5        // => "o"
   /// ```
-  at: index :: Integer -> String => @primitive "at:"
+  at: index :: Integer -> String => @primitive
 
   /// Convert all characters to uppercase.
   ///
@@ -173,7 +172,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello" uppercase    // => "HELLO"
   /// ```
-  uppercase -> String => @primitive "uppercase"
+  uppercase -> String => @primitive
 
   /// Convert all characters to lowercase.
   ///
@@ -181,7 +180,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "HELLO" lowercase    // => "hello"
   /// ```
-  lowercase -> String => @primitive "lowercase"
+  lowercase -> String => @primitive
 
   /// Capitalize the first character.
   ///
@@ -189,7 +188,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello" capitalize   // => "Hello"
   /// ```
-  capitalize -> String => @primitive "capitalize"
+  capitalize -> String => @primitive
 
   /// Remove leading and trailing whitespace.
   ///
@@ -197,7 +196,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "  hello  " trim     // => "hello"
   /// ```
-  trim -> String => @primitive "trim"
+  trim -> String => @primitive
 
   /// Remove leading whitespace.
   ///
@@ -205,7 +204,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "  hello" trimLeft   // => "hello"
   /// ```
-  trimLeft -> String => @primitive "trimLeft"
+  trimLeft -> String => @primitive
 
   /// Remove trailing whitespace.
   ///
@@ -213,7 +212,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello  " trimRight  // => "hello"
   /// ```
-  trimRight -> String => @primitive "trimRight"
+  trimRight -> String => @primitive
 
   /// Reverse the string (grapheme-aware).
   ///
@@ -221,7 +220,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello" reverse      // => "olleh"
   /// ```
-  reverse -> String => @primitive "reverse"
+  reverse -> String => @primitive
 
   /// Test if the receiver contains a substring.
   ///
@@ -239,7 +238,7 @@ sealed typed Binary subclass: String
   /// "hello" startsWith: "hel"   // => true
   /// "hello" startsWith: "xyz"   // => false
   /// ```
-  startsWith: prefix :: String -> Boolean => @primitive "startsWith:"
+  startsWith: prefix :: String -> Boolean => @primitive
 
   /// Test if the receiver ends with the given suffix.
   ///
@@ -248,7 +247,7 @@ sealed typed Binary subclass: String
   /// "hello" endsWith: "llo"     // => true
   /// "hello" endsWith: "xyz"     // => false
   /// ```
-  endsWith: suffix :: String -> Boolean => @primitive "endsWith:"
+  endsWith: suffix :: String -> Boolean => @primitive
 
   /// Return the 1-based index of the first occurrence of a substring, or `nil` if not found.
   ///
@@ -257,7 +256,7 @@ sealed typed Binary subclass: String
   /// "hello" indexOf: "ell"      // => 2
   /// "hello" indexOf: "xyz"      // => nil
   /// ```
-  indexOf: substring :: String -> Integer | Nil => @primitive "indexOf:"
+  indexOf: substring :: String -> Integer | Nil => @primitive
 
   /// Split the string by a separator.
   ///
@@ -265,7 +264,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a,b,c" split: ","          // => #("a", "b", "c")
   /// ```
-  split: separator :: String -> List(String) => @primitive "split:"
+  split: separator :: String -> List(String) => @primitive
 
   /// Split the string by a pattern.
   ///
@@ -273,7 +272,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a::b::c" splitOn: "::"     // => #("a", "b", "c")
   /// ```
-  splitOn: pattern :: String -> List(String) => @primitive "splitOn:"
+  splitOn: pattern :: String -> List(String) => @primitive
 
   /// Repeat the string `n` times.
   ///
@@ -281,7 +280,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "ab" repeat: 3              // => "ababab"
   /// ```
-  repeat: n :: Integer -> String => @primitive "repeat:"
+  repeat: n :: Integer -> String => @primitive
 
   /// Split the string into lines.
   ///
@@ -289,7 +288,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a\nb\nc" lines             // => #("a", "b", "c")
   /// ```
-  lines -> List(String) => @primitive "lines"
+  lines -> List(String) => @primitive
 
   /// Split the string into words (whitespace-separated).
   ///
@@ -297,7 +296,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello world" words         // => #("hello", "world")
   /// ```
-  words -> List(String) => @primitive "words"
+  words -> List(String) => @primitive
 
   /// Replace all occurrences of `old` with `new`.
   ///
@@ -305,8 +304,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "aabaa" replaceAll: "a" with: "x"     // => "xxbxx"
   /// ```
-  replaceAll: old :: String with: new :: String -> String =>
-    @primitive "replaceAll:with:"
+  replaceAll: old :: String with: new :: String -> String => @primitive
 
   /// Replace the first occurrence of `old` with `new`.
   ///
@@ -314,8 +312,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "aabaa" replaceFirst: "a" with: "x"   // => "xabaa"
   /// ```
-  replaceFirst: old :: String with: new :: String -> String =>
-    @primitive "replaceFirst:with:"
+  replaceFirst: old :: String with: new :: String -> String => @primitive
 
   /// Take the first `n` grapheme clusters.
   ///
@@ -323,7 +320,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello" take: 3             // => "hel"
   /// ```
-  take: n :: Integer -> String => @primitive "take:"
+  take: n :: Integer -> String => @primitive
 
   /// Drop the first `n` grapheme clusters.
   ///
@@ -331,7 +328,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello" drop: 2             // => "llo"
   /// ```
-  drop: n :: Integer -> String => @primitive "drop:"
+  drop: n :: Integer -> String => @primitive
 
   /// Left-pad the string to the given width with spaces.
   ///
@@ -339,7 +336,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hi" padLeft: 5             // => "   hi"
   /// ```
-  padLeft: width :: Integer -> String => @primitive "padLeft:"
+  padLeft: width :: Integer -> String => @primitive
 
   /// Right-pad the string to the given width with spaces.
   ///
@@ -347,7 +344,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hi" padRight: 5            // => "hi   "
   /// ```
-  padRight: width :: Integer -> String => @primitive "padRight:"
+  padRight: width :: Integer -> String => @primitive
 
   /// Left-pad the string to the given width with the specified character.
   ///
@@ -355,8 +352,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hi" padLeft: 5 with: "0"  // => "000hi"
   /// ```
-  padLeft: width :: Integer with: char :: String -> String =>
-    @primitive "padLeft:with:"
+  padLeft: width :: Integer with: char :: String -> String => @primitive
 
   /// Right-pad the string to the given width with the specified character.
   ///
@@ -364,8 +360,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hi" padRight: 5 with: "0"  // => "hi000"
   /// ```
-  padRight: width :: Integer with: char :: String -> String =>
-    @primitive "padRight:with:"
+  padRight: width :: Integer with: char :: String -> String => @primitive
 
   /// Test if the string is empty.
   ///
@@ -392,7 +387,7 @@ sealed typed Binary subclass: String
   /// "   " isBlank               // => true
   /// "" isBlank                  // => true
   /// ```
-  isBlank -> Boolean => @primitive "isBlank"
+  isBlank -> Boolean => @primitive
 
   /// Test if all characters are digits.
   ///
@@ -401,7 +396,7 @@ sealed typed Binary subclass: String
   /// "123" isDigit               // => true
   /// "12a" isDigit               // => false
   /// ```
-  isDigit -> Boolean => @primitive "isDigit"
+  isDigit -> Boolean => @primitive
 
   /// Test if all characters are letters.
   ///
@@ -410,7 +405,7 @@ sealed typed Binary subclass: String
   /// "abc" isAlpha               // => true
   /// "ab1" isAlpha               // => false
   /// ```
-  isAlpha -> Boolean => @primitive "isAlpha"
+  isAlpha -> Boolean => @primitive
 
   /// Parse the string as an integer.
   ///
@@ -418,7 +413,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "42" asInteger              // => 42
   /// ```
-  asInteger -> Integer => @primitive "asInteger"
+  asInteger -> Integer => @primitive
 
   /// Parse the string as a float.
   ///
@@ -426,7 +421,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "3.14" asFloat              // => 3.14
   /// ```
-  asFloat -> Float => @primitive "asFloat"
+  asFloat -> Float => @primitive
 
   /// Convert the string to an atom (Symbol).
   ///
@@ -434,7 +429,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello" asAtom              // => #hello
   /// ```
-  asAtom -> Symbol => @primitive "asAtom"
+  asAtom -> Symbol => @primitive
 
   /// Convert the string to a list of grapheme cluster strings.
   ///
@@ -442,7 +437,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "abc" asList                // => #("a", "b", "c")
   /// ```
-  asList -> List(String) => @primitive "asList"
+  asList -> List(String) => @primitive
 
   /// Iterate over each grapheme cluster, evaluating `block` with each one.
   ///
@@ -460,7 +455,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "abc" collect: [:c | c uppercase]  // => "ABC"
   /// ```
-  collect: block :: Block -> String => @primitive "collect:"
+  collect: block :: Block -> String => @primitive
 
   /// Select grapheme clusters for which `block` returns true.
   ///
@@ -471,7 +466,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a1b2" select: [:c | c isAlpha]    // => "ab"
   /// ```
-  select: block :: Block -> String => @primitive "select:"
+  select: block :: Block -> String => @primitive
 
   /// Reject grapheme clusters for which `block` returns true.
   ///
@@ -481,7 +476,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a1b2" reject: [:c | c isAlpha]    // => "12"
   /// ```
-  reject: block :: Block -> String => @primitive "reject:"
+  reject: block :: Block -> String => @primitive
 
   /// Return a lazy Stream over the characters (grapheme clusters).
   ///
@@ -489,7 +484,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// ("hello" stream) take: 3         // => #("h", "e", "l")
   /// ```
-  stream -> Stream(String) => @primitive "stream"
+  stream -> Stream(String) => @primitive
 
   /// Test if the string matches a regular expression pattern.
   /// Accepts a String pattern or compiled Regex object.
@@ -499,7 +494,7 @@ sealed typed Binary subclass: String
   /// "hello123" matchesRegex: "[0-9]+"          // => true
   /// "hello" matchesRegex: "^[0-9]+$"           // => false
   /// ```
-  matchesRegex: pattern -> Boolean => @primitive "matchesRegex:"
+  matchesRegex: pattern -> Boolean => @primitive
 
   /// Test if the string matches a pattern with PCRE options.
   ///
@@ -507,8 +502,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "Hello" matchesRegex: "[a-z]+" options: #(#caseless)  // => true
   /// ```
-  matchesRegex: pattern options: opts :: List -> Boolean =>
-    @primitive "matchesRegex:options:"
+  matchesRegex: pattern options: opts :: List -> Boolean => @primitive
 
   /// Find the first regex match, returning matched String or nil.
   ///
@@ -517,7 +511,7 @@ sealed typed Binary subclass: String
   /// "hello123world" firstMatch: "[0-9]+"       // => "123"
   /// "hello" firstMatch: "[0-9]+"               // => nil
   /// ```
-  firstMatch: pattern -> String | Nil => @primitive "firstMatch:"
+  firstMatch: pattern -> String | Nil => @primitive
 
   /// Find all regex matches, returning a List of Strings.
   ///
@@ -525,7 +519,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a1b2c3" allMatches: "[0-9]+"              // => #("1", "2", "3")
   /// ```
-  allMatches: pattern -> List(String) => @primitive "allMatches:"
+  allMatches: pattern -> List(String) => @primitive
 
   /// Replace the first regex match with a replacement string.
   ///
@@ -533,8 +527,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello world" replaceRegex: "[aeiou]" with: "*"      // => "h*llo world"
   /// ```
-  replaceRegex: pattern with: replacement :: String -> String =>
-    @primitive "replaceRegex:with:"
+  replaceRegex: pattern with: replacement :: String -> String => @primitive
 
   /// Replace all regex matches with a replacement string.
   ///
@@ -542,8 +535,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "hello world" replaceAllRegex: "[aeiou]" with: "*"   // => "h*ll* w*rld"
   /// ```
-  replaceAllRegex: pattern with: replacement :: String -> String =>
-    @primitive "replaceAllRegex:with:"
+  replaceAllRegex: pattern with: replacement :: String -> String => @primitive
 
   /// Split the string by a regex pattern.
   ///
@@ -551,7 +543,7 @@ sealed typed Binary subclass: String
   /// ```beamtalk
   /// "a,,b,,,c" splitRegex: ",+"                // => #("a", "b", "c")
   /// ```
-  splitRegex: pattern -> List(String) => @primitive "splitRegex:"
+  splitRegex: pattern -> List(String) => @primitive
 
   /// Return a developer-readable string representation (with surrounding quotes).
   /// Embedded double-quote characters are doubled (Beamtalk string literal convention).

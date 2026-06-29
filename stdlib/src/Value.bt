@@ -67,4 +67,4 @@ Object subclass: Value
   /// ValuePoint x: 3 y: 4        printString   // => "ValuePoint(x: 3, y: 4)"
   /// ValuePoint new              printString   // => "ValuePoint(x: 0, y: 0)"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive

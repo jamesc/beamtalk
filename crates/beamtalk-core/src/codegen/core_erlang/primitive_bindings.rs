@@ -255,6 +255,7 @@ mod tests {
                 name: prim_name.into(),
                 is_quoted,
                 is_intrinsic: false,
+                is_inferred: false,
                 span: span(),
             })],
             span(),

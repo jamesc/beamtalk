@@ -24,7 +24,7 @@ sealed typed Object subclass: Reference
   /// ```beamtalk
   /// ref asString           // => "#Ref<0.1.2.3>"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -40,7 +40,7 @@ sealed typed Object subclass: Reference
   /// ```beamtalk
   /// ref1 =:= ref2         // => false
   /// ```
-  =:= other -> Boolean => @primitive "=:="
+  =:= other -> Boolean => @primitive
 
   /// Test strict inequality with another reference.
   ///
@@ -48,7 +48,7 @@ sealed typed Object subclass: Reference
   /// ```beamtalk
   /// ref1 =/= ref2          // => true
   /// ```
-  =/= other -> Boolean => @primitive "=/="
+  =/= other -> Boolean => @primitive
 
   /// Test inequality with another reference.
   ///
@@ -56,7 +56,7 @@ sealed typed Object subclass: Reference
   /// ```beamtalk
   /// ref1 /= ref2          // => true
   /// ```
-  /= other -> Boolean => @primitive "/="
+  /= other -> Boolean => @primitive
 
   /// Cancel a monitor associated with this reference.
   ///
@@ -70,7 +70,7 @@ sealed typed Object subclass: Reference
   /// ref := actor monitor
   /// ref demonitor          // => true
   /// ```
-  demonitor -> Boolean => @primitive "demonitor"
+  demonitor -> Boolean => @primitive
 
   /// Return a hash value for the reference.
-  hash -> Integer => @primitive "hash"
+  hash -> Integer => @primitive

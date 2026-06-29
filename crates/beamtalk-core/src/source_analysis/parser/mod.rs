@@ -724,6 +724,12 @@ pub(super) struct Parser {
     pub(super) diagnostics: Vec<Diagnostic>,
     /// Whether the parser is currently inside a method body.
     pub(super) in_method_body: bool,
+    /// The selector of the method whose body is currently being parsed.
+    ///
+    /// Set while inside a method body so that a bare `@primitive` (no explicit
+    /// selector string) can infer its selector from the enclosing method
+    /// (BT-2724). `None` outside method bodies.
+    pub(super) current_method_selector: Option<EcoString>,
     /// Whether the parser is currently inside a class body.
     /// Used to detect trailing expressions via indentation (BT-903).
     pub(super) in_class_body: bool,
@@ -757,6 +763,7 @@ impl Parser {
             current: 0,
             diagnostics: Vec::new(),
             in_method_body: false,
+            current_method_selector: None,
             in_class_body: false,
             nesting_depth: 0,
             unattached_doc_comment_indices,

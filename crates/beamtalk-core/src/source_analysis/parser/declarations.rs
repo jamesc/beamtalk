@@ -1123,7 +1123,12 @@ impl Parser {
 
         // Parse method body
         self.in_method_body = true;
+        // Record the enclosing method's selector so a bare `@primitive` can
+        // infer it (BT-2724).
+        let previous_method_selector = self.current_method_selector.take();
+        self.current_method_selector = Some(selector.name());
         let body = self.parse_method_body();
+        self.current_method_selector = previous_method_selector;
         self.in_method_body = false;
 
         let end = body.last().map_or(start, |s| s.expression.span());

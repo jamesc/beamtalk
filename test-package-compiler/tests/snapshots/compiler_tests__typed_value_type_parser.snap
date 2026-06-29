@@ -294,6 +294,7 @@ Module {
                                 name: "distanceTo:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 354,
                                     end: 378,
@@ -353,6 +354,7 @@ Module {
                                 name: "printString",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 427,
                                     end: 451,

@@ -23,7 +23,7 @@ sealed typed Object subclass: Port
   /// ```beamtalk
   /// port asString          // => "#Port<0.5>"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -39,7 +39,7 @@ sealed typed Object subclass: Port
   /// ```beamtalk
   /// port1 =:= port2       // => false
   /// ```
-  =:= other -> Boolean => @primitive "=:="
+  =:= other -> Boolean => @primitive
 
   /// Test strict inequality with another port.
   ///
@@ -47,7 +47,7 @@ sealed typed Object subclass: Port
   /// ```beamtalk
   /// port1 =/= port2        // => true
   /// ```
-  =/= other -> Boolean => @primitive "=/="
+  =/= other -> Boolean => @primitive
 
   /// Test inequality with another port.
   ///
@@ -55,7 +55,7 @@ sealed typed Object subclass: Port
   /// ```beamtalk
   /// port1 /= port2        // => true
   /// ```
-  /= other -> Boolean => @primitive "/="
+  /= other -> Boolean => @primitive
 
   /// Return a hash value for the port.
-  hash -> Integer => @primitive "hash"
+  hash -> Integer => @primitive

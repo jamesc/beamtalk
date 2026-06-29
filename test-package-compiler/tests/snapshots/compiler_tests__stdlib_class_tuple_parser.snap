@@ -46,6 +46,7 @@ Module {
                                 name: "size",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 302,
                                     end: 319,
@@ -114,6 +115,7 @@ Module {
                                 name: "at:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 336,
                                     end: 352,
@@ -153,6 +155,7 @@ Module {
                                 name: "isOk",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 410,
                                     end: 427,
@@ -202,6 +205,7 @@ Module {
                                 name: "isError",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 442,
                                     end: 462,
@@ -241,6 +245,7 @@ Module {
                                 name: "unwrap",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 492,
                                     end: 511,
@@ -309,6 +314,7 @@ Module {
                                 name: "unwrapOr:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 536,
                                     end: 558,
@@ -367,6 +373,7 @@ Module {
                                 name: "unwrapOrElse:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 585,
                                     end: 611,
@@ -406,6 +413,7 @@ Module {
                                 name: "asString",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 643,
                                     end: 664,
