@@ -75,5 +75,5 @@ TestCase subclass: ErlangInteropTest
     self assert: caught kind equals: #type_error
     self assert: caught message class equals: String
     // ...and the human-readable message never leaks the raw `badarg` atom
-    // (the raw reason lives in details, not the user-facing message).
+    // (the raw reason lives in `hint` and `details`, not the user-facing message).
     self assert: (caught message includesSubstring: "badarg") equals: false
