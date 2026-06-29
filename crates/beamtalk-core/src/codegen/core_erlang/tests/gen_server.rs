@@ -4770,3 +4770,58 @@ fn test_inherited_typed_no_default_fallback_false_or_type_display() {
         "FalseOr display should be 'Integer | False'"
     );
 }
+
+#[test]
+fn test_bt_2720_native_object_instance_delegate_lowers_to_native_call() {
+    // ADR 0101 / BT-2720: an instance-side `self delegate` on a `native:`
+    // Object lowers through beamtalk_erlang_proxy:native_call/4, prepending
+    // Self and carrying {Class, Sel} context.
+    let src = concat!(
+        "Object subclass: Stream native: beamtalk_stream\n",
+        "  select: predicate :: Block -> Object => self delegate\n",
+        "  asList -> Object => self delegate\n",
+    );
+    let code = super::codegen(src);
+    assert!(
+        code.contains(
+            "call 'beamtalk_erlang_proxy':'native_call'('beamtalk_stream', 'select', [Self, "
+        ),
+        "select: should lower to native_call('beamtalk_stream', 'select', [Self, Pred], ...). Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'Stream', 'select:'}"),
+        "native_call should carry {{Class, Sel}} = {{'Stream', 'select:'}}. Got:\n{code}"
+    );
+    // Unary delegate: asList -> native_call(..., 'asList', [Self], {'Stream', 'asList'})
+    assert!(
+        code.contains("call 'beamtalk_erlang_proxy':'native_call'('beamtalk_stream', 'asList', [Self], {'Stream', 'asList'})"),
+        "asList should lower to native_call('beamtalk_stream', 'asList', [Self], {{'Stream', 'asList'}}). Got:\n{code}"
+    );
+    // Must NOT emit a bare module:fn call for the delegate body.
+    assert!(
+        !code.contains("call 'beamtalk_stream':'select'"),
+        "native: delegate must route through the proxy, not a bare beamtalk_stream:select. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_bt_2720_native_object_class_delegate_omits_self() {
+    // ADR 0101 / BT-2720: a class-side `self delegate` omits self from the arg
+    // list (class methods are not instances).
+    let src = concat!(
+        "Object subclass: Stream native: beamtalk_stream\n",
+        "  class from: start :: Integer -> Object => self delegate\n",
+    );
+    let code = super::codegen(src);
+    assert!(
+        code.contains("call 'beamtalk_erlang_proxy':'native_call'('beamtalk_stream', 'from', [")
+            && code.contains("], {'Stream', 'from:'})"),
+        "class from: should lower to native_call('beamtalk_stream', 'from', [Start], {{'Stream', 'from:'}}). Got:\n{code}"
+    );
+    // The class-side arg list must omit ClassSelf / ClassVars (class methods
+    // are not instances).
+    assert!(
+        !code.contains("'native_call'('beamtalk_stream', 'from', [ClassSelf"),
+        "class-side native_call must omit ClassSelf from the arg list. Got:\n{code}"
+    );
+}

@@ -7,13 +7,17 @@
 /// Operations are either **lazy** (return a new Stream) or
 /// **terminal** (force evaluation and return a result).
 ///
+/// `native: beamtalk_stream` (ADR 0101) — every delegating method is
+/// `=> self delegate`, lowering through the unified FFI boundary to
+/// `beamtalk_stream:fn(Self, …)`, identical to its actor twin `TranscriptStream`.
+///
 /// ## Examples
 /// ```beamtalk
 /// (Stream from: 1) take: 5             // => #(1, 2, 3, 4, 5)
 /// (Stream on: #(1, 2, 3)) asList       // => #(1, 2, 3)
 /// ((Stream from: 1) select: [:n | n isEven]) take: 3  // => #(2, 4, 6)
 /// ```
-sealed typed Object subclass: Stream(E)
+sealed typed Object subclass: Stream(E) native: beamtalk_stream
 
   /// Use 'Stream on: collection' or 'Stream from: start' to create a Stream.
   class new: _ :: Object -> Nil =>
@@ -25,8 +29,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream from: 1) take: 3           // => #(1, 2, 3)
   /// ```
-  class sealed from: start :: Integer -> Stream(Integer) =>
-    (Erlang beamtalk_stream) from: start
+  class sealed from: start :: Integer -> Stream(Integer) => self delegate
 
   /// Create an infinite Stream starting from `start`, applying `stepFun` to get next.
   ///
@@ -35,7 +38,7 @@ sealed typed Object subclass: Stream(E)
   /// (Stream from: 1 by: [:n | n * 2]) take: 4  // => #(1, 2, 4, 8)
   /// ```
   class sealed from: start :: Integer by: stepFun :: Block -> Stream(Integer) =>
-    (Erlang beamtalk_stream) from: start by: stepFun
+    self delegate
 
   /// Create a Stream from a collection (list).
   ///
@@ -43,8 +46,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
   /// ```
-  class sealed on: collection :: Object -> Stream(E) =>
-    (Erlang beamtalk_stream) on: collection
+  class sealed on: collection :: Object -> Stream(E) => self delegate
 
   /// Filter elements matching predicate (lazy).
   ///
@@ -52,8 +54,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4)) select: [:n | n > 2]) asList  // => #(3, 4)
   /// ```
-  select: predicate :: Block -> Stream(E) =>
-    (Erlang beamtalk_stream) select: self with: predicate
+  select: predicate :: Block -> Stream(E) => self delegate
 
   /// Transform each element (lazy).
   ///
@@ -61,8 +62,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3)) collect: [:n | n * 10]) asList  // => #(10, 20, 30)
   /// ```
-  collect: transform :: Block -> Stream =>
-    (Erlang beamtalk_stream) collect: self with: transform
+  collect: transform :: Block -> Stream => self delegate
 
   /// Inverse filter — exclude elements matching predicate (lazy).
   ///
@@ -70,8 +70,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4)) reject: [:n | n > 2]) asList  // => #(1, 2)
   /// ```
-  reject: predicate :: Block -> Stream(E) =>
-    (Erlang beamtalk_stream) reject: self with: predicate
+  reject: predicate :: Block -> Stream(E) => self delegate
 
   /// Skip first N elements (lazy).
   ///
@@ -79,8 +78,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// ((Stream on: #(1, 2, 3, 4, 5)) drop: 2) asList  // => #(3, 4, 5)
   /// ```
-  drop: count :: Integer -> Stream(E) =>
-    (Erlang beamtalk_stream) drop: self count: count
+  drop: count :: Integer -> Stream(E) => self delegate
 
   /// Return first N elements as a List (terminal).
   ///
@@ -88,8 +86,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream from: 1) take: 5           // => #(1, 2, 3, 4, 5)
   /// ```
-  take: count :: Integer -> List(E) =>
-    (Erlang beamtalk_stream) take: self count: count
+  take: count :: Integer -> List(E) => self delegate
 
   /// Iterate with side effects, return nil (terminal).
   ///
@@ -97,7 +94,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) do: [:n | Transcript show: n]
   /// ```
-  do: block :: Block -> Nil => (Erlang beamtalk_stream) do: self block: block
+  do: block :: Block -> Nil => self delegate
 
   /// Fold/reduce with initial value (terminal).
   ///
@@ -105,11 +102,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) inject: 0 into: [:sum :n | sum + n]  // => 6
   /// ```
-  inject: initial :: Object into: block :: Block -> Object =>
-    (Erlang beamtalk_stream)
-      inject: self
-      init: initial
-      into: block
+  inject: initial :: Object into: block :: Block -> Object => self delegate
 
   /// Return first element matching predicate, or nil (terminal).
   ///
@@ -117,8 +110,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3, 4)) detect: [:n | n > 2]  // => 3
   /// ```
-  detect: predicate :: Block -> E | Nil =>
-    (Erlang beamtalk_stream) detect: self with: predicate
+  detect: predicate :: Block -> E | Nil => self delegate
 
   /// Materialize entire stream to a List (terminal).
   ///
@@ -126,7 +118,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) asList     // => #(1, 2, 3)
   /// ```
-  asList -> List(E) => (Erlang beamtalk_stream) asList: self
+  asList -> List(E) => self delegate
 
   /// Return true if any element satisfies predicate (terminal).
   ///
@@ -134,8 +126,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) anySatisfy: [:n | n > 2]  // => true
   /// ```
-  anySatisfy: predicate :: Block -> Boolean =>
-    (Erlang beamtalk_stream) anySatisfy: self with: predicate
+  anySatisfy: predicate :: Block -> Boolean => self delegate
 
   /// Return true if all elements satisfy predicate (terminal).
   ///
@@ -143,8 +134,7 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream on: #(1, 2, 3)) allSatisfy: [:n | n > 0]  // => true
   /// ```
-  allSatisfy: predicate :: Block -> Boolean =>
-    (Erlang beamtalk_stream) allSatisfy: self with: predicate
+  allSatisfy: predicate :: Block -> Boolean => self delegate
 
   /// Return a developer-readable string showing pipeline structure.
   ///
@@ -152,4 +142,4 @@ sealed typed Object subclass: Stream(E)
   /// ```beamtalk
   /// (Stream from: 1) printString        // => "Stream(from: 1)"
   /// ```
-  printString -> String => (Erlang beamtalk_stream) printString: self
+  printString -> String => self delegate

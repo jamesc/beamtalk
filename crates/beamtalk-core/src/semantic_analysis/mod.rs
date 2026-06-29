@@ -586,8 +586,14 @@ fn analyse_full_with_natives(
     );
 
     // BT-1207: Native actor validation (ADR 0056)
-    validators::check_native_state_fields(module, &mut result.diagnostics);
+    validators::check_native_state_fields(module, &result.class_hierarchy, &mut result.diagnostics);
     validators::check_native_delegate_return_type(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+    // BT-2720: Reserved-word backing-function check for native Objects (ADR 0101)
+    validators::check_native_delegate_reserved_word(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,

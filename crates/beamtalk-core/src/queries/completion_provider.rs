@@ -957,7 +957,11 @@ fn should_exclude_delegate(
     receiver_class: Option<&str>,
     hierarchy: &ClassHierarchy,
 ) -> bool {
-    if selector != "delegate" || defined_in != "Actor" {
+    // ADR 0101 / BT-2720: `delegate` is a sentinel on both the `Actor` base
+    // (ADR 0056) and the `Object` base. On non-native classes it raises at
+    // runtime, so hide it from completions there. User-defined `delegate`
+    // methods on other classes are unaffected.
+    if selector != "delegate" || (defined_in != "Actor" && defined_in != "Object") {
         return false;
     }
     // When the receiver class is known, check its native status directly.

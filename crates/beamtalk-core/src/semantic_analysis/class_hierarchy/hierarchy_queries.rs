@@ -179,10 +179,12 @@ impl ClassHierarchy {
             .any(|s| s.as_str() == "DynamicSupervisor")
     }
 
-    /// Returns true if the named class is a native Actor (ADR 0056).
+    /// Returns true if the named class is declared `native:` (ADR 0056, ADR 0101).
     ///
-    /// Native actors are declared with `native: module_name` and delegate
-    /// to a backing Erlang module. They cannot declare `state:` fields.
+    /// Native classes are declared with `native: module_name` and delegate to a
+    /// backing Erlang module. This covers both native Actors (ADR 0056), which
+    /// cannot declare `state:` fields, and native stateless Objects (ADR 0101),
+    /// whose `self delegate` methods lower to direct in-process calls.
     #[must_use]
     pub fn is_native(&self, class_name: &str) -> bool {
         self.classes
