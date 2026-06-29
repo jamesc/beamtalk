@@ -875,6 +875,26 @@ fn parse_intrinsic_bare_identifier() {
 }
 
 #[test]
+fn parse_intrinsic_bare_does_not_infer() {
+    // BT-2724: bare `@intrinsic` must still error. Intrinsic names name a
+    // structural intrinsic, never the method's selector, so inference (which is
+    // only correct for `@primitive`) must not apply.
+    let source = "Object subclass: Foo\n  size => @intrinsic";
+    let diagnostics = parse_err(source);
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected error for bare @intrinsic"
+    );
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("@intrinsic must be followed by"),
+        "Got: {}",
+        diagnostics[0].message
+    );
+}
+
+#[test]
 fn parse_intrinsic_quoted_selector() {
     // @intrinsic with quoted selector produces same AST as @primitive
     let source = "Object subclass: Foo\n  size => @intrinsic \"size\"";

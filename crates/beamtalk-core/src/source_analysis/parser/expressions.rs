@@ -2072,7 +2072,15 @@ impl Parser {
                 // Unreachable: `has_explicit_name` guarantees String/Identifier.
                 _ => unreachable!("has_explicit_name implies String or Identifier"),
             }
-        } else if let Some(selector) = self.current_method_selector.clone() {
+        } else if let Some(selector) = self
+            .current_method_selector
+            .clone()
+            // Only `@primitive` infers its selector. `@intrinsic` names a
+            // structural intrinsic (`blockValue`, `actorSpawn`, …) that is never
+            // the method's own selector, so a bare `@intrinsic` must still error
+            // rather than silently infer the wrong intrinsic (BT-2724).
+            .filter(|_| !is_intrinsic)
+        {
             // Bare `@primitive` — infer the selector from the enclosing method.
             // This yields the same AST as the explicit quoted form
             // (`is_quoted: true`), so downstream codegen is identical; only
