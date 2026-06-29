@@ -26,7 +26,7 @@ sealed typed Number subclass: Integer
   /// 3 + 4         // => 7
   /// -1 + 1        // => 0
   /// ```
-  + other :: Number -> Integer => @primitive "+"
+  + other :: Number -> Integer => @primitive
 
   /// Subtract an integer from the receiver.
   ///
@@ -35,7 +35,7 @@ sealed typed Number subclass: Integer
   /// 10 - 3        // => 7
   /// 0 - 5         // => -5
   /// ```
-  - other :: Number -> Integer => @primitive "-"
+  - other :: Number -> Integer => @primitive
 
   /// Multiply the receiver by an integer.
   ///
@@ -44,7 +44,7 @@ sealed typed Number subclass: Integer
   /// 6 * 7         // => 42
   /// -3 * 4        // => -12
   /// ```
-  * other :: Number -> Integer => @primitive "*"
+  * other :: Number -> Integer => @primitive
 
   /// Divide the receiver by a number (float division).
   ///
@@ -56,7 +56,7 @@ sealed typed Number subclass: Integer
   /// 10 / 3        // => 3.3333333333333335
   /// 42 / 7        // => 6.0
   /// ```
-  / other :: Number -> Float => @primitive "/"
+  / other :: Number -> Float => @primitive
 
   /// Integer (truncating) division of the receiver by another integer.
   ///
@@ -69,7 +69,7 @@ sealed typed Number subclass: Integer
   /// 7 div: 2      // => 3
   /// -7 div: 2     // => -3
   /// ```
-  div: other :: Integer -> Integer => @primitive "div:"
+  div: other :: Integer -> Integer => @primitive
 
   /// Remainder after integer division.
   ///
@@ -78,7 +78,7 @@ sealed typed Number subclass: Integer
   /// 17 % 5        // => 2
   /// 10 % 3        // => 1
   /// ```
-  % other :: Number -> Integer => @primitive "%"
+  % other :: Number -> Integer => @primitive
 
   /// Raise the receiver to a power.
   ///
@@ -87,7 +87,7 @@ sealed typed Number subclass: Integer
   /// 2 ** 10       // => 1024
   /// 3 ** 3        // => 27
   /// ```
-  ** other :: Number -> Integer => @primitive "**"
+  ** other :: Number -> Integer => @primitive
 
   /// Test strict equality with another integer.
   ///
@@ -96,7 +96,7 @@ sealed typed Number subclass: Integer
   /// 42 =:= 42       // => true
   /// 1 =:= 2         // => false
   /// ```
-  =:= other :: Number -> Boolean => @primitive "=:="
+  =:= other :: Number -> Boolean => @primitive
 
   /// Test strict inequality with another integer.
   ///
@@ -105,7 +105,7 @@ sealed typed Number subclass: Integer
   /// 1 =/= 2         // => true
   /// 42 =/= 42       // => false
   /// ```
-  =/= other :: Number -> Boolean => @primitive "=/="
+  =/= other :: Number -> Boolean => @primitive
 
   /// Test inequality with another integer.
   ///
@@ -114,7 +114,7 @@ sealed typed Number subclass: Integer
   /// 1 /= 2        // => true
   /// 42 /= 42      // => false
   /// ```
-  /= other :: Number -> Boolean => @primitive "/="
+  /= other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is less than another integer.
   ///
@@ -123,7 +123,7 @@ sealed typed Number subclass: Integer
   /// 1 < 2         // => true
   /// 5 < 3         // => false
   /// ```
-  < other :: Number -> Boolean => @primitive "<"
+  < other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is greater than another integer.
   ///
@@ -132,7 +132,7 @@ sealed typed Number subclass: Integer
   /// 5 > 3         // => true
   /// 1 > 2         // => false
   /// ```
-  > other :: Number -> Boolean => @primitive ">"
+  > other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is less than or equal to another integer.
   ///
@@ -141,7 +141,7 @@ sealed typed Number subclass: Integer
   /// 1 <= 2        // => true
   /// 3 <= 3        // => true
   /// ```
-  <= other :: Number -> Boolean => @primitive "<="
+  <= other :: Number -> Boolean => @primitive
 
   /// Test if the receiver is greater than or equal to another integer.
   ///
@@ -150,7 +150,7 @@ sealed typed Number subclass: Integer
   /// 5 >= 3        // => true
   /// 3 >= 3        // => true
   /// ```
-  >= other :: Number -> Boolean => @primitive ">="
+  >= other :: Number -> Boolean => @primitive
 
   /// Negate the receiver.
   ///
@@ -363,7 +363,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 42 asFloat    // => 42.0
   /// ```
-  asFloat -> Float => @primitive "asFloat"
+  asFloat -> Float => @primitive
 
   /// Convert the receiver to its String representation.
   ///
@@ -371,7 +371,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 42 asString   // => "42"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -379,7 +379,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 42 printString  // => "42"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive
 
   /// Bitwise AND with another integer.
   ///
@@ -387,7 +387,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 12 bitAnd: 10   // => 8
   /// ```
-  bitAnd: other :: Integer -> Integer => @primitive "bitAnd:"
+  bitAnd: other :: Integer -> Integer => @primitive
 
   /// Bitwise OR with another integer.
   ///
@@ -395,7 +395,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 12 bitOr: 10    // => 14
   /// ```
-  bitOr: other :: Integer -> Integer => @primitive "bitOr:"
+  bitOr: other :: Integer -> Integer => @primitive
 
   /// Bitwise XOR with another integer.
   ///
@@ -403,7 +403,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 12 bitXor: 10   // => 6
   /// ```
-  bitXor: other :: Integer -> Integer => @primitive "bitXor:"
+  bitXor: other :: Integer -> Integer => @primitive
 
   /// Bit shift the receiver by `n` positions. Positive shifts left, negative shifts right.
   ///
@@ -412,7 +412,7 @@ sealed typed Number subclass: Integer
   /// 1 bitShift: 4   // => 16
   /// 16 bitShift: -2 // => 4
   /// ```
-  bitShift: n :: Integer -> Integer => @primitive "bitShift:"
+  bitShift: n :: Integer -> Integer => @primitive
 
   /// Bitwise complement of the receiver.
   ///
@@ -420,7 +420,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 0 bitNot        // => -1
   /// ```
-  bitNot -> Integer => @primitive "bitNot"
+  bitNot -> Integer => @primitive
 
   /// Factorial of the receiver. Raises an error for negative integers.
   ///
@@ -464,7 +464,7 @@ sealed typed Number subclass: Integer
   /// 65 isLetter     // => true
   /// 48 isLetter     // => false
   /// ```
-  isLetter -> Boolean => @primitive "isLetter"
+  isLetter -> Boolean => @primitive
 
   /// Test if the codepoint is a Unicode digit.
   ///
@@ -473,7 +473,7 @@ sealed typed Number subclass: Integer
   /// 48 isDigit      // => true
   /// 65 isDigit      // => false
   /// ```
-  isDigit -> Boolean => @primitive "isDigit"
+  isDigit -> Boolean => @primitive
 
   /// Test if the codepoint is an uppercase letter.
   ///
@@ -482,7 +482,7 @@ sealed typed Number subclass: Integer
   /// 65 isUppercase  // => true
   /// 97 isUppercase  // => false
   /// ```
-  isUppercase -> Boolean => @primitive "isUppercase"
+  isUppercase -> Boolean => @primitive
 
   /// Test if the codepoint is a lowercase letter.
   ///
@@ -491,7 +491,7 @@ sealed typed Number subclass: Integer
   /// 97 isLowercase  // => true
   /// 65 isLowercase  // => false
   /// ```
-  isLowercase -> Boolean => @primitive "isLowercase"
+  isLowercase -> Boolean => @primitive
 
   /// Test if the codepoint is a whitespace character.
   ///
@@ -500,7 +500,7 @@ sealed typed Number subclass: Integer
   /// 32 isWhitespace // => true
   /// 65 isWhitespace // => false
   /// ```
-  isWhitespace -> Boolean => @primitive "isWhitespace"
+  isWhitespace -> Boolean => @primitive
 
   // === Exponential / logarithmic methods ===
 
@@ -511,7 +511,7 @@ sealed typed Number subclass: Integer
   /// 16 sqrt           // => 4.0
   /// 2 sqrt            // => 1.4142135623730951
   /// ```
-  sqrt -> Float => @primitive "sqrt"
+  sqrt -> Float => @primitive
 
   /// Natural logarithm (base e) of the receiver (returns Float).
   ///
@@ -519,7 +519,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 1 log             // => 0.0
   /// ```
-  log -> Float => @primitive "log"
+  log -> Float => @primitive
 
   /// Natural logarithm (base e) of the receiver. Alias for `log`.
   ///
@@ -527,7 +527,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 1 ln              // => 0.0
   /// ```
-  ln -> Float => @primitive "ln"
+  ln -> Float => @primitive
 
   /// Base-2 logarithm of the receiver (returns Float).
   ///
@@ -535,7 +535,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 8 log2            // => 3.0
   /// ```
-  log2 -> Float => @primitive "log2"
+  log2 -> Float => @primitive
 
   /// Base-10 logarithm of the receiver (returns Float).
   ///
@@ -543,7 +543,7 @@ sealed typed Number subclass: Integer
   /// ```beamtalk
   /// 100 log10         // => 2.0
   /// ```
-  log10 -> Float => @primitive "log10"
+  log10 -> Float => @primitive
 
   /// Euler's number (e) raised to the power of the receiver (returns Float).
   ///
@@ -552,7 +552,7 @@ sealed typed Number subclass: Integer
   /// 0 exp             // => 1.0
   /// 1 exp             // => 2.718281828459045
   /// ```
-  exp -> Float => @primitive "exp"
+  exp -> Float => @primitive
 
   /// Raise the receiver to the power of `exponent`.
   ///
@@ -564,4 +564,4 @@ sealed typed Number subclass: Integer
   /// 2 raisedTo: 10    // => 1024
   /// 2 raisedTo: -1    // => 0.5
   /// ```
-  raisedTo: exponent :: Number -> Number => @primitive "raisedTo:"
+  raisedTo: exponent :: Number -> Number => @primitive

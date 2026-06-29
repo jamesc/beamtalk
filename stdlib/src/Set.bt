@@ -24,7 +24,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// Set class withAll: #(1, 2, 2, 3)  // => a Set with 1, 2, 3
   /// ```
-  class withAll: list :: List(E) -> Set(E) => @primitive "withAll:"
+  class withAll: list :: List(E) -> Set(E) => @primitive
 
   /// Create a Set from a list, deduplicating elements. Convenience alias for `withAll:`.
   ///
@@ -41,7 +41,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// (Set new add: 1) size           // => 1
   /// Set new size                    // => 0
   /// ```
-  size -> Integer => @primitive "size"
+  size -> Integer => @primitive
 
   /// Test if the set has no elements.
   ///
@@ -49,7 +49,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// Set new isEmpty                 // => true
   /// ```
-  isEmpty -> Boolean => @primitive "isEmpty"
+  isEmpty -> Boolean => @primitive
 
   /// Test if the set contains the given element.
   ///
@@ -58,7 +58,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// (Set new add: 1) includes: 1   // => true
   /// (Set new add: 1) includes: 2   // => false
   /// ```
-  includes: element :: E -> Boolean => @primitive "includes:"
+  includes: element :: E -> Boolean => @primitive
 
   /// Return a new set with the element added.
   ///
@@ -66,7 +66,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// (Set new add: 1) size          // => 1
   /// ```
-  add: element :: E -> Set(E) => @primitive "add:"
+  add: element :: E -> Set(E) => @primitive
 
   /// Return a new set with the element removed.
   ///
@@ -74,7 +74,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// ((Set new add: 1) remove: 1) isEmpty   // => true
   /// ```
-  remove: element :: E -> Set(E) => @primitive "remove:"
+  remove: element :: E -> Set(E) => @primitive
 
   /// Return a new set with elements from both sets.
   ///
@@ -82,7 +82,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// (Set new add: 1) union: (Set new add: 2)
   /// ```
-  union: other :: Set(E) -> Set(E) => @primitive "union:"
+  union: other :: Set(E) -> Set(E) => @primitive
 
   /// Return a new set with only elements present in both sets.
   ///
@@ -90,7 +90,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// ((Set new add: 1) add: 2) intersection: ((Set new add: 2) add: 3)
   /// ```
-  intersection: other :: Set(E) -> Set(E) => @primitive "intersection:"
+  intersection: other :: Set(E) -> Set(E) => @primitive
 
   /// Return a new set with elements in the receiver but not in `other`.
   ///
@@ -98,7 +98,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// ((Set new add: 1) add: 2) difference: (Set new add: 2)
   /// ```
-  difference: other :: Set(E) -> Set(E) => @primitive "difference:"
+  difference: other :: Set(E) -> Set(E) => @primitive
 
   /// Test if all elements of the receiver are in `other`.
   ///
@@ -106,7 +106,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// (Set new add: 1) isSubsetOf: ((Set new add: 1) add: 2)   // => true
   /// ```
-  isSubsetOf: other :: Set(E) -> Boolean => @primitive "isSubsetOf:"
+  isSubsetOf: other :: Set(E) -> Boolean => @primitive
 
   /// Convert the set to a list of elements.
   ///
@@ -117,7 +117,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// (Set new add: 1) asList        // => #(1)
   /// ```
-  asList -> List(E) => @primitive "asList"
+  asList -> List(E) => @primitive
 
   /// A Set is already a Set — identity override of `Collection>>asSet`.
   asSet -> Set(E) => self
@@ -128,7 +128,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// Set new fromList: #(1, 2, 2, 3)
   /// ```
-  fromList: list :: List -> Set(E) => @primitive "fromList:"
+  fromList: list :: List -> Set(E) => @primitive
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
@@ -136,7 +136,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// (Set new add: 1) do: [:x | Transcript show: x]
   /// ```
-  do: block :: Block(E, Object) -> Nil => @primitive "do:"
+  do: block :: Block(E, Object) -> Nil => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -144,7 +144,7 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// Set new printString
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive
 
   /// Return a lazy Stream over the set elements.
   ///
@@ -152,4 +152,4 @@ sealed typed Collection(E) subclass: Set(E)
   /// ```beamtalk
   /// ((Set new add: 1) stream) asList   // => #(1)
   /// ```
-  stream -> Stream(E) => @primitive "stream"
+  stream -> Stream(E) => @primitive

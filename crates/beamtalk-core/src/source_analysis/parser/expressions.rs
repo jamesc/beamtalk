@@ -2031,40 +2031,74 @@ impl Parser {
             };
         }
 
-        match self.current_kind() {
-            // Quoted selector: @primitive "+"
-            TokenKind::String(name) => {
-                let name = name.clone();
-                let end_token = self.advance();
-                let span = start.merge(end_token.span());
-                Expression::Primitive {
-                    name,
-                    is_quoted: true,
-                    is_intrinsic,
-                    span,
+        // An explicit selector (quoted string or bare intrinsic identifier) is
+        // only consumed when it appears on the *same* line as the directive.
+        // A token on a following line is a separate statement (e.g. fallback
+        // code), so a bare `@primitive` at end of line infers its selector
+        // from the enclosing method (BT-2724).
+        let has_explicit_name = matches!(
+            self.current_kind(),
+            TokenKind::String(_) | TokenKind::Identifier(_)
+        ) && !self.current_token().has_leading_newline();
+
+        if has_explicit_name {
+            match self.current_kind() {
+                // Quoted selector: @primitive "+"
+                TokenKind::String(name) => {
+                    let name = name.clone();
+                    let end_token = self.advance();
+                    let span = start.merge(end_token.span());
+                    Expression::Primitive {
+                        name,
+                        is_quoted: true,
+                        is_intrinsic,
+                        is_inferred: false,
+                        span,
+                    }
                 }
-            }
-            // Bare identifier: @primitive basicNew
-            TokenKind::Identifier(name) => {
-                let name = name.clone();
-                let end_token = self.advance();
-                let span = start.merge(end_token.span());
-                Expression::Primitive {
-                    name,
-                    is_quoted: false,
-                    is_intrinsic,
-                    span,
+                // Bare identifier: @primitive basicNew
+                TokenKind::Identifier(name) => {
+                    let name = name.clone();
+                    let end_token = self.advance();
+                    let span = start.merge(end_token.span());
+                    Expression::Primitive {
+                        name,
+                        is_quoted: false,
+                        is_intrinsic,
+                        is_inferred: false,
+                        span,
+                    }
                 }
+                // Unreachable: `has_explicit_name` guarantees String/Identifier.
+                _ => unreachable!("has_explicit_name implies String or Identifier"),
             }
-            _ => {
-                let span = start;
-                let message: EcoString =
-                    format!("{directive} must be followed by a quoted selector or identifier")
-                        .into();
-                self.diagnostics
-                    .push(Diagnostic::error(message.clone(), span));
-                Expression::Error { message, span }
+        } else if let Some(selector) = self
+            .current_method_selector
+            .clone()
+            // Only `@primitive` infers its selector. `@intrinsic` names a
+            // structural intrinsic (`blockValue`, `actorSpawn`, …) that is never
+            // the method's own selector, so a bare `@intrinsic` must still error
+            // rather than silently infer the wrong intrinsic (BT-2724).
+            .filter(|_| !is_intrinsic)
+        {
+            // Bare `@primitive` — infer the selector from the enclosing method.
+            // This yields the same AST as the explicit quoted form
+            // (`is_quoted: true`), so downstream codegen is identical; only
+            // unparsing distinguishes it via `is_inferred`.
+            Expression::Primitive {
+                name: selector,
+                is_quoted: true,
+                is_intrinsic,
+                is_inferred: true,
+                span: start,
             }
+        } else {
+            let span = start;
+            let message: EcoString =
+                format!("{directive} must be followed by a quoted selector or identifier").into();
+            self.diagnostics
+                .push(Diagnostic::error(message.clone(), span));
+            Expression::Error { message, span }
         }
     }
 

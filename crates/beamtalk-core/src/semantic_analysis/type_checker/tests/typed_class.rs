@@ -271,6 +271,7 @@ fn test_typed_class_skips_primitive_methods() {
                 name: "+".into(),
                 is_quoted: true,
                 is_intrinsic: false,
+                is_inferred: false,
                 span: span(),
             })],
             span(),

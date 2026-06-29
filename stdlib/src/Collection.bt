@@ -106,8 +106,7 @@ abstract typed Value subclass: Collection(E)
   /// ```beamtalk
   /// #(1, 2, 3) inject: 0 into: [:sum :x | sum + x]  // => 6
   /// ```
-  inject: initial :: A into: block :: Block(A, E, A) -> A =>
-    @primitive "inject:into:"
+  inject: initial :: A into: block :: Block(A, E, A) -> A => @primitive
 
   /// Collect results of evaluating `block` on each element.
   ///
@@ -236,7 +235,7 @@ abstract typed Value subclass: Collection(E)
   /// #(1, 2, 3) sum               // => 6
   /// #() sum                      // => 0
   /// ```
-  sum -> Number => @primitive "sum"
+  sum -> Number => @primitive
 
   /// Return the largest element.
   ///
@@ -249,7 +248,7 @@ abstract typed Value subclass: Collection(E)
   /// ```beamtalk
   /// #(3, 1, 4, 1, 5) max         // => 5
   /// ```
-  max -> E => @primitive "max"
+  max -> E => @primitive
 
   /// Return the smallest element.
   ///
@@ -261,7 +260,7 @@ abstract typed Value subclass: Collection(E)
   /// ```beamtalk
   /// #(3, 1, 4, 1, 5) min         // => 1
   /// ```
-  min -> E => @primitive "min"
+  min -> E => @primitive
 
   /// Return the mean of the elements as a Float.
   ///
@@ -272,7 +271,7 @@ abstract typed Value subclass: Collection(E)
   /// ```beamtalk
   /// #(1, 2, 3, 4) average        // => 2.5
   /// ```
-  average -> Float => @primitive "average"
+  average -> Float => @primitive
 
   // === Indexed iteration ===
 

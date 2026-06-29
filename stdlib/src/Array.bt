@@ -30,7 +30,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```beamtalk
   /// Array withAll: #(1, 2, 3)   // => #[1, 2, 3]
   /// ```
-  class withAll: list :: List(E) -> Array(E) => @primitive "withAll:"
+  class withAll: list :: List(E) -> Array(E) => @primitive
 
   /// Create an Array from a list. Convenience alias for `withAll:`.
   ///
@@ -47,7 +47,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// #[1, 2, 3] size              // => 3
   /// #[] size                     // => 0
   /// ```
-  size -> Integer => @primitive "size"
+  size -> Integer => @primitive
 
   /// Test if the array has no elements.
   ///
@@ -56,7 +56,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// #[] isEmpty                  // => true
   /// #[1] isEmpty                 // => false
   /// ```
-  isEmpty -> Boolean => @primitive "isEmpty"
+  isEmpty -> Boolean => @primitive
 
   /// Return the element at the given 1-based index.
   ///
@@ -67,7 +67,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// #[10, 20, 30] at: 2          // => 20
   /// #[10, 20, 30] at: 1          // => 10
   /// ```
-  at: index :: Integer -> E => @primitive "at:"
+  at: index :: Integer -> E => @primitive
 
   /// Return a new array with the element at `index` replaced by `value`.
   ///
@@ -77,7 +77,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```beamtalk
   /// (#[1, 2, 3] at: 2 put: 99)  // => #[1, 99, 3]
   /// ```
-  at: index :: Integer put: value :: E -> Array(E) => @primitive "at:put:"
+  at: index :: Integer put: value :: E -> Array(E) => @primitive
 
   /// Test if the array contains the given element.
   ///
@@ -86,7 +86,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// #[1, 2, 3] includes: 2       // => true
   /// #[1, 2, 3] includes: 9       // => false
   /// ```
-  includes: element :: E -> Boolean => @primitive "includes:"
+  includes: element :: E -> Boolean => @primitive
 
   /// Iterate over each element, evaluating `block` with each one.
   ///
@@ -94,7 +94,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```beamtalk
   /// #[1, 2, 3] do: [:x | Transcript show: x]
   /// ```
-  do: block :: Block(E, Object) -> Nil => @primitive "do:"
+  do: block :: Block(E, Object) -> Nil => @primitive
 
   /// An Array is already an Array — identity override of `Collection>>asArray`.
   asArray -> Array(E) => self
@@ -105,7 +105,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```beamtalk
   /// #[1, 2, 3] collect: [:x | x * 2]   // => #[2, 4, 6]
   /// ```
-  collect: block :: Block(E, R) -> Array(R) => @primitive "collect:"
+  collect: block :: Block(E, R) -> Array(R) => @primitive
 
   /// Select elements for which `block` returns true, returning a new Array.
   ///
@@ -113,7 +113,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```beamtalk
   /// #[1, 2, 3, 4] select: [:x | x > 2]  // => #[3, 4]
   /// ```
-  select: block :: Block(E, Boolean) -> Array(E) => @primitive "select:"
+  select: block :: Block(E, Boolean) -> Array(E) => @primitive
 
   /// Reduce the array with an accumulator.
   ///
@@ -121,8 +121,7 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```beamtalk
   /// #[1, 2, 3] inject: 0 into: [:acc :x | acc + x]   // => 6
   /// ```
-  inject: initial :: A into: block :: Block(A, E, A) -> A =>
-    @primitive "inject:into:"
+  inject: initial :: A into: block :: Block(A, E, A) -> A => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -130,4 +129,4 @@ sealed typed Collection(E) subclass: Array(E)
   /// ```beamtalk
   /// #[1, 2, 3] printString       // => "#[1, 2, 3]"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive

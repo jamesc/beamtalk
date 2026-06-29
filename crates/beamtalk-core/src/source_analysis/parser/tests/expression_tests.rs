@@ -752,19 +752,67 @@ fn parse_primitive_structural_intrinsic() {
 }
 
 #[test]
-fn parse_primitive_missing_name_error() {
-    // @primitive without a name should produce an error
-    let source = "Object subclass: Foo\n  abs => @primitive";
-    let diagnostics = parse_err(source);
-    assert!(
-        !diagnostics.is_empty(),
-        "Expected error for @primitive without name"
-    );
-    assert!(
-        diagnostics[0]
-            .message
-            .contains("@primitive must be followed by")
-    );
+fn parse_primitive_bare_infers_selector() {
+    // Bare @primitive (no selector string) infers the selector from the
+    // enclosing method, producing the same AST as the explicit quoted form
+    // (BT-2724).
+    let source = "Object subclass: Foo\n  size => @primitive";
+    let module = parse_ok(source);
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.body.len(), 1);
+    if let Expression::Primitive {
+        name, is_quoted, ..
+    } = &method.body[0].expression
+    {
+        assert_eq!(name.as_str(), "size");
+        assert!(
+            is_quoted,
+            "inferred selector behaves like a quoted selector"
+        );
+    } else {
+        panic!("Expected Primitive, got: {:?}", method.body[0]);
+    }
+}
+
+#[test]
+fn parse_primitive_bare_infers_binary_selector() {
+    // Inference works for binary selectors too.
+    let source = "Object subclass: Foo\n  + other => @primitive";
+    let module = parse_ok(source);
+    let method = &module.classes[0].methods[0];
+    if let Expression::Primitive { name, .. } = &method.body[0].expression {
+        assert_eq!(name.as_str(), "+");
+    } else {
+        panic!("Expected Primitive, got: {:?}", method.body[0]);
+    }
+}
+
+#[test]
+fn parse_primitive_bare_infers_keyword_selector() {
+    // Inference concatenates keyword parts: `at:put:`.
+    let source = "Object subclass: Foo\n  at: i put: v => @primitive";
+    let module = parse_ok(source);
+    let method = &module.classes[0].methods[0];
+    if let Expression::Primitive { name, .. } = &method.body[0].expression {
+        assert_eq!(name.as_str(), "at:put:");
+    } else {
+        panic!("Expected Primitive, got: {:?}", method.body[0]);
+    }
+}
+
+#[test]
+fn parse_primitive_bare_with_fallback() {
+    // Bare @primitive followed by fallback code on the next line infers the
+    // selector and keeps the fallback as a separate statement.
+    let source = "Object subclass: MyInt\n  abs => @primitive\n    self negated";
+    let module = parse_ok(source);
+    let method = &module.classes[0].methods[0];
+    assert_eq!(method.body.len(), 2);
+    if let Expression::Primitive { name, .. } = &method.body[0].expression {
+        assert_eq!(name.as_str(), "abs");
+    } else {
+        panic!("Expected Primitive, got: {:?}", method.body[0]);
+    }
 }
 
 #[test]
@@ -824,6 +872,26 @@ fn parse_intrinsic_bare_identifier() {
         }
         other => panic!("Expected Primitive, got: {other:?}"),
     }
+}
+
+#[test]
+fn parse_intrinsic_bare_does_not_infer() {
+    // BT-2724: bare `@intrinsic` must still error. Intrinsic names name a
+    // structural intrinsic, never the method's selector, so inference (which is
+    // only correct for `@primitive`) must not apply.
+    let source = "Object subclass: Foo\n  size => @intrinsic";
+    let diagnostics = parse_err(source);
+    assert!(
+        !diagnostics.is_empty(),
+        "Expected error for bare @intrinsic"
+    );
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("@intrinsic must be followed by"),
+        "Got: {}",
+        diagnostics[0].message
+    );
 }
 
 #[test]

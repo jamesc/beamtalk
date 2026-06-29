@@ -5412,6 +5412,7 @@ mod tests {
             name: "add".into(),
             is_quoted: false,
             is_intrinsic: false,
+            is_inferred: false,
             span: span(),
         };
         let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);

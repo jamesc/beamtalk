@@ -20,7 +20,7 @@ sealed typed Value subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) selector       // => #+
   /// ```
-  selector -> Symbol => @primitive "selector"
+  selector -> Symbol => @primitive
 
   /// Return the method source code as a string.
   ///
@@ -28,7 +28,7 @@ sealed typed Value subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) source
   /// ```
-  source -> String => @primitive "source"
+  source -> String => @primitive
 
   /// Return the method documentation string, or nil if none set.
   ///
@@ -36,7 +36,7 @@ sealed typed Value subclass: CompiledMethod
   /// ```beamtalk
   /// (Counter >> #increment) doc   // => nil (or doc string if set)
   /// ```
-  doc => @primitive "doc"
+  doc => @primitive
 
   /// Return the number of arguments the method expects.
   ///
@@ -45,7 +45,7 @@ sealed typed Value subclass: CompiledMethod
   /// (Integer >> #+) argumentCount  // => 1
   /// (Integer >> #abs) argumentCount // => 0
   /// ```
-  argumentCount -> Integer => @primitive "argumentCount"
+  argumentCount -> Integer => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -53,7 +53,7 @@ sealed typed Value subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) printString
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive
 
   /// Convert the compiled method to a string.
   ///
@@ -61,4 +61,4 @@ sealed typed Value subclass: CompiledMethod
   /// ```beamtalk
   /// (Integer >> #+) asString
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive

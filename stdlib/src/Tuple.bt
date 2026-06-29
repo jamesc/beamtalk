@@ -50,7 +50,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// Tuple class withAll: #(1, 2, 3)   // => {1, 2, 3}
   /// ```
-  class withAll: list :: List -> Tuple => @primitive "withAll:"
+  class withAll: list :: List -> Tuple => @primitive
 
   /// Create a Tuple from a list. Convenience alias for `withAll:`.
   ///
@@ -66,7 +66,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result size   // => 2 (e.g., an {ok, Value} tuple)
   /// ```
-  size -> Integer => @primitive "size"
+  size -> Integer => @primitive
 
   /// Return the element at the given 1-based index.
   ///
@@ -74,7 +74,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result at: 2   // => the value from an {ok, Value} tuple
   /// ```
-  at: index :: Integer => @primitive "at:"
+  at: index :: Integer => @primitive
 
   /// Test if the tuple represents an `{'ok', _}` result.
   ///
@@ -82,7 +82,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result isOk       // => true when result is {ok, _}
   /// ```
-  isOk -> Boolean => @primitive "isOk"
+  isOk -> Boolean => @primitive
 
   /// Test if the tuple represents an `{'error', _}` result.
   ///
@@ -90,7 +90,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result isError   // => true when result is {error, _}
   /// ```
-  isError -> Boolean => @primitive "isError"
+  isError -> Boolean => @primitive
 
   /// Extract the value from an `{'ok', Value}` tuple, or raise on `{'error', Reason}`.
   ///
@@ -131,7 +131,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result asString   // => "{ok,42}"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive
 
   /// Return the human-readable representation of the tuple.
   ///
@@ -147,7 +147,7 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result do: [:x | Transcript show: x]
   /// ```
-  do: block :: Block -> Nil => @primitive "do:"
+  do: block :: Block -> Nil => @primitive
 
   /// Return a random element from the tuple.
   ///
@@ -155,4 +155,4 @@ sealed typed Collection subclass: Tuple
   /// ```beamtalk
   /// result atRandom            // => random element from result tuple
   /// ```
-  atRandom => @primitive "atRandom"
+  atRandom => @primitive

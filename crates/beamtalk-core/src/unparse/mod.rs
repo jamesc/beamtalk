@@ -1041,6 +1041,7 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             name,
             is_quoted,
             is_intrinsic,
+            is_inferred,
             ..
         } => {
             let directive = if *is_intrinsic {
@@ -1048,7 +1049,10 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             } else {
                 "@primitive"
             };
-            if *is_quoted {
+            if *is_inferred {
+                // Bare `@primitive` — selector inferred from the method (BT-2724).
+                docvec![directive]
+            } else if *is_quoted {
                 docvec![directive, " \"", leaf::string_content(name), "\""]
             } else {
                 docvec![directive, " ", leaf::ident(name)]
@@ -3140,6 +3144,37 @@ mod tests {
     fn protocol_class_method_no_doc_comment_round_trip() {
         let source = concat!("Protocol define: Creatable\n", "  class create -> Self\n",);
         assert_identity(source);
+    }
+
+    #[test]
+    fn bare_primitive_round_trips_without_selector_string() {
+        // BT-2724: a bare `@primitive` (selector inferred from the method) must
+        // not be rewritten with an explicit selector string by the formatter.
+        let source = concat!("Object subclass: Foo\n", "  size => @primitive\n");
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert!(
+            formatted.contains("@primitive\n"),
+            "expected bare @primitive, got:\n{formatted}"
+        );
+        assert!(
+            !formatted.contains("@primitive \""),
+            "bare @primitive should not gain a selector string:\n{formatted}"
+        );
+        assert_idempotent(source);
+    }
+
+    #[test]
+    fn explicit_primitive_selector_string_preserved() {
+        // BT-2724: an explicit selector string (genuine rename) is preserved.
+        let source = concat!(
+            "Object subclass: Foo\n",
+            "  signal => @primitive \"classSignal\"\n"
+        );
+        let formatted = format_source(source).expect("format_source must succeed");
+        assert!(
+            formatted.contains("@primitive \"classSignal\""),
+            "explicit selector string should be preserved, got:\n{formatted}"
+        );
     }
 
     #[test]

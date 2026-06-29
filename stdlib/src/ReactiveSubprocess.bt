@@ -55,7 +55,7 @@ typed Actor subclass: ReactiveSubprocess
   /// proc := (ReactiveSubprocess open: "echo" args: #("hello") notify: delegate) unwrap
   /// ```
   class open: command :: String args: args :: List(String) notify: notify :: Actor -> Result(ReactiveSubprocess, Error) =>
-    @primitive "open:args:notify:"
+    @primitive
 
   /// Open a subprocess with environment and working directory, delivering lines to `notify`.
   ///
@@ -67,7 +67,7 @@ typed Actor subclass: ReactiveSubprocess
   ///   notify: delegate) unwrap
   /// ```
   class open: command :: String args: args :: List(String) env: env :: Dictionary dir: dir :: String notify: notify :: Actor -> Result(ReactiveSubprocess, Error) =>
-    @primitive "open:args:env:dir:notify:"
+    @primitive
 
   /// Write a line to the subprocess's stdin (appends newline).
   ///
@@ -75,7 +75,7 @@ typed Actor subclass: ReactiveSubprocess
   /// ```beamtalk
   /// proc writeLine: "{\"jsonrpc\":\"2.0\",\"method\":\"ping\"}"
   /// ```
-  writeLine: data :: String -> Nil => @primitive "writeLine:"
+  writeLine: data :: String -> Nil => @primitive
 
   /// Get the exit code. Returns nil if the subprocess is still running.
   ///
@@ -83,7 +83,7 @@ typed Actor subclass: ReactiveSubprocess
   /// ```beamtalk
   /// proc exitCode.   // => 0
   /// ```
-  exitCode -> Integer | Nil => @primitive "exitCode"
+  exitCode -> Integer | Nil => @primitive
 
   /// Force-close the subprocess (sends kill to process group).
   ///
@@ -91,4 +91,4 @@ typed Actor subclass: ReactiveSubprocess
   /// ```beamtalk
   /// proc close.
   /// ```
-  close -> Nil => @primitive "close"
+  close -> Nil => @primitive

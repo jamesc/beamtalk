@@ -21,7 +21,7 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame method   // => #dispatch
   /// ```
-  method -> Symbol => @primitive "method"
+  method -> Symbol => @primitive
 
   /// Return the Beamtalk class name, or nil if not a Beamtalk class.
   ///
@@ -29,7 +29,7 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame receiverClass   // => Counter
   /// ```
-  receiverClass -> String | Nil => @primitive "receiverClass"
+  receiverClass -> String | Nil => @primitive
 
   /// Return the function arity (number of arguments).
   ///
@@ -37,7 +37,7 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame arguments   // => 4
   /// ```
-  arguments -> Integer => @primitive "arguments"
+  arguments -> Integer => @primitive
 
   /// Return the source location as "file:line", or nil if unavailable.
   ///
@@ -45,7 +45,7 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame sourceLocation   // => "counter.erl:42"
   /// ```
-  sourceLocation -> String | Nil => @primitive "sourceLocation"
+  sourceLocation -> String | Nil => @primitive
 
   /// Return the Erlang module name as a string, or nil.
   ///
@@ -53,7 +53,7 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame moduleName   // => "counter"
   /// ```
-  moduleName -> String | Nil => @primitive "moduleName"
+  moduleName -> String | Nil => @primitive
 
   /// Return the source line number, or nil if unavailable.
   ///
@@ -61,7 +61,7 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame line   // => 42
   /// ```
-  line -> Integer | Nil => @primitive "line"
+  line -> Integer | Nil => @primitive
 
   /// Return the source file path as a string, or nil if unavailable.
   ///
@@ -69,7 +69,7 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame file   // => "counter.erl"
   /// ```
-  file -> String | Nil => @primitive "file"
+  file -> String | Nil => @primitive
 
   /// Return a human-readable string representation.
   ///
@@ -77,4 +77,4 @@ typed Value subclass: StackFrame
   /// ```beamtalk
   /// frame printString   // => "Counter>>dispatch/4 (counter.erl:42)"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive

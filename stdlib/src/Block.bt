@@ -97,7 +97,7 @@ sealed typed Object subclass: Block
   /// [:x :y | x + y] arity     // => 2
   /// [42] arity                 // => 0
   /// ```
-  arity -> Integer => @primitive "arity"
+  arity -> Integer => @primitive
 
   /// Evaluate the block with arguments from a list.
   ///
@@ -105,4 +105,4 @@ sealed typed Object subclass: Block
   /// ```beamtalk
   /// [:x :y | x + y] valueWithArguments: #(3, 4)   // => 7
   /// ```
-  valueWithArguments: args :: List -> Object => @primitive "valueWithArguments:"
+  valueWithArguments: args :: List -> Object => @primitive

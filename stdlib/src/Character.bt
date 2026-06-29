@@ -21,7 +21,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// Character value: 65      // => $A
   /// ```
-  class sealed value: codepoint :: Integer -> Character => @primitive "value:"
+  class sealed value: codepoint :: Integer -> Character => @primitive
 
   /// Test strict equality with another character.
   ///
@@ -30,7 +30,7 @@ sealed typed Integer subclass: Character
   /// $A =:= $A                  // => true
   /// $A =:= $B                  // => false
   /// ```
-  =:= other :: Character -> Boolean => @primitive "=:="
+  =:= other :: Character -> Boolean => @primitive
 
   /// Test strict inequality with another character.
   ///
@@ -39,7 +39,7 @@ sealed typed Integer subclass: Character
   /// $A =/= $B                  // => true
   /// $A =/= $A                  // => false
   /// ```
-  =/= other :: Character -> Boolean => @primitive "=/="
+  =/= other :: Character -> Boolean => @primitive
 
   /// Test inequality with another character.
   ///
@@ -48,7 +48,7 @@ sealed typed Integer subclass: Character
   /// $A /= $B                 // => true
   /// $A /= $A                 // => false
   /// ```
-  /= other :: Character -> Boolean => @primitive "/="
+  /= other :: Character -> Boolean => @primitive
 
   /// Test if the receiver sorts before another character.
   ///
@@ -56,7 +56,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A < $B                  // => true
   /// ```
-  < other :: Character -> Boolean => @primitive "<"
+  < other :: Character -> Boolean => @primitive
 
   /// Test if the receiver sorts after another character.
   ///
@@ -64,7 +64,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $B > $A                  // => true
   /// ```
-  > other :: Character -> Boolean => @primitive ">"
+  > other :: Character -> Boolean => @primitive
 
   /// Test if the receiver sorts before or equal to another character.
   ///
@@ -72,7 +72,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A <= $A                 // => true
   /// ```
-  <= other :: Character -> Boolean => @primitive "<="
+  <= other :: Character -> Boolean => @primitive
 
   /// Test if the receiver sorts after or equal to another character.
   ///
@@ -80,7 +80,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A >= $A                 // => true
   /// ```
-  >= other :: Character -> Boolean => @primitive ">="
+  >= other :: Character -> Boolean => @primitive
 
   /// Return the Unicode codepoint as an integer.
   ///
@@ -88,7 +88,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A asInteger             // => 65
   /// ```
-  asInteger -> Integer => @primitive "asInteger"
+  asInteger -> Integer => @primitive
 
   /// Convert the character to a single-character string.
   ///
@@ -96,7 +96,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A asString              // => "A"
   /// ```
-  asString -> String => @primitive "asString"
+  asString -> String => @primitive
 
   /// Return a developer-readable string representation.
   ///
@@ -104,7 +104,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A printString           // => "$A"
   /// ```
-  printString -> String => @primitive "printString"
+  printString -> String => @primitive
 
   /// Return a hash value for the character.
   ///
@@ -112,7 +112,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A hash
   /// ```
-  hash -> Integer => @primitive "hash"
+  hash -> Integer => @primitive
 
   /// Test if the character is a Unicode letter.
   ///
@@ -121,7 +121,7 @@ sealed typed Integer subclass: Character
   /// $a isLetter              // => true
   /// $1 isLetter              // => false
   /// ```
-  isLetter -> Boolean => @primitive "isLetter"
+  isLetter -> Boolean => @primitive
 
   /// Test if the character is a Unicode digit.
   ///
@@ -130,7 +130,7 @@ sealed typed Integer subclass: Character
   /// $1 isDigit               // => true
   /// $a isDigit               // => false
   /// ```
-  isDigit -> Boolean => @primitive "isDigit"
+  isDigit -> Boolean => @primitive
 
   /// Test if the character is uppercase.
   ///
@@ -139,7 +139,7 @@ sealed typed Integer subclass: Character
   /// $A isUppercase           // => true
   /// $a isUppercase           // => false
   /// ```
-  isUppercase -> Boolean => @primitive "isUppercase"
+  isUppercase -> Boolean => @primitive
 
   /// Test if the character is lowercase.
   ///
@@ -148,7 +148,7 @@ sealed typed Integer subclass: Character
   /// $a isLowercase           // => true
   /// $A isLowercase           // => false
   /// ```
-  isLowercase -> Boolean => @primitive "isLowercase"
+  isLowercase -> Boolean => @primitive
 
   /// Test if the character is whitespace.
   ///
@@ -157,7 +157,7 @@ sealed typed Integer subclass: Character
   /// $  isWhitespace          // => true
   /// $a isWhitespace          // => false
   /// ```
-  isWhitespace -> Boolean => @primitive "isWhitespace"
+  isWhitespace -> Boolean => @primitive
 
   /// Convert to uppercase.
   ///
@@ -165,7 +165,7 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $a uppercase             // => $A
   /// ```
-  uppercase -> Character => @primitive "uppercase"
+  uppercase -> Character => @primitive
 
   /// Convert to lowercase.
   ///
@@ -173,4 +173,4 @@ sealed typed Integer subclass: Character
   /// ```beamtalk
   /// $A lowercase             // => $a
   /// ```
-  lowercase -> Character => @primitive "lowercase"
+  lowercase -> Character => @primitive

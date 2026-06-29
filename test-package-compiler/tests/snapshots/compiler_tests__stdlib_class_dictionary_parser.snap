@@ -46,6 +46,7 @@ Module {
                                 name: "size",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 305,
                                     end: 322,
@@ -95,6 +96,7 @@ Module {
                                 name: "keys",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 334,
                                     end: 351,
@@ -134,6 +136,7 @@ Module {
                                 name: "values",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 365,
                                     end: 384,
@@ -192,6 +195,7 @@ Module {
                                 name: "at:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 399,
                                     end: 415,
@@ -267,6 +271,7 @@ Module {
                                 name: "at:ifAbsent:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 446,
                                     end: 471,
@@ -342,6 +347,7 @@ Module {
                                 name: "at:put:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 497,
                                     end: 517,
@@ -400,6 +406,7 @@ Module {
                                 name: "includesKey:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 541,
                                     end: 566,
@@ -458,6 +465,7 @@ Module {
                                 name: "removeKey:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 627,
                                     end: 650,
@@ -526,6 +534,7 @@ Module {
                                 name: "merge:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 670,
                                     end: 689,
@@ -584,6 +593,7 @@ Module {
                                 name: "keysAndValuesDo:",
                                 is_quoted: true,
                                 is_intrinsic: false,
+                                is_inferred: false,
                                 span: Span {
                                     start: 734,
                                     end: 763,
