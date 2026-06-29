@@ -89,6 +89,8 @@
 [Erlang erlang throw: 1] on: Error do: [:e | e message]
 // => 1
 
-// Erlang error still caught by Error handler (no regression)
-[Erlang erlang error: 1] on: Error do: [:e | e message]
-// => 1
+// Erlang error still caught by Error handler, now wrapped by default as a
+// structured #beamtalk_error{} at the FFI boundary (ADR 0101 Part 2). The raw
+// error:* no longer leaks; it is caught as a runtime_error rather than message "1".
+[Erlang erlang error: 1] on: Error do: [:e | e kind]
+// => runtime_error

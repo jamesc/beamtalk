@@ -220,17 +220,20 @@ TestCase subclass: TracingTest
     self assert: ((health at: "run_queue") >= 0)
 
   // === Type error validation ===
+  // ADR 0101: these shims raise a #beamtalk_error{kind = type_error}; the unified
+  // FFI proxy now preserves that classification (idempotent pass-through) instead
+  // of the former clobbering to runtime_error.
   testSlowMethodsRequiresPositiveInteger =>
-    self should: [Tracing slowMethods: 0] raise: #runtime_error
+    self should: [Tracing slowMethods: 0] raise: #type_error
 
   testHotMethodsRequiresPositiveInteger =>
-    self should: [Tracing hotMethods: -1] raise: #runtime_error
+    self should: [Tracing hotMethods: -1] raise: #type_error
 
   testErrorMethodsRequiresPositiveInteger =>
-    self should: [Tracing errorMethods: 0] raise: #runtime_error
+    self should: [Tracing errorMethods: 0] raise: #type_error
 
   testBottlenecksRequiresPositiveInteger =>
-    self should: [Tracing bottlenecks: 0] raise: #runtime_error
+    self should: [Tracing bottlenecks: 0] raise: #type_error
 
   testMaxEventsRequiresPositiveInteger =>
-    self should: [Tracing maxEvents: 0] raise: #runtime_error
+    self should: [Tracing maxEvents: 0] raise: #type_error

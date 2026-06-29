@@ -38,9 +38,18 @@ for reserved selectors (class, ==, /=, self, etc.).
 See: ADR 0028 §1 (Module Proxy Pattern)
 """.
 
--export([coerce_result/1, direct_call/3, dispatch/3, has_method/1, new/1]).
+-export([coerce_result/1, direct_call/3, dispatch/3, has_method/1, native_call/4, new/1]).
 
 -include("beamtalk.hrl").
+
+%%% Error-reporting context for the unified apply path (ADR 0101 Part 2).
+%%%
+%%% - `none` — inline `(Erlang module)` FFI. Wrapped errors report the
+%%%   Erlang-facing `'ErlangModule'` class and the original selector.
+%%% - `{Class, Selector}` — a `native:` Object delegation (BT-2720). Wrapped
+%%%   errors report the Beamtalk class/selector so they read `Stream>>take:`
+%%%   rather than the bare Erlang MFA.
+-type error_context() :: none | {atom(), atom()}.
 
 -doc "Create a new ErlangModule proxy for the given module atom.".
 -spec new(atom()) -> map().
@@ -158,8 +167,10 @@ of calling `call 'M':'F'(args)` directly. This enables:
 - Automatic binary→charlist coercion on badarg (BT-1127)
 - Charlist→binary result coercion for consistent string types
 
-Unlike `validate_and_apply/4`, this does NOT wrap exit/throw exceptions —
-those propagate naturally so `Erlang erlang exit: 1` behaves as expected.
+Wrapping policy is unified across all apply paths via `apply_with_coercion/5`
+(ADR 0101 Part 2): `error:*` is converted to a structured `#beamtalk_error{}`,
+while `exit:*` and `throw:*` propagate naturally so `Erlang erlang exit: 1`
+behaves as expected and foreign throws stay throws.
 """.
 -spec direct_call(atom(), atom(), list()) -> term().
 direct_call(Module, FunName, Args) ->
@@ -170,7 +181,7 @@ direct_call(Module, FunName, Args) ->
         {ok, Exports} ->
             case lists:member({FunName, Arity}, Exports) of
                 true ->
-                    apply_with_coercion(Module, FunName, Args, FunName);
+                    apply_with_coercion(Module, FunName, Args, FunName, none);
                 false ->
                     raise_function_or_arity_error(
                         Module, FunName, Arity, FunName, Exports
@@ -179,41 +190,122 @@ direct_call(Module, FunName, Args) ->
     end.
 
 -doc """
-Call Module:FunName(Args), retrying with charlist-coerced args on badarg.
+Entry point for `native:` Object delegation (ADR 0101 Part 1, BT-2720).
 
-Only catches badarg (for coercion retry). All other exceptions (exit, throw,
-and other errors) propagate naturally — this preserves the semantics of
-direct calls like `Erlang erlang exit: 1`.
+`native:` Object methods lower to
+`beamtalk_erlang_proxy:native_call(Mod, Fn, [Self | Args], {Class, Sel})`.
+Unlike `direct_call/3`/`validate_and_apply/4` this **skips the proactive
+`get_exports`/arity pre-check** — codegen guarantees the call shape at compile
+time, so the check is pure overhead. It still routes through the shared
+`apply_with_coercion/5`, so it gets the **same** `error:*` → `#beamtalk_error{}`
+wrapping and ADR 0076 ok/error → `Result` coercion as inline FFI.
+
+The `{Class, Sel}` context makes wrapped errors read `Stream>>take:` instead of
+the bare Erlang MFA. Crucially, `error:undef` is still caught (the compile-time
+guarantee does not survive **hot code reload** — a backing function can be
+swapped between compile and call) and surfaced as a structured
+`does_not_understand` carrying `{Class, Sel}`.
+
+**Codegen-only.** This entry deliberately omits the proactive
+`get_exports`/arity pre-check that `direct_call/3` and `validate_and_apply/4`
+run, so it must only be called with the exact `{Mod, Fn, Args}` shape codegen
+emits. Hand-written code wanting export validation up front should use
+`direct_call/3` (or the `(Erlang module)` FFI surface) instead.
 """.
--spec apply_with_coercion(atom(), atom(), list(), atom()) -> term().
-apply_with_coercion(Module, FunName, Args, OrigSelector) ->
+-spec native_call(atom(), atom(), list(), {atom(), atom()}) -> term().
+native_call(Module, FunName, Args, {Class, Selector}) ->
+    apply_with_coercion(Module, FunName, Args, FunName, {Class, Selector}).
+
+-doc """
+The single, unified apply path for all FFI (ADR 0101 Part 2).
+
+Calls `Module:FunName(Args)`, coercing ok/error → `Result` (ADR 0076) on the
+happy path and retrying with charlist-coerced args on `badarg` (BT-1127).
+
+Exception policy — converged across `direct_call/3`, `validate_and_apply/4`,
+and `native_call/4`:
+- `error:#beamtalk_error{}` (already wrapped) → re-raised unchanged
+- `error:undef` → structured `does_not_understand` (hot-reload TOCTOU)
+- `error:badarg` → charlist retry, else `type_error`
+- `error:function_clause` → `arity_mismatch`
+- `error:badarith` → `type_error`
+- any other `error:Reason` → `runtime_error` (this is the catch-all that makes
+  casual FFI safe by default — previously `direct_call` leaked these)
+- `exit:*` → **propagates** (not caught)
+- `throw:*` → **passes through** (not caught)
+
+`Context` selects the class/selector reported on wrapped errors — see
+`error_context()`. The wrapping helpers (`ensure_wrapped`-style) run only on the
+error path; the happy path pays nothing beyond the `try` frame + coercion.
+""".
+-spec apply_with_coercion(atom(), atom(), list(), atom(), error_context()) -> term().
+apply_with_coercion(Module, FunName, Args, OrigSelector, Context) ->
     try
-        Result = erlang:apply(Module, FunName, Args),
-        coerce_ffi_result(Module, Result)
+        coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
     catch
+        %% Clause order mirrors maybe_retry_badarg/6 for readability. The patterns
+        %% are mutually exclusive (distinct atoms vs map vs record), so order only
+        %% matters for the trailing catch-all, which must stay last.
         error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
+            %% Re-raise already-wrapped Beamtalk exceptions unchanged
+            %% (e.g. from Beamtalk code reached via Erlang). Idempotent.
             erlang:raise(error, Wrapped, WrappedStack);
-        error:undef:_Stack ->
-            %% TOCTOU: function unloaded between export check and apply
-            raise_undef_error(Module, FunName, length(Args), OrigSelector);
+        error:#beamtalk_error{} = Rec:RecStack ->
+            %% A bare #beamtalk_error{} record raised by an Erlang shim
+            %% (e.g. error(#beamtalk_error{kind = type_error, …})) is already
+            %% classified — wrap it into the map form *preserving its kind*
+            %% (idempotent); do not reclassify it as a generic runtime_error.
+            erlang:raise(error, beamtalk_exception_handler:wrap(Rec), RecStack);
         error:badarg:Stack ->
-            CoercedArgs = coerce_binaries_to_charlists(Args),
-            case CoercedArgs =/= Args of
-                true ->
-                    try
-                        RetryResult = erlang:apply(Module, FunName, CoercedArgs),
-                        coerce_ffi_result(Module, RetryResult)
-                    catch
-                        error:badarg:Stack2 ->
-                            raise_badarg_error(Module, FunName, OrigSelector, Stack2);
-                        error:#{error := #beamtalk_error{}} = Wrapped2:WrappedStack2 ->
-                            erlang:raise(error, Wrapped2, WrappedStack2);
-                        error:undef:_Stack2 ->
-                            raise_undef_error(Module, FunName, length(CoercedArgs), OrigSelector)
-                    end;
-                false ->
-                    raise_badarg_error(Module, FunName, OrigSelector, Stack)
-            end
+            maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack);
+        error:undef:_Stack ->
+            %% TOCTOU / hot code reload: function unloaded between check and apply
+            raise_undef_error(Module, FunName, length(Args), OrigSelector, Context);
+        error:function_clause:Stack ->
+            raise_function_clause_error(Module, FunName, OrigSelector, Context, Stack);
+        error:badarith:Stack ->
+            raise_badarith_error(Module, FunName, OrigSelector, Context, Stack);
+        error:Reason:Stack ->
+            raise_generic_error(Module, FunName, OrigSelector, Context, Reason, Stack)
+        %% exit:* and throw:* are deliberately NOT caught — they propagate
+        %% (ADR 0101 Part 2: process exit and foreign throws are semantically
+        %% meaningful and must not be flattened into #beamtalk_error{}).
+    end.
+
+-doc """
+BT-1127: auto-coerce binary args to charlists and retry once on `badarg`.
+
+Many Erlang functions (os:cmd/1, file:read_file/1, …) expect charlists but
+Beamtalk strings are binaries. Applies the same unified catch policy on the
+retry; if the retry still fails (or no binary args were coercible) the error is
+wrapped per `apply_with_coercion/5`.
+""".
+-spec maybe_retry_badarg(atom(), atom(), list(), atom(), error_context(), list()) -> term().
+maybe_retry_badarg(Module, FunName, Args, OrigSelector, Context, Stack) ->
+    CoercedArgs = coerce_binaries_to_charlists(Args),
+    case CoercedArgs =/= Args of
+        true ->
+            try
+                coerce_ffi_result(Module, erlang:apply(Module, FunName, CoercedArgs))
+            catch
+                error:#{error := #beamtalk_error{}} = Wrapped:WrappedStack ->
+                    erlang:raise(error, Wrapped, WrappedStack);
+                error:#beamtalk_error{} = Rec:RecStack ->
+                    erlang:raise(error, beamtalk_exception_handler:wrap(Rec), RecStack);
+                error:badarg:Stack2 ->
+                    raise_badarg_error(Module, FunName, OrigSelector, Context, Stack2);
+                error:undef:_Stack2 ->
+                    raise_undef_error(Module, FunName, length(CoercedArgs), OrigSelector, Context);
+                error:function_clause:Stack2 ->
+                    raise_function_clause_error(Module, FunName, OrigSelector, Context, Stack2);
+                error:badarith:Stack2 ->
+                    raise_badarith_error(Module, FunName, OrigSelector, Context, Stack2);
+                error:Reason2:Stack2 ->
+                    raise_generic_error(Module, FunName, OrigSelector, Context, Reason2, Stack2)
+                %% exit:* / throw:* propagate (see apply_with_coercion/5)
+            end;
+        false ->
+            raise_badarg_error(Module, FunName, OrigSelector, Context, Stack)
     end.
 
 %%% ============================================================================
@@ -280,6 +372,11 @@ Validate function existence and arity, then apply.
 
 Checks module_info(exports) before calling erlang:apply/3 to provide
 actionable error messages (BT-679). No caching — hot code reload must work.
+
+Once validated, delegates to the unified `apply_with_coercion/5` so the
+`call:args:` / dispatch path shares the **same** exception policy as inline FFI
+(ADR 0101 Part 2): `error:*` wrapped, `exit:*`/`throw:*` propagated. This rolls
+back the former `exit`→`erlang_exit` / `throw`→`erlang_throw` wrapping.
 """.
 -spec validate_and_apply(atom(), atom(), list(), atom()) -> term().
 validate_and_apply(Module, FunName, Args, OrigSelector) ->
@@ -290,153 +387,7 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
         {ok, Exports} ->
             case lists:member({FunName, Arity}, Exports) of
                 true ->
-                    %% Exact match — call directly
-                    try
-                        coerce_ffi_result(Module, erlang:apply(Module, FunName, Args))
-                    catch
-                        error:#{error := #beamtalk_error{}} = Wrapped:_Stack ->
-                            %% Re-raise already-wrapped Beamtalk exceptions
-                            %% (e.g., from Beamtalk code called via Erlang)
-                            error(Wrapped);
-                        error:undef:Stack ->
-                            %% Unlikely with export validation (BT-679), but
-                            %% possible during hot code reload race conditions
-                            Error0 = beamtalk_error:new(does_not_understand, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            Error2 = beamtalk_error:with_hint(
-                                Error1,
-                                erlang_error_hint(Module, FunName, undef)
-                            ),
-                            beamtalk_error:raise(
-                                beamtalk_error:with_details(
-                                    Error2,
-                                    #{
-                                        erlang_error => undef,
-                                        erlang_stacktrace => Stack
-                                    }
-                                )
-                            );
-                        error:badarg:Stack ->
-                            %% BT-1127: Auto-coerce binary args to charlists and retry.
-                            %% Many Erlang functions (os:cmd/1, file:read_file/1, etc.)
-                            %% expect charlists but Beamtalk strings are binaries.
-                            CoercedArgs = coerce_binaries_to_charlists(Args),
-                            case CoercedArgs =/= Args of
-                                true ->
-                                    try
-                                        Result = erlang:apply(Module, FunName, CoercedArgs),
-                                        coerce_ffi_result(Module, Result)
-                                    catch
-                                        error:badarg:Stack2 ->
-                                            raise_badarg_error(
-                                                Module, FunName, OrigSelector, Stack2
-                                            );
-                                        error:#{error := #beamtalk_error{}} = Wrapped:_Stack2 ->
-                                            error(Wrapped);
-                                        error:undef:_Stack2 ->
-                                            raise_undef_error(
-                                                Module,
-                                                FunName,
-                                                length(CoercedArgs),
-                                                OrigSelector
-                                            )
-                                    end;
-                                false ->
-                                    raise_badarg_error(Module, FunName, OrigSelector, Stack)
-                            end;
-                        error:function_clause:Stack ->
-                            Error0 = beamtalk_error:new(arity_mismatch, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            Error2 = beamtalk_error:with_hint(
-                                Error1,
-                                erlang_error_hint(Module, FunName, function_clause)
-                            ),
-                            beamtalk_error:raise(
-                                beamtalk_error:with_details(
-                                    Error2,
-                                    #{
-                                        erlang_error => function_clause,
-                                        erlang_stacktrace => Stack
-                                    }
-                                )
-                            );
-                        error:badarith:Stack ->
-                            Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            Error2 = beamtalk_error:with_hint(
-                                Error1,
-                                erlang_error_hint(Module, FunName, badarith)
-                            ),
-                            beamtalk_error:raise(
-                                beamtalk_error:with_details(
-                                    Error2,
-                                    #{
-                                        erlang_error => badarith,
-                                        erlang_stacktrace => Stack
-                                    }
-                                )
-                            );
-                        error:Reason:Stack ->
-                            Error0 = beamtalk_error:new(runtime_error, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            Error2 = beamtalk_error:with_hint(
-                                Error1,
-                                erlang_error_hint(Module, FunName, Reason)
-                            ),
-                            beamtalk_error:raise(
-                                beamtalk_error:with_details(
-                                    Error2,
-                                    #{
-                                        erlang_error => Reason,
-                                        erlang_stacktrace => Stack
-                                    }
-                                )
-                            );
-                        exit:Reason:Stack ->
-                            Error0 = beamtalk_error:new(erlang_exit, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
-                            Hint = iolist_to_binary([
-                                <<"Erlang process exit in ">>,
-                                atom_to_binary(Module, utf8),
-                                <<":">>,
-                                atom_to_binary(FunName, utf8),
-                                <<": ">>,
-                                ReasonBin
-                            ]),
-                            Error2 = beamtalk_error:with_hint(Error1, Hint),
-                            beamtalk_error:raise(
-                                beamtalk_error:with_details(
-                                    Error2,
-                                    #{
-                                        erlang_exit_reason => Reason,
-                                        erlang_stacktrace => Stack
-                                    }
-                                )
-                            );
-                        throw:Value:Stack ->
-                            Error0 = beamtalk_error:new(erlang_throw, 'ErlangModule'),
-                            Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
-                            ValueBin = iolist_to_binary(io_lib:format("~p", [Value])),
-                            Hint = iolist_to_binary([
-                                <<"Erlang throw in ">>,
-                                atom_to_binary(Module, utf8),
-                                <<":">>,
-                                atom_to_binary(FunName, utf8),
-                                <<": ">>,
-                                ValueBin
-                            ]),
-                            Error2 = beamtalk_error:with_hint(Error1, Hint),
-                            beamtalk_error:raise(
-                                beamtalk_error:with_details(
-                                    Error2,
-                                    #{
-                                        erlang_throw_value => Value,
-                                        erlang_stacktrace => Stack
-                                    }
-                                )
-                            )
-                    end;
+                    apply_with_coercion(Module, FunName, Args, OrigSelector, none);
                 false ->
                     raise_function_or_arity_error(
                         Module, FunName, Arity, OrigSelector, Exports
@@ -498,12 +449,29 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
     end.
 
 -doc """
+Resolve the `{Class, Selector}` to attach to a wrapped FFI error.
+
+Inline FFI (`Context = none`) reports the Erlang-facing `'ErlangModule'` class
+and the original selector — preserving the long-standing error contract.
+A `native:` delegation (`Context = {Class, Sel}`) reports the Beamtalk
+class/selector so errors read `Stream>>take:` (ADR 0101 Part 2).
+""".
+-spec error_class_selector(error_context(), atom()) -> {atom(), atom()}.
+error_class_selector(none, OrigSelector) -> {'ErlangModule', OrigSelector};
+error_class_selector({Class, Selector}, _OrigSelector) -> {Class, Selector}.
+
+-doc """
 Raise a structured undef error (TOCTOU: function unloaded between check and apply).
 
 Pass the actual arity so the error message is accurate (not "0 arguments").
+
+For inline FFI (`Context = none`) this re-checks exports to distinguish
+"missing function" from "wrong arity". For a `native:` delegation
+(`Context = {Class, Sel}`) the pre-check was skipped by design, so surface a
+`does_not_understand` carrying the Beamtalk `{Class, Sel}` directly.
 """.
--spec raise_undef_error(atom(), atom(), non_neg_integer(), atom()) -> no_return().
-raise_undef_error(Module, FunName, Arity, OrigSelector) ->
+-spec raise_undef_error(atom(), atom(), non_neg_integer(), atom(), error_context()) -> no_return().
+raise_undef_error(Module, FunName, Arity, OrigSelector, none) ->
     case get_exports(Module) of
         {error, not_loaded} ->
             raise_module_not_loaded(Module, OrigSelector);
@@ -511,22 +479,93 @@ raise_undef_error(Module, FunName, Arity, OrigSelector) ->
             raise_function_or_arity_error(
                 Module, FunName, Arity, OrigSelector, Exports
             )
-    end.
-
--doc "Raise a structured badarg error.".
--spec raise_badarg_error(atom(), atom(), atom(), list()) -> no_return().
-raise_badarg_error(Module, FunName, OrigSelector, Stack) ->
-    Error0 = beamtalk_error:new(type_error, 'ErlangModule'),
-    Error1 = beamtalk_error:with_selector(Error0, OrigSelector),
+    end;
+raise_undef_error(Module, FunName, Arity, _OrigSelector, {Class, Selector}) ->
+    Error0 = beamtalk_error:new(does_not_understand, Class),
+    Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,
-        erlang_error_hint(Module, FunName, badarg)
+        erlang_error_hint(Module, FunName, undef)
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_details(Error2, #{
+            module => Module,
+            function => FunName,
+            arity => Arity,
+            erlang_error => undef
+        })
+    ).
+
+-doc "Raise a structured badarg error (type_error).".
+-spec raise_badarg_error(atom(), atom(), atom(), error_context(), list()) -> no_return().
+raise_badarg_error(Module, FunName, OrigSelector, Context, Stack) ->
+    raise_wrapped_error(type_error, badarg, Module, FunName, OrigSelector, Context, Stack).
+
+-doc "Raise a structured function_clause error (arity_mismatch).".
+-spec raise_function_clause_error(atom(), atom(), atom(), error_context(), list()) -> no_return().
+raise_function_clause_error(Module, FunName, OrigSelector, Context, Stack) ->
+    raise_wrapped_error(
+        arity_mismatch, function_clause, Module, FunName, OrigSelector, Context, Stack
+    ).
+
+-doc "Raise a structured badarith error (type_error).".
+-spec raise_badarith_error(atom(), atom(), atom(), error_context(), list()) -> no_return().
+raise_badarith_error(Module, FunName, OrigSelector, Context, Stack) ->
+    raise_wrapped_error(type_error, badarith, Module, FunName, OrigSelector, Context, Stack).
+
+-doc """
+Catch-all wrapper for any other `error:Reason` (ADR 0101 Part 2).
+
+This is what makes casual FFI safe by default: any `error:*` not handled by a
+specific clause above becomes a structured `#beamtalk_error{}` rather than
+leaking a raw Erlang fault to the user/REPL.
+
+Delegates to the canonical classifier `beamtalk_exception_handler:ensure_wrapped/4`
+(AC: "via ensure_wrapped"), so unclassified BEAM shapes get readable, bucketed
+messages: `{badkey, K}` → key_error "key not found: K", `{badmap, M}`,
+`{badmatch, V}`, `noproc`, `timeout`, … (BT-2704/2707). The `{Class, Selector}`
+breadcrumb locates the message (e.g. `Stream>>take:`). This reuses the existing
+classifier rather than re-deriving FFI error text in the proxy.
+""".
+-spec raise_generic_error(atom(), atom(), atom(), error_context(), term(), list()) -> no_return().
+raise_generic_error(_Module, _FunName, OrigSelector, Context, Reason, Stack) ->
+    Ctx = generic_error_context(Context, OrigSelector),
+    Wrapped = beamtalk_exception_handler:ensure_wrapped(error, Reason, Stack, Ctx),
+    erlang:raise(error, Wrapped, Stack).
+
+-doc """
+Build the dispatch breadcrumb map (`#{class, selector}`) handed to
+`ensure_wrapped/4` so a generically-wrapped FFI error is located. Inline FFI
+reports `'ErlangModule'` + the Erlang function; `native:` reports the Beamtalk
+class/selector.
+""".
+-spec generic_error_context(error_context(), atom()) -> map().
+generic_error_context(none, OrigSelector) ->
+    #{class => 'ErlangModule', selector => OrigSelector};
+generic_error_context({Class, Selector}, _OrigSelector) ->
+    #{class => Class, selector => Selector}.
+
+-doc """
+Shared builder for a wrapped `error:*` FFI exception.
+
+Attaches `{Class, Selector}` per `error_class_selector/2`, an actionable hint,
+and the original Erlang error + stacktrace in details.
+""".
+-spec raise_wrapped_error(atom(), term(), atom(), atom(), atom(), error_context(), list()) ->
+    no_return().
+raise_wrapped_error(Kind, ErlangError, Module, FunName, OrigSelector, Context, Stack) ->
+    {ErrClass, ErrSelector} = error_class_selector(Context, OrigSelector),
+    Error0 = beamtalk_error:new(Kind, ErrClass),
+    Error1 = beamtalk_error:with_selector(Error0, ErrSelector),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        erlang_error_hint(Module, FunName, ErlangError)
     ),
     beamtalk_error:raise(
         beamtalk_error:with_details(
             Error2,
             #{
-                erlang_error => badarg,
+                erlang_error => ErlangError,
                 erlang_stacktrace => Stack
             }
         )
