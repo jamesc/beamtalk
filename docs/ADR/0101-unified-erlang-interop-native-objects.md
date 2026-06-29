@@ -313,13 +313,17 @@ These forks were raised in review and resolved:
 3. **ADR 0100: coordination, not conflict.** `native:` Objects are legitimately `ClosedComplete` (no extension hook → a DNU hint on an unknown selector is *correct*). `@primitive` classes (incl. the reflection facades) keep their Open/extensible treatment. **Requirement on ADR 0100's implementation:** its method-surface scan must count `self delegate` `native:` methods as declared methods (so they don't read as "missing" and trigger false hints). Neither ADR blocks the other (see Migration Path).
 4. **Canonical timeout idiom (BT-2723).** The Migration Path flagged the `gen_server:call` timeout replacement as unspecified. Resolved: **Beamtalk already has a structured-timeout path; no raw `exit`-catch idiom is introduced.**
    - A bounded synchronous send uses `anActor withTimeout: ms` (→ `TimeoutProxy`). A timeout surfaces as a **raised** `#beamtalk_error{kind = timeout}` (catchable as `#timeout`, under `Error`/`Exception`) — *not* a propagating raw `exit`. This is produced by `beamtalk_actor:sync_send/4` → `raise_timeout/1`, independent of the FFI proxy, so it is unaffected by Part 2.
-   - **Result-returning form (canonical):** to convert a timeout into a `Result error:` *value* rather than a raised error, compose the existing structured-timeout raise with `on:do:`:
+   - **Result-returning form (canonical):** to convert a timeout *specifically* into a `Result error:` *value* (while letting every other failure propagate to a supervisor), guard on the `#timeout` kind and re-raise anything else. Wrap the success path in `Result ok:` so both branches share the `Result(Rows, Error)` type:
      ```beamtalk
-     result := [ (db withTimeout: 30000) query: sql ]
+     result := [ Result ok: ((db withTimeout: 30000) query: sql) ]
        on: Error
-       do: [:e | Result error: e ]
-     // result : Result(Rows, Error) — a value on reply, `Result error:` on timeout
+       do: [:e |
+         e kind = #timeout
+           ifTrue: [ Result error: e ]   // a timeout becomes a Result error: value
+           ifFalse: [ e signal ] ]       // re-raise non-timeout errors (let-it-crash)
+     // result : Result(Rows, Error) — `Result ok:` on reply, `Result error:` on timeout
      ```
+     The `#timeout` guard matters: a bare `on: Error do: [Result error: …]` would also swallow `actor_dead`, validation faults, and any other crash surfacing through `sync_send`, defeating supervision. There is no dedicated `TimeoutError` class today — `kind = timeout` falls through to the `Error` class — so the kind check is how the idiom stays timeout-specific; a future `TimeoutError` subclass could replace the guard with `on: TimeoutError do:`.
    - A dedicated `callWithTimeout:` convenience helper that returns `Result` directly is **deferred** (recorded as an optional future addition): the `on:do:` form already composes the two existing, type-visible channels, and no current call site needs the sugar. Adding it later is non-breaking.
    - **Migration consequence:** because the only structured-timeout source (the actor path) already *raises* rather than propagating a raw `exit`, the Phase 2 grep for FFI exit/throw catches finds nothing to migrate (see Migration Path bullet). The idiom above is the documented canonical form for any future code that needs a value-returning timeout.
 

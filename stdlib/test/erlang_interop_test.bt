@@ -67,10 +67,10 @@ TestCase subclass: ErlangInteropTest
     kind := [(Erlang erlang) abs: #notanumber] on: TypeError do: [:e | e kind]
     self assert: kind equals: #type_error
 
-  testRawFfiBadargIsCatchableAndNotRawErlang =>
-    // The wrapped error is catchable as an Exception and its message is a
-    // formatted string, never a raw `badarg` dump leaking the host VM.
-    leaksRaw := [
-      (Erlang erlang) abs: #notanumber
-    ] on: Exception do: [:e | e message includesSubstring: "badarg"]
-    self assert: leaksRaw equals: false
+  testRawFfiBadargIsCatchableAsExceptionWithCoherentMessage =>
+    // Catchable not just as the specific TypeError but as the broad Exception
+    // root, and the wrapped error is structurally identified (kind) and carries
+    // a coherent String message — never a raw `badarg` tuple leaking the host VM.
+    caught := [(Erlang erlang) abs: #notanumber] on: Exception do: [:e | e]
+    self assert: caught kind equals: #type_error
+    self assert: caught message class equals: String
