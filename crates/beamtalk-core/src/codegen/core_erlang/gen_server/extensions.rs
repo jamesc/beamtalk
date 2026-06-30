@@ -241,7 +241,7 @@ impl CoreErlangGenerator {
         self.clear_method_param_types();
         // BT-2710 follow-up: extension bodies have no access to the target
         // class's state declarations, so clear field types — `self.<field>`
-        // reads fall back to the bare BIF. Known limitation: an extension
+        // reads fall back to the bare BIF. Known limitation (BT-2710): an extension
         // method comparing an object-typed field silently term-orders rather
         // than dispatching (status quo, unchanged from pre-BT-2710). Threading
         // the target class's state into extension codegen is a tracked
@@ -321,7 +321,7 @@ impl CoreErlangGenerator {
         self.clear_method_param_types();
         // BT-2710 follow-up: extension bodies have no access to the target
         // class's state declarations, so clear field types — `self.<field>`
-        // reads fall back to the bare BIF. Known limitation: an extension
+        // reads fall back to the bare BIF. Known limitation (BT-2710): an extension
         // method comparing an object-typed field silently term-orders rather
         // than dispatching (status quo, unchanged from pre-BT-2710). Threading
         // the target class's state into extension codegen is a tracked
