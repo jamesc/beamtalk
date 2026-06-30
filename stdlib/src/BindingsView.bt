@@ -13,8 +13,9 @@
 /// `at:put:` / `removeKey:` write through to the backing layer. It follows the
 /// `FileHandle` / `Port` representation pattern — a `sealed typed Object
 /// subclass` with no declared fields, minted by a primitive as a tagged map
-/// carrying per-instance scope and identity. Instance methods pass `self` to a
-/// `view_*` primitive.
+/// carrying per-instance scope and identity. It is `native:`
+/// `beamtalk_session_primitives`, so each Dictionary-protocol method is a
+/// `self delegate` to the same-named backing function (ADR 0101 / BT-2731).
 ///
 /// Unlike `Dictionary`, mutation is in-place (write-through), not copy-on-write:
 /// `at:put:` returns the *value put* and `removeKey:` returns `nil`, rather than
@@ -34,7 +35,7 @@
 /// view removeKey: #x           // => nil
 /// Workspace globals at: #Transcript   // => the Transcript singleton
 /// ```
-sealed typed Object subclass: BindingsView
+sealed typed Object subclass: BindingsView native: beamtalk_session_primitives
 
   /// Return the value bound to `key`, or `nil` if absent.
   ///
@@ -42,8 +43,7 @@ sealed typed Object subclass: BindingsView
   /// ```beamtalk
   /// Session current bindings at: #x              // => 42
   /// ```
-  at: key :: Symbol -> Object =>
-    (Erlang beamtalk_session_primitives) view_at: self key: key
+  at: key :: Symbol -> Object => self delegate
 
   /// Write `value` under `key` (write-through) and return the value put.
   ///
@@ -55,11 +55,7 @@ sealed typed Object subclass: BindingsView
   /// ```beamtalk
   /// Session current bindings at: #y put: 99      // => 99
   /// ```
-  at: key :: Symbol put: value :: Object -> Object =>
-    (Erlang beamtalk_session_primitives)
-      view_at_put: self
-      key: key
-      value: value
+  at: key :: Symbol put: value :: Object -> Object => self delegate
 
   /// Remove the binding for `key` (write-through) and return `nil`.
   ///
@@ -70,8 +66,7 @@ sealed typed Object subclass: BindingsView
   /// ```beamtalk
   /// Session current bindings removeKey: #x       // => nil
   /// ```
-  removeKey: key :: Symbol -> Nil =>
-    (Erlang beamtalk_session_primitives) view_remove: self key: key
+  removeKey: key :: Symbol -> Nil => self delegate
 
   /// Whether `key` (a Symbol) is currently bound in this view.
   ///
@@ -86,8 +81,7 @@ sealed typed Object subclass: BindingsView
   /// ```beamtalk
   /// Session current bindings includesKey: #x     // => true
   /// ```
-  includesKey: key :: Symbol -> Boolean =>
-    (Erlang beamtalk_session_primitives) view_includes_key: self key: key
+  includesKey: key :: Symbol -> Boolean => self delegate
 
   /// Return a list of all bound names (Symbols).
   ///
@@ -95,7 +89,7 @@ sealed typed Object subclass: BindingsView
   /// ```beamtalk
   /// Session current bindings keys                // => #(#x #y)
   /// ```
-  keys -> List(Symbol) => (Erlang beamtalk_session_primitives) view_keys: self
+  keys -> List(Symbol) => self delegate
 
   /// Return a list of all bound values.
   ///
@@ -103,7 +97,7 @@ sealed typed Object subclass: BindingsView
   /// ```beamtalk
   /// Session current bindings values              // => #(42 99)
   /// ```
-  values -> List => (Erlang beamtalk_session_primitives) view_values: self
+  values -> List => self delegate
 
   /// Return the number of bindings in this view.
   ///
@@ -111,7 +105,7 @@ sealed typed Object subclass: BindingsView
   /// ```beamtalk
   /// Session current bindings size                // => 2
   /// ```
-  size -> Integer => (Erlang beamtalk_session_primitives) view_size: self
+  size -> Integer => self delegate
 
   /// Iterate over each value, evaluating `block` with each one (matches
   /// `Dictionary do:`, which iterates values).

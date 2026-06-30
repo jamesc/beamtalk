@@ -69,8 +69,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```beamtalk
   /// Session current bindings keys                 // => #(#x)
   /// ```
-  bindings -> BindingsView =>
-    (Erlang beamtalk_session_primitives) bindingsViewFor: self
+  bindings -> BindingsView => self delegate
 
   /// Resolve a name exactly the way bare-name lookup does, returning the
   /// first match or nil. Order: session locals → workspace globals
@@ -81,8 +80,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```beamtalk
   /// Session current resolve: #Transcript          // => the Transcript singleton
   /// ```
-  resolve: aName :: Symbol -> Object =>
-    (Erlang beamtalk_session_primitives) resolveFor: self name: aName
+  resolve: aName :: Symbol -> Object => self delegate
 
   /// Clear this session's local bindings. Workspace globals remain.
   ///
@@ -90,7 +88,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```beamtalk
   /// Session current clear                         // => nil
   /// ```
-  clear -> Nil => (Erlang beamtalk_session_primitives) clearFor: self
+  clear -> Nil => self delegate
 
   /// Stable session identifier (matches the protocol session id).
   ///
@@ -98,7 +96,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```beamtalk
   /// Session current id                            // => "user-repl-abc-123"
   /// ```
-  id -> String => (Erlang beamtalk_session_primitives) idOf: self
+  id -> String => self delegate
 
   /// Originating client surface for this session: `"repl"`, `"mcp"`, `"lsp"`,
   /// `"liveview"`, `"ide"`, `"attach"`, or `"unknown"`. Immutable for the
@@ -110,7 +108,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```beamtalk
   /// Session current kind                          // => "repl"
   /// ```
-  kind -> String => (Erlang beamtalk_session_primitives) kindOf: self
+  kind -> String => self delegate
 
   /// Full origin/debug metadata as a Dictionary: `id` plus `kind` and, where
   /// known, `peer` (remote host:port), `node` (calling node), `user`, and
@@ -120,7 +118,7 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```beamtalk
   /// Session current info                          // => #{#id => "...", #kind => "repl", ...}
   /// ```
-  info -> Dictionary => (Erlang beamtalk_session_primitives) infoFor: self
+  info -> Dictionary => self delegate
 
   /// Developer display: `Session(<kind>: <id>)`, e.g.
   /// `Session(repl: session_123_ab)`. Not liveness-checked, so printing a
@@ -130,5 +128,4 @@ sealed typed Object subclass: Session native: beamtalk_session_primitives
   /// ```beamtalk
   /// Session current printString                   // => "Session(repl: session_123_ab)"
   /// ```
-  printString -> String =>
-    (Erlang beamtalk_session_primitives) printStringFor: self
+  printString -> String => self delegate

@@ -3,6 +3,11 @@
 
 -module(beamtalk_session_primitives).
 
+%% `BindingsView size` (ADR 0101 / BT-2731) delegates to a local `size/1`,
+%% which shadows the auto-imported `erlang:size/1`. The module never calls the
+%% BIF unqualified, so drop the auto-import to keep the local name unambiguous.
+-compile({no_auto_import, [size/1]}).
+
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
@@ -37,7 +42,7 @@ the target shell's in-flight eval worker would clobber them.
 #{'$beamtalk_class' => 'BindingsView', scope => workspace}
 ```
 
-Every cross-session send (`bindingsViewFor`, `resolveFor`, `clearFor`, `idOf`,
+Every cross-session send (`bindings`, `resolve`, `clear`, `id`,
 and the view read/write primitives) liveness-checks the carried PID and raises
 `#beamtalk_error{kind = session_not_found}` rather than issuing a `gen_server:call`
 that would block to timeout against a dead PID.
@@ -54,20 +59,20 @@ that would block to timeout against a dead PID.
 -define(SESSION_ID_LOOKUP_TIMEOUT, 1000).
 
 %% Factory (class-side)
--export([current/0, withId/1, idOf/1, liveSessions/0]).
+-export([current/0, withId/1, id/1, liveSessions/0]).
 %% Session operations (instance-side, take a Session value)
--export([bindingsViewFor/1, resolveFor/2, clearFor/1, kindOf/1, infoFor/1, printStringFor/1]).
+-export([bindings/1, resolve/2, clear/1, kind/1, info/1, printString/1]).
 %% Workspace-globals view (not a Session method)
 -export([globalsView/0]).
 %% BindingsView read/write primitives
 -export([
-    view_at/2,
-    view_at_put/3,
-    view_includes_key/2,
-    view_remove/2,
-    view_keys/1,
-    view_values/1,
-    view_size/1
+    at/2,
+    at/3,
+    includesKey/2,
+    removeKey/2,
+    keys/1,
+    values/1,
+    size/1
 ]).
 
 -type session() :: #{
@@ -75,7 +80,7 @@ that would block to timeout against a dead PID.
     id := binary(),
     pid := pid(),
     %% Origin/debug metadata carried from the shell (always includes `kind`).
-    %% Read-only display data — `kindOf`/`infoFor`/`printStringFor` read it
+    %% Read-only display data — `kind`/`info`/`printString` read it
     %% without a liveness check so a dead session can still be inspected.
     meta := map()
 }.
@@ -140,9 +145,9 @@ Liveness-checked per ADR 0081 Phase 3: a captured `Session` whose backing shell
 has died raises `session_not_found` rather than returning a stale id, so every
 send to a `Session` value fails consistently once the session is gone.
 """.
--spec idOf(session() | term()) -> binary().
-idOf(Session) ->
-    {Id, Pid} = session_id_pid(Session, 'idOf:'),
+-spec id(session() | term()) -> binary().
+id(Session) ->
+    {Id, Pid} = session_id_pid(Session, 'id'),
     ensure_alive(Pid, Id),
     Id.
 
@@ -180,12 +185,12 @@ liveSessions() ->
 Return a `BindingsView` over the named session's locals map.
 
 The view records the target session's id and PID so cross-session writes can be
-rejected.  A read against this view (`view_at/2`, `view_keys/1`, …) goes to the
+rejected.  A read against this view (`at/2`, `keys/1`, …) goes to the
 target shell's `get_bindings` (its locals-only map after BT-2365).
 """.
--spec bindingsViewFor(session() | term()) -> bindings_view().
-bindingsViewFor(Session) ->
-    {Id, Pid} = session_id_pid(Session, 'bindingsViewFor:'),
+-spec bindings(session() | term()) -> bindings_view().
+bindings(Session) ->
+    {Id, Pid} = session_id_pid(Session, 'bindings'),
     ensure_alive(Pid, Id),
     #{'$beamtalk_class' => 'BindingsView', scope => session, id => Id, pid => Pid}.
 
@@ -198,9 +203,9 @@ locals → bind:as: → singletons → classes.  `aName` may be an atom, binary,
 string.  A name that resolves nowhere raises `undefined_variable` (the resolver's
 terminal), matching how the name would behave as a bare identifier.
 """.
--spec resolveFor(session() | term(), atom() | binary() | string() | term()) -> term().
-resolveFor(Session, Name) ->
-    {Id, Pid} = session_id_pid(Session, 'resolveFor:'),
+-spec resolve(session() | term(), atom() | binary() | string() | term()) -> term().
+resolve(Session, Name) ->
+    {Id, Pid} = session_id_pid(Session, 'resolve:'),
     Locals = session_bindings(Pid, Id),
     NameAtom = to_name_atom(Name),
     beamtalk_workspace:resolve_name(Locals, NameAtom).
@@ -214,10 +219,10 @@ error.  Against any other session, raises `cross_session_mutation_unsupported`:
 the target shell's in-flight worker would clobber a direct edit, and the calling
 eval's pending queue does not reach the target.
 """.
--spec clearFor(session() | term()) -> nil.
-clearFor(Session) ->
-    {Id, Pid} = session_id_pid(Session, 'clearFor:'),
-    enqueue_session_mutation(Pid, Id, {clear, undefined, undefined}, 'clearFor:'),
+-spec clear(session() | term()) -> nil.
+clear(Session) ->
+    {Id, Pid} = session_id_pid(Session, 'clear'),
+    enqueue_session_mutation(Pid, Id, {clear, undefined, undefined}, 'clear'),
     nil.
 
 -doc """
@@ -228,8 +233,8 @@ Reads the embedded metadata directly with **no** liveness check: kind is
 immutable display data, so a dead session can still report where it came from
 (useful precisely when debugging a session that has gone away).
 """.
--spec kindOf(session() | term()) -> binary().
-kindOf(Session) ->
+-spec kind(session() | term()) -> binary().
+kind(Session) ->
     {_Id, Meta} = session_meta(Session, 'kind'),
     maps:get(kind, Meta, <<"unknown">>).
 
@@ -239,8 +244,8 @@ every metadata key (`kind`, and where known `peer`, `node`, `user`,
 `connected_at`). Read-only and not liveness-checked — a primary tool for
 answering "what is this session and where did it come from?".
 """.
--spec infoFor(session() | term()) -> map().
-infoFor(Session) ->
+-spec info(session() | term()) -> map().
+info(Session) ->
     {Id, Meta} = session_meta(Session, 'info'),
     Meta#{id => Id}.
 
@@ -252,8 +257,8 @@ Backs `Session>>printString`. Reads the embedded id/kind directly with no
 liveness check so printing a list of sessions (`Workspace sessions`) never
 raises just because one session died mid-enumeration.
 """.
--spec printStringFor(session() | term()) -> binary().
-printStringFor(Session) ->
+-spec printString(session() | term()) -> binary().
+printString(Session) ->
     {Id, Meta} = session_meta(Session, 'printString'),
     Kind = maps:get(kind, Meta, <<"unknown">>),
     iolist_to_binary([<<"Session(">>, Kind, <<": ">>, Id, <<")">>]).
@@ -284,8 +289,8 @@ Reads reflect committed state: within a single eval they do not observe
 mutations enqueued earlier in that same eval (those land on `pending_mutations`
 and apply at eval exit).
 """.
--spec view_at(bindings_view() | term(), atom() | binary() | string() | term()) -> term().
-view_at(View, Key) ->
+-spec at(bindings_view() | term(), atom() | binary() | string() | term()) -> term().
+at(View, Key) ->
     Map = view_read_map(View, 'at:'),
     case to_existing_name_atom(Key) of
         {ok, KeyAtom} -> maps:get(KeyAtom, Map, nil);
@@ -300,13 +305,13 @@ The membership test is O(1) (`maps:is_key/2`) on the resolved bindings map;
 constructing that map is the same cost as any other read here (session scope
 reads the locals map directly, workspace scope snapshots the bind:as: ETS via
 `view_read_map/2`, which is O(n)).  Accepts atom/binary/String keys with the
-same semantics as `view_at/2`: a never-interned name (via
+same semantics as `at/2`: a never-interned name (via
 `to_existing_name_atom/1`) cannot be a binding key, so it returns `false`
 without minting an atom.
 """.
--spec view_includes_key(bindings_view() | term(), atom() | binary() | string() | term()) ->
+-spec includesKey(bindings_view() | term(), atom() | binary() | string() | term()) ->
     boolean().
-view_includes_key(View, Key) ->
+includesKey(View, Key) ->
     Map = view_read_map(View, 'includesKey:'),
     case to_existing_name_atom(Key) of
         {ok, KeyAtom} -> maps:is_key(KeyAtom, Map);
@@ -323,29 +328,29 @@ is not read back within the same eval).  Session scope, another session → rais
 `cross_session_mutation_unsupported`.  Workspace scope → `bind/2` (synchronous,
 protected-name conflict checks).
 """.
--spec view_at_put(bindings_view() | term(), atom() | binary() | string() | term(), term()) ->
+-spec at(bindings_view() | term(), atom() | binary() | string() | term(), term()) ->
     term().
-view_at_put(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key, Value) ->
+at(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key, Value) ->
     KeyAtom = to_name_atom(Key),
     _ = beamtalk_workspace_interface_primitives:bind(Value, KeyAtom),
     Value;
-view_at_put(
+at(
     #{'$beamtalk_class' := 'BindingsView', scope := session, id := Id, pid := Pid}, Key, Value
 ) ->
     KeyAtom = to_name_atom(Key),
     enqueue_session_mutation(Pid, Id, {put, KeyAtom, Value}, 'at:put:'),
     Value;
-view_at_put(Other, _Key, _Value) ->
+at(Other, _Key, _Value) ->
     raise_view_type_error('at:put:', Other).
 
 -doc """
 Remove a key from a `BindingsView`, returning `nil` (uniform contract — session
 removals are enqueued, so the removed value is not read back synchronously).
 
-Dispatch by scope mirrors `view_at_put/3`.
+Dispatch by scope mirrors `at/3`.
 """.
--spec view_remove(bindings_view() | term(), atom() | binary() | string() | term()) -> nil.
-view_remove(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key) ->
+-spec removeKey(bindings_view() | term(), atom() | binary() | string() | term()) -> nil.
+removeKey(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key) ->
     case to_existing_name_atom(Key) of
         %% unbind/1 raises name_not_found for unknown names; a never-interned
         %% atom is necessarily unknown, so treat it as already-absent (idempotent
@@ -354,7 +359,7 @@ view_remove(#{'$beamtalk_class' := 'BindingsView', scope := workspace}, Key) ->
         error -> nil
     end,
     nil;
-view_remove(#{'$beamtalk_class' := 'BindingsView', scope := session, id := Id, pid := Pid}, Key) ->
+removeKey(#{'$beamtalk_class' := 'BindingsView', scope := session, id := Id, pid := Pid}, Key) ->
     case to_existing_name_atom(Key) of
         {ok, KeyAtom} ->
             enqueue_session_mutation(Pid, Id, {remove, KeyAtom, undefined}, 'removeKey:');
@@ -363,22 +368,22 @@ view_remove(#{'$beamtalk_class' := 'BindingsView', scope := session, id := Id, p
             nil
     end,
     nil;
-view_remove(Other, _Key) ->
+removeKey(Other, _Key) ->
     raise_view_type_error('removeKey:', Other).
 
 -doc "Return the keys of a `BindingsView` as a list of atoms.".
--spec view_keys(bindings_view() | term()) -> [atom()].
-view_keys(View) ->
+-spec keys(bindings_view() | term()) -> [atom()].
+keys(View) ->
     maps:keys(view_read_map(View, 'keys')).
 
 -doc "Return the values of a `BindingsView` as a list.".
--spec view_values(bindings_view() | term()) -> [term()].
-view_values(View) ->
+-spec values(bindings_view() | term()) -> [term()].
+values(View) ->
     maps:values(view_read_map(View, 'values')).
 
 -doc "Return the number of entries in a `BindingsView`.".
--spec view_size(bindings_view() | term()) -> non_neg_integer().
-view_size(View) ->
+-spec size(bindings_view() | term()) -> non_neg_integer().
+size(View) ->
     maps:size(view_read_map(View, 'size')).
 
 %%% ============================================================================
@@ -597,11 +602,11 @@ raise_name_type_error(Other) ->
 %% Convert a name to an EXISTING atom for read/remove lookups, returning
 %% `{ok, Atom}` or `error` when the atom has never been created.
 %%
-%% Reads (`view_at`) and removes never need to mint a fresh atom: a name that
+%% Reads (`at`) and removes never need to mint a fresh atom: a name that
 %% was never interned cannot be a binding key, so `error` maps to "absent".
 %% This keeps introspection (`bindings at:`, `globals at:`) from being an
 %% atom-table exhaustion vector when fed arbitrary user strings in a loop —
-%% only genuine *writes* (`view_at_put`, which name a binding) create atoms,
+%% only genuine *writes* (`at`, which name a binding) create atoms,
 %% matching the existing eval/`bind:as:` trust model.
 -spec to_existing_name_atom(term()) -> {ok, atom()} | error.
 to_existing_name_atom(Name) when is_atom(Name) ->
